@@ -175,6 +175,9 @@ public class Look(
         }
         val actionId = idGen.next("act")
         val alias = allocate()
+        // The raw bytes are published under their own hash (= the version), so a later stale `expect` can be
+        // diffed against exactly what the model was shown (§9.1 diff since expect). Recovery storage, never rendered.
+        blobs.put(content.bytes, BlobKind.PREIMAGE, ids, recovery = true)
         val full = redaction.apply(rendered(lines, span), ContentClass.ReusableEvidence)
         val hidden = shift(full.mask.hiddenLines, span.from - 1)
         val view = fit(full.text.lines(), args.budget)

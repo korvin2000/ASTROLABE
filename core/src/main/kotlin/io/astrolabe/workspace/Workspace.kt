@@ -2,6 +2,7 @@ package io.astrolabe.workspace
 
 import io.astrolabe.id.WorkspaceId
 import io.astrolabe.os.Git
+import kotlinx.coroutines.sync.Mutex
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -26,6 +27,13 @@ public class Workspace @JvmOverloads public constructor(
 
     /** The path contract bound to [root]; look, edit, registry, stamps and closures share it. */
     public val paths: WorkspacePath = WorkspacePath.of(this.root, protectedPaths)
+
+    /**
+     * Runtime writers of this workspace are serialized here (§9.1 "a hash is not a lock", D-26): an edit batch
+     * holds it from preflight through publication, a check that claims `exclusive` inputs holds it for its whole
+     * run (D-45). It excludes nothing outside this process; the project lock does that (D-44).
+     */
+    public val mutation: Mutex = Mutex()
 
     init {
         val repo = runCatching { git.repo.toRealPath() }.getOrDefault(git.repo)
