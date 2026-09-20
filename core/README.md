@@ -31,3 +31,43 @@ workspace IDs never prove non-conflict at the common destination. S3 remains gat
 The full grammar, proof outline, complexity, limits and independent oracle evidence are in the
 [P5.1.5 protocol](../audit/OUT-OF-ORDER-P5.1.5.md). Run the focused `ScopeAlgebraTest` and `ScopeOracleTest`
 with `:core:test`; public API changes require separate `:core:updateKotlinAbi` before the full build.
+
+## Exact offline DAG sequencing (P4.5.5)
+
+P4.5.5 provides `route.DagSchedule`, an exact comparison oracle for a small selected slice of a
+`RequirementGraph`. It does not dispatch work or enable a routing policy. Supply `ScheduleProblem`
+with selected IDs, explicitly completed external prerequisites, additional mandatory precedence
+edges, a declaration that all order constraints are represented and frozen `ScheduleCosts`.
+Only Pending increments are accepted; verified work is never rescheduled. If an external prerequisite
+is present in the graph, its status must agree with the caller's completion declaration (Verified).
+Contract/evidence validity and dispatch authority remain controller responsibilities.
+
+`ScheduleContext` records the role/policy label, profile digest, S/R prefix digests and cache namespace.
+Costs contain an initial charge for every selected ID, every directed pair's switch charge, a fixed
+charge per ID, one currency, version and provenance. The complete matrix is required even for
+transitions that dependencies would make unreachable. Unknown/missing charges or context give
+`UnknownCosts`; negative or mixed-currency charges fail construction. Matching role/profile/context
+never implies a zero charge. Represent incompatible cache states with their explicit cold price.
+
+```kotlin
+val result = DagSchedule.solve(problem, ScheduleLimits(
+    maxIncrements = 16,
+    maxTableEntries = 1_048_576,
+    maxTransitions = 10_000_000,
+))
+```
+
+The objective is fixed charges + initial(first) + pairwise switches; sums use exact decimal Money
+without rounding. `Optimal` carries order, variable/fixed/total cost, input fingerprints, state count
+and transition count. Empty selection has zero cost. Equal optima resolve deterministically by
+ascending mask/last/next traversal and lowest final last ID, not lexicographically smallest whole order.
+`HistoryDependent` costs (TTL, multiple retained prefixes or changing latency), or undeclared mandatory
+constraints, yield `Unsupported`. Runtime scheduling hints/calibration/shadow evaluation and FX-45
+stay in P4.5.3/P2.2.2/P6; synthetic optima establish no provider-billing savings.
+
+The dense DP uses O(n²·2ⁿ) arithmetic operations and O(n·2ⁿ) table entries. Limits are explicit resource
+policy. Table sizing uses Long arithmetic before allocation; n>30 and tables beyond JVM Int indexing
+are refused. The configured entry limit should fit available heap (reference + parent per slot, plus
+BigDecimal objects for reached states). `ResourceLimit` has no optimum/witness, including when the
+transition limit is exhausted after exploring partial paths. See the
+[model, tests and protocol](../audit/OUT-OF-ORDER-P4.5.5.md).

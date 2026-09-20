@@ -2,6 +2,8 @@
 
 ## Implementation checkpoints — 20 September 2026
 
+- P4.5.5: exact bounded ordering of a small dependency DAG under frozen pairwise switching costs,
+  including initial/fixed charges, external prerequisite checks and explicit unsupported/limit outcomes.
 - P6.1.5: metadata-only workload partition validation and bounded exact construction, preserving
   task repetitions/must-link groups, weighted quotas and time constraints. Unknown metadata and
   search exhaustion remain explicit; frozen campaign/holdout integrity stays with P6.1.2.

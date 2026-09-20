@@ -9717,6 +9717,114 @@ public final class io/astrolabe/register/Validator {
 	public final fun check (Lio/astrolabe/register/Register;Lio/astrolabe/register/Patch;Lio/astrolabe/register/ValidationContext;)Lio/astrolabe/register/Validation;
 }
 
+public final class io/astrolabe/route/DagSchedule {
+	public static final field INSTANCE Lio/astrolabe/route/DagSchedule;
+	public static final fun solve (Lio/astrolabe/route/ScheduleProblem;Lio/astrolabe/route/ScheduleLimits;)Lio/astrolabe/route/ScheduleResult;
+}
+
+public final class io/astrolabe/route/ScheduleContext {
+	public fun <init> (Ljava/lang/String;Lio/astrolabe/id/Digest;Lio/astrolabe/id/Digest;Lio/astrolabe/id/Digest;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lio/astrolabe/id/Digest;
+	public final fun component3 ()Lio/astrolabe/id/Digest;
+	public final fun component4 ()Lio/astrolabe/id/Digest;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Lio/astrolabe/id/Digest;Lio/astrolabe/id/Digest;Lio/astrolabe/id/Digest;Ljava/lang/String;)Lio/astrolabe/route/ScheduleContext;
+	public static synthetic fun copy$default (Lio/astrolabe/route/ScheduleContext;Ljava/lang/String;Lio/astrolabe/id/Digest;Lio/astrolabe/id/Digest;Lio/astrolabe/id/Digest;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/route/ScheduleContext;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCacheNamespace ()Ljava/lang/String;
+	public final fun getProfile ()Lio/astrolabe/id/Digest;
+	public final fun getRole ()Ljava/lang/String;
+	public final fun getRolePrefix ()Lio/astrolabe/id/Digest;
+	public final fun getSystemPrefix ()Lio/astrolabe/id/Digest;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/route/ScheduleCostModel : java/lang/Enum {
+	public static final field HistoryDependent Lio/astrolabe/route/ScheduleCostModel;
+	public static final field Pairwise Lio/astrolabe/route/ScheduleCostModel;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/route/ScheduleCostModel;
+	public static fun values ()[Lio/astrolabe/route/ScheduleCostModel;
+}
+
+public final class io/astrolabe/route/ScheduleCosts {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/util/Map;Ljava/util/Map;Ljava/util/Map;Ljava/util/Map;Ljava/lang/String;Lio/astrolabe/route/ScheduleCostModel;)V
+	public final fun getContexts ()Ljava/util/Map;
+	public final fun getCurrency ()Ljava/lang/String;
+	public final fun getFingerprint ()Lio/astrolabe/id/Digest;
+	public final fun getFixed ()Ljava/util/Map;
+	public final fun getInitial ()Ljava/util/Map;
+	public final fun getModel ()Lio/astrolabe/route/ScheduleCostModel;
+	public final fun getProvenance ()Ljava/lang/String;
+	public final fun getSwitches ()Ljava/util/Map;
+	public final fun getVersion ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/route/ScheduleEdge {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;)Lio/astrolabe/route/ScheduleEdge;
+	public static synthetic fun copy$default (Lio/astrolabe/route/ScheduleEdge;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/route/ScheduleEdge;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFrom ()Ljava/lang/String;
+	public final fun getTo ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/route/ScheduleLimits {
+	public fun <init> (IJJ)V
+	public final fun component1 ()I
+	public final fun component2 ()J
+	public final fun component3 ()J
+	public final fun copy (IJJ)Lio/astrolabe/route/ScheduleLimits;
+	public static synthetic fun copy$default (Lio/astrolabe/route/ScheduleLimits;IJJILjava/lang/Object;)Lio/astrolabe/route/ScheduleLimits;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMaxIncrements ()I
+	public final fun getMaxTableEntries ()J
+	public final fun getMaxTransitions ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/route/ScheduleProblem {
+	public fun <init> (Lio/astrolabe/graph/RequirementGraph;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;ZLio/astrolabe/route/ScheduleCosts;)V
+	public final fun getCompletedPrerequisites ()Ljava/util/Set;
+	public final fun getConstraintsComplete ()Z
+	public final fun getCosts ()Lio/astrolabe/route/ScheduleCosts;
+	public final fun getFingerprint ()Lio/astrolabe/id/Digest;
+	public final fun getGraph ()Lio/astrolabe/graph/RequirementGraph;
+	public final fun getPrecedence ()Ljava/util/Set;
+	public final fun getSelected ()Ljava/util/Set;
+}
+
+public final class io/astrolabe/route/ScheduleResult {
+	public final fun getFixedCost ()Lio/astrolabe/provider/Money;
+	public final fun getIssues ()Ljava/util/List;
+	public final fun getOrder ()Ljava/util/List;
+	public final fun getProblem ()Lio/astrolabe/route/ScheduleProblem;
+	public final fun getStates ()J
+	public final fun getStatus ()Lio/astrolabe/route/ScheduleStatus;
+	public final fun getTotalCost ()Lio/astrolabe/provider/Money;
+	public final fun getTransitions ()J
+	public final fun getVariableCost ()Lio/astrolabe/provider/Money;
+}
+
+public final class io/astrolabe/route/ScheduleStatus : java/lang/Enum {
+	public static final field InvalidInput Lio/astrolabe/route/ScheduleStatus;
+	public static final field Optimal Lio/astrolabe/route/ScheduleStatus;
+	public static final field ResourceLimit Lio/astrolabe/route/ScheduleStatus;
+	public static final field UnknownCosts Lio/astrolabe/route/ScheduleStatus;
+	public static final field UnsatisfiedPrerequisites Lio/astrolabe/route/ScheduleStatus;
+	public static final field Unsupported Lio/astrolabe/route/ScheduleStatus;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/route/ScheduleStatus;
+	public static fun values ()[Lio/astrolabe/route/ScheduleStatus;
+}
+
 public final class io/astrolabe/route/Tier : java/lang/Enum {
 	public static final field Companion Lio/astrolabe/route/Tier$Companion;
 	public static final field Deterministic Lio/astrolabe/route/Tier;

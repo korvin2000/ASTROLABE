@@ -1,5 +1,21 @@
 # Continue ASTROLABE implementation
 
+**Completed this session: P6.1.5 / OOO-07, then P4.5.5 / OOO-08**, D-59/D-60.
+P6.1.5 commit `eb143e8`; P4.5.5 is the commit containing this checkpoint, on `feature/out-of-order-kernels`.
+Current **66/182 DONE (36.3%), 4 IN_PROGRESS, 112 TODO**. No ACTIVE override remains.
+Workload partitioning: immutable metadata, weighted quotas, transitive groups/time, bounded exact search.
+DAG oracle: dependency-safe subset-DP with exact initial/switch/fixed costs and explicit model/resource limits.
+24 new focused tests; independent 300-table workload + 200-DAG oracles; reviews resolved; ABI/full build pass.
+Final Windows/JDK 26 build executed **core 825 tests, 0 failures/errors, 6 platform skips**, **eval 30 tests,
+0 failures/errors/skips**; provider-api reused 15 green results. Linux/CI/live gates remain open/UNMEASURED.
+Protocols: [P6.1.5](audit/OUT-OF-ORDER-P6.1.5.md), [P4.5.5](audit/OUT-OF-ORDER-P4.5.5.md).
+Do not reimplement these kernels. P6.1.2 retains runner/manifest/holdout/FX-47 work; P4.5.3 retains
+calibration/controller/shadow/FX-45 work. The session ends at this complete checkpoint.
+Next out-of-order: **OOO-06 → candidate P4.5.4**, then OOO-09 → OOO-04; admission/registration first.
+Normal return: P0.1.2 + P0.6.1/P0.6.2/P0.6.4 -> P1.8.2. TODO §1.2 remains authoritative.
+
+**Earlier checkpoint:**
+
 **P6.1.5 / OOO-07 DONE**, D-59; checkpoint is the commit containing this record.
 Immutable workload metadata, must-link/time/quota validator and exact bounded assignment are ready.
 Current **65/181 DONE (35.9%), 4 IN_PROGRESS, 112 TODO**. 12 focused tests, 300 oracle tables,
