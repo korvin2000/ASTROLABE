@@ -1064,6 +1064,422 @@ public final class io/astrolabe/id/WorkspaceId$Serializer : io/astrolabe/id/Stri
 	public static final field INSTANCE Lio/astrolabe/id/WorkspaceId$Serializer;
 }
 
+public final class io/astrolabe/os/BranchInfo {
+	public fun <init> (Lio/astrolabe/os/ObjectId;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Integer;Ljava/lang/Integer;)V
+	public final fun component1 ()Lio/astrolabe/os/ObjectId;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/lang/Integer;
+	public final fun component5 ()Ljava/lang/Integer;
+	public final fun copy (Lio/astrolabe/os/ObjectId;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Integer;Ljava/lang/Integer;)Lio/astrolabe/os/BranchInfo;
+	public static synthetic fun copy$default (Lio/astrolabe/os/BranchInfo;Lio/astrolabe/os/ObjectId;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Integer;Ljava/lang/Integer;ILjava/lang/Object;)Lio/astrolabe/os/BranchInfo;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAhead ()Ljava/lang/Integer;
+	public final fun getBehind ()Ljava/lang/Integer;
+	public final fun getHead ()Ljava/lang/String;
+	public final fun getOid ()Lio/astrolabe/os/ObjectId;
+	public final fun getUpstream ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/ChangeOrigin : java/lang/Enum {
+	public static final field COPY Lio/astrolabe/os/ChangeOrigin;
+	public static final field Companion Lio/astrolabe/os/ChangeOrigin$Companion;
+	public static final field RENAME Lio/astrolabe/os/ChangeOrigin;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/os/ChangeOrigin;
+	public static fun values ()[Lio/astrolabe/os/ChangeOrigin;
+}
+
+public final class io/astrolabe/os/ChangeOrigin$Companion {
+	public final fun parse (C)Lio/astrolabe/os/ChangeOrigin;
+}
+
+public final class io/astrolabe/os/FileMode : java/lang/Enum {
+	public static final field ABSENT Lio/astrolabe/os/FileMode;
+	public static final field Companion Lio/astrolabe/os/FileMode$Companion;
+	public static final field EXECUTABLE Lio/astrolabe/os/FileMode;
+	public static final field GITLINK Lio/astrolabe/os/FileMode;
+	public static final field REGULAR Lio/astrolabe/os/FileMode;
+	public static final field SYMLINK Lio/astrolabe/os/FileMode;
+	public static final field TREE Lio/astrolabe/os/FileMode;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getOctal ()Ljava/lang/String;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/os/FileMode;
+	public static fun values ()[Lio/astrolabe/os/FileMode;
+}
+
+public final class io/astrolabe/os/FileMode$Companion {
+	public final fun parse (Ljava/lang/String;)Lio/astrolabe/os/FileMode;
+	public final fun parseOrNull (Ljava/lang/String;)Lio/astrolabe/os/FileMode;
+}
+
+public final class io/astrolabe/os/Git {
+	public fun <init> (Ljava/nio/file/Path;Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/nio/file/Path;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun catFile (Lio/astrolabe/os/ObjectId;)[B
+	public final fun commitTree (Lio/astrolabe/os/ObjectId;Ljava/util/List;Ljava/lang/String;Lio/astrolabe/os/Identity;)Lio/astrolabe/os/ObjectId;
+	public static synthetic fun commitTree$default (Lio/astrolabe/os/Git;Lio/astrolabe/os/ObjectId;Ljava/util/List;Ljava/lang/String;Lio/astrolabe/os/Identity;ILjava/lang/Object;)Lio/astrolabe/os/ObjectId;
+	public final fun diff (Ljava/util/List;Z)Ljava/lang/String;
+	public static synthetic fun diff$default (Lio/astrolabe/os/Git;Ljava/util/List;ZILjava/lang/Object;)Ljava/lang/String;
+	public final fun getExecutable ()Ljava/lang/String;
+	public final fun getRepo ()Ljava/nio/file/Path;
+	public final fun hashObject ([BZZ)Lio/astrolabe/os/ObjectId;
+	public static synthetic fun hashObject$default (Lio/astrolabe/os/Git;[BZZILjava/lang/Object;)Lio/astrolabe/os/ObjectId;
+	public final fun lsFiles (Ljava/util/List;)Ljava/util/List;
+	public static synthetic fun lsFiles$default (Lio/astrolabe/os/Git;Ljava/util/List;ILjava/lang/Object;)Ljava/util/List;
+	public final fun lsTree (Lio/astrolabe/os/ObjectId;Z)Ljava/util/List;
+	public static synthetic fun lsTree$default (Lio/astrolabe/os/Git;Lio/astrolabe/os/ObjectId;ZILjava/lang/Object;)Ljava/util/List;
+	public final fun readRef (Ljava/lang/String;)Lio/astrolabe/os/ObjectId;
+	public final fun requireMinimum (II)Lio/astrolabe/os/GitVersion;
+	public final fun revParse (Ljava/lang/String;)Lio/astrolabe/os/ObjectId;
+	public final fun show (Lio/astrolabe/os/ObjectId;)Ljava/lang/String;
+	public final fun status (Lio/astrolabe/os/UntrackedFiles;Z)Lio/astrolabe/os/GitStatus;
+	public static synthetic fun status$default (Lio/astrolabe/os/Git;Lio/astrolabe/os/UntrackedFiles;ZILjava/lang/Object;)Lio/astrolabe/os/GitStatus;
+	public final fun unsupportedForms ()Ljava/util/Set;
+	public final fun updateIndex (Ljava/nio/file/Path;Ljava/util/List;)V
+	public final fun updateRef (Ljava/lang/String;Lio/astrolabe/os/ObjectId;Lio/astrolabe/os/ObjectId;)V
+	public final fun version ()Lio/astrolabe/os/GitVersion;
+	public final fun worktreeAdd (Ljava/nio/file/Path;Lio/astrolabe/os/ObjectId;)V
+	public final fun worktreeRemove (Ljava/nio/file/Path;Z)V
+	public static synthetic fun worktreeRemove$default (Lio/astrolabe/os/Git;Ljava/nio/file/Path;ZILjava/lang/Object;)V
+	public final fun writeTree (Ljava/nio/file/Path;)Lio/astrolabe/os/ObjectId;
+}
+
+public class io/astrolabe/os/GitError : java/lang/RuntimeException {
+	public fun <init> (Ljava/util/List;ILjava/lang/String;)V
+	public final fun getArgv ()Ljava/util/List;
+	public final fun getExitCode ()I
+	public final fun getStderr ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/GitStatus {
+	public fun <init> (Lio/astrolabe/os/BranchInfo;Ljava/util/List;)V
+	public final fun component1 ()Lio/astrolabe/os/BranchInfo;
+	public final fun component2 ()Ljava/util/List;
+	public final fun copy (Lio/astrolabe/os/BranchInfo;Ljava/util/List;)Lio/astrolabe/os/GitStatus;
+	public static synthetic fun copy$default (Lio/astrolabe/os/GitStatus;Lio/astrolabe/os/BranchInfo;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/os/GitStatus;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBranch ()Lio/astrolabe/os/BranchInfo;
+	public final fun getEntries ()Ljava/util/List;
+	public final fun getUntracked ()Ljava/util/List;
+	public fun hashCode ()I
+	public final fun isClean ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/GitVersion : java/lang/Comparable {
+	public static final field Companion Lio/astrolabe/os/GitVersion$Companion;
+	public fun <init> (IIILjava/lang/String;)V
+	public final fun atLeast (II)Z
+	public fun compareTo (Lio/astrolabe/os/GitVersion;)I
+	public synthetic fun compareTo (Ljava/lang/Object;)I
+	public final fun component1 ()I
+	public final fun component2 ()I
+	public final fun component3 ()I
+	public final fun component4 ()Ljava/lang/String;
+	public final fun copy (IIILjava/lang/String;)Lio/astrolabe/os/GitVersion;
+	public static synthetic fun copy$default (Lio/astrolabe/os/GitVersion;IIILjava/lang/String;ILjava/lang/Object;)Lio/astrolabe/os/GitVersion;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMajor ()I
+	public final fun getMinor ()I
+	public final fun getPatch ()I
+	public final fun getRaw ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/GitVersion$Companion {
+	public final fun parse (Ljava/lang/String;)Lio/astrolabe/os/GitVersion;
+}
+
+public final class io/astrolabe/os/Identity {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;)Lio/astrolabe/os/Identity;
+	public static synthetic fun copy$default (Lio/astrolabe/os/Identity;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/os/Identity;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEmail ()Ljava/lang/String;
+	public final fun getName ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/IndexEntry {
+	public fun <init> (Lio/astrolabe/os/FileMode;Lio/astrolabe/os/ObjectId;Ljava/lang/String;)V
+	public final fun component1 ()Lio/astrolabe/os/FileMode;
+	public final fun component2 ()Lio/astrolabe/os/ObjectId;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (Lio/astrolabe/os/FileMode;Lio/astrolabe/os/ObjectId;Ljava/lang/String;)Lio/astrolabe/os/IndexEntry;
+	public static synthetic fun copy$default (Lio/astrolabe/os/IndexEntry;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/ObjectId;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/os/IndexEntry;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getId ()Lio/astrolabe/os/ObjectId;
+	public final fun getMode ()Lio/astrolabe/os/FileMode;
+	public final fun getPath ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/LsFilesEntry {
+	public fun <init> (Lio/astrolabe/os/FileMode;Lio/astrolabe/os/ObjectId;ILjava/lang/String;)V
+	public final fun component1 ()Lio/astrolabe/os/FileMode;
+	public final fun component2 ()Lio/astrolabe/os/ObjectId;
+	public final fun component3 ()I
+	public final fun component4 ()Ljava/lang/String;
+	public final fun copy (Lio/astrolabe/os/FileMode;Lio/astrolabe/os/ObjectId;ILjava/lang/String;)Lio/astrolabe/os/LsFilesEntry;
+	public static synthetic fun copy$default (Lio/astrolabe/os/LsFilesEntry;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/ObjectId;ILjava/lang/String;ILjava/lang/Object;)Lio/astrolabe/os/LsFilesEntry;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getId ()Lio/astrolabe/os/ObjectId;
+	public final fun getMode ()Lio/astrolabe/os/FileMode;
+	public final fun getPath ()Ljava/lang/String;
+	public final fun getStage ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/ObjectId {
+	public static final field Companion Lio/astrolabe/os/ObjectId$Companion;
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/astrolabe/os/ObjectId;
+	public static synthetic fun copy$default (Lio/astrolabe/os/ObjectId;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/os/ObjectId;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getHex ()Ljava/lang/String;
+	public fun hashCode ()I
+	public final fun isZero ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/ObjectId$Companion {
+	public final fun parse (Ljava/lang/String;)Lio/astrolabe/os/ObjectId;
+	public final fun parseOrNull (Ljava/lang/String;)Lio/astrolabe/os/ObjectId;
+	public final fun zeroLike (Lio/astrolabe/os/ObjectId;)Lio/astrolabe/os/ObjectId;
+}
+
+public final class io/astrolabe/os/RefUpdateRejected : io/astrolabe/os/GitError {
+	public fun <init> (Ljava/lang/String;Lio/astrolabe/os/ObjectId;Ljava/util/List;ILjava/lang/String;)V
+	public final fun getExpectedOld ()Lio/astrolabe/os/ObjectId;
+	public final fun getRef ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/RepositoryForm : java/lang/Enum {
+	public static final field SPARSE_CHECKOUT Lio/astrolabe/os/RepositoryForm;
+	public static final field SUBMODULES Lio/astrolabe/os/RepositoryForm;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/os/RepositoryForm;
+	public static fun values ()[Lio/astrolabe/os/RepositoryForm;
+}
+
+public final class io/astrolabe/os/StatusCode : java/lang/Enum {
+	public static final field ADDED Lio/astrolabe/os/StatusCode;
+	public static final field COPIED Lio/astrolabe/os/StatusCode;
+	public static final field Companion Lio/astrolabe/os/StatusCode$Companion;
+	public static final field DELETED Lio/astrolabe/os/StatusCode;
+	public static final field FILE_TYPE_CHANGED Lio/astrolabe/os/StatusCode;
+	public static final field MODIFIED Lio/astrolabe/os/StatusCode;
+	public static final field RENAMED Lio/astrolabe/os/StatusCode;
+	public static final field UNMERGED Lio/astrolabe/os/StatusCode;
+	public static final field UNMODIFIED Lio/astrolabe/os/StatusCode;
+	public final fun getCode ()C
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/os/StatusCode;
+	public static fun values ()[Lio/astrolabe/os/StatusCode;
+}
+
+public final class io/astrolabe/os/StatusCode$Companion {
+	public final fun parse (C)Lio/astrolabe/os/StatusCode;
+}
+
+public abstract interface class io/astrolabe/os/StatusEntry {
+	public abstract fun getPath ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/StatusEntry$Ignored : io/astrolabe/os/StatusEntry {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/astrolabe/os/StatusEntry$Ignored;
+	public static synthetic fun copy$default (Lio/astrolabe/os/StatusEntry$Ignored;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/os/StatusEntry$Ignored;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getPath ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/StatusEntry$Ordinary : io/astrolabe/os/StatusEntry {
+	public fun <init> (Lio/astrolabe/os/StatusCode;Lio/astrolabe/os/StatusCode;Lio/astrolabe/os/SubmoduleState;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/ObjectId;Lio/astrolabe/os/ObjectId;Ljava/lang/String;)V
+	public final fun component1 ()Lio/astrolabe/os/StatusCode;
+	public final fun component2 ()Lio/astrolabe/os/StatusCode;
+	public final fun component3 ()Lio/astrolabe/os/SubmoduleState;
+	public final fun component4 ()Lio/astrolabe/os/FileMode;
+	public final fun component5 ()Lio/astrolabe/os/FileMode;
+	public final fun component6 ()Lio/astrolabe/os/FileMode;
+	public final fun component7 ()Lio/astrolabe/os/ObjectId;
+	public final fun component8 ()Lio/astrolabe/os/ObjectId;
+	public final fun component9 ()Ljava/lang/String;
+	public final fun copy (Lio/astrolabe/os/StatusCode;Lio/astrolabe/os/StatusCode;Lio/astrolabe/os/SubmoduleState;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/ObjectId;Lio/astrolabe/os/ObjectId;Ljava/lang/String;)Lio/astrolabe/os/StatusEntry$Ordinary;
+	public static synthetic fun copy$default (Lio/astrolabe/os/StatusEntry$Ordinary;Lio/astrolabe/os/StatusCode;Lio/astrolabe/os/StatusCode;Lio/astrolabe/os/SubmoduleState;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/ObjectId;Lio/astrolabe/os/ObjectId;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/os/StatusEntry$Ordinary;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getHeadId ()Lio/astrolabe/os/ObjectId;
+	public final fun getHeadMode ()Lio/astrolabe/os/FileMode;
+	public final fun getIndex ()Lio/astrolabe/os/StatusCode;
+	public final fun getIndexId ()Lio/astrolabe/os/ObjectId;
+	public final fun getIndexMode ()Lio/astrolabe/os/FileMode;
+	public fun getPath ()Ljava/lang/String;
+	public final fun getSubmodule ()Lio/astrolabe/os/SubmoduleState;
+	public final fun getWorktree ()Lio/astrolabe/os/StatusCode;
+	public final fun getWorktreeMode ()Lio/astrolabe/os/FileMode;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/StatusEntry$Renamed : io/astrolabe/os/StatusEntry {
+	public fun <init> (Lio/astrolabe/os/StatusCode;Lio/astrolabe/os/StatusCode;Lio/astrolabe/os/SubmoduleState;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/ObjectId;Lio/astrolabe/os/ObjectId;Lio/astrolabe/os/ChangeOrigin;ILjava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Lio/astrolabe/os/StatusCode;
+	public final fun component10 ()I
+	public final fun component11 ()Ljava/lang/String;
+	public final fun component12 ()Ljava/lang/String;
+	public final fun component2 ()Lio/astrolabe/os/StatusCode;
+	public final fun component3 ()Lio/astrolabe/os/SubmoduleState;
+	public final fun component4 ()Lio/astrolabe/os/FileMode;
+	public final fun component5 ()Lio/astrolabe/os/FileMode;
+	public final fun component6 ()Lio/astrolabe/os/FileMode;
+	public final fun component7 ()Lio/astrolabe/os/ObjectId;
+	public final fun component8 ()Lio/astrolabe/os/ObjectId;
+	public final fun component9 ()Lio/astrolabe/os/ChangeOrigin;
+	public final fun copy (Lio/astrolabe/os/StatusCode;Lio/astrolabe/os/StatusCode;Lio/astrolabe/os/SubmoduleState;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/ObjectId;Lio/astrolabe/os/ObjectId;Lio/astrolabe/os/ChangeOrigin;ILjava/lang/String;Ljava/lang/String;)Lio/astrolabe/os/StatusEntry$Renamed;
+	public static synthetic fun copy$default (Lio/astrolabe/os/StatusEntry$Renamed;Lio/astrolabe/os/StatusCode;Lio/astrolabe/os/StatusCode;Lio/astrolabe/os/SubmoduleState;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/ObjectId;Lio/astrolabe/os/ObjectId;Lio/astrolabe/os/ChangeOrigin;ILjava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/os/StatusEntry$Renamed;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getHeadId ()Lio/astrolabe/os/ObjectId;
+	public final fun getHeadMode ()Lio/astrolabe/os/FileMode;
+	public final fun getIndex ()Lio/astrolabe/os/StatusCode;
+	public final fun getIndexId ()Lio/astrolabe/os/ObjectId;
+	public final fun getIndexMode ()Lio/astrolabe/os/FileMode;
+	public final fun getOrigPath ()Ljava/lang/String;
+	public final fun getOrigin ()Lio/astrolabe/os/ChangeOrigin;
+	public fun getPath ()Ljava/lang/String;
+	public final fun getSimilarityPercent ()I
+	public final fun getSubmodule ()Lio/astrolabe/os/SubmoduleState;
+	public final fun getWorktree ()Lio/astrolabe/os/StatusCode;
+	public final fun getWorktreeMode ()Lio/astrolabe/os/FileMode;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/StatusEntry$Unmerged : io/astrolabe/os/StatusEntry {
+	public fun <init> (Lio/astrolabe/os/StatusCode;Lio/astrolabe/os/StatusCode;Lio/astrolabe/os/SubmoduleState;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/ObjectId;Lio/astrolabe/os/ObjectId;Lio/astrolabe/os/ObjectId;Ljava/lang/String;)V
+	public final fun component1 ()Lio/astrolabe/os/StatusCode;
+	public final fun component10 ()Lio/astrolabe/os/ObjectId;
+	public final fun component11 ()Ljava/lang/String;
+	public final fun component2 ()Lio/astrolabe/os/StatusCode;
+	public final fun component3 ()Lio/astrolabe/os/SubmoduleState;
+	public final fun component4 ()Lio/astrolabe/os/FileMode;
+	public final fun component5 ()Lio/astrolabe/os/FileMode;
+	public final fun component6 ()Lio/astrolabe/os/FileMode;
+	public final fun component7 ()Lio/astrolabe/os/FileMode;
+	public final fun component8 ()Lio/astrolabe/os/ObjectId;
+	public final fun component9 ()Lio/astrolabe/os/ObjectId;
+	public final fun copy (Lio/astrolabe/os/StatusCode;Lio/astrolabe/os/StatusCode;Lio/astrolabe/os/SubmoduleState;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/ObjectId;Lio/astrolabe/os/ObjectId;Lio/astrolabe/os/ObjectId;Ljava/lang/String;)Lio/astrolabe/os/StatusEntry$Unmerged;
+	public static synthetic fun copy$default (Lio/astrolabe/os/StatusEntry$Unmerged;Lio/astrolabe/os/StatusCode;Lio/astrolabe/os/StatusCode;Lio/astrolabe/os/SubmoduleState;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/ObjectId;Lio/astrolabe/os/ObjectId;Lio/astrolabe/os/ObjectId;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/os/StatusEntry$Unmerged;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getIndex ()Lio/astrolabe/os/StatusCode;
+	public fun getPath ()Ljava/lang/String;
+	public final fun getStage1Id ()Lio/astrolabe/os/ObjectId;
+	public final fun getStage1Mode ()Lio/astrolabe/os/FileMode;
+	public final fun getStage2Id ()Lio/astrolabe/os/ObjectId;
+	public final fun getStage2Mode ()Lio/astrolabe/os/FileMode;
+	public final fun getStage3Id ()Lio/astrolabe/os/ObjectId;
+	public final fun getStage3Mode ()Lio/astrolabe/os/FileMode;
+	public final fun getSubmodule ()Lio/astrolabe/os/SubmoduleState;
+	public final fun getWorktree ()Lio/astrolabe/os/StatusCode;
+	public final fun getWorktreeMode ()Lio/astrolabe/os/FileMode;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/StatusEntry$Untracked : io/astrolabe/os/StatusEntry {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/astrolabe/os/StatusEntry$Untracked;
+	public static synthetic fun copy$default (Lio/astrolabe/os/StatusEntry$Untracked;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/os/StatusEntry$Untracked;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getPath ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/SubmoduleState {
+	public static final field Companion Lio/astrolabe/os/SubmoduleState$Companion;
+	public fun <init> (ZZZZ)V
+	public final fun component1 ()Z
+	public final fun component2 ()Z
+	public final fun component3 ()Z
+	public final fun component4 ()Z
+	public final fun copy (ZZZZ)Lio/astrolabe/os/SubmoduleState;
+	public static synthetic fun copy$default (Lio/astrolabe/os/SubmoduleState;ZZZZILjava/lang/Object;)Lio/astrolabe/os/SubmoduleState;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCommitChanged ()Z
+	public final fun getHasTrackedChanges ()Z
+	public final fun getHasUntrackedChanges ()Z
+	public fun hashCode ()I
+	public final fun isSubmodule ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/SubmoduleState$Companion {
+	public final fun getNOT_A_SUBMODULE ()Lio/astrolabe/os/SubmoduleState;
+	public final fun parse (Ljava/lang/String;)Lio/astrolabe/os/SubmoduleState;
+}
+
+public final class io/astrolabe/os/TreeEntry {
+	public fun <init> (Lio/astrolabe/os/FileMode;Lio/astrolabe/os/TreeEntryKind;Lio/astrolabe/os/ObjectId;Ljava/lang/String;)V
+	public final fun component1 ()Lio/astrolabe/os/FileMode;
+	public final fun component2 ()Lio/astrolabe/os/TreeEntryKind;
+	public final fun component3 ()Lio/astrolabe/os/ObjectId;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun copy (Lio/astrolabe/os/FileMode;Lio/astrolabe/os/TreeEntryKind;Lio/astrolabe/os/ObjectId;Ljava/lang/String;)Lio/astrolabe/os/TreeEntry;
+	public static synthetic fun copy$default (Lio/astrolabe/os/TreeEntry;Lio/astrolabe/os/FileMode;Lio/astrolabe/os/TreeEntryKind;Lio/astrolabe/os/ObjectId;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/os/TreeEntry;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getId ()Lio/astrolabe/os/ObjectId;
+	public final fun getKind ()Lio/astrolabe/os/TreeEntryKind;
+	public final fun getMode ()Lio/astrolabe/os/FileMode;
+	public final fun getPath ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/TreeEntryKind : java/lang/Enum {
+	public static final field BLOB Lio/astrolabe/os/TreeEntryKind;
+	public static final field COMMIT Lio/astrolabe/os/TreeEntryKind;
+	public static final field Companion Lio/astrolabe/os/TreeEntryKind$Companion;
+	public static final field TAG Lio/astrolabe/os/TreeEntryKind;
+	public static final field TREE Lio/astrolabe/os/TreeEntryKind;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/os/TreeEntryKind;
+	public static fun values ()[Lio/astrolabe/os/TreeEntryKind;
+}
+
+public final class io/astrolabe/os/TreeEntryKind$Companion {
+	public final fun parse (Ljava/lang/String;)Lio/astrolabe/os/TreeEntryKind;
+}
+
+public final class io/astrolabe/os/UnsupportedRepositoryForm : java/lang/RuntimeException {
+	public fun <init> (Lio/astrolabe/os/RepositoryForm;Ljava/lang/String;)V
+	public final fun getForm ()Lio/astrolabe/os/RepositoryForm;
+	public final fun getOperation ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/UntrackedFiles : java/lang/Enum {
+	public static final field ALL Lio/astrolabe/os/UntrackedFiles;
+	public static final field NO Lio/astrolabe/os/UntrackedFiles;
+	public static final field NORMAL Lio/astrolabe/os/UntrackedFiles;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getFlag ()Ljava/lang/String;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/os/UntrackedFiles;
+	public static fun values ()[Lio/astrolabe/os/UntrackedFiles;
+}
+
 public final class io/astrolabe/route/Tier : java/lang/Enum {
 	public static final field Companion Lio/astrolabe/route/Tier$Companion;
 	public static final field Deterministic Lio/astrolabe/route/Tier;
