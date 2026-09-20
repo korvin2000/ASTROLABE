@@ -23,12 +23,13 @@
 In scope: the whole architecture through S3 as a library, validated with a **fake provider adapter**. Out of scope ([P7](#p7-deferred-out-of-scope-boundary)): live provider transports, auth, retry/backoff, HTTP clients, MCP client transports, confined-runner backends, live benchmark campaigns. Every phase states which fixtures it must pass and which platform/provider assumptions remain unsupported. The roadmap rule "no stage starts before the previous gate is measured" ([§18.2](docs/implementation/roadmap.md#sec-18-2)) is interpreted for this offline plan as: engineering proceeds through P6 with each live gate recorded `UNMEASURED` and its prerequisites named; promotion claims wait for live evaluation (I-19, D-28).
 
 ## 1 Progress
-- **Latest checkpoint: P4.5.4 / OOO-06 DONE**, D-61, from `955fb77`; 15 focused tests, 300 seed-454 path-enumeration policies, author review resolved, ABI and full Windows/JDK 26 build pass. Core **840 tests/0 failures/errors/6 platform skips**, eval **30/0 failures/errors/skips** executed; provider-api 15 green results reused. **67/183 DONE, 4 IN_PROGRESS, 112 TODO**. No ACTIVE override. Next authorized proposal OOO-09; normal return P0 validation -> P1.8.2. [Protocol](audit/OUT-OF-ORDER-P4.5.4.md).
+- **Latest checkpoint: P4.5.4 / OOO-06 and P1.11.3 / OOO-09 DONE**, in requested order, D-61/D-62. P4.5.4 commit `817a32b`; P1.11.3 commit containing this checkpoint. 30 focused tests, independent oracles on 300 attempt policies + 300 traces; author reviews resolved; ABI and full Windows/JDK 26 build pass. Core **855 tests/0 failures/errors/6 platform skips**, eval **30/0 failures/errors/skips** executed; provider-api 15 green results reused. **68/184 DONE, 4 IN_PROGRESS, 112 TODO**. No ACTIVE override. Next proposal OOO-04; session stops at completed checkpoint. Normal return P0 validation -> P1.8.2.
+- **Previous checkpoint: P4.5.4 / OOO-06 DONE**, D-61, from `955fb77`; 15 focused tests, 300 seed-454 path-enumeration policies, author review resolved, ABI and full Windows/JDK 26 build pass. Core **840 tests/0 failures/errors/6 platform skips**, eval **30/0 failures/errors/skips** executed; provider-api 15 green results reused. **67/183 DONE, 4 IN_PROGRESS, 112 TODO**. No ACTIVE override. Next authorized proposal OOO-09; normal return P0 validation -> P1.8.2. [Protocol](audit/OUT-OF-ORDER-P4.5.4.md).
 - **Previous checkpoint: P6.1.5 / OOO-07 and P4.5.5 / OOO-08 DONE**, in requested order, D-59/D-60. Commits: P6.1.5 `eb143e8`; P4.5.5 commit containing this record. 24 new focused tests, independent oracles (300 workload tables + 200 DAGs), reviews resolved, ABI/full build pass. Final Windows/JDK 26 build executed core **825 tests, 0 failures/errors, 6 platform skips**, eval **30 tests, 0 failures/errors/skips**; provider-api 15 green results reused. Current **66/182 DONE (36.3%), 4 IN_PROGRESS, 112 TODO**. No ACTIVE override; next proposal OOO-06. Normal return P0 validation -> P1.8.2.
 - **Previous checkpoint: P6.1.5 / OOO-07 DONE**, D-59. 12 focused tests, 300 seed-615 oracle tables, independent review correction/regression, ABI and full Windows/JDK 26 build pass. Eval 30 tests executed; core 813/6 skips and provider-api 15 reused. Current **65/181 DONE (35.9%), 4 IN_PROGRESS, 112 TODO**. No active override; next authorized proposal OOO-08. Return P0 validation -> P1.8.2. [Protocol](audit/OUT-OF-ORDER-P6.1.5.md).
 - **Previous out-of-order checkpoint:** **P6.1.4 (OOO-02) and P5.1.5 (OOO-05) DONE**, in the requested order; D-57/D-58. Both independent reviews clear, ABI checks and full offline Windows/JDK 26 build pass. Final build executed core **813 tests, 0 failures/errors, 6 platform skips** and eval **18 tests, 0 failures/errors/skips**; provider-api UP-TO-DATE (15 green results). Protocols: [P6.1.4](audit/OUT-OF-ORDER-P6.1.4.md), [P5.1.5](audit/OUT-OF-ORDER-P5.1.5.md). No active override remains; next out-of-order proposal **OOO-07** (candidate P6.1.5), admission first. Normal return: P0 validation -> P1.8.2.
-- **Completed out-of-order work:** P2.1.1, P2.3.4 (OOO-01), P2.6.5 (OOO-03), P6.1.4 (OOO-02), P5.1.5 (OOO-05). P6.1.5 (OOO-07) and P4.5.5 (OOO-08) are also DONE; OOO-06/P4.5.4 is also DONE; OOO-09/04 remain proposals, in that order. Parent integration and CI/Linux/live gates remain unchanged.
-- **Current phase counts:** P0 15 DONE + 4 IN_PROGRESS; P1 44 DONE + 19 TODO; P2-P6 8 DONE + 93 TODO. Counts derive from unique task headings, not code volume.
+- **Completed out-of-order work:** P2.1.1, P2.3.4 (OOO-01), P2.6.5 (OOO-03), P6.1.4 (OOO-02), P5.1.5 (OOO-05). P6.1.5 (OOO-07) and P4.5.5 (OOO-08) are also DONE; OOO-06/P4.5.4 and OOO-09/P1.11.3 are also DONE; OOO-04 remains a proposal. Parent integration and CI/Linux/live gates remain unchanged.
+- **Current phase counts:** P0 15 DONE + 4 IN_PROGRESS; P1 45 DONE + 19 TODO; P2-P6 8 DONE + 93 TODO. Counts derive from unique task headings, not code volume.
 - **Phase:** P0 validation reopened; P1 implementation checkpoint retained · **Next task:** P0.1.2 (with P0.6.1/P0.6.2/P0.6.4) · **Next P1 code task:** P1.8.2 · **Owner decisions blocking work:** none
 - **Open decisions needing an owner answer:** none (D-01, D-02, D-09, D-12, D-15 answered 2026-09-20 in `ANSWERS.md`; provisional defaults are labelled in §3)
 - **Previous completion state (2026-09-20, P5.1.5 completed):** P0: 15/19 DONE, 4 IN_PROGRESS (reopened CI validation). P1: 44/63 DONE, 19 TODO. P2-P6: 5 DONE (P2.1.1, P2.3.4, P2.6.5, P6.1.4, P5.1.5), 93 TODO. Total: **64/180 DONE (35.6%), 4 IN_PROGRESS, 112 TODO**. Counts measure task headings, not code or effort; phase/CI/Linux/live gates unchanged.
@@ -84,6 +85,17 @@ All three pass in the isolated local rerun; their remote failures remain unresol
 ### 1.2 Owner-authorized analytical work (2026-09-20)
 
 **Current card — State: COMPLETE**
+- Proposal: **OOO-09** | Canonical task: **P1.11.3** | Parents: P1.11.1/P1.11.2 (TODO).
+- Authority: continuing owner request for sequential out-of-order implementation/protocols/docs.
+- Baseline: clean `817a32b`, `feature/out-of-order-kernels`, after P4.5.4 DONE.
+- Scope: immutable trace snapshot, dedup/tree money, exclusive intervals, explicit causal DAG and uncertainty.
+- Producers: SpanId/Phase P0.4.1, WorkId/Identities P0.2.1, Money P0.3.3, all DONE. D-62.
+- Excluded: runtime Span/emission/capture/store, Accounting/reconciliation/export and FX-59.
+- Checkpoint: P1.11.3 DONE. 15 focused tests/300 seeded trace oracles, author review resolved; ABI and full build pass. Core 855/6 skips and eval 30 executed, provider-api 15 reused; commit containing this checkpoint.
+- Next: session ends at complete checkpoint. Next out-of-order proposal OOO-04/P3.2.7, admission first. Normal return P0 validation -> P1.8.2. CI/Linux/live gates unchanged.
+- Journal: [P1.11.3](audit/OUT-OF-ORDER-P1.11.3.md).
+
+**Historical completed card — P4.5.4**
 - Proposal: **OOO-06** | Canonical task: **P4.5.4** | Parent: P4.5.1 (TODO), consumer P4.5.2.
 - Authority: 2026-09-20 owner request for sequential implementation with protocols/docs/checkpoints.
 - Baseline: clean `feature/out-of-order-kernels` at `955fb77`.
@@ -231,6 +243,7 @@ A task may consume a type only after its producing task is `DONE` (I-01). Extend
 
 | Artifact | First declared (producer) | Extended by |
 |---|---|---|
+| `TraceSpanStatus`, `TraceSpan`, `TraceUnitKind`, `TraceUnit`, `TraceEdge`, `TraceSnapshot`, `TraceLimits`, `TraceStatus`, `TraceBand`, `TraceTiming`, `TraceCriticalPath`, `TraceAnalysis`, `TraceAnalytics` | P1.11.3 (OOO-09, DONE) | P1.11.1 runtime/emission/metrics; P1.11.2 accounting/reconciliation/export |
 | `AttemptOutcome`, `AttemptBranch`, `AttemptState`, `AttemptPolicy`, `AttemptLimits`, `AttemptEstimateStatus`, `AttemptEstimate`, `AttemptGate`, `AttemptCandidate`, `AttemptSelectionInput`, `AttemptSelectionStatus`, `AttemptSelection`, `AttemptCost` | P4.5.4 (OOO-06, DONE) | P4.5.1 outcome calibration/real gate evidence/Router; P4.5.2 escalation/controller |
 | `ScheduleContext`, `ScheduleEdge`, `ScheduleCostModel`, `ScheduleCosts`, `ScheduleProblem`, `ScheduleLimits`, `ScheduleStatus`, `ScheduleResult`, `DagSchedule` | P4.5.5 (OOO-08, DONE) | P4.5.3 calibrated model/ordering hook; P2.2.2 dispatch; P6 shadow evaluation |
 | `WorkloadPartition`, `WorkloadGrouping`, `WorkloadTask`, `WorkloadTrialKey`, `WorkloadLink`, `WorkloadWindow`, `WorkloadQuota`, `WorkloadPolicy`, `WorkloadDesign`, `WorkloadGroup`, `WorkloadMass`, `WorkloadSplitStatus`, `WorkloadSplitResult`, `WorkloadSplit` | P6.1.5 (OOO-07, DONE) | P6.1.2 frozen manifests/integrity; P6.1.1 runner |
@@ -336,6 +349,8 @@ Dispositions follow `ANSWERS.md` (2026-09-20): **CONFIRMED** (owner answer) · *
 | D-60 | Out-of-order exact DAG sequencing oracle | **LOCAL IMPLEMENTATION CHOICE** P4.5.5 consumes immutable graph and frozen context/cost projections. Only Pending selected increments, explicit completed external prerequisites, full mandatory precedence, pairwise/Markov-only costs. Exact decimal initial + switch + fixed charges, subset-DP and witness; deterministic mask/ID ties; bounded dense table/transitions with explicit ResourceLimit. [Model/oracle](audit/OUT-OF-ORDER-P4.5.5.md). No runtime activation or provider-savings claim. | P4.5.5, P4.5.3 |
 
 | D-61 | Out-of-order finite attempt-policy costs | **LOCAL IMPLEMENTATION CHOICE** P4.5.4 owns immutable finite-state policies; one step per substantive attempt, explicit conditional/terminal/exhaustion charges. Exact decimal probability mass, rolling finite-horizon recurrence, unknown propagation, separate supplied eligibility/floors/conservative affordability before cost comparison. [Model and oracle](audit/OUT-OF-ORDER-P4.5.4.md). No learning, demotion or dispatch authority. | P4.5.4, P4.5.1, P4.5.2 |
+
+| D-62 | Out-of-order exact trace analytics | **LOCAL IMPLEMENTATION CHOICE** P1.11.3 owns immutable trace snapshots, one WorkId/currency, dedup by payload; cost ancestry distinct from explicit exclusive execution/wait DAG. BigInteger nanoseconds, endpoint sweep, bottom-up costs and iterative longest path. Unknown money/clocks/open intervals/causal completeness preserved. [Model/oracles](audit/OUT-OF-ORDER-P1.11.3.md). No runtime accounting/emission/export completion. | P1.11.3, P1.11.1, P1.11.2 |
 
 ### 3.1 Specification refinements recorded by this plan
 The plan follows the refined reading below; a later documentation-maintenance pass should apply them to the cited sections (they are not silent redesigns — each keeps the section's intent and closes an ambiguity found in review):
@@ -869,15 +884,29 @@ Goal: [§18.2 Stage A](docs/implementation/roadmap.md#sec-18-2): one implementin
 
 ### P1.11 Telemetry and accounting
 #### P1.11.1 [M] `Span`s and metrics · TODO
+- Integration: use completed P1.11.3 TraceAnalytics. Runtime Span/timing/emission, complete causal/unit capture and metrics remain here; original prerequisites retained.
 - Why: [§15.5](docs/platform/adapters.md#sec-15-5) phase tags, parent/child spans, exclusive cost recorded once, critical-path wall clock vs summed worker time.
 - Pkg: `telemetry`
 - Build: `Span(id, parent, phase, ids, start/end, exclusiveCost)`, per-cell metrics (tokens by cache class, `[A]` size, STATE upkeep tokens, tool calls, tool seconds, checks by layer, gates fired, rebuilds, turns, boundary reason, manifest ref, pre-compilation hit/miss), per-campaign metrics (cost per accepted task, first-attempt pass rate, verified/blocked/cancelled increments, continuations, rebuilds per cell, boundary cost share, probe/review usage, escalations, human interventions with reasons); per-project metric model (KB usage rates, retrieval misses, routing calibration quadruples, MAST-tagged failure distribution, calibration-prior drift, post-merge reverts and churn as deployment outcomes reported by the host through `Outcomes.report(workId, outcome)`) with its sources filled in by P2.6, P4.1 and P4.5.
 - Done: inclusive totals derived without double counting (test); events emitted for every span.
 
 #### P1.11.2 [M] `Accounting` and exports · TODO
+- Integration: use completed P1.11.3 snapshot totals; native usage, pricing, reconciliation, FX-59 and exports remain here.
 - Why: [§15.2](docs/platform/adapters.md#sec-15-2), [§11.5](docs/operations/routing.md#sec-11-5) four quantities; missing usage = unknown.
 - Build: per call: native usage retained + normalized categories + `Money` from the profile's dated price table; `Quantities(bytesTransmitted, modelVisibleInput, billedUsage, durableState)`; `cost_per_accepted_task` (undefined at zero); cold vs warm reported separately; `Export` JSON files under `exports/`; OpenTelemetry GenAI span export `[O]`.
 - Done: FX-59 (missing usage stays unknown; no zero-spend assumption); fake adapter invoices reconcile with recorded segments.
+
+#### P1.11.3 [M] Trace analytics kernel (OOO-09) · DONE
+- Deps: P0.4.1, P0.2.1, P0.3.3 (explicit; independent of P1.11.1/P1.11.2).
+- Pkg: `core` / `telemetry`.
+- Spec: [adapters §§15.2/15.5](docs/platform/adapters.md#sec-15-5), [evaluation §19.4](docs/evaluation/method.md#sec-19-4), proposal §8.5/§9.1, D-62.
+- Build: immutable snapshot identity/dedup; exclusive/inclusive cost tree; worker/busy/concurrency/elapsed timing; explicit causal DAG longest path and lower-bound/unknown semantics, provenance and diagnostics.
+- Done: A/B/C, independent integer-cell and all-path oracles; nested/adjacent/overlap/multi-root/unknown/open/cancelled/conflict/orphan/cycle/large-counter/mutation/permutation cases; review, ABI/full build, protocol/API/handoff. No runtime Span/Accounting/FX-59 completion.
+- Log: 2026-09-20 — admitted from 817a32b; model frozen in [protocol](audit/OUT-OF-ORDER-P1.11.3.md); next RED test.
+
+- Log: 2026-09-20 — 15 focused tests pass, seed-1113 interval/tree/all-path oracles; 20k ancestry/5k causal chains; author review red-green dedup fix; ABI updated. Full build running.
+
+- Log: 2026-09-20 — DONE. 15 trace tests/300 seeded oracles, author review correction/regression, ABI and full Windows/JDK 26 build pass in 3m18s. Core 855/0 failures/errors/6 skips and eval 30/0 failures/errors/skips executed; provider-api 15 reused. API/protocol/handoff complete. P1.11.1/P1.11.2/FX-59/CI/Linux/live gates unchanged. Next OOO-04.
 
 ### P1.12 Stage A validation
 #### P1.12.1 [V] Harness fixture tests · TODO

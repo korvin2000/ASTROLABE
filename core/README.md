@@ -1,5 +1,36 @@
 # Core implementation notes
 
+## Trace snapshots (P1.11.3)
+
+`telemetry.TraceAnalytics.analyze(snapshot, limits)` is pure analytics over a caller-supplied,
+versioned `TraceSnapshot`. A snapshot has one WorkId/currency; each span retains Phase, Identities,
+parent, clock domain, start/end, recorded exclusive Money and open/completed/cancelled status.
+Identical deliveries deduplicate (money equality is numerical); conflicting payloads, orphan/cyclic
+ancestry, wrong work/currency, invalid ownership or causal graphs return InvalidInput. Recorded costs
+propagate from leaves to parents, retaining unknown amounts; only root totals form totalCost.
+
+`TraceUnit` is an explicit exclusive Work or Wait interval, not an inclusive span lifetime. Units must
+fit their owner's known lifetime and cannot overlap other nonempty units of that span. Spans can have
+concurrent children and children may outlive parents. For complete closed inputs in a single clock
+domain, workerNanos sums Work durations, busyNanos measures their union, and bands/maxConcurrency
+describe parallel work. Wait units contribute only to the explicit causal path. elapsedNanos is the
+observed span envelope, separate from both activity and causal length. Coordinates are half-open Long
+nanoseconds; duration differences/sums are BigInteger, without overflow or clamping skew to zero.
+
+The causal DAG consists solely of supplied TraceEdges. Longest-path output includes a witness and
+`complete`; incomplete causal/unit inventories give a known lower bound. Unknown duration or mixed
+clock domains leaves the causal path unknown. Open spans/incomplete unit inventories leave complete
+worker/busy totals unknown; closed elapsed can still be reported. Callers must transform clocks
+explicitly before constructing a comparable snapshot and preserve that provenance. Completeness is
+their attestation, not a conclusion drawn from parentage. Unknown Money remains unknown independently
+of timing. Complete describes the supplied analytic model, not acceptance or runtime readiness.
+
+Snapshot/results copy collections. Scalar skew/negative-cost/label errors throw IllegalArgumentException;
+structural errors, incomplete data and decimal resource bounds have distinct statuses. Cost/causal
+traversals are iterative O(V+E), sweep is O(U log U), with deterministic sorting and arbitrary-precision
+arithmetic costs additional. P1.11.1/P1.11.2 retain runtime capture/emission, real completeness evidence,
+native usage/pricing/reconciliation, FX-59 and exports. [Protocol](../audit/OUT-OF-ORDER-P1.11.3.md).
+
 ## Finite attempt costs (P4.5.4)
 
 `route.AttemptCost.evaluate(policy, remainingAttempts, limits)` evaluates a frozen `AttemptPolicy`.

@@ -10294,6 +10294,162 @@ public final class io/astrolabe/store/Tx {
 	public final fun query (Ljava/lang/String;[Ljava/lang/Object;Lkotlin/jvm/functions/Function1;)Ljava/util/List;
 }
 
+public final class io/astrolabe/telemetry/TraceAnalysis {
+	public final fun getCriticalPath ()Lio/astrolabe/telemetry/TraceCriticalPath;
+	public final fun getDuplicateSpans ()I
+	public final fun getDuplicateUnits ()I
+	public final fun getInclusiveCosts ()Ljava/util/Map;
+	public final fun getIssues ()Ljava/util/List;
+	public final fun getSnapshot ()Lio/astrolabe/telemetry/TraceSnapshot;
+	public final fun getStatus ()Lio/astrolabe/telemetry/TraceStatus;
+	public final fun getTiming ()Lio/astrolabe/telemetry/TraceTiming;
+	public final fun getTotalCost ()Lio/astrolabe/provider/Money;
+}
+
+public final class io/astrolabe/telemetry/TraceAnalytics {
+	public static final field INSTANCE Lio/astrolabe/telemetry/TraceAnalytics;
+	public static final fun analyze (Lio/astrolabe/telemetry/TraceSnapshot;Lio/astrolabe/telemetry/TraceLimits;)Lio/astrolabe/telemetry/TraceAnalysis;
+}
+
+public final class io/astrolabe/telemetry/TraceBand {
+	public fun <init> (JJI)V
+	public final fun component1 ()J
+	public final fun component2 ()J
+	public final fun component3 ()I
+	public final fun copy (JJI)Lio/astrolabe/telemetry/TraceBand;
+	public static synthetic fun copy$default (Lio/astrolabe/telemetry/TraceBand;JJIILjava/lang/Object;)Lio/astrolabe/telemetry/TraceBand;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEndNanos ()J
+	public final fun getStartNanos ()J
+	public final fun getWorkers ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/telemetry/TraceCriticalPath {
+	public final fun getComplete ()Z
+	public final fun getKnownLengthNanos ()Ljava/math/BigInteger;
+	public final fun getUnits ()Ljava/util/List;
+}
+
+public final class io/astrolabe/telemetry/TraceEdge {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;)Lio/astrolabe/telemetry/TraceEdge;
+	public static synthetic fun copy$default (Lio/astrolabe/telemetry/TraceEdge;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/telemetry/TraceEdge;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFrom ()Ljava/lang/String;
+	public final fun getTo ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/telemetry/TraceLimits {
+	public fun <init> (I)V
+	public final fun component1 ()I
+	public final fun copy (I)Lio/astrolabe/telemetry/TraceLimits;
+	public static synthetic fun copy$default (Lio/astrolabe/telemetry/TraceLimits;IILjava/lang/Object;)Lio/astrolabe/telemetry/TraceLimits;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMaxDecimalDigits ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/telemetry/TraceSnapshot {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Lio/astrolabe/id/WorkId;Ljava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/util/Set;ZZ)V
+	public final fun getCausalityComplete ()Z
+	public final fun getCurrency ()Ljava/lang/String;
+	public final fun getEdges ()Ljava/util/Set;
+	public final fun getProvenance ()Ljava/lang/String;
+	public final fun getSpans ()Ljava/util/List;
+	public final fun getUnits ()Ljava/util/List;
+	public final fun getUnitsComplete ()Z
+	public final fun getVersion ()Ljava/lang/String;
+	public final fun getWork ()Lio/astrolabe/id/WorkId;
+}
+
+public final class io/astrolabe/telemetry/TraceSpan {
+	public fun <init> (Lio/astrolabe/event/SpanId;Lio/astrolabe/event/SpanId;Lio/astrolabe/event/Phase;Lio/astrolabe/id/Identities;Ljava/lang/String;JLjava/lang/Long;Lio/astrolabe/provider/Money;Lio/astrolabe/telemetry/TraceSpanStatus;)V
+	public final fun component1 ()Lio/astrolabe/event/SpanId;
+	public final fun component2 ()Lio/astrolabe/event/SpanId;
+	public final fun component3 ()Lio/astrolabe/event/Phase;
+	public final fun component4 ()Lio/astrolabe/id/Identities;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()J
+	public final fun component7 ()Ljava/lang/Long;
+	public final fun component8 ()Lio/astrolabe/provider/Money;
+	public final fun component9 ()Lio/astrolabe/telemetry/TraceSpanStatus;
+	public final fun copy (Lio/astrolabe/event/SpanId;Lio/astrolabe/event/SpanId;Lio/astrolabe/event/Phase;Lio/astrolabe/id/Identities;Ljava/lang/String;JLjava/lang/Long;Lio/astrolabe/provider/Money;Lio/astrolabe/telemetry/TraceSpanStatus;)Lio/astrolabe/telemetry/TraceSpan;
+	public static synthetic fun copy$default (Lio/astrolabe/telemetry/TraceSpan;Lio/astrolabe/event/SpanId;Lio/astrolabe/event/SpanId;Lio/astrolabe/event/Phase;Lio/astrolabe/id/Identities;Ljava/lang/String;JLjava/lang/Long;Lio/astrolabe/provider/Money;Lio/astrolabe/telemetry/TraceSpanStatus;ILjava/lang/Object;)Lio/astrolabe/telemetry/TraceSpan;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getClockDomain ()Ljava/lang/String;
+	public final fun getEndNanos ()Ljava/lang/Long;
+	public final fun getExclusiveCost ()Lio/astrolabe/provider/Money;
+	public final fun getId ()Lio/astrolabe/event/SpanId;
+	public final fun getIdentities ()Lio/astrolabe/id/Identities;
+	public final fun getParent ()Lio/astrolabe/event/SpanId;
+	public final fun getPhase ()Lio/astrolabe/event/Phase;
+	public final fun getStartNanos ()J
+	public final fun getStatus ()Lio/astrolabe/telemetry/TraceSpanStatus;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/telemetry/TraceSpanStatus : java/lang/Enum {
+	public static final field Cancelled Lio/astrolabe/telemetry/TraceSpanStatus;
+	public static final field Completed Lio/astrolabe/telemetry/TraceSpanStatus;
+	public static final field Open Lio/astrolabe/telemetry/TraceSpanStatus;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/telemetry/TraceSpanStatus;
+	public static fun values ()[Lio/astrolabe/telemetry/TraceSpanStatus;
+}
+
+public final class io/astrolabe/telemetry/TraceStatus : java/lang/Enum {
+	public static final field Complete Lio/astrolabe/telemetry/TraceStatus;
+	public static final field InvalidInput Lio/astrolabe/telemetry/TraceStatus;
+	public static final field Partial Lio/astrolabe/telemetry/TraceStatus;
+	public static final field ResourceLimit Lio/astrolabe/telemetry/TraceStatus;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/telemetry/TraceStatus;
+	public static fun values ()[Lio/astrolabe/telemetry/TraceStatus;
+}
+
+public final class io/astrolabe/telemetry/TraceTiming {
+	public final fun getBands ()Ljava/util/List;
+	public final fun getBusyNanos ()Ljava/math/BigInteger;
+	public final fun getElapsedNanos ()Ljava/math/BigInteger;
+	public final fun getMaxConcurrency ()Ljava/lang/Integer;
+	public final fun getWorkerNanos ()Ljava/math/BigInteger;
+}
+
+public final class io/astrolabe/telemetry/TraceUnit {
+	public fun <init> (Ljava/lang/String;Lio/astrolabe/event/SpanId;Lio/astrolabe/telemetry/TraceUnitKind;JLjava/lang/Long;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lio/astrolabe/event/SpanId;
+	public final fun component3 ()Lio/astrolabe/telemetry/TraceUnitKind;
+	public final fun component4 ()J
+	public final fun component5 ()Ljava/lang/Long;
+	public final fun copy (Ljava/lang/String;Lio/astrolabe/event/SpanId;Lio/astrolabe/telemetry/TraceUnitKind;JLjava/lang/Long;)Lio/astrolabe/telemetry/TraceUnit;
+	public static synthetic fun copy$default (Lio/astrolabe/telemetry/TraceUnit;Ljava/lang/String;Lio/astrolabe/event/SpanId;Lio/astrolabe/telemetry/TraceUnitKind;JLjava/lang/Long;ILjava/lang/Object;)Lio/astrolabe/telemetry/TraceUnit;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEndNanos ()Ljava/lang/Long;
+	public final fun getId ()Ljava/lang/String;
+	public final fun getKind ()Lio/astrolabe/telemetry/TraceUnitKind;
+	public final fun getSpan ()Lio/astrolabe/event/SpanId;
+	public final fun getStartNanos ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/telemetry/TraceUnitKind : java/lang/Enum {
+	public static final field Wait Lio/astrolabe/telemetry/TraceUnitKind;
+	public static final field Work Lio/astrolabe/telemetry/TraceUnitKind;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/telemetry/TraceUnitKind;
+	public static fun values ()[Lio/astrolabe/telemetry/TraceUnitKind;
+}
+
 public abstract interface class io/astrolabe/tool/Args {
 }
 

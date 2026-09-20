@@ -1,5 +1,22 @@
 # ASTROLABE 1.0.1 Kotlin SOTA AI Coding Agent Harness — actual state
 
+**Completed in order: P4.5.4 / OOO-06, then P1.11.3 / OOO-09**, D-61/D-62.
+P4.5.4 commit `817a32b`; P1.11.3 is the commit containing this checkpoint, `feature/out-of-order-kernels`.
+**68/184 DONE, 4 IN_PROGRESS, 112 TODO**. No ACTIVE override. Session ends at a complete checkpoint.
+AttemptCost: exact finite attempt costs/terminal probabilities and separate admission checks.
+TraceAnalytics: immutable dedup, exclusive/inclusive money, worker/busy/concurrency/elapsed time and
+explicit causal paths with honest lower-bound/unknown semantics. Do not reimplement these kernels.
+30 focused tests; independent oracles on 300 attempt policies and 300 traces; author reviews resolved.
+Final Windows/JDK 26 full build passed in 3m18s: **core 855/0 failures/errors/6 platform skips**,
+**eval 30/0 failures/errors/skips** executed; provider-api 15 green results reused. ABI checks pass.
+Protocols: [P4.5.4](audit/OUT-OF-ORDER-P4.5.4.md), [P1.11.3](audit/OUT-OF-ORDER-P1.11.3.md).
+[API guide](core/README.md). P4.5.1/P4.5.2 and P1.11.1/P1.11.2 retain their runtime/integration gates.
+Next out-of-order: **OOO-04 / candidate P3.2.7**, not registered/started; apply admission §4 and check
+D-63 availability before code. Normal return P0.1.2 + P0.6.1/P0.6.2/P0.6.4 -> P1.8.2.
+TODO §1.2 governs. Remote CI/Linux and all live gates remain open/UNMEASURED.
+
+**Historical checkpoints below.**
+
 **P4.5.4 / OOO-06 DONE**, D-61, from `955fb77`; commit containing this checkpoint.
 Exact finite attempt policies, full cost/terminal masses, unknowns and separate admission checks.
 **67/183 DONE, 4 IN_PROGRESS, 112 TODO**. No ACTIVE override. 15 focused tests and 300 seed-454
