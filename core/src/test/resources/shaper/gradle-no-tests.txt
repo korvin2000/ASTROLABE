@@ -1,0 +1,8 @@
+> Task :cart-core:compileJava UP-TO-DATE
+> Task :cart-core:compileTestJava UP-TO-DATE
+> Task :cart-core:processTestResources NO-SOURCE
+> Task :cart-core:testClasses UP-TO-DATE
+> Task :cart-core:test NO-SOURCE
+
+BUILD SUCCESSFUL in 1s
+4 actionable tasks: 4 up-to-date

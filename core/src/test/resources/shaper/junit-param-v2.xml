@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.acme.DiscountTest" tests="4" skipped="0" failures="1" errors="0" timestamp="2026-09-20T04:20:14.000Z" hostname="build-01" time="0.061">
+  <properties/>
+  <testcase name="tier(int)[1]" classname="com.acme.DiscountTest" time="0.011"/>
+  <testcase name="tier(int)[2]" classname="com.acme.DiscountTest" time="0.012"/>
+  <testcase name="tier(int)[3]" classname="com.acme.DiscountTest" time="0.013"/>
+  <testcase name="tier(int)[4]" classname="com.acme.DiscountTest" time="0.014">
+    <failure message="expected: &lt;9&gt; but was: &lt;7&gt;" type="org.opentest4j.AssertionFailedError">expected: &lt;9&gt; but was: &lt;7&gt;</failure>
+  </testcase>
+  <system-out><![CDATA[]]></system-out>
+</testsuite>

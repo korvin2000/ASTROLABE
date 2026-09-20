@@ -1,0 +1,15 @@
+
+
+  cart
+    ✓ adds items
+    ✓ removes items
+    1) applies tier 3
+
+
+  2 passing (14ms)
+  1 failing
+
+  1) cart
+       applies tier 3:
+     AssertionError [ERR_ASSERTION]: expected 4 to equal 5
+      at Context.<anonymous> (test/cart.spec.js:18:12)

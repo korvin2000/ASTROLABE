@@ -1,0 +1,13 @@
+..F.s
+======================================================================
+FAIL: test_tier (tests.test_discount.DiscountTest.test_tier)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/dev/shop/tests/test_discount.py", line 22, in test_tier
+    self.assertEqual(discount(cart, 3), 5)
+AssertionError: 4 != 5
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.002s
+
+FAILED (failures=1, skipped=1)

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.acme.CartTest" tests="2" skipped="0" failures="1" errors="0" timestamp="2026-09-20T04:10:11.406Z" hostname="build-01" time="0.081">
+  <properties/>
+  <testcase name="handlesEmpty" classname="com.acme.CartTest" time="0.012"/>
+  <testcase name="appliesDiscount" classname="com.acme.CartTest" time="0.019">
+    <failure message="expected: &lt;5&gt; but was: &lt;4&gt;" type="org.opentest4j.AssertionFailedError">org.opentest4j.AssertionFailedError: expected: &lt;5&gt; but was: &lt;4&gt;
+	at com.acme.CartTest.appliesDiscount(CartTest.java:41)</failure>
+  </testcase>
+  <system-out><![CDATA[]]></system-out>
+</testsuite>

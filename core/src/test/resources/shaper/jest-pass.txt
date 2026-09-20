@@ -1,0 +1,8 @@
+ PASS  src/cart.test.ts
+ PASS  src/discount.test.ts
+
+Test Suites: 2 passed, 2 total
+Tests:       12 passed, 12 total
+Snapshots:   0 total
+Time:        1.204 s
+Ran all test suites.
