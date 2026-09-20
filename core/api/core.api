@@ -494,6 +494,545 @@ public final class io/astrolabe/ShapePolicy$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
 }
 
+public final class io/astrolabe/atlas/Atlas {
+	public static final field Companion Lio/astrolabe/atlas/Atlas$Companion;
+	public static final field MAX_PARSED_BYTES J
+	public fun <init> (Ljava/nio/file/Path;Ljava/util/List;Ljava/util/List;)V
+	public static final fun build (Ljava/nio/file/Path;)Lio/astrolabe/atlas/Atlas;
+	public final fun bytesUnder (Ljava/lang/String;)J
+	public static final fun cacheFile (Ljava/nio/file/Path;Ljava/nio/file/Path;)Ljava/nio/file/Path;
+	public final fun children (Ljava/lang/String;)Ljava/util/List;
+	public final fun component1 ()Ljava/nio/file/Path;
+	public final fun component2 ()Ljava/util/List;
+	public final fun component3 ()Ljava/util/List;
+	public final fun copy (Ljava/nio/file/Path;Ljava/util/List;Ljava/util/List;)Lio/astrolabe/atlas/Atlas;
+	public static synthetic fun copy$default (Lio/astrolabe/atlas/Atlas;Ljava/nio/file/Path;Ljava/util/List;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/atlas/Atlas;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun filesUnder (Ljava/lang/String;)I
+	public final fun getBytes ()J
+	public final fun getCollapsed ()Ljava/util/List;
+	public final fun getCollapsedBytes ()J
+	public final fun getLanguages ()Ljava/util/List;
+	public final fun getRepoKey ()Lio/astrolabe/id/Digest;
+	public final fun getRoot ()Ljava/nio/file/Path;
+	public final fun getRows ()Ljava/util/List;
+	public fun hashCode ()I
+	public final fun hubs (I)Ljava/util/List;
+	public final fun importers (Ljava/lang/String;)Ljava/util/List;
+	public static final fun load (Ljava/nio/file/Path;Ljava/nio/file/Path;)Lio/astrolabe/atlas/Atlas;
+	public static final fun open (Ljava/nio/file/Path;Ljava/nio/file/Path;)Lio/astrolabe/atlas/Atlas;
+	public final fun outline (Ljava/lang/String;)Lio/astrolabe/atlas/Outline;
+	public final fun refresh (Ljava/util/Collection;)Lio/astrolabe/atlas/Atlas;
+	public final fun row (Ljava/lang/String;)Lio/astrolabe/atlas/AtlasRow;
+	public final fun save (Ljava/nio/file/Path;)Ljava/nio/file/Path;
+	public final fun subdirectories (Ljava/lang/String;)Ljava/util/List;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/atlas/Atlas$Companion {
+	public final fun build (Ljava/nio/file/Path;)Lio/astrolabe/atlas/Atlas;
+	public final fun cacheFile (Ljava/nio/file/Path;Ljava/nio/file/Path;)Ljava/nio/file/Path;
+	public final fun load (Ljava/nio/file/Path;Ljava/nio/file/Path;)Lio/astrolabe/atlas/Atlas;
+	public final fun open (Ljava/nio/file/Path;Ljava/nio/file/Path;)Lio/astrolabe/atlas/Atlas;
+}
+
+public final class io/astrolabe/atlas/AtlasRow {
+	public fun <init> (Ljava/lang/String;JLio/astrolabe/atlas/Language;Ljava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/util/List;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()J
+	public final fun component3 ()Lio/astrolabe/atlas/Language;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/util/List;
+	public final fun component6 ()Ljava/util/List;
+	public final fun component7 ()Ljava/util/List;
+	public final fun copy (Ljava/lang/String;JLio/astrolabe/atlas/Language;Ljava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/util/List;)Lio/astrolabe/atlas/AtlasRow;
+	public static synthetic fun copy$default (Lio/astrolabe/atlas/AtlasRow;Ljava/lang/String;JLio/astrolabe/atlas/Language;Ljava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/atlas/AtlasRow;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBytes ()J
+	public final fun getExports ()Ljava/util/List;
+	public final fun getHash8 ()Ljava/lang/String;
+	public final fun getImports ()Ljava/util/List;
+	public final fun getLang ()Lio/astrolabe/atlas/Language;
+	public final fun getPath ()Ljava/lang/String;
+	public final fun getTestsFor ()Ljava/util/List;
+	public fun hashCode ()I
+	public final fun isTest ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/atlas/AtlasRow$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/atlas/AtlasRow$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/atlas/AtlasRow;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/atlas/AtlasRow;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/atlas/CollapseReason : java/lang/Enum {
+	public static final field Build Lio/astrolabe/atlas/CollapseReason;
+	public static final field Companion Lio/astrolabe/atlas/CollapseReason$Companion;
+	public static final field Generated Lio/astrolabe/atlas/CollapseReason;
+	public static final field Lockfile Lio/astrolabe/atlas/CollapseReason;
+	public static final field Minified Lio/astrolabe/atlas/CollapseReason;
+	public static final field TooLarge Lio/astrolabe/atlas/CollapseReason;
+	public static final field Vendored Lio/astrolabe/atlas/CollapseReason;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/atlas/CollapseReason;
+	public static fun values ()[Lio/astrolabe/atlas/CollapseReason;
+}
+
+public final class io/astrolabe/atlas/CollapseReason$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/atlas/Collapsed {
+	public static final field Companion Lio/astrolabe/atlas/Collapsed$Companion;
+	public fun <init> (Ljava/lang/String;IJLio/astrolabe/atlas/CollapseReason;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()I
+	public final fun component3 ()J
+	public final fun component4 ()Lio/astrolabe/atlas/CollapseReason;
+	public final fun copy (Ljava/lang/String;IJLio/astrolabe/atlas/CollapseReason;)Lio/astrolabe/atlas/Collapsed;
+	public static synthetic fun copy$default (Lio/astrolabe/atlas/Collapsed;Ljava/lang/String;IJLio/astrolabe/atlas/CollapseReason;ILjava/lang/Object;)Lio/astrolabe/atlas/Collapsed;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBytes ()J
+	public final fun getFiles ()I
+	public final fun getPath ()Ljava/lang/String;
+	public final fun getReason ()Lio/astrolabe/atlas/CollapseReason;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/atlas/Collapsed$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/atlas/Collapsed$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/atlas/Collapsed;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/atlas/Collapsed;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/atlas/Collapsed$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/atlas/Declaration {
+	public static final field Companion Lio/astrolabe/atlas/Declaration$Companion;
+	public fun <init> (Lio/astrolabe/atlas/DeclarationKind;Ljava/lang/String;IIZ)V
+	public final fun component1 ()Lio/astrolabe/atlas/DeclarationKind;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()I
+	public final fun component4 ()I
+	public final fun component5 ()Z
+	public final fun copy (Lio/astrolabe/atlas/DeclarationKind;Ljava/lang/String;IIZ)Lio/astrolabe/atlas/Declaration;
+	public static synthetic fun copy$default (Lio/astrolabe/atlas/Declaration;Lio/astrolabe/atlas/DeclarationKind;Ljava/lang/String;IIZILjava/lang/Object;)Lio/astrolabe/atlas/Declaration;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getExported ()Z
+	public final fun getFrom ()I
+	public final fun getKind ()Lio/astrolabe/atlas/DeclarationKind;
+	public final fun getName ()Ljava/lang/String;
+	public final fun getTo ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/atlas/Declaration$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/atlas/Declaration$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/atlas/Declaration;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/atlas/Declaration;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/atlas/Declaration$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/atlas/DeclarationKind : java/lang/Enum {
+	public static final field Class Lio/astrolabe/atlas/DeclarationKind;
+	public static final field Companion Lio/astrolabe/atlas/DeclarationKind$Companion;
+	public static final field Const Lio/astrolabe/atlas/DeclarationKind;
+	public static final field Export Lio/astrolabe/atlas/DeclarationKind;
+	public static final field Function Lio/astrolabe/atlas/DeclarationKind;
+	public static final field Import Lio/astrolabe/atlas/DeclarationKind;
+	public static final field Method Lio/astrolabe/atlas/DeclarationKind;
+	public static final field Other Lio/astrolabe/atlas/DeclarationKind;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/atlas/DeclarationKind;
+	public static fun values ()[Lio/astrolabe/atlas/DeclarationKind;
+}
+
+public final class io/astrolabe/atlas/DeclarationKind$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public abstract interface class io/astrolabe/atlas/Focus {
+	public static final field Companion Lio/astrolabe/atlas/Focus$Companion;
+	public static fun render (Lio/astrolabe/atlas/Atlas;Lio/astrolabe/atlas/Focus;)Ljava/lang/String;
+	public static fun render (Lio/astrolabe/atlas/Atlas;Lio/astrolabe/atlas/Focus;I)Ljava/lang/String;
+}
+
+public final class io/astrolabe/atlas/Focus$Companion {
+	public final fun render (Lio/astrolabe/atlas/Atlas;Lio/astrolabe/atlas/Focus;)Ljava/lang/String;
+	public final fun render (Lio/astrolabe/atlas/Atlas;Lio/astrolabe/atlas/Focus;I)Ljava/lang/String;
+	public static synthetic fun render$default (Lio/astrolabe/atlas/Focus$Companion;Lio/astrolabe/atlas/Atlas;Lio/astrolabe/atlas/Focus;IILjava/lang/Object;)Ljava/lang/String;
+}
+
+public final class io/astrolabe/atlas/Focus$Dir : io/astrolabe/atlas/Focus {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/astrolabe/atlas/Focus$Dir;
+	public static synthetic fun copy$default (Lio/astrolabe/atlas/Focus$Dir;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/atlas/Focus$Dir;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getPath ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/atlas/Focus$File : io/astrolabe/atlas/Focus {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/astrolabe/atlas/Focus$File;
+	public static synthetic fun copy$default (Lio/astrolabe/atlas/Focus$File;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/atlas/Focus$File;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getPath ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/atlas/Focus$Root : io/astrolabe/atlas/Focus {
+	public static final field INSTANCE Lio/astrolabe/atlas/Focus$Root;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/atlas/Importers {
+	public fun <init> (Ljava/lang/String;Ljava/util/List;Lio/astrolabe/atlas/IndexTier;Z)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/util/List;
+	public final fun component3 ()Lio/astrolabe/atlas/IndexTier;
+	public final fun component4 ()Z
+	public final fun copy (Ljava/lang/String;Ljava/util/List;Lio/astrolabe/atlas/IndexTier;Z)Lio/astrolabe/atlas/Importers;
+	public static synthetic fun copy$default (Lio/astrolabe/atlas/Importers;Ljava/lang/String;Ljava/util/List;Lio/astrolabe/atlas/IndexTier;ZILjava/lang/Object;)Lio/astrolabe/atlas/Importers;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getComplete ()Z
+	public final fun getPath ()Ljava/lang/String;
+	public final fun getPaths ()Ljava/util/List;
+	public final fun getTier ()Lio/astrolabe/atlas/IndexTier;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/atlas/IndexTier : java/lang/Enum {
+	public static final field Companion Lio/astrolabe/atlas/IndexTier$Companion;
+	public static final field LanguageService Lio/astrolabe/atlas/IndexTier;
+	public static final field Lexical Lio/astrolabe/atlas/IndexTier;
+	public static final field Syntax Lio/astrolabe/atlas/IndexTier;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getLevel ()I
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/atlas/IndexTier;
+	public static fun values ()[Lio/astrolabe/atlas/IndexTier;
+}
+
+public final class io/astrolabe/atlas/IndexTier$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/atlas/Language : java/lang/Enum {
+	public static final field Companion Lio/astrolabe/atlas/Language$Companion;
+	public static final field Go Lio/astrolabe/atlas/Language;
+	public static final field Java Lio/astrolabe/atlas/Language;
+	public static final field JavaScript Lio/astrolabe/atlas/Language;
+	public static final field Json Lio/astrolabe/atlas/Language;
+	public static final field Kotlin Lio/astrolabe/atlas/Language;
+	public static final field Markdown Lio/astrolabe/atlas/Language;
+	public static final field Other Lio/astrolabe/atlas/Language;
+	public static final field Python Lio/astrolabe/atlas/Language;
+	public static final field Rust Lio/astrolabe/atlas/Language;
+	public static final field Shell Lio/astrolabe/atlas/Language;
+	public static final field Toml Lio/astrolabe/atlas/Language;
+	public static final field TypeScript Lio/astrolabe/atlas/Language;
+	public static final field Yaml Lio/astrolabe/atlas/Language;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getHasOutlineParser ()Z
+	public final fun getId ()Ljava/lang/String;
+	public static final fun of (Ljava/lang/String;)Lio/astrolabe/atlas/Language;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/atlas/Language;
+	public static fun values ()[Lio/astrolabe/atlas/Language;
+}
+
+public final class io/astrolabe/atlas/Language$Companion {
+	public final fun of (Ljava/lang/String;)Lio/astrolabe/atlas/Language;
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/atlas/Location {
+	public fun <init> (Ljava/lang/String;ILio/astrolabe/atlas/DeclarationKind;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()I
+	public final fun component3 ()Lio/astrolabe/atlas/DeclarationKind;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;ILio/astrolabe/atlas/DeclarationKind;Ljava/lang/String;)Lio/astrolabe/atlas/Location;
+	public static synthetic fun copy$default (Lio/astrolabe/atlas/Location;Ljava/lang/String;ILio/astrolabe/atlas/DeclarationKind;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/atlas/Location;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getKind ()Lio/astrolabe/atlas/DeclarationKind;
+	public final fun getLine ()I
+	public final fun getName ()Ljava/lang/String;
+	public final fun getPath ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/atlas/Manifest : java/lang/Enum {
+	public static final field CargoToml Lio/astrolabe/atlas/Manifest;
+	public static final field Companion Lio/astrolabe/atlas/Manifest$Companion;
+	public static final field GoMod Lio/astrolabe/atlas/Manifest;
+	public static final field GradleGroovy Lio/astrolabe/atlas/Manifest;
+	public static final field GradleKts Lio/astrolabe/atlas/Manifest;
+	public static final field Makefile Lio/astrolabe/atlas/Manifest;
+	public static final field PackageJson Lio/astrolabe/atlas/Manifest;
+	public static final field PomXml Lio/astrolabe/atlas/Manifest;
+	public static final field PyProject Lio/astrolabe/atlas/Manifest;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getFileName ()Ljava/lang/String;
+	public static final fun of (Ljava/lang/String;)Lio/astrolabe/atlas/Manifest;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/atlas/Manifest;
+	public static fun values ()[Lio/astrolabe/atlas/Manifest;
+}
+
+public final class io/astrolabe/atlas/Manifest$Companion {
+	public final fun of (Ljava/lang/String;)Lio/astrolabe/atlas/Manifest;
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/atlas/Outline {
+	public static final field Companion Lio/astrolabe/atlas/Outline$Companion;
+	public fun <init> (Ljava/lang/String;Lio/astrolabe/atlas/Language;Ljava/util/List;Ljava/lang/String;Lio/astrolabe/atlas/IndexTier;Z)V
+	public synthetic fun <init> (Ljava/lang/String;Lio/astrolabe/atlas/Language;Ljava/util/List;Ljava/lang/String;Lio/astrolabe/atlas/IndexTier;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lio/astrolabe/atlas/Language;
+	public final fun component3 ()Ljava/util/List;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Lio/astrolabe/atlas/IndexTier;
+	public final fun component6 ()Z
+	public final fun copy (Ljava/lang/String;Lio/astrolabe/atlas/Language;Ljava/util/List;Ljava/lang/String;Lio/astrolabe/atlas/IndexTier;Z)Lio/astrolabe/atlas/Outline;
+	public static synthetic fun copy$default (Lio/astrolabe/atlas/Outline;Ljava/lang/String;Lio/astrolabe/atlas/Language;Ljava/util/List;Ljava/lang/String;Lio/astrolabe/atlas/IndexTier;ZILjava/lang/Object;)Lio/astrolabe/atlas/Outline;
+	public static final fun empty (Ljava/lang/String;Lio/astrolabe/atlas/Language;)Lio/astrolabe/atlas/Outline;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getComplete ()Z
+	public final fun getEntries ()Ljava/util/List;
+	public final fun getExports ()Ljava/util/List;
+	public final fun getImportTargets ()Ljava/util/List;
+	public final fun getLanguage ()Lio/astrolabe/atlas/Language;
+	public final fun getNamespace ()Ljava/lang/String;
+	public final fun getPath ()Ljava/lang/String;
+	public final fun getTier ()Lio/astrolabe/atlas/IndexTier;
+	public fun hashCode ()I
+	public static final fun of (Ljava/lang/String;[B)Lio/astrolabe/atlas/Outline;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/atlas/Outline$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/atlas/Outline$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/atlas/Outline;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/atlas/Outline;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/atlas/Outline$Companion {
+	public final fun empty (Ljava/lang/String;Lio/astrolabe/atlas/Language;)Lio/astrolabe/atlas/Outline;
+	public static synthetic fun empty$default (Lio/astrolabe/atlas/Outline$Companion;Ljava/lang/String;Lio/astrolabe/atlas/Language;ILjava/lang/Object;)Lio/astrolabe/atlas/Outline;
+	public final fun of (Ljava/lang/String;[B)Lio/astrolabe/atlas/Outline;
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/atlas/PackageCommands {
+	public static final field Companion Lio/astrolabe/atlas/PackageCommands$Companion;
+	public static final field ROOT Ljava/lang/String;
+	public fun <init> (Ljava/lang/String;Lio/astrolabe/atlas/Manifest;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/List;)V
+	public synthetic fun <init> (Ljava/lang/String;Lio/astrolabe/atlas/Manifest;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lio/astrolabe/atlas/Manifest;
+	public final fun component3 ()Ljava/util/List;
+	public final fun component4 ()Ljava/util/List;
+	public final fun component5 ()Ljava/util/List;
+	public final fun component6 ()Ljava/util/List;
+	public final fun copy (Ljava/lang/String;Lio/astrolabe/atlas/Manifest;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/List;)Lio/astrolabe/atlas/PackageCommands;
+	public static synthetic fun copy$default (Lio/astrolabe/atlas/PackageCommands;Ljava/lang/String;Lio/astrolabe/atlas/Manifest;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/atlas/PackageCommands;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBuild ()Ljava/util/List;
+	public final fun getDir ()Ljava/lang/String;
+	public final fun getLint ()Ljava/util/List;
+	public final fun getManifest ()Lio/astrolabe/atlas/Manifest;
+	public final fun getManifestPath ()Ljava/lang/String;
+	public final fun getTest ()Ljava/util/List;
+	public final fun getTypecheck ()Ljava/util/List;
+	public fun hashCode ()I
+	public final fun isEmpty ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/atlas/PackageCommands$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/atlas/PackageCommands$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/atlas/PackageCommands;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/atlas/PackageCommands;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/atlas/PackageCommands$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/atlas/Prime {
+	public static final field HUBS I
+	public static final field INSTANCE Lio/astrolabe/atlas/Prime;
+	public static final field MAX_CANDIDATES I
+	public static final field TREE_DEPTH I
+	public final fun getCANDIDATE_NAMES ()Ljava/util/List;
+	public static final fun render (Lio/astrolabe/atlas/Atlas;Lio/astrolabe/atlas/Sniffed;Lio/astrolabe/atlas/RulesSnapshot;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;I)Ljava/lang/String;
+	public static synthetic fun render$default (Lio/astrolabe/atlas/Atlas;Lio/astrolabe/atlas/Sniffed;Lio/astrolabe/atlas/RulesSnapshot;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;IILjava/lang/Object;)Ljava/lang/String;
+	public static final fun rulesCandidates (Lio/astrolabe/atlas/Atlas;)Ljava/util/List;
+}
+
+public final class io/astrolabe/atlas/Reference {
+	public fun <init> (Ljava/lang/String;ILjava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()I
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;ILjava/lang/String;)Lio/astrolabe/atlas/Reference;
+	public static synthetic fun copy$default (Lio/astrolabe/atlas/Reference;Ljava/lang/String;ILjava/lang/String;ILjava/lang/Object;)Lio/astrolabe/atlas/Reference;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getLine ()I
+	public final fun getPath ()Ljava/lang/String;
+	public final fun getText ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/atlas/Refs {
+	public fun <init> (Ljava/lang/String;Ljava/util/List;Lio/astrolabe/atlas/IndexTier;ZZ)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/util/List;Lio/astrolabe/atlas/IndexTier;ZZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/util/List;
+	public final fun component3 ()Lio/astrolabe/atlas/IndexTier;
+	public final fun component4 ()Z
+	public final fun component5 ()Z
+	public final fun copy (Ljava/lang/String;Ljava/util/List;Lio/astrolabe/atlas/IndexTier;ZZ)Lio/astrolabe/atlas/Refs;
+	public static synthetic fun copy$default (Lio/astrolabe/atlas/Refs;Ljava/lang/String;Ljava/util/List;Lio/astrolabe/atlas/IndexTier;ZZILjava/lang/Object;)Lio/astrolabe/atlas/Refs;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getComplete ()Z
+	public final fun getName ()Ljava/lang/String;
+	public final fun getReferences ()Ljava/util/List;
+	public final fun getTier ()Lio/astrolabe/atlas/IndexTier;
+	public final fun getTruncated ()Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/atlas/RulesSnapshot {
+	public static final field Companion Lio/astrolabe/atlas/RulesSnapshot$Companion;
+	public fun <init> (Ljava/lang/String;Lio/astrolabe/id/Digest;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lio/astrolabe/id/Digest;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Lio/astrolabe/id/Digest;Ljava/lang/String;)Lio/astrolabe/atlas/RulesSnapshot;
+	public static synthetic fun copy$default (Lio/astrolabe/atlas/RulesSnapshot;Ljava/lang/String;Lio/astrolabe/id/Digest;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/atlas/RulesSnapshot;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDigest ()Lio/astrolabe/id/Digest;
+	public final fun getPath ()Ljava/lang/String;
+	public final fun getText ()Ljava/lang/String;
+	public fun hashCode ()I
+	public static final fun of (Ljava/lang/String;[B)Lio/astrolabe/atlas/RulesSnapshot;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/atlas/RulesSnapshot$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/atlas/RulesSnapshot$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/atlas/RulesSnapshot;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/atlas/RulesSnapshot;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/atlas/RulesSnapshot$Companion {
+	public final fun of (Ljava/lang/String;[B)Lio/astrolabe/atlas/RulesSnapshot;
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/atlas/Sniff {
+	public static final field INSTANCE Lio/astrolabe/atlas/Sniff;
+	public static final fun commands (Lio/astrolabe/atlas/Atlas;)Lio/astrolabe/atlas/Sniffed;
+	public static final fun commands (Ljava/nio/file/Path;Ljava/util/Set;)Lio/astrolabe/atlas/Sniffed;
+}
+
+public final class io/astrolabe/atlas/Sniffed {
+	public static final field Companion Lio/astrolabe/atlas/Sniffed$Companion;
+	public fun <init> (Ljava/util/List;)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun copy (Ljava/util/List;)Lio/astrolabe/atlas/Sniffed;
+	public static synthetic fun copy$default (Lio/astrolabe/atlas/Sniffed;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/atlas/Sniffed;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getPackages ()Ljava/util/List;
+	public fun hashCode ()I
+	public final fun isEmpty ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/atlas/Sniffed$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/atlas/Sniffed$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/atlas/Sniffed;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/atlas/Sniffed;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/atlas/Sniffed$Companion {
+	public final fun getNONE ()Lio/astrolabe/atlas/Sniffed;
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/atlas/SymbolIndex {
+	public static final field Companion Lio/astrolabe/atlas/SymbolIndex$Companion;
+	public static final field DEFAULT_BUDGET_BYTES J
+	public static final field DEFAULT_MAX_HITS I
+	public fun <init> (Lio/astrolabe/atlas/Atlas;)V
+	public fun <init> (Lio/astrolabe/atlas/Atlas;Lio/astrolabe/os/search/Search;)V
+	public synthetic fun <init> (Lio/astrolabe/atlas/Atlas;Lio/astrolabe/os/search/Search;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun def (Ljava/lang/String;)Ljava/util/List;
+	public final fun getTier ()Lio/astrolabe/atlas/IndexTier;
+	public final fun importers (Ljava/lang/String;)Lio/astrolabe/atlas/Importers;
+	public final fun refs (Ljava/lang/String;)Lio/astrolabe/atlas/Refs;
+	public final fun refs (Ljava/lang/String;J)Lio/astrolabe/atlas/Refs;
+	public final fun refs (Ljava/lang/String;JI)Lio/astrolabe/atlas/Refs;
+	public static synthetic fun refs$default (Lio/astrolabe/atlas/SymbolIndex;Ljava/lang/String;JIILjava/lang/Object;)Lio/astrolabe/atlas/Refs;
+}
+
+public final class io/astrolabe/atlas/SymbolIndex$Companion {
+}
+
 public final class io/astrolabe/auth/Boundary {
 	public static final field DATA_RULE Ljava/lang/String;
 	public static final field GAUGE_CLOSE Ljava/lang/String;

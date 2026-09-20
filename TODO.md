@@ -398,25 +398,29 @@ Goal: [§18.2 Stage A](docs/implementation/roadmap.md#sec-18-2): one implementin
 - Log: 2026-09-20 — WorkspacePath.of(root, ProtectedPaths).resolve(userPath, Intent Read|Mutate) → Resolved(relative, real, kind, linkAncestors) | Rejected(reason): '..' refused outright, absolute escapes rejected, real-path resolution, mutation through symlink/junction/reparse/special ancestors refused, case aliases unified on case-insensitive filesystems, two-tier protected paths (.git read+write denied; CI config/lockfiles/migrations write-denied), revalidate (best effort), publicationLimits() states that atomic rename is not compare-and-replace. IX-09 tests incl. junctions via mklink /J; symlink cases skip visibly on Windows (Linux CI).
 
 ### P1.3 Orientation tier 0
-#### P1.3.1 [M] `Atlas` · TODO
+#### P1.3.1 [M] `Atlas` · DONE
 - Why: [§7.1](docs/repository/navigation.md#sec-7-1) harness-built structure without bodies; "the atlas never lies about existence".
 - Pkg: `atlas`
 - Build: `AtlasRow(path, bytes, lang, hash8, exports, imports, testsFor)`, `Atlas.build(workspace)` lazy, cached in `indexes/` by repo hash, `refresh(touchedPaths)` O(touched); collapse rules for vendor/build/generated (listed, not expanded); `Focus.render(atlas, focus: root|dir|file)` (root → dirs with sizes; dir → children with export counts + one-line names; file → outline).
 - Done: rebuild-from-cache equals fresh build; refresh after an edit updates only touched rows.
+- Log: 2026-09-20 — io.astrolabe.atlas (delegated worktree agent, merged): AtlasRow(path, bytes, lang, hash8, exports, imports, testsFor), Atlas.build(root)/load(indexesDir, root)/open/save (cache indexes/atlas-<hash8 of root>.json keyed by repoKey = digest of sorted path+hash8 lines and a (size, mtime) hint scan — a lookup cache, never a version authority), refresh(touched) re-parses only touched rows, directory collapse rules (node_modules/build/dist/target/.gradle/__pycache__/.venv/venv/vendor as one Collapsed row each; *.min.js, *.lock, > 1 MiB per file); Focus.render(atlas, Root|Dir|File, ≤ 300 tokens). File list from git ls-files --cached --others --exclude-standard; dotfiles indexed (rules candidates), .git skipped.
 
-#### P1.3.2 [M] `Prime` (`[R]` content) · TODO
+#### P1.3.2 [M] `Prime` (`[R]` content) · DONE
 - Why: [§5.1 `[R]`](docs/runtime/context-layout.md#sec-5-1), [§7.1](docs/repository/navigation.md#sec-7-1); byte-stable per repo version and role.
 - Build: `Prime.render(atlas, sniff, rules: RulesTrust.approved?, kbIndex, focusSubsystem)`: tree depth 3 with counts, languages, sniffed commands, the **approved** rules-file snapshot only (D-32: discovery proposes candidates; `RulesTrust` (P1.10.1) binds path + digest + provenance through host configuration or explicit user authority; an unapproved candidate is listed as repository data, never rendered as instructions), top-10 hubs by inbound refs (tier 0: import count), `index/contracts.md` + `index/global.md` lines (empty until P2.6), behaviour-map excerpt ≤ 300 (empty until P4.3).
 - Done: same inputs ⇒ identical bytes; no timestamps; an unapproved `AGENTS.md` never appears in `[R]` as instructions (IX-08).
+- Log: 2026-09-20 — Prime.render(atlas, sniff, rules: RulesSnapshot?, kbIndexLines, bmapExcerpt, focusSubsystem): deterministic [R] text (repo/languages, tree depth 3 with counts, commands per package, rules: approved snapshot verbatim between rules-file markers or 'none approved' + candidates listed as data only (IX-08), top-10 hubs by inbound imports, index lines, bmap ≤ 300 tokens); byte-identical across directories and runs, no timestamps. RulesTrust (P1.10.1) fills the RulesSnapshot seam at campaign open (P1.9.2).
 
-#### P1.3.3 [M] `Outline` and `SymbolIndex` tier 0 · TODO
+#### P1.3.3 [M] `Outline` and `SymbolIndex` tier 0 · DONE
 - Why: [§7.2](docs/repository/navigation.md#sec-7-2) regex/ctags-grade tier with `complete:false` on refs.
 - Build: `Language` detection, `Outline.of(path)` (declarations with spans for D-09 languages; generic fallback = top-level lines), `SymbolIndex.def(name)`, `refs(name) → complete=false, tier=0`.
 - Done: outlines for fixture repos; `refs` always flagged incomplete at tier 0.
+- Log: 2026-09-20 — Language detection (13), Outline.of(path, bytes) tier-0 regex declarations with spans (Python indentation, JS/TS/Kotlin/Java brace matching; exports; namespace for Kotlin/Java import resolution; generic top-level fallback), SymbolIndex(atlas, search = Searches.available()).def/refs (lexical, complete=false, tier 0 by construction)/importers.
 
-#### P1.3.4 [M] `Sniff` commands · TODO
+#### P1.3.4 [M] `Sniff` commands · DONE
 - Build: `Sniff.commands(atlas)` → test/build/lint/type-check commands per manifest (Makefile, pyproject, package.json, Cargo.toml, go.mod, build.gradle(.kts), pom.xml), per package in monorepos ([§7.7](docs/repository/navigation.md#sec-7-7)).
 - Done: fixture repos map to the right runner; unknown ⇒ `none` (never guessed).
+- Log: 2026-09-20 — Sniff.commands(atlas|root, paths) → Sniffed(packages: PackageCommands(dir, manifest, test/build/lint/typecheck argv)) for Makefile, pyproject (pytest when configured else unittest), package.json (bare runner scripts preferred; tsc --noEmit only with tsconfig + typescript dependency, node --check never a type check — D-09), Cargo.toml, go.mod, build.gradle(.kts), pom.xml; one package per manifest directory (§7.7); unknown ⇒ none. The RunnerCommands mapping into Checks.seed (P1.7.1) is the controller's job (P1.9.2).
 
 ### P1.4 Evidence store
 #### P1.4.1 [M] `Journal` · DONE
