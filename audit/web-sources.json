@@ -1,0 +1,101 @@
+[
+  {
+    "id": "W01",
+    "title": "OpenAI — Prompt caching",
+    "url": "https://developers.openai.com/api/docs/guides/prompt-caching",
+    "supported_point": "Cache behavior and usage mappings are model/API-dependent. Where cache-write tokens are reported inside input, ordinary input subtracts both cached reads and writes. Separate those categories and preserve the native usage object.",
+    "used_for": "F06, F10",
+    "limit": "Official reference; inspected on 2026-09-20. Do not apply newer-model fields to every compatible endpoint.",
+    "inspected_on": "2026-09-20"
+  },
+  {
+    "id": "W02",
+    "title": "Anthropic — Prompt caching",
+    "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching",
+    "supported_point": "Explicit pre-warming uses a provider request; local compilation alone is not a cache write. Total input combines ordinary, cache-read and cache-creation fields.",
+    "used_for": "F06, F10",
+    "limit": "Official reference; inspected on 2026-09-20. Pre-warming is not introduced as a required ASTROLABE workflow.",
+    "inspected_on": "2026-09-20"
+  },
+  {
+    "id": "W03",
+    "title": "OpenAI — Function calling",
+    "url": "https://developers.openai.com/api/docs/guides/function-calling",
+    "supported_point": "The function-call exchange retains native assistant output and pairs each tool result with its call ID.",
+    "used_for": "F03",
+    "limit": "Official protocol documentation; inspected on 2026-09-20. The revised pseudocode is illustrative, not an SDK implementation.",
+    "inspected_on": "2026-09-20"
+  },
+  {
+    "id": "W04",
+    "title": "OpenAI — Conversation state",
+    "url": "https://developers.openai.com/api/docs/guides/conversation-state",
+    "supported_point": "Continuation reduces retransmission, not the obligation to account for effective history; chained previous input remains billable.",
+    "used_for": "F03, F06",
+    "limit": "Official reference; inspected on 2026-09-20. Reduction must not reintroduce unwanted old history through provider state.",
+    "inspected_on": "2026-09-20"
+  },
+  {
+    "id": "W05",
+    "title": "Git — git-worktree",
+    "url": "https://git-scm.com/docs/git-worktree",
+    "supported_point": "Ordinary refs are shared across linked worktrees; per-worker shadow refs therefore require a distinct namespace. Worktree separation is not an OS capability boundary.",
+    "used_for": "F02",
+    "limit": "Official documentation; inspected on 2026-09-20. Workspace suffix is this revision’s engineering inference.",
+    "inspected_on": "2026-09-20"
+  },
+  {
+    "id": "W06",
+    "title": "Git — git-update-ref",
+    "url": "https://git-scm.com/docs/git-update-ref",
+    "supported_point": "Ref updates can verify an expected old object ID. That protects publication of the ref, not atomic restoration of every file.",
+    "used_for": "F02, F05",
+    "limit": "Official documentation; inspected on 2026-09-20. Filesystem restoration still needs guarded recovery.",
+    "inspected_on": "2026-09-20"
+  },
+  {
+    "id": "W07",
+    "title": "SQLite — Atomic Commit",
+    "url": "https://sqlite.org/atomiccommit.html",
+    "supported_point": "SQLite’s commit guarantees concern its database and documented storage assumptions, not arbitrary repository mutations or remote effects.",
+    "used_for": "F05, F08",
+    "limit": "Official engineering documentation; inspected on 2026-09-20. No new transaction framework was inferred.",
+    "inspected_on": "2026-09-20"
+  },
+  {
+    "id": "W08",
+    "title": "MCP — Tools specification, 2025-06-18",
+    "url": "https://modelcontextprotocol.io/specification/2025-06-18/server/tools",
+    "supported_point": "Tool annotations from untrusted servers are not trusted authority. A read-only hint cannot grant an executor capability.",
+    "used_for": "F11",
+    "limit": "Pinned official specification version; inspected on 2026-09-20. This is not a claim that every later MCP capability was audited.",
+    "inspected_on": "2026-09-20"
+  },
+  {
+    "id": "W09",
+    "title": "The Complexity Trap, arXiv:2508.21433v3",
+    "url": "https://arxiv.org/html/2508.21433v3",
+    "supported_point": "Observation masking is a meaningful baseline; hybrid comparisons are workload-specific. The paper does not make deterministic rebuilding universally optimal.",
+    "used_for": "F12; preserved reduction rationale",
+    "limit": "Primary research, version pinned; inspected on 2026-09-20. Deterministic rebuilding remains the authoritative baseline choice; no summarizer was added.",
+    "inspected_on": "2026-09-20"
+  },
+  {
+    "id": "W10",
+    "title": "SoL-Pi, arXiv:2609.20519v1",
+    "url": "https://arxiv.org/html/2609.20519v1",
+    "supported_point": "The complete efficiency configuration and highest-scoring configuration are different operating points. Their largest savings and best quality cannot be combined into one result.",
+    "used_for": "F12; preserved economics caveat",
+    "limit": "Primary research, version pinned; inspected on 2026-09-20. Reported findings do not validate ASTROLABE or establish a universal fusion policy.",
+    "inspected_on": "2026-09-20"
+  },
+  {
+    "id": "W11",
+    "title": "The Missing Complement, arXiv:2609.20050v1",
+    "url": "https://arxiv.org/html/2609.20050v1",
+    "supported_point": "Constructed-pool evidence coverage and gold-blind repository discovery are different claims. Complementary retrieval is useful motivation, not proof of end-to-end repair success.",
+    "used_for": "F12; preserved retrieval rationale",
+    "limit": "Primary research, version pinned; inspected on 2026-09-20. No additional retrieval-agent orchestration was adopted.",
+    "inspected_on": "2026-09-20"
+  }
+]

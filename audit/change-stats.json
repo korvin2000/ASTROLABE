@@ -1,0 +1,11 @@
+{
+  "original_bytes": 232829,
+  "revised_logical_bytes": 252198,
+  "original_words": 33976,
+  "revised_logical_words": 36314,
+  "unchanged_original_words": 33153,
+  "original_word_retention_pct": 97.58,
+  "new_or_replaced_words": 3161,
+  "removed_or_replaced_original_words": 823,
+  "semantic_edit_operations": 118
+}

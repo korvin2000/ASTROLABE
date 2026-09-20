@@ -1,0 +1,1781 @@
+[
+  {
+    "id": "meta",
+    "title": "Source metadata and title",
+    "original_start_line": 1,
+    "original_end_line": 20,
+    "file": "docs/reference/synthesis-history.md",
+    "anchor": "sec-meta",
+    "original_sha256": "92d950fab6e95f5cad3b50cde3c62495823f98344878dc5550ab81736126ef18",
+    "corrected_sha256": "b150c794aa1b493a236ec34956151e47b9d64df65d42986dd4b21a2e8a68f77a",
+    "rendered_sha256": "54511d281585cc3bb728b58b906eaf8d6b40fe95e7bc2c07474b2b00c357ce19",
+    "changes": [
+      "F12"
+    ]
+  },
+  {
+    "id": "0",
+    "title": "0. Executive summary",
+    "original_start_line": 21,
+    "original_end_line": 22,
+    "file": "docs/architecture/overview.md",
+    "anchor": "sec-0",
+    "original_sha256": "5e21f8ff8807e6ccbb80ccd33cfb472fe6095ce90bc543b652968643598b0e90",
+    "corrected_sha256": "5e21f8ff8807e6ccbb80ccd33cfb472fe6095ce90bc543b652968643598b0e90",
+    "rendered_sha256": "8dd3a6ffd431f07a1b2e6d36ea5089b834ea109c6f147e57001ddbf967585ea7",
+    "changes": []
+  },
+  {
+    "id": "0.1",
+    "title": "0.1 Thesis",
+    "original_start_line": 23,
+    "original_end_line": 32,
+    "file": "docs/architecture/overview.md",
+    "anchor": "sec-0-1",
+    "original_sha256": "ee3fd23f4136023389a1068d61d99333417cfc4f40814a7a7f5a6815feb1747d",
+    "corrected_sha256": "3c00df68619c57941a4bbce38591628dfb9d3be2661884cd79b4ddf04d311226",
+    "rendered_sha256": "c19a2d107c2b5def6c76ef9b9319c42f5baaafc80d85684df0aa5be653725b53",
+    "changes": [
+      "F12"
+    ]
+  },
+  {
+    "id": "0.2",
+    "title": "0.2 Verdict on the three candidates (full rubric in §22)",
+    "original_start_line": 33,
+    "original_end_line": 42,
+    "file": "docs/reference/synthesis-history.md",
+    "anchor": "sec-0-2",
+    "original_sha256": "2dc69aef3f9d10c77ad30c1c63c5a31e134e3ba69b29f2e55bc229912d725cea",
+    "corrected_sha256": "bb055e0229452d88e49d7a3c5673a80a62e310b774abe349e5d39f0f2002f519",
+    "rendered_sha256": "623e454d8b60687abfc0c72cad6b36c3fa6883f83d8ca037c94fcdd61093ed9b",
+    "changes": [
+      "F12"
+    ]
+  },
+  {
+    "id": "0.3",
+    "title": "0.3 What was taken from each",
+    "original_start_line": 43,
+    "original_end_line": 50,
+    "file": "docs/reference/traceability.md",
+    "anchor": "sec-0-3",
+    "original_sha256": "c7762281693cff6b7faca0e3d3cbea303d407630e6586981c5af3514ec63e9c7",
+    "corrected_sha256": "c7762281693cff6b7faca0e3d3cbea303d407630e6586981c5af3514ec63e9c7",
+    "rendered_sha256": "e1a7c92ab6022200f9918c1011e5e09abac209f43d0c9a029fad8b65afd5c32e",
+    "changes": []
+  },
+  {
+    "id": "0.4",
+    "title": "0.4 Design commitments",
+    "original_start_line": 51,
+    "original_end_line": 65,
+    "file": "docs/architecture/overview.md",
+    "anchor": "sec-0-4",
+    "original_sha256": "4288a868fe026d98af1ec31d68bd8c1ae0127266aad96dea2b7885874d94906d",
+    "corrected_sha256": "4288a868fe026d98af1ec31d68bd8c1ae0127266aad96dea2b7885874d94906d",
+    "rendered_sha256": "e524c34bde6df0ccdd7a37ec1231fa36cb003f7da496b48f838b72f3fb750ef1",
+    "changes": []
+  },
+  {
+    "id": "0.5",
+    "title": "0.5 What is new relative to A ∪ B ∪ C",
+    "original_start_line": 66,
+    "original_end_line": 80,
+    "file": "docs/reference/synthesis-history.md",
+    "anchor": "sec-0-5",
+    "original_sha256": "c7e0f43ead1985233c65a37aa52f36050162da94236bbe4b2b2f7633f1730a59",
+    "corrected_sha256": "c7e0f43ead1985233c65a37aa52f36050162da94236bbe4b2b2f7633f1730a59",
+    "rendered_sha256": "777296d2997461f89caac8886ce076e9afe0bb1b6358532b3bf3826441a50901",
+    "changes": []
+  },
+  {
+    "id": "0.6",
+    "title": "0.6 The one diagram",
+    "original_start_line": 81,
+    "original_end_line": 117,
+    "file": "docs/architecture/overview.md",
+    "anchor": "sec-0-6",
+    "original_sha256": "9af9e811c4f4a08db86573192a094f084f3d3f2f48b4ac41c1127fe2edef1a31",
+    "corrected_sha256": "9af9e811c4f4a08db86573192a094f084f3d3f2f48b4ac41c1127fe2edef1a31",
+    "rendered_sha256": "89216d141b5806c780fb652383649c02660ff20b96602db3b7b4289a8db103a2",
+    "changes": []
+  },
+  {
+    "id": "0.7",
+    "title": "0.7 Reading map",
+    "original_start_line": 118,
+    "original_end_line": 137,
+    "file": "docs/reference/synthesis-history.md",
+    "anchor": "sec-0-7",
+    "original_sha256": "c8240204ed8b8a86abf84467e45dcc363a88cd170bddee57b112d5b5c010291d",
+    "corrected_sha256": "c8240204ed8b8a86abf84467e45dcc363a88cd170bddee57b112d5b5c010291d",
+    "rendered_sha256": "72bb0176cd44b9c8be1422b724be108f1e72035bd0b8f97ee29d3c0cf0453010",
+    "changes": []
+  },
+  {
+    "id": "1",
+    "title": "1. Objective, workload and failure model",
+    "original_start_line": 138,
+    "original_end_line": 139,
+    "file": "docs/architecture/principles.md",
+    "anchor": "sec-1",
+    "original_sha256": "e432b0e887f6c1f093873526fcf251ae3d464933689d34cab1a530d8b1976d92",
+    "corrected_sha256": "e432b0e887f6c1f093873526fcf251ae3d464933689d34cab1a530d8b1976d92",
+    "rendered_sha256": "2d6cb8eb30fdb0737dc7e212ac290414e77e5586dd870fbbd417be1850f014ce",
+    "changes": []
+  },
+  {
+    "id": "1.1",
+    "title": "1.1 The objective `[IM §1.2; A §1.1; B §3.1; C §1]`",
+    "original_start_line": 140,
+    "original_end_line": 153,
+    "file": "docs/architecture/principles.md",
+    "anchor": "sec-1-1",
+    "original_sha256": "1281b0b9035e6525018f4872110474b5802a8435f8a3581f3a92ba03cd7b2266",
+    "corrected_sha256": "1281b0b9035e6525018f4872110474b5802a8435f8a3581f3a92ba03cd7b2266",
+    "rendered_sha256": "a8c31547769aedb121f23e483ed65bf167cf537a83df9916a27d88d902f3ed65",
+    "changes": []
+  },
+  {
+    "id": "1.2",
+    "title": "1.2 Target workload `[A §1.2; B §3.2]`",
+    "original_start_line": 154,
+    "original_end_line": 166,
+    "file": "docs/architecture/principles.md",
+    "anchor": "sec-1-2",
+    "original_sha256": "4787e0713911d668490e0ce8144d69209469afe811b227db585d54ce793e5674",
+    "corrected_sha256": "4787e0713911d668490e0ce8144d69209469afe811b227db585d54ce793e5674",
+    "rendered_sha256": "d98552ec633db056bf2c0b974aac0d57293ebe2d410d8ef6bfae981a29e1cc6c",
+    "changes": []
+  },
+  {
+    "id": "1.3",
+    "title": "1.3 Non-negotiable invariants `[B §3.3 hardened with IM §3.4 and A L5–L8]`",
+    "original_start_line": 167,
+    "original_end_line": 181,
+    "file": "docs/architecture/principles.md",
+    "anchor": "sec-1-3",
+    "original_sha256": "1831621fe33e3badbc5ae684e9c8f0d60cc69cf41b25d21efb032c3dd8de6307",
+    "corrected_sha256": "1831621fe33e3badbc5ae684e9c8f0d60cc69cf41b25d21efb032c3dd8de6307",
+    "rendered_sha256": "5ba851f3d9d0a0f385c94aeae68b3185e945102a1817a100c21bfc790c64f49c",
+    "changes": []
+  },
+  {
+    "id": "1.4",
+    "title": "1.4 Unified failure taxonomy → mechanisms `[A §1.3 ∪ C §2 ∪ B §15.6, deduplicated]`",
+    "original_start_line": 182,
+    "original_end_line": 218,
+    "file": "docs/architecture/principles.md",
+    "anchor": "sec-1-4",
+    "original_sha256": "a247ce71461b5a6fafa6da39ad21a0b04bbe365aa49e299a8783df8b3f56ed50",
+    "corrected_sha256": "b4d1ab62372ef76ba71cd72a83539143cd2419b37f1c646473490acd7abf760b",
+    "rendered_sha256": "f512368f2b5a4fbdcdfaad16e0f92d3af372ddd2cf04552f9799e39c65d60dc4",
+    "changes": [
+      "F02",
+      "F12"
+    ]
+  },
+  {
+    "id": "2",
+    "title": "2. Laws",
+    "original_start_line": 219,
+    "original_end_line": 238,
+    "file": "docs/architecture/principles.md",
+    "anchor": "sec-2",
+    "original_sha256": "45da4e92a3616778bd14281a183d42ef8bfe5550f52a1703a4ac84661fac2d38",
+    "corrected_sha256": "45da4e92a3616778bd14281a183d42ef8bfe5550f52a1703a4ac84661fac2d38",
+    "rendered_sha256": "c32f9d5334246b82944d5bc08ddcdfbeeaff4b9a23570110fb9e097a60d3a8a6",
+    "changes": []
+  },
+  {
+    "id": "3",
+    "title": "3. Architecture",
+    "original_start_line": 239,
+    "original_end_line": 240,
+    "file": "docs/architecture/components.md",
+    "anchor": "sec-3",
+    "original_sha256": "d846a061850916ee7012e448883caf6476809f948bf08c064f16303452cd84a4",
+    "corrected_sha256": "d846a061850916ee7012e448883caf6476809f948bf08c064f16303452cd84a4",
+    "rendered_sha256": "b1a7270805cdaa30545d9cdcaef1fdca189b5d353b1f8c04d03f9bcf29d4ac7c",
+    "changes": []
+  },
+  {
+    "id": "3.1",
+    "title": "3.1 Two clocks, one unit `[FROM-A §3.1; controller = C's supervisor]`",
+    "original_start_line": 241,
+    "original_end_line": 257,
+    "file": "docs/architecture/components.md",
+    "anchor": "sec-3-1",
+    "original_sha256": "418291062565b54aec3d0c9544206ca28f2f292298ceb37b66a11961a9cf0677",
+    "corrected_sha256": "418291062565b54aec3d0c9544206ca28f2f292298ceb37b66a11961a9cf0677",
+    "rendered_sha256": "9fcee0a18c92d9eb5e886d7ce2fefb2c0786afc351f9b1f8ae88f5eb58db46d6",
+    "changes": []
+  },
+  {
+    "id": "3.2",
+    "title": "3.2 Planes, components and ownership `[FROM-C §4.2–4.3, with A's components mapped in]`",
+    "original_start_line": 258,
+    "original_end_line": 276,
+    "file": "docs/architecture/components.md",
+    "anchor": "sec-3-2",
+    "original_sha256": "4557515c3f02a753d329a40a546d6d3133fec15e1b91a1d9c0f0e389d4f69d1a",
+    "corrected_sha256": "6f3c067eb994f5c34416373dce40dc32524314f4da17543ab825a5f78d4d53a6",
+    "rendered_sha256": "f30ae6978574ce8731b155c34b9d2cb7220ebc1b350f24fa1c7cc09e96e0081f",
+    "changes": [
+      "F08"
+    ]
+  },
+  {
+    "id": "3.3",
+    "title": "3.3 Four identities and one version registry `[FROM-B §5.1; FROM-C §8.3]`",
+    "original_start_line": 277,
+    "original_end_line": 287,
+    "file": "docs/architecture/components.md",
+    "anchor": "sec-3-3",
+    "original_sha256": "713ced00405f067287768e8e9e18f2a9debf5a28f786b7ca107045650b36c9f9",
+    "corrected_sha256": "3fef5a9f7b174aabbc87546c6dd3119aec0bf10214221fb4e06c739da358c1f6",
+    "rendered_sha256": "7bc4a28d1d8be5b868f41c4f72f55b1668fa8ad92a5eba2d14c9f618755fafe6",
+    "changes": [
+      "F02"
+    ]
+  },
+  {
+    "id": "3.4",
+    "title": "3.4 Roles as configurations `[FROM-C §4.4; MB §5.1]`",
+    "original_start_line": 288,
+    "original_end_line": 302,
+    "file": "docs/architecture/roles-shapes.md",
+    "anchor": "sec-3-4",
+    "original_sha256": "24ec2cdbfb2fc5c46dd5991e36b66dc63e12ab6e0b1ff50bfe13a0b0fe8b5e4c",
+    "corrected_sha256": "97bfc884df70f8942fa0d076efb460807e88781877e4901afa1f3e524538530f",
+    "rendered_sha256": "66250748bc6cf55817abdd5e664b0014d8fdee3c687150b7eeade8ab0da71ab2",
+    "changes": [
+      "F09"
+    ]
+  },
+  {
+    "id": "3.5",
+    "title": "3.5 Shapes and collapsibility `[FROM-C §4.5; A §3.3; MB §3.5]`",
+    "original_start_line": 303,
+    "original_end_line": 337,
+    "file": "docs/architecture/roles-shapes.md",
+    "anchor": "sec-3-5",
+    "original_sha256": "502297c91fad0c03333747f4e5f021b82946b5b4057403323af7b85136166c5a",
+    "corrected_sha256": "40c0649d660f875032f28d70b78cb50e5bf72bd65192af88de5c622b5bc0e8a8",
+    "rendered_sha256": "f5af8dcaf932136e786e34d4c5a17c16317a4d4cefeb54ec4e661dd45b9cb9cf",
+    "changes": [
+      "F09"
+    ]
+  },
+  {
+    "id": "3.6",
+    "title": "3.6 Data flow for one increment `[FROM-A §3.4 + C §4.6]`",
+    "original_start_line": 338,
+    "original_end_line": 355,
+    "file": "docs/architecture/lifecycle.md",
+    "anchor": "sec-3-6",
+    "original_sha256": "7f65d05968791bcfbba154f8cd0c519ee2567d270bb4c5d02e5fc1f5a91b0494",
+    "corrected_sha256": "4f3eedddba30e31b1eab625079d1866599972714705c57782c794556ce3a79bb",
+    "rendered_sha256": "262dfeb2879921eb93d7ce486d3906b519e8f3d30bf5bec375967a5d3bbf2dd4",
+    "changes": [
+      "F01",
+      "F06"
+    ]
+  },
+  {
+    "id": "3.7",
+    "title": "3.7 Controller and cell, in pseudocode `[A §3.5 extended with C §5.7 and B §11.5]`",
+    "original_start_line": 356,
+    "original_end_line": 401,
+    "file": "docs/architecture/lifecycle.md",
+    "anchor": "sec-3-7",
+    "original_sha256": "905cb07d0686d1581c43e8199681f2da4149f264f4a316b655a6b5efbce1befb",
+    "corrected_sha256": "efbde5f7732d2118290520157daa7914be00d7af7c3a5d3d4a349642742de0bb",
+    "rendered_sha256": "b70248efebd10a1f210da68d02ea045c0e8e4af6ba62c226d7ce17eaf81ca801",
+    "changes": [
+      "F03"
+    ]
+  },
+  {
+    "id": "3.8",
+    "title": "3.8 Deterministic / semantic boundary `[A §3.6; MB §3.6; IM inv. 8]`",
+    "original_start_line": 402,
+    "original_end_line": 408,
+    "file": "docs/architecture/components.md",
+    "anchor": "sec-3-8",
+    "original_sha256": "776f7c8f3d2d4cfd05fb8212ada5accf9599940f57c02cf175639b5cae87b9a0",
+    "corrected_sha256": "776f7c8f3d2d4cfd05fb8212ada5accf9599940f57c02cf175639b5cae87b9a0",
+    "rendered_sha256": "be6109c9f11556b5bca0ddde0905e44c5711e7f0224eab42ebf9beb9e2ab510f",
+    "changes": []
+  },
+  {
+    "id": "4",
+    "title": "4. The durable layer (campaign state)",
+    "original_start_line": 409,
+    "original_end_line": 412,
+    "file": "docs/state/contracts.md",
+    "anchor": "sec-4",
+    "original_sha256": "cd6742dea3aeb01e6567fc1dce86c9c84048ac941f66ccf7057179c21847b4bf",
+    "corrected_sha256": "b162f88c5b760e756b22006d6454b92a1a63f20d6c0e6d9377a9261e0a9203f7",
+    "rendered_sha256": "cb2bb2c9fcca6ad58e6461b0a8339096cf25a3aee549813e6c7593c746123f5d",
+    "changes": [
+      "F08"
+    ]
+  },
+  {
+    "id": "4.1",
+    "title": "4.1 Task Contract `[FROM-A §4.1 + C §5.1 acceptance kinds and origins + B §5.2 authority references]`",
+    "original_start_line": 413,
+    "original_end_line": 453,
+    "file": "docs/state/contracts.md",
+    "anchor": "sec-4-1",
+    "original_sha256": "dda888b1828a8134a969e464309b9a30b7598f153f31dd5f53e16194dc9c9565",
+    "corrected_sha256": "e7b14da883cc64646fc93e155360c18d5e189130874ffd0541416a5086cc8e7d",
+    "rendered_sha256": "b3856b004df93c0fd66de45bef7ea88d331cf46c7215373c1ae943a7c2c661be",
+    "changes": [
+      "F01"
+    ]
+  },
+  {
+    "id": "4.2",
+    "title": "4.2 Requirement graph, increments and the ledger `[FROM-A §4.2 + B §6.1 + IM §4.2]`",
+    "original_start_line": 454,
+    "original_end_line": 482,
+    "file": "docs/state/contracts.md",
+    "anchor": "sec-4-2",
+    "original_sha256": "041d67e1340274d009aa7366218a8810215718b2b1d67dba2c1f8dfb3261c901",
+    "corrected_sha256": "041d67e1340274d009aa7366218a8810215718b2b1d67dba2c1f8dfb3261c901",
+    "rendered_sha256": "9a70713eae63ae8eaca90a4e56639e644eda7bc550213baa9318bcad55a7f33c",
+    "changes": []
+  },
+  {
+    "id": "4.3",
+    "title": "4.3 Evidence store: journal, blobs, stamps, receipts, evidence states `[A §4.3 + B §5.2, §5.4, §5.5 + C §9.2]`",
+    "original_start_line": 483,
+    "original_end_line": 500,
+    "file": "docs/state/evidence-coherence.md",
+    "anchor": "sec-4-3",
+    "original_sha256": "e35093c9bda24433d9e04ef3f4ec876eeca4e6f4a4721406944bf9319809bcb7",
+    "corrected_sha256": "e590f641abbd8f1e4260acebd8a5ad23627efb7b5dc390c2623e58f027873be4",
+    "rendered_sha256": "b014232fd982fd86d52dbd7e7a488fb7f39fc7ac285a55aab557d8b5d71cf9df",
+    "changes": [
+      "F04"
+    ]
+  },
+  {
+    "id": "4.4",
+    "title": "4.4 The coherence protocol: one version registry, five horizons `[FROM-C §4.8, §8.3 + A §8.1 closures — NEW unification N1]`",
+    "original_start_line": 501,
+    "original_end_line": 525,
+    "file": "docs/state/evidence-coherence.md",
+    "anchor": "sec-4-4",
+    "original_sha256": "f1290b61a563fb487b39dc9038d4f6cf958b0d53eb1eda616492f180d9f35fa4",
+    "corrected_sha256": "f1290b61a563fb487b39dc9038d4f6cf958b0d53eb1eda616492f180d9f35fa4",
+    "rendered_sha256": "21dc44614d1c2e1c3072cfb35b4df1584b4171a4234826b12ff0893148cfb185",
+    "changes": []
+  },
+  {
+    "id": "4.5",
+    "title": "4.5 Knowledge Base `[A §4.4 + C §7 + B §10 merged]`",
+    "original_start_line": 526,
+    "original_end_line": 548,
+    "file": "docs/knowledge/records.md",
+    "anchor": "sec-4-5",
+    "original_sha256": "583bc742e8905a5ad89cd7e6ce01b19a64a305e07b4d162c7c1c0529f62af7fc",
+    "corrected_sha256": "a49b0c782e3b569a758ba39ff180ba6a4050145df5e2bb1f8636b1c6964da382",
+    "rendered_sha256": "6e54e3fd60552c0f8dbbf755d5a30206179f8ac480a8ce3a433bea5f0c924927",
+    "changes": [
+      "F08"
+    ]
+  },
+  {
+    "id": "4.6",
+    "title": "4.6 Workspace: shadow ref, dirty state, execution modes, orientation `[A §4.5 + C §8.5]`",
+    "original_start_line": 549,
+    "original_end_line": 557,
+    "file": "docs/runtime/workspace-editing.md",
+    "anchor": "sec-4-6",
+    "original_sha256": "5574cb77d384b381bf9503d68c6321759ec5b247910b7f016720ce637d1bc2b8",
+    "corrected_sha256": "a1b7ce633b287d128428fe3b98d7825871c5699859b3b42da1b872d475fbc93d",
+    "rendered_sha256": "531b1849b6ac6681d25bcd1550578779978e4c2dd1ff4b0a20bb1bd68780658d",
+    "changes": [
+      "F02",
+      "F11"
+    ]
+  },
+  {
+    "id": "5",
+    "title": "5. The Cell (execution kernel)",
+    "original_start_line": 558,
+    "original_end_line": 561,
+    "file": "docs/runtime/context-layout.md",
+    "anchor": "sec-5",
+    "original_sha256": "ea4ef78f80cce2194487026cf4d24b0fc2d5710089d6b4f24180ebb1cb4b01fa",
+    "corrected_sha256": "ea4ef78f80cce2194487026cf4d24b0fc2d5710089d6b4f24180ebb1cb4b01fa",
+    "rendered_sha256": "9ce863776880974656c159ea6a2ab4dd1471ee85d50f3d7efe74bc7e2f657e15",
+    "changes": []
+  },
+  {
+    "id": "5.1",
+    "title": "5.1 Context layout `[A §5.1 + C §6.4 + MB §4.1 render order]`",
+    "original_start_line": 562,
+    "original_end_line": 584,
+    "file": "docs/runtime/context-layout.md",
+    "anchor": "sec-5-1",
+    "original_sha256": "960b6f3b5d13651d44e1d74824fe912099824db00a1b23df8a96e5bb1fd48d1b",
+    "corrected_sha256": "993798cfb0c5c07e80f574971662e01f03066c71637c2908eb57b58a65874941",
+    "rendered_sha256": "b0f937d7de455017b1f853da479d8a6e202a3b8674075ae665e80bd91a8f4419",
+    "changes": [
+      "F06"
+    ]
+  },
+  {
+    "id": "5.2",
+    "title": "5.2 The Working Register (STATE) `[A §5.2 + C §8.2 + B decision packets]`",
+    "original_start_line": 585,
+    "original_end_line": 608,
+    "file": "docs/runtime/register-workset.md",
+    "anchor": "sec-5-2",
+    "original_sha256": "90e85317e4935ecbd7d99e1eeeb82e74a2c89c5e6ab0479f4b7e983811cd3945",
+    "corrected_sha256": "ce74898039af43c35670ce005aee99d38a327517b14b24a35fc402cbba1664d9",
+    "rendered_sha256": "9148035370e80a12a1a33bd912900fd38b05f0c3ebb520b9618b529135b684d1",
+    "changes": [
+      "F08"
+    ]
+  },
+  {
+    "id": "5.3",
+    "title": "5.3 The Workset and cache-aware staleness `[A §5.3 + C §6.6 — resolution of the immediate-stub disagreement]`",
+    "original_start_line": 609,
+    "original_end_line": 619,
+    "file": "docs/runtime/register-workset.md",
+    "anchor": "sec-5-3",
+    "original_sha256": "dcd0e7a0c2125ab2c41eae8d59c3f61514739e5f7a631bc69a4f59b530283641",
+    "corrected_sha256": "86f9c06d28295b5fada1579d70403d29336e8e3727521cbbe28bf0128ac0a6d5",
+    "rendered_sha256": "cc1153345a73f2e199bcaf59062d5c0d14a8fbff45c83ee595f3ed15b2fcb301",
+    "changes": [
+      "F02"
+    ]
+  },
+  {
+    "id": "5.4",
+    "title": "5.4 Tools `[A §5.4 five-tool discipline + C §8.4 families, masks, catalog, envelope, turn order, error policy — resolution of the surface-size disagreement]`",
+    "original_start_line": 620,
+    "original_end_line": 712,
+    "file": "docs/runtime/tools.md",
+    "anchor": "sec-5-4",
+    "original_sha256": "2b48ff41468835fda7d9d715b40ea9b5112fb39e8596418b0c475507c3e2afa0",
+    "corrected_sha256": "03c0bbe3150ad80830b1859ca58b761612e92652155193ba252288ae818247f3",
+    "rendered_sha256": "d2730b2980417065c5db7dfa7d57205ee13c19f8d66836f540994cd79e1c0698",
+    "changes": [
+      "F01",
+      "F03",
+      "F05",
+      "F12"
+    ]
+  },
+  {
+    "id": "5.5",
+    "title": "5.5 Transactional turns and fusion `[A §5.5; C §8.4; B §8.5]`",
+    "original_start_line": 713,
+    "original_end_line": 725,
+    "file": "docs/runtime/tools.md",
+    "anchor": "sec-5-5",
+    "original_sha256": "878808ca61e909f6b7ae4783f37ccadf1e87bbbf6a50f32e440a40d159474ec3",
+    "corrected_sha256": "2aa1dea8cdff3d41b04cc420ec8701283fb27634f102fde8fba9dc88795c95a5",
+    "rendered_sha256": "f0497198831069fc680d85bba98ca88aacefd6ec94916e4bf5544598c8feb1b3",
+    "changes": [
+      "F03",
+      "F05"
+    ]
+  },
+  {
+    "id": "5.6",
+    "title": "5.6 Gates and nudges `[A §5.6 ∪ C §8.8; one line each; fire once per condition; computed by the harness, no judge model]`",
+    "original_start_line": 726,
+    "original_end_line": 745,
+    "file": "docs/runtime/gates-termination.md",
+    "anchor": "sec-5-6",
+    "original_sha256": "17f8793d91693250ec768f1c7c60c651ead1b0c41bb3754bf22dd53b3e0fe0f5",
+    "corrected_sha256": "0011a5cab2443b7d79a4d4191b264ad23b6be5318d59cab113f091eb3cb2374b",
+    "rendered_sha256": "b6eae6c116499877e78b3e9310a9da462be8de0459d02b6a49b4be48b8cffc53",
+    "changes": [
+      "F01"
+    ]
+  },
+  {
+    "id": "5.7",
+    "title": "5.7 Gauge, residency and eviction `[A §5.7; C §6.5; HELM §7.6; J1 §5.5]`",
+    "original_start_line": 746,
+    "original_end_line": 755,
+    "file": "docs/runtime/residency-rebuild.md",
+    "anchor": "sec-5-7",
+    "original_sha256": "1c81b698fc07cb02feaa79b3f255d7855c864bb944e88c1f5bceacc3ccad0557",
+    "corrected_sha256": "1c81b698fc07cb02feaa79b3f255d7855c864bb944e88c1f5bceacc3ccad0557",
+    "rendered_sha256": "f7c438f7a7e250e40d3a1c53477743332294233dcd11f9852a928798d5306371",
+    "changes": []
+  },
+  {
+    "id": "5.8",
+    "title": "5.8 One rebuild mechanism, five uses `[C §6.7 + A §5.8, §6 — NEW unification N2]`",
+    "original_start_line": 756,
+    "original_end_line": 768,
+    "file": "docs/runtime/residency-rebuild.md",
+    "anchor": "sec-5-8",
+    "original_sha256": "ebc14d1e71232d285042c81a139d52990ccb131201168b674f810f793cabc5f7",
+    "corrected_sha256": "8c590806dde3e5c5f69c0776308cfb91db630c43fd8379bd602e5e101a6a381b",
+    "rendered_sha256": "617328a74c4644e1d7cae235ea90965e2f9054f8b874fc45882f18b57b3b21f0",
+    "changes": [
+      "F03"
+    ]
+  },
+  {
+    "id": "5.9",
+    "title": "5.9 Cell termination and the Result Packet `[A §5.9 + C §6.1 + B §9.6]`",
+    "original_start_line": 769,
+    "original_end_line": 792,
+    "file": "docs/runtime/gates-termination.md",
+    "anchor": "sec-5-9",
+    "original_sha256": "9b56371535900b3a0a1f5305399606496ab831e9688f06a3b043982f4ec0df2b",
+    "corrected_sha256": "30ca9700cad8244db53d819f77febf61e8b41c43af049fb04e1e29fedbf7c514",
+    "rendered_sha256": "9aac7b841a91784ebf38811b5025b39152c91369e7293aa986f6916bdfd79e5e",
+    "changes": [
+      "F09"
+    ]
+  },
+  {
+    "id": "5.10",
+    "title": "5.10 One turn, rendered (abridged) `[A §5.10; C Appendix A]`",
+    "original_start_line": 793,
+    "original_end_line": 814,
+    "file": "docs/reference/rendered-turn.md",
+    "anchor": "sec-5-10",
+    "original_sha256": "21b874860d574d1f38797b47bc100ec514fa0aff78a1caa2de1a7fd698d2547f",
+    "corrected_sha256": "21b874860d574d1f38797b47bc100ec514fa0aff78a1caa2de1a7fd698d2547f",
+    "rendered_sha256": "3fb4dc85fc8b61d8d76b88855da582e4fd047d2dd42d7fcceb14733351cf86d6",
+    "changes": []
+  },
+  {
+    "id": "6",
+    "title": "6. Context compilation (between cells)",
+    "original_start_line": 815,
+    "original_end_line": 816,
+    "file": "docs/context/compiler.md",
+    "anchor": "sec-6",
+    "original_sha256": "7d5daefd69d20ed136fcc50d945a20de53934dce145082e056456896640b2d88",
+    "corrected_sha256": "7d5daefd69d20ed136fcc50d945a20de53934dce145082e056456896640b2d88",
+    "rendered_sha256": "30113481ec47a01ef515b8e55b18abeac546b8270e0d880d6d4cbfa1f5a3ba54",
+    "changes": []
+  },
+  {
+    "id": "6.1",
+    "title": "6.1 The compile function `[A §6.1 + C §6.2 + B §7.2]`",
+    "original_start_line": 817,
+    "original_end_line": 843,
+    "file": "docs/context/compiler.md",
+    "anchor": "sec-6-1",
+    "original_sha256": "45b20f10b38812ba2e605a010a6238429628a13dd8b98cdcf8dfeb5b1fe428fe",
+    "corrected_sha256": "6ab2116473ce005d7808b6f02403b8404f153daf16e19bd5a9c42d2e3a72fa15",
+    "rendered_sha256": "4d68065e950b8240ad0da0806d3022b426b4deb5636348f0b53817856a4f5520",
+    "changes": [
+      "F06"
+    ]
+  },
+  {
+    "id": "6.2",
+    "title": "6.2 What carries forward across cells `[FROM-A §6.2]`",
+    "original_start_line": 844,
+    "original_end_line": 857,
+    "file": "docs/context/continuity.md",
+    "anchor": "sec-6-2",
+    "original_sha256": "dc4d7f646e67da2e32458601d0351b042b94a9e14e857fc14fa4f37b617f1ec5",
+    "corrected_sha256": "dc4d7f646e67da2e32458601d0351b042b94a9e14e857fc14fa4f37b617f1ec5",
+    "rendered_sha256": "962551db3e48e649bbd3c27dfb88fce7e80419df13147677244a54ebbe134697",
+    "changes": []
+  },
+  {
+    "id": "6.3",
+    "title": "6.3 KB injection ranking and focus notes `[A §6.3 + C §6.3 + IM §8.3]`",
+    "original_start_line": 858,
+    "original_end_line": 861,
+    "file": "docs/context/continuity.md",
+    "anchor": "sec-6-3",
+    "original_sha256": "b67c44dfcce8ba2d671a8d64f00e1446d02d9140fddb6b78c912086503a1156c",
+    "corrected_sha256": "b67c44dfcce8ba2d671a8d64f00e1446d02d9140fddb6b78c912086503a1156c",
+    "rendered_sha256": "7b03ace3a98519d8d770b00736b576082c1d5b446bba843b98af1227964bc431",
+    "changes": []
+  },
+  {
+    "id": "6.4",
+    "title": "6.4 Cross-cell fact coherence `[A §6.4 — now a case of §4.4]`",
+    "original_start_line": 862,
+    "original_end_line": 865,
+    "file": "docs/context/continuity.md",
+    "anchor": "sec-6-4",
+    "original_sha256": "b93ef9873fc4782b8173afd24a59e6fc691f6a86bd65149eb16a095b1cd8460f",
+    "corrected_sha256": "21c2d365acbd0ba77781865cbd744fde9add55ac3e5c417b6b50e73618999646",
+    "rendered_sha256": "51c726842d0ebb83dbf5d6dc1b53775edee51426f5bd12cfbebf7c9474dcd8cb",
+    "changes": [
+      "F08"
+    ]
+  },
+  {
+    "id": "6.5",
+    "title": "6.5 Manifest `[A §6.5; MB §4.7; B §7.6]`",
+    "original_start_line": 866,
+    "original_end_line": 869,
+    "file": "docs/context/continuity.md",
+    "anchor": "sec-6-5",
+    "original_sha256": "9628fd724de1c03e24528bcc3e89ed7b68a0553e375e119c4d8ca6039075b9fc",
+    "corrected_sha256": "9628fd724de1c03e24528bcc3e89ed7b68a0553e375e119c4d8ca6039075b9fc",
+    "rendered_sha256": "f34f007d0f9a3d521d78898cec914622b242eab55aee840f9a8d9c48041ca8c4",
+    "changes": []
+  },
+  {
+    "id": "6.6",
+    "title": "6.6 Deterministic boundary pre-compilation `[NEW N4]`",
+    "original_start_line": 870,
+    "original_end_line": 873,
+    "file": "docs/context/continuity.md",
+    "anchor": "sec-6-6",
+    "original_sha256": "7cb30e77f6991aa18e6eebfc04d447f5fd440c9f33c9d61d3a1413c9da7d9a8a",
+    "corrected_sha256": "49496dc0ad9901b9e74fdea7a3fe9301dbfaf3c5ea8ca4536ba3a67e45a464e6",
+    "rendered_sha256": "5ef65aeae423d636b63c3e79a953123d4c021947490173ed6cd48265674fa27a",
+    "changes": [
+      "F06"
+    ]
+  },
+  {
+    "id": "6.7",
+    "title": "6.7 Decomposition calibration prior `[NEW N5]`",
+    "original_start_line": 874,
+    "original_end_line": 879,
+    "file": "docs/context/continuity.md",
+    "anchor": "sec-6-7",
+    "original_sha256": "7c19e6d143f834fad0815154ea1c357d9175e35706d21dd0a6abd5672b114cbc",
+    "corrected_sha256": "7c19e6d143f834fad0815154ea1c357d9175e35706d21dd0a6abd5672b114cbc",
+    "rendered_sha256": "ed016a3eafe0e982e13378c8f514bc1387b2195ccac260afc9583cacf6ec3ec6",
+    "changes": []
+  },
+  {
+    "id": "7",
+    "title": "7. Repository understanding at scale",
+    "original_start_line": 880,
+    "original_end_line": 881,
+    "file": "docs/repository/navigation.md",
+    "anchor": "sec-7",
+    "original_sha256": "f518ef28a3156fe9ed5047bdffc2645470f09dd70bc888c3b5b769b1cf2ba8aa",
+    "corrected_sha256": "f518ef28a3156fe9ed5047bdffc2645470f09dd70bc888c3b5b769b1cf2ba8aa",
+    "rendered_sha256": "a58dd82c3ab8e801706c8f14fcc6d9b7e1a3c7f5fdfb1f8a06768106854fadfa",
+    "changes": []
+  },
+  {
+    "id": "7.1",
+    "title": "7.1 Atlas and prime: harness-built structure without bodies `[A §7.1; C §8.6; C5 §6]`",
+    "original_start_line": 882,
+    "original_end_line": 885,
+    "file": "docs/repository/navigation.md",
+    "anchor": "sec-7-1",
+    "original_sha256": "39b7b61b362a1c5a589aef6669dcae613c69ed30577ea2db4f77ee119d63cc0c",
+    "corrected_sha256": "39b7b61b362a1c5a589aef6669dcae613c69ed30577ea2db4f77ee119d63cc0c",
+    "rendered_sha256": "8b7a3feb33f39eb456ebfbdf45834e7398be8c90410c745b4333479190bbecca",
+    "changes": []
+  },
+  {
+    "id": "7.2",
+    "title": "7.2 Symbol index tiers `[A §7.2; C §8.6; J1 §5.6]`",
+    "original_start_line": 886,
+    "original_end_line": 895,
+    "file": "docs/repository/navigation.md",
+    "anchor": "sec-7-2",
+    "original_sha256": "bedd2ec95bbae092201773cf19913ecf4c7fa61849169a9426fbfbb53791f10d",
+    "corrected_sha256": "bedd2ec95bbae092201773cf19913ecf4c7fa61849169a9426fbfbb53791f10d",
+    "rendered_sha256": "50dd3153a08f1cdc1b57156bb98064e50d34af25bc32e03a7a26a3c5bdc7b01b",
+    "changes": []
+  },
+  {
+    "id": "7.3",
+    "title": "7.3 Import graph and blast radius `[A §7.3; C4 §9; HELM R1]`",
+    "original_start_line": 896,
+    "original_end_line": 899,
+    "file": "docs/repository/navigation.md",
+    "anchor": "sec-7-3",
+    "original_sha256": "ad4aff2d85961a3e21f078f36f1467cc9ba820becb63f8ba3d15e9bf1ea77a6d",
+    "corrected_sha256": "ad4aff2d85961a3e21f078f36f1467cc9ba820becb63f8ba3d15e9bf1ea77a6d",
+    "rendered_sha256": "d599c23e46202cc0687155e1e72d3e20ccde25b2623faeec9360e8d9d4e07ec3",
+    "changes": []
+  },
+  {
+    "id": "7.4",
+    "title": "7.4 Impact engine — one analysis, four consumers `[FROM-C §9.3]`",
+    "original_start_line": 900,
+    "original_end_line": 919,
+    "file": "docs/repository/navigation.md",
+    "anchor": "sec-7-4",
+    "original_sha256": "f94d7804e01c24dd61ca67443281f6d25f89534095e09b7d577d1f5698b1a198",
+    "corrected_sha256": "d943506d3998e17dcdb8fd9da7c33563bc4abef18853b523fffa64c48d429bac",
+    "rendered_sha256": "03d8775fc53612ee2f565fd462354fa331e2e610ab55005046983128869e0277",
+    "changes": [
+      "F04"
+    ]
+  },
+  {
+    "id": "7.5",
+    "title": "7.5 Behaviour-to-code maps `[A §7.4; C §7.5; IM §7.3; RN R02]`",
+    "original_start_line": 920,
+    "original_end_line": 923,
+    "file": "docs/repository/navigation.md",
+    "anchor": "sec-7-5",
+    "original_sha256": "32a8ca49c31b9f772fc9ec57c4ca6b8e7e3d2e3bd1ba0b8c010d18b48553ea5b",
+    "corrected_sha256": "32a8ca49c31b9f772fc9ec57c4ca6b8e7e3d2e3bd1ba0b8c010d18b48553ea5b",
+    "rendered_sha256": "41991b84cd25a69ef4fc6ce701aa48eb8e93b27ede57439d1c3b05d991d19d9b",
+    "changes": []
+  },
+  {
+    "id": "7.6",
+    "title": "7.6 Missing-complement retrieval protocol `[B §6.2 + A §7.5 + IM §7.2; RN R01]`",
+    "original_start_line": 924,
+    "original_end_line": 935,
+    "file": "docs/repository/navigation.md",
+    "anchor": "sec-7-6",
+    "original_sha256": "557c1d3996982343218e4ad6a979c36e92d3bbd6f947c9194de46c97e091f466",
+    "corrected_sha256": "557c1d3996982343218e4ad6a979c36e92d3bbd6f947c9194de46c97e091f466",
+    "rendered_sha256": "ae97f8ede6797ac7b7626c736150b22a660ccc363557ceada0b727505b2c21ab",
+    "changes": []
+  },
+  {
+    "id": "7.7",
+    "title": "7.7 Large-monorepo policy `[A §7.6; IM §7.1]`",
+    "original_start_line": 936,
+    "original_end_line": 940,
+    "file": "docs/repository/navigation.md",
+    "anchor": "sec-7-7",
+    "original_sha256": "04ab7ff5232e95b4ae1333416688305c11c077517d0a39fa34218877fda42f28",
+    "corrected_sha256": "04ab7ff5232e95b4ae1333416688305c11c077517d0a39fa34218877fda42f28",
+    "rendered_sha256": "1953be0a7f735cf3884fe99e099c69579dc0b0f33fbbdebd2c127cdd5dd67934",
+    "changes": []
+  },
+  {
+    "id": "8",
+    "title": "8. Verification and truthful completion",
+    "original_start_line": 941,
+    "original_end_line": 942,
+    "file": "docs/verification/scheduler.md",
+    "anchor": "sec-8",
+    "original_sha256": "d5a4faf2d45e2a8991698c545d6fd05a15cf38b58ab3a65bfbe5066c77f9a734",
+    "corrected_sha256": "d5a4faf2d45e2a8991698c545d6fd05a15cf38b58ab3a65bfbe5066c77f9a734",
+    "rendered_sha256": "9b3f835423621e143fdf63144e689664c213325a3a76b24139e47fecc0912ae9",
+    "changes": []
+  },
+  {
+    "id": "8.1",
+    "title": "8.1 The verification scheduler `[A §8.1 + B §9.2 applicability and reuse proof + C §9.1 layers]`",
+    "original_start_line": 943,
+    "original_end_line": 971,
+    "file": "docs/verification/scheduler.md",
+    "anchor": "sec-8-1",
+    "original_sha256": "37bdd4a9e7f774c587dffed53d05de0f1ee1867dd6b59580ab896a24f588e8a1",
+    "corrected_sha256": "b7a9f68a4a5ea4c8c3b38a9da1cd75799c969a11a7b8002cb4cdad2a3632e276",
+    "rendered_sha256": "64d5c09a12a0a6010e4cd6ff24b31b5132aa619dce75f20c6ec7f67444717398",
+    "changes": [
+      "F04"
+    ]
+  },
+  {
+    "id": "8.2",
+    "title": "8.2 Claim-matched ladder `[MB §9.1; A §8.2; C §9.4; B §9.1]`",
+    "original_start_line": 972,
+    "original_end_line": 984,
+    "file": "docs/verification/scheduler.md",
+    "anchor": "sec-8-2",
+    "original_sha256": "23052e733626fe28359752f6b5154e202f420bc8883a8f755fb7e0e277543737",
+    "corrected_sha256": "23052e733626fe28359752f6b5154e202f420bc8883a8f755fb7e0e277543737",
+    "rendered_sha256": "7f82c4e9f47efe4e4548d6843333140f48fadcfa350a5fc5e8712d323335048a",
+    "changes": []
+  },
+  {
+    "id": "8.3",
+    "title": "8.3 Rendering: delta + absolute `[L2; A §8.3; J1 §5.3]`",
+    "original_start_line": 985,
+    "original_end_line": 995,
+    "file": "docs/verification/scheduler.md",
+    "anchor": "sec-8-3",
+    "original_sha256": "bbd6a9d0cec19bb6f1ae0f13cfecf2cdfe89889d24fd213e68ac0751184a1571",
+    "corrected_sha256": "bbd6a9d0cec19bb6f1ae0f13cfecf2cdfe89889d24fd213e68ac0751184a1571",
+    "rendered_sha256": "63ffa5e46c02aff3b12cb3f9d401f2e904c71f09441d2337297837d236f5188b",
+    "changes": []
+  },
+  {
+    "id": "8.4",
+    "title": "8.4 Stamps, receipts and the status vocabulary `[A §8.4; C §9.2; B §9.2]`",
+    "original_start_line": 996,
+    "original_end_line": 999,
+    "file": "docs/verification/scheduler.md",
+    "anchor": "sec-8-4",
+    "original_sha256": "7a04b4bd4d1dcfa135924fbbb839aa0b5420c3e0029b0e36539bfcdacfe65e2b",
+    "corrected_sha256": "99a4785fd682a4c3efda1bfb5e6014071a1694ce05ddf6b9d9d8e1e5c4173efb",
+    "rendered_sha256": "efeb9c3b781252d6790c90c3be54e1b52664aa325261f7243e9b06169508310e",
+    "changes": [
+      "F04"
+    ]
+  },
+  {
+    "id": "8.5",
+    "title": "8.5 Baseline receipt and pre-existing failures `[A §8.5; C2 → HELM A5]`",
+    "original_start_line": 1000,
+    "original_end_line": 1003,
+    "file": "docs/verification/scheduler.md",
+    "anchor": "sec-8-5",
+    "original_sha256": "3c6ba48ed60375e7366797fc82e4e42b5172d4af12b05162264befdc5bf403ee",
+    "corrected_sha256": "ab9d36d1e95ad3385207ac74582d527276d17860bb8f36bbe7d6b31bfd2d7396",
+    "rendered_sha256": "934c17f99621a649e24814bfda4ffc412897a7057cd77eca74e97d53cd2ef1b3",
+    "changes": [
+      "F04"
+    ]
+  },
+  {
+    "id": "8.6",
+    "title": "8.6 Scope guard and test-integrity guard `[A §8.6 classifier + C §9.7 rendering + B §9.1 original obligation — NEW N6]`",
+    "original_start_line": 1004,
+    "original_end_line": 1008,
+    "file": "docs/verification/acceptance-review.md",
+    "anchor": "sec-8-6",
+    "original_sha256": "06541698e3b5ac32a4e878095870b15b7ceeff87b750f0a065ccafe37ef4a049",
+    "corrected_sha256": "dfe01732ba1ac4fa67783a0e70a6388c93a31f7ab2e3abb4016624473e7f97c5",
+    "rendered_sha256": "11d1b18eb5bb5d623dc2a8795d16c763f4c73f67bae95214ca4671858279c8b1",
+    "changes": [
+      "F01"
+    ]
+  },
+  {
+    "id": "8.7",
+    "title": "8.7 Hard exit gate `[A §8.7; C §9.6; C3 §5]`",
+    "original_start_line": 1009,
+    "original_end_line": 1012,
+    "file": "docs/verification/acceptance-review.md",
+    "anchor": "sec-8-7",
+    "original_sha256": "ac0a69284b6874abf594c19aca4f99e006cee224557b8ba65b90f2e263e83084",
+    "corrected_sha256": "92c9ed3f35fe5403ab790e28197cd81d79f7118e56707e9fc78b3f26cab0cf6d",
+    "rendered_sha256": "8c73bf519b66e592257378c491b39f5c165b94eb7dc71788343cd1859f0ea91f",
+    "changes": [
+      "F01"
+    ]
+  },
+  {
+    "id": "8.8",
+    "title": "8.8 Review cells and the judge protocol — two scopes `[A §8.8 + C §9.5 + B §9.4 — NEW N8]`",
+    "original_start_line": 1013,
+    "original_end_line": 1027,
+    "file": "docs/verification/acceptance-review.md",
+    "anchor": "sec-8-8",
+    "original_sha256": "f17a0ac16167de202006f3acaa630ea91832a9714e082518ff9f5edbf16a1b0e",
+    "corrected_sha256": "b7e21007ce1e4eea90ee013feac7d531aef2108e5fe7c0b7d26467f2524c1e64",
+    "rendered_sha256": "4e27139a375bd9dcd12861f12461988b8d2d50cfe7594dd47c5d7237315f2fea",
+    "changes": [
+      "F01"
+    ]
+  },
+  {
+    "id": "8.9",
+    "title": "8.9 Refactor mode `[A §8.9 + B §6.4 checklist + C fixtures]`",
+    "original_start_line": 1028,
+    "original_end_line": 1038,
+    "file": "docs/verification/refactoring.md",
+    "anchor": "sec-8-9",
+    "original_sha256": "9e5fa6445dca6f6035e3f803a8856aa82156f9064a7dea68252bb73b3c462fd5",
+    "corrected_sha256": "a87db934938b8a5f9d394f3ed524d26f538926290b8d7f3641f1e4bbf94feb26",
+    "rendered_sha256": "bc3b2759a52cc84c0c396a7cd2f1c9695cc7e474a6a0111bca760345f756dc55",
+    "changes": [
+      "F04"
+    ]
+  },
+  {
+    "id": "8.10",
+    "title": "8.10 Flaky checks `[FROM-B §9.3]`",
+    "original_start_line": 1039,
+    "original_end_line": 1044,
+    "file": "docs/verification/refactoring.md",
+    "anchor": "sec-8-10",
+    "original_sha256": "de2f87f5495d197ffe1597abc777400074057bdbaf3de6e19bc74a847e83914a",
+    "corrected_sha256": "de2f87f5495d197ffe1597abc777400074057bdbaf3de6e19bc74a847e83914a",
+    "rendered_sha256": "96c399c7f4e6748e5b6838716bd093efe1bd34180672fccd9ec97bada2014252",
+    "changes": []
+  },
+  {
+    "id": "9",
+    "title": "9. Editing at scale",
+    "original_start_line": 1045,
+    "original_end_line": 1046,
+    "file": "docs/runtime/workspace-editing.md",
+    "anchor": "sec-9",
+    "original_sha256": "67607ae7272577f1102607153f2d50c1816b925517d9c03c0c267dc862ded88e",
+    "corrected_sha256": "67607ae7272577f1102607153f2d50c1816b925517d9c03c0c267dc862ded88e",
+    "rendered_sha256": "f8ece5ba64b3347e121f4a109ebb138608062b486b861238e4c4ba5e8734c98a",
+    "changes": []
+  },
+  {
+    "id": "9.1",
+    "title": "9.1 Anchored compare-and-swap path `[A §9.1; C §8.4; C1 §5.2; C2 §4.2]`",
+    "original_start_line": 1047,
+    "original_end_line": 1050,
+    "file": "docs/runtime/workspace-editing.md",
+    "anchor": "sec-9-1",
+    "original_sha256": "40da42a560b6a7b92e86d4e56cbec583483ce90f23cc08da112e4b3e5783c6fe",
+    "corrected_sha256": "40da42a560b6a7b92e86d4e56cbec583483ce90f23cc08da112e4b3e5783c6fe",
+    "rendered_sha256": "70f704316aab22f48194ae901f56f0c30a264120a7b69536a9879437d99a1f20",
+    "changes": []
+  },
+  {
+    "id": "9.2",
+    "title": "9.2 Scripted transform path `[A §9.2 + B §8.4 + C §8.4 edit.script — MERGED]`",
+    "original_start_line": 1051,
+    "original_end_line": 1062,
+    "file": "docs/runtime/workspace-editing.md",
+    "anchor": "sec-9-2",
+    "original_sha256": "eb81799d69a9ec2498b2664b310bb72a0e0a365aceed6a959db283e7ac153acd",
+    "corrected_sha256": "7546a12694bb1128bcbc68d8bc66d062878e23eccbd90e4d7da7ce287c249cf5",
+    "rendered_sha256": "481e8e6c43fda936f4463df5f56955acf2692a257ad7efd6381169f8f9d3aeaf",
+    "changes": [
+      "F05"
+    ]
+  },
+  {
+    "id": "9.3",
+    "title": "9.3 Reversibility `[A §9.3; C §8.5]`",
+    "original_start_line": 1063,
+    "original_end_line": 1066,
+    "file": "docs/runtime/workspace-editing.md",
+    "anchor": "sec-9-3",
+    "original_sha256": "00f233c571df68545b9d2b3bd00ed3c9897f9c69156e920b867b47ff697c6682",
+    "corrected_sha256": "00f233c571df68545b9d2b3bd00ed3c9897f9c69156e920b867b47ff697c6682",
+    "rendered_sha256": "df0d3ecf7c74b2cc1d56cc95f914067efbf7eaface59aade2f6c5283eb5c6599",
+    "changes": []
+  },
+  {
+    "id": "9.4",
+    "title": "9.4 Formatters, generators and foreign writes `[A §9.4; C §8.3; J1 §8.2]`",
+    "original_start_line": 1067,
+    "original_end_line": 1070,
+    "file": "docs/runtime/workspace-editing.md",
+    "anchor": "sec-9-4",
+    "original_sha256": "ac384a962a0022002ebd0032c37bd092b63340fa2b52f6202f53f736f6d4f489",
+    "corrected_sha256": "d84ddf6c666addfd611a38a34c2d9886467b0d809858ab36fc8d7e1fc5688949",
+    "rendered_sha256": "d0a96021fef912a9146462f5c5d60b64d1625b43bce5ddac24fe8c145ceaf8f6",
+    "changes": [
+      "F11"
+    ]
+  },
+  {
+    "id": "9.5",
+    "title": "9.5 Unsupported mutation kinds `[FROM-B §8.3]`",
+    "original_start_line": 1071,
+    "original_end_line": 1075,
+    "file": "docs/runtime/workspace-editing.md",
+    "anchor": "sec-9-5",
+    "original_sha256": "82da2ef0256e94dc00f0b02f79a7f4262363f165c3ff9b30a8995bc23c1b8a3a",
+    "corrected_sha256": "82da2ef0256e94dc00f0b02f79a7f4262363f165c3ff9b30a8995bc23c1b8a3a",
+    "rendered_sha256": "0d8a5457c6a087b376f9071c36633af9be0303eca0edb8890f0de551ea3dcd04",
+    "changes": []
+  },
+  {
+    "id": "10",
+    "title": "10. Delegation and concurrency",
+    "original_start_line": 1076,
+    "original_end_line": 1077,
+    "file": "docs/operations/delegation.md",
+    "anchor": "sec-10",
+    "original_sha256": "5317acd15c1a4fd338f4930d822cbed3c772018eeb6bb060a387436459413953",
+    "corrected_sha256": "5317acd15c1a4fd338f4930d822cbed3c772018eeb6bb060a387436459413953",
+    "rendered_sha256": "540c42de752ec135dfb0c386f616874abf9bb599441241d165ef15a993634773",
+    "changes": []
+  },
+  {
+    "id": "10.1",
+    "title": "10.1 Worth test `[A §10.1; B §11.2; MB §5.3; IM §10.1]`",
+    "original_start_line": 1078,
+    "original_end_line": 1089,
+    "file": "docs/operations/delegation.md",
+    "anchor": "sec-10-1",
+    "original_sha256": "71bdd699740d0cac4b7ba6f4003d19ab885e0769a6c20beba7e821784207dfef",
+    "corrected_sha256": "00c7d4e25cd072f986e2236e06b5f3b5149d985a8686155c53df1777932332a8",
+    "rendered_sha256": "ffe08fd1cf95cff3b33ab92b1c5d0cc486523b7747dacb33d57f6adaf5e41a15",
+    "changes": [
+      "F09"
+    ]
+  },
+  {
+    "id": "10.2",
+    "title": "10.2 Probe cell (read-only research) `[A §10.2; C investigator]`",
+    "original_start_line": 1090,
+    "original_end_line": 1093,
+    "file": "docs/operations/delegation.md",
+    "anchor": "sec-10-2",
+    "original_sha256": "cfe4fee2637e95b1e5d82de7667544f1f3e90495272c79589f3b02fa24b82a5f",
+    "corrected_sha256": "cfe4fee2637e95b1e5d82de7667544f1f3e90495272c79589f3b02fa24b82a5f",
+    "rendered_sha256": "7e70f2f81b7248f2a7ff5cc64f2ba75ccad2d4ea623baf5725e500be5bb0a9a0",
+    "changes": []
+  },
+  {
+    "id": "10.3",
+    "title": "10.3 Review cells and QA cells",
+    "original_start_line": 1094,
+    "original_end_line": 1097,
+    "file": "docs/operations/delegation.md",
+    "anchor": "sec-10-3",
+    "original_sha256": "0de7d40b201d4d9ff41d3d2aa721a81cfec09538ef71cd108cb1fb5e5643c334",
+    "corrected_sha256": "0de7d40b201d4d9ff41d3d2aa721a81cfec09538ef71cd108cb1fb5e5643c334",
+    "rendered_sha256": "53f09779933ba9a2fd8ad981d55ed1f9bf900747c88f999385a2912ded5ec991",
+    "changes": []
+  },
+  {
+    "id": "10.4",
+    "title": "10.4 Writer cells and the integrator (S3) `[A §10.4; C §11; MB §5.5]`",
+    "original_start_line": 1098,
+    "original_end_line": 1117,
+    "file": "docs/operations/delegation.md",
+    "anchor": "sec-10-4",
+    "original_sha256": "080295b59f3e7a4f03947461c81ddefc88f3caa07647a5b7f2748d9d37ce7e44",
+    "corrected_sha256": "76b2b414189a5fa7add8662491fb5cfa229c6f158778da3526c3d89b4069549f",
+    "rendered_sha256": "aaa2e87544f064169fa33100f8d6eb56f69d5202fe6aaca94e5cf1227ddd638a",
+    "changes": [
+      "F02",
+      "F09"
+    ]
+  },
+  {
+    "id": "11",
+    "title": "11. Model profiles, routing and effort",
+    "original_start_line": 1118,
+    "original_end_line": 1119,
+    "file": "docs/operations/routing.md",
+    "anchor": "sec-11",
+    "original_sha256": "964b8d5c23df4f90a0c4204e8dd083bef028cdca624bc7d44185abd912e3e4ea",
+    "corrected_sha256": "964b8d5c23df4f90a0c4204e8dd083bef028cdca624bc7d44185abd912e3e4ea",
+    "rendered_sha256": "73efec3f6d0ba47a09416330ba7b7c2b4d3d4d3bf1d7f810d35d2b37a404c1f8",
+    "changes": []
+  },
+  {
+    "id": "11.1",
+    "title": "11.1 Function-based routing table `[FROM-A §11.1 + C §10.4 tiers and effort + B §11.3]`",
+    "original_start_line": 1120,
+    "original_end_line": 1137,
+    "file": "docs/operations/routing.md",
+    "anchor": "sec-11-1",
+    "original_sha256": "9705a3de06e6d0e406b70a6e838f8f6c1d189e33835c192cb15767d6d055c96a",
+    "corrected_sha256": "9705a3de06e6d0e406b70a6e838f8f6c1d189e33835c192cb15767d6d055c96a",
+    "rendered_sha256": "edc9dfbe333bafdbebe13d59c784051038fddd5f359d2ef07361d8fac3385bb2",
+    "changes": []
+  },
+  {
+    "id": "11.2",
+    "title": "11.2 Selection policy — eligibility, affordability, refusal `[B §11.3 + C §10.4 + A never-list — NEW N7]`",
+    "original_start_line": 1138,
+    "original_end_line": 1153,
+    "file": "docs/operations/routing.md",
+    "anchor": "sec-11-2",
+    "original_sha256": "60b9786039ea60b5cd8795ad082c1471da84390e1ed0e0f079b2ae26b4360bfa",
+    "corrected_sha256": "59a96acac83a4e82f29164bb287f67e2df35979df2b947486aad03407c7c0839",
+    "rendered_sha256": "b898006196e40407b6594b80e43c3687cc5ed2743acbef70f9796735e3ff465e",
+    "changes": [
+      "F07"
+    ]
+  },
+  {
+    "id": "11.3",
+    "title": "11.3 Escalation ladder `[MB §7.4; A §11.2; C §10.5]`",
+    "original_start_line": 1154,
+    "original_end_line": 1157,
+    "file": "docs/operations/routing.md",
+    "anchor": "sec-11-3",
+    "original_sha256": "0551c2fd863464689a99837e4cbfdba482d9aefc214731dcf41159a9c7c99aa3",
+    "corrected_sha256": "0551c2fd863464689a99837e4cbfdba482d9aefc214731dcf41159a9c7c99aa3",
+    "rendered_sha256": "732b5cc2e72251dea45da1c8499a939d684d5d9f6fb47a1ef5d0dac786af6091",
+    "changes": []
+  },
+  {
+    "id": "11.4",
+    "title": "11.4 Calibration, shadow routing, cache-aware scheduling `[C §10.6, §5.6; MB §7.5]`",
+    "original_start_line": 1158,
+    "original_end_line": 1161,
+    "file": "docs/operations/routing.md",
+    "anchor": "sec-11-4",
+    "original_sha256": "1f88018f6f949c2a8bdf246f27c9b5c56fed4518734c371409c98197bfafb583",
+    "corrected_sha256": "1f88018f6f949c2a8bdf246f27c9b5c56fed4518734c371409c98197bfafb583",
+    "rendered_sha256": "34f877009239a4dc1a23e5979aaaf45c9cd070f5e0deba6e00bd0c1edc6eedc6",
+    "changes": []
+  },
+  {
+    "id": "11.5",
+    "title": "11.5 Economics `[A §11.3; B §12.3; MB §7.6]`",
+    "original_start_line": 1162,
+    "original_end_line": 1167,
+    "file": "docs/operations/routing.md",
+    "anchor": "sec-11-5",
+    "original_sha256": "9367d46b3e735c74ca4f77c2181392b4c74eb01ae4017aceabf08af918b4d0a9",
+    "corrected_sha256": "ef69b1640aa279fc3edbb11373ea9477283f2d2b1d766c2b461e5b852eed0a5c",
+    "rendered_sha256": "a9ca79fe404b1c324ee57fac9ab7075e93e88b43c26d5f26f9eba4f2afab7261",
+    "changes": [
+      "F06"
+    ]
+  },
+  {
+    "id": "12",
+    "title": "12. Learning across cells and sessions",
+    "original_start_line": 1168,
+    "original_end_line": 1169,
+    "file": "docs/knowledge/learning.md",
+    "anchor": "sec-12",
+    "original_sha256": "5633d0a63e0019692908b40fafc4dea71d8bdec7e280468e2dedce0be7ecd0ae",
+    "corrected_sha256": "5633d0a63e0019692908b40fafc4dea71d8bdec7e280468e2dedce0be7ecd0ae",
+    "rendered_sha256": "c005d969f137797cb774c59328b9855df608a719a6f9c57c528b328a7aa29601",
+    "changes": []
+  },
+  {
+    "id": "12.1",
+    "title": "12.1 Pipeline `[A §12.1; C §7.6; MB §10.2; IM §8.2]`",
+    "original_start_line": 1170,
+    "original_end_line": 1173,
+    "file": "docs/knowledge/learning.md",
+    "anchor": "sec-12-1",
+    "original_sha256": "9b93c634ab0c66f389cd233ac2900b9c2f9baf121605b5ac5df1548802fc594f",
+    "corrected_sha256": "9b93c634ab0c66f389cd233ac2900b9c2f9baf121605b5ac5df1548802fc594f",
+    "rendered_sha256": "60892573ce0ee5d78fb785c1fa632243dcd738763aaf070c185b17756e1ae722",
+    "changes": []
+  },
+  {
+    "id": "12.2",
+    "title": "12.2 Rules",
+    "original_start_line": 1174,
+    "original_end_line": 1183,
+    "file": "docs/knowledge/learning.md",
+    "anchor": "sec-12-2",
+    "original_sha256": "edf5a6e7b5f99292a186951c1d407035ce33731ba67c4883ff1bca778af002db",
+    "corrected_sha256": "edf5a6e7b5f99292a186951c1d407035ce33731ba67c4883ff1bca778af002db",
+    "rendered_sha256": "73d4425be8ed7fe0e65f69f6d7ad77ee89f72cd3df903af0d872d79da536f0bb",
+    "changes": []
+  },
+  {
+    "id": "12.3",
+    "title": "12.3 Offline improvement runner `[C §13.7; B §10.5; IM §11; RN R10, R11]`",
+    "original_start_line": 1184,
+    "original_end_line": 1189,
+    "file": "docs/knowledge/learning.md",
+    "anchor": "sec-12-3",
+    "original_sha256": "2c97e94fcb94edf674e109c7d4b994d94c1289d7871a551fc5fc964df563e8a0",
+    "corrected_sha256": "2c97e94fcb94edf674e109c7d4b994d94c1289d7871a551fc5fc964df563e8a0",
+    "rendered_sha256": "ffb1d49552bcd3dc0144040e087a9b4497abbec0573175c582a6644d846dd38d",
+    "changes": []
+  },
+  {
+    "id": "13",
+    "title": "13. Recovery and durability",
+    "original_start_line": 1190,
+    "original_end_line": 1191,
+    "file": "docs/operations/recovery.md",
+    "anchor": "sec-13",
+    "original_sha256": "3358f741b63ff177a8a4b6bd56a0678a66f7a3afd632437b6a51b3a543d83353",
+    "corrected_sha256": "3358f741b63ff177a8a4b6bd56a0678a66f7a3afd632437b6a51b3a543d83353",
+    "rendered_sha256": "a69fdae140f84799dfdc8bf33bafa2be2801a3dac4939b03ee5ad37f42efed1f",
+    "changes": []
+  },
+  {
+    "id": "13.1",
+    "title": "13.1 Reconcile before retry `[A §13.1; B §5.5; C §8.5; IM §4.4]`",
+    "original_start_line": 1192,
+    "original_end_line": 1204,
+    "file": "docs/operations/recovery.md",
+    "anchor": "sec-13-1",
+    "original_sha256": "0783eb1f5f101fa03f58f18aa47ce84357f78cb2fac06d82688e18bb284c171c",
+    "corrected_sha256": "ebe63ea142bf761537065380ec97db486efc6444f4ba2605d6abda9a66675f85",
+    "rendered_sha256": "cb05cf67151ba4b51fff40c2fd0ed6a27097c854632c7b6b035f9c3a64260fee",
+    "changes": [
+      "F09"
+    ]
+  },
+  {
+    "id": "13.2",
+    "title": "13.2 Failure classes → bounded responses `[C §10.1; IM §4.3; B §11.4]`",
+    "original_start_line": 1205,
+    "original_end_line": 1224,
+    "file": "docs/operations/recovery.md",
+    "anchor": "sec-13-2",
+    "original_sha256": "9e14b9c0020ef72054071c7d3c846ec204091d588963cdb440a13c05a783e0b7",
+    "corrected_sha256": "9e14b9c0020ef72054071c7d3c846ec204091d588963cdb440a13c05a783e0b7",
+    "rendered_sha256": "e8c620d7c32d6473b95917640345e8f8b17c51bca3783901eef19b3f21496d35",
+    "changes": []
+  },
+  {
+    "id": "13.3",
+    "title": "13.3 Alternative attempts and refinement `[C §10.3; B §11.1; IM §10.2]`",
+    "original_start_line": 1225,
+    "original_end_line": 1228,
+    "file": "docs/operations/recovery.md",
+    "anchor": "sec-13-3",
+    "original_sha256": "ffe0f1685175d2da3fc24d706030f4d5f8015a469b382fdbeaa764c0f7bc5e7a",
+    "corrected_sha256": "9ec2436a28030bc8dde385aabdbc7a32d3ffbaf51df24a8cbe2bcd75d345b054",
+    "rendered_sha256": "9e714c599b926fee8d28704f89b302a45a6e50161931ea9358a6cc844bffdc68",
+    "changes": [
+      "F07"
+    ]
+  },
+  {
+    "id": "13.4",
+    "title": "13.4 Resume protocol `[A §13.3; C §13.4; IM §4.4]`",
+    "original_start_line": 1229,
+    "original_end_line": 1234,
+    "file": "docs/operations/recovery.md",
+    "anchor": "sec-13-4",
+    "original_sha256": "09bf6796482688a2a3c8885cf939edbc344c577384e1f57fa84367838fd665f2",
+    "corrected_sha256": "09bf6796482688a2a3c8885cf939edbc344c577384e1f57fa84367838fd665f2",
+    "rendered_sha256": "3cd76fae0b2979bb50a1dad484cb1edc50a38485c2821a12fa7dd9d78f4933ee",
+    "changes": []
+  },
+  {
+    "id": "14",
+    "title": "14. Safety and integrity",
+    "original_start_line": 1235,
+    "original_end_line": 1236,
+    "file": "docs/platform/security.md",
+    "anchor": "sec-14",
+    "original_sha256": "b330c697bc0ad55152c98a87cceb415026cf54b3a4c65aaa3489a2750f936c7a",
+    "corrected_sha256": "b330c697bc0ad55152c98a87cceb415026cf54b3a4c65aaa3489a2750f936c7a",
+    "rendered_sha256": "56e608def311e042b40271ef3891168676891702fc50c3040ae2364b081532fc",
+    "changes": []
+  },
+  {
+    "id": "14.1",
+    "title": "14.1 Execution modes and effect classes `[C §8.5; A §14.1; J1 §5.7]`",
+    "original_start_line": 1237,
+    "original_end_line": 1240,
+    "file": "docs/platform/security.md",
+    "anchor": "sec-14-1",
+    "original_sha256": "86cd2f0d346fd75134c7b1746a6f9d31042233eeed5c45cf1490541e16d8faa3",
+    "corrected_sha256": "86cd2f0d346fd75134c7b1746a6f9d31042233eeed5c45cf1490541e16d8faa3",
+    "rendered_sha256": "3e367c22d41025918c003d765ee524bcc9a58efc861c4dde016e065df339f23f",
+    "changes": []
+  },
+  {
+    "id": "14.2",
+    "title": "14.2 Permission ladder and human anchors `[MB §9.4; A §14.2; C §5.4]`",
+    "original_start_line": 1241,
+    "original_end_line": 1244,
+    "file": "docs/platform/security.md",
+    "anchor": "sec-14-2",
+    "original_sha256": "83be271fa56007e5680ae51832329f4eb645fe9faa238e0da022d6dee8990750",
+    "corrected_sha256": "83be271fa56007e5680ae51832329f4eb645fe9faa238e0da022d6dee8990750",
+    "rendered_sha256": "f1f0a8d5e3d0a883469e1be63fa1db2c5234ecb74620319975a67d63ded02ba6",
+    "changes": []
+  },
+  {
+    "id": "14.3",
+    "title": "14.3 Instruction / data boundary `[HELM §7.8, A7; MB §12; A §14.3; C §12.4]`",
+    "original_start_line": 1245,
+    "original_end_line": 1248,
+    "file": "docs/platform/security.md",
+    "anchor": "sec-14-3",
+    "original_sha256": "e3e1e759dca7b7fc4dba295a7630bacdae227b771c31729e1e839f9b32eb9485",
+    "corrected_sha256": "548e81a686532184994c2b54a6059f19ac8fb542a44756841381e691780ef667",
+    "rendered_sha256": "a8d6bd4d1e3ce624e903c7adb04f6c2156a5d4d6fc16a87bedb463c90db474cd",
+    "changes": [
+      "F11"
+    ]
+  },
+  {
+    "id": "14.4",
+    "title": "14.4 Threat table `[MB §12; A §14.4; C §12.4]`",
+    "original_start_line": 1249,
+    "original_end_line": 1265,
+    "file": "docs/platform/security.md",
+    "anchor": "sec-14-4",
+    "original_sha256": "23576b7a405cc97e1f1a34dc07b68d91e3c54e49a6cfab74c9897c4f63c247ac",
+    "corrected_sha256": "23576b7a405cc97e1f1a34dc07b68d91e3c54e49a6cfab74c9897c4f63c247ac",
+    "rendered_sha256": "7c6aae008978f94cca6f64f47a27372ddc88c1bb4dd5093d7a5f44d0bf7e1500",
+    "changes": []
+  },
+  {
+    "id": "15",
+    "title": "15. Platform: adapters, accounting, MCP, observability",
+    "original_start_line": 1266,
+    "original_end_line": 1267,
+    "file": "docs/platform/adapters.md",
+    "anchor": "sec-15",
+    "original_sha256": "ff8e9cd166541c44e89f5cb698c9277b76dd3c9e833969a66f08db2388136fa2",
+    "corrected_sha256": "ff8e9cd166541c44e89f5cb698c9277b76dd3c9e833969a66f08db2388136fa2",
+    "rendered_sha256": "e022b6ba481ee6b9f37dbcd5db29367881ce57d07861e8fa4057fda0eedd4c94",
+    "changes": []
+  },
+  {
+    "id": "15.1",
+    "title": "15.1 Provider adapters `[MB §11; B §12.1–12.2; C §12.1]`",
+    "original_start_line": 1268,
+    "original_end_line": 1271,
+    "file": "docs/platform/adapters.md",
+    "anchor": "sec-15-1",
+    "original_sha256": "81ba7d7a66642ea4f0f55d42c930c904395a3c0213c499dacf41bce278d302ca",
+    "corrected_sha256": "527f7bd030717be1a7adf6c03254dc9e44bacc2bdd4b518814f8fe83a89c7b7e",
+    "rendered_sha256": "80fd779ee7929acb915f169bc810f780e719201f05604692ce111ce3dce1db5a",
+    "changes": [
+      "F03"
+    ]
+  },
+  {
+    "id": "15.2",
+    "title": "15.2 Accounting without double counting `[FROM-B §12.3]`",
+    "original_start_line": 1272,
+    "original_end_line": 1275,
+    "file": "docs/platform/adapters.md",
+    "anchor": "sec-15-2",
+    "original_sha256": "3e1f8729ed710f37b89938a85e5c0e59913cf6ad31faf0941b3dcb00c1972094",
+    "corrected_sha256": "f9d9ac94053e4feb4dba1cf648e6946c5fce6b90cbf81e207906771bf9ae66ec",
+    "rendered_sha256": "ff520c87faa2630e203878fe4210e7485ddbb256156fb18b258519fddfe32dca",
+    "changes": [
+      "F10"
+    ]
+  },
+  {
+    "id": "15.3",
+    "title": "15.3 MCP mounts and external capabilities `[C §12.3; MB §8.6; QA §4.6]`",
+    "original_start_line": 1276,
+    "original_end_line": 1279,
+    "file": "docs/platform/adapters.md",
+    "anchor": "sec-15-3",
+    "original_sha256": "26827846f4fc265c567026bf30899fe6c3b73cdbb096dcca191bb648b813289d",
+    "corrected_sha256": "4753a8a15d5047f6bda6d6d8df86bbc45cbbec73011cad2c1c0d6fc7d9188d04",
+    "rendered_sha256": "cafda45d681d62db774ef6d1bbcd6e151bec502c83af7c52dab66ff90404bec5",
+    "changes": [
+      "F11"
+    ]
+  },
+  {
+    "id": "15.4",
+    "title": "15.4 Adapter acceptance fixtures `[FROM-B §12.4]`",
+    "original_start_line": 1280,
+    "original_end_line": 1283,
+    "file": "docs/platform/adapters.md",
+    "anchor": "sec-15-4",
+    "original_sha256": "40f644b4c24d00f9a2f34d932e49c329d633a5838ae7768cb23cc852ddcd2d80",
+    "corrected_sha256": "40f644b4c24d00f9a2f34d932e49c329d633a5838ae7768cb23cc852ddcd2d80",
+    "rendered_sha256": "a524b1bc66dd64a88173742a936d14759435c283d65fbf724c3907be27758f06",
+    "changes": []
+  },
+  {
+    "id": "15.5",
+    "title": "15.5 Observability `[A §15; C §12.5; MB §13; B §15.4]`",
+    "original_start_line": 1284,
+    "original_end_line": 1288,
+    "file": "docs/platform/adapters.md",
+    "anchor": "sec-15-5",
+    "original_sha256": "7b677552828e7ccfabbcaceaa02e02da9e2bbe5f6907e2faa8291adc66e0da6e",
+    "corrected_sha256": "7b677552828e7ccfabbcaceaa02e02da9e2bbe5f6907e2faa8291adc66e0da6e",
+    "rendered_sha256": "2721e99bbeefe53224451c86856d45c107e29013a859173ac4d60e8da5766c8d",
+    "changes": []
+  },
+  {
+    "id": "16",
+    "title": "16. Token and session economy",
+    "original_start_line": 1289,
+    "original_end_line": 1290,
+    "file": "docs/economics/costs.md",
+    "anchor": "sec-16",
+    "original_sha256": "b3df69807ad91d7fd66d5fedeb8955ee619c6fe8f06932ea5df1a39032698785",
+    "corrected_sha256": "b3df69807ad91d7fd66d5fedeb8955ee619c6fe8f06932ea5df1a39032698785",
+    "rendered_sha256": "708391b32e569164877649234a26a2896129625b9a768f6f34064d074e836373",
+    "changes": []
+  },
+  {
+    "id": "16.1",
+    "title": "16.1 Mechanism → saving map `[A §16.1 extended]`",
+    "original_start_line": 1291,
+    "original_end_line": 1316,
+    "file": "docs/economics/costs.md",
+    "anchor": "sec-16-1",
+    "original_sha256": "b4098fbca84b57402546a2d430aaaf420bc7aa57fc02c69ce1130b0354efac82",
+    "corrected_sha256": "6d98c0fd2bf419187d02b23cf906c2ec1c35dad483ad83e7f06a2fb04527a4b9",
+    "rendered_sha256": "ca1794b43d0c09e41192493678b596a6d29542a326712fa6abb2395d4516ee2a",
+    "changes": [
+      "F06"
+    ]
+  },
+  {
+    "id": "16.2",
+    "title": "16.2 Cache-reuse arithmetic as a design constraint `[FROM-B §7.5 — the analytic core, restated]`",
+    "original_start_line": 1317,
+    "original_end_line": 1324,
+    "file": "docs/economics/costs.md",
+    "anchor": "sec-16-2",
+    "original_sha256": "697724b8571d1c8aefc2be7c9d7dfe7a89ce56138f3d5694b733d18fd214c29f",
+    "corrected_sha256": "ee5d8168acd6481ab1d593bd703a3eb620a5616afbdb486335c5251009639611",
+    "rendered_sha256": "2a757cdd2f0038765c6aa0024311d5c0de606d2bac5adbfa005783c74386875e",
+    "changes": [
+      "F06"
+    ]
+  },
+  {
+    "id": "16.3",
+    "title": "16.3 Compaction triggers as tuning rules `[FROM-B §7.4; IM §6.5]`",
+    "original_start_line": 1325,
+    "original_end_line": 1334,
+    "file": "docs/economics/costs.md",
+    "anchor": "sec-16-3",
+    "original_sha256": "029cb8e5cfcd7be04a7735671008d509e880cccd06903a431649a284ee7ba26e",
+    "corrected_sha256": "029cb8e5cfcd7be04a7735671008d509e880cccd06903a431649a284ee7ba26e",
+    "rendered_sha256": "8e1d09bb162e9e1e70a7b30cf54df317099a919e47ba173787aeca0f9d21d9a3",
+    "changes": []
+  },
+  {
+    "id": "16.4",
+    "title": "16.4 Session efficiency and output discipline `[A §16.2, §16.4; C §6.8]`",
+    "original_start_line": 1335,
+    "original_end_line": 1340,
+    "file": "docs/economics/costs.md",
+    "anchor": "sec-16-4",
+    "original_sha256": "437badc09cf3d9498602f2c1fb0941be70c20e9e3a2a88e512d3dfa3bb760e34",
+    "corrected_sha256": "3dfefd3229ab7049a4c36afdec617fc234422d10e96be280301d4424f13cfd6d",
+    "rendered_sha256": "3c6a28e0f7f39b9495f81c03553716f0d814daf8148b85b030bcaae0b959ae9c",
+    "changes": [
+      "F06"
+    ]
+  },
+  {
+    "id": "17",
+    "title": "17. Defaults",
+    "original_start_line": 1341,
+    "original_end_line": 1374,
+    "file": "docs/reference/defaults.md",
+    "anchor": "sec-17",
+    "original_sha256": "0a8224345d13735e6ce202f1ea4a3472da88302caae8d995564f123ca843d5fa",
+    "corrected_sha256": "2b1cd818b7af3b0e09bead0b84533c30aed17eaf155251eb98b55d40401398e1",
+    "rendered_sha256": "ae751d293465096621599d131fc243fe11b5ba9f7ec18a883edf0c7e428bdcbe",
+    "changes": [
+      "F03",
+      "F04",
+      "F07",
+      "F08"
+    ]
+  },
+  {
+    "id": "18",
+    "title": "18. Implementation plan",
+    "original_start_line": 1375,
+    "original_end_line": 1376,
+    "file": "docs/implementation/roadmap.md",
+    "anchor": "sec-18",
+    "original_sha256": "6dd7cb20509626d3458f8f68532fe9ec3773c57a395c507b6f2ddda4226eade4",
+    "corrected_sha256": "6dd7cb20509626d3458f8f68532fe9ec3773c57a395c507b6f2ddda4226eade4",
+    "rendered_sha256": "11aae9eefbe635ea252358dd447276f0a656ec4dea8a855c0c0a5efc2da390ce",
+    "changes": []
+  },
+  {
+    "id": "18.1",
+    "title": "18.1 Modules and honest size `[A §18.1; C §15.1; J1 §7.6 and QA §4.5 warn against \"weekend-scale\" claims — ESTIMATE]`",
+    "original_start_line": 1377,
+    "original_end_line": 1403,
+    "file": "docs/implementation/roadmap.md",
+    "anchor": "sec-18-1",
+    "original_sha256": "54c94d55f30e67276a4a85931a51ba66e31b35d3c30533a9346c415ead4365fd",
+    "corrected_sha256": "54c94d55f30e67276a4a85931a51ba66e31b35d3c30533a9346c415ead4365fd",
+    "rendered_sha256": "e953f43b4e20dfe9bfed7a0e63e98e4ab1e7475a1af1879a633112953b7709c0",
+    "changes": []
+  },
+  {
+    "id": "18.2",
+    "title": "18.2 Stages and exit gates `[A §18.2; C §15.2; B §16; IM §14]`",
+    "original_start_line": 1404,
+    "original_end_line": 1417,
+    "file": "docs/implementation/roadmap.md",
+    "anchor": "sec-18-2",
+    "original_sha256": "ca40a358b945c806f8bab24fd4e41b5e4d238ba834e46a9480543b66947d3c90",
+    "corrected_sha256": "29928600870fb3c2c400b12ec47ad7f11ae0f1a6b401b402e7ed2acf2c98d932",
+    "rendered_sha256": "89742a5466877c5a8bd8e84f1e83cafb12aaab3dcd1027988d5ea662e3f07e5d",
+    "changes": [
+      "F10"
+    ]
+  },
+  {
+    "id": "19",
+    "title": "19. Evaluation and falsifiability",
+    "original_start_line": 1418,
+    "original_end_line": 1419,
+    "file": "docs/evaluation/method.md",
+    "anchor": "sec-19",
+    "original_sha256": "b9f993bb689e7d3549409bb32f003789564764012715a1341018e75fd450fa98",
+    "corrected_sha256": "b9f993bb689e7d3549409bb32f003789564764012715a1341018e75fd450fa98",
+    "rendered_sha256": "6eaa7f47b1bc54da91937f8bbc1cc1890c44203b90efe21261869ecac5bf9432",
+    "changes": []
+  },
+  {
+    "id": "19.1",
+    "title": "19.1 Three different things to validate, and the comparators `[B §15.1, §15.3; A §19.1; C §16.2]`",
+    "original_start_line": 1420,
+    "original_end_line": 1438,
+    "file": "docs/evaluation/method.md",
+    "anchor": "sec-19-1",
+    "original_sha256": "85d2021b9ac46e6414f1e8fd4ad91659585557eb056afc87f3a8e124f9bf3820",
+    "corrected_sha256": "85d2021b9ac46e6414f1e8fd4ad91659585557eb056afc87f3a8e124f9bf3820",
+    "rendered_sha256": "63fde321f1f59a465dce37bf42f29723fd24b829a8d1cc6533194b702e5da5d2",
+    "changes": []
+  },
+  {
+    "id": "19.2",
+    "title": "19.2 Workload and evaluation integrity `[B §15.2; A §19.2; C §16.3; IM §13.1]`",
+    "original_start_line": 1439,
+    "original_end_line": 1444,
+    "file": "docs/evaluation/method.md",
+    "anchor": "sec-19-2",
+    "original_sha256": "35852fc5506088b0c1ad21d55570ea6094b647559f1564d5fba38bd1ecb06990",
+    "corrected_sha256": "35852fc5506088b0c1ad21d55570ea6094b647559f1564d5fba38bd1ecb06990",
+    "rendered_sha256": "d76f87f3ab19bbaad44b6794a2aeede203c8b2d28bb57131f377543f148e4f81",
+    "changes": []
+  },
+  {
+    "id": "19.3",
+    "title": "19.3 Adversarial acceptance cases — harness tests `[J1 §8.2 ∪ MB §15.2 ∪ A §19.3 ∪ B §15.6 ∪ C §16.4, deduplicated]`",
+    "original_start_line": 1445,
+    "original_end_line": 1498,
+    "file": "docs/evaluation/fixtures.md",
+    "anchor": "sec-19-3",
+    "original_sha256": "2994a5c0ca68614e32a0e10b7ae1dbe5def4a09ac4f16b4b4f29d34230ec9440",
+    "corrected_sha256": "5b7c317cced41f9519ab531fbb8ea6813f8c08456edae4edaee20e78837df80f",
+    "rendered_sha256": "cd65ba7b063252a463896034b0dfdd73914ff15ff4c1580774f6a0c31b9e2ce8",
+    "changes": [
+      "F05",
+      "F06",
+      "F08",
+      "F09",
+      "F10"
+    ]
+  },
+  {
+    "id": "19.4",
+    "title": "19.4 Metrics and the predeclared score `[B §15.4; A §19.4; C §16.3; IM §13.3]`",
+    "original_start_line": 1499,
+    "original_end_line": 1511,
+    "file": "docs/evaluation/method.md",
+    "anchor": "sec-19-4",
+    "original_sha256": "d2c9666bc489a9c01817d6cd6091ab173cd7a2b33ca5985c7aa4f93f8833efbc",
+    "corrected_sha256": "8ecaf366b0ec4d2f5db572beb80caadb0c0298060abe79bf4aaf5e6f55f686cf",
+    "rendered_sha256": "f106bcfaecdfdbe63aa574a3ffe6ae4f9dd54c923fdea02fa6791a2af409b534",
+    "changes": [
+      "F05",
+      "F10"
+    ]
+  },
+  {
+    "id": "19.5",
+    "title": "19.5 Ablations (one at a time, model constant) `[A §19.5 ∪ C §16.5 ∪ B §15.3]`",
+    "original_start_line": 1512,
+    "original_end_line": 1515,
+    "file": "docs/evaluation/method.md",
+    "anchor": "sec-19-5",
+    "original_sha256": "18ef39087460cec41c67fba0eb541cf9622a0789c632310ea4f6971e99686100",
+    "corrected_sha256": "18ef39087460cec41c67fba0eb541cf9622a0789c632310ea4f6971e99686100",
+    "rendered_sha256": "5d7ea6be259c29500498ae10819f68ac12ce880a0f1152010d7ae972ba885934",
+    "changes": []
+  },
+  {
+    "id": "19.6",
+    "title": "19.6 Promotion policy and what would falsify the central claims `[B §15.5; MB §16.6; A §19.6; C §16.6]`",
+    "original_start_line": 1516,
+    "original_end_line": 1523,
+    "file": "docs/evaluation/method.md",
+    "anchor": "sec-19-6",
+    "original_sha256": "686a83ee3c282f0e35ed9e6fbe1eb9cb5e794e965a94152c4072d286c87dfb16",
+    "corrected_sha256": "686a83ee3c282f0e35ed9e6fbe1eb9cb5e794e965a94152c4072d286c87dfb16",
+    "rendered_sha256": "e24f4cd256414f55bbaea9ef65bc04bce53d0308e10381065f813771c49b4e9a",
+    "changes": []
+  },
+  {
+    "id": "20",
+    "title": "20. Deliberately not adopted, and the A/B/C disagreement ledger",
+    "original_start_line": 1524,
+    "original_end_line": 1525,
+    "file": "docs/reference/decisions.md",
+    "anchor": "sec-20",
+    "original_sha256": "48aef33c440d20bf1372b203ff2f44608575e9964f45a92670285fcef63f0498",
+    "corrected_sha256": "48aef33c440d20bf1372b203ff2f44608575e9964f45a92670285fcef63f0498",
+    "rendered_sha256": "0a5ae918b00b078da25353e00c2522e6539e0e3d842e781a6bdf49823e5cc069",
+    "changes": []
+  },
+  {
+    "id": "20.1",
+    "title": "20.1 Not adopted from the sources `[A §20 ∪ C §17 ∪ B §14, condensed]`",
+    "original_start_line": 1526,
+    "original_end_line": 1538,
+    "file": "docs/reference/decisions.md",
+    "anchor": "sec-20-1",
+    "original_sha256": "cc6b31692b6aefc94e8eea71d656eeb664be8097b024e245a7051766fb56f982",
+    "corrected_sha256": "cc6b31692b6aefc94e8eea71d656eeb664be8097b024e245a7051766fb56f982",
+    "rendered_sha256": "b7643e7648bf53ab9ea00430927ddea4996041e521f71cf922f9549412f38e66",
+    "changes": []
+  },
+  {
+    "id": "20.2",
+    "title": "20.2 The A/B/C disagreement ledger `[NEW N10]`",
+    "original_start_line": 1539,
+    "original_end_line": 1563,
+    "file": "docs/reference/decisions.md",
+    "anchor": "sec-20-2",
+    "original_sha256": "b91added91d60c75250c7de01196753bf3f5ceef0f4d71105e77cba150465fae",
+    "corrected_sha256": "622de5ea616f4309010378863a4eb3dac99d9f1a27d13d6ae2310395468ed85b",
+    "rendered_sha256": "0362bdb962f3bd54c57783116135844bf5120fcb13f70ad6498d267d401a4b12",
+    "changes": [
+      "F05",
+      "F08",
+      "F10",
+      "F12"
+    ]
+  },
+  {
+    "id": "21",
+    "title": "21. Open questions and risks `[A §21 ∪ C §19 ∪ B §17, with reversal criteria]`",
+    "original_start_line": 1564,
+    "original_end_line": 1589,
+    "file": "docs/reference/risks.md",
+    "anchor": "sec-21",
+    "original_sha256": "8e22bf27014c7374ad3cca2d4091e67ef3c93d1dbd39a747275204e7fa6a7757",
+    "corrected_sha256": "8e22bf27014c7374ad3cca2d4091e67ef3c93d1dbd39a747275204e7fa6a7757",
+    "rendered_sha256": "1e8d969dfded88854508340cf05d4a0ab825fe55d00d67c96a883f5ab40a3d9a",
+    "changes": []
+  },
+  {
+    "id": "22",
+    "title": "22. Critical evaluation of the three candidates",
+    "original_start_line": 1590,
+    "original_end_line": 1591,
+    "file": "docs/reference/candidate-review.md",
+    "anchor": "sec-22",
+    "original_sha256": "e28bf48c5fd0c51daff1f7c9f699b6a118855fb54b18a0e741a7b01d6daba00f",
+    "corrected_sha256": "e28bf48c5fd0c51daff1f7c9f699b6a118855fb54b18a0e741a7b01d6daba00f",
+    "rendered_sha256": "b73a432ca0576344606a5343606b0d343e835bad7c6404b1dafb26e01b77e109",
+    "changes": []
+  },
+  {
+    "id": "22.1",
+    "title": "22.1 Rubric and scores",
+    "original_start_line": 1592,
+    "original_end_line": 1604,
+    "file": "docs/reference/candidate-review.md",
+    "anchor": "sec-22-1",
+    "original_sha256": "60cf9332fbf56761eff472fbaea334cb879e4b665803571f874d563a4dd19a8d",
+    "corrected_sha256": "df505ee41c82fd2b3480c7628546f72b097e77565e83c05ef5ea6eb6b982459f",
+    "rendered_sha256": "86630f2610a74ab3f9d03b6c0ff8e5bc0816e5a777bcbfe0308044aba5305d6d",
+    "changes": [
+      "F12"
+    ]
+  },
+  {
+    "id": "22.2",
+    "title": "22.2 A — WAYPOINT: why it is the baseline",
+    "original_start_line": 1605,
+    "original_end_line": 1610,
+    "file": "docs/reference/candidate-review.md",
+    "anchor": "sec-22-2",
+    "original_sha256": "29449fc5a3e997cc7134e9b2b44c23f87f37cf8cbf4fc2a47209ed01b0253218",
+    "corrected_sha256": "29449fc5a3e997cc7134e9b2b44c23f87f37cf8cbf4fc2a47209ed01b0253218",
+    "rendered_sha256": "fdce584037178143ebae1699bb40802615a36ae004896a0145d6088d8a9ae24c",
+    "changes": []
+  },
+  {
+    "id": "22.3",
+    "title": "22.3 B — the evidence-guided runtime: why it is the analytical donor and not the baseline",
+    "original_start_line": 1611,
+    "original_end_line": 1616,
+    "file": "docs/reference/candidate-review.md",
+    "anchor": "sec-22-3",
+    "original_sha256": "d1a2ecf73767f6a9518f25ffc254b2cdfb15c79c48733ccc832251fa3a3a73c3",
+    "corrected_sha256": "85af1db9821b956a3512a2626a3c7df55b2142c4011ed2fab34d27187ecd59b9",
+    "rendered_sha256": "bcbdb868f8c0297241b1c520aa3a4ed6b6acc892f913d175fe153e8145be0bb5",
+    "changes": [
+      "F12"
+    ]
+  },
+  {
+    "id": "22.4",
+    "title": "22.4 C — SEXTANT: why it is the specification donor and a near tie",
+    "original_start_line": 1617,
+    "original_end_line": 1622,
+    "file": "docs/reference/candidate-review.md",
+    "anchor": "sec-22-4",
+    "original_sha256": "ca6af60fb484cac53224fb73970136c5037408d25b6d71c8aaca8c8541447fe0",
+    "corrected_sha256": "ca6af60fb484cac53224fb73970136c5037408d25b6d71c8aaca8c8541447fe0",
+    "rendered_sha256": "d2488779b64bb4e0f133faefc0471210cfd41edeba338f5eebfed1b3c6251c76",
+    "changes": []
+  },
+  {
+    "id": "22.5",
+    "title": "22.5 Faithfulness to the sources and shared blind spots",
+    "original_start_line": 1623,
+    "original_end_line": 1628,
+    "file": "docs/reference/candidate-review.md",
+    "anchor": "sec-22-5",
+    "original_sha256": "649175ae4213f9e352d684ad8096e7c67e1e6e74836d5524aa840eaee9283daf",
+    "corrected_sha256": "649175ae4213f9e352d684ad8096e7c67e1e6e74836d5524aa840eaee9283daf",
+    "rendered_sha256": "d72d0ca5aa5d1523cf93aeb5afa74acc3ee21ff83818e9cdb81abe39a7f78479",
+    "changes": []
+  },
+  {
+    "id": "22.6",
+    "title": "22.6 Why the ranking could flip, honestly",
+    "original_start_line": 1629,
+    "original_end_line": 1634,
+    "file": "docs/reference/candidate-review.md",
+    "anchor": "sec-22-6",
+    "original_sha256": "b6f87c99fecb9fd9c46e80332796280c50af7e81fdec832fb60d7a0c41aa96f5",
+    "corrected_sha256": "b6f87c99fecb9fd9c46e80332796280c50af7e81fdec832fb60d7a0c41aa96f5",
+    "rendered_sha256": "650431f099ee82047ea73e7b2419377610da89cb84facd028ef394820d4de798",
+    "changes": []
+  },
+  {
+    "id": "23",
+    "title": "23. Traceability and glossary",
+    "original_start_line": 1635,
+    "original_end_line": 1636,
+    "file": "docs/reference/traceability.md",
+    "anchor": "sec-23",
+    "original_sha256": "865a4411c381bd3d82bec3b2663eed6215ef90865ed1b2620ee3068ca0631c00",
+    "corrected_sha256": "865a4411c381bd3d82bec3b2663eed6215ef90865ed1b2620ee3068ca0631c00",
+    "rendered_sha256": "014fdc15b4542f97549bee299c128f199defc634acd388316f7378371f4b1ed0",
+    "changes": []
+  },
+  {
+    "id": "23.1",
+    "title": "23.1 Mechanism → candidate → source",
+    "original_start_line": 1637,
+    "original_end_line": 1666,
+    "file": "docs/reference/traceability.md",
+    "anchor": "sec-23-1",
+    "original_sha256": "503dd936eb80c24a03bf8491e698fb8fd8a3e4ebf2dfcc4405bf70b392bc88b5",
+    "corrected_sha256": "503dd936eb80c24a03bf8491e698fb8fd8a3e4ebf2dfcc4405bf70b392bc88b5",
+    "rendered_sha256": "2e088ef9586791f6060b71fcdd28fbaecc5c43b1bd99c36d8ffc54ea7007bf19",
+    "changes": []
+  },
+  {
+    "id": "23.2",
+    "title": "23.2 Glossary",
+    "original_start_line": 1667,
+    "original_end_line": 1701,
+    "file": "docs/reference/glossary.md",
+    "anchor": "sec-23-2",
+    "original_sha256": "03e21f62c42ab46f781d4f453abf2165438035bf5699560a920604078ae0287a",
+    "corrected_sha256": "03e21f62c42ab46f781d4f453abf2165438035bf5699560a920604078ae0287a",
+    "rendered_sha256": "db37293f6313d22d60d576fad91cecf1135572675860743133c00e4d7622f051",
+    "changes": []
+  },
+  {
+    "id": "appendix-a",
+    "title": "Appendix A. Kernel contract (`[S]`, implementing cell, ~1.1K tokens; the lines the structure cannot say) `[C Appendix B, amended]`",
+    "original_start_line": 1702,
+    "original_end_line": 1721,
+    "file": "docs/reference/kernel-contract.md",
+    "anchor": "sec-appendix-a",
+    "original_sha256": "cd7f5158085cf17c4124bf2dabb0096bae2e901e59c17f32b87edb93629aefc4",
+    "corrected_sha256": "fff51981446c655979b314ee8a5ca1b2b1af0326512be77626281961d315f664",
+    "rendered_sha256": "f49937e745e34c1b4de546919745e69be3fbf964e06d54c14893ac5ae0bcb4a7",
+    "changes": [
+      "F03",
+      "F05",
+      "F12"
+    ]
+  }
+]

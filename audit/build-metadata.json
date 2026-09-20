@@ -1,0 +1,11 @@
+{
+  "version": "1.0.1-proposal",
+  "date": "2026-09-20",
+  "scope": "Documentation-only conservative maintenance",
+  "source_sections": 137,
+  "subsystem_documents": 39,
+  "max_subsystem_bytes": 15953,
+  "median_subsystem_bytes": 7127,
+  "runtime_tests_executed": false,
+  "benchmarks_executed": false
+}

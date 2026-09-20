@@ -1,0 +1,26 @@
+[
+  {
+    "path": "sources/SOTA-BEST-MIXED-AGENT.md",
+    "bytes": 232829,
+    "sha256": "188768038631d6717fb0b5a6cdb44620ca0d1e420cdbeb4c9f285ef392935057",
+    "physical_lines": 1721
+  },
+  {
+    "path": "sources/SOTA-CODING-AGENT_A.md",
+    "bytes": 111338,
+    "sha256": "24d70e6ab3bb86b5b438489d9503ca3bdf6870d0c449bb4d35017b78103d0a08",
+    "physical_lines": 1118
+  },
+  {
+    "path": "sources/SOTA-CODING-AGENT_B.md",
+    "bytes": 112376,
+    "sha256": "b79b6681d6a548d6ea51c216f2cca7314852c7d3e5103c181c5756fe8d38b612",
+    "physical_lines": 1098
+  },
+  {
+    "path": "sources/SOTA-CODING-AGENT_C.md",
+    "bytes": 141816,
+    "sha256": "419bc02c4bd33a2f470663fdb6cda68fce5af18b1a1120ebe71a645b21c67b6e",
+    "physical_lines": 1317
+  }
+]

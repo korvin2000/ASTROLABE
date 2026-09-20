@@ -1,0 +1,710 @@
+[
+  {
+    "change_id": "F12",
+    "old": "version: 1.0-proposal",
+    "new": "version: 1.0.1-proposal",
+    "count": 1
+  },
+  {
+    "change_id": "F12",
+    "old": "Twenty-six failures cover",
+    "new": "Twenty-eight failures cover",
+    "count": 1
+  },
+  {
+    "change_id": "F12",
+    "old": "*End of ASTROLABE proposal — v1.0, 2026-09-20.",
+    "new": "*End of ASTROLABE proposal — v1.0.1, 2026-09-20.",
+    "count": 1
+  },
+  {
+    "change_id": "F12",
+    "old": "Seven families, 22 operations, byte-stable per role; rare capabilities via `tools.catalog`.",
+    "new": "Seven families with the operations enumerated below, byte-stable per role; rare capabilities via `look(catalog)` (`tools.catalog` is descriptive shorthand, not an eighth family).",
+    "count": 1
+  },
+  {
+    "change_id": "F12",
+    "old": "**seven families, 22 operations**:",
+    "new": "**seven families with explicit operations**:",
+    "count": 1
+  },
+  {
+    "change_id": "F12",
+    "old": "Weakest as an executable design: no context layout, no register, no gates, no defaults — a builder would have to invent the kernel.",
+    "new": "Least concrete at the cell-kernel level: B specifies a render order, completion assessment and initial policies, but not A/C’s detailed STATE, gauge and rendered turn.",
+    "count": 1
+  },
+  {
+    "change_id": "F12",
+    "old": "there is no context layout, no register format, no gates, no gauge, no KNOWN/NOT SEEN rendering, no tool signatures, no defaults, no LOC.",
+    "new": "it supplies a render order (§7.1), completion assessment (§9.6), capability contracts (§8.1) and initial policies (§11.6), but lacks A/C’s concrete STATE format, gauge and KNOWN/NOT SEEN rendering, full operation signatures and LOC estimates.",
+    "count": 1
+  },
+  {
+    "change_id": "F12",
+    "old": "the kernel (layout, register, gates, tools, defaults) is unspecified",
+    "new": "the cell-level STATE, gauge and detailed turn are less specified",
+    "count": 1
+  },
+  {
+    "change_id": "F02",
+    "old": "`context_id` (= cell id) | one model-visible context lineage",
+    "new": "`context_id` (cell lineage) | one cell’s model-visible lineage; rebuilds have a projection generation",
+    "count": 1
+  },
+  {
+    "change_id": "F02",
+    "old": "Every read, fact, note, receipt and delegated result carries anchors into this registry (§4.4).",
+    "new": "Every read, fact, note, receipt and delegated result carries anchors into this registry (§4.4).\n\n**Namespace rule.** `version(path)` is shorthand for `version(workspace_id, path)`; `displayed(path, v)` is shorthand for coverage in `(context_id, projection_generation, workspace_id, path, v)`. Shared content hashes do not share edit authority. A rebuild advances the projection generation; a new cell gets a new `context_id`, and alternative attempts get a controller-assigned `attempt_id`. These are qualifiers on existing records, not additional stores or a fifth campaign identity.",
+    "count": 1
+  },
+  {
+    "change_id": "F02",
+    "old": "Rules: a `look(read|def|outline)` registers displayed ranges;",
+    "new": "Rules: only exact source bytes actually delivered in the current projection register displayed ranges; an outline, symbol location or enclosing span does not make an undisplayed body KNOWN. `look(def)` counts only for the source bytes it actually renders;",
+    "count": 1
+  },
+  {
+    "change_id": "F02",
+    "old": "The Workset is exported at cell end and re-served as seeds by the compiler (§6.2).",
+    "new": "The Workset is exported at cell end and re-served as seeds by the compiler (§6.2). Ordinary edits use coverage from the model request that produced the edit: a parallel probe’s reads, or a read result first produced earlier in the same emitted batch, cannot authorize that already-generated edit. The next model request may use the newly delivered coverage.",
+    "count": 1
+  },
+  {
+    "change_id": "F02",
+    "old": "refs/astrolabe/<work>/<attempt>/head",
+    "new": "refs/astrolabe/<work>/<attempt>/<workspace>/head",
+    "count": 1
+  },
+  {
+    "change_id": "F02",
+    "old": "O(1) whole-tree revert to any turn",
+    "new": "constant-time snapshot selection for any turn; restoring files costs I/O proportional to the affected contents",
+    "count": 1
+  },
+  {
+    "change_id": "F02",
+    "old": "Shadow ref per turn; O(1) revert;",
+    "new": "Shadow ref per turn; guarded snapshot restore;",
+    "count": 1
+  },
+  {
+    "change_id": "F02",
+    "old": "A worktree is edit isolation, not a security boundary `[J1 §5.7]`.",
+    "new": "A worktree is edit isolation, not a security boundary `[J1 §5.7]`. Its shadow ref includes the workspace qualifier (§4.6), because ordinary `refs/` are shared across Git worktrees; ref updates use an expected old object id. A worker cannot reuse another workspace’s displayed-range authority.",
+    "count": 1
+  },
+  {
+    "change_id": "F08",
+    "old": "probe / review / writer / QA cells, packets, budgets, integrator | decisions",
+    "new": "probe / review / writer / QA cell dispatch, packets, child budget allocations | decisions or integration acceptance",
+    "count": 1
+  },
+  {
+    "change_id": "F08",
+    "old": "The database is canonical for structured records; Markdown exports are derived, never competing authorities `[B §4.1]`.",
+    "new": "The database is canonical for structured records; Markdown exports are derived, never competing authorities `[B §4.1]`. This includes contract authority, runtime progress, KB record revisions and usage counters: the examples below are joined read projections, not separately writable copies. KB Markdown files are immutable exported views; KB search indexes are rebuildable, not a second authority. The curator is the sole KB publisher, the verifier/integrator owns acceptance, and the controller alone commits resulting ledger transitions.",
+    "count": 1
+  },
+  {
+    "change_id": "F08",
+    "old": "schema.md · index.sqlite (FTS over summaries and anchors; usage counters)",
+    "new": "schema.md · index.sqlite (optional disposable FTS view; canonical records and usage counters are in state.sqlite)",
+    "count": 1
+  },
+  {
+    "change_id": "F08",
+    "old": "only `fact` and `pitfall` candidates",
+    "new": "only evidence-backed factual `LES` and conditional `PIT` candidates",
+    "count": 1
+  },
+  {
+    "change_id": "F08",
+    "old": "scoped `fact`/`pitfall` at ≤ 0.6",
+    "new": "scoped factual `LES`/conditional `PIT` at ≤ 0.6",
+    "count": 1
+  },
+  {
+    "change_id": "F08",
+    "old": "`fact`/`pitfall` with anchors, scoped, confidence ≤ 0.6",
+    "new": "factual `LES`/conditional `PIT` with anchors, scoped, confidence ≤ 0.6",
+    "count": 1
+  },
+  {
+    "change_id": "F08",
+    "old": "refuted facts are kept; dead ends carry scope",
+    "new": "refuted facts are kept in the durable register history; active or dependency-referenced ones remain in the bounded projection, while inactive records can move verbatim to the same-task STATUS note with resolvable ids; dead ends carry scope",
+    "count": 1
+  },
+  {
+    "change_id": "F08",
+    "old": "`x` facts are kept until the campaign ends and are offered to the extractor as `PIT` candidates.",
+    "new": "`x` facts are retained durably until the campaign ends and offered to the extractor as `PIT` candidates; inactive records need not remain in every 1,200-token register projection. Required carry-forward that still cannot fit causes an explicit capacity response, not deletion.",
+    "count": 1
+  },
+  {
+    "change_id": "F08",
+    "old": "body (≤120 tokens, no code bodies)",
+    "new": "body (≤120 tokens, no code bodies) (compact note unit; BMAP/SKILL detail uses linked, versioned units/modules, whose mandatory parts remain subject to the total compile budget)",
+    "count": 1
+  },
+  {
+    "change_id": "F01",
+    "old": "Outside the contract: rejected unless `task.propose(amendment)` is pending and the mode allows.",
+    "new": "Outside the contract: rejected until an authorized amendment has been approved and committed to the contract; a pending proposal grants nothing. Revalidate the action against that committed version and the executor’s capability ceiling before dispatch.",
+    "count": 1
+  },
+  {
+    "change_id": "F01",
+    "old": "→ ends the turn as blocked-with-question; answer arrives as a contract amendment",
+    "new": "→ ends the turn after reconciliation as blocked-with-question; parent ask-back returns evidence, while an authorized user answer amends the contract only when it changes authority or requirements",
+    "count": 1
+  },
+  {
+    "change_id": "F01",
+    "old": "A user message may amend anything; the harness applies it because the authority is the message, stored verbatim.",
+    "new": "A user message may amend anything; the harness applies it because the authority is the message, stored verbatim. A parent model’s answer to a child is not a user amendment and cannot expand authority. A factual answer that leaves requirements and permissions unchanged is recorded as evidence without inventing a new authority revision.",
+    "count": 1
+  },
+  {
+    "change_id": "F01",
+    "old": "a `check:` lacks evidence, a `review:` is unsigned, a red line is unrecorded, or `[ ]` steps remain",
+    "new": "a `check:` lacks accepted current evidence, a required review lacks a current approval, a required obligation is red, or any `[ ]`/`[>]` step lacks disposition",
+    "count": 1
+  },
+  {
+    "change_id": "F01",
+    "old": "no `[ ]` steps remain uncancelled; test-integrity flags are justified;",
+    "new": "no `[ ]` or `[>]` step remains without completion, cancellation or an explicit non-completed disposition; test-integrity flags are justified;",
+    "count": 1
+  },
+  {
+    "change_id": "F01",
+    "old": "Partial completion is a valid terminal outcome; nothing loops to manufacture green `[J1 §7.5]`.",
+    "new": "Partial completion is a valid terminal outcome; nothing loops to manufacture green `[J1 §7.5]`. Recording a failure in `Open` does not waive a required acceptance item or unresolved contract violation. A `check:` reference must have a recorded assessment of the stated criterion, not merely exist. Required reviews must approve before the controller closes the increment; their assessments bind the contract version, reviewed candidate/patch, criterion and relevant evidence versions. Changed dependencies invalidate approval; unassessed freshness is `unknown`. Incidental red diagnostics may be tracked in `Open`, but cannot hide a required failure.",
+    "count": 1
+  },
+  {
+    "change_id": "F01",
+    "old": "**Campaign scope** fires at the end of every S2+ campaign with ≥ 3 increments or any refactor-mode campaign:",
+    "new": "**Campaign scope** fires at the end of every S2+ campaign with ≥ 3 increments or any refactor-mode campaign: this is the precise predicate `(shape >= S2 and increment_count >= 3) or refactor_mode`, additionally including explicitly required campaign reviews; summaries elsewhere use this rule.",
+    "count": 1
+  },
+  {
+    "change_id": "F04",
+    "old": "acceptance run: items whose closure ⊂ closure(E)",
+    "new": "acceptance run: items whose input_closure intersects closure(E); unknown closures widen conservatively",
+    "count": 1
+  },
+  {
+    "change_id": "F04",
+    "old": "input_closure: known(paths[]) | package(p) | unknown        # what invalidates it — joins the coherence protocol (§4.4)",
+    "new": "input_closure: known(paths[]) | package(p) | unknown        # what invalidates it — joins the coherence protocol (§4.4)\n  definition_version: <hash of check definition, argv/cwd/selector and parser policy>\n  closure_manifest: <paths@versions + directory membership + relevant config/lockfiles/fixtures; completeness and exclusions>",
+    "count": 1
+  },
+  {
+    "change_id": "F04",
+    "old": "verifier_version, outcome, parsed {passed, failed, errors, skipped, discovered}, input_closure",
+    "new": "verifier_version, check_definition_version, contract_version, outcome, parsed {passed, failed, errors, skipped, discovered}, input_closure",
+    "count": 1
+  },
+  {
+    "change_id": "F04",
+    "old": "unknown closure requires a rerun at the conservative containing scope.",
+    "new": "unknown closure requires a rerun at the conservative containing scope. Reuse also requires unchanged check definition, argv/cwd/selector, verifier/parser version, relevant environment and external fixtures; a path list alone is not a completeness proof. Package/glob closures include membership, so added/deleted tests or inputs invalidate them. Import/test-name heuristics choose scope but do not establish a complete reuse closure. Review/check assessments additionally bind their obligation versions (§8.7).",
+    "count": 1
+  },
+  {
+    "change_id": "F04",
+    "old": "Status ∈ `passed · failed · timeout · infra_error · inconclusive · not_run · stale · unavailable · denied · unknown_outcome`;",
+    "new": "Historical outcome ∈ `passed · failed · timeout · infra_error · inconclusive · not_run · unavailable · denied · unknown_outcome`; applicability ∈ `current · stale · unknown` is computed separately and never overwrites that outcome;",
+    "count": 1
+  },
+  {
+    "change_id": "F04",
+    "old": "At campaign start (S1+) or on first `run(verify=true)` (S0),",
+    "new": "At campaign start (S1+) or lazily through `verify(baseline)` (S0),",
+    "count": 1
+  },
+  {
+    "change_id": "F04",
+    "old": "Nothing may be called pre-existing without this receipt.",
+    "new": "Nothing may be called pre-existing without this receipt. If edits have already started, the baseline runs against the captured initial dirty candidate, not the current edited tree. Match test identity, comparable environment and failure signature, not only counts or a test name. Baseline failure is not permission to waive task-specific acceptance; any allowed pre-existing full-suite exceptions remain explicit in the finish receipt.",
+    "count": 1
+  },
+  {
+    "change_id": "F04",
+    "old": "`not_run (time-boxed; scheduled at step boundary)` never silence",
+    "new": "`not_run` if deferred before dispatch, or `timeout` if started and terminated at the time box; scheduled at step boundary, never silence",
+    "count": 1
+  },
+  {
+    "change_id": "F04",
+    "old": "Checker time box | 20 s | then `not_run`, scheduled at step boundary",
+    "new": "Checker time box | 20 s | deferred ⇒ `not_run`; started then timed out ⇒ `timeout`; scheduled at step boundary",
+    "count": 1
+  },
+  {
+    "change_id": "F04",
+    "old": "**Equivalence evidence**: \"same tests, same counts, same goldens @s_n vs @s0\" is the acceptance form for pure refactors;",
+    "new": "**Equivalence evidence**: compare the identities, outcomes and boundary/compatibility cases of preserved tests and available goldens at `s_n` versus `s0`; equal counts alone are not behavioural equivalence;",
+    "count": 1
+  },
+  {
+    "change_id": "F05",
+    "old": "Anchored edits are all-or-nothing on *op failure*;",
+    "new": "Anchored edits apply nothing on *preflight rejection*; publication can partially fail and must report actual per-file outcomes (§9.1);",
+    "count": 1
+  },
+  {
+    "change_id": "F05",
+    "old": "| Transform touches files outside `scope_glob` | Reverted as a unit; reported |",
+    "new": "| Transform touches files outside `scope_glob` | Reject publication or apply a guarded inverse; report actual restoration, partial state or unknown effects (§9.2) |",
+    "count": 1
+  },
+  {
+    "change_id": "F05",
+    "old": "A transform that changes files outside `scope_glob`, or whose match count falls outside `expected_matches`, is reverted as a unit and reported.",
+    "new": "Before dispatch, resolve the allowed target inventory, preconditions and expected-count policy; an omitted constraint is explicitly `unspecified`, never `inventory_ok: true`. Record recoverable preimages before mutation, not after discovering the diff. On out-of-scope writes or count failure, do not accept the transform: discard an isolated candidate when available, otherwise attempt a guarded inverse only where current bytes still match its own postimages. Report `restored`, `partial` or `unknown_outcome` with actual effects; never promise unit rollback or undo of external effects.",
+    "count": 1
+  },
+  {
+    "change_id": "F05",
+    "old": "| Transform touches files outside `scope_glob` or misses its expected match count | reverted as a unit; reported |",
+    "new": "| Transform touches files outside `scope_glob` or misses its expected match count | rejected; isolated candidate discarded or guarded inverse attempted; actual restoration/partial/unknown state reported |",
+    "count": 1
+  },
+  {
+    "change_id": "F05",
+    "old": "all-or-nothing on op failure; partial I/O reported",
+    "new": "no writes on preflight rejection; partial I/O reported",
+    "count": 1
+  },
+  {
+    "change_id": "F05",
+    "old": "**agreement** (§5.5) | — |",
+    "new": "**preflight atomicity only; filesystem publication and commands retain separate outcomes** (§5.5) | — |",
+    "count": 1
+  },
+  {
+    "change_id": "F11",
+    "old": "reclassifies the run from `R` to `W` in its receipt,",
+    "new": "reclassifies an `R` run to `W` only for observed in-scope writes, retaining `D` or `unknown` for broader/uncertain effects,",
+    "count": 1
+  },
+  {
+    "change_id": "F11",
+    "old": "The harness never calls a denylist or a worktree a sandbox.",
+    "new": "The harness never calls a denylist or a worktree a sandbox. Protect the canonical harness state and Git common metadata from untrusted subprocess writes; tool capabilities authorize approved access, not arbitrary shell access to those stores.",
+    "count": 1
+  },
+  {
+    "change_id": "F11",
+    "old": "`R/W` run without prompts in either mode;",
+    "new": "`R/W` run without prompts in either mode; known read-only duties use read-only source mounts or an isolated disposable candidate, with scratch writes explicit; in `trusted-local`, an R label alone is not proof of read-only execution;",
+    "count": 1
+  },
+  {
+    "change_id": "F11",
+    "old": "(read-only per manifest → `R`, otherwise `D` until configured)",
+    "new": "(locally approved, validated read-only capability → `R`; remote annotations are hints, otherwise `D` until configured)",
+    "count": 1
+  },
+  {
+    "change_id": "F11",
+    "old": "Instructions come from user messages, the contract and the configured rules file only; no other repository text is an instruction source.",
+    "new": "Instructions come from user messages, the contract and the configured rules file only; no other repository text is an instruction source. Load an authorized, version-pinned rules snapshot: editing that path cannot silently elevate the edited bytes into instruction authority. Delimiters and instruction-shape detection are model-facing cues, not security proofs; escape delimiter-like payload bytes and enforce capabilities independently.",
+    "count": 1
+  },
+  {
+    "change_id": "F11",
+    "old": "secrets are redacted before persistence to notes, blobs or packets; late results from superseded cells are rejected.",
+    "new": "secrets are redacted before model exposure and reusable evidence persistence, with capture limitations recorded; late publication from superseded cells is rejected, while factual effects remain archived for reconciliation. Exact rollback preimages are separately access-controlled local recovery artifacts, never silently redacted into unusable inverse patches or exposed to the model/KB.",
+    "count": 1
+  },
+  {
+    "change_id": "F07",
+    "old": "tier       = max(tier, never_below(function))                          # A's never-cheap list is a floor, not a hint",
+    "new": "tier       = max(tier, never_below(function), risk_floor(packet.risk, impact.contracts_touched, fanin, reversibility))  # calibration cannot lower either floor",
+    "count": 1
+  },
+  {
+    "change_id": "F07",
+    "old": "at most `budget.attempts` (default 2 alternatives for one impasse `[B §11.6]`); then `blocked`.",
+    "new": "at most `budget.attempts` total substantive attempts per increment (default 2: initial attempt plus one alternative/escalated attempt); then `blocked`. Transport retries and scoped repair calls have their own existing bounded counters and still consume the same campaign budget. A controller-assigned new attempt id preserves previous evidence; it never resets the increment’s attempt count.",
+    "count": 1
+  },
+  {
+    "change_id": "F07",
+    "old": "Repair helper / alternative attempts / delegation depth / parallel cells | 2 attempts / 2 /",
+    "new": "Repair helper / substantive attempts per increment / delegation depth / parallel cells | 2 repair calls / 2 total (initial + one alternative) /",
+    "count": 1
+  },
+  {
+    "change_id": "F06",
+    "old": "[T] transcript  (append-only between eviction batches — cache breakpoint at its end)\n    user messages pinned verbatim",
+    "new": "[T] transcript  (append-only between eviction batches — cache breakpoint at its end)\n    main-line user messages pinned verbatim; children use exact applicable excerpts + authority refs (§20.2 D13)",
+    "count": 1
+  },
+  {
+    "change_id": "F06",
+    "old": "contract digest (≤150: goal verbatim + acceptance status)",
+    "new": "contract digest (≤150: exact goal excerpt + ids/status; full authoritative wording remains in [K]/pinned messages)",
+    "count": 1
+  },
+  {
+    "change_id": "F06",
+    "old": "`[A]` size and STATE upkeep are first-class metrics `[C §6.8]`.",
+    "new": "`[A]` size and STATE upkeep are first-class metrics `[C §6.8]`. Segment stability is keyed to its actual inputs, not an entire evolving repository: `[R]` is a labelled compile-time orientation snapshot, while current atlas/Workset views live in `[A]` and tool results. Recompile affected mandatory content when authority or dependencies change; do not keep it stale to preserve a cache hit. Logical breakpoints are adapter-validated provider capabilities, not guaranteed cache entries.",
+    "count": 1
+  },
+  {
+    "change_id": "F06",
+    "old": "budget    = C_profile·α − |S| − |R| − reserve(output + next observation + [A]_max + estimation margin)",
+    "new": "budget    = C_profile·α − |S| − |R| − |pinned_T_and_retained_protocol| − reserve(output + next observation + [A]_max + estimation margin)",
+    "count": 1
+  },
+  {
+    "change_id": "F06",
+    "old": "mandatory = contract_slice(C, increment)          # requirements (verbatim), ALL constraints, exclusions, acceptance ids + kinds",
+    "new": "mandatory = contract_slice(C, increment)          # requirements (verbatim), ALL constraints, exclusions, acceptance ids + kinds\n              ∪ mandatory_skill_modules_with_prerequisites_and_invariants",
+    "count": 1
+  },
+  {
+    "change_id": "F06",
+    "old": "selected  = greedy_cover(selected, candidates, budget)   # useful uncovered evidence per marginal token; mandatory first   # B §7.2",
+    "new": "selected  = greedy_cover(mandatory, optional_candidates=selected - mandatory, budget=budget)  # bounded admission, dependency bundles, no silent mandatory drop",
+    "count": 1
+  },
+  {
+    "change_id": "F06",
+    "old": "Coverage assertions check presence; they cannot prove that every necessary relationship was identified or that the model understood it",
+    "new": "Coverage assertions check presence; they cannot prove that every necessary relationship was identified or that the model understood it; every serialized contribution is charged once, including tools, pinned user text, retained protocol items and provider-effective continuation history; rules/index content already in `[S]/[R]` is referenced for coverage, not duplicated into `[K]`. Before every model dispatch, a hard total-context admission check includes output/reasoning headroom; fixed component caps are ceilings, not additive promises",
+    "count": 1
+  },
+  {
+    "change_id": "F06",
+    "old": "When a cell's last mutation has landed and only slow checks remain (blast-radius or full-suite runs, typically tens of seconds), the controller already knows the ready frontier. The compiler pre-builds the next increment's `[K]` — contract slice, CON notes, seeds at current versions, ranked notes, focus zoom — as a pure function of campaign state and the *predicted* post-verification stamp. No model call is made. When the cell closes: if the actual stamp equals the predicted one, the pre-compiled `[K]` is used and its cache write is issued immediately; if not (a late formatter, a failed check that keeps the increment open), the pre-compilation is discarded and recompiled. Cost: one wasted deterministic compile on a miss; benefit: the boundary's wall-clock latency overlaps the verification it would otherwise follow. Applies only to `cell_end(next_increment)`, never to continuation of a red increment. Ablation: pre-compilation on/off, measuring p50/p95 boundary latency and wasted compiles (§19.5). `[HYPOTHESIS]`",
+    "new": "When a cell’s last mutation has landed and only slow checks remain, the compiler may pre-build the next increment’s `[K]` locally, without a provider request. Tag it with the full compile-input fingerprint: candidate stamp, contract/authority revision, selected increment and carry-forward/register version, referenced note/contract/skill/index versions, role, profile and frozen policy. On successful cell close, reuse only if those inputs and required coverage still match; otherwise discard and recompile. Matching the tree stamp alone is insufficient, because checks, amendments or knowledge admission can change non-tree inputs. Cache population occurs on a provider request, not on local compilation; a provider-supported explicit pre-warm is optional, separately budgeted and off by default. No speculative model generation is introduced. Applies only to `cell_end(next_increment)`, never continuation of a red increment. Cost: wasted deterministic compiles on misses; intended benefit: overlap local boundary preparation with verification. Ablation: pre-compilation on/off, p50/p95 boundary latency, misses and any separately measured warm-up charges (§19.5). `[HYPOTHESIS]`",
+    "count": 1
+  },
+  {
+    "change_id": "F06",
+    "old": "pre-compilation cache writes — is priced",
+    "new": "any explicitly enabled provider pre-warm requests — is priced",
+    "count": 1
+  },
+  {
+    "change_id": "F06",
+    "old": "**Never break the prefix mid-cell.**",
+    "new": "**Preserve stable prefixes except at declared coherence/rebuild boundaries.**",
+    "count": 1
+  },
+  {
+    "change_id": "F06",
+    "old": "`[K]` is compiled once per cell; tool schemas are byte-stable; the anchor is the only per-turn volatility.",
+    "new": "`[K]` is compiled per projection; tool schemas are byte-stable; the anchor is the routine volatile tail. Authorized amendments or invalid mandatory inputs take precedence over cache reuse (§5.1, §5.8).",
+    "count": 1
+  },
+  {
+    "change_id": "F06",
+    "old": "Increments that end inside one or two turns therefore lose money;",
+    "new": "Short increments may not repay this illustrative reconstruction charge; the conclusion depends on actual reuse, provider pricing and whether a semantic boundary was required anyway;",
+    "count": 1
+  },
+  {
+    "change_id": "F06",
+    "old": "schema tokens for unused tools without cache breaks | none | MB §8, C",
+    "new": "schema churn and avoidable cache invalidation; masking does not remove schema tokens from model-visible context | fixed-schema input and cache charges remain | MB §8, C",
+    "count": 1
+  },
+  {
+    "change_id": "F06",
+    "old": "failed anchor = same-turn correction;",
+    "new": "failed anchor = bounded diagnostic followed by correction on the next model turn;",
+    "count": 1
+  },
+  {
+    "change_id": "F10",
+    "old": "T_s = (Σ input_tokens_s + Σ output_tokens_s) / accepted_trials_s        (billed cost reported beside it)\nE_s = 100 · clamp((T_high_s − T_s) / (T_high_s − T_low_s), 0, 1);   E = Σ_s w_s · E_s",
+    "new": "Cost_s = total_online_cost_s / accepted_trials_s     # includes helpers, retries, review and integration\nE_s = 100 · clamp((Cost_high_s − Cost_s) / (Cost_high_s − Cost_low_s), 0, 1); E = Σ_s w_s · E_s\nT_s = (Σ input_tokens_s + Σ output_tokens_s) / accepted_trials_s  # retained token-volume diagnostic, not E",
+    "count": 1
+  },
+  {
+    "change_id": "F10",
+    "old": "`0 ≤ T_low_s < T_high_s` fixed from the pilot and frozen;",
+    "new": "`0 ≤ Cost_low_s < Cost_high_s` in one declared currency, fixed from the pilot and frozen; missing billing remains unknown and blocks an economic promotion claim;",
+    "count": 1
+  },
+  {
+    "change_id": "F10",
+    "old": "**B's formula and promotion policy with C's zero-invariants and A's floors** (§19.4–19.6)",
+    "new": "**B's normalization and promotion policy, using billed cost for E as required by §1/§16, with C's zero-invariants and A's floors** (§19.4–19.6)",
+    "count": 1
+  },
+  {
+    "change_id": "F10",
+    "old": "execution-mode label, baseline receipt, exit gate, adapters with usage by cache class, telemetry | J1",
+    "new": "execution-mode label, baseline receipt, exit gate, minimal cancellation/lease checks, atomic budget reservations, action reconciliation, task.ask and adapters with usage by cache class, telemetry | J1",
+    "count": 1
+  },
+  {
+    "change_id": "F10",
+    "old": "B1 ≥ B0 quality at lower billed cost on medium tasks",
+    "new": "B2 (S1) ≥ B1 (S0) quality at lower billed cost on medium tasks",
+    "count": 1
+  },
+  {
+    "change_id": "F10",
+    "old": "No stage starts before the previous gate is measured; features that fail their gate remain behind a flag with their ablation data attached.",
+    "new": "No stage starts before the previous gate is measured; features that fail their gate remain behind a flag with their ablation data attached. Stage C’s mandatory refactor review uses the already allowed human-review path until Stage D’s automatic review cell is ready; without that review, the refactor cannot be accepted. Earlier stages may collect CAL statistics deterministically; knowledge admission/automatic injection waits for its implemented Stage D path. Required P0 correctness controls are never treated as optional ablations in live work.",
+    "count": 1
+  },
+  {
+    "change_id": "F10",
+    "old": "OpenAI cached-input counts are a subset of reported input;",
+    "new": "OpenAI cached-input counts are a subset of reported input; where the selected model/API also reports `input_tokens_details.cache_write_tokens`, ordinary input is `input_tokens − cached_tokens − cache_write_tokens`, with each category priced once using that profile’s dated mapping;",
+    "count": 1
+  },
+  {
+    "change_id": "F03",
+    "old": "  · bg=true returns a handle that survives resume; poll returns only NEW output; kill(handle)",
+    "new": "  · bg=true returns a persisted backend handle; resume reconciles its process identity and state\n  · run(op=\"poll\", handle, since?) → NEW output + next_cursor + current process status; no relaunch\n  · run(op=\"cancel\", handle) → cancellation request/status; kill(handle) is an alias, not proof all effects stopped",
+    "count": 1
+  },
+  {
+    "change_id": "F03",
+    "old": "Runs execute only if the edit batch applied fully; a non-zero exit is information; ops whose *inputs* depend on earlier *outputs* belong in the next turn; a turn's mutations are one shadow-ref snapshot.",
+    "new": "Runs execute if there is no edit batch or it applied fully; a non-zero exit is information. Operation ids refer to the original emitted call order, even after phase partitioning. Conditional dependencies must point backward in execution order: run-after-edit and state-after-run are valid, edit-after-a-later-run is rejected before effects. Calls needing newly discovered argument values belong in the next model turn. Partition by operation effects, not merely the family name: `kb.propose` and task/STATE proposals are metadata writes after execution, not reads. End-turn requests are honored only after reconciliation/persistence. A turn’s mutations have one shadow-ref checkpoint; this does not imply cross-file atomicity.",
+    "count": 1
+  },
+  {
+    "change_id": "F03",
+    "old": "· patches validated against §5.2 invariants; a rejected op returns the violated rule and sizes; nothing else is applied",
+    "new": "· patches validated against §5.2 invariants; a rejected op returns the violated rule and sizes; nothing else is applied\n  · evaluate conditions, then validate/commit the eligible patch list atomically against the current STATE version; rejection leaves STATE unchanged, not earlier workspace effects",
+    "count": 1
+  },
+  {
+    "change_id": "F03",
+    "old": "| STATE invariant violated | Reject that op with the invariant and sizes |",
+    "new": "| STATE invariant violated | Reject the eligible STATE patch list with the invariant and sizes; prior world effects remain recorded |",
+    "count": 1
+  },
+  {
+    "change_id": "F03",
+    "old": "| Empty search in limited scope | `complete: false`; not evidence of absence |",
+    "new": "| Empty search in limited scope | `complete` describes exhaustion of the declared scope; even complete scoped emptiness is not repository-wide absence |",
+    "count": 1
+  },
+  {
+    "change_id": "F03",
+    "old": "state({patch:[{plan.tick:2, if:\"green(op:2)\"}, {fact.add:{kind:\"v\", text:\"handlers accept ctx\", evidence:\"op:2\"}, if:\"green(op:2)\"}],\n       next:\"update remaining call sites\"})",
+    "new": "state({patch:[{plan.tick:2, if:\"green(op:2)\"}, {fact.add:{kind:\"v\", text:\"handlers accept ctx\", evidence:\"op:2\"}, if:\"green(op:2)\"},\n              {next:\"update remaining call sites\", if:\"green(op:2)\"}]})",
+    "count": 1
+  },
+  {
+    "change_id": "F03",
+    "old": "6. Batch what is decided; turn on what is discovered. Reads run first, then one edit batch, then runs and checks; a run happens only if every edit applied; a non-zero exit is information.",
+    "new": "6. Batch what is decided; turn on what is discovered. Reads run first, then one edit batch, then runs/checks and STATE. With no edit, a run may execute; otherwise all edits must have applied. Same-batch new reads do not authorize an already-generated edit. A non-zero exit is information.",
+    "count": 1
+  },
+  {
+    "change_id": "F03",
+    "old": "[T]    ← pinned user messages + packet + note(\"rebuilt: <reason>\") + last m = 6 turns with stubs   (m = 0 for alternative and cell_end)",
+    "new": "[T]    ← applicable pinned messages + packet + note(\"rebuilt: <reason>\") + last m = 6 complete protocol turns with stubs\n              (m = 0 for role_switch, alternative_attempt and cell_end; no proposer transcript in a review context)",
+    "count": 1
+  },
+  {
+    "change_id": "F03",
+    "old": "[S][R] ← unchanged for pressure/resume/continuation; recompiled for role', profile', or a new repo version",
+    "new": "[S][R] ← reused only when their input versions still match; otherwise recompiled for authority/dependency/role/profile changes",
+    "count": 1
+  },
+  {
+    "change_id": "F03",
+    "old": "STATE is the only model-written summary in the system",
+    "new": "STATE is the only model-written summary used for rebuild",
+    "count": 1
+  },
+  {
+    "change_id": "F03",
+    "old": "8 / 6 (0 for alternative attempt and cell end)",
+    "new": "8 / 6 (0 for role switch, alternative attempt and cell end)",
+    "count": 1
+  },
+  {
+    "change_id": "F03",
+    "old": "A provider continuation identifier is never reused across a role switch `[MB §3.6]`.",
+    "new": "A provider continuation identifier is never reused across a role switch `[MB §3.6]`. The adapter must likewise not reuse a continuation whose implicit history restores evicted bodies, replaced `[K]` or earlier volatile anchors. Reconstruct the selected native history or start a compatible fresh provider lineage. Preserve complete tool-call/result units and required opaque items; a local rebuild replaces the whole context/Workset projection, not just `T`. Checkpoint the old projection before installation and record the new generation; do not summarize at rebuild.",
+    "count": 1
+  },
+  {
+    "change_id": "F03",
+    "old": "A universal \"mask rather than remove tools\" instruction is a caching heuristic, not a cross-provider correctness rule — the adapter validates it `[B §12.2]`.",
+    "new": "A universal \"mask rather than remove tools\" instruction is a caching heuristic, not a cross-provider correctness rule — the adapter validates it `[B §12.2]`. Persist the complete validated native assistant output, including tool calls and required opaque items, before adding matching results. Dispatch only complete schema-valid calls; keep a result or explicit not-executed disposition for each accepted call id. Local phase ordering never permits malformed native history. Effective continuation history, not payload size, is subject to context admission (§6.1).",
+    "count": 1
+  },
+  {
+    "change_id": "F09",
+    "old": "select_shape(contract, impact):                                   # deterministic, logged with its inputs",
+    "new": "select_shape(contract, impact, plan=None):                        # deterministic, logged; initial pass cannot choose S3",
+    "count": 1
+  },
+  {
+    "change_id": "F09",
+    "old": "    if plan.units >= 2 and disjoint(write_paths) and no interface change in units",
+    "new": "    if plan is not None and plan.units >= 2 and disjoint(write_paths) and no interface change in units",
+    "count": 1
+  },
+  {
+    "change_id": "F09",
+    "old": "Persona text is at most a few operational lines; roles are declared in configuration, not code; a role tag is never a security boundary `[MB A13, R3]`.",
+    "new": "Persona text is at most a few operational lines; roles are declared in configuration, not code; a role tag is never a security boundary `[MB A13, R3]`. Effective operations are the intersection of the role mask, enabled shape/stage and current authorization. The plan role cannot spawn a probe in S1 merely because its role table lists that operation; a required unavailable role causes an explicit upgrade at a context boundary or an honest wait/block. Only shared interface/contract decisions are centralized: children may make ordinary local implementation choices within their packet, as already implied by their implementing duty.",
+    "count": 1
+  },
+  {
+    "change_id": "F09",
+    "old": "**What is active per shape** (the collapsibility contract).",
+    "new": "**What is active per shape** (the collapsibility contract). Required review obligations, including enabled refactor mode, select at least S2 (or use an explicitly authorized human review); a downgrade never removes an outstanding required check or review.",
+    "count": 1
+  },
+  {
+    "change_id": "F09",
+    "old": "Packets, receipts, manifests | receipt only | ✓ | ✓ | ✓",
+    "new": "Packets, receipts, manifests | minimal receipt + context manifest; no delegation packet | ✓ | ✓ | ✓",
+    "count": 1
+  },
+  {
+    "change_id": "F09",
+    "old": "Timeouts after non-idempotent effects never auto-replay;",
+    "new": "Timeouts after non-idempotent effects never auto-replay; lease expiry or cancellation revokes publication authority, not the fact that an action may still be running. The controller increments an execution generation on reassignment/supersession; the runner checks that generation, lease, authority and atomic budget reservation before dispatch and the verifier/integrator rechecks before acceptance/publication. Late observations and actual effects are persisted even when publication is refused. Reconcile an old owner’s unknown effects before granting another writer the same workspace; a lease alone cannot fence an arbitrary OS process. ",
+    "count": 1
+  },
+  {
+    "change_id": "F09",
+    "old": "a partial tool chain records completed effects first;",
+    "new": "A partial tool chain records completed effects first;",
+    "count": 1
+  },
+  {
+    "change_id": "F03",
+    "old": "### 3.7 Controller and cell, in pseudocode `[A §3.5 extended with C §5.7 and B §11.5]`\n\n```python\ndef campaign(request, repo, policy):\n    C   = Contract.from_request(request, policy)            # verbatim request pinned; acceptance derived, proposed or asked\n    W   = Workspace.open(repo)                              # version registry, atlas, dirty-state record, shadow ref\n    S   = Store.open(C.work_id); KB = KnowledgeBase.open(repo)\n    imp = impact_prescan(C, W)                              # paths named, CON notes touched, size class\n    shape, profile = select_shape(C, imp), select_profile(C, imp, policy)      # logged with inputs\n    G   = plan_cell(C, W, S, KB, prior=KB.calibration(repo)) if shape >= S1 else G_single(C)\n    while (inc := G.next_ready(C.budget)) is not None and not cancelled(C):\n        if inc.waits_on_handle and not handle_done(inc): poll_or_advance_independent(); continue   # B §11.5\n        ctx  = compiler.take_precompiled(inc) or compile(inc, C, W, S, KB, seeds=G.carry_forward(inc))   # §6\n        res  = cell(ctx, inc, budget=policy.cell_budget(shape))                                        # §5\n        ver  = scheduler.verify(res, inc)                    # acceptance, blast radius, closures; judge if S2 requires\n        if shape == S3: ver = integrator.integrate(res, ver)  # §10.4\n        S.receipts += ver.receipts; G.ledger.update(ver)       # verified | blocked | partial | failed\n        W.invalidate(res.touched); KB.enqueue(extract(res.trace)); telemetry.record(res, ver)\n        match ver.status:\n            case \"done\":     G.close(inc); compiler.precompile(G.peek_next())            # §6.6\n            case \"partial\":  G.continue_(inc, carry=res.register, seeds=res.workset)\n            case \"blocked\":  if not policy.resolve(res.question): return G.report(partial=True)\n            case \"replan\":   G = replan_cell(C, G, res)      # decisions stay in the main line\n            case \"failed\":   recover_or_escalate(inc, res)   # §13: capsule → alternative attempt → escalate → blocked\n        if policy.review_required(inc, ver): S.receipts += review_cell(inc, res, C, KB)\n    return finish(C, G, S, W)      # full suite + all acceptance @ final stamp + campaign review (S2+) → campaign receipt\n\ndef cell(ctx, inc, budget):\n    T, reg, ws = [pinned(ctx.user_msgs), ctx.packet], ctx.register, ctx.workset\n    for turn in range(budget.turns):\n        A   = anchor(contract_digest(inc), reg, ws, effects.view(), sched.render(), focus(reg), gauge(), nudges())\n        out = model(ctx.S + ctx.R + ctx.K + T + A, effort=profile.effort.worker)\n        if not out.calls:                                       # completion proposal\n            if sched.exit_gate(inc, reg): return Result.done(reg, ws, receipts=sched.receipts)\n            T.append(note(EXIT_REFUSAL)); continue              # hard gate; escape only via task.ask / state(blocked)\n        ops = partition(out.calls)                              # reads → one edit batch → runs/verify → state ops (C §8.4)\n        for call in ops:\n            res = dispatch(call, reg, ws, sched)\n            T.append(result(res.view, id=res.id))               # inside harness-owned delimiters\n            if res.terminal: return res.packet                  # blocked / replan / waiting\n        reconcile_workspace(); sched.end_of_turn_checker(touched, time_box=20)\n        if turn % k == 0: T = evict(T, k, order=refetchability, cap=R_max)\n        if tokens(...) > α·C_max: T = rebuild(\"pressure\", T, reg, m)   # second time ⇒ partial + replan hint\n    return Result.partial(reg, ws)                              # controller compiles a continuation cell\n```\n\n",
+    "new": "### 3.7 Controller and cell, in pseudocode `[A §3.5 extended with C §5.7 and B §11.5]`\n\nThis is lifecycle pseudocode, not executable provider code. Calls below use the existing controller, compiler, cell, runner and scheduler; there is no additional orchestrator.\n\n```text\ncampaign(request, repo, policy):\n    C, W, S, KB = open_contract_workspace_store_and_kb(request, repo, policy)\n    reconcile_pending_actions_and_workspace(C, W, S)       # before any new consequential action\n    imp = impact_prescan(C, W)\n    shape = select_shape(C, imp, plan=None)                 # S0–S2 until a plan exists\n    G = plan_cell(C, W, S, KB) if shape >= S1 else G_single(C)\n    shape = select_shape(C, imp, plan=G)                    # S3 only from validated ownership/contracts\n    while unfinished_requirements(C, G):\n        enforce_cancellation_leases_authority_and_reservations(C)\n        incorporate_observations_and_invalidate(W, S, G)\n        if stop_or_external_wait(C, G): return persist_honest_outcome(C, G, S, W)\n        inc = G.next_ready(C.budget)\n        if inc is None:\n            return persist_wait_block_or_exhaustion(C, G, S, W)  # empty frontier never means completed\n        if inc.waits_on_handle and not handle_done(inc):\n            poll_same_handle_or_advance_independent_work(); continue\n        profile = select_profile(inc.function, inc.packet, imp, policy)\n        if profile.refused: return persist_refusal_or_narrow(inc, profile, C, G, S, W)\n        ctx = take_valid_precompiled_or_compile(inc, C, W, S, KB, profile)\n        if ctx.is_capacity_or_evidence_gap: handle_gap_without_dispatch(ctx, inc); continue\n        res = cell(ctx, inc, reserved_cell_budget(C, inc))\n        reconcile_and_persist_effects(res, W, S)            # includes partial and late results\n        ver = scheduler.verify(res, inc)                   # reuse current receipts; never trust model status\n        if res.proposes_done and policy.review_required(inc, ver):\n            ver = scheduler.obtain_required_review_once(ver, inc, C)  # before closure; reuse current approval\n        if shape == S3 and ver.acceptable:\n            ver = integrator.integrate(res, ver)            # combined-state checks and required review\n        controller.commit_outcome_if_current(ver, C, G, S)  # checks contract/candidate/generation; one ledger owner\n        extractor.enqueue_if_enabled(res, KB); telemetry.record(res, ver)\n        dispatch_outcome(ver):                             # same increment on partial; no budget resets\n            done -> G.close(inc)\n            partial -> G.continue_(inc, register=res.register, seeds=res.workset)\n            replan -> replace_plan_with_authorized_coverage_preserved(C, G, res)\n            waiting -> persist_handle_and_schedule_independent_work(res)\n            blocked -> resolve_by_authority_or_return_honest_block(res)\n            failed -> recover_or_escalate_within_original_budget(inc, res)\n    return finish(C, G, S, W)   # final acceptance + full-suite policy + required campaign review, else explicit gaps\n\ncell(ctx, inc, budget):\n    for turn in bounded_turns(budget):\n        enforce_dispatch_authority_and_budget(ctx)\n        A = render_current_anchor(ctx, inc)\n        request = adapter.render_and_admit(ctx.S, ctx.R, ctx.K, ctx.T, A)\n        out = model(request, profile=ctx.profile)\n        calls = validate_complete_calls_and_dependencies(out) # fail closed; no partial-call execution\n        journal.persist_native_output(out)\n        ctx.T.append_native(out)                            # assistant calls precede their results\n        if not calls:\n            proposal = validate_role_output(out, ctx.role)  # probe/reviewer packets are not implementing STATE\n            return_if_role_complete_or_record_gaps(proposal, ctx, inc)\n            continue\n        ops = partition_by_effect(calls)                     # stable op ids; §5.4 conditions\n        for call in ops:\n            res = dispatch_or_record_not_executed(call, ctx)\n            journal.persist_result(res)\n            ctx.T.append_native_result(call.id, res)\n            if res.requests_terminal: record_terminal_request_and_stop_new_effects()\n        reconcile_workspace_and_persist_checkpoint(ctx)      # every exit path, including partial failure\n        scheduler.end_of_turn_checker_if_needed(ctx, time_box=20)\n        if terminal_requested(): return persist_role_packet(ctx)\n        if (turn + 1) % k == 0: ctx.evict_complete_protocol_units()\n        if next_request_exceeds_usable_context(ctx):\n            ctx = rebuild(\"pressure\", ctx)                  # replaces S/R/K/T, register projection and Workset\n            if second_pressure_rebuild(ctx): return persist_partial_with_replan_hint(ctx)\n    return persist_partial(ctx)\n```\n\n`return_if_role_complete_or_record_gaps` uses the implementing exit gate for implementers/writers, and the declared packet validator for plan/probe/review/QA/helper roles; it never lets a reviewer recursively demand a review of its own verdict. A completion proposal can request scheduler-owned required checks/review, but is accepted only with current evidence. The outer verification step reuses those results instead of invoking a second judge. All terminal branches reconcile/persist already-started actions; a missing/failed check becomes a specific gap or non-completed outcome, never an endless finalization loop. Boundary pre-compilation may run locally while final checks are pending (§6.6); publication remains contingent on successful verification.\n\n",
+    "count": 1
+  },
+  {
+    "change_id": "F09",
+    "old": "integrate(result):\n    if result.base.stamp ≠ main.stamp_at_dispatch or any (path, v) in result.read_versions moved:  → stale-for-integration\n        re-evaluate: rebase in the child's worktree and re-run its acceptance, or reject with evidence\n    merge queue (serialized): apply patch → combined-tree checker → blast radius over the UNION of merged edit sets\n        → acceptance items of all merged units → contract lint (no CON anchor moved without an ADR)\n    publish only after combined verification; receipts carry base, patch hash, resulting stamp and environment",
+    "new": "integrate(result):\n    validate result.base == recorded_dispatch_base and current contract/authority/execution generation\n    if main.current_stamp != result.base.stamp or any recorded read dependency moved:\n        mark stale-for-integration; rebase in the child's worktree and re-run acceptance, or reject with evidence\n    merge queue (serialized under destination ownership): capture integration_base → apply patch\n        → combined-tree checker → blast radius over UNION of merged edit sets → all affected acceptance\n        → contract lint and required current review\n    publish only if main still matches integration_base and authority/generation remain valid\n    receipts bind integration_base, patch hash, resulting stamp and environment; controller alone updates ledger",
+    "count": 1
+  },
+  {
+    "change_id": "F01",
+    "old": "summaries elsewhere use this rule. the judge receives",
+    "new": "summaries elsewhere use this rule. The judge receives",
+    "count": 1
+  },
+  {
+    "change_id": "F06",
+    "old": "(or the pre-compiled [K] if its stamp still matches, §6.6)",
+    "new": "(or the pre-compiled [K] if its full compile-input fingerprint still matches, §6.6)",
+    "count": 1
+  },
+  {
+    "change_id": "F06",
+    "old": "| Pre-compiled `[K]` whose stamp moved | discarded and recompiled; no stale seed served |",
+    "new": "| Pre-compiled `[K]` whose tree, contract, selected notes/skills or carry-forward changed | discarded and recompiled; full input fingerprint and required coverage revalidated |",
+    "count": 1
+  },
+  {
+    "change_id": "F09",
+    "old": "| Minimalism becomes underspecification | operational fixtures (cancellation, reconciliation, budgets) pass in every shape |",
+    "new": "| Minimalism becomes underspecification | operational fixtures (cancellation, reconciliation, budgets) pass in every shape |\n| Outline names an unread function body; read+edit emitted in one batch | unseen-body edit rejected using dispatch-time context coverage |\n| Two contexts/worktrees have the same path and content hash | observed ranges and shadow refs remain context/workspace-local |\n| Pending scope amendment followed by an out-of-scope call | no dispatch until approved contract revision and capability check |\n| Required review returns revise after local tests pass | increment stays unaccepted; findings steer continuation |\n| One changed file lies in a larger acceptance dependency set | nonempty intersection schedules the check; subset containment is not required |\n| Calibration proposes a tier below the risk floor | final tier still respects both risk and function floors |\n| Native output contains tool calls, then a rebuild occurs | call/result ids and required opaque items remain valid; no inherited evicted tail |\n| Refuted facts exceed the register cap | inactive entries archived verbatim; active dependencies retained or explicit capacity gap |\n| A command starts, then checker time box expires | timeout is recorded; not falsely labelled not_run |\n| Missing cache usage or a billed pre-warm request | unknown remains unknown; no free warm-up or zero-spend assumption |\n",
+    "count": 1
+  },
+  {
+    "change_id": "F01",
+    "old": "A detection that *weakens* an existing check on code the increment did not intend to change forces a review cell,",
+    "new": "A detection that *weakens* an existing required check forces a review cell (or authorized human review), even inside the intended write scope,",
+    "count": 1
+  },
+  {
+    "change_id": "F03",
+    "old": "            proposal = validate_role_output(out, ctx.role)  # probe/reviewer packets are not implementing STATE\n            return_if_role_complete_or_record_gaps(proposal, ctx, inc)\n            continue",
+    "new": "            proposal = validate_role_output(out, ctx.role)  # probe/reviewer packets are not implementing STATE\n            completion = scheduler.assess_role_completion(proposal, ctx, inc)\n            if completion.accepted: return reconcile_and_persist_role_packet(ctx, completion)\n            record_completion_gaps(completion)\n            if completion.cannot_progress: return reconcile_and_persist_incomplete(ctx, completion)\n            continue",
+    "count": 1
+  },
+  {
+    "change_id": "F03",
+    "old": "`return_if_role_complete_or_record_gaps` uses the implementing exit gate",
+    "new": "`assess_role_completion` uses the implementing exit gate",
+    "count": 1
+  },
+  {
+    "change_id": "F08",
+    "old": "cannot happen: no model summary at rebuild; Dead end keeps reproduction and evidence",
+    "new": "reproduction and evidence must remain reachable through Dead ends/STATUS; fixture fails if a bounded projection loses them",
+    "count": 1
+  },
+  {
+    "change_id": "F09",
+    "old": "  work: W-0042  attempt: a2  cell: cell-8  increment: I2",
+    "new": "  work: W-0042  attempt: a2  cell: cell-8  increment: I2\n  contract_version: 3  execution_generation: 1       # controller/runner-owned, checked before acceptance\n  base: {stamp: s7, workspace: ws-main}                # recorded dispatch base, not the final stamp\n  read_versions: {\"src/router.py\": a9f1}              # runtime-observed dependency versions, not model assertions",
+    "count": 1
+  },
+  {
+    "change_id": "F09",
+    "old": "Children return packets, never conversations; the parent owns integration and completion; a child's confident summary is not verified evidence.",
+    "new": "Children return packets, never conversations; the parent owns integration and completion; a child's confident summary is not verified evidence. A Task Packet carries the existing work/attempt/context and increment ids, role, exact applicable requirements/constraints and authority refs, contract version, dispatch candidate/workspace, required evidence and uncertainties, allowed read/write scope, tool/capability ceiling, reserved budget and execution generation. Its Result Packet preserves that dispatch base and runtime-observed dependency versions alongside the final candidate and receipts (§5.9). A child’s interface assumptions are dependencies even when their files are not in its write scope.",
+    "count": 1
+  },
+  {
+    "change_id": "F12",
+    "old": "Where the three genuinely conflict (§20.2) the resolution is argued, not averaged.",
+    "new": "Where the three genuinely conflict (§20.2) the resolution is argued, not averaged. For this maintenance revision, inherited source-check claims remain provenance rather than a claim that every upstream document was inspected: the supplied A/B/C proposals and the separately listed primary-source checks are distinguished in the source register. Unavailable HELM/candidate files and `SOTA-RESEARCH-NOTES.md` are not treated as newly verified evidence.",
+    "count": 1
+  },
+  {
+    "change_id": "F05",
+    "old": "**Invariants, must be zero in every configuration**: edits to unseen content;",
+    "new": "**Invariants, must be zero in every configuration**: ordinary anchored edits to unseen content (declared transforms are separately audited under §9.2);",
+    "count": 1
+  },
+  {
+    "change_id": "F05",
+    "old": "read before you edit; never edit a region you have not displayed;",
+    "new": "read before an anchored edit; never anchor a hunk in an undisplayed region; declared transforms use the separate §9.2 contract;",
+    "count": 1
+  },
+  {
+    "change_id": "F10",
+    "old": "| Tiny task | S0 selected; overhead ≤ `[A]` per turn; cold start ≤ 2 turns |",
+    "new": "| Tiny task | S0 selected with mandatory lifecycle controls; measure overhead and cold-start turns against the declared targets, rather than assuming those costs are zero |",
+    "count": 1
+  },
+  {
+    "change_id": "F01",
+    "old": "The only escape is `state(blocked)` / `task.ask` with evidence, which ends the cell with an honest partial report.",
+    "new": "The model may request `state(blocked)` / `task.ask` with evidence instead of completion; runtime budget, cancellation and process-wait outcomes also remain explicit non-completed exits (§5.9).",
+    "count": 1
+  },
+  {
+    "change_id": "F01",
+    "old": "and the campaign-level review where S2+ requires it.",
+    "new": "and campaign-level review whenever the precise §8.8 predicate requires it.",
+    "count": 1
+  },
+  {
+    "change_id": "F09",
+    "old": "merge queue (serialized under destination ownership): capture integration_base → apply patch",
+    "new": "merge queue (serialized under destination ownership): capture integration_base → apply patch in an isolated integration candidate",
+    "count": 1
+  },
+  {
+    "change_id": "F01",
+    "old": "scheduler.exit_gate()                  refuses \"done\" without current green on every run: item of the increment",
+    "new": "scheduler.exit_gate()                  refuses \"done\" without current acceptance and required review for the increment",
+    "count": 1
+  }
+]

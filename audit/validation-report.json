@@ -1,0 +1,24 @@
+{
+  "version": "1.0.1-proposal",
+  "review_date": "2026-09-20",
+  "scope": "Static documentation integrity and traceability only",
+  "status": "passed",
+  "counts": {
+    "original_sources_verified": 4,
+    "content_edit_operations_replayed": 118,
+    "correction_groups": 12,
+    "original_design_commitments_unchanged": true,
+    "section_blocks_mapped": 137,
+    "subsystem_documents_verified": 39,
+    "max_subsystem_bytes": 15953,
+    "entrypoint_words": 557,
+    "original_word_retention_pct": 97.58,
+    "active_markdown_files_checked": 48,
+    "local_links_checked": 889
+  },
+  "errors": [],
+  "runtime_tests_executed": false,
+  "provider_integration_tests_executed": false,
+  "benchmarks_executed": false,
+  "excluded_from_link_validation": "Immutable originals under sources/: inherited links intentionally preserved"
+}
