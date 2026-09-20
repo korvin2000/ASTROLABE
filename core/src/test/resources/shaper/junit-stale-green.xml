@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.astrolabe.id.IdsTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-09-20T04:12:27.406Z" hostname="WINDOWS-4F8CQT6" time="0.242">
+  <properties/>
+  <testcase name="generations advance()" classname="io.astrolabe.id.IdsTest" time="0.059"/>
+  <testcase name="fixed id generator is deterministic and random one is unique()" classname="io.astrolabe.id.IdsTest" time="0.012"/>
+  <testcase name="ids are validated at construction()" classname="io.astrolabe.id.IdsTest" time="0.034"/>
+  <testcase name="identities serialize as bare strings and round trip()" classname="io.astrolabe.id.IdsTest" time="0.094"/>
+  <testcase name="digest matches the sha256 test vector and hashes raw bytes()" classname="io.astrolabe.id.IdsTest" time="0.003"/>
+  <testcase name="instant serializer uses ISO text()" classname="io.astrolabe.id.IdsTest" time="0.01"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

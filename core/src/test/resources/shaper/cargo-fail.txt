@@ -1,0 +1,24 @@
+   Compiling shop v0.1.0 (/home/dev/shop)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.21s
+     Running unittests src/lib.rs (target/debug/deps/shop-2f1c9a0b4d7e)
+
+running 6 tests
+test cart::tests::adds_item ... ok
+test cart::tests::removes_item ... ok
+test cart::tests::totals ... ok
+test discount::tests::tier_one ... ok
+test discount::tests::tier_three ... FAILED
+test discount::tests::tier_five ... ignored
+
+failures:
+
+---- discount::tests::tier_three stdout ----
+thread 'discount::tests::tier_three' panicked at src/discount.rs:42:9:
+assertion `left == right` failed
+  left: 4
+ right: 5
+
+failures:
+    discount::tests::tier_three
+
+test result: FAILED. 4 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.01s

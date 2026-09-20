@@ -1,0 +1,16 @@
+ RUN  v1.6.0 /home/dev/shop
+
+ ✓ src/cart.test.ts (3)
+ ❯ src/discount.test.ts (2)
+   ✓ discount > applies tier 1
+   × discount > applies tier 3
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/discount.test.ts > discount > applies tier 3
+AssertionError: expected 4 to be 5 // Object.is equality
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 3 passed (4)
+   Start at  10:00:00
+   Duration  512ms

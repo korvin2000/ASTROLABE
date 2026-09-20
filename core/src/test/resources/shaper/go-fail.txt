@@ -1,0 +1,10 @@
+=== RUN   TestAddsItem
+--- PASS: TestAddsItem (0.00s)
+=== RUN   TestDiscount
+=== RUN   TestDiscount/tier_3
+    discount_test.go:31: expected 5, got 4
+--- FAIL: TestDiscount (0.00s)
+    --- FAIL: TestDiscount/tier_3 (0.00s)
+FAIL
+FAIL	example.com/shop/cart	0.004s
+FAIL

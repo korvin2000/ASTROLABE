@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.acme.FlakyTest" tests="2" skipped="0" failures="1" errors="0" timestamp="2026-09-20T04:10:13.001Z" hostname="build-01" time="0.044">
+  <properties/>
+  <testcase name="retries" classname="com.acme.FlakyTest" time="0.021">
+    <failure message="timed out after 2s" type="java.lang.AssertionError">java.lang.AssertionError: timed out after 2s</failure>
+  </testcase>
+  <testcase name="retries" classname="com.acme.FlakyTest" time="0.023"/>
+  <system-out><![CDATA[]]></system-out>
+</testsuite>
