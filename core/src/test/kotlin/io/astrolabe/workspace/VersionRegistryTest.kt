@@ -148,33 +148,33 @@ class VersionRegistryTest {
     @Test
     fun `change notifications fire once per version transition`() {
         val seen = CopyOnWriteArrayList<String>()
-        registry.addListener { path, from, to -> seen.add("$path:${from?.hash8}->${to?.hash8}") }
+        registry.addListener { c -> seen.add("${c.path}:${c.from?.hash8}->${c.to?.hash8} (${c.cause})") }
         val v1 = registry.version("src/a.py")!!
         repo.write("src/a.py", "def a():\n    return 2\n")
         val v2 = registry.version("src/a.py")!!
 
-        registry.change("src/a.py", v1, v2)
-        registry.change("src/a.py", v1, v2)
-        registry.change("src/a.py", v2, v2)
+        registry.change("src/a.py", v1, v2, "edit #1")
+        registry.change("src/a.py", v1, v2, "edit #1")
+        registry.change("src/a.py", v2, v2, "edit #1")
 
-        assertEquals(listOf("src/a.py:${v1.hash8}->${v2.hash8}"), seen)
+        assertEquals(listOf("src/a.py:${v1.hash8}->${v2.hash8} (edit #1)"), seen)
         assertEquals(v2, registry.recorded("src/a.py"))
     }
 
     @Test
     fun `a deletion is a transition and a removed listener stops hearing about it`() {
         val seen = CopyOnWriteArrayList<String>()
-        val subscription = registry.addListener { path, _, to -> seen.add("$path->${to?.hash8 ?: "gone"}") }
+        val subscription = registry.addListener { c -> seen.add("${c.path}->${c.to?.hash8 ?: "gone"}") }
         val v1 = registry.version("src/a.py")!!
 
-        registry.change("src/a.py", null, v1)
-        registry.change("src/a.py", v1, null)
-        registry.change("src/a.py", v1, null)
+        registry.change("src/a.py", null, v1, "created by run #2")
+        registry.change("src/a.py", v1, null, "deleted by run #2")
+        registry.change("src/a.py", v1, null, "deleted by run #2")
         assertEquals(listOf("src/a.py->${v1.hash8}", "src/a.py->gone"), seen)
         assertNull(registry.recorded("src/a.py"))
 
         subscription.close()
-        registry.change("src/a.py", null, v1)
+        registry.change("src/a.py", null, v1, "created by run #3")
         assertEquals(2, seen.size, "a removed listener hears nothing")
     }
 

@@ -51,9 +51,40 @@ public sealed interface CasCheck {
     public data class Refused(val rejection: PathResolution.Rejected) : CasCheck
 }
 
-/** Notified once per `(path, from → to)` version transition; the coherence hooks of P1.4.4 subscribe. */
+/**
+ * One `path: from → to` transition as the registry announced it (§4.4 `on change(path, v → v')`).
+ *
+ * [from] is `null` when the file did not exist before *or* when the mutator could not establish the
+ * previous version (a run that touched a file nobody had read). The horizons do not need the
+ * distinction: everything anchored at [path] with a version other than [to] is stale either way.
+ * [to] is `null` for a deletion. [cause] names the mutation for the announcement the model sees
+ * (`stale @v (edited by transform #40)`, §5.3).
+ */
+public data class VersionChange(
+    val path: String,
+    val from: FileVersion?,
+    val to: FileVersion?,
+    val cause: String,
+) {
+    init {
+        require(path.isNotBlank()) { "a version change needs a path" }
+        require(from != to) { "$path: $from → $to is not a transition" }
+        require(cause.isNotBlank()) { "a version change names its cause" }
+    }
+
+    val deleted: Boolean get() = to == null
+
+    /** True when [version] is what an item anchored at [path] must carry to stay current. */
+    public fun current(version: FileVersion): Boolean = version == to
+}
+
+/**
+ * Notified once per version transition. [io.astrolabe.evidence.Coherence] is the registry's one
+ * subscriber and fans each change out to the horizons (Workset, register facts, checks, …), which
+ * implement this same interface.
+ */
 public fun interface ChangeListener {
-    public fun onChange(path: String, from: FileVersion?, to: FileVersion?)
+    public fun onChange(change: VersionChange)
 }
 
 /**
@@ -198,19 +229,23 @@ public class VersionRegistry(public val workspace: Workspace) {
     }
 
     /**
-     * Records the transition `path: from → to` and notifies the listeners **once**. A repeated call
-     * for a transition already recorded, and a call where `from == to`, notify nobody: §4.4 marks
-     * evidence stale on a version change, and doing that twice for one change would invalidate
-     * evidence that was rebuilt against the new version in between.
+     * Records the transition `path: from → to` caused by [cause] and notifies the listeners **once**.
+     * A repeated call for a transition already recorded, and a call where `from == to`, notify
+     * nobody: §4.4 marks evidence stale on a version change, and doing that twice for one change
+     * would invalidate evidence that was rebuilt against the new version in between.
+     *
+     * Listeners run on the calling thread, in subscription order; a mutator therefore announces a
+     * change only after the bytes are on disk, and workspace mutation stays serialized (D-26).
      */
-    public fun change(path: String, from: FileVersion?, to: FileVersion?) {
+    public fun change(path: String, from: FileVersion?, to: FileVersion?, cause: String) {
         if (from == to) return
         val next: Any = to ?: DELETED
         synchronized(current) {
             if (current[path] == next) return
             current[path] = next
         }
-        for (listener in listeners) listener.onChange(path, from, to)
+        val change = VersionChange(path, from, to, cause)
+        for (listener in listeners) listener.onChange(change)
     }
 
     /** The last version this registry recorded for [path] through [change]; not a filesystem read. */

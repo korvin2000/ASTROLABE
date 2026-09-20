@@ -6,6 +6,7 @@ import io.astrolabe.evidence.ClaimKind
 import io.astrolabe.id.ContextId
 import io.astrolabe.id.Digest
 import io.astrolabe.id.FileVersion
+import io.astrolabe.workspace.VersionChange
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -80,9 +81,12 @@ class RegisterTest {
     @Test
     fun `harness marks stale facts and fires trips once`() {
         val fresh = example.copy(facts = example.facts.map { it.copy(staleAt = null) })
-        val marked = fresh.markStale("src/handlers/user.py", old)
+        val marked = fresh.markStale(VersionChange("src/handlers/user.py", old, v, "edit #40"))
         assertTrue(marked.fact(4)!!.stale)
+        assertEquals(old, marked.fact(4)!!.staleAt)
         assertTrue(!marked.fact(1)!!.stale)
+        assertTrue(!fresh.markStale(VersionChange("src/handlers/user.py", null, old, "run #7")).fact(4)!!.stale, "a fact at the new version stays current")
+        assertTrue(fresh.markStale(VersionChange("src/handlers/user.py", null, v, "touched by run #7")).fact(4)!!.stale, "an unknown old version marks conservatively")
         val fired = example.fireTrips(listOf("src/cli/main.py"))
         assertTrue(fired.openItem(1)!!.fired)
         assertEquals(listOf("⟨trip Q1 fired: any edit under src/cli/ → check → does CLI path build handlers?⟩"), RegisterRender.firedTrips(fired))

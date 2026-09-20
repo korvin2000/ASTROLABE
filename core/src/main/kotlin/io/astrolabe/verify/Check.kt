@@ -9,6 +9,9 @@ import io.astrolabe.evidence.Outcome
 import io.astrolabe.id.CandidateId
 import io.astrolabe.id.CanonicalEncoding
 import io.astrolabe.id.Digest
+import io.astrolabe.workspace.ChangeListener
+import io.astrolabe.workspace.EnvFingerprint
+import io.astrolabe.workspace.VersionChange
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -53,10 +56,16 @@ public enum class Trigger { EveryEdit, EndOfTurn, StepBoundary, RiskAboveTheta, 
 @Serializable
 public enum class Applicability { Current, Stale, Unknown }
 
+/**
+ * The check's last receipt as the registry caches it. [stamp] is the receipt's `stamp_after` and
+ * [definitionVersion] the [Check.definitionVersion] the check had when it ran; [applicability] is the
+ * computed view ([Checks.refresh], [Checks.onChange]) and [outcome] the historical fact that never changes.
+ */
 @Serializable
 public data class LastResult(
     val receiptId: String,
     val stamp: CandidateId,
+    val definitionVersion: Digest,
     val outcome: Outcome,
     val counts: Counts?,
     val applicability: Applicability,
@@ -113,8 +122,12 @@ public data class RunnerCommands(
  * The check registry (§8.1, TODO P1.7.1). Seeded from sniffed commands and contract acceptance: `CHK-types-touched`,
  * `CHK-lint`, `CHK-accept-<AC>`, `CHK-full`. S0 closures are `Known(touched paths)` for touched selectors and
  * `Unknown` otherwise; the scheduler refines them (P3.1.1).
+ *
+ * It is the verification horizon of the coherence protocol (§4.4): [onChange] marks the checks whose closure
+ * a change moved, and [refresh] recomputes applicability against the current stamp (§8.4). Both leave the
+ * historical outcome untouched.
  */
-public class Checks private constructor(private val checks: LinkedHashMap<String, Check>) {
+public class Checks private constructor(private val checks: LinkedHashMap<String, Check>) : ChangeListener {
     public fun all(): List<Check> = checks.values.toList()
 
     public operator fun get(id: String): Check? = checks[id]
@@ -146,6 +159,47 @@ public class Checks private constructor(private val checks: LinkedHashMap<String
             is Closure.Package -> changedPaths.any { it == closure.path || it.startsWith(closure.path.trimEnd('/') + "/") }
             Closure.Unknown -> true
         }
+    }
+
+    /**
+     * §4.4 verification horizon: a moved path marks every check whose closure contains it stale, a check with an
+     * unknown closure stale conservatively, and a moved lock/dependency file every check (it is an input of the
+     * environment id, whatever the closure says). The reason names the path and the cause.
+     */
+    override fun onChange(change: VersionChange) {
+        val environment = change.path.substringAfterLast('/') in EnvFingerprint.LOCK_FILE_NAMES
+        val affected = if (environment) checks.values.toList() else affectedBy(listOf(change.path))
+        for (check in affected) {
+            val reason = when {
+                environment -> "environment moved: ${change.path} (${change.cause})"
+                check.inputClosure == Closure.Unknown -> "closure unknown; ${change.path} changed (${change.cause})"
+                else -> "closure moved: ${change.path} (${change.cause})"
+            }
+            markStale(check.id, reason)
+        }
+    }
+
+    /**
+     * §8.4 applicability, recomputed for every check with a result: `current = (stamp_after == stamp_now)` with the
+     * check definition unchanged since the run; a different stamp is `stale` (until P3.1.2 can attach a reuse proof
+     * for an unchanged closure), a changed definition is `stale` whatever the stamp (FX-16), and a missing current
+     * stamp is `unknown`. A stamp that returned to the tested candidate makes the result current again: the
+     * receipt is evidence about those exact bytes (L7). Eligibility for the final tree (D-45) stays on the receipt.
+     */
+    public fun refresh(stampNow: CandidateId?): List<Check> = checks.values.filter { it.last != null }.map { check ->
+        val last = check.last!!
+        val next = when {
+            stampNow == null -> last.copy(applicability = Applicability.Unknown, staleReason = "current stamp unknown")
+            last.definitionVersion != check.definitionVersion ->
+                last.copy(applicability = Applicability.Stale, staleReason = "check definition changed since ${last.receiptId}")
+            last.stamp != stampNow -> last.copy(
+                applicability = Applicability.Stale,
+                staleReason = last.staleReason?.takeIf { last.applicability == Applicability.Stale }
+                    ?: "candidate moved @${last.stamp.digest.hash8} → @${stampNow.digest.hash8} (no reuse proof)",
+            )
+            else -> last.copy(applicability = Applicability.Current, staleReason = null)
+        }
+        if (next == last) check else check.copy(last = next).also { checks[check.id] = it }
     }
 
     public fun register(check: Check): Check {

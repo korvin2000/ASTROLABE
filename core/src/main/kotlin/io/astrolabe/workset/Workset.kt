@@ -2,8 +2,10 @@ package io.astrolabe.workset
 
 import io.astrolabe.id.FileVersion
 import io.astrolabe.provider.TokenEstimator
+import io.astrolabe.workspace.ChangeListener
 import io.astrolabe.workspace.LineRange
 import io.astrolabe.workspace.Ranges
+import io.astrolabe.workspace.VersionChange
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -65,11 +67,14 @@ public class WorksetView internal constructor(private val entries: List<Entry>) 
  * The Workset (§5.3, TODO P1.5.3): KNOWN = entries whose version is current and whose bytes are live in
  * `[T]`/`[K]`; everything else is NOT SEEN. A version change drops the entry and announces it in the same
  * turn; the physical stub happens at the next eviction batch unless the body exceeds [immediateStubTokens].
+ *
+ * It is the turn horizon of the coherence protocol (§4.4): registered with `Coherence`, it hears every
+ * version transition through [onChange].
  */
 public class Workset(
     private val immediateStubTokens: Int = 800,
     private val renderCapTokens: Int = 60,
-) {
+) : ChangeListener {
     private val live = ArrayList<Entry>()
     private val stale = ArrayList<Entry>()
     private val drops = ArrayList<StaleDrop>()
@@ -96,17 +101,16 @@ public class Workset(
     public fun covers(path: String, version: FileVersion, range: LineRange): Boolean = snapshot().covers(path, version, range)
 
     /**
-     * Coherence hook (§4.4 turn horizon): every live entry of [path] at [from] leaves KNOWN now and is announced;
-     * returns the drops so the caller can stub large bodies immediately.
+     * Coherence hook (§4.4 turn horizon): every live entry of the changed path that is not at the new version
+     * leaves KNOWN now and is announced with the cause. The drops wait in [pendingDrops]; the ones flagged
+     * [StaleDrop.stubNow] exceed [immediateStubTokens] and are stubbed at once, the rest at the next batch.
      */
-    public fun onVersionChange(path: String, from: FileVersion, cause: String): List<StaleDrop> {
-        val affected = live.filter { it.path == path && it.version == from }
-        if (affected.isEmpty()) return emptyList()
+    override fun onChange(change: VersionChange) {
+        val affected = live.filter { it.path == change.path && !change.current(it.version) }
+        if (affected.isEmpty()) return
         live.removeAll(affected)
         stale += affected
-        val announced = affected.map { StaleDrop(it.path, it.range, it.version, cause, it.resultId, stubNow = it.tokens > immediateStubTokens) }
-        drops += announced
-        return announced
+        drops += affected.map { StaleDrop(it.path, it.range, it.version, change.cause, it.resultId, stubNow = it.tokens > immediateStubTokens) }
     }
 
     /** Eviction batch (P1.8.6): a stubbed result no longer contributes coverage. */

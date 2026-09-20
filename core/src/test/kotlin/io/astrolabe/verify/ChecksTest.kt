@@ -124,10 +124,10 @@ class ChecksTest {
         val accept = checks["CHK-accept-AC-4"]!!
         assertNotEquals(accept.definitionVersion, accept.copy(command = Command(listOf("pytest", "-k", "idempot", "-x"))).definitionVersion)
         assertNotEquals(accept.definitionVersion, accept.copy(parserPolicy = "shaper/2").definitionVersion)
-        assertEquals(accept.definitionVersion, accept.copy(last = LastResult("r", CandidateId(Digest.ofUtf8("s")), Outcome.Passed, Counts(1), Applicability.Current)).definitionVersion)
+        assertEquals(accept.definitionVersion, accept.copy(last = LastResult("r", CandidateId(Digest.ofUtf8("s")), accept.definitionVersion, Outcome.Passed, Counts(1), Applicability.Current)).definitionVersion)
 
         val stamp = CandidateId(Digest.ofUtf8("s8"))
-        checks.record("CHK-accept-AC-4", LastResult("rcpt-20", stamp, Outcome.Failed, Counts(11, 1), Applicability.Current))
+        checks.record("CHK-accept-AC-4", LastResult("rcpt-20", stamp, accept.definitionVersion, Outcome.Failed, Counts(11, 1), Applicability.Current))
         assertEquals(listOf("CHK-accept-AC-1", "CHK-accept-AC-4", "CHK-full", "CHK-types-touched", "CHK-lint").sorted(), checks.affectedBy(listOf("src/pay/x.py")).map { it.id }.sorted())
         assertEquals(listOf("CHK-accept-AC-1", "CHK-accept-AC-4", "CHK-full"), checks.affectedBy(listOf("docs/readme.md")).map { it.id })
         val stale = checks.markStale("CHK-accept-AC-4", "closure moved")!!

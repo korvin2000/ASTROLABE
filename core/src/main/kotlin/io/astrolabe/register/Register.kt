@@ -4,6 +4,7 @@ import io.astrolabe.evidence.Anchor
 import io.astrolabe.evidence.ClaimKind
 import io.astrolabe.id.ContextId
 import io.astrolabe.id.FileVersion
+import io.astrolabe.workspace.VersionChange
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -120,10 +121,18 @@ public data class Register(
 
     public fun openItem(n: Int): OpenItem? = open.firstOrNull { it.n == n }
 
-    /** Harness-side: marks every `v` fact anchored at [path] with the old version as stale (§4.4 cell horizon). */
-    public fun markStale(path: String, oldVersion: FileVersion): Register = copy(
+    /**
+     * Harness-side (§4.4 cell horizon): every `v` fact anchored at the changed path at any version other than
+     * the new one is marked `v(stale @old)`. Only the model can clear the mark, by re-verifying.
+     */
+    public fun markStale(change: VersionChange): Register = copy(
         facts = facts.map { f ->
-            if (f.kind == ClaimKind.Verified && f.anchor?.path == path && f.anchor.version == oldVersion && f.staleAt == null) f.copy(staleAt = oldVersion) else f
+            val anchor = f.anchor
+            if (f.kind == ClaimKind.Verified && anchor?.path == change.path && !change.current(anchor.version) && f.staleAt == null) {
+                f.copy(staleAt = anchor.version)
+            } else {
+                f
+            }
         },
     )
 

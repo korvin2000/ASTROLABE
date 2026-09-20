@@ -5,6 +5,7 @@ import io.astrolabe.id.Digest
 import io.astrolabe.id.FileVersion
 import io.astrolabe.workspace.LineRange
 import io.astrolabe.workspace.Ranges
+import io.astrolabe.workspace.VersionChange
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -36,13 +37,16 @@ class WorksetTest {
         val ws = Workset(immediateStubTokens = 800)
         ws.register(entry("src/a.py", 1, 50, tokens = 100, id = "#1"))
         ws.register(entry("src/b.py", 1, 900, tokens = 1_200, id = "#2"))
-        val drops = ws.onVersionChange("src/b.py", v1, "edited by transform #40")
+        ws.onChange(VersionChange("src/b.py", v1, v2, "edited by transform #40"))
+        val drops = ws.pendingDrops
         assertEquals(1, drops.size)
         assertTrue(drops.single().stubNow)
         assertEquals("src/b.py:1-900 stale @${v1.hash8} (edited by transform #40) → recall #2 or read again", drops.single().text)
         assertFalse(ws.covers("src/b.py", v1, LineRange(1, 10)))
         assertTrue(ws.covers("src/a.py", v1, LineRange(1, 10)))
-        assertFalse(ws.onVersionChange("src/a.py", v1, "edit #3").single().stubNow)
+        ws.onChange(VersionChange("src/a.py", null, v2, "touched by run #3"))
+        assertFalse(ws.pendingDrops.last().stubNow)
+        assertEquals("touched by run #3", ws.pendingDrops.last().cause, "an unknown old version drops every entry not at the new one")
         assertEquals(2, ws.pendingDrops.size)
         val rendered = ws.render(estimator)
         assertTrue(rendered.startsWith("KNOWN: (nothing) · NOT SEEN: everything else"), rendered)
