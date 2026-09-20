@@ -1,23 +1,25 @@
 # Continue ASTROLABE implementation
 
-**P2.3.4 / OOO-01 is DONE** from baseline `2c78d75`; [journal](audit/OUT-OF-ORDER-P2.3.4.md).
-13 focused tests passed; final Windows/JDK 26 build: core 790 tests, zero failures/errors,
-six platform skips; provider-api UP-TO-DATE (15 green results). ABI checked; independent review resolved.
-Current counts: **61/177 DONE, 4 IN_PROGRESS, 112 TODO**. Next under the ongoing multi-task request:
-register selected OOO-03 as P2.6.5 before code. P2.3.1 stays TODO; OOO-02/04 remain proposals.
-After selected components return to P0.1.2 + P0.6.1/P0.6.2/P0.6.4, then P1.8.2.
-Do not reimplement P2.3.4. Linux/remote CI and live gates unchanged. Earlier checkpoints below are historical.
+**P2.3.4 / OOO-01 and P2.6.5 / OOO-03 are DONE. No active out-of-order override remains.**
+Resume **P0.1.2 + P0.6.1/P0.6.2/P0.6.4, then P1.8.2**. Do not reimplement either kernel or P2.1.1.
 
-**Out-of-order analytical checkpoint (2026-09-20):** TODO §1.2 is **COMPLETE**; **P2.1.1 is DONE** as a graph/ledger component. No active override remains: resume reopened P0 validation, then P1.8.2. Do not redo P2.1.1 or jump to P2.1.2; P2 runtime/storage integration is still pending. Dependencies, existing task IDs, acceptance and validation gates remain binding. [Implementation and verification log](audit/OUT-OF-ORDER-P2.1.1.md).
+- [Context selection journal](audit/OUT-OF-ORDER-P2.3.4.md): dependency closure, exact budget arithmetic, deterministic marginal greedy policy, omissions and capacity refusal; commit `5ec1e0c`.
+- [Calibration journal](audit/OUT-OF-ORDER-P2.6.5.md): versioned grouping, deduplicated terminal/censored observations, median/ratios and pure warning; completed from `5ec1e0c` in the commit containing this checkpoint.
+- Verification: **26 new focused tests**; independent random graph/exhaustive and exact-rational oracles; independent reviews resolved. Final Windows/JDK 26 build: **core 803 tests, zero failures/errors, six existing platform skips**; provider-api UP-TO-DATE (15 green results). ABI checks pass.
+- Current counts: P0 15 DONE + 4 IN_PROGRESS; P1 44 DONE + 19 TODO; P2-P6 3 DONE + 93 TODO. Total **62/178 DONE (34.8%), 4 IN_PROGRESS, 112 TODO**.
+- P2.3.1/P2.6.4 stay TODO: real sources/rendering/manifest/admission and sizing collection/persistence/controller events/optional CAL injection remain with their owners. OOO-02/04 remain proposals.
+- Linux/remote CI findings and live gates are unchanged; no promotion claim. Earlier checkpoints below are historical.
+
+**Earlier P2.1.1 checkpoint (2026-09-20):** TODO §1.2 is **COMPLETE**; **P2.1.1 is DONE** as a graph/ledger component. No active override remains: resume reopened P0 validation, then P1.8.2. Do not redo P2.1.1 or jump to P2.1.2; P2 runtime/storage integration is still pending. Dependencies, existing task IDs, acceptance and validation gates remain binding. [Implementation and verification log](audit/OUT-OF-ORDER-P2.1.1.md).
 
 **When the owner asks for further out-of-order implementation:** read [OUT-OF-ORDER-PROPOSAL-TASKS.md](OUT-OF-ORDER-PROPOSAL-TASKS.md), first resume any ACTIVE card in TODO §1.2, otherwise select a dependency-admissible candidate using its ranking and activation protocol. The proposal itself starts no code task and changes no completion count; an ordinary request to continue the main plan follows the queue below.
 
 Resume the existing `TODO.md` plan from the checked-out implementation: first resolve the reopened P0 validation tasks, then continue the remaining P1 work. Implement and validate successive dependency-ready tasks; preserve the architecture, ownership boundaries, terminology and task IDs. The goal is a reusable Kotlin/JVM SDK consumable from Java, with host events/hooks and no UI coupling. This is implementation work; the earlier planning-only instructions are historical.
 
-**Checkpoint and starting point**
+**Earlier audit checkpoint and general workflow**
 
 - Audit baseline: `main` at `468f5b0`, containing implementation checkpoint `0b94875`; remote CI ran against `468f5b0`. Check local status/history before editing, preserve user changes and published history, and leave pushes to the owner. Both handoff documents are tracked; `DESCRIPTION_RU.md` was untracked at audit start.
-- Current counts including P2.1.1: P0 **15 DONE + 4 IN_PROGRESS**, P1 **44 DONE + 19 TODO**, P2–P6 **1 DONE + 93 TODO**; total **60/176 DONE (34.1%), 4 IN_PROGRESS, 112 TODO**. P0 foundation code exists, but P0.1.2/P0.6.1/P0.6.2/P0.6.4 remain reopened for failed or missing CI validation. These are task counts, not code-volume or effort percentages.
+- Historical counts after P2.1.1: P0 **15 DONE + 4 IN_PROGRESS**, P1 **44 DONE + 19 TODO**, P2–P6 **1 DONE + 93 TODO**; total **60/176 DONE (34.1%), 4 IN_PROGRESS, 112 TODO**. P0 foundation code exists, but P0.1.2/P0.6.1/P0.6.2/P0.6.4 remain reopened for failed or missing CI validation. These are task counts, not code-volume or effort percentages.
 - P1 has contract storage/amendments/digest/S0 auto-derivation, workspace/versioning/recovery, atlas/sniff, evidence records/journal/intents/coherence, register/workset, all seven tool families (look, edit, run, verify, state, task.ask, kb contract) with partition/dispatcher, the verification baseline (checker, receipts/currency, baseline ledger, reserve, exit gate/verifier, scope guard/test integrity), authority controls and the role table. These are components, not a working end-to-end agent: the built JAR has only role configuration in `cell` and constants in `Astrolabe`; controller orchestration and the SDK facade remain pending. `EmptyKb` is not a persistent KB, and the existing Java fixture tests constants, not a campaign.
 - Resolve **P0.1.2 CI validation**, including the failures owned by P0.6.1/P0.6.2/P0.6.4 (TODO §1.1). The next P1 code task remains **P1.8.2 Layout render**, then P1.8.3 Anchor, P1.8.4 Gauge, P1.8.5 Gates, P1.8.6 Residency, P1.8.7 Cell loop, P1.8.8 ResultPacket, P1.9.1–P1.9.6 controller/facade, P1.11 telemetry, P1.12 validation. Use TODO §1's distinction between completed component wiring and outstanding runtime integration.
 - Historical planning-only banners elsewhere are not current status. TODO sections 1 and 1.1 and the audit notes on reopened tasks supersede the session-2 summaries. Use actual code, executed checks and the latest task logs to establish progress. Do not redo completed components or equate scaffolding with completed integration.

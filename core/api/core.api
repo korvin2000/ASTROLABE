@@ -7565,6 +7565,162 @@ public abstract interface class io/astrolabe/java/JavaAuthority {
 	public abstract fun review (Lio/astrolabe/verify/ReviewRequest;)Ljava/util/concurrent/CompletableFuture;
 }
 
+public final class io/astrolabe/kb/CalibrationBand {
+	public fun <init> (II)V
+	public final fun component1 ()I
+	public final fun component2 ()I
+	public final fun copy (II)Lio/astrolabe/kb/CalibrationBand;
+	public static synthetic fun copy$default (Lio/astrolabe/kb/CalibrationBand;IIILjava/lang/Object;)Lio/astrolabe/kb/CalibrationBand;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMaxFiles ()I
+	public final fun getMinFiles ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/kb/CalibrationGroup {
+	public final fun getByBand ()Ljava/util/Map;
+	public final fun getBySubsystem ()Ljava/util/Map;
+	public final fun getOverall ()Lio/astrolabe/kb/CalibrationSummary;
+}
+
+public final class io/astrolabe/kb/CalibrationId {
+	public fun <init> (Lio/astrolabe/id/WorkId;Lio/astrolabe/id/AttemptId;Ljava/lang/String;)V
+	public final fun component1 ()Lio/astrolabe/id/WorkId;
+	public final fun component2 ()Lio/astrolabe/id/AttemptId;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (Lio/astrolabe/id/WorkId;Lio/astrolabe/id/AttemptId;Ljava/lang/String;)Lio/astrolabe/kb/CalibrationId;
+	public static synthetic fun copy$default (Lio/astrolabe/kb/CalibrationId;Lio/astrolabe/id/WorkId;Lio/astrolabe/id/AttemptId;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/kb/CalibrationId;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAttempt ()Lio/astrolabe/id/AttemptId;
+	public final fun getIncrement ()Ljava/lang/String;
+	public final fun getWork ()Lio/astrolabe/id/WorkId;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/kb/CalibrationObservation {
+	public static final field Companion Lio/astrolabe/kb/CalibrationObservation$Companion;
+	public fun <init> (Lio/astrolabe/kb/CalibrationId;Lio/astrolabe/kb/CalibrationSeries;Ljava/lang/String;ILio/astrolabe/graph/Sizing;Lio/astrolabe/kb/CalibrationOutcome;Ljava/lang/String;)V
+	public final fun component1 ()Lio/astrolabe/kb/CalibrationId;
+	public final fun component2 ()Lio/astrolabe/kb/CalibrationSeries;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()I
+	public final fun component5 ()Lio/astrolabe/graph/Sizing;
+	public final fun component6 ()Lio/astrolabe/kb/CalibrationOutcome;
+	public final fun component7 ()Ljava/lang/String;
+	public final fun copy (Lio/astrolabe/kb/CalibrationId;Lio/astrolabe/kb/CalibrationSeries;Ljava/lang/String;ILio/astrolabe/graph/Sizing;Lio/astrolabe/kb/CalibrationOutcome;Ljava/lang/String;)Lio/astrolabe/kb/CalibrationObservation;
+	public static synthetic fun copy$default (Lio/astrolabe/kb/CalibrationObservation;Lio/astrolabe/kb/CalibrationId;Lio/astrolabe/kb/CalibrationSeries;Ljava/lang/String;ILio/astrolabe/graph/Sizing;Lio/astrolabe/kb/CalibrationOutcome;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/kb/CalibrationObservation;
+	public fun equals (Ljava/lang/Object;)Z
+	public static final fun fromIncrement (Lio/astrolabe/kb/CalibrationId;Lio/astrolabe/kb/CalibrationSeries;Ljava/lang/String;Lio/astrolabe/kb/CalibrationOutcome;Ljava/lang/String;Lio/astrolabe/contract/Increment;)Lio/astrolabe/kb/CalibrationObservation;
+	public final fun getExpectedFiles ()I
+	public final fun getId ()Lio/astrolabe/kb/CalibrationId;
+	public final fun getOutcome ()Lio/astrolabe/kb/CalibrationOutcome;
+	public final fun getProvenance ()Ljava/lang/String;
+	public final fun getSeries ()Lio/astrolabe/kb/CalibrationSeries;
+	public final fun getSizing ()Lio/astrolabe/graph/Sizing;
+	public final fun getSubsystem ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/kb/CalibrationObservation$Companion {
+	public final fun fromIncrement (Lio/astrolabe/kb/CalibrationId;Lio/astrolabe/kb/CalibrationSeries;Ljava/lang/String;Lio/astrolabe/kb/CalibrationOutcome;Ljava/lang/String;Lio/astrolabe/contract/Increment;)Lio/astrolabe/kb/CalibrationObservation;
+}
+
+public final class io/astrolabe/kb/CalibrationOutcome : java/lang/Enum {
+	public static final field Cancelled Lio/astrolabe/kb/CalibrationOutcome;
+	public static final field Completed Lio/astrolabe/kb/CalibrationOutcome;
+	public static final field Failed Lio/astrolabe/kb/CalibrationOutcome;
+	public static final field Unfinished Lio/astrolabe/kb/CalibrationOutcome;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/kb/CalibrationOutcome;
+	public static fun values ()[Lio/astrolabe/kb/CalibrationOutcome;
+}
+
+public final class io/astrolabe/kb/CalibrationPolicy {
+	public fun <init> (Ljava/lang/String;Ljava/util/List;)V
+	public final fun band (I)Lio/astrolabe/kb/CalibrationBand;
+	public final fun getBands ()Ljava/util/List;
+	public final fun getUpperBounds ()Ljava/util/List;
+	public final fun getVersion ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/kb/CalibrationSeries {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Lio/astrolabe/kb/CalibrationSeries;
+	public static synthetic fun copy$default (Lio/astrolabe/kb/CalibrationSeries;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/kb/CalibrationSeries;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getHarnessVersion ()Ljava/lang/String;
+	public final fun getRepository ()Ljava/lang/String;
+	public final fun getSizingPolicyVersion ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/kb/CalibrationStats {
+	public static final field Companion Lio/astrolabe/kb/CalibrationStats$Companion;
+	public static final fun aggregate (Ljava/util/Collection;Lio/astrolabe/kb/CalibrationPolicy;)Lio/astrolabe/kb/CalibrationStats;
+	public final fun getAlgorithmVersion ()Ljava/lang/String;
+	public final fun getDuplicateRows ()I
+	public final fun getGroups ()Ljava/util/Map;
+	public final fun getInputRows ()I
+	public final fun getObservations ()Ljava/util/List;
+	public final fun getPolicy ()Lio/astrolabe/kb/CalibrationPolicy;
+	public final fun warning (Lio/astrolabe/kb/CalibrationSeries;I)Lio/astrolabe/kb/CalibrationWarning;
+}
+
+public final class io/astrolabe/kb/CalibrationStats$Companion {
+	public final fun aggregate (Ljava/util/Collection;Lio/astrolabe/kb/CalibrationPolicy;)Lio/astrolabe/kb/CalibrationStats;
+}
+
+public final class io/astrolabe/kb/CalibrationSummary {
+	public final fun component1 ()I
+	public final fun component2 ()I
+	public final fun component3 ()I
+	public final fun component4 ()I
+	public final fun component5 ()I
+	public final fun component6 ()Ljava/lang/Double;
+	public final fun component7 ()I
+	public final fun component8 ()I
+	public final fun component9 ()Ljava/math/BigDecimal;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCancelled ()I
+	public final fun getCensored ()I
+	public final fun getCompleted ()I
+	public final fun getDefinedRatios ()I
+	public final fun getEligible ()I
+	public final fun getFailed ()I
+	public final fun getMeanTouchedExpectedRatio ()Ljava/math/BigDecimal;
+	public final fun getOverrunRate ()Ljava/lang/Double;
+	public final fun getOverruns ()I
+	public final fun getTurnsMedian ()Ljava/lang/Double;
+	public final fun getUndefinedRatios ()I
+	public final fun getUnfinished ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/kb/CalibrationWarning {
+	public fun <init> (Lio/astrolabe/kb/CalibrationSeries;Lio/astrolabe/kb/CalibrationBand;II)V
+	public final fun component1 ()Lio/astrolabe/kb/CalibrationSeries;
+	public final fun component2 ()Lio/astrolabe/kb/CalibrationBand;
+	public final fun component3 ()I
+	public final fun component4 ()I
+	public final fun copy (Lio/astrolabe/kb/CalibrationSeries;Lio/astrolabe/kb/CalibrationBand;II)Lio/astrolabe/kb/CalibrationWarning;
+	public static synthetic fun copy$default (Lio/astrolabe/kb/CalibrationWarning;Lio/astrolabe/kb/CalibrationSeries;Lio/astrolabe/kb/CalibrationBand;IIILjava/lang/Object;)Lio/astrolabe/kb/CalibrationWarning;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBand ()Lio/astrolabe/kb/CalibrationBand;
+	public final fun getEligible ()I
+	public final fun getOverruns ()I
+	public final fun getSeries ()Lio/astrolabe/kb/CalibrationSeries;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class io/astrolabe/kb/EmptyKb : io/astrolabe/kb/Kb {
 	public static final field INSTANCE Lio/astrolabe/kb/EmptyKb;
 	public fun get (Ljava/lang/String;)Lio/astrolabe/kb/KbEntry;

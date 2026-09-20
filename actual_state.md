@@ -1,20 +1,22 @@
 # ASTROLABE 1.0.1 Kotlin SOTA AI Coding Agent Harness — actual state
 
-## Current out-of-order checkpoint (2026-09-20)
+## Current checkpoint (2026-09-20)
 
-**P2.3.4 / OOO-01 is DONE** from baseline `2c78d75`; [journal](audit/OUT-OF-ORDER-P2.3.4.md).
-13 focused tests passed; final Windows/JDK 26 build: core 790 tests, zero failures/errors,
-six platform skips; provider-api UP-TO-DATE (15 green results). ABI checked; independent review resolved.
-Current counts: **61/177 DONE, 4 IN_PROGRESS, 112 TODO**. Next under the ongoing multi-task request:
-register selected OOO-03 as P2.6.5 before code. P2.3.1 stays TODO; OOO-02/04 remain proposals.
-After selected components return to P0.1.2 + P0.6.1/P0.6.2/P0.6.4, then P1.8.2.
-Do not reimplement P2.3.4. Linux/remote CI and live gates unchanged. Earlier checkpoints below are historical.
+**P2.3.4 / OOO-01 and P2.6.5 / OOO-03 are DONE. No active out-of-order override remains.**
+Resume **P0.1.2 + P0.6.1/P0.6.2/P0.6.4, then P1.8.2**. Do not reimplement either kernel or P2.1.1.
 
-## Analytical implementation checkpoint (2026-09-20) — current resume point
+- [Context selection journal](audit/OUT-OF-ORDER-P2.3.4.md): dependency closure, exact budget arithmetic, deterministic marginal greedy policy, omissions and capacity refusal; commit `5ec1e0c`.
+- [Calibration journal](audit/OUT-OF-ORDER-P2.6.5.md): versioned grouping, deduplicated terminal/censored observations, median/ratios and pure warning; completed from `5ec1e0c` in the commit containing this checkpoint.
+- Verification: **26 new focused tests**; independent random graph/exhaustive and exact-rational oracles; independent reviews resolved. Final Windows/JDK 26 build: **core 803 tests, zero failures/errors, six existing platform skips**; provider-api UP-TO-DATE (15 green results). ABI checks pass.
+- Current counts: P0 15 DONE + 4 IN_PROGRESS; P1 44 DONE + 19 TODO; P2-P6 3 DONE + 93 TODO. Total **62/178 DONE (34.8%), 4 IN_PROGRESS, 112 TODO**.
+- P2.3.1/P2.6.4 stay TODO: real sources/rendering/manifest/admission and sizing collection/persistence/controller events/optional CAL injection remain with their owners. OOO-02/04 remain proposals.
+- Linux/remote CI findings and live gates are unchanged; no promotion claim. Earlier checkpoints below are historical.
+
+## Earlier P2.1.1 checkpoint (2026-09-20)
 
 - **P2.1.1 is DONE out of order**, from baseline `d0ca86a`: iterative graph algorithms, immutable snapshots, deterministic frontier, requirement dependencies, evidence-derived ledger and FX-42 protection. The existing increment/ledger types retain their ownership. Verifier results bind work/attempt/context/revision/definition, retain check/review references and reject stale review approvals.
 - **No active override remains. Next: P0.1.2 + P0.6.1/P0.6.2/P0.6.4, then P1.8.2.** Do not start P2.1.2 or rebuild this component merely because it was completed ahead of schedule. Plan/controller/storage integration remains with P2.1.2/P2.1.4/P2.2.2/P2.2.4.
-- **Current counts:** P0 15 DONE + 4 IN_PROGRESS; P1 44 DONE + 19 TODO; P2–P6 1 DONE + 93 TODO. Total **60/176 DONE (34.1%), 4 IN_PROGRESS, 112 TODO**; counted from task headings.
+- **Counts at that checkpoint:** P0 15 DONE + 4 IN_PROGRESS; P1 44 DONE + 19 TODO; P2–P6 1 DONE + 93 TODO. Total **60/176 DONE (34.1%), 4 IN_PROGRESS, 112 TODO**; counted from task headings.
 - **Verification:** 44 focused tests passed; final Windows/JDK 26 offline `build` succeeded. Core executed 777 tests: zero failures/errors, six existing platform skips. Provider-api was UP-TO-DATE (15 green test results). Nineteen tests added; Kotlin ABI regenerated and checked. Linux/remote CI and all live gates remain unvalidated/UNMEASURED.
 - **Retained observation:** the first full build once failed RunTest FX-22 when `bg-end` arrived before the terminal status; isolated and later full runs passed. OS/run code and tests were unchanged. Keep this finding with P0.6.1/P0.6.4; a passing rerun is not a diagnosis.
 - **Protocol, design choices, commands and integration owners:** [TODO §1.2](TODO.md#12-owner-authorized-analytical-work-2026-09-20) and [implementation log](audit/OUT-OF-ORDER-P2.1.1.md).
