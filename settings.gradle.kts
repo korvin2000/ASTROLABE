@@ -19,4 +19,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "astrolabe"
 
-include(":provider-api", ":core")
+include(":provider-api", ":core", ":eval")

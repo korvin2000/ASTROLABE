@@ -1,0 +1,63 @@
+# Offline evaluation kernel
+
+P6.1.4 supplies score arithmetic and paired inference over explicit records. It is not a campaign
+runner and does not enable features. The runner, frozen manifests and integrity verification remain
+P6.1.1/P6.1.2/P6.1.3; Accounting remains P1.11.2. Live evaluation remains P7, UNMEASURED.
+
+Create a `ScorePolicy` before results: decimal stratum weights, complexity labels, pilot cost ranges,
+acceptance floors, family confidence, minimum cluster count, cost ratio and cost/latency ceilings.
+Weights sum exactly to one and complex strata carry at least half. `EvaluationDesign` fixes the
+baseline/candidate configuration digests and every `PlannedTrial`. A pair's `matchedInputs` digest
+must bind its start state, acceptance, environment and equal budget. The caller verifies these facts.
+
+Supply one `EvaluationTrial` per configuration and planned repository/task/repetition key. Its
+cost includes all attempts, helpers, review and integration. Repetitions stay in the same task stratum;
+repository labels identify independent clusters, including related repositories under one label.
+Do not provide intermediate attempts as extra observations. Missing rows, duplicates, mismatched
+inputs or currencies produce explicit issues and prevent a valid comparison.
+
+```kotlin
+val baselineScore = Scorecard.calculate(design, design.baseline, baselineTrials)
+val candidateScore = Scorecard.calculate(design, candidateConfiguration, candidateTrials)
+val report = PromotionReport.evaluate(
+    baselineScore, candidateScore, externallyVerifiedEvidence,
+    baselineInvestment, candidateInvestment,
+)
+```
+
+The report retains the design, source rows/provenance, input digests, arithmetic, bounds and every
+issue. Inputs and returned collections are defensive immutable snapshots. Invalid policy parameters
+throw `IllegalArgumentException`; invalid or missing trial data is reported as issues. Unknown token
+volume is diagnostic, unknown billing blocks an economic claim, and unknown latency blocks a ceiling
+claim. All counts remain visible. `Money.unknown` is never treated as an exact zero cost.
+
+Q and E follow evaluation §19.4. Money totals use exact decimal addition and DECIMAL128 division.
+Floors, cost ratios and ceilings use exact cross-products. Economic comparison uses the frozen
+weighted mean of stratum costs per accepted task; observed loss in any weighted complex stratum
+vetoes eligibility. Latency ceilings apply to every candidate trial. One-off investments are separate;
+repayment is incremental investment divided by positive weighted savings. Unknown investment or
+non-positive savings leaves repayment undefined, with separate `investmentIssues`.
+
+`PairedBound` estimates the fixed-design, trial-weighted acceptance difference, overall and within
+renormalized complex strata. Repository blocks are independent; within-block dependence is unrestricted.
+The deterministic Hoeffding bound allocates family alpha over both endpoints and every declared
+candidate. It needs no PRNG, normal approximation or estimated cluster variance. Constant observations
+retain uncertainty. Insufficient clusters produce no bound; otherwise the lower bound must be strictly
+above -0.02, in fraction units. The [derivation and assumptions](../audit/OUT-OF-ORDER-P6.1.4.md) also
+document directed numerical rounding and reproducible Monte Carlo checks.
+
+This bound can be very wide. With equal cluster weights, 95% family confidence and one candidate,
+zero observed difference requires over 21,910 independent repositories to clear the 0.02 margin.
+That is a consequence of the chosen worst-case bound, not a recommended campaign size. Pilot design
+and any future more powerful method need a separately frozen, validated policy; repeated runs inside
+one repository do not manufacture independent observations.
+
+`numericalPass` describes arithmetic/statistical conditions conditional on the declared design.
+`EligibleForReview` additionally requires caller-supplied measured, frozen, independent, intact
+evaluation with mandatory controls enabled. It still authorizes no adoption. Synthetic or missing
+evidence gives `Inconclusive`; known violations give `KeepBaseline`; malformed trial tables give
+`InvalidInput`. Every result leaves runtime configuration unchanged.
+
+Run `./gradlew :eval:test` (Windows: `./gradlew.bat :eval:test`) on the pinned JDK 26 toolchain.
+The tests include independent arithmetic/formula oracles and seven predeclared 1,000-campaign
+simulations. Public API changes require a separate `:eval:updateKotlinAbi` invocation before `build`.

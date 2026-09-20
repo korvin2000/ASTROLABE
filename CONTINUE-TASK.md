@@ -1,5 +1,15 @@
 # Continue ASTROLABE implementation
 
+**OOO-02 / P6.1.4 DONE**, D-57, from `d1689ef`; do not reimplement it. No active override at this checkpoint.
+[Journal](audit/OUT-OF-ORDER-P6.1.4.md), [API guide](eval/README.md), TODO §1.2 contain the handoff.
+Current **63/179 DONE (35.2%), 4 IN_PROGRESS, 112 TODO**. Eighteen focused eval tests, 7,000 fixed
+simulation campaigns, independent review, ABI and full offline Windows/JDK 26 build pass. The full build
+executed 18 eval tests; core 803 tests/6 skips and provider-api 15 were UP-TO-DATE, not fresh executions.
+Parent P6.1.3 and P6.1.1/P6.1.2 remain TODO; no adoption/live claim. Normal return P0 validation -> P1.8.2.
+Under the continuing multi-kernel request, admit OOO-05 next (candidate P5.1.5); use proposal §4/§8.1.
+
+**Earlier checkpoint (historical):**
+
 **P2.3.4 / OOO-01 and P2.6.5 / OOO-03 are DONE. No active out-of-order override remains.**
 Resume **P0.1.2 + P0.6.1/P0.6.2/P0.6.4, then P1.8.2**. Do not reimplement either kernel or P2.1.1.
 

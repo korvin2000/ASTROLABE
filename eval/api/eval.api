@@ -1,0 +1,281 @@
+public final class io/astrolabe/eval/EvaluationDesign {
+	public fun <init> (Lio/astrolabe/eval/ScorePolicy;Lio/astrolabe/id/Digest;Lio/astrolabe/id/Digest;Ljava/util/Set;Ljava/util/List;)V
+	public final fun getBaseline ()Lio/astrolabe/id/Digest;
+	public final fun getCandidates ()Ljava/util/Set;
+	public final fun getFingerprint ()Lio/astrolabe/id/Digest;
+	public final fun getManifest ()Lio/astrolabe/id/Digest;
+	public final fun getPolicy ()Lio/astrolabe/eval/ScorePolicy;
+	public final fun getTrials ()Ljava/util/List;
+}
+
+public final class io/astrolabe/eval/EvaluationEvidence {
+	public fun <init> (Lio/astrolabe/id/Digest;Lio/astrolabe/id/Digest;Lio/astrolabe/eval/EvaluationOrigin;Lio/astrolabe/eval/EvidenceCheck;Lio/astrolabe/eval/EvidenceCheck;Lio/astrolabe/eval/EvidenceCheck;Ljava/lang/String;)V
+	public final fun component1 ()Lio/astrolabe/id/Digest;
+	public final fun component2 ()Lio/astrolabe/id/Digest;
+	public final fun component3 ()Lio/astrolabe/eval/EvaluationOrigin;
+	public final fun component4 ()Lio/astrolabe/eval/EvidenceCheck;
+	public final fun component5 ()Lio/astrolabe/eval/EvidenceCheck;
+	public final fun component6 ()Lio/astrolabe/eval/EvidenceCheck;
+	public final fun component7 ()Ljava/lang/String;
+	public final fun copy (Lio/astrolabe/id/Digest;Lio/astrolabe/id/Digest;Lio/astrolabe/eval/EvaluationOrigin;Lio/astrolabe/eval/EvidenceCheck;Lio/astrolabe/eval/EvidenceCheck;Lio/astrolabe/eval/EvidenceCheck;Ljava/lang/String;)Lio/astrolabe/eval/EvaluationEvidence;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/EvaluationEvidence;Lio/astrolabe/id/Digest;Lio/astrolabe/id/Digest;Lio/astrolabe/eval/EvaluationOrigin;Lio/astrolabe/eval/EvidenceCheck;Lio/astrolabe/eval/EvidenceCheck;Lio/astrolabe/eval/EvidenceCheck;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/eval/EvaluationEvidence;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getConfiguration ()Lio/astrolabe/id/Digest;
+	public final fun getIndependence ()Lio/astrolabe/eval/EvidenceCheck;
+	public final fun getIntegrity ()Lio/astrolabe/eval/EvidenceCheck;
+	public final fun getMandatoryControls ()Lio/astrolabe/eval/EvidenceCheck;
+	public final fun getManifest ()Lio/astrolabe/id/Digest;
+	public final fun getOrigin ()Lio/astrolabe/eval/EvaluationOrigin;
+	public final fun getProvenance ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/eval/EvaluationIssue {
+	public fun <init> (Lio/astrolabe/eval/EvaluationIssueCode;Ljava/lang/String;)V
+	public final fun component1 ()Lio/astrolabe/eval/EvaluationIssueCode;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Lio/astrolabe/eval/EvaluationIssueCode;Ljava/lang/String;)Lio/astrolabe/eval/EvaluationIssue;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/EvaluationIssue;Lio/astrolabe/eval/EvaluationIssueCode;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/eval/EvaluationIssue;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCode ()Lio/astrolabe/eval/EvaluationIssueCode;
+	public final fun getDetail ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/eval/EvaluationIssueCode : java/lang/Enum {
+	public static final field BoundNotMet Lio/astrolabe/eval/EvaluationIssueCode;
+	public static final field CostCeiling Lio/astrolabe/eval/EvaluationIssueCode;
+	public static final field CurrencyMismatch Lio/astrolabe/eval/EvaluationIssueCode;
+	public static final field DuplicateTrial Lio/astrolabe/eval/EvaluationIssueCode;
+	public static final field EconomicPolicy Lio/astrolabe/eval/EvaluationIssueCode;
+	public static final field EvidenceMismatch Lio/astrolabe/eval/EvaluationIssueCode;
+	public static final field Independence Lio/astrolabe/eval/EvaluationIssueCode;
+	public static final field InsufficientClusters Lio/astrolabe/eval/EvaluationIssueCode;
+	public static final field Integrity Lio/astrolabe/eval/EvaluationIssueCode;
+	public static final field InvariantViolation Lio/astrolabe/eval/EvaluationIssueCode;
+	public static final field LatencyCeiling Lio/astrolabe/eval/EvaluationIssueCode;
+	public static final field MandatoryControls Lio/astrolabe/eval/EvaluationIssueCode;
+	public static final field MismatchedInputs Lio/astrolabe/eval/EvaluationIssueCode;
+	public static final field MissingStratum Lio/astrolabe/eval/EvaluationIssueCode;
+	public static final field MissingTrial Lio/astrolabe/eval/EvaluationIssueCode;
+	public static final field NoPositiveSaving Lio/astrolabe/eval/EvaluationIssueCode;
+	public static final field ObservedComplexLoss Lio/astrolabe/eval/EvaluationIssueCode;
+	public static final field QualityFloor Lio/astrolabe/eval/EvaluationIssueCode;
+	public static final field SeriousRegression Lio/astrolabe/eval/EvaluationIssueCode;
+	public static final field SyntheticEvidence Lio/astrolabe/eval/EvaluationIssueCode;
+	public static final field UnexpectedTrial Lio/astrolabe/eval/EvaluationIssueCode;
+	public static final field UnknownBilling Lio/astrolabe/eval/EvaluationIssueCode;
+	public static final field UnknownInvestment Lio/astrolabe/eval/EvaluationIssueCode;
+	public static final field UnknownLatency Lio/astrolabe/eval/EvaluationIssueCode;
+	public static final field ZeroAccepted Lio/astrolabe/eval/EvaluationIssueCode;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/eval/EvaluationIssueCode;
+	public static fun values ()[Lio/astrolabe/eval/EvaluationIssueCode;
+}
+
+public final class io/astrolabe/eval/EvaluationOrigin : java/lang/Enum {
+	public static final field Measured Lio/astrolabe/eval/EvaluationOrigin;
+	public static final field Synthetic Lio/astrolabe/eval/EvaluationOrigin;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/eval/EvaluationOrigin;
+	public static fun values ()[Lio/astrolabe/eval/EvaluationOrigin;
+}
+
+public final class io/astrolabe/eval/EvaluationTrial {
+	public fun <init> (Lio/astrolabe/eval/TrialKey;Lio/astrolabe/id/Digest;Lio/astrolabe/id/Digest;ZLio/astrolabe/provider/Money;ZLjava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;JJLjava/lang/String;)V
+	public final fun component1 ()Lio/astrolabe/eval/TrialKey;
+	public final fun component10 ()J
+	public final fun component11 ()J
+	public final fun component12 ()Ljava/lang/String;
+	public final fun component2 ()Lio/astrolabe/id/Digest;
+	public final fun component3 ()Lio/astrolabe/id/Digest;
+	public final fun component4 ()Z
+	public final fun component5 ()Lio/astrolabe/provider/Money;
+	public final fun component6 ()Z
+	public final fun component7 ()Ljava/lang/Long;
+	public final fun component8 ()Ljava/lang/Long;
+	public final fun component9 ()Ljava/lang/Long;
+	public final fun copy (Lio/astrolabe/eval/TrialKey;Lio/astrolabe/id/Digest;Lio/astrolabe/id/Digest;ZLio/astrolabe/provider/Money;ZLjava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;JJLjava/lang/String;)Lio/astrolabe/eval/EvaluationTrial;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/EvaluationTrial;Lio/astrolabe/eval/TrialKey;Lio/astrolabe/id/Digest;Lio/astrolabe/id/Digest;ZLio/astrolabe/provider/Money;ZLjava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;JJLjava/lang/String;ILjava/lang/Object;)Lio/astrolabe/eval/EvaluationTrial;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAccepted ()Z
+	public final fun getBillingComplete ()Z
+	public final fun getConfiguration ()Lio/astrolabe/id/Digest;
+	public final fun getInputTokens ()Ljava/lang/Long;
+	public final fun getInvariantViolations ()J
+	public final fun getKey ()Lio/astrolabe/eval/TrialKey;
+	public final fun getLatencyMillis ()Ljava/lang/Long;
+	public final fun getMatchedInputs ()Lio/astrolabe/id/Digest;
+	public final fun getOnlineCost ()Lio/astrolabe/provider/Money;
+	public final fun getOutputTokens ()Ljava/lang/Long;
+	public final fun getProvenance ()Ljava/lang/String;
+	public final fun getSeriousRegressions ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/eval/EvidenceCheck : java/lang/Enum {
+	public static final field Fail Lio/astrolabe/eval/EvidenceCheck;
+	public static final field Pass Lio/astrolabe/eval/EvidenceCheck;
+	public static final field Unknown Lio/astrolabe/eval/EvidenceCheck;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/eval/EvidenceCheck;
+	public static fun values ()[Lio/astrolabe/eval/EvidenceCheck;
+}
+
+public final class io/astrolabe/eval/PairedBound {
+	public static final field Companion Lio/astrolabe/eval/PairedBound$Companion;
+	public static final fun calculate (Lio/astrolabe/eval/Scorecard;Lio/astrolabe/eval/Scorecard;Z)Lio/astrolabe/eval/PairedBound;
+	public final fun getClusters ()I
+	public final fun getComplexOnly ()Z
+	public final fun getConstantDifferences ()Z
+	public final fun getEstimate ()Ljava/math/BigDecimal;
+	public final fun getIssues ()Ljava/util/List;
+	public final fun getLower ()Ljava/lang/Double;
+	public final fun getPassesMargin ()Z
+	public final fun getRadius ()Ljava/lang/Double;
+}
+
+public final class io/astrolabe/eval/PairedBound$Companion {
+	public final fun calculate (Lio/astrolabe/eval/Scorecard;Lio/astrolabe/eval/Scorecard;Z)Lio/astrolabe/eval/PairedBound;
+}
+
+public final class io/astrolabe/eval/PlannedTrial {
+	public fun <init> (Lio/astrolabe/eval/TrialKey;Ljava/lang/String;Lio/astrolabe/id/Digest;)V
+	public final fun component1 ()Lio/astrolabe/eval/TrialKey;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Lio/astrolabe/id/Digest;
+	public final fun copy (Lio/astrolabe/eval/TrialKey;Ljava/lang/String;Lio/astrolabe/id/Digest;)Lio/astrolabe/eval/PlannedTrial;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/PlannedTrial;Lio/astrolabe/eval/TrialKey;Ljava/lang/String;Lio/astrolabe/id/Digest;ILjava/lang/Object;)Lio/astrolabe/eval/PlannedTrial;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getKey ()Lio/astrolabe/eval/TrialKey;
+	public final fun getMatchedInputs ()Lio/astrolabe/id/Digest;
+	public final fun getStratum ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/eval/PromotionReport {
+	public static final field Companion Lio/astrolabe/eval/PromotionReport$Companion;
+	public static final fun evaluate (Lio/astrolabe/eval/Scorecard;Lio/astrolabe/eval/Scorecard;Lio/astrolabe/eval/EvaluationEvidence;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;)Lio/astrolabe/eval/PromotionReport;
+	public final fun getBaseline ()Lio/astrolabe/eval/Scorecard;
+	public final fun getBaselineInvestment ()Lio/astrolabe/provider/Money;
+	public final fun getBaselineWeightedCost ()Lio/astrolabe/provider/Money;
+	public final fun getCandidate ()Lio/astrolabe/eval/Scorecard;
+	public final fun getCandidateInvestment ()Lio/astrolabe/provider/Money;
+	public final fun getCandidateWeightedCost ()Lio/astrolabe/provider/Money;
+	public final fun getComplex ()Lio/astrolabe/eval/PairedBound;
+	public final fun getEvidence ()Lio/astrolabe/eval/EvaluationEvidence;
+	public final fun getInputDigest ()Lio/astrolabe/id/Digest;
+	public final fun getInvestmentIssues ()Ljava/util/List;
+	public final fun getIssues ()Ljava/util/List;
+	public final fun getNumericalPass ()Z
+	public final fun getOverall ()Lio/astrolabe/eval/PairedBound;
+	public final fun getRepaymentAcceptedTasks ()Ljava/math/BigDecimal;
+	public final fun getVerdict ()Lio/astrolabe/eval/PromotionVerdict;
+}
+
+public final class io/astrolabe/eval/PromotionReport$Companion {
+	public final fun evaluate (Lio/astrolabe/eval/Scorecard;Lio/astrolabe/eval/Scorecard;Lio/astrolabe/eval/EvaluationEvidence;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;)Lio/astrolabe/eval/PromotionReport;
+}
+
+public final class io/astrolabe/eval/PromotionVerdict : java/lang/Enum {
+	public static final field EligibleForReview Lio/astrolabe/eval/PromotionVerdict;
+	public static final field Inconclusive Lio/astrolabe/eval/PromotionVerdict;
+	public static final field InvalidInput Lio/astrolabe/eval/PromotionVerdict;
+	public static final field KeepBaseline Lio/astrolabe/eval/PromotionVerdict;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/eval/PromotionVerdict;
+	public static fun values ()[Lio/astrolabe/eval/PromotionVerdict;
+}
+
+public final class io/astrolabe/eval/ScorePolicy {
+	public fun <init> (Ljava/lang/String;Ljava/util/List;Ljava/math/BigDecimal;ILjava/math/BigDecimal;Lio/astrolabe/provider/Money;J)V
+	public final fun getConfidence ()Ljava/math/BigDecimal;
+	public final fun getCostCeiling ()Lio/astrolabe/provider/Money;
+	public final fun getCostRatio ()Ljava/math/BigDecimal;
+	public final fun getCurrency ()Ljava/lang/String;
+	public final fun getFingerprint ()Lio/astrolabe/id/Digest;
+	public final fun getLatencyCeilingMillis ()J
+	public final fun getMinClusters ()I
+	public final fun getStrata ()Ljava/util/List;
+	public final fun getVersion ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/eval/Scorecard {
+	public static final field Companion Lio/astrolabe/eval/Scorecard$Companion;
+	public static final fun calculate (Lio/astrolabe/eval/EvaluationDesign;Lio/astrolabe/id/Digest;Ljava/util/List;)Lio/astrolabe/eval/Scorecard;
+	public final fun getConfiguration ()Lio/astrolabe/id/Digest;
+	public final fun getDesign ()Lio/astrolabe/eval/EvaluationDesign;
+	public final fun getEconomy ()Ljava/math/BigDecimal;
+	public final fun getEligibleScore ()Ljava/math/BigDecimal;
+	public final fun getInputDigest ()Lio/astrolabe/id/Digest;
+	public final fun getIssues ()Ljava/util/List;
+	public final fun getQuality ()Ljava/math/BigDecimal;
+	public final fun getRows ()Ljava/util/List;
+	public final fun getStrata ()Ljava/util/Map;
+	public final fun getTotalOnlineCost ()Lio/astrolabe/provider/Money;
+}
+
+public final class io/astrolabe/eval/Scorecard$Companion {
+	public final fun calculate (Lio/astrolabe/eval/EvaluationDesign;Lio/astrolabe/id/Digest;Ljava/util/List;)Lio/astrolabe/eval/Scorecard;
+}
+
+public final class io/astrolabe/eval/StratumPolicy {
+	public fun <init> (Ljava/lang/String;Ljava/math/BigDecimal;ZLio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Ljava/math/BigDecimal;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/math/BigDecimal;
+	public final fun component3 ()Z
+	public final fun component4 ()Lio/astrolabe/provider/Money;
+	public final fun component5 ()Lio/astrolabe/provider/Money;
+	public final fun component6 ()Ljava/math/BigDecimal;
+	public final fun copy (Ljava/lang/String;Ljava/math/BigDecimal;ZLio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Ljava/math/BigDecimal;)Lio/astrolabe/eval/StratumPolicy;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/StratumPolicy;Ljava/lang/String;Ljava/math/BigDecimal;ZLio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Ljava/math/BigDecimal;ILjava/lang/Object;)Lio/astrolabe/eval/StratumPolicy;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAcceptanceFloor ()Ljava/math/BigDecimal;
+	public final fun getComplex ()Z
+	public final fun getCostHigh ()Lio/astrolabe/provider/Money;
+	public final fun getCostLow ()Lio/astrolabe/provider/Money;
+	public final fun getId ()Ljava/lang/String;
+	public final fun getWeight ()Ljava/math/BigDecimal;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/eval/StratumScore {
+	public final fun component1 ()I
+	public final fun component2 ()I
+	public final fun component3 ()Ljava/math/BigDecimal;
+	public final fun component4 ()Lio/astrolabe/provider/Money;
+	public final fun component5 ()Lio/astrolabe/provider/Money;
+	public final fun component6 ()Ljava/math/BigDecimal;
+	public final fun component7 ()Ljava/math/BigDecimal;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAcceptance ()Ljava/math/BigDecimal;
+	public final fun getAccepted ()I
+	public final fun getCostPerAccepted ()Lio/astrolabe/provider/Money;
+	public final fun getEconomy ()Ljava/math/BigDecimal;
+	public final fun getOnlineCost ()Lio/astrolabe/provider/Money;
+	public final fun getTokensPerAccepted ()Ljava/math/BigDecimal;
+	public final fun getTrials ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/eval/TrialKey {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;I)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()I
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;I)Lio/astrolabe/eval/TrialKey;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/TrialKey;Ljava/lang/String;Ljava/lang/String;IILjava/lang/Object;)Lio/astrolabe/eval/TrialKey;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getRepetition ()I
+	public final fun getRepository ()Ljava/lang/String;
+	public final fun getTask ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+

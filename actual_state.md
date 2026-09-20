@@ -2,6 +2,18 @@
 
 ## Current checkpoint (2026-09-20)
 
+**OOO-02 / P6.1.4 DONE**, from `d1689ef`, D-57. No active override at this checkpoint.
+Q/E/cost, paired repository-cluster bounds, diagnostic verdict/repayment and immutable provenance are complete.
+[Journal](audit/OUT-OF-ORDER-P6.1.4.md) and [API guide](eval/README.md). Do not reimplement the kernel.
+Current **63/179 DONE (35.2%), 4 IN_PROGRESS, 112 TODO**. Eighteen focused eval tests, 7,000 fixed
+simulations, independent review, eval ABI and full Windows/JDK 26 offline build pass. Full build freshly
+ran 18 eval tests; core 803 tests/6 skips and provider-api 15 tests were UP-TO-DATE, not new executions.
+P6.1.1/P6.1.2/P6.1.3 remain TODO; live gates UNMEASURED; CI/Linux findings unchanged.
+Next under the continuing out-of-order request: OOO-05 (candidate P5.1.5), admission first.
+Normal return: P0.1.2 + P0.6.1/P0.6.2/P0.6.4 -> P1.8.2.
+
+## Earlier P2.3.4/P2.6.5 checkpoint
+
 **P2.3.4 / OOO-01 and P2.6.5 / OOO-03 are DONE. No active out-of-order override remains.**
 Resume **P0.1.2 + P0.6.1/P0.6.2/P0.6.4, then P1.8.2**. Do not reimplement either kernel or P2.1.1.
 
