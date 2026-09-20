@@ -10,7 +10,7 @@ Resume **P0.1.2 + P0.6.1/P0.6.2/P0.6.4, then P1.8.2**. Do not reimplement either
 - Verification: **26 new focused tests**; independent random graph/exhaustive and exact-rational oracles; independent reviews resolved. Final Windows/JDK 26 build: **core 803 tests, zero failures/errors, six existing platform skips**; provider-api UP-TO-DATE (15 green results). ABI checks pass.
 - Current counts: P0 15 DONE + 4 IN_PROGRESS; P1 44 DONE + 19 TODO; P2-P6 3 DONE + 93 TODO. Total **62/178 DONE (34.8%), 4 IN_PROGRESS, 112 TODO**.
 - P2.3.1/P2.6.4 stay TODO: real sources/rendering/manifest/admission and sizing collection/persistence/controller events/optional CAL injection remain with their owners. OOO-02/04 remain proposals.
-- Additional candidate search at `2cb9372`: [proposal §8](OUT-OF-ORDER-PROPOSAL-TASKS.md#8-повторный-отбор-пять-новых-кандидатов-на-checkpoint-2cb9372) adds OOO-05–OOO-09 with algorithms, ready producers and independent checks. All remain PROPOSED; no task or module activated, no count change. Use the updated ranking for a future out-of-order implementation request.
+- Out-of-order planning refresh at `f6a4feb`: seven unimplemented proposals now follow [descending difficulty, §2](OUT-OF-ORDER-PROPOSAL-TASKS.md#complexity-order), starting with OOO-02 (candidate P6.1.4). [Handoff §9](OUT-OF-ORDER-PROPOSAL-TASKS.md#implementation-handoff) supplies implementation slices, eval setup and progress/verification requirements. All seven remain PROPOSED; no task/module activated, no count change. Apply this order only to a future out-of-order implementation request.
 - Linux/remote CI findings and live gates are unchanged; no promotion claim. Earlier checkpoints below are historical.
 
 ## Earlier P2.1.1 checkpoint (2026-09-20)
