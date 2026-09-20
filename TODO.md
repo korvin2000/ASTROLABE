@@ -355,41 +355,47 @@ Goal: [§18.2 Stage A](docs/implementation/roadmap.md#sec-18-2): one implementin
 - Log: 2026-09-20 — register.ContractDigest.render(contract, ledger, obligations, estimator, cap=150): current authorized objective (every verbatim request, newest last), requirement statuses (snake_case wire names), obligation ids + status/currency text supplied by the scheduler, critical exclusions and pending-amendment count; deterministic labelled truncation (oldest request first, then statuses collapse to +N more; exclusions/requirements never dropped) — D-17. context.ContractSlice.forIncrement(contract, increment, originalObligations): requirements verbatim, ALL constraints/exclusions, complete acceptance definitions (command/criterion, origin, obligation version, links) + coverage() that fails on an id without its definition (IX-11) and a byte-stable render(). Tests green.
 
 ### P1.2 Workspace core
-#### P1.2.1 [C][M] `Workspace` and `VersionRegistry` · TODO
+#### P1.2.1 [C][M] `Workspace` and `VersionRegistry` · DONE
 - Why: [§3.3](docs/architecture/components.md#sec-3-3) `version(workspace, path)`, `displayed(context, generation, workspace, path, v)`; F2 (namespace rule).
 - Pkg: `workspace`
 - Deps: P1.2.6 (`WorkspacePath`)
 - Build: `Workspace(id, root, git)`, `VersionRegistry { version(path): FileVersion (raw-byte hash; an mtime/size cache is only a hint and is bypassed at every consequential boundary — read, edit CAS, check, reuse, publication — with acquisition-race detection, I-05); displayed(ctx, gen, ws, path, v): Ranges; show(ctx, gen, ws, path, v, range, redactionMask); change(path, from, to) → listeners }`, `Ranges` (sorted merged intervals), `ChangeListener` (Coherence hooks in P1.4.4).
 - Notes: shared content hashes never share edit authority across contexts/workspaces (FX-51 in P2/P5).
 - Done: displayed ranges union/merge tests; change notifications fire once per version transition; a same-size external rewrite with a restored mtime is detected and rejects a stale CAS (IX-05).
+- Log: 2026-09-20 — Workspace(id, root, git, protectedPaths); VersionRegistry: version/read (raw-byte hash, acquisition race detected via re-stat, mtime/size only a hint via versionHint), checkExpected → CasCheck Current|Stale|Refused, displayed/show keyed by (ctx, gen, ws, path, v) with redaction subtracted (FX-51 separate coverage per context/workspace), change(path, from, to) notifies ChangeListeners once per transition. IX-05: same-size rewrite with restored mtime rejects a stale CAS.
 
-#### P1.2.2 [M] `Stamper` · TODO
+#### P1.2.2 [M] `Stamper` · DONE
 - Why: [§8.4](docs/verification/scheduler.md#sec-8-4) stamp = base commit + tracked delta hash + untracked manifest hash + env id; computed before/after `run(verify)` and at every cell boundary.
 - Deps: P0.6.2, P0.2.1
 - Build: `Stamper.stamp(workspace): Stamp` over the versioned canonical candidate encoding (sorted membership, path/type/mode/content; harness state lives outside the tree, D-44), `Stamper.diff(a, b): changedPaths`, `EnvFingerprint.compute()` (D-13: OS/arch, resolved tool/checker/parser identities and versions, protected digests of relevant effective environment values, build flags, lock/dependency state, runner policy id, external fixture identities; unknown relevant inputs ⇒ `envKnown=false`, which blocks cross-candidate reuse), stamps table with `at` as metadata.
 - Done: editing a file changes the stamp; equal trees ⇒ equal stamps across runs and capture times; a changed lockfile or tool version changes `envId` (IX-05).
+- Log: 2026-09-20 — Stamper(workspace, env): tracked delta + untracked manifest over CanonicalEncoding v1 (paths sorted by unsigned UTF-8 bytes; count-prefixed path/type/mode/digest lines), baseCommit, EnvFingerprint.compute(EnvInputs: os/arch, tool versions, env value digests, lock digests, build flags, runner policy, fixtures, unknown ⇒ envKnown=false), report()/diff()/capture(clock)/record(store) into the stamps table with at as metadata. Equal trees ⇒ equal stamps across capture times; edit, lockfile or tool version change ⇒ different ids (IX-05).
 
-#### P1.2.3 [M] Dirty-state record · TODO
+#### P1.2.3 [M] Dirty-state record · DONE
 - Why: [§4.6](docs/runtime/workspace-editing.md#sec-4-6) initial dirty-state record; FX-06.
 - Build: `DirtyState.capture(workspace)` at campaign open → a `Snapshot` = raw-byte/type/mode **manifest** plus exact recovery blobs for tracked delta, staged content (read from the user's index without touching it) and relevant untracked files (D-53), + `s0` stamp; ignored/untracked inputs accounted for explicitly; unsupported forms (submodules, sparse checkout) rejected by name; `DirtyState.separate(final)` → `agent` / `by_run` / `pre_existing_user_changes` for the finish receipt.
 - Done: FX-06 test: user changes survive edits, failed checks, reverts; CRLF conversion and a configured clean filter do not alter the captured bytes (IX-12).
+- Log: 2026-09-20 — DirtyState.capture(turn=0) → Snapshot manifest (raw bytes/type/mode entries + staged entries read from the user's index without touching it, base commit, stamp, ignored count, unreadable) with recovery blobs in blobs/recovery; unsupported repository forms refused by name; DirtyState.separate(initial, final, agentEdits, runTouched) → agent | byRun | preExistingUserChanges | unattributed. IX-12: CRLF + live clean filter never alter captured bytes; FX-06 user changes survive and are separated.
 
-#### P1.2.4 [M] `ShadowRef` snapshots and `revert:turn:N` · TODO
+#### P1.2.4 [M] `ShadowRef` snapshots and `revert:turn:N` · DONE
 - Why: [§4.6](docs/runtime/workspace-editing.md#sec-4-6), [§9.3](docs/runtime/workspace-editing.md#sec-9-3): snapshot after every mutating turn; constant-time selection; no `reset`/`clean`; never crosses the dirty-state record.
 - Deps: P0.6.2
 - Build: `ShadowRef(work, attempt, workspace)` → `refs/astrolabe/<work>/<attempt>/<ws>/head`; `snapshot(turn)` = build a `Snapshot` manifest (raw bytes/type/mode) → store blobs with `git hash-object --no-filters -w` (or from recovery blobs) → deliberately initialized temporary index from the manifest → `write-tree` → `commit-tree` (parent = previous) → `update-ref` with expected old id; the manifest is the authority, the Git tree only indexes it (D-53); `restore(turn)` writes bytes from the manifest's blobs, guarded per file against divergent current content; `materialize(turn, dir)` exports a candidate and verifies it against the manifest; snapshot 0 = the captured dirty state.
 - Done: restore never touches user refs/index/stash; expected-old-id mismatch fails loudly; FX-05 (inverse refuses divergent content); a `.gitattributes` filter never changes snapshot bytes or runs at snapshot time (IX-12).
+- Log: 2026-09-20 — ShadowRef(work, attempt, workspace, store, dirtyState, os, clock): refs/astrolabe/<work>/<attempt>/<ws>/head; snapshot(turn) writes raw blobs with hash-object --no-filters -w, builds a deliberately initialized temp index, write-tree, commit-tree (parent = previous), update-ref with expected old; constant-time turn → commit index under candidates/; restore(turn) guarded per file (tree-diff ∪ both manifests) ⇒ Restored | Divergent | Refused (FX-05); materialize(turn, dir) verified against the manifest (IX-12); user refs/index/stash untouched (asserted byte-for-byte).
 
-#### P1.2.5 [M] `Preimages` and `revert:#id` · TODO
+#### P1.2.5 [M] `Preimages` and `revert:#id` · DONE
 - Build: `Preimages.save(path, version, bytes)` into `blobs/recovery/` (unredacted, restricted, D-14); `revert(editId)` = version-checked inverse producing a diff receipt + inline syntax; refuses when current bytes ≠ postimage.
 - Done: FX-05; preimage saved before any write (ordering test).
+- Log: 2026-09-20 — Preimages(workspace, blobs, ids, clock): save/saveThenWrite (bytes durable in blobs/recovery before the write — ordering test), recordPostimage, revert(editId, path, os) ⇒ Reverted(DiffReceipt) | Diverged | Refused when current bytes ≠ postimage (FX-05). Preimage records are in-memory until journaled by the edit tool (P1.6.4).
 
-#### P1.2.6 [C][M] `WorkspacePath` contract · TODO
+#### P1.2.6 [C][M] `WorkspacePath` contract · DONE
 - Why: [§14.1](docs/platform/security.md#sec-14-1) filesystem-root enforcement; lexical scope is insufficient (I-09, D-47).
 - Deps: P0.6.1 (`realPath`)
 - Pkg: `workspace`
 - Build: `WorkspacePath.resolve(workspace, userPath) → Resolved(relative, real, kind) | Rejected(reason)`: canonical real-path resolution; `..` traversal and absolute escapes rejected; mutation through symlink/junction/reparse ancestors rejected until an explicit operation supports them (reads report the link kind); case/alias identity unified on case-insensitive filesystems; protected paths matched by real path; `revalidate(resolved)` at publication; documented limit: atomic rename is not compare-and-replace against external writers — stronger guarantees need host-coordinated publication. Used by look/edit/registry/stamps/closures/ownership (single entry point).
 - Done: traversal, absolute escape, outside/protected junction targets, Windows case aliases and ancestor substitution leave protected/outside bytes unchanged; unsupported concurrent-publication guarantees are reported, not claimed (IX-09).
+- Log: 2026-09-20 — WorkspacePath.of(root, ProtectedPaths).resolve(userPath, Intent Read|Mutate) → Resolved(relative, real, kind, linkAncestors) | Rejected(reason): '..' refused outright, absolute escapes rejected, real-path resolution, mutation through symlink/junction/reparse/special ancestors refused, case aliases unified on case-insensitive filesystems, two-tier protected paths (.git read+write denied; CI config/lockfiles/migrations write-denied), revalidate (best effort), publicationLimits() states that atomic rename is not compare-and-replace. IX-09 tests incl. junctions via mklink /J; symlink cases skip visibly on Windows (Linux CI).
 
 ### P1.3 Orientation tier 0
 #### P1.3.1 [M] `Atlas` · TODO
