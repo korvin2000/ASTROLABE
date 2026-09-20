@@ -2420,6 +2420,185 @@ public final class io/astrolabe/cell/Roles {
 	public static final fun shapeMask (Lio/astrolabe/contract/Shape;)Lio/astrolabe/provider/ToolMask;
 }
 
+public final class io/astrolabe/context/ContextArithmetic {
+	public fun <init> (Ljava/math/BigInteger;Ljava/math/BigInteger;Ljava/math/BigInteger;Ljava/math/BigInteger;Ljava/math/BigInteger;)V
+	public final fun component1 ()Ljava/math/BigInteger;
+	public final fun component2 ()Ljava/math/BigInteger;
+	public final fun component3 ()Ljava/math/BigInteger;
+	public final fun component4 ()Ljava/math/BigInteger;
+	public final fun component5 ()Ljava/math/BigInteger;
+	public final fun copy (Ljava/math/BigInteger;Ljava/math/BigInteger;Ljava/math/BigInteger;Ljava/math/BigInteger;Ljava/math/BigInteger;)Lio/astrolabe/context/ContextArithmetic;
+	public static synthetic fun copy$default (Lio/astrolabe/context/ContextArithmetic;Ljava/math/BigInteger;Ljava/math/BigInteger;Ljava/math/BigInteger;Ljava/math/BigInteger;Ljava/math/BigInteger;ILjava/lang/Object;)Lio/astrolabe/context/ContextArithmetic;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAvailableTokens ()Ljava/math/BigInteger;
+	public final fun getKnownFixedTokens ()Ljava/math/BigInteger;
+	public final fun getLimitTokens ()Ljava/math/BigInteger;
+	public final fun getSelectedTokens ()Ljava/math/BigInteger;
+	public final fun getTotalTokens ()Ljava/math/BigInteger;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/context/ContextBudget {
+	public fun <init> (Lio/astrolabe/budget/Tokens;Ljava/math/BigDecimal;Lio/astrolabe/context/ContextCost;Lio/astrolabe/context/ContextCost;Lio/astrolabe/context/ContextCost;Lio/astrolabe/context/ContextCost;Lio/astrolabe/context/ContextCost;Lio/astrolabe/context/ContextCost;)V
+	public final fun component1 ()Lio/astrolabe/budget/Tokens;
+	public final fun component2 ()Ljava/math/BigDecimal;
+	public final fun component3 ()Lio/astrolabe/context/ContextCost;
+	public final fun component4 ()Lio/astrolabe/context/ContextCost;
+	public final fun component5 ()Lio/astrolabe/context/ContextCost;
+	public final fun component6 ()Lio/astrolabe/context/ContextCost;
+	public final fun component7 ()Lio/astrolabe/context/ContextCost;
+	public final fun component8 ()Lio/astrolabe/context/ContextCost;
+	public final fun copy (Lio/astrolabe/budget/Tokens;Ljava/math/BigDecimal;Lio/astrolabe/context/ContextCost;Lio/astrolabe/context/ContextCost;Lio/astrolabe/context/ContextCost;Lio/astrolabe/context/ContextCost;Lio/astrolabe/context/ContextCost;Lio/astrolabe/context/ContextCost;)Lio/astrolabe/context/ContextBudget;
+	public static synthetic fun copy$default (Lio/astrolabe/context/ContextBudget;Lio/astrolabe/budget/Tokens;Ljava/math/BigDecimal;Lio/astrolabe/context/ContextCost;Lio/astrolabe/context/ContextCost;Lio/astrolabe/context/ContextCost;Lio/astrolabe/context/ContextCost;Lio/astrolabe/context/ContextCost;Lio/astrolabe/context/ContextCost;ILjava/lang/Object;)Lio/astrolabe/context/ContextBudget;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAlpha ()Ljava/math/BigDecimal;
+	public final fun getEffectiveHistory ()Lio/astrolabe/context/ContextCost;
+	public final fun getPinnedHistory ()Lio/astrolabe/context/ContextCost;
+	public final fun getProfileTokens ()Lio/astrolabe/budget/Tokens;
+	public final fun getRepository ()Lio/astrolabe/context/ContextCost;
+	public final fun getReserves ()Lio/astrolabe/context/ContextCost;
+	public final fun getRetainedProtocol ()Lio/astrolabe/context/ContextCost;
+	public final fun getSystem ()Lio/astrolabe/context/ContextCost;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/context/ContextCost {
+	public fun <init> (Lio/astrolabe/budget/Tokens;Ljava/lang/String;Z)V
+	public final fun component1 ()Lio/astrolabe/budget/Tokens;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Z
+	public final fun copy (Lio/astrolabe/budget/Tokens;Ljava/lang/String;Z)Lio/astrolabe/context/ContextCost;
+	public static synthetic fun copy$default (Lio/astrolabe/context/ContextCost;Lio/astrolabe/budget/Tokens;Ljava/lang/String;ZILjava/lang/Object;)Lio/astrolabe/context/ContextCost;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEstimated ()Z
+	public final fun getSource ()Ljava/lang/String;
+	public final fun getTokens ()Lio/astrolabe/budget/Tokens;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/context/ContextCover {
+	public static final field INSTANCE Lio/astrolabe/context/ContextCover;
+	public static final fun select (Ljava/util/Collection;Lio/astrolabe/context/ContextBudget;)Lio/astrolabe/context/ContextSelection;
+}
+
+public final class io/astrolabe/context/ContextIssue {
+	public fun <init> (Lio/astrolabe/context/ContextUnitId;Lio/astrolabe/context/ContextUnitId;Lio/astrolabe/context/ContextIssueCode;)V
+	public final fun component1 ()Lio/astrolabe/context/ContextUnitId;
+	public final fun component2 ()Lio/astrolabe/context/ContextUnitId;
+	public final fun component3 ()Lio/astrolabe/context/ContextIssueCode;
+	public final fun copy (Lio/astrolabe/context/ContextUnitId;Lio/astrolabe/context/ContextUnitId;Lio/astrolabe/context/ContextIssueCode;)Lio/astrolabe/context/ContextIssue;
+	public static synthetic fun copy$default (Lio/astrolabe/context/ContextIssue;Lio/astrolabe/context/ContextUnitId;Lio/astrolabe/context/ContextUnitId;Lio/astrolabe/context/ContextIssueCode;ILjava/lang/Object;)Lio/astrolabe/context/ContextIssue;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCode ()Lio/astrolabe/context/ContextIssueCode;
+	public final fun getDependency ()Lio/astrolabe/context/ContextUnitId;
+	public final fun getRoot ()Lio/astrolabe/context/ContextUnitId;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/context/ContextIssueCode : java/lang/Enum {
+	public static final field DependencyCycle Lio/astrolabe/context/ContextIssueCode;
+	public static final field MissingDependency Lio/astrolabe/context/ContextIssueCode;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/context/ContextIssueCode;
+	public static fun values ()[Lio/astrolabe/context/ContextIssueCode;
+}
+
+public final class io/astrolabe/context/ContextOmission : java/lang/Enum {
+	public static final field Budget Lio/astrolabe/context/ContextOmission;
+	public static final field Dependency Lio/astrolabe/context/ContextOmission;
+	public static final field NoGain Lio/astrolabe/context/ContextOmission;
+	public static final field SelectionRefused Lio/astrolabe/context/ContextOmission;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/context/ContextOmission;
+	public static fun values ()[Lio/astrolabe/context/ContextOmission;
+}
+
+public final class io/astrolabe/context/ContextPick {
+	public final fun getAddedIds ()Ljava/util/List;
+	public final fun getGain ()Ljava/math/BigInteger;
+	public final fun getRoot ()Lio/astrolabe/context/ContextUnitId;
+	public final fun getTokens ()Ljava/math/BigInteger;
+}
+
+public final class io/astrolabe/context/ContextPlacement : java/lang/Enum {
+	public static final field K Lio/astrolabe/context/ContextPlacement;
+	public static final field Repository Lio/astrolabe/context/ContextPlacement;
+	public static final field System Lio/astrolabe/context/ContextPlacement;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/context/ContextPlacement;
+	public static fun values ()[Lio/astrolabe/context/ContextPlacement;
+}
+
+public final class io/astrolabe/context/ContextPriority : java/lang/Enum {
+	public static final field AffectedContracts Lio/astrolabe/context/ContextPriority;
+	public static final field Background Lio/astrolabe/context/ContextPriority;
+	public static final field CarryForward Lio/astrolabe/context/ContextPriority;
+	public static final field Lessons Lio/astrolabe/context/ContextPriority;
+	public static final field LocalImplementation Lio/astrolabe/context/ContextPriority;
+	public static final field Seeds Lio/astrolabe/context/ContextPriority;
+	public static final field Skills Lio/astrolabe/context/ContextPriority;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/context/ContextPriority;
+	public static fun values ()[Lio/astrolabe/context/ContextPriority;
+}
+
+public final class io/astrolabe/context/ContextSelection {
+	public final fun getArithmetic ()Lio/astrolabe/context/ContextArithmetic;
+	public final fun getBudget ()Lio/astrolabe/context/ContextBudget;
+	public final fun getIssues ()Ljava/util/List;
+	public final fun getMandatoryIds ()Ljava/util/Set;
+	public final fun getOmissions ()Ljava/util/Map;
+	public final fun getPicks ()Ljava/util/List;
+	public final fun getPolicyVersion ()Ljava/lang/String;
+	public final fun getSelectedIds ()Ljava/util/Set;
+	public final fun getStatus ()Lio/astrolabe/context/ContextSelectionStatus;
+	public final fun getUnits ()Ljava/util/Map;
+}
+
+public final class io/astrolabe/context/ContextSelectionStatus : java/lang/Enum {
+	public static final field Capacity Lio/astrolabe/context/ContextSelectionStatus;
+	public static final field Fit Lio/astrolabe/context/ContextSelectionStatus;
+	public static final field NeedsEvidence Lio/astrolabe/context/ContextSelectionStatus;
+	public static final field UnknownHistory Lio/astrolabe/context/ContextSelectionStatus;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/context/ContextSelectionStatus;
+	public static fun values ()[Lio/astrolabe/context/ContextSelectionStatus;
+}
+
+public final class io/astrolabe/context/ContextUnit {
+	public fun <init> (Lio/astrolabe/context/ContextUnitId;Lio/astrolabe/context/ContextCost;)V
+	public fun <init> (Lio/astrolabe/context/ContextUnitId;Lio/astrolabe/context/ContextCost;Ljava/util/Collection;)V
+	public fun <init> (Lio/astrolabe/context/ContextUnitId;Lio/astrolabe/context/ContextCost;Ljava/util/Collection;Z)V
+	public fun <init> (Lio/astrolabe/context/ContextUnitId;Lio/astrolabe/context/ContextCost;Ljava/util/Collection;ZLio/astrolabe/context/ContextPriority;)V
+	public fun <init> (Lio/astrolabe/context/ContextUnitId;Lio/astrolabe/context/ContextCost;Ljava/util/Collection;ZLio/astrolabe/context/ContextPriority;J)V
+	public fun <init> (Lio/astrolabe/context/ContextUnitId;Lio/astrolabe/context/ContextCost;Ljava/util/Collection;ZLio/astrolabe/context/ContextPriority;JLio/astrolabe/context/ContextPlacement;)V
+	public synthetic fun <init> (Lio/astrolabe/context/ContextUnitId;Lio/astrolabe/context/ContextCost;Ljava/util/Collection;ZLio/astrolabe/context/ContextPriority;JLio/astrolabe/context/ContextPlacement;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getCost ()Lio/astrolabe/context/ContextCost;
+	public final fun getDependsOn ()Ljava/util/List;
+	public final fun getGain ()J
+	public final fun getId ()Lio/astrolabe/context/ContextUnitId;
+	public final fun getMandatory ()Z
+	public final fun getPlacement ()Lio/astrolabe/context/ContextPlacement;
+	public final fun getPriority ()Lio/astrolabe/context/ContextPriority;
+}
+
+public final class io/astrolabe/context/ContextUnitId : java/lang/Comparable {
+	public fun <init> (Ljava/lang/String;)V
+	public fun compareTo (Lio/astrolabe/context/ContextUnitId;)I
+	public synthetic fun compareTo (Ljava/lang/Object;)I
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/astrolabe/context/ContextUnitId;
+	public static synthetic fun copy$default (Lio/astrolabe/context/ContextUnitId;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/context/ContextUnitId;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getValue ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class io/astrolabe/context/ContractSlice {
 	public static final field Companion Lio/astrolabe/context/ContractSlice$Companion;
 	public fun <init> (ILjava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/Map;Ljava/util/List;)V

@@ -1,5 +1,13 @@
 # Continue ASTROLABE implementation
 
+**P2.3.4 / OOO-01 is DONE** from baseline `2c78d75`; [journal](audit/OUT-OF-ORDER-P2.3.4.md).
+13 focused tests passed; final Windows/JDK 26 build: core 790 tests, zero failures/errors,
+six platform skips; provider-api UP-TO-DATE (15 green results). ABI checked; independent review resolved.
+Current counts: **61/177 DONE, 4 IN_PROGRESS, 112 TODO**. Next under the ongoing multi-task request:
+register selected OOO-03 as P2.6.5 before code. P2.3.1 stays TODO; OOO-02/04 remain proposals.
+After selected components return to P0.1.2 + P0.6.1/P0.6.2/P0.6.4, then P1.8.2.
+Do not reimplement P2.3.4. Linux/remote CI and live gates unchanged. Earlier checkpoints below are historical.
+
 **Out-of-order analytical checkpoint (2026-09-20):** TODO §1.2 is **COMPLETE**; **P2.1.1 is DONE** as a graph/ledger component. No active override remains: resume reopened P0 validation, then P1.8.2. Do not redo P2.1.1 or jump to P2.1.2; P2 runtime/storage integration is still pending. Dependencies, existing task IDs, acceptance and validation gates remain binding. [Implementation and verification log](audit/OUT-OF-ORDER-P2.1.1.md).
 
 **When the owner asks for further out-of-order implementation:** read [OUT-OF-ORDER-PROPOSAL-TASKS.md](OUT-OF-ORDER-PROPOSAL-TASKS.md), first resume any ACTIVE card in TODO §1.2, otherwise select a dependency-admissible candidate using its ranking and activation protocol. The proposal itself starts no code task and changes no completion count; an ordinary request to continue the main plan follows the queue below.

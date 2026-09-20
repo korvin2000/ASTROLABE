@@ -1,5 +1,15 @@
 # ASTROLABE 1.0.1 Kotlin SOTA AI Coding Agent Harness — actual state
 
+## Current out-of-order checkpoint (2026-09-20)
+
+**P2.3.4 / OOO-01 is DONE** from baseline `2c78d75`; [journal](audit/OUT-OF-ORDER-P2.3.4.md).
+13 focused tests passed; final Windows/JDK 26 build: core 790 tests, zero failures/errors,
+six platform skips; provider-api UP-TO-DATE (15 green results). ABI checked; independent review resolved.
+Current counts: **61/177 DONE, 4 IN_PROGRESS, 112 TODO**. Next under the ongoing multi-task request:
+register selected OOO-03 as P2.6.5 before code. P2.3.1 stays TODO; OOO-02/04 remain proposals.
+After selected components return to P0.1.2 + P0.6.1/P0.6.2/P0.6.4, then P1.8.2.
+Do not reimplement P2.3.4. Linux/remote CI and live gates unchanged. Earlier checkpoints below are historical.
+
 ## Analytical implementation checkpoint (2026-09-20) — current resume point
 
 - **P2.1.1 is DONE out of order**, from baseline `d0ca86a`: iterative graph algorithms, immutable snapshots, deterministic frontier, requirement dependencies, evidence-derived ledger and FX-42 protection. The existing increment/ledger types retain their ownership. Verifier results bind work/attempt/context/revision/definition, retain check/review references and reject stale review approvals.
