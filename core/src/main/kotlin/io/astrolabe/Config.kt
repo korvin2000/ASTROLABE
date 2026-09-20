@@ -3,6 +3,8 @@ package io.astrolabe
 import io.astrolabe.auth.ExecutionMode
 import io.astrolabe.auth.RedactionConfig
 import io.astrolabe.auth.Stage
+import io.astrolabe.cell.Role
+import io.astrolabe.cell.Roles
 import io.astrolabe.id.Digest
 import io.astrolabe.provider.Profile
 import kotlinx.serialization.Serializable
@@ -29,10 +31,30 @@ public data class Config(
     /** External durable state root (D-44); `null` selects the OS user-state directory. */
     val stateRoot: String? = null,
     val flags: Flags = Flags(),
+    /**
+     * Host overrides of the declared roles by name (§3.4, D-38): wording may change, executor authority may
+     * not — an override must keep its tool mask within, and its permission at or below, the SDK default.
+     */
+    val roles: Map<String, Role> = emptyMap(),
 ) {
+    /** The role [name] as configured, else the SDK default; `null` for a name neither declares. */
+    public fun role(name: String): Role? = roles[name] ?: Roles.defaults[name]
+
     public fun violations(): List<ConfigViolation> = buildList {
         addAll(defaults.violations())
         addAll(redaction.violations())
+        roles.forEach { (name, role) ->
+            if (name != role.name) add(ConfigViolation("roles.$name", "key differs from role name '${role.name}'"))
+            val default = Roles.defaults[name]
+            if (default == null) {
+                add(ConfigViolation("roles.$name", "not a declared role; the runtime has no duties for it"))
+            } else {
+                val widened = role.toolMask.allowed - default.toolMask.allowed
+                if (widened.isNotEmpty()) add(ConfigViolation("roles.$name", "override widens the tool mask by ${widened.sorted()}; a role is never a security boundary and overrides change wording only (D-38)"))
+                if (role.permission.ordinal > default.permission.ordinal) add(ConfigViolation("roles.$name", "override raises the permission to ${role.permission}; the default is ${default.permission} (D-38)"))
+                if (role.packetKind != default.packetKind) add(ConfigViolation("roles.$name", "override changes the output packet; duties and packets are the SDK's (D-38)"))
+            }
+        }
         if (profiles.isNotEmpty() || profileRoles.main.isNotEmpty()) {
             if (profileRoles.main !in profiles) add(ConfigViolation("profileRoles.main", "profile '${profileRoles.main}' is not configured"))
             profileRoles.helper?.let { if (it !in profiles) add(ConfigViolation("profileRoles.helper", "profile '$it' is not configured")) }
