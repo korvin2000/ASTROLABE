@@ -23,7 +23,7 @@
 In scope: the whole architecture through S3 as a library, validated with a **fake provider adapter**. Out of scope ([P7](#p7-deferred-out-of-scope-boundary)): live provider transports, auth, retry/backoff, HTTP clients, MCP client transports, confined-runner backends, live benchmark campaigns. Every phase states which fixtures it must pass and which platform/provider assumptions remain unsupported. The roadmap rule "no stage starts before the previous gate is measured" ([§18.2](docs/implementation/roadmap.md#sec-18-2)) is interpreted for this offline plan as: engineering proceeds through P6 with each live gate recorded `UNMEASURED` and its prerequisites named; promotion claims wait for live evaluation (I-19, D-28).
 
 ## 1 Progress
-- **Phase:** P0 · **Next task:** P0.4.3 · **Blocked:** none
+- **Phase:** P0 · **Next task:** P1.6.1 · **Blocked:** none
 - **Open decisions needing an owner answer:** none (D-01, D-02, D-09, D-12, D-15 answered 2026-09-20 in `ANSWERS.md`; provisional defaults are labelled in §3)
 - **Session log**
   - 2026-09-20 — plan created from docs 1.0.1; no Gradle project, no code. Local machine has git 2.45 and ripgrep, **no JDK/Gradle installed** (install JDK 26 + Gradle 9.7.0 wrapper before P0.1.1).
@@ -320,11 +320,12 @@ Goal: [§18.2 Stage A](docs/implementation/roadmap.md#sec-18-2): one implementin
 **Fixtures:** FX-01..10, 13 (partial: `unavailable` receipt), 15, 16 (stale marking; reuse proofs P3), 18, 21, 23 (open-time reconciliation), 24, 25, 26 (single-cell form), 38, 39 (executor ceiling), 43, 48, 49 (S0), 50, 58, 59; IX-02, 04, 05, 06, 07, 08, 09, 10, 12, 13, 14, 15, 16, 17, 20 · **Unsupported until later:** resume across sessions (P2), rebuild (P2), blast radius/closures beyond `known(paths)` (P3), precise test-integrity classification (P3.4.2; P1 has the conservative policy of P1.7.8), review cells (P4; the human path exists from P1.7.8), KB content (P2/P4), confined execution (P7 — a host that requires it is refused, D-11), live providers (P7). Live gate (B1 vs B0/B-HELM): `UNMEASURED`.
 
 ### P1.1 Task Contract (S0 form)
-#### P1.1.1 [C][M] Contract records and store · TODO
+#### P1.1.1 [C][M] Contract records and store · IN_PROGRESS
 - Why: [§4.1](docs/state/contracts.md#sec-4-1) harness-owned, user-authoritative contract; invariant 1–2.
 - Pkg: `contract`
 - Build: `Contract(workId, version, attemptId, mode, shape, requests: append-only List<Request>, requirements, acceptance, constraints, exclusions, contractsTouched, scope: Scope(writePaths, protectedPaths), budget: Budget, authorization: Authorization(ladderCeiling, dClass, capabilitySet), risk, amendmentsPending)`, `Requirement(id, text, acceptance ids, dependsOn, authorityRef, status: harness-derived)`, `sealed Acceptance { Run(cmd, origin, last), Check(text, origin, evidenceRef), Review(text, origin, signedBy) }` with `Origin { user, harness, model(strengthens), amended(v) }`, `Constraint(id, text, authority)`, `Contracts` store (versioned rows; version bumps only on authorized amendment; failed attempts preserved); the **minimal** `Increment(id, requirementIds, accept, writeScope, expectedFiles, status)` and `Ledger(requirementId → status, evidence, stampValid)` records used by S0 (`G_single`) are declared here so P1 consumers never depend on P2 (I-01); P2.1.1 extends them with the graph fields.
 - Done: model-side APIs cannot mutate acceptance (only `strengthens` add and `propose`); store round trip; FX-15 test.
+- Log: 2026-09-20 — contract package: Contract (validated refs, unique ids), UserRequest, Requirement(+RequirementStatus), Origin sealed (user/harness/model(strengthens)/amended@v), Command(argv, cwd), Acceptance sealed Run/Check/Review with obligationVersion (D-52), Constraint, Scope, Authorization(+dClassAllowlist), Risk, Amendment, minimal Increment/IncrementStatus/Ledger/LedgerEntry for S0; Contract.strengthen is the only model-side mutation (add-only, Model origin required). ContractRepository seam (history/append/replaceLatest) with InMemoryContractRepository + Contracts store API. Remaining for DONE: SQLite ContractRepository over the store (after P0.5 merges).
 
 #### P1.1.2 [M] S0 auto-derivation · TODO
 - Why: [§4.1 auto-derivation](docs/state/contracts.md#sec-4-1); [§3.5 S0](docs/architecture/roles-shapes.md#sec-3-5).
@@ -332,11 +333,12 @@ Goal: [§18.2 Stage A](docs/implementation/roadmap.md#sec-18-2): one implementin
 - Build: `Contracts.deriveS0(request, atlas)` → `AC-1: run <sniffed suite> (origin harness, scope touched)`, default write scope (D-31), protected paths; requirement `R1` = request text.
 - Done: fixture repos yield the right runner command; no acceptance ⇒ still derived; model must state goal-level acceptance in its first patch or ask (entry gate, P1.8.5).
 
-#### P1.1.3 [M] Amendments channel · TODO
+#### P1.1.3 [M] Amendments channel · DONE
 - Why: F1/F17 closed at the data model; [§4.1 origins and amendments](docs/state/contracts.md#sec-4-1).
 - Deps: P0.4.2
 - Build: `Amendment(by: model|user, cell, change, reason, status: pending|accepted|rejected)`, `Contracts.propose` (model → pending), `Contracts.amendByUser(text)` (append request, bump version, authority = message), `Contracts.resolve(via Authority)`; policy never auto-accepts a weakening; parent answers to children are evidence, not amendments; factual answers do not bump the version.
 - Done: FX-15; version bump only on authorized amendment; events `Contract.*` emitted.
+- Log: 2026-09-20 — Contracts.propose (pending, grants nothing), amendByUser (append request verbatim + version bump; authority = the message), resolve via Authority (weakening ⇒ Rejected by AutonomousAuthority; Accepted ⇒ apply + version bump with amended@vN provenance; Pending ⇒ unchanged), resolved() history; Contract.* events emitted. FX-15 covered: model cannot edit/remove acceptance; a rejected weakening leaves version and items unchanged.
 
 #### P1.1.4 [M] Contract digest and contract slice · TODO
 - Why: [§5.1](docs/runtime/context-layout.md#sec-5-1) digest ≤ 150 tokens in `[A]`, verbatim slice in `[K]`.
@@ -409,15 +411,17 @@ Goal: [§18.2 Stage A](docs/implementation/roadmap.md#sec-18-2): one implementin
 - Build: `JournalEvent(eventId, ids, turn, kind: call|result|editIntent|editOutcome|check|nudge|boundary|intent|reconcile, argsDigest, refs)`, `Journal.append/search(query, scope)` (FTS over text views), ordering guarantees.
 - Done: append-only enforced (no update/delete API); search returns `complete` per scope.
 
-#### P1.4.2 [C][M] `Receipt`, `Observation`, `Claim` · TODO
+#### P1.4.2 [C][M] `Receipt`, `Observation`, `Claim` · DONE
 - Why: [§4.3](docs/state/evidence-coherence.md#sec-4-3), [§8.4](docs/verification/scheduler.md#sec-8-4) status vocabulary; invariant 4–5.
 - Build: `Receipt(receiptId, checkId, acceptanceIds, cmd, cwd, argvOrShell, stampBefore, stampAfter, envId, verifierVersion, checkDefinitionVersion, contractVersion, outcome: Outcome{passed, failed, timeout, infraError, inconclusive, notRun, unavailable, denied, unknownOutcome}, parsed: Counts, inputClosure: Closure{Known(paths), Package(p), Unknown}, raw: blobRef, limits, reuseOf?)` immutable; `Observation(id, actionId, candidate, contentRef, scope, completeness, sourceVersions, capture)`, `Claim(id, text, kind h|v|x, evidenceState, authority, freshness, evidenceRefs)`.
 - Done: applicability is **not** a receipt field (computed, P1.4.4/P3.1.2); parse error or absent result never maps to `passed`.
+- Log: 2026-09-20 — evidence records: Outcome (9 states, only Passed is green), Counts, Closure (Known/Package/Unknown), InputStability + TestedInputs (D-45 eligibility), Limit, Receipt (immutable; a Passed receipt requires parsed counts with something executed; greenForFinalTree needs eligible inputs), RedactionMask + Observation.coverage(path) = ranges − hidden (D-49), Claim (v needs evidence), Anchor, workspace.Ranges/LineRange (sorted merged intervals with minus/intersect/covers). Applicability is computed elsewhere (P1.4.4/P3.1.2), never stored.
 
-#### P1.4.3 [M] `Intent` journal and consequential-action ordering · TODO
+#### P1.4.3 [M] `Intent` journal and consequential-action ordering · DONE
 - Why: invariant 6; [§4.3 ordering](docs/state/evidence-coherence.md#sec-4-3); FX-23, FX-24.
 - Build: `Intent(intentId, actionId, argv, cwd, expectedEffect, idempotencyKey?, status: recorded|dispatched|running|observed|committed|unknown)`, `Consequential.run(reserve → intent → dispatch → observe → persist → commit)` helper enforcing the order; `Intents.openAtStart()` → `unknown_outcome` list for reconciliation.
 - Done: fault injection at each boundary leaves a classifiable state; no action after an unreconciled unknown.
+- Log: 2026-09-20 — Intent + IntentStatus (recorded→dispatched→running→observed→committed | unknown), IntentJournal seam (record/update/open/get; monotone transitions) with InMemoryIntentJournal (SQLite version follows the store merge), Consequential.run(reserve → intent → dispatch → observe → persist → commit) returning Completed | Unknown(intentId) | NotDispatched; journal.open() = unknown_outcome list at start. Fault injection at every boundary tested (FX-23/24 partial); Alias (D-46 campaign-global #n) + Aliases seam with in-memory impl.
 
 #### P1.4.4 [M] `Coherence` (turn, cell, verification horizons) · TODO
 - Why: [§4.4](docs/state/evidence-coherence.md#sec-4-4) one registry, one rule: mark, never serve as current, never delete; F19.
@@ -426,22 +430,25 @@ Goal: [§18.2 Stage A](docs/implementation/roadmap.md#sec-18-2): one implementin
 - Done: FX-07 (partial: reads/facts/receipts by known closure), FX-16 (stale after change; reuse proof arrives in P3.1.2).
 
 ### P1.5 Register (STATE) and Workset
-#### P1.5.1 [C][M] `Register` model and Markdown render · TODO
+#### P1.5.1 [C][M] `Register` model and Markdown render · DONE
 - Why: [§5.2](docs/runtime/register-workset.md#sec-5-2); model-owned, harness-validated; rendered by the harness at the tail.
 - Pkg: `register`
 - Build: `Register(version, cell, increment, constraints, plan: List<Step(n, mark [ ]|[>]|[x]|[~], text, accept?, after?, req?, evidence?)>, facts: List<Fact(kind h|v|x, text, anchor?, evidenceId?, stale?)>, deadEnds, decisions, open, focus, amendments, next)`, `RegisterRender.markdown(register)` exactly in the §5.2 shape with harness-added `v(stale @old)` tags; `RegisterParser` (Markdown → `Register`, used only for golden round-trip tests — recovery and STATUS notes use typed records, never Markdown import, D-24; the model emits typed ops only); `register_versions` persistence per patch.
 - Done: render golden test against the §5.2 example; cap 1,200 tokens measured.
+- Log: 2026-09-20 — register: Mark/Step/Fact(staleAt harness-only)/DeadEnd/Decision/OpenItem(trip, fired)/AmendmentLine/Register with markStale and fireTrips, Trips glob/prefix predicates; RegisterRender.markdown in the §5.2 shape (deterministic golden test built from the §5.2 example; v(stale @old) and fired-trip lines harness-rendered), tokens() measured with the heuristic estimator (example ≈ within the 1,200 cap). RegisterParser deliberately not written: typed records round-trip through JSON, Markdown is a view only (D-24).
 
-#### P1.5.2 [M] Typed ops, `Patch`, `Validator`, conditional ops · TODO
+#### P1.5.2 [M] Typed ops, `Patch`, `Validator`, conditional ops · DONE
 - Why: [§5.2 typed ops and invariants](docs/runtime/register-workset.md#sec-5-2); F21; [§5.5](docs/runtime/tools.md#sec-5-5) conditional ops.
 - Build: `sealed Op { PlanAdd, PlanCursor, PlanTick, PlanCancel, FactAdd, FactRefute, DeadendAdd, DecisionAdd, OpenAdd, OpenClose, FocusSet, AmendPropose, Next }`, `Patch(ops, ifConditions: green(op:N)|applied(op:N))`, `Validator.check(register, patch, evidence, checks)` enforcing: one `[>]` while `[ ]` exists; exactly one `Next`; `tick` needs green accept on current version or evidence id; `v` needs an existing store id; ≤ 240 chars, no fences; `[~]` needs reason; dead ends need scope + reopen; `h` in active step flagged; red verify line needs an `Open` before `[>]` advances; `Amendments` only place for acceptance; cap 1,200; patches above 400 tokens rejected. `open.add(text, trip?, needs?)` trips are path/glob predicates evaluated after each edit batch; a fired trip renders one `⟨trip Qn fired: …⟩` line in `[A]` (P1.8.3), once. Conditions evaluated after runs; eligible list committed atomically against the STATE version; rejection returns the violated rule + sizes and leaves STATE unchanged (prior world effects stand).
 - Done: one test per invariant; refuted facts retained in history; conditional drop rendered.
+- Log: 2026-09-20 — Op sealed (13 typed ops), Condition green|applied(op:N) with parser, PatchOp/Patch, Validator.check(register, patch, ValidationContext) → Applied(register, appliedOps, dropped, flags, sizes) | Rejected(rule, detail, sizes): conditions evaluated first, one Next per patch, one [>] while [ ] exists, tick needs green accept or an existing evidence id, v needs an existing store id, ≤ 240 chars, no fences, [~] needs a reason, dead ends need scope + reopen, red verify line needs an Open before the cursor advances, register cap 1,200 / patch cap 400 tokens, refuted facts kept, h/stale facts under Next flagged (word-overlap heuristic). Atomic: rejection leaves the register unchanged.
 
-#### P1.5.3 [M] `Workset` · TODO
+#### P1.5.3 [M] `Workset` · DONE
 - Why: [§5.3](docs/runtime/register-workset.md#sec-5-3) KNOWN/NOT SEEN, mark-then-stub, region-seen; F3.
 - Pkg: `workset`
 - Build: `Entry(path, range, version, source: look|postEdit|seed|recall, turn)`, `Workset` (token-budgeted), `known()`/`notSeen()` render (≤ 60 tokens + named stale drops), `covers(path, v, range)` region-seen check using *dispatch-time* coverage (FX-50) and excluding any line hidden by an observation's redaction mask (D-49 — reads, post-edit views, seeds and recall alike), `onVersionChange` → drop + announce now, physical stub at the next batch unless body > 800 tokens (immediate), `recall(id)` re-registers at recorded version (`historical` if changed), `export()` at cell end.
 - Done: outline/def spans never make bodies KNOWN; stale announcement same turn; stub timing tests.
+- Log: 2026-09-20 — workset: Entry(path, range, version, source look|postEdit|seed|recall, turn, resultId, tokens, hidden), StaleDrop(stubNow when tokens > 800), WorksetView (immutable dispatch-time snapshot, FX-50), Workset.register/covers/onVersionChange (drop + announce now)/stub/recall (Known | Historical)/takeAnnouncements/export/seed/render (≤ 60 tokens + named stale drops). Coverage excludes redacted lines (IX-10); outlines never register.
 
 ### P1.6 Tools
 #### P1.6.1 [C] Tool contracts, schemas, `Envelope`, `Gauge` · TODO
