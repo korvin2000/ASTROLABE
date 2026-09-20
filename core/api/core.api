@@ -2000,6 +2000,32 @@ public final class io/astrolabe/auth/StageGrant$Refused$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
 }
 
+public abstract interface class io/astrolabe/budget/Admission {
+}
+
+public final class io/astrolabe/budget/Admission$Admitted : io/astrolabe/budget/Admission {
+	public final fun getEstimate ()Lio/astrolabe/budget/Tokens;
+	public final fun getPartitions ()Ljava/util/List;
+	public final fun getSpend ()Lio/astrolabe/budget/Spend;
+	public final fun reconcile (Lio/astrolabe/budget/Tokens;)V
+	public final fun release ()V
+}
+
+public final class io/astrolabe/budget/Admission$Refused : io/astrolabe/budget/Admission {
+	public fun <init> (Lio/astrolabe/budget/Spend;Lio/astrolabe/budget/Tokens;Ljava/lang/String;)V
+	public final fun component1 ()Lio/astrolabe/budget/Spend;
+	public final fun component2 ()Lio/astrolabe/budget/Tokens;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (Lio/astrolabe/budget/Spend;Lio/astrolabe/budget/Tokens;Ljava/lang/String;)Lio/astrolabe/budget/Admission$Refused;
+	public static synthetic fun copy$default (Lio/astrolabe/budget/Admission$Refused;Lio/astrolabe/budget/Spend;Lio/astrolabe/budget/Tokens;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/budget/Admission$Refused;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEstimate ()Lio/astrolabe/budget/Tokens;
+	public final fun getReason ()Ljava/lang/String;
+	public final fun getSpend ()Lio/astrolabe/budget/Spend;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class io/astrolabe/budget/Budget {
 	public static final field Companion Lio/astrolabe/budget/Budget$Companion;
 	public fun <init> (IILio/astrolabe/budget/Tokens;ILio/astrolabe/budget/Reserves;Lio/astrolabe/provider/Money;)V
@@ -2039,6 +2065,66 @@ public final class io/astrolabe/budget/Budget$Companion {
 	public final fun of (Lio/astrolabe/Defaults;Lio/astrolabe/budget/Tokens;Lio/astrolabe/provider/Money;)Lio/astrolabe/budget/Budget;
 	public static synthetic fun of$default (Lio/astrolabe/budget/Budget$Companion;Lio/astrolabe/Defaults;Lio/astrolabe/budget/Tokens;Lio/astrolabe/provider/Money;ILjava/lang/Object;)Lio/astrolabe/budget/Budget;
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/budget/CellBudget {
+	public static final field Companion Lio/astrolabe/budget/CellBudget$Companion;
+	public static final field GATE Ljava/lang/String;
+	public fun <init> (Lio/astrolabe/budget/Tokens;ILio/astrolabe/budget/CellReserve;Lio/astrolabe/event/Events;Lio/astrolabe/id/Identities;)V
+	public synthetic fun <init> (Lio/astrolabe/budget/Tokens;ILio/astrolabe/budget/CellReserve;Lio/astrolabe/event/Events;Lio/astrolabe/id/Identities;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun admit (Lio/astrolabe/budget/Spend;Lio/astrolabe/budget/Tokens;)Lio/astrolabe/budget/Admission;
+	public final fun getGenerationTurnsLeft ()I
+	public final fun getRecovery ()Lio/astrolabe/budget/Reservations;
+	public final fun getReserve ()Lio/astrolabe/budget/CellReserve;
+	public final fun getReserveReached ()Z
+	public final fun getTokens ()Lio/astrolabe/budget/Tokens;
+	public final fun getTurns ()I
+	public final fun getTurnsLeft ()I
+	public final fun getTurnsTaken ()I
+	public final fun getVerification ()Lio/astrolabe/budget/Reservations;
+	public final fun getWorking ()Lio/astrolabe/budget/Reservations;
+	public static final fun of (Lio/astrolabe/budget/Tokens;ILio/astrolabe/budget/Reserves;)Lio/astrolabe/budget/CellBudget;
+	public static final fun of (Lio/astrolabe/budget/Tokens;ILio/astrolabe/budget/Reserves;Lio/astrolabe/budget/Tokens;)Lio/astrolabe/budget/CellBudget;
+	public static final fun of (Lio/astrolabe/budget/Tokens;ILio/astrolabe/budget/Reserves;Lio/astrolabe/budget/Tokens;Lio/astrolabe/event/Events;)Lio/astrolabe/budget/CellBudget;
+	public static final fun of (Lio/astrolabe/budget/Tokens;ILio/astrolabe/budget/Reserves;Lio/astrolabe/budget/Tokens;Lio/astrolabe/event/Events;Lio/astrolabe/id/Identities;)Lio/astrolabe/budget/CellBudget;
+	public final fun snapshot ()Lio/astrolabe/budget/CellBudget$Snapshot;
+	public final fun startTurn (Lio/astrolabe/budget/Spend;)Lio/astrolabe/budget/Admission;
+	public final fun verdict (Ljava/util/Collection;)Lio/astrolabe/budget/ReserveVerdict;
+	public static synthetic fun verdict$default (Lio/astrolabe/budget/CellBudget;Ljava/util/Collection;ILjava/lang/Object;)Lio/astrolabe/budget/ReserveVerdict;
+}
+
+public final class io/astrolabe/budget/CellBudget$Companion {
+	public final fun of (Lio/astrolabe/budget/Tokens;ILio/astrolabe/budget/Reserves;)Lio/astrolabe/budget/CellBudget;
+	public final fun of (Lio/astrolabe/budget/Tokens;ILio/astrolabe/budget/Reserves;Lio/astrolabe/budget/Tokens;)Lio/astrolabe/budget/CellBudget;
+	public final fun of (Lio/astrolabe/budget/Tokens;ILio/astrolabe/budget/Reserves;Lio/astrolabe/budget/Tokens;Lio/astrolabe/event/Events;)Lio/astrolabe/budget/CellBudget;
+	public final fun of (Lio/astrolabe/budget/Tokens;ILio/astrolabe/budget/Reserves;Lio/astrolabe/budget/Tokens;Lio/astrolabe/event/Events;Lio/astrolabe/id/Identities;)Lio/astrolabe/budget/CellBudget;
+	public static synthetic fun of$default (Lio/astrolabe/budget/CellBudget$Companion;Lio/astrolabe/budget/Tokens;ILio/astrolabe/budget/Reserves;Lio/astrolabe/budget/Tokens;Lio/astrolabe/event/Events;Lio/astrolabe/id/Identities;ILjava/lang/Object;)Lio/astrolabe/budget/CellBudget;
+}
+
+public final class io/astrolabe/budget/CellBudget$Partition : java/lang/Enum {
+	public static final field Recovery Lio/astrolabe/budget/CellBudget$Partition;
+	public static final field Verification Lio/astrolabe/budget/CellBudget$Partition;
+	public static final field Working Lio/astrolabe/budget/CellBudget$Partition;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/budget/CellBudget$Partition;
+	public static fun values ()[Lio/astrolabe/budget/CellBudget$Partition;
+}
+
+public final class io/astrolabe/budget/CellBudget$Snapshot {
+	public fun <init> (Lio/astrolabe/budget/Tokens;IZI)V
+	public final fun component1 ()Lio/astrolabe/budget/Tokens;
+	public final fun component2 ()I
+	public final fun component3 ()Z
+	public final fun component4 ()I
+	public final fun copy (Lio/astrolabe/budget/Tokens;IZI)Lio/astrolabe/budget/CellBudget$Snapshot;
+	public static synthetic fun copy$default (Lio/astrolabe/budget/CellBudget$Snapshot;Lio/astrolabe/budget/Tokens;IZIILjava/lang/Object;)Lio/astrolabe/budget/CellBudget$Snapshot;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getPercentUsed ()I
+	public final fun getReserveOk ()Z
+	public final fun getSpentTokens ()Lio/astrolabe/budget/Tokens;
+	public final fun getTurnsTaken ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class io/astrolabe/budget/CellReserve {
@@ -2121,6 +2207,21 @@ public final class io/astrolabe/budget/Reserve {
 	public static synthetic fun cell$default (Lio/astrolabe/budget/Tokens;ILio/astrolabe/budget/Reserves;Lio/astrolabe/budget/Tokens;ILjava/lang/Object;)Lio/astrolabe/budget/CellReserve;
 }
 
+public final class io/astrolabe/budget/ReserveVerdict {
+	public fun <init> (ZLjava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Z
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (ZLjava/lang/String;Ljava/lang/String;)Lio/astrolabe/budget/ReserveVerdict;
+	public static synthetic fun copy$default (Lio/astrolabe/budget/ReserveVerdict;ZLjava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/budget/ReserveVerdict;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getGate ()Ljava/lang/String;
+	public final fun getPartial ()Ljava/lang/String;
+	public final fun getReached ()Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class io/astrolabe/budget/Reserves {
 	public static final field Companion Lio/astrolabe/budget/Reserves$Companion;
 	public fun <init> ()V
@@ -2150,6 +2251,20 @@ public final synthetic class io/astrolabe/budget/Reserves$$serializer : kotlinx/
 
 public final class io/astrolabe/budget/Reserves$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/budget/Spend : java/lang/Enum {
+	public static final field Check Lio/astrolabe/budget/Spend;
+	public static final field Edit Lio/astrolabe/budget/Spend;
+	public static final field Generation Lio/astrolabe/budget/Spend;
+	public static final field Receipt Lio/astrolabe/budget/Spend;
+	public static final field RegisterPatch Lio/astrolabe/budget/Spend;
+	public static final field ResultPacket Lio/astrolabe/budget/Spend;
+	public static final field StatusNote Lio/astrolabe/budget/Spend;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getReportOrVerify ()Z
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/budget/Spend;
+	public static fun values ()[Lio/astrolabe/budget/Spend;
 }
 
 public final class io/astrolabe/budget/Tokens : java/lang/Comparable {
