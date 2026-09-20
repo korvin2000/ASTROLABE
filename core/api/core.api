@@ -8229,6 +8229,13 @@ public final class io/astrolabe/register/Fact$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
 }
 
+public final class io/astrolabe/register/InMemoryRegisterVersions : io/astrolabe/register/RegisterVersions {
+	public fun <init> ()V
+	public fun get (Lio/astrolabe/id/ContextId;I)Lio/astrolabe/register/Register;
+	public fun latest (Lio/astrolabe/id/ContextId;)Lio/astrolabe/register/Register;
+	public fun save (Lio/astrolabe/id/Identities;Lio/astrolabe/register/Register;)V
+}
+
 public final class io/astrolabe/register/Mark : java/lang/Enum {
 	public static final field Cancelled Lio/astrolabe/register/Mark;
 	public static final field Companion Lio/astrolabe/register/Mark$Companion;
@@ -8831,6 +8838,12 @@ public final class io/astrolabe/register/RegisterRender {
 	public static final fun tokens (Lio/astrolabe/register/Register;Lio/astrolabe/provider/TokenEstimator;)J
 }
 
+public abstract interface class io/astrolabe/register/RegisterVersions {
+	public abstract fun get (Lio/astrolabe/id/ContextId;I)Lio/astrolabe/register/Register;
+	public abstract fun latest (Lio/astrolabe/id/ContextId;)Lio/astrolabe/register/Register;
+	public abstract fun save (Lio/astrolabe/id/Identities;Lio/astrolabe/register/Register;)V
+}
+
 public final class io/astrolabe/register/Sizes {
 	public static final field Companion Lio/astrolabe/register/Sizes$Companion;
 	public fun <init> (JIJI)V
@@ -8862,6 +8875,13 @@ public final synthetic class io/astrolabe/register/Sizes$$serializer : kotlinx/s
 
 public final class io/astrolabe/register/Sizes$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/register/SqliteRegisterVersions : io/astrolabe/register/RegisterVersions {
+	public fun <init> (Lio/astrolabe/store/Store;Ljava/time/Clock;)V
+	public fun get (Lio/astrolabe/id/ContextId;I)Lio/astrolabe/register/Register;
+	public fun latest (Lio/astrolabe/id/ContextId;)Lio/astrolabe/register/Register;
+	public fun save (Lio/astrolabe/id/Identities;Lio/astrolabe/register/Register;)V
 }
 
 public final class io/astrolabe/register/Step {
@@ -11135,6 +11155,93 @@ public final synthetic class io/astrolabe/tool/run/WrapperDetection$$serializer 
 
 public final class io/astrolabe/tool/run/WrapperDetection$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/state/BlockedRequest {
+	public fun <init> (Ljava/lang/String;Ljava/util/List;Ljava/lang/String;I)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/util/List;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()I
+	public final fun copy (Ljava/lang/String;Ljava/util/List;Ljava/lang/String;I)Lio/astrolabe/tool/state/BlockedRequest;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/state/BlockedRequest;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;IILjava/lang/Object;)Lio/astrolabe/tool/state/BlockedRequest;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEvidence ()Ljava/util/List;
+	public final fun getQuestion ()Ljava/lang/String;
+	public final fun getReason ()Ljava/lang/String;
+	public final fun getTurn ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/astrolabe/tool/state/ParsedPatch {
+}
+
+public final class io/astrolabe/tool/state/ParsedPatch$Invalid : io/astrolabe/tool/state/ParsedPatch {
+	public fun <init> (ILjava/lang/String;)V
+	public final fun component1 ()I
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (ILjava/lang/String;)Lio/astrolabe/tool/state/ParsedPatch$Invalid;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/state/ParsedPatch$Invalid;ILjava/lang/String;ILjava/lang/Object;)Lio/astrolabe/tool/state/ParsedPatch$Invalid;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getIndex ()I
+	public final fun getReason ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/tool/state/ParsedPatch$Valid : io/astrolabe/tool/state/ParsedPatch {
+	public fun <init> (Lio/astrolabe/register/Patch;)V
+	public final fun component1 ()Lio/astrolabe/register/Patch;
+	public final fun copy (Lio/astrolabe/register/Patch;)Lio/astrolabe/tool/state/ParsedPatch$Valid;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/state/ParsedPatch$Valid;Lio/astrolabe/register/Patch;ILjava/lang/Object;)Lio/astrolabe/tool/state/ParsedPatch$Valid;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getPatch ()Lio/astrolabe/register/Patch;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/tool/state/PatchParser {
+	public static final field INSTANCE Lio/astrolabe/tool/state/PatchParser;
+	public static final fun nameOf (Lkotlinx/serialization/json/JsonElement;)Ljava/lang/String;
+	public static final fun parse (Ljava/util/List;)Lio/astrolabe/tool/state/ParsedPatch;
+	public static final fun parse (Ljava/util/List;Ljava/util/Map;)Lio/astrolabe/tool/state/ParsedPatch;
+	public static synthetic fun parse$default (Ljava/util/List;Ljava/util/Map;ILjava/lang/Object;)Lio/astrolabe/tool/state/ParsedPatch;
+}
+
+public final class io/astrolabe/tool/state/RetrievalMiss {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()I
+	public final fun component4 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;)Lio/astrolabe/tool/state/RetrievalMiss;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/state/RetrievalMiss;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;ILjava/lang/Object;)Lio/astrolabe/tool/state/RetrievalMiss;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEventId ()Ljava/lang/String;
+	public final fun getNeed ()Ljava/lang/String;
+	public final fun getTurn ()I
+	public final fun getWhy ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/tool/state/StateTool : io/astrolabe/tool/ToolExecutor {
+	public static final field Companion Lio/astrolabe/tool/state/StateTool$Companion;
+	public static final field EMPTY_CONTEXT Lio/astrolabe/register/ValidationContext;
+	public fun <init> (Lio/astrolabe/register/Validator;Lio/astrolabe/register/RegisterVersions;Lio/astrolabe/evidence/Journal;Lio/astrolabe/provider/TokenEstimator;Lio/astrolabe/id/IdGen;Lio/astrolabe/id/Identities;Ljava/time/Clock;Lio/astrolabe/register/Register;Lio/astrolabe/event/Events;Lio/astrolabe/provider/ToolMask;)V
+	public synthetic fun <init> (Lio/astrolabe/register/Validator;Lio/astrolabe/register/RegisterVersions;Lio/astrolabe/evidence/Journal;Lio/astrolabe/provider/TokenEstimator;Lio/astrolabe/id/IdGen;Lio/astrolabe/id/Identities;Ljava/time/Clock;Lio/astrolabe/register/Register;Lio/astrolabe/event/Events;Lio/astrolabe/provider/ToolMask;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun execute (Lio/astrolabe/tool/ToolCall;Lio/astrolabe/tool/TurnContext;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public final fun getOpResults ()Ljava/util/Map;
+	public final fun getPendingBlock ()Lio/astrolabe/tool/state/BlockedRequest;
+	public final fun getRegister ()Lio/astrolabe/register/Register;
+	public final fun getRetrievalMisses ()Ljava/util/List;
+	public final fun getValidation ()Lio/astrolabe/register/ValidationContext;
+	public final fun setOpResults (Ljava/util/Map;)V
+	public final fun setValidation (Lio/astrolabe/register/ValidationContext;)V
+}
+
+public final class io/astrolabe/tool/state/StateTool$Companion {
 }
 
 public final class io/astrolabe/tool/verify/Verify : io/astrolabe/tool/ToolExecutor {
