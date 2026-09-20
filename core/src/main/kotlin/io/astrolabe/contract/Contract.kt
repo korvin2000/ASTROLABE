@@ -10,6 +10,7 @@ import io.astrolabe.id.CandidateId
 import io.astrolabe.id.ContextId
 import io.astrolabe.id.InstantSerializer
 import io.astrolabe.id.WorkId
+import io.astrolabe.workspace.PathPattern
 import io.astrolabe.workspace.ProtectedPaths
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -154,12 +155,21 @@ public sealed interface Acceptance {
 public data class Constraint(val id: String, val text: String, val authority: String)
 
 /**
- * Write scope bounds possible writes; it authorizes no unrelated work (D-31). Entries are workspace-relative:
- * `dir/` is a directory prefix, a bare `name` matches that file name anywhere in the tree (lock files are not
- * rooted), anything with `*`/`?` is a glob, and [REPOSITORY] is the whole tree.
+ * Write scope bounds possible writes; it authorizes no unrelated work (D-31). Entries follow the
+ * [PathPattern] convention: `dir/` is a directory prefix, a bare `name` matches that file name anywhere in
+ * the tree (lock files are not rooted), anything with `*`/`?` is a glob, and [REPOSITORY] is the whole tree.
  */
 @Serializable
 public data class Scope(val writePaths: List<String>, val protectedPaths: List<String>) {
+    /** True when a write path of this scope names [relative]. */
+    public fun covers(relative: String): Boolean = writePaths.any { PathPattern.matches(it, relative) }
+
+    /** True when a protected entry names [relative] (D-class: never written without committed authority). */
+    public fun protects(relative: String): Boolean = protectedPaths.any { PathPattern.matches(it, relative) }
+
+    /** §8.6 scope guard rule for one path: inside the write scope and outside the protected list. */
+    public fun allowsWrite(relative: String): Boolean = covers(relative) && !protects(relative)
+
     public companion object {
         /** The glob that names the whole repository. */
         public const val REPOSITORY: String = "**"

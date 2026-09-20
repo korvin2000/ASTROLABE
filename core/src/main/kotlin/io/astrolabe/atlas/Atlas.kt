@@ -606,8 +606,11 @@ internal fun buildRow(
 
 private val TEST_DIRECTORIES = setOf("test", "tests", "__tests__", "spec", "specs")
 
-/** True when [path] is a test by directory placement or by file-name convention (§7.3). */
-internal fun isTestPath(path: String): Boolean {
+/**
+ * True when [path] is a test by directory placement or by file-name convention (§7.3). The one rule for
+ * "known test file" in the harness: atlas rows and the acceptance-surface classifier (§8.6) both use it.
+ */
+public fun isTestPath(path: String): Boolean {
     val segments = path.split('/')
     if (segments.dropLast(1).any { it.lowercase(Locale.ROOT) in TEST_DIRECTORIES }) return true
     val name = segments.last()

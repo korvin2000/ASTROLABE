@@ -536,6 +536,10 @@ public final class io/astrolabe/atlas/Atlas$Companion {
 	public final fun open (Ljava/nio/file/Path;Ljava/nio/file/Path;)Lio/astrolabe/atlas/Atlas;
 }
 
+public final class io/astrolabe/atlas/AtlasKt {
+	public static final fun isTestPath (Ljava/lang/String;)Z
+}
+
 public final class io/astrolabe/atlas/AtlasRow {
 	public fun <init> (Ljava/lang/String;JLio/astrolabe/atlas/Language;Ljava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/util/List;)V
 	public final fun component1 ()Ljava/lang/String;
@@ -2981,14 +2985,17 @@ public final class io/astrolabe/contract/Scope {
 	public static final field Companion Lio/astrolabe/contract/Scope$Companion;
 	public static final field REPOSITORY Ljava/lang/String;
 	public fun <init> (Ljava/util/List;Ljava/util/List;)V
+	public final fun allowsWrite (Ljava/lang/String;)Z
 	public final fun component1 ()Ljava/util/List;
 	public final fun component2 ()Ljava/util/List;
 	public final fun copy (Ljava/util/List;Ljava/util/List;)Lio/astrolabe/contract/Scope;
 	public static synthetic fun copy$default (Lio/astrolabe/contract/Scope;Ljava/util/List;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/contract/Scope;
+	public final fun covers (Ljava/lang/String;)Z
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getProtectedPaths ()Ljava/util/List;
 	public final fun getWritePaths ()Ljava/util/List;
 	public fun hashCode ()I
+	public final fun protects (Ljava/lang/String;)Z
 	public static final fun repositoryMinus (Lio/astrolabe/workspace/ProtectedPaths;)Lio/astrolabe/contract/Scope;
 	public fun toString ()Ljava/lang/String;
 }
@@ -10367,6 +10374,17 @@ public final class io/astrolabe/tool/run/WrapperDetection$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
 }
 
+public final class io/astrolabe/verify/AcceptanceSurface : java/lang/Enum {
+	public static final field AcceptanceCommand Lio/astrolabe/verify/AcceptanceSurface;
+	public static final field CheckDefinition Lio/astrolabe/verify/AcceptanceSurface;
+	public static final field CiConfig Lio/astrolabe/verify/AcceptanceSurface;
+	public static final field TestFile Lio/astrolabe/verify/AcceptanceSurface;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getWire ()Ljava/lang/String;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/verify/AcceptanceSurface;
+	public static fun values ()[Lio/astrolabe/verify/AcceptanceSurface;
+}
+
 public final class io/astrolabe/verify/Applicability : java/lang/Enum {
 	public static final field Companion Lio/astrolabe/verify/Applicability$Companion;
 	public static final field Current Lio/astrolabe/verify/Applicability;
@@ -10934,6 +10952,69 @@ public final class io/astrolabe/verify/RunnerCommands$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
 }
 
+public final class io/astrolabe/verify/ScopeGuard {
+	public fun <init> (Lio/astrolabe/workspace/Workspace;)V
+	public final fun check (Ljava/util/Collection;Lio/astrolabe/contract/Contract;Lio/astrolabe/contract/Increment;)Lio/astrolabe/verify/ScopeVerdict;
+	public static synthetic fun check$default (Lio/astrolabe/verify/ScopeGuard;Ljava/util/Collection;Lio/astrolabe/contract/Contract;Lio/astrolabe/contract/Increment;ILjava/lang/Object;)Lio/astrolabe/verify/ScopeVerdict;
+}
+
+public final class io/astrolabe/verify/ScopeRefusal {
+	public fun <init> (Ljava/lang/String;Lio/astrolabe/verify/ScopeRefusalKind;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lio/astrolabe/verify/ScopeRefusalKind;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Lio/astrolabe/verify/ScopeRefusalKind;Ljava/lang/String;)Lio/astrolabe/verify/ScopeRefusal;
+	public static synthetic fun copy$default (Lio/astrolabe/verify/ScopeRefusal;Ljava/lang/String;Lio/astrolabe/verify/ScopeRefusalKind;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/verify/ScopeRefusal;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDetail ()Ljava/lang/String;
+	public final fun getKind ()Lio/astrolabe/verify/ScopeRefusalKind;
+	public final fun getPath ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/verify/ScopeRefusalKind : java/lang/Enum {
+	public static final field OutsideContract Lio/astrolabe/verify/ScopeRefusalKind;
+	public static final field PathRejected Lio/astrolabe/verify/ScopeRefusalKind;
+	public static final field Protected Lio/astrolabe/verify/ScopeRefusalKind;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/verify/ScopeRefusalKind;
+	public static fun values ()[Lio/astrolabe/verify/ScopeRefusalKind;
+}
+
+public abstract interface class io/astrolabe/verify/ScopeVerdict {
+	public abstract fun getContractVersion ()I
+}
+
+public final class io/astrolabe/verify/ScopeVerdict$Allowed : io/astrolabe/verify/ScopeVerdict {
+	public fun <init> (ILjava/util/List;Ljava/util/List;)V
+	public synthetic fun <init> (ILjava/util/List;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()I
+	public final fun component2 ()Ljava/util/List;
+	public final fun component3 ()Ljava/util/List;
+	public final fun copy (ILjava/util/List;Ljava/util/List;)Lio/astrolabe/verify/ScopeVerdict$Allowed;
+	public static synthetic fun copy$default (Lio/astrolabe/verify/ScopeVerdict$Allowed;ILjava/util/List;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/verify/ScopeVerdict$Allowed;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getContractVersion ()I
+	public final fun getOutsideIncrement ()Ljava/util/List;
+	public final fun getPaths ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/verify/ScopeVerdict$Refused : io/astrolabe/verify/ScopeVerdict {
+	public fun <init> (ILjava/util/List;)V
+	public final fun component1 ()I
+	public final fun component2 ()Ljava/util/List;
+	public final fun copy (ILjava/util/List;)Lio/astrolabe/verify/ScopeVerdict$Refused;
+	public static synthetic fun copy$default (Lio/astrolabe/verify/ScopeVerdict$Refused;ILjava/util/List;ILjava/lang/Object;)Lio/astrolabe/verify/ScopeVerdict$Refused;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getContractVersion ()I
+	public final fun getRefusals ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public abstract interface class io/astrolabe/verify/Selector {
 	public static final field Companion Lio/astrolabe/verify/Selector$Companion;
 }
@@ -11000,6 +11081,47 @@ public final class io/astrolabe/verify/Severity : java/lang/Enum {
 
 public final class io/astrolabe/verify/Severity$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/verify/TestIntegrity {
+	public static final field CHECK_DEFINITION_NAMES Ljava/util/Set;
+	public static final field CHECK_DEFINITION_PREFIXES Ljava/util/List;
+	public static final field CI_NAMES Ljava/util/Set;
+	public static final field CI_PREFIXES Ljava/util/Set;
+	public static final field INSTANCE Lio/astrolabe/verify/TestIntegrity;
+	public static final field UNCLASSIFIED Ljava/lang/String;
+	public static final fun baseline (Ljava/util/Collection;Ljava/lang/String;Lio/astrolabe/contract/Contract;Lio/astrolabe/verify/Checks;)Ljava/util/List;
+	public static final fun resolve (Lio/astrolabe/verify/ReviewRequest;Ljava/util/List;Lio/astrolabe/event/Authority;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static final fun reviewRequest (Ljava/lang/String;Ljava/util/List;Lio/astrolabe/contract/Contract;Lio/astrolabe/verify/Checks;Lio/astrolabe/id/Identities;Lio/astrolabe/id/CandidateId;Ljava/lang/String;Ljava/util/Map;)Lio/astrolabe/verify/ReviewRequest;
+	public static synthetic fun reviewRequest$default (Ljava/lang/String;Ljava/util/List;Lio/astrolabe/contract/Contract;Lio/astrolabe/verify/Checks;Lio/astrolabe/id/Identities;Lio/astrolabe/id/CandidateId;Ljava/lang/String;Ljava/util/Map;ILjava/lang/Object;)Lio/astrolabe/verify/ReviewRequest;
+	public static final fun surfaceOf (Ljava/lang/String;Lio/astrolabe/contract/Contract;)Lio/astrolabe/verify/AcceptanceSurface;
+	public static final fun unresolved (Ljava/util/List;)Ljava/util/List;
+}
+
+public final class io/astrolabe/verify/TestIntegrityFlag {
+	public fun <init> (Ljava/lang/String;Lio/astrolabe/verify/AcceptanceSurface;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Lio/astrolabe/verify/Verdict;)V
+	public synthetic fun <init> (Ljava/lang/String;Lio/astrolabe/verify/AcceptanceSurface;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Lio/astrolabe/verify/Verdict;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lio/astrolabe/verify/AcceptanceSurface;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/util/List;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Ljava/lang/String;
+	public final fun component7 ()Lio/astrolabe/verify/Verdict;
+	public final fun copy (Ljava/lang/String;Lio/astrolabe/verify/AcceptanceSurface;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Lio/astrolabe/verify/Verdict;)Lio/astrolabe/verify/TestIntegrityFlag;
+	public static synthetic fun copy$default (Lio/astrolabe/verify/TestIntegrityFlag;Ljava/lang/String;Lio/astrolabe/verify/AcceptanceSurface;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Lio/astrolabe/verify/Verdict;ILjava/lang/Object;)Lio/astrolabe/verify/TestIntegrityFlag;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBlocksCompletion ()Z
+	public final fun getCause ()Ljava/lang/String;
+	public final fun getKind ()Ljava/lang/String;
+	public final fun getLine ()Ljava/lang/String;
+	public final fun getPath ()Ljava/lang/String;
+	public final fun getReason ()Ljava/lang/String;
+	public final fun getRequiredChecks ()Ljava/util/List;
+	public final fun getSurface ()Lio/astrolabe/verify/AcceptanceSurface;
+	public final fun getVerdict ()Lio/astrolabe/verify/Verdict;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class io/astrolabe/verify/Trigger : java/lang/Enum {
@@ -11505,6 +11627,11 @@ public final class io/astrolabe/workspace/PathKind : java/lang/Enum {
 	public final fun isLink ()Z
 	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/workspace/PathKind;
 	public static fun values ()[Lio/astrolabe/workspace/PathKind;
+}
+
+public final class io/astrolabe/workspace/PathPattern {
+	public static final field INSTANCE Lio/astrolabe/workspace/PathPattern;
+	public static final fun matches (Ljava/lang/String;Ljava/lang/String;)Z
 }
 
 public abstract interface class io/astrolabe/workspace/PathResolution {
