@@ -10631,6 +10631,11 @@ public abstract interface class io/astrolabe/tool/run/ConfinedRunner : io/astrol
 	public abstract fun getBackend ()Ljava/lang/String;
 }
 
+public final class io/astrolabe/tool/run/Executions {
+	public static final field INSTANCE Lio/astrolabe/tool/run/Executions;
+	public static final fun observe (Lio/astrolabe/os/Os;Lio/astrolabe/os/Proc;JJ)Lio/astrolabe/tool/run/Observed;
+}
+
 public final class io/astrolabe/tool/run/GenericShaper : io/astrolabe/tool/run/Shaper {
 	public fun <init> ()V
 	public fun applies (Lio/astrolabe/tool/run/RunCapture;)Z
@@ -10713,6 +10718,13 @@ public final class io/astrolabe/tool/run/JestShaper : io/astrolabe/tool/run/Shap
 	public fun getId ()Ljava/lang/String;
 	public fun getVersion ()Ljava/lang/String;
 	public fun shape (Lio/astrolabe/tool/run/RunCapture;Lio/astrolabe/tool/run/ShapeBudget;)Lio/astrolabe/tool/run/Shaped;
+}
+
+public final class io/astrolabe/tool/run/Observed {
+	public fun <init> (Lio/astrolabe/os/Proc;[BZ)V
+	public final fun getLost ()Z
+	public final fun getOutput ()[B
+	public final fun getProc ()Lio/astrolabe/os/Proc;
 }
 
 public final class io/astrolabe/tool/run/PytestShaper : io/astrolabe/tool/run/Shaper {
@@ -11123,6 +11135,16 @@ public final synthetic class io/astrolabe/tool/run/WrapperDetection$$serializer 
 
 public final class io/astrolabe/tool/run/WrapperDetection$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/verify/Verify : io/astrolabe/tool/ToolExecutor {
+	public fun <init> (Lio/astrolabe/verify/Checks;Lio/astrolabe/verify/Scheduler;Lio/astrolabe/verify/Checker;Lio/astrolabe/verify/Baseline;Lio/astrolabe/id/CandidateId;Lio/astrolabe/workspace/Workspace;Lio/astrolabe/tool/run/Runner;Lio/astrolabe/os/Os;Lio/astrolabe/workspace/Stamper;Lio/astrolabe/store/BlobStore;Lio/astrolabe/auth/Redaction;Lio/astrolabe/provider/TokenEstimator;Lio/astrolabe/id/IdGen;Lio/astrolabe/id/Identities;Lio/astrolabe/contract/Contracts;Ljava/nio/file/Path;Lio/astrolabe/provider/ToolMask;JJLjava/util/Set;)V
+	public synthetic fun <init> (Lio/astrolabe/verify/Checks;Lio/astrolabe/verify/Scheduler;Lio/astrolabe/verify/Checker;Lio/astrolabe/verify/Baseline;Lio/astrolabe/id/CandidateId;Lio/astrolabe/workspace/Workspace;Lio/astrolabe/tool/run/Runner;Lio/astrolabe/os/Os;Lio/astrolabe/workspace/Stamper;Lio/astrolabe/store/BlobStore;Lio/astrolabe/auth/Redaction;Lio/astrolabe/provider/TokenEstimator;Lio/astrolabe/id/IdGen;Lio/astrolabe/id/Identities;Lio/astrolabe/contract/Contracts;Ljava/nio/file/Path;Lio/astrolabe/provider/ToolMask;JJLjava/util/Set;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun execute (Lio/astrolabe/tool/ToolCall;Lio/astrolabe/tool/TurnContext;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public final fun getInputs ()Ljava/util/Collection;
+	public final fun getTouched ()Ljava/util/Collection;
+	public final fun setInputs (Ljava/util/Collection;)V
+	public final fun setTouched (Ljava/util/Collection;)V
 }
 
 public final class io/astrolabe/verify/AcceptanceSurface : java/lang/Enum {
@@ -12094,6 +12116,7 @@ public final class io/astrolabe/verify/Scheduler {
 	public synthetic fun <init> (Lio/astrolabe/verify/Checks;Lio/astrolabe/workspace/Workspace;Lio/astrolabe/workspace/VersionRegistry;Lio/astrolabe/workspace/Stamper;Lio/astrolabe/evidence/Receipts;Lio/astrolabe/evidence/Aliases;Lio/astrolabe/id/IdGen;Lio/astrolabe/id/Identities;Ljava/time/Clock;Ljava/lang/String;Lio/astrolabe/verify/ScratchPolicy;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun aliasOf (Ljava/lang/String;)Ljava/lang/String;
 	public final fun currency (Lio/astrolabe/verify/Check;Lio/astrolabe/id/CandidateId;)Lio/astrolabe/verify/Currency;
+	public final fun record (Lio/astrolabe/verify/CheckerResult;I)Lio/astrolabe/evidence/Receipt;
 	public final fun runCheck (Lio/astrolabe/verify/Check;ILjava/util/Collection;Lkotlin/jvm/functions/Function1;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public static synthetic fun runCheck$default (Lio/astrolabe/verify/Scheduler;Lio/astrolabe/verify/Check;ILjava/util/Collection;Lkotlin/jvm/functions/Function1;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
 	public final fun testedInputsFor (Lio/astrolabe/verify/Check;Ljava/util/Collection;)Ljava/util/List;

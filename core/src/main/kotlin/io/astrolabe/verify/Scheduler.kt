@@ -143,6 +143,32 @@ public class Scheduler(
         }
     }
 
+    /**
+     * Turns an end-of-turn [CheckerResult] into a receipt and makes it the check's current result: the checker
+     * ran outside the exclusive protocol (no rescan of its inputs), so the receipt says `input_stability =
+     * unknown` — fine for fast type/lint feedback, never eligible as acceptance evidence (D-45).
+     */
+    public fun record(result: CheckerResult, contractVersion: Int): Receipt {
+        val check = requireNotNull(checks[result.checkId]) { "unknown check ${result.checkId}" }
+        val command = check.command
+        val limits = ArrayList<Limit>()
+        result.reason?.let { limits += Limit(result.outcome.name.lowercase(), it) }
+        limits += Limit("input_stability", "end-of-turn checker: inputs were not rescanned, stability unknown")
+        val receipt = Receipt(
+            receiptId = idGen.next("rcpt"), ids = ids, checkId = check.id, acceptanceIds = check.acceptanceIds,
+            command = command?.let { Checker.argvFor(check, result.touched) } ?: emptyList(), cwd = command?.cwd, shell = false,
+            stampBefore = result.stampBefore, stampAfter = result.stampAfter ?: result.stampBefore, envId = stamper.report().env.envId,
+            verifierVersion = verifierVersion, checkDefinitionVersion = check.definitionVersion, contractVersion = contractVersion,
+            outcome = result.outcome, parsed = if (result.errors > 0) Counts(errors = result.errors) else null, inputClosure = check.inputClosure,
+            testedInputs = TestedInputs(result.touched.mapNotNull { path -> registry.version(path)?.let { path to it } }.toMap(), InputStability.Unknown),
+            raw = result.log, limits = limits, exitCode = result.exit, at = clock.instant(),
+        )
+        receipts.record(receipt)
+        aliasByReceipt[receipt.receiptId] = aliases.allocate(ids.work, receipt.receiptId, "receipt", ids.context, workspace.id).text
+        checks.record(check.id, LastResult(receipt.receiptId, receipt.stampAfter, check.definitionVersion, result.outcome, receipt.parsed, Applicability.Current))
+        return receipt
+    }
+
     /** §8.4 applicability plus D-45 eligibility of a check's last receipt against [stampNow]. */
     public fun currency(check: Check, stampNow: CandidateId?): Currency {
         val last = checks[check.id]?.last ?: return Currency(null, Applicability.Unknown, false, false, listOf("no receipt for ${check.id}"))
