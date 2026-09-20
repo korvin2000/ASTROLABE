@@ -1,6 +1,15 @@
 # ASTROLABE 1.0.1 Kotlin SOTA AI Coding Agent Harness — actual state
 
-## Session 2 + targeted readiness audit (2026-09-20) — resume point
+## Analytical implementation checkpoint (2026-09-20) — current resume point
+
+- **P2.1.1 is DONE out of order**, from baseline `d0ca86a`: iterative graph algorithms, immutable snapshots, deterministic frontier, requirement dependencies, evidence-derived ledger and FX-42 protection. The existing increment/ledger types retain their ownership. Verifier results bind work/attempt/context/revision/definition, retain check/review references and reject stale review approvals.
+- **No active override remains. Next: P0.1.2 + P0.6.1/P0.6.2/P0.6.4, then P1.8.2.** Do not start P2.1.2 or rebuild this component merely because it was completed ahead of schedule. Plan/controller/storage integration remains with P2.1.2/P2.1.4/P2.2.2/P2.2.4.
+- **Current counts:** P0 15 DONE + 4 IN_PROGRESS; P1 44 DONE + 19 TODO; P2–P6 1 DONE + 93 TODO. Total **60/176 DONE (34.1%), 4 IN_PROGRESS, 112 TODO**; counted from task headings.
+- **Verification:** 44 focused tests passed; final Windows/JDK 26 offline `build` succeeded. Core executed 777 tests: zero failures/errors, six existing platform skips. Provider-api was UP-TO-DATE (15 green test results). Nineteen tests added; Kotlin ABI regenerated and checked. Linux/remote CI and all live gates remain unvalidated/UNMEASURED.
+- **Retained observation:** the first full build once failed RunTest FX-22 when `bg-end` arrived before the terminal status; isolated and later full runs passed. OS/run code and tests were unchanged. Keep this finding with P0.6.1/P0.6.4; a passing rerun is not a diagnosis.
+- **Protocol, design choices, commands and integration owners:** [TODO §1.2](TODO.md#12-owner-authorized-analytical-work-2026-09-20) and [implementation log](audit/OUT-OF-ORDER-P2.1.1.md).
+
+## Session 2 + targeted readiness audit (2026-09-20) — earlier checkpoint
 
 - Audit baseline: branch `main` at `468f5b0`; implementation checkpoint `0b94875`. `TODO.md`, `actual_state.md` and `CONTINUE-TASK.md` are tracked; only `DESCRIPTION_RU.md` was untracked before this documentation correction. Remote CI exists for `468f5b0`; historical "nothing pushed" statements are not current repository state. Leave pushes to the owner.
 - **`TODO.md` is the execution authority; code and executed checks establish readiness.** First resolve reopened P0 validation (P0.1.2, P0.6.1, P0.6.2, P0.6.4); the next P1 implementation task remains **P1.8.2 `Layout` render**. The remaining P1 order is P1.8.2–P1.8.8 → P1.9.1–P1.9.6 → P1.11.1–P1.11.2 → P1.12.1–P1.12.4. See TODO §1 for remaining integration work and §1.1 for the audit evidence and exact test commands.
@@ -9,7 +18,7 @@
 
 P1.4.4 Coherence · P1.1.2 S0 auto-derivation · P1.7.8 ScopeGuard/TestIntegrity · P1.6.2 Partition/Dispatcher · P1.6.3 look · P1.6.4 edit · P1.6.5 run · P1.7.2 Checker · P1.7.4 receipts/currency · P1.7.5 Baseline · P1.7.6 Reserve (`CellBudget`) · P1.7.7 ExitGate/Verifier · P1.6.7 verify · P1.6.8 state · P1.6.9 task.ask · P1.6.10 kb contract · P1.8.1 Role.
 
-Net after audit: **15/19 P0 tasks `DONE`, 4 `IN_PROGRESS`; 44/63 P1 tasks `DONE`, 19 `TODO`; P2–P6: 94 tasks `TODO`. Total: 59/176 `DONE` (33.5%), 4 `IN_PROGRESS`, 113 `TODO`.** Before reopening failed validation, the actual headings counted 19 P0 + 44 P1 `DONE`, not 26 + 45; the previous "17 left" was also a counting error. These are task counts, not a measured fraction of code or remaining effort. The four reopened tasks have implementations, but their completion criteria are not met across the required environments.
+Historical audit counts before P2.1.1: **15/19 P0 tasks `DONE`, 4 `IN_PROGRESS`; 44/63 P1 tasks `DONE`, 19 `TODO`; P2–P6: 94 tasks `TODO`. Total: 59/176 `DONE` (33.5%), 4 `IN_PROGRESS`, 113 `TODO`.** Current counts are above. Before reopening failed validation, the actual headings counted 19 P0 + 44 P1 `DONE`, not 26 + 45; the previous "17 left" was also a counting error. These are task counts, not a measured fraction of code or remaining effort. The four reopened tasks have implementations, but their completion criteria are not met across the required environments.
 
 All seven tool families exist at their P1 scope, including only a `Kb` interface/tool and `EmptyKb`, not a persistent knowledge base. There is still **no end-to-end agent**: source inspection and `jar tf`/`javap` of the built core JAR confirm that `cell` contains role configuration only, `Astrolabe` exposes constants only, and there is no controller, `AstrolabeJava` or telemetry implementation. The existing Java smoke test reads `Astrolabe.MODULE`; it does not satisfy P1.12.3's campaign smoke criterion.
 

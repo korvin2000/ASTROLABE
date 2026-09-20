@@ -7,7 +7,10 @@ import io.astrolabe.contract.Ledger
 import io.astrolabe.contract.LedgerEntry
 import io.astrolabe.contract.RequirementStatus
 import io.astrolabe.id.CandidateId
+import io.astrolabe.id.AttemptId
+import io.astrolabe.id.ContextId
 import io.astrolabe.id.Digest
+import io.astrolabe.id.WorkId
 import io.astrolabe.register.Mark
 import io.astrolabe.register.Register
 
@@ -30,7 +33,7 @@ public data class Assessment(
 
 /** The exit gate's verdict: accepted, or exactly what is missing (§8.7). */
 public sealed interface GateResult {
-    public data class Accepted(val receiptIds: List<String>) : GateResult
+    public data class Accepted(val receiptIds: List<String>, val evidenceRefs: List<String> = receiptIds) : GateResult
 
     public data class Refused(val missing: List<String>) : GateResult
 }
@@ -58,6 +61,7 @@ public object ExitGate {
     ): GateResult {
         val missing = ArrayList<String>()
         val receipts = ArrayList<String>()
+        val evidence = ArrayList<String>()
         for (id in increment.accept) {
             when (val item = contract.acceptance(id)) {
                 null -> missing += "$id: not an acceptance item of contract v${contract.version}"
@@ -79,7 +83,7 @@ public object ExitGate {
                             else -> "assessment not accepted"
                         }
                         missing += "$id: ${item.criterion} — $why"
-                    }
+                    } else evidence += assessment.evidenceRef
                 }
                 is Acceptance.Review -> {
                     val verdict = reviews[id]
@@ -87,6 +91,7 @@ public object ExitGate {
                         verdict == null -> missing += "$id: ${item.criterion} — no signed review"
                         verdict.contractRevision != contract.version -> missing += "$id: ${item.criterion} — review signed for contract v${verdict.contractRevision}, not v${contract.version}"
                         !verdict.approved -> missing += "$id: ${item.criterion} — review ${verdict.outcome.name.lowercase()} by ${verdict.signedBy}"
+                        else -> evidence += verdict.requestId
                     }
                 }
             }
@@ -107,7 +112,7 @@ public object ExitGate {
             if (flag.verdict?.approved != true) missing += "acceptance surface ${flag.path} touches ${flag.requiredChecks.joinToString(", ")} without an approving review"
         }
         unresolvedImpactNudges.forEach { missing += "unresolved impact nudge: $it" }
-        return if (missing.isEmpty()) GateResult.Accepted(receipts.distinct()) else GateResult.Refused(missing)
+        return if (missing.isEmpty()) GateResult.Accepted(receipts.distinct(), (receipts + evidence).distinct()) else GateResult.Refused(missing)
     }
 }
 
@@ -141,6 +146,13 @@ public sealed interface CompletionResult {
         val envId: Digest,
         val receiptIds: List<String>,
         val ledger: Ledger,
+        /** Bound by the verifier so an old completion cannot be committed against an amended graph. */
+        val contractVersion: Int = 0,
+        val workId: WorkId? = null,
+        val incrementDefinition: Digest? = null,
+        val attemptId: AttemptId? = null,
+        val evidenceRefs: List<String> = receiptIds,
+        val contextId: ContextId? = null,
     ) : CompletionResult
 
     /** Not supported by the evidence; the ledger is untouched. After [Verifier.maxFinalizations] refusals the cell goes to gap-directed recovery. */
@@ -177,11 +189,22 @@ public class Verifier(public val maxFinalizations: Int = 2) {
         unresolvedImpactNudges: List<String> = emptyList(),
     ): CompletionResult {
         require(proposal.incrementId == increment.id) { "proposal is for ${proposal.incrementId}, not ${increment.id}" }
+        require(register.increment == increment.id) { "register belongs to another increment" }
         exitKind(proposal.claimedStatus)?.let { return CompletionResult.NotCompleted(it, proposal.reason ?: proposal.claimedStatus) }
         require(proposal.claimedStatus == "done") { "unknown status '${proposal.claimedStatus}'" }
         val missing = ArrayList<String>()
         if (proposal.contractVersion != contract.version) missing += "proposal binds contract v${proposal.contractVersion}; the committed contract is v${contract.version}"
         if (proposal.resultingStamp != stampNow) missing += "resulting stamp @${proposal.resultingStamp.hash8} is not the tree now @${stampNow.hash8}"
+        for (id in increment.accept) if (contract.acceptance(id) is Acceptance.Review) {
+            val verdict = reviews[id] ?: continue
+            if (verdict.reviewedCandidate != stampNow) missing += "$id: review does not certify the current candidate"
+        }
+        for (flag in flags.filter { it.requiredChecks.isNotEmpty() }) {
+            val verdict = flag.verdict ?: continue
+            if (verdict.contractRevision != contract.version || verdict.reviewedCandidate != stampNow) {
+                missing += "acceptance surface ${flag.path}: approval belongs to another contract or candidate"
+            }
+        }
         val gate = ExitGate.evaluate(register, contract, increment, currencies, assessments, reviews, flags, unresolvedImpactNudges)
         if (gate is GateResult.Refused) missing += gate.missing
         if (missing.isNotEmpty()) {
@@ -189,13 +212,18 @@ public class Verifier(public val maxFinalizations: Int = 2) {
             finalizations[increment.id] = attempts
             return CompletionResult.Refused(missing, attempts, recoveryDirected = attempts >= maxFinalizations)
         }
-        val receiptIds = (gate as GateResult.Accepted).receiptIds
+        val accepted = gate as GateResult.Accepted
+        val receiptIds = accepted.receiptIds
         val entries = ledger.entries.toMutableMap()
         for (requirementId in increment.requirementIds) {
-            entries[requirementId] = LedgerEntry(requirementId, RequirementStatus.Verified, receiptIds, stampValid = true)
+            entries[requirementId] = LedgerEntry(requirementId, RequirementStatus.Verified, accepted.evidenceRefs, stampValid = true)
         }
         finalizations.remove(increment.id)
-        return CompletionResult.Accepted(increment.id, proposal.baseStamp, proposal.patchHash, proposal.resultingStamp, proposal.envId, receiptIds, Ledger(entries))
+        return CompletionResult.Accepted(
+            increment.id, proposal.baseStamp, proposal.patchHash, proposal.resultingStamp, proposal.envId,
+            receiptIds, Ledger(entries), contract.version, contract.workId, increment.definitionDigest(),
+            contract.attemptId, accepted.evidenceRefs, register.cell,
+        )
     }
 
     private fun exitKind(status: String): ExitKind? = when (status) {

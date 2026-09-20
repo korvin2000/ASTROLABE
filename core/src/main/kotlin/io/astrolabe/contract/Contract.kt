@@ -5,15 +5,20 @@ import io.astrolabe.Mode
 import io.astrolabe.auth.Stage
 import io.astrolabe.budget.Budget
 import io.astrolabe.event.Proposer
+import io.astrolabe.graph.Production
+import io.astrolabe.graph.RedOkUntil
+import io.astrolabe.graph.Sizing
 import io.astrolabe.id.AttemptId
 import io.astrolabe.id.CandidateId
 import io.astrolabe.id.ContextId
+import io.astrolabe.id.Digest
 import io.astrolabe.id.InstantSerializer
 import io.astrolabe.id.WorkId
 import io.astrolabe.workspace.PathPattern
 import io.astrolabe.workspace.ProtectedPaths
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import java.time.Instant
 
 /** Orchestration shapes (§3.5). */
@@ -279,8 +284,8 @@ public data class Contract(
 public enum class IncrementStatus { Pending, InProgress, Verified, Blocked, Cancelled }
 
 /**
- * The minimal increment record (S0's `G_single`, TODO P1.1.1); the requirement graph (P2.1.1) extends it with
- * dependencies, risk, production and sizing.
+ * Increment (§4.2). S0 callers may omit graph fields; S1 proposals must pass RequirementGraph.validate.
+ * Status, cells and sizing are harness-owned. [produces] has no inferred default for an S1 proposal.
  */
 @Serializable
 public data class Increment(
@@ -292,11 +297,30 @@ public data class Increment(
     val status: IncrementStatus = IncrementStatus.Pending,
     val title: String = "",
     val cancelledReason: String? = null,
+    val dependsOn: List<String> = emptyList(),
+    val risk: Risk? = null,
+    val redOkUntil: RedOkUntil? = null,
+    val produces: Production? = null,
+    val cells: List<ContextId> = emptyList(),
+    val sizing: Sizing = Sizing(),
+    /** Acceptance.Check id -> required evidence kind (e.g. diff, refs or run); not an assessment. */
+    val evidenceKinds: Map<String, String> = emptyMap(),
 ) {
     init {
         require(id.isNotBlank() && requirementIds.isNotEmpty()) { "increment needs an id and requirements" }
         require(expectedFiles >= 0) { "expectedFiles must be ≥ 0" }
+        require(status != IncrementStatus.Cancelled || !cancelledReason.isNullOrBlank()) {
+            "a cancelled increment retains its reason"
+        }
     }
+
+    /** Canonical plan identity, excluding runtime history; binds verification across reordering/replanning. */
+    public fun definitionDigest(): Digest = Digest.ofUtf8(Json.encodeToString(serializer(), copy(
+        requirementIds = requirementIds.distinct().sorted(), accept = accept.distinct().sorted(),
+        writeScope = writeScope.distinct().sorted(), dependsOn = dependsOn.distinct().sorted(),
+        evidenceKinds = evidenceKinds.toSortedMap(), status = IncrementStatus.Pending,
+        cancelledReason = null, cells = emptyList(), sizing = Sizing(),
+    )))
 }
 
 /** Ledger row per requirement (§4.2): harness-derived, changed only by the controller on receipts. */

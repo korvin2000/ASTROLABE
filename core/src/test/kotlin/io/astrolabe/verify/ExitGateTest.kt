@@ -136,7 +136,10 @@ class ExitGateTest {
         val proposal = CompletionProposal("I1", "done", 2, baseStamp = s8, resultingStamp = s9, patchHash = Digest.ofUtf8("patch"), envId = env)
 
         val moved = assertIs<CompletionResult.Refused>(verifier.accept(proposal, contract, increment, done, ledger, stampNow = s8, currencies = mapOf("CHK-accept-AC-1" to green()), assessments = listOf(assessed), reviews = mapOf("AC-3" to signed)))
-        assertEquals(listOf("resulting stamp @${s9.hash8} is not the tree now @${s8.hash8}"), moved.missing)
+        assertEquals(listOf(
+            "resulting stamp @${s9.hash8} is not the tree now @${s8.hash8}",
+            "AC-3: review does not certify the current candidate",
+        ), moved.missing)
         assertEquals(1, moved.attempts)
         assertFalse(moved.recoveryDirected)
         assertEquals(RequirementStatus.Pending, ledger["R1"]!!.status, "the ledger is untouched on refusal")
@@ -154,7 +157,8 @@ class ExitGateTest {
         assertEquals(env, accepted.envId)
         assertEquals(listOf("rcpt-1"), accepted.receiptIds)
         assertEquals(RequirementStatus.Verified, accepted.ledger["R1"]!!.status)
-        assertEquals(listOf("rcpt-1"), accepted.ledger["R1"]!!.evidence)
+        assertEquals(listOf("rcpt-1", "#44", "rev-1"), accepted.evidenceRefs)
+        assertEquals(accepted.evidenceRefs, accepted.ledger["R1"]!!.evidence)
         assertTrue(accepted.ledger["R1"]!!.stampValid)
         assertEquals(RequirementStatus.Pending, ledger["R1"]!!.status, "the controller commits the returned ledger; the input is immutable")
 
@@ -162,5 +166,22 @@ class ExitGateTest {
         assertEquals(CompletionResult.NotCompleted(ExitKind.BudgetExhausted, "budget_exhausted"), verifier.accept(proposal.copy(claimedStatus = "budget_exhausted"), contract, increment, done, ledger, s9, emptyMap()))
         assertEquals(ExitKind.Waiting, assertIs<CompletionResult.NotCompleted>(verifier.accept(proposal.copy(claimedStatus = "waiting", reason = "full suite running"), contract, increment, done, ledger, s9, emptyMap())).kind)
         assertTrue(runCatching { verifier.accept(proposal.copy(claimedStatus = "verified"), contract, increment, done, ledger, s9, emptyMap()) }.isFailure, "the model cannot name a status the protocol does not have")
+    }
+
+    @Test
+    fun `stale review and acceptance surface approvals never certify the current candidate`() {
+        val proposal = CompletionProposal("I1", "done", contract.version, s8, s9, null, env)
+        fun complete(review: Verdict, flags: List<TestIntegrityFlag> = emptyList()) = Verifier().accept(
+            proposal, contract, increment, done, Ledger.initial(contract), s9,
+            mapOf("AC-1" to green()), listOf(assessed), mapOf("AC-3" to review), flags,
+        )
+        assertIs<CompletionResult.Refused>(complete(signed.copy(reviewedCandidate = s8)))
+        val flag = TestIntegrityFlag(
+            "tests/test_total.py", AcceptanceSurface.TestFile, "edit", listOf("CHK-accept-AC-1"),
+            reason = "correct old expectation", verdict = signed,
+        )
+        assertIs<CompletionResult.Refused>(complete(signed, listOf(flag.copy(verdict = signed.copy(reviewedCandidate = s8)))))
+        assertIs<CompletionResult.Refused>(complete(signed, listOf(flag.copy(verdict = signed.copy(contractRevision = 1)))))
+        assertIs<CompletionResult.Accepted>(complete(signed, listOf(flag)))
     }
 }
