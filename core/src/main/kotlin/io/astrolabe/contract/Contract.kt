@@ -10,6 +10,7 @@ import io.astrolabe.id.CandidateId
 import io.astrolabe.id.ContextId
 import io.astrolabe.id.InstantSerializer
 import io.astrolabe.id.WorkId
+import io.astrolabe.workspace.ProtectedPaths
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.time.Instant
@@ -152,9 +153,29 @@ public sealed interface Acceptance {
 @Serializable
 public data class Constraint(val id: String, val text: String, val authority: String)
 
-/** Write scope bounds possible writes; it authorizes no unrelated work (D-31). Paths are workspace-relative prefixes or globs. */
+/**
+ * Write scope bounds possible writes; it authorizes no unrelated work (D-31). Entries are workspace-relative:
+ * `dir/` is a directory prefix, a bare `name` matches that file name anywhere in the tree (lock files are not
+ * rooted), anything with `*`/`?` is a glob, and [REPOSITORY] is the whole tree.
+ */
 @Serializable
-public data class Scope(val writePaths: List<String>, val protectedPaths: List<String>)
+public data class Scope(val writePaths: List<String>, val protectedPaths: List<String>) {
+    public companion object {
+        /** The glob that names the whole repository. */
+        public const val REPOSITORY: String = "**"
+
+        /**
+         * D-31 default for S0: repository-local writes minus the protected defaults (`.git/`, CI config, lock
+         * files, migration directories), rendered from the path contract in force so contract and enforcement
+         * agree on the list.
+         */
+        @JvmStatic
+        public fun repositoryMinus(protected: ProtectedPaths): Scope = Scope(
+            writePaths = listOf(REPOSITORY),
+            protectedPaths = protected.writeDeniedPrefixes.sorted().map { "$it/" } + protected.writeDeniedNames.sorted(),
+        )
+    }
+}
 
 @Serializable
 public data class Authorization(
@@ -235,6 +256,12 @@ public data class Contract(
 
     /** The currently authorized objective: the latest request text (D-17). */
     val objective: String get() = requests.last().text
+
+    /**
+     * §4.1 auto-derivation: a harness-sniffed suite is not a goal-level acceptance. While this is false the
+     * model must state one in its first register patch or ask one question (entry gate, P1.8.5).
+     */
+    val goalAcceptanceStated: Boolean get() = acceptance.any { it.origin !is Origin.Harness }
 }
 
 /** Increment status (§4.2). */

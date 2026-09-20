@@ -2571,6 +2571,7 @@ public final class io/astrolabe/contract/Contract {
 	public final fun getConstraints ()Ljava/util/List;
 	public final fun getContractsTouched ()Ljava/util/List;
 	public final fun getExclusions ()Ljava/util/List;
+	public final fun getGoalAcceptanceStated ()Z
 	public final fun getMode ()Lio/astrolabe/Mode;
 	public final fun getObjective ()Ljava/lang/String;
 	public final fun getRequests ()Ljava/util/List;
@@ -2608,17 +2609,24 @@ public abstract interface class io/astrolabe/contract/ContractRepository {
 }
 
 public final class io/astrolabe/contract/Contracts {
+	public static final field Companion Lio/astrolabe/contract/Contracts$Companion;
+	public static final field TOUCHED Ljava/lang/String;
 	public fun <init> (Lio/astrolabe/contract/ContractRepository;Lio/astrolabe/id/IdGen;Ljava/time/Clock;Lio/astrolabe/event/Events;)V
 	public synthetic fun <init> (Lio/astrolabe/contract/ContractRepository;Lio/astrolabe/id/IdGen;Ljava/time/Clock;Lio/astrolabe/event/Events;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun amendByUser (Lio/astrolabe/id/WorkId;Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Lio/astrolabe/contract/Contract;
 	public static synthetic fun amendByUser$default (Lio/astrolabe/contract/Contracts;Lio/astrolabe/id/WorkId;Ljava/lang/String;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Lio/astrolabe/contract/Contract;
 	public final fun current (Lio/astrolabe/id/WorkId;)Lio/astrolabe/contract/Contract;
+	public final fun deriveS0 (Lio/astrolabe/id/WorkId;Lio/astrolabe/id/AttemptId;Ljava/lang/String;Lio/astrolabe/atlas/Atlas;Lio/astrolabe/Config;Lio/astrolabe/budget/Tokens;Lio/astrolabe/workspace/ProtectedPaths;Lio/astrolabe/provider/Money;)Lio/astrolabe/contract/S0Derivation;
+	public static synthetic fun deriveS0$default (Lio/astrolabe/contract/Contracts;Lio/astrolabe/id/WorkId;Lio/astrolabe/id/AttemptId;Ljava/lang/String;Lio/astrolabe/atlas/Atlas;Lio/astrolabe/Config;Lio/astrolabe/budget/Tokens;Lio/astrolabe/workspace/ProtectedPaths;Lio/astrolabe/provider/Money;ILjava/lang/Object;)Lio/astrolabe/contract/S0Derivation;
 	public final fun history (Lio/astrolabe/id/WorkId;)Ljava/util/List;
 	public final fun open (Lio/astrolabe/contract/Contract;)Lio/astrolabe/contract/Contract;
 	public final fun propose (Lio/astrolabe/id/WorkId;Lio/astrolabe/id/ContextId;Ljava/lang/String;Ljava/lang/String;Z)Lio/astrolabe/contract/Amendment;
 	public final fun resolve (Lio/astrolabe/id/WorkId;Ljava/lang/String;Lio/astrolabe/event/Authority;Lkotlin/jvm/functions/Function1;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public final fun resolved ()Ljava/util/List;
 	public final fun strengthen (Lio/astrolabe/id/WorkId;Lio/astrolabe/contract/Acceptance;)Lio/astrolabe/contract/Contract;
+}
+
+public final class io/astrolabe/contract/Contracts$Companion {
 }
 
 public final class io/astrolabe/contract/InMemoryContractRepository : io/astrolabe/contract/ContractRepository {
@@ -2954,8 +2962,24 @@ public final class io/astrolabe/contract/Risk$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
 }
 
+public final class io/astrolabe/contract/S0Derivation {
+	public fun <init> (Lio/astrolabe/contract/Contract;Lio/astrolabe/atlas/Sniffed;Lio/astrolabe/atlas/PackageCommands;)V
+	public final fun component1 ()Lio/astrolabe/contract/Contract;
+	public final fun component2 ()Lio/astrolabe/atlas/Sniffed;
+	public final fun component3 ()Lio/astrolabe/atlas/PackageCommands;
+	public final fun copy (Lio/astrolabe/contract/Contract;Lio/astrolabe/atlas/Sniffed;Lio/astrolabe/atlas/PackageCommands;)Lio/astrolabe/contract/S0Derivation;
+	public static synthetic fun copy$default (Lio/astrolabe/contract/S0Derivation;Lio/astrolabe/contract/Contract;Lio/astrolabe/atlas/Sniffed;Lio/astrolabe/atlas/PackageCommands;ILjava/lang/Object;)Lio/astrolabe/contract/S0Derivation;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getContract ()Lio/astrolabe/contract/Contract;
+	public final fun getPrimary ()Lio/astrolabe/atlas/PackageCommands;
+	public final fun getSniffed ()Lio/astrolabe/atlas/Sniffed;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class io/astrolabe/contract/Scope {
 	public static final field Companion Lio/astrolabe/contract/Scope$Companion;
+	public static final field REPOSITORY Ljava/lang/String;
 	public fun <init> (Ljava/util/List;Ljava/util/List;)V
 	public final fun component1 ()Ljava/util/List;
 	public final fun component2 ()Ljava/util/List;
@@ -2965,6 +2989,7 @@ public final class io/astrolabe/contract/Scope {
 	public final fun getProtectedPaths ()Ljava/util/List;
 	public final fun getWritePaths ()Ljava/util/List;
 	public fun hashCode ()I
+	public static final fun repositoryMinus (Lio/astrolabe/workspace/ProtectedPaths;)Lio/astrolabe/contract/Scope;
 	public fun toString ()Ljava/lang/String;
 }
 
@@ -2980,6 +3005,7 @@ public final synthetic class io/astrolabe/contract/Scope$$serializer : kotlinx/s
 }
 
 public final class io/astrolabe/contract/Scope$Companion {
+	public final fun repositoryMinus (Lio/astrolabe/workspace/ProtectedPaths;)Lio/astrolabe/contract/Scope;
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
 }
 
@@ -10888,6 +10914,7 @@ public final class io/astrolabe/verify/RunnerCommands {
 	public final fun getTest ()Lio/astrolabe/contract/Command;
 	public final fun getTypecheck ()Lio/astrolabe/contract/Command;
 	public fun hashCode ()I
+	public static final fun of (Lio/astrolabe/atlas/PackageCommands;)Lio/astrolabe/verify/RunnerCommands;
 	public fun toString ()Ljava/lang/String;
 }
 
@@ -10903,6 +10930,7 @@ public final synthetic class io/astrolabe/verify/RunnerCommands$$serializer : ko
 }
 
 public final class io/astrolabe/verify/RunnerCommands$Companion {
+	public final fun of (Lio/astrolabe/atlas/PackageCommands;)Lio/astrolabe/verify/RunnerCommands;
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
 }
 

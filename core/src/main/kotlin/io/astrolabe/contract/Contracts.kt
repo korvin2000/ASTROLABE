@@ -1,15 +1,26 @@
 package io.astrolabe.contract
 
+import io.astrolabe.Config
+import io.astrolabe.atlas.Atlas
+import io.astrolabe.atlas.PackageCommands
+import io.astrolabe.atlas.Sniff
+import io.astrolabe.atlas.Sniffed
+import io.astrolabe.auth.CapabilitySet
+import io.astrolabe.budget.Budget
+import io.astrolabe.budget.Tokens
 import io.astrolabe.event.AgentEvent
 import io.astrolabe.event.AmendmentProposal
 import io.astrolabe.event.Authority
 import io.astrolabe.event.Events
 import io.astrolabe.event.Proposer
 import io.astrolabe.event.ResolutionOutcome
+import io.astrolabe.id.AttemptId
 import io.astrolabe.id.ContextId
 import io.astrolabe.id.IdGen
 import io.astrolabe.id.Identities
 import io.astrolabe.id.WorkId
+import io.astrolabe.provider.Money
+import io.astrolabe.workspace.ProtectedPaths
 import java.time.Clock
 
 /** Persistence seam for versioned contract rows; the SQLite implementation lives in the store package. */
@@ -130,7 +141,73 @@ public class Contracts(
     /** Resolved amendments, kept for the finish receipt. */
     public fun resolved(): List<Amendment> = resolvedHistory.values.toList()
 
+    /**
+     * §4.1 auto-derivation for S0 (TODO P1.1.2): the request becomes `R1` verbatim, every package whose manifest
+     * declares a test command becomes `AC-n: run <suite> (origin harness, scope touched)`, the write scope is the
+     * D-31 default and nothing is guessed — a repository without a declared suite still yields a contract, with
+     * no acceptance, and [Contract.goalAcceptanceStated] stays false until the model states one or the user
+     * amends. The result is not stored; the campaign opens it ([open]) once the workspace is captured.
+     */
+    public fun deriveS0(
+        work: WorkId,
+        attempt: AttemptId,
+        text: String,
+        atlas: Atlas,
+        config: Config,
+        tokens: Tokens,
+        protected: ProtectedPaths = ProtectedPaths(),
+        cost: Money? = null,
+    ): S0Derivation {
+        val request = UserRequest(idGen.next("U"), clock.instant(), text)
+        val sniffed = Sniff.commands(atlas)
+        val suites = sniffed.packages.filter { it.test != null }
+        val acceptance = suites.mapIndexed { index, pkg ->
+            Acceptance.Run(
+                id = "AC-${index + 1}",
+                command = Command(pkg.test!!, cwd = pkg.dir.takeIf { it != PackageCommands.ROOT }),
+                origin = Origin.Harness,
+                scope = TOUCHED,
+            )
+        }
+        val contract = Contract(
+            workId = work,
+            version = 1,
+            attemptId = attempt,
+            mode = config.mode,
+            shape = Shape.S0,
+            requests = listOf(request),
+            requirements = listOf(Requirement("R1", text, acceptance.map { it.id }, authorityRef = request.id)),
+            acceptance = acceptance,
+            constraints = emptyList(),
+            exclusions = emptyList(),
+            contractsTouched = emptyList(),
+            scope = Scope.repositoryMinus(protected),
+            budget = Budget.of(config.defaults, tokens, cost),
+            authorization = Authorization(config.ceiling, config.dClass, CapabilitySet.WORKSPACE_LOCAL_TEST_ONLY.name),
+            // Risk is not assessed here: incomplete discovery is unknown, never low (D-16); the pre-scan is P3.2.6.
+            risk = null,
+        )
+        return S0Derivation(contract, sniffed, primary = suites.firstOrNull { it.dir == PackageCommands.ROOT } ?: suites.firstOrNull())
+    }
+
     private fun requireCurrent(work: WorkId): Contract = current(work) ?: throw IllegalStateException("no contract for $work")
 
     private fun ids(contract: Contract) = Identities(contract.workId, contract.attemptId)
+
+    public companion object {
+        /** The scope word of an auto-derived suite: the runner narrows it to touched files (§8.1). */
+        public const val TOUCHED: String = "touched"
+    }
 }
+
+/**
+ * What [Contracts.deriveS0] produced. [primary] is the package whose commands seed the check registry
+ * (`RunnerCommands.of`): the root package when it declares a suite, else the first package that does; S0 is a
+ * one-package shape (D-16), so a monorepo's other suites are acceptance items with their own `cwd` and nothing
+ * more until the impact pre-scan (P3.2.6) can narrow them.
+ */
+public data class S0Derivation(
+    val contract: Contract,
+    val sniffed: Sniffed,
+    val primary: PackageCommands?,
+)

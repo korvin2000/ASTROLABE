@@ -1,5 +1,6 @@
 package io.astrolabe.verify
 
+import io.astrolabe.atlas.PackageCommands
 import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Command
 import io.astrolabe.contract.Contract
@@ -116,7 +117,17 @@ public data class RunnerCommands(
     val build: Command? = null,
     val lint: Command? = null,
     val typecheck: Command? = null,
-)
+) {
+    public companion object {
+        /** The sniffed declarations of one package as registry commands; a package below the root keeps its `cwd`. */
+        @JvmStatic
+        public fun of(pkg: PackageCommands): RunnerCommands {
+            val cwd = pkg.dir.takeIf { it != PackageCommands.ROOT }
+            fun command(argv: List<String>?) = argv?.let { Command(it, cwd) }
+            return RunnerCommands(command(pkg.test), command(pkg.build), command(pkg.lint), command(pkg.typecheck))
+        }
+    }
+}
 
 /**
  * The check registry (§8.1, TODO P1.7.1). Seeded from sniffed commands and contract acceptance: `CHK-types-touched`,
