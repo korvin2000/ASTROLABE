@@ -23,7 +23,7 @@
 In scope: the whole architecture through S3 as a library, validated with a **fake provider adapter**. Out of scope ([P7](#p7-deferred-out-of-scope-boundary)): live provider transports, auth, retry/backoff, HTTP clients, MCP client transports, confined-runner backends, live benchmark campaigns. Every phase states which fixtures it must pass and which platform/provider assumptions remain unsupported. The roadmap rule "no stage starts before the previous gate is measured" ([§18.2](docs/implementation/roadmap.md#sec-18-2)) is interpreted for this offline plan as: engineering proceeds through P6 with each live gate recorded `UNMEASURED` and its prerequisites named; promotion claims wait for live evaluation (I-19, D-28).
 
 ## 1 Progress
-- **Phase:** P0 · **Next task:** P0.1.3 · **Blocked:** none
+- **Phase:** P0 · **Next task:** P0.4.1 · **Blocked:** none
 - **Open decisions needing an owner answer:** none (D-01, D-02, D-09, D-12, D-15 answered 2026-09-20 in `ANSWERS.md`; provisional defaults are labelled in §3)
 - **Session log**
   - 2026-09-20 — plan created from docs 1.0.1; no Gradle project, no code. Local machine has git 2.45 and ripgrep, **no JDK/Gradle installed** (install JDK 26 + Gradle 9.7.0 wrapper before P0.1.1).
@@ -209,11 +209,12 @@ Goal: scaffolding that establishes real contracts and boundaries; nothing here t
 - Done: both jobs green on the skeleton.
 - Log: 2026-09-20 — .github/workflows/ci.yml: ubuntu-latest + windows-latest matrix, Temurin 26, gradle/actions/setup-gradle, gradlew check, test reports uploaded. Not yet executed on a remote CI runner (no remote configured in this session); local Windows run green.
 
-#### P0.1.3 [C] `Config` and `Defaults` · TODO
+#### P0.1.3 [C] `Config` and `Defaults` · DONE
 - Why: every number of [§17](docs/reference/defaults.md#sec-17) is configurable per task and none is hard-coded; harness changes take effect only at attempt boundaries (invariant 12).
 - Pkg: root `io.astrolabe`
 - Build: `Defaults` with one named field per §17 row (shape policy, `turnsPerCell = 40` with the 80 % nudge, `alpha = 0.65`, `k = 8`, `m = 6`, `rMaxTokens = 16_000`, `anchorMaxTokens = 2_500`, `immediateStubTokens = 800`, `lookBudget = 1_500`, `runBudget = 1_200`, `registerCap = 1_200`, `digestCap = 150`, `patchCap = 400`, fact/note/summary caps, seeds/injection/focus caps, `touchedInAnchor = 10`, `checkerTimeBoxSeconds = 20`, `theta = 40`, `fullSuiteCadence = 5`, reserves, guard counters, probe/review/repair/attempt/depth/parallel limits, `campaignCells = 12`, flaky policy, admission policy, profiles, mode/execution mode/`dClass`/ceiling, `runTimeoutSeconds = 120`); `Config(defaults, mode, executionMode, rulesFile (trust binding per D-32), stateRoot (D-44), flags: one switch per production-optional `[O]` mechanism only)`; sections owned by later tasks are added there, not here (roles + texts P1.8.1/D-38, redaction P1.10.3, tierTable P4.5.1, injectionWeights P4.1.3/D-37) — I-01; counterfactual research arms live in `EvalArms` of the `eval` module, never in `Config` (D-48); `AttemptConfig` (harness version, config snapshot, profiles, role-text versions) with a validator that rejects any combination disabling a mandatory control; frozen at campaign open (P1.9.4).
 - Done: a test enumerates the §17 table against `Defaults` fields; every `[O]` flag defaults off; the validator rejects a reserve-off or test-integrity-off production config (IX-18).
+- Log: 2026-09-20 — Defaults (one field per §17 row, 25 rows; DefaultsTest maps the table to the fields both ways so no unowned number exists), ShapePolicy (D-16 classes, s3Enabled=false, slackFactor 1.5), ProfileRoles, Config(defaults, profiles, profileRoles, mode, executionMode, dClass, ceiling, rulesFile: RulesBinding (D-32), stateRoot, flags: Flags = 13 [O] switches, all off by test), ConfigViolation; AttemptConfig(harnessVersion, config, roleTextVersions, controls: Controls, production) with a @Transient fingerprint over stable JSON; freeze() throws InvalidConfig on any production violation (reserve 0, checker time box 0, attempts 0, unknown profile…); researchArm() is the EvalArms entry (production=false, never promotion-eligible) — IX-18. Declared owning-package enums early: auth.ExecutionMode, auth.Stage (extended by P1.10.x), route.Tier (extended by P4.5.1), root Mode/DClassPolicy. Astrolabe.VERSION = 0.1.0.
 
 ### P0.2 Identities, hashing, tokens, budgets
 #### P0.2.1 [C] `id` package · DONE
@@ -222,11 +223,12 @@ Goal: scaffolding that establishes real contracts and boundaries; nothing here t
 - Done: equality/serialization tests; equal candidates captured at different times have equal `Stamp.id`; a mode/membership/environment change changes it; Java-visible (`data class`, D-08).
 - Log: 2026-09-20 — id package: WorkId/AttemptId/ContextId/WorkspaceId validated `[A-Za-z0-9._-]{1,128}`; Digest (SHA-256 hex, hash8), FileVersion (raw bytes), Stamp with @Transient id = digest of CanonicalEncoding('stamp', v1: base/tracked/untracked/env); CapturedStamp carries `at` outside identity; Identities carries CandidateId (= Stamp.id) instead of a full Stamp so rows never duplicate stamp components (the stamps table keeps them); Generation/ExecutionGeneration; IdGen with RandomIdGen + FixedIdGen (test fixtures). 11 tests green.
 
-#### P0.2.2 [C][M] `budget` package · TODO
+#### P0.2.2 [C][M] `budget` package · DONE
 - Why: invariant 10 (every child/retry/rebuild consumes the originating budget); reservations enforced across concurrent calls ([§8.1 reserve](docs/verification/scheduler.md#sec-8-1)); FX-25.
 - Deps: P0.3.2 (`TokenEstimator`), P0.3.3 (`Money`) — I-01
 - Build: `Tokens`, `HeuristicEstimator : TokenEstimator` (bytes/3.6 with code-aware tweaks; jtokkit adapter optional; planning use only, D-06), `Budget(cells, turnsPerCell, tokens, cost: Money?, attempts, reserves)`, `Reservations` (atomic `reserve(amount)` → `Reservation`; `reconcile(actual)`; `release`; conservative hold for uncertain external usage), `Reserve` (verification 15 % + recovery/persist 5 % of cell; campaign recovery 10 %; raised to known check costs).
 - Done: concurrent reservation test cannot overspend; unknown usage keeps a hold until reconciled.
+- Log: 2026-09-20 — budget: Tokens (non-negative, saturating minus, fraction), Reserves, Budget.of(defaults), CellReserve + Reserve.cell (15 %/5 % of tokens and turns, verification raised to known check costs) / Reserve.campaign, HeuristicEstimator (bytes/3.6 + symbols/4, 10 % margin, never exact, planning only), Reservations (atomic reserve → Reservation.reconcile/release; overrun recorded; unknown usage keeps its hold). FX-25 concurrency test: 300 concurrent reserves of 10 on 1000 ⇒ exactly 100 granted.
 
 ### P0.3 Provider API module (contract level only)
 #### P0.3.1 [C] Item model · DONE
@@ -253,11 +255,12 @@ Goal: scaffolding that establishes real contracts and boundaries; nothing here t
 - Done: KDoc states every rule of §15.1 the adapter must uphold; cancel-before-id, cancel racing a completed response and late usage after cancel settle spend once with no tool dispatch (IX-15); ABI dump committed.
 - Log: 2026-09-20 — ProviderAdapter/Validation/Problem(Kind)/Validations.standard (pairing, breakpoints, dialect, continuation support, unknown history, admission with margin + output headroom)/Invocation(await, cancel, terminal; InvocationState)/Terminal/ProviderError sealed; JavaProviderAdapter + JavaInvocation (CompletableFuture) + ProviderAdapters.fromJava bridge that never cancels the host's futures on coroutine cancellation (calls cancel(); terminal() still completes) with exception mapping; error mapping and cancel-then-late-usage tested; ABI dump committed. Cancel-before-id and cancel-racing-completion arrive with the fake adapter (P0.3.5).
 
-#### P0.3.5 [M] Fake adapter + scripted model (test fixtures) · TODO
+#### P0.3.5 [M] Fake adapter + scripted model (test fixtures) · DONE
 - Why: the only model used by this plan's validation; must exercise AX-01..AX-10.
 - Pkg: `core/testFixtures` (depends on `provider-api`)
 - Build: `ScriptedModel` DSL (turn matchers on request content → response items), `FakeAdapter` (records requests, segments, breakpoints, invocation states; counts tokens with its **own independent** deterministic tokenizer, not the core heuristic (I-17); synthesizes `BillableUsage` by segment stability: unchanged prefix ⇒ cache read, changed ⇒ uncached + a cache write in a configurable class (5-minute/1-hour mixes for IX-16); injects faults: interrupted stream, broken pairing, output-limit stop, refusal, expired continuation, unsupported schema dialect, cancellation with late output/usage, missing usage), `FakeProfile`s (main/helper/escalation) with fake dated price tables and declared context limits; a Java-authored `JavaProviderAdapter` fake for P1.12.3.
 - Done: AX-01..AX-10 expressed as tests against `FakeAdapter` + `validate()`; IX-15, IX-16, IX-17, IX-24 fixtures runnable.
+- Log: 2026-09-20 — testFixtures: FakeProfiles (main/helper/escalation/strictOnly/tiny with dated USD price tables and declared limits), FakeTokenizer (whitespace pieces + symbols; independent of the core heuristic), ScriptedModel (ordered once-matchers + fallback, builder DSL, FaultKind ×8), FakeCachePolicy (write-class cycling), FakeAdapter (segment-stability cache simulation, drift-recording validate, AX-07 foreign reasoning refusal, D-51 states, holdResponses/release for races, late output on cancel, missing usage). FakeAdapterTest: AX-01..AX-10, IX-15 (cancel before ack / cancel racing completion / late usage once), IX-16, IX-17, IX-24 — 11 tests green. Java-authored JavaProviderAdapter fake arrives with P1.12.3.
 
 ### P0.4 Events, host hooks and views (UI integration seam)
 #### P0.4.1 [C] `AgentEvent` model and `Events` bus · TODO

@@ -1,0 +1,79 @@
+package io.astrolabe
+
+import io.astrolabe.auth.ExecutionMode
+import io.astrolabe.auth.Stage
+import io.astrolabe.id.Digest
+import io.astrolabe.provider.Profile
+import kotlinx.serialization.Serializable
+
+/**
+ * Host-supplied configuration of one SDK instance. Everything a policy may read lives here; nothing here is
+ * read mid-attempt — [AttemptConfig.freeze] snapshots it at campaign open (invariant 12). Sections owned by
+ * later tasks (role texts, redaction set, tier table, injection weights) are added by those tasks.
+ */
+@Serializable
+public data class Config(
+    val defaults: Defaults = Defaults(),
+    /** Routable profiles by id; [profileRoles] names which one serves each function. */
+    val profiles: Map<String, Profile> = emptyMap(),
+    val profileRoles: ProfileRoles = defaults.profileRoles,
+    val mode: Mode = defaults.mode,
+    val executionMode: ExecutionMode = defaults.executionMode,
+    val dClass: DClassPolicy = defaults.dClass,
+    val ceiling: Stage = defaults.ceiling,
+    /** The one authorized rules file (D-32); discovery alone never binds one. */
+    val rulesFile: RulesBinding? = null,
+    /** External durable state root (D-44); `null` selects the OS user-state directory. */
+    val stateRoot: String? = null,
+    val flags: Flags = Flags(),
+) {
+    public fun violations(): List<ConfigViolation> = buildList {
+        addAll(defaults.violations())
+        if (profiles.isNotEmpty() || profileRoles.main.isNotEmpty()) {
+            if (profileRoles.main !in profiles) add(ConfigViolation("profileRoles.main", "profile '${profileRoles.main}' is not configured"))
+            profileRoles.helper?.let { if (it !in profiles) add(ConfigViolation("profileRoles.helper", "profile '$it' is not configured")) }
+            profileRoles.escalation?.let { if (it !in profiles) add(ConfigViolation("profileRoles.escalation", "profile '$it' is not configured")) }
+        }
+        profiles.forEach { (id, profile) -> if (id != profile.id) add(ConfigViolation("profiles.$id", "key differs from profile id '${profile.id}'")) }
+    }
+
+    public val mainProfile: Profile? get() = profiles[profileRoles.main]
+}
+
+/**
+ * Production-optional `[O]` mechanisms, one switch each, all off until their evaluation gate is passed
+ * (D-48, §19.5). Counterfactual research arms (reserve off, test-integrity off, delta-only, clamped routing)
+ * are not flags: they live in the evaluation module's `EvalArms` and can never be selected here.
+ */
+@Serializable
+public data class Flags(
+    val precompile: Boolean = false,
+    val calibrationPrior: Boolean = false,
+    val treeSitterIndex: Boolean = false,
+    val languageService: Boolean = false,
+    val denseRetrieval: Boolean = false,
+    val generatedTools: Boolean = false,
+    val skillsPromotion: Boolean = false,
+    val asyncChecker: Boolean = false,
+    val qaCell: Boolean = false,
+    val l4Gates: Boolean = false,
+    val s3Writers: Boolean = false,
+    val otelExport: Boolean = false,
+    val worthTestEstimate: Boolean = false,
+)
+
+/**
+ * An authorized rules-file snapshot (§14.3, D-32): canonical repository-relative path, digest of the approved
+ * bytes and who bound it. Changed bytes do not inherit approval.
+ */
+@Serializable
+public data class RulesBinding(
+    val path: String,
+    val digest: Digest,
+    val provenance: String,
+) {
+    init {
+        require(path.isNotBlank()) { "rules path must not be blank" }
+        require(provenance.isNotBlank()) { "provenance must name the binding authority" }
+    }
+}
