@@ -23,11 +23,12 @@
 In scope: the whole architecture through S3 as a library, validated with a **fake provider adapter**. Out of scope ([P7](#p7-deferred-out-of-scope-boundary)): live provider transports, auth, retry/backoff, HTTP clients, MCP client transports, confined-runner backends, live benchmark campaigns. Every phase states which fixtures it must pass and which platform/provider assumptions remain unsupported. The roadmap rule "no stage starts before the previous gate is measured" ([§18.2](docs/implementation/roadmap.md#sec-18-2)) is interpreted for this offline plan as: engineering proceeds through P6 with each live gate recorded `UNMEASURED` and its prerequisites named; promotion claims wait for live evaluation (I-19, D-28).
 
 ## 1 Progress
-- **Latest out-of-order checkpoint:** **P6.1.4 (OOO-02) and P5.1.5 (OOO-05) DONE**, in the requested order; D-57/D-58. Both independent reviews clear, ABI checks and full offline Windows/JDK 26 build pass. Final build executed core **813 tests, 0 failures/errors, 6 platform skips** and eval **18 tests, 0 failures/errors/skips**; provider-api UP-TO-DATE (15 green results). Protocols: [P6.1.4](audit/OUT-OF-ORDER-P6.1.4.md), [P5.1.5](audit/OUT-OF-ORDER-P5.1.5.md). No active override remains; next out-of-order proposal **OOO-07** (candidate P6.1.5), admission first. Normal return: P0 validation -> P1.8.2.
-- **Completed out-of-order work:** P2.1.1, P2.3.4 (OOO-01), P2.6.5 (OOO-03), P6.1.4 (OOO-02), P5.1.5 (OOO-05). OOO-07/08/06/09/04 remain proposals, in that order. Parent integration and CI/Linux/live gates remain unchanged.
+- **Latest checkpoint: P6.1.5 / OOO-07 DONE**, D-59. 12 focused tests, 300 seed-615 oracle tables, independent review correction/regression, ABI and full Windows/JDK 26 build pass. Eval 30 tests executed; core 813/6 skips and provider-api 15 reused. Current **65/181 DONE (35.9%), 4 IN_PROGRESS, 112 TODO**. No active override; next authorized proposal OOO-08. Return P0 validation -> P1.8.2. [Protocol](audit/OUT-OF-ORDER-P6.1.5.md).
+- **Previous out-of-order checkpoint:** **P6.1.4 (OOO-02) and P5.1.5 (OOO-05) DONE**, in the requested order; D-57/D-58. Both independent reviews clear, ABI checks and full offline Windows/JDK 26 build pass. Final build executed core **813 tests, 0 failures/errors, 6 platform skips** and eval **18 tests, 0 failures/errors/skips**; provider-api UP-TO-DATE (15 green results). Protocols: [P6.1.4](audit/OUT-OF-ORDER-P6.1.4.md), [P5.1.5](audit/OUT-OF-ORDER-P5.1.5.md). No active override remains; next out-of-order proposal **OOO-07** (candidate P6.1.5), admission first. Normal return: P0 validation -> P1.8.2.
+- **Completed out-of-order work:** P2.1.1, P2.3.4 (OOO-01), P2.6.5 (OOO-03), P6.1.4 (OOO-02), P5.1.5 (OOO-05). P6.1.5 (OOO-07) is also DONE; OOO-08/06/09/04 remain proposals, in that order. Parent integration and CI/Linux/live gates remain unchanged.
 - **Phase:** P0 validation reopened; P1 implementation checkpoint retained · **Next task:** P0.1.2 (with P0.6.1/P0.6.2/P0.6.4) · **Next P1 code task:** P1.8.2 · **Owner decisions blocking work:** none
 - **Open decisions needing an owner answer:** none (D-01, D-02, D-09, D-12, D-15 answered 2026-09-20 in `ANSWERS.md`; provisional defaults are labelled in §3)
-- **Completion state (2026-09-20, P5.1.5 completed):** P0: 15/19 DONE, 4 IN_PROGRESS (reopened CI validation). P1: 44/63 DONE, 19 TODO. P2-P6: 5 DONE (P2.1.1, P2.3.4, P2.6.5, P6.1.4, P5.1.5), 93 TODO. Total: **64/180 DONE (35.6%), 4 IN_PROGRESS, 112 TODO**. Counts measure task headings, not code or effort; phase/CI/Linux/live gates unchanged.
+- **Previous completion state (2026-09-20, P5.1.5 completed):** P0: 15/19 DONE, 4 IN_PROGRESS (reopened CI validation). P1: 44/63 DONE, 19 TODO. P2-P6: 5 DONE (P2.1.1, P2.3.4, P2.6.5, P6.1.4, P5.1.5), 93 TODO. Total: **64/180 DONE (35.6%), 4 IN_PROGRESS, 112 TODO**. Counts measure task headings, not code or effort; phase/CI/Linux/live gates unchanged.
 - **Remaining P1 in dependency order:** P1.8.2–P1.8.8 cell runtime (Layout → Anchor → Gauge → Gates → Residency → Cell loop → ResultPacket) → P1.9.1–P1.9.6 controller/facade → P1.11.1–P1.11.2 telemetry → P1.12.1–P1.12.4 validation (the `Deps` fields stay authoritative).
 - **Resume notes**
   - Build: `export JAVA_HOME=/c/Users/user/.gradle/jdks/eclipse_adoptium-26-amd64-windows.2` (Temurin 26.0.2.1; Windows form `C:\Users\user\.gradle\jdks\eclipse_adoptium-26-amd64-windows.2`), then `./gradlew build` (historical session-2 local reports: 773 tests, zero failures, six skips; fresh targeted audit: 59 passed, see section 1.1). Targeted runs: `./gradlew :core:test --tests 'io.astrolabe.<pkg>.*' --console=plain`. Kotlin ABI validation is on: after any public-API change run `./gradlew :core:updateKotlinAbi` (and `:provider-api:updateKotlinAbi` when touched) as its own invocation, then `build`, and commit the `*/api/*.api` dumps. The test JVM passes `--enable-native-access=ALL-UNNAMED` (FFM in `os`).
@@ -80,6 +81,16 @@ All three pass in the isolated local rerun; their remote failures remain unresol
 ### 1.2 Owner-authorized analytical work (2026-09-20)
 
 **Current card — State: COMPLETE**
+- Proposal: **OOO-07** | Canonical task: **P6.1.5** | Parent: P6.1.2 (TODO).
+- Authority: owner request for successive proposal implementations in order, with protocols/session checkpoint.
+- Baseline: clean `main` at `3e5c1ce`; branch `feature/out-of-order-kernels`.
+- Scope: metadata policy, indivisible groups, exact quota/time validator and bounded assignment; D-59.
+- Producers: P0.1.1, P0.2.1 and P6.1.4 eval utilities, all DONE.
+- Excluded: runner/manifests/contamination/memory/holdout tracking and FX-47 remain P6.1.1/P6.1.2.
+- Checkpoint: P6.1.5 DONE; 12 focused tests/300 oracle tables, review correction resolved, eval ABI and full build pass. Final eval 30 tests executed; core 813/6 skips and provider-api 15 reused. Commit containing this record.
+- Return: P0 validation -> P1.8.2. [Protocol](audit/OUT-OF-ORDER-P6.1.5.md).
+
+**Historical completed card — P5.1.5 (State: COMPLETE)**
 - Proposal: **OOO-05** | Canonical task: **P5.1.5** | Parents: P5.1.1/P5.1.4 (TODO).
 - Authority: continuing owner request for ordered out-of-order implementations; OOO-02 complete at `89d10c9`.
 - Baseline: clean `main` at `89d10c9`. Scope: symbolic intersection/difference of supplied open write scopes in one destination namespace, constructive witness, exact existing matcher semantics, explicit limits/unknowns.
@@ -196,6 +207,7 @@ A task may consume a type only after its producing task is `DONE` (I-01). Extend
 
 | Artifact | First declared (producer) | Extended by |
 |---|---|---|
+| `WorkloadPartition`, `WorkloadGrouping`, `WorkloadTask`, `WorkloadTrialKey`, `WorkloadLink`, `WorkloadWindow`, `WorkloadQuota`, `WorkloadPolicy`, `WorkloadDesign`, `WorkloadGroup`, `WorkloadMass`, `WorkloadSplitStatus`, `WorkloadSplitResult`, `WorkloadSplit` | P6.1.5 (OOO-07, DONE) | P6.1.2 frozen manifests/integrity; P6.1.1 runner |
 | `ScopeRelation`, `ScopeResult`, `ScopeUnknownReason`, `ScopeSearchLimits`, `ScopeAnalysis`, `ScopeAlgebra` | P5.1.5 (OOO-05, DONE) | P5.1.1 ownership; P5.1.4 shape admission; physical checks remain WorkspacePath/ScopeGuard |
 | `TrialKey`, `PlannedTrial`, `EvaluationTrial`, `StratumPolicy`, `ScorePolicy`, `EvaluationDesign`, `EvaluationEvidence`, `EvidenceCheck`, `EvaluationOrigin`, `EvaluationIssue`, `EvaluationIssueCode`, `StratumScore`, `Scorecard`, `PairedBound`, `PromotionReport`, `PromotionVerdict` | P6.1.4 (OOO-02, DONE) | P6.1.3 integration; P6.1.2 supplied manifests/integrity; P1.11.2 accounting |
 | `Identities`, `Stamp` (canonical encoding), `FileVersion`, `Digest`, `IdGen` | P0.2.1 | P1.2.2 (computation) |
@@ -292,6 +304,8 @@ Dispositions follow `ANSWERS.md` (2026-09-20): **CONFIRMED** (owner answer) · *
 | D-57 | Out-of-order scorecard and paired inference | **LOCAL IMPLEMENTATION CHOICE** P6.1.4 owns immutable offline evaluation projections. Fixed trial-weighted estimand, repository clusters, complete declared pairs and config/matched-input digests; exact decimal weights, complex mass >= 0.5. Deterministic bounded-cluster Hoeffding lower bounds with family alpha split across two endpoints and all frozen candidates; no bootstrap or normality assumption. Conservative small-sample handling, strict -0.02 margin, separate unknown billing/floors/ceilings/integrity and synthetic-only results. Actual policy parameters and proof/simulation plan are in the [journal](audit/OUT-OF-ORDER-P6.1.4.md). This kernel never adopts a candidate; P6.1.1/2/3 and P7 retain their gates and responsibilities. | P6.1.4, P6.1.3 |
 
 | D-58 | Out-of-order write-scope language algebra | **LOCAL IMPLEMENTATION CHOICE** P5.1.5 analyzes open write scopes, justified by existing create/rename-to-missing paths. Exact PathPattern semantics, Unicode scalar alphabet and explicit canonical lexical path language; one destination namespace. Tagged epsilon NFA, lazy subset/canonical-path product and iterative BFS provide shortest witnesses or a complete emptiness proof; limits and unsupported surrogate input give Unknown. Immutable scopes, deterministic alphabet tie order, existing-matcher witness validation. This neither authorizes physical writes nor enables S3; parents retain integration and gates. [Model and tests](audit/OUT-OF-ORDER-P5.1.5.md). | P5.1.5, P5.1.1, P5.1.4 |
+
+| D-59 | Out-of-order constrained workload partition | **LOCAL IMPLEMENTATION CHOICE** P6.1.5 owns immutable metadata-only task/repetition/policy projections. Task-level exact decimal weight; explicit repository/family/extra must-links; half-open time windows; hard mass quotas and weighted absolute-deviation objective. DSU plus bounded iterative exact search; sound suffix bounds; immutable fingerprints; unknown metadata, invalid assignment, exhausted limits and proof of infeasibility stay distinct. [Frozen model/oracle](audit/OUT-OF-ORDER-P6.1.5.md). P6.1.2 retains contamination/holdout/manifest integration and FX-47. | P6.1.5, P6.1.2 |
 
 ### 3.1 Specification refinements recorded by this plan
 The plan follows the refined reading below; a later documentation-maintenance pass should apply them to the cited sections (they are not silent redesigns — each keeps the section's intent and closes an ambiguity found in review):
@@ -1418,6 +1432,7 @@ Goal: [§18.2 Stage F](docs/implementation/roadmap.md#sec-18-2), [§19](docs/eva
 - Done: runner reproduces the JUnit results and exports a machine-readable report.
 
 #### P6.1.2 [M] Frozen campaigns, comparators, ablation switches, workload manifests · TODO
+- Integration: consume completed P6.1.5 WorkloadSplit. Runner/manifests/contamination/memory/holdout tracking and FX-47 stay here; implicit P6.1.1 prerequisite and full Build/Done remain unchanged.
 - Why: [§19.1–19.2](docs/evaluation/method.md#sec-19-1), [§19.5](docs/evaluation/method.md#sec-19-5); invariant 12; F27.
 - Build: `campaigns/` frozen manifests (attempt config, harness version, flags, strata, repositories, partitions by repository/task family/time); comparator configurations B0, B-HELM, B1–B5, Target (B0/B-HELM need live providers ⇒ config only); every §19.5 ablation as an `EvalArms` entry (research arms live in the `eval` module, never in production `Config`; arms that disable a mandatory control are runnable but marked ineligible for promotion — D-48, I-18); every live gate recorded with status `UNMEASURED`, its prerequisites and the evidence fields it will need (I-19); contamination checks: hidden acceptance outside the solver's workspace, answer-bearing patches/notes removed, mutable memory reset for cold runs and frozen/equal for warm runs, a repeatedly consulted selection set flagged as no longer a holdout (FX-47).
 - Done: FX-47; flags enumerated and documented from one table.
@@ -1437,6 +1452,17 @@ Goal: [§18.2 Stage F](docs/implementation/roadmap.md#sec-18-2), [§19](docs/eva
 - Log: 2026-09-20 — admitted from d1689ef; no partial implementation; D-57 and [journal](audit/OUT-OF-ORDER-P6.1.4.md) freeze the model/method/experiments before results. Next: slice A tests.
 - Log: 2026-09-20 — slices A/B: minimal eval module, immutable design/trials, exact decimal totals and floors, unknown billing/invalid pairs, Q/E and Hoeffding repository bounds. Initial RED compilation confirmed absent API; 9 focused Windows tests now pass, including 100 seeded arithmetic tables (seed 614). Next C; full task still IN_PROGRESS, ABI/build pending.
 - Log: 2026-09-20 — A+B+C complete: compound diagnostic verdict, exact economic policy/ceilings, separate investment repayment, immutable provenance and conservative synthetic/integrity boundary. Same-task stratum consistency regression fixed. 18 focused tests, including 7 predeclared models × 1,000 campaigns (seeds 614/615/616), independent arithmetic/bound oracles; all pass, maximum upper95 false-eligibility frequency on margin/harm models 0.004470. Independent read-only review found no required issues. Separate eval ABI update and full offline Windows/JDK 26 build pass (eval executed 18; core 803 tests/6 skips and provider-api 15 were UP-TO-DATE). No runtime promotion or Linux/remote CI claim. Parent integration remains TODO; [API guide](eval/README.md), [full protocol](audit/OUT-OF-ORDER-P6.1.4.md). Return P0 validation -> P1.8.2; next authorized proposal OOO-05.
+
+#### P6.1.5 [M][V] Constrained workload partition kernel (OOO-07) · DONE
+- Deps: P0.1.1, P0.2.1, P6.1.4 (existing eval utilities only; no dependency on runner/parent).
+- Pkg: `eval` / `io.astrolabe.eval`.
+- Spec: [evaluation §19.2](docs/evaluation/method.md#sec-19-2), proposal §8.3/§9.1, D-59.
+- Build: immutable task/repetition metadata and frozen policy; must-link components, weighted quota/time validation, deterministic bounded exact assignment, explicit unknown/limit/infeasible/feasible/optimal outcomes, counts and design fingerprints.
+- Done: all A/B/C; independent exhaustive oracle, giant/transitive/time/rare-stratum/repetition/decimal/mutation/digest/permutation checks, review, ABI and full build. Parent runtime/FX-47 remains TODO.
+- Log: 2026-09-20 — admitted from clean 3e5c1ce. [Protocol/model](audit/OUT-OF-ORDER-P6.1.5.md) frozen before code. Minimal RED test confirms absent API; implementation next.
+- Log: 2026-09-20 — A/B/C complete; 11 focused tests and 300 seed-615 oracle tables pass, including at least 100 feasible optimizations. Separate eval ABI update and full Windows/JDK 26 build passed: eval 29 tests executed; core 813/6 skips and provider-api 15 green results reused. Review pending. No parent/CI/Linux/live claim.
+
+- Log: 2026-09-20 — DONE. Review found validation-priority defect; corrected with zero-mass/split regression, reviewer confirmed no remaining required findings. Final focused 12 tests, ABI check and full Windows/JDK 26 build pass: eval 30 tests executed, core 813/6 skips and provider-api 15 reused. No parent or gate closure. Protocol and eval README updated; next authorized candidate OOO-08.
 
 ### P6.2 Offline improvement runner skeleton `[O]`
 #### P6.2.1 [O][M] Trace mining and experiment bookkeeping · TODO

@@ -279,3 +279,167 @@ public final class io/astrolabe/eval/TrialKey {
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class io/astrolabe/eval/WorkloadDesign {
+	public fun <init> (Lio/astrolabe/eval/WorkloadPolicy;Ljava/util/List;)V
+	public final fun getFingerprint ()Lio/astrolabe/id/Digest;
+	public final fun getPolicy ()Lio/astrolabe/eval/WorkloadPolicy;
+	public final fun getTasks ()Ljava/util/List;
+}
+
+public final class io/astrolabe/eval/WorkloadGroup {
+	public final fun getAllowed ()Ljava/util/Set;
+	public final fun getTasks ()Ljava/util/List;
+}
+
+public final class io/astrolabe/eval/WorkloadGrouping : java/lang/Enum {
+	public static final field Repository Lio/astrolabe/eval/WorkloadGrouping;
+	public static final field TaskFamily Lio/astrolabe/eval/WorkloadGrouping;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/eval/WorkloadGrouping;
+	public static fun values ()[Lio/astrolabe/eval/WorkloadGrouping;
+}
+
+public final class io/astrolabe/eval/WorkloadLink {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;)Lio/astrolabe/eval/WorkloadLink;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/WorkloadLink;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/eval/WorkloadLink;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFirst ()Ljava/lang/String;
+	public final fun getSecond ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/eval/WorkloadMass {
+	public fun <init> (Lio/astrolabe/eval/WorkloadPartition;Ljava/lang/String;IJLjava/math/BigDecimal;Ljava/math/BigDecimal;)V
+	public final fun component1 ()Lio/astrolabe/eval/WorkloadPartition;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()I
+	public final fun component4 ()J
+	public final fun component5 ()Ljava/math/BigDecimal;
+	public final fun component6 ()Ljava/math/BigDecimal;
+	public final fun copy (Lio/astrolabe/eval/WorkloadPartition;Ljava/lang/String;IJLjava/math/BigDecimal;Ljava/math/BigDecimal;)Lio/astrolabe/eval/WorkloadMass;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/WorkloadMass;Lio/astrolabe/eval/WorkloadPartition;Ljava/lang/String;IJLjava/math/BigDecimal;Ljava/math/BigDecimal;ILjava/lang/Object;)Lio/astrolabe/eval/WorkloadMass;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getComplexWeight ()Ljava/math/BigDecimal;
+	public final fun getPartition ()Lio/astrolabe/eval/WorkloadPartition;
+	public final fun getStratum ()Ljava/lang/String;
+	public final fun getTasks ()I
+	public final fun getTrials ()J
+	public final fun getWeight ()Ljava/math/BigDecimal;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/eval/WorkloadPartition : java/lang/Enum {
+	public static final field Development Lio/astrolabe/eval/WorkloadPartition;
+	public static final field Final Lio/astrolabe/eval/WorkloadPartition;
+	public static final field Selection Lio/astrolabe/eval/WorkloadPartition;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/eval/WorkloadPartition;
+	public static fun values ()[Lio/astrolabe/eval/WorkloadPartition;
+}
+
+public final class io/astrolabe/eval/WorkloadPolicy {
+	public fun <init> (Ljava/lang/String;Ljava/util/Map;Ljava/util/Set;Ljava/util/List;Ljava/util/Map;Ljava/util/Map;Ljava/util/List;)V
+	public final fun getAllowed ()Ljava/util/Map;
+	public final fun getFingerprint ()Lio/astrolabe/id/Digest;
+	public final fun getGrouping ()Ljava/util/Set;
+	public final fun getLinks ()Ljava/util/List;
+	public final fun getQuotas ()Ljava/util/List;
+	public final fun getStrata ()Ljava/util/Map;
+	public final fun getVersion ()Ljava/lang/String;
+	public final fun getWindows ()Ljava/util/Map;
+}
+
+public final class io/astrolabe/eval/WorkloadQuota {
+	public fun <init> (Lio/astrolabe/eval/WorkloadPartition;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;)V
+	public final fun component1 ()Lio/astrolabe/eval/WorkloadPartition;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/math/BigDecimal;
+	public final fun component4 ()Ljava/math/BigDecimal;
+	public final fun component5 ()Ljava/math/BigDecimal;
+	public final fun component6 ()Ljava/math/BigDecimal;
+	public final fun copy (Lio/astrolabe/eval/WorkloadPartition;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;)Lio/astrolabe/eval/WorkloadQuota;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/WorkloadQuota;Lio/astrolabe/eval/WorkloadPartition;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;ILjava/lang/Object;)Lio/astrolabe/eval/WorkloadQuota;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMaximum ()Ljava/math/BigDecimal;
+	public final fun getMinimum ()Ljava/math/BigDecimal;
+	public final fun getPartition ()Lio/astrolabe/eval/WorkloadPartition;
+	public final fun getPenalty ()Ljava/math/BigDecimal;
+	public final fun getStratum ()Ljava/lang/String;
+	public final fun getTarget ()Ljava/math/BigDecimal;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/eval/WorkloadSplit {
+	public static final field INSTANCE Lio/astrolabe/eval/WorkloadSplit;
+	public static final fun solve (Lio/astrolabe/eval/WorkloadDesign;J)Lio/astrolabe/eval/WorkloadSplitResult;
+	public static final fun validate (Lio/astrolabe/eval/WorkloadDesign;Lio/astrolabe/id/Digest;Ljava/util/Map;)Lio/astrolabe/eval/WorkloadSplitResult;
+}
+
+public final class io/astrolabe/eval/WorkloadSplitResult {
+	public final fun getAssignment ()Ljava/util/Map;
+	public final fun getDesign ()Lio/astrolabe/eval/WorkloadDesign;
+	public final fun getGroups ()Ljava/util/List;
+	public final fun getIssues ()Ljava/util/List;
+	public final fun getObjective ()Ljava/math/BigDecimal;
+	public final fun getSearchComplete ()Z
+	public final fun getStatus ()Lio/astrolabe/eval/WorkloadSplitStatus;
+	public final fun getTotals ()Ljava/util/List;
+	public final fun getVisitedNodes ()J
+}
+
+public final class io/astrolabe/eval/WorkloadSplitStatus : java/lang/Enum {
+	public static final field Feasible Lio/astrolabe/eval/WorkloadSplitStatus;
+	public static final field Infeasible Lio/astrolabe/eval/WorkloadSplitStatus;
+	public static final field InvalidInput Lio/astrolabe/eval/WorkloadSplitStatus;
+	public static final field Optimal Lio/astrolabe/eval/WorkloadSplitStatus;
+	public static final field SearchLimit Lio/astrolabe/eval/WorkloadSplitStatus;
+	public static final field UnknownMetadata Lio/astrolabe/eval/WorkloadSplitStatus;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/eval/WorkloadSplitStatus;
+	public static fun values ()[Lio/astrolabe/eval/WorkloadSplitStatus;
+}
+
+public final class io/astrolabe/eval/WorkloadTask {
+	public fun <init> (Ljava/lang/String;Ljava/util/Set;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/time/Instant;)V
+	public final fun getFamily ()Ljava/lang/String;
+	public final fun getId ()Ljava/lang/String;
+	public final fun getRepetitions ()Ljava/util/Set;
+	public final fun getRepository ()Ljava/lang/String;
+	public final fun getStratum ()Ljava/lang/String;
+	public final fun getTime ()Ljava/time/Instant;
+	public final fun getWeight ()Ljava/math/BigDecimal;
+}
+
+public final class io/astrolabe/eval/WorkloadTrialKey {
+	public fun <init> (Ljava/lang/String;I)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()I
+	public final fun copy (Ljava/lang/String;I)Lio/astrolabe/eval/WorkloadTrialKey;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/WorkloadTrialKey;Ljava/lang/String;IILjava/lang/Object;)Lio/astrolabe/eval/WorkloadTrialKey;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getRepetition ()I
+	public final fun getTask ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/eval/WorkloadWindow {
+	public fun <init> (Ljava/time/Instant;Ljava/time/Instant;)V
+	public final fun component1 ()Ljava/time/Instant;
+	public final fun component2 ()Ljava/time/Instant;
+	public final fun contains (Ljava/time/Instant;)Z
+	public final fun copy (Ljava/time/Instant;Ljava/time/Instant;)Lio/astrolabe/eval/WorkloadWindow;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/WorkloadWindow;Ljava/time/Instant;Ljava/time/Instant;ILjava/lang/Object;)Lio/astrolabe/eval/WorkloadWindow;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFromInclusive ()Ljava/time/Instant;
+	public final fun getUntilExclusive ()Ljava/time/Instant;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+

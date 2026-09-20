@@ -1,5 +1,15 @@
 # ASTROLABE 1.0.1 Kotlin SOTA AI Coding Agent Harness — actual state
 
+**P6.1.5 / OOO-07 DONE**, D-59; checkpoint is the commit containing this record.
+Immutable workload metadata, must-link/time/quota validator and exact bounded assignment are ready.
+Current **65/181 DONE (35.9%), 4 IN_PROGRESS, 112 TODO**. 12 focused tests, 300 oracle tables,
+independent review resolved, ABI and full Windows/JDK 26 build pass: eval 30 tests executed;
+core 813 tests/6 platform skips and provider-api 15 green results reused UP-TO-DATE.
+[Protocol](audit/OUT-OF-ORDER-P6.1.5.md). No active override; next authorized proposal OOO-08.
+Normal return P0 validation -> P1.8.2. Parents/CI/Linux/live gates unchanged. Do not rebuild P6.1.5.
+
+**Previous checkpoints below are historical.**
+
 ## Current checkpoint (2026-09-20)
 
 **P6.1.4 / OOO-02 and P5.1.5 / OOO-05 DONE**, in the requested order. No ACTIVE override remains.

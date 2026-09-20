@@ -1,5 +1,11 @@
 # Change record
 
+## Implementation checkpoints — 20 September 2026
+
+- P6.1.5: metadata-only workload partition validation and bounded exact construction, preserving
+  task repetitions/must-link groups, weighted quotas and time constraints. Unknown metadata and
+  search exhaustion remain explicit; frozen campaign/holdout integrity stays with P6.1.2.
+
 ## 1.0.1-proposal — 20 September 2026
 
 **Type:** conservative correction and documentation reorganization of ASTROLABE 1.0-proposal.

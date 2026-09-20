@@ -61,3 +61,44 @@ evidence gives `Inconclusive`; known violations give `KeepBaseline`; malformed t
 Run `./gradlew :eval:test` (Windows: `./gradlew.bat :eval:test`) on the pinned JDK 26 toolchain.
 The tests include independent arithmetic/formula oracles and seven predeclared 1,000-campaign
 simulations. Public API changes require a separate `:eval:updateKotlinAbi` invocation before `build`.
+
+## Workload partitioning
+
+P6.1.5 supplies `WorkloadSplit` for metadata-only development/selection/final design. Construct a
+`WorkloadPolicy` with stratum complexity labels, explicit repository/family grouping rules, optional
+additional `WorkloadLink`s, per-task allowed partitions and optional `WorkloadWindow`s for all three
+partitions. Windows are half-open and may have unbounded endpoints. Empty grouping explicitly selects
+task-only isolation. Supply an overall `WorkloadQuota` for every partition and optional stratum quotas.
+Each quota has inclusive minimum/maximum task mass, a target and an absolute-deviation penalty.
+
+`WorkloadDesign` takes canonical `WorkloadTask` metadata with explicit repetition IDs. Weight belongs
+to the task and is counted once across repetitions. This differs from the scorecard's trial-weighted
+estimand: the future runner must explicitly freeze how task mass maps into its scoring design.
+The workload must have positive total mass and at least half in complex strata. The kernel does not
+require half in each partition; express any additional partition balance through stratum quotas.
+
+```kotlin
+val split = WorkloadSplit.solve(design, maxNodes = 100_000)
+val checked = WorkloadSplit.validate(design, design.fingerprint, suppliedTrialAssignments)
+```
+
+Assignments identify every task/repetition. The validator checks coverage, no split repetitions or
+must-link components, allowed partitions, time and all quotas. The expected fingerprint binds the
+entire design, including policy. `Feasible` means a supplied assignment passed; `Optimal` means bounded
+exact search completed with an optimum of the declared decimal objective. `Infeasible` includes a
+static contradiction or an exhaustive-search reason. `SearchLimit` may carry a feasible incumbent;
+inspect its assignment/objective, and never treat that incumbent as optimal. `UnknownMetadata` names
+every required missing field. Invalid construction parameters throw; invalid supplied assignments
+give `InvalidInput` with issues and no objective/totals. No task is silently dropped.
+
+Results retain immutable input records, policy/design digests, components and allowed partitions,
+assignment, search count/completion and partition/stratum task counts, trial counts, total mass and
+complex mass. Empty stratum cells remain visible in valid assignments. Exact decimal arithmetic
+avoids rounding over quota boundaries; deterministic component/partition ordering resolves ties.
+
+Search is worst-case exponential (three choices per component); `maxNodes` bounds attempted component
+assignments, not input size or preprocessing. Suffix bounds use O(components × quota cells) memory.
+The [protocol](../audit/OUT-OF-ORDER-P6.1.5.md) records the model, proof and independent oracle.
+This is evidence only about supplied metadata/links. It neither detects unknown answer leakage nor
+restores a repeatedly used holdout. Frozen manifests, contamination cleanup, memory reset/access
+tracking and FX-47 runtime validation remain P6.1.1/P6.1.2.
