@@ -236,7 +236,7 @@ class RunTest {
 
     @Test
     fun `a background run persists a handle that survives a restart, polls without relaunch and can be cancelled (FX-22)`() = runTest {
-        val started = run("""{"cmd":"${shell("echo bg-start&ping -n 4 127.0.0.1 >NUL&echo bg-end", "echo bg-start; sleep 3; echo bg-end")}","bg":true}""")
+        val started = run("""{"cmd":"${shell("echo bg-start&ping -n 7 127.0.0.1 >NUL&echo bg-end", "echo bg-start; sleep 6; echo bg-end")}","bg":true}""")
         assertEquals("running", status(started), started.body)
         assertTrue(started.body.contains("handle handle-1"), started.body)
         val handle = SqliteHandles(store, clock).get("handle-1")!!
@@ -249,7 +249,7 @@ class RunTest {
         assertTrue(early.body.contains("bg-start"), "output that has arrived returns at once: ${early.body}")
         val quiet = run("""{"op":"poll","handle":"handle-1","timeout":1}""")
         assertEquals("running", status(quiet), quiet.body)
-        assertTrue(quiet.body.contains("observation timed out after 1s, the process keeps running (no relaunch)"), quiet.body)
+        assertTrue(quiet.body.contains("observation timed out after 1s, the process keeps running (no relaunch)"), "the process sleeps for seconds after its first line; a one-second poll times out: ${quiet.body}")
         assertEquals(handle.proc.pid, SqliteHandles(store, clock).get("handle-1")!!.proc.pid, "same process, same handle")
         val done = run("""{"op":"poll","handle":"handle-1","timeout":30}""")
         assertTrue(status(done) != "running", done.body)
