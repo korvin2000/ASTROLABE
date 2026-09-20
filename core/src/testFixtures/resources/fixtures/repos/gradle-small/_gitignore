@@ -1,0 +1,5 @@
+build/
+__pycache__/
+node_modules/
+.pytest_cache/
+.gradle/

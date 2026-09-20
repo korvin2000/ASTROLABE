@@ -1,0 +1,12 @@
+# Every file of the ts-small fixture, in the order FixtureRepos.materialize writes them.
+# These are repository paths. A leading dot ships as "_" in the resource tree, because Gradle's
+# default resource excludes drop .gitignore; FixtureRepos.resourceName maps between the two.
+# Hand-written; FixtureReposIndexTest fails if it and fixtures/repos/ts-small/ disagree.
+.gitignore
+README.md
+package.json
+src/index.ts
+src/router.ts
+test/index.test.ts
+test/router.test.ts
+tsconfig.json

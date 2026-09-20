@@ -1,0 +1,12 @@
+{
+  "name": "ts-small",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ASTROLABE fixture: a tiny TypeScript router with runnable tests.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "test:junit": "node --test --test-reporter=junit",
+    "check": "node --check src/index.ts"
+  }
+}
