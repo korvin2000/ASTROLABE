@@ -18,20 +18,27 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 
 /**
- * What an executor reports back: the rendered result for `[T]` and the two facts later conditions need —
- * whether an edit batch [applied] fully and whether a run or verify came back [green]. [tokens] is what the
- * result cost against the turn's read budget; [resultAlias] the campaign-global `#n` for the host event.
+ * What an executor reports back: the result [body] with its envelope [header] (the cell renders both with
+ * the gauge, P1.8.4) and the two facts later conditions need — whether an edit batch [applied] fully and
+ * whether a run or verify came back [green]. [tokens] is what the body costs in the window and against the
+ * turn's read budget.
  */
 public data class ToolOutcome(
-    val text: String,
+    val body: String,
+    val header: EnvelopeHeader? = null,
     val applied: Boolean = false,
     val green: Boolean = false,
     val tokens: Long = 0,
-    val resultAlias: String? = null,
 ) {
     init {
         require(tokens >= 0) { "tokens must be ≥ 0" }
     }
+
+    /** The campaign-global `#n` of the result, when the executor recorded one. */
+    val resultAlias: String? get() = header?.resultAlias
+
+    /** Header line and body, for logs and host events; not the `[T]` rendering, which adds the gauge. */
+    val text: String get() = listOfNotNull(header?.line(), body.takeIf { it.isNotEmpty() }).joinToString("\n")
 }
 
 /** Every accepted call id ends the turn with exactly one disposition (§5.4: a result or an explicit reason). */
@@ -184,7 +191,7 @@ public class Dispatcher(
             Disposition.Failed(call.opId, "${failure::class.simpleName}: ${failure.message}")
         }
         val header = when (disposition) {
-            is Disposition.Executed -> disposition.outcome.text.lineSequence().first()
+            is Disposition.Executed -> disposition.outcome.header?.line() ?: disposition.outcome.body.lineSequence().first()
             is Disposition.Failed -> "failed: ${disposition.error}"
             is Disposition.NotExecuted -> disposition.reason
         }

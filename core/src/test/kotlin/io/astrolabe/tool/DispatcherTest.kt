@@ -38,10 +38,15 @@ class DispatcherTest {
     private fun state() = "state" to """{"op":"patch","patch":[{"next":"x"}]}"""
 
     /** Fakes: a look registers the read at v1; an edit applies only when the dispatch-time snapshot covers the hunk. */
+    private fun header(opId: Int) = EnvelopeHeader(
+        "#$opId", "look", EffectClass.R, emptyMap(), null, false, Effects.None,
+        runtime = RuntimeFields("act-$opId", "ok", null, null, "src/a.py:1-10", "complete"),
+    )
+
     private val executors: Map<ToolFamily, ToolExecutor> = mapOf(
         ToolFamily.Look to ToolExecutor { call, _ ->
             workset.register(Entry("src/a.py", Ranges.single(1, 10), v1, EntrySource.Look, turn = 1, resultId = "#${call.opId}", tokens = 120))
-            ToolOutcome("result #${call.opId} look", tokens = 120, resultAlias = "#${call.opId}")
+            ToolOutcome("1| def a():", header(call.opId), tokens = 120)
         },
         ToolFamily.Edit to ToolExecutor { call, context ->
             val covered = context.coverage.covers("src/a.py", v1, LineRange(1, 5))
@@ -133,7 +138,7 @@ class DispatcherTest {
             }
             assertEquals(
                 listOf(
-                    "called 3 look.read Locate", "resulted 3 #3 result #3 look",
+                    "called 3 look.read Locate", "resulted 3 #3 ${header(3).line()}",
                     "called 2 run.run Verify", "resulted 2 null result #2 run",
                     "called 1 state.patch Understand", "resulted 1 null result #1 state",
                 ),
