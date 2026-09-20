@@ -23,11 +23,12 @@
 In scope: the whole architecture through S3 as a library, validated with a **fake provider adapter**. Out of scope ([P7](#p7-deferred-out-of-scope-boundary)): live provider transports, auth, retry/backoff, HTTP clients, MCP client transports, confined-runner backends, live benchmark campaigns. Every phase states which fixtures it must pass and which platform/provider assumptions remain unsupported. The roadmap rule "no stage starts before the previous gate is measured" ([§18.2](docs/implementation/roadmap.md#sec-18-2)) is interpreted for this offline plan as: engineering proceeds through P6 with each live gate recorded `UNMEASURED` and its prerequisites named; promotion claims wait for live evaluation (I-19, D-28).
 
 ## 1 Progress
-- **Latest checkpoint: P6.1.5 / OOO-07 and P4.5.5 / OOO-08 DONE**, in requested order, D-59/D-60. Commits: P6.1.5 `eb143e8`; P4.5.5 commit containing this record. 24 new focused tests, independent oracles (300 workload tables + 200 DAGs), reviews resolved, ABI/full build pass. Final Windows/JDK 26 build executed core **825 tests, 0 failures/errors, 6 platform skips**, eval **30 tests, 0 failures/errors/skips**; provider-api 15 green results reused. Current **66/182 DONE (36.3%), 4 IN_PROGRESS, 112 TODO**. No ACTIVE override; next proposal OOO-06. Normal return P0 validation -> P1.8.2.
+- **Latest checkpoint: P4.5.4 / OOO-06 DONE**, D-61, from `955fb77`; 15 focused tests, 300 seed-454 path-enumeration policies, author review resolved, ABI and full Windows/JDK 26 build pass. Core **840 tests/0 failures/errors/6 platform skips**, eval **30/0 failures/errors/skips** executed; provider-api 15 green results reused. **67/183 DONE, 4 IN_PROGRESS, 112 TODO**. No ACTIVE override. Next authorized proposal OOO-09; normal return P0 validation -> P1.8.2. [Protocol](audit/OUT-OF-ORDER-P4.5.4.md).
+- **Previous checkpoint: P6.1.5 / OOO-07 and P4.5.5 / OOO-08 DONE**, in requested order, D-59/D-60. Commits: P6.1.5 `eb143e8`; P4.5.5 commit containing this record. 24 new focused tests, independent oracles (300 workload tables + 200 DAGs), reviews resolved, ABI/full build pass. Final Windows/JDK 26 build executed core **825 tests, 0 failures/errors, 6 platform skips**, eval **30 tests, 0 failures/errors/skips**; provider-api 15 green results reused. Current **66/182 DONE (36.3%), 4 IN_PROGRESS, 112 TODO**. No ACTIVE override; next proposal OOO-06. Normal return P0 validation -> P1.8.2.
 - **Previous checkpoint: P6.1.5 / OOO-07 DONE**, D-59. 12 focused tests, 300 seed-615 oracle tables, independent review correction/regression, ABI and full Windows/JDK 26 build pass. Eval 30 tests executed; core 813/6 skips and provider-api 15 reused. Current **65/181 DONE (35.9%), 4 IN_PROGRESS, 112 TODO**. No active override; next authorized proposal OOO-08. Return P0 validation -> P1.8.2. [Protocol](audit/OUT-OF-ORDER-P6.1.5.md).
 - **Previous out-of-order checkpoint:** **P6.1.4 (OOO-02) and P5.1.5 (OOO-05) DONE**, in the requested order; D-57/D-58. Both independent reviews clear, ABI checks and full offline Windows/JDK 26 build pass. Final build executed core **813 tests, 0 failures/errors, 6 platform skips** and eval **18 tests, 0 failures/errors/skips**; provider-api UP-TO-DATE (15 green results). Protocols: [P6.1.4](audit/OUT-OF-ORDER-P6.1.4.md), [P5.1.5](audit/OUT-OF-ORDER-P5.1.5.md). No active override remains; next out-of-order proposal **OOO-07** (candidate P6.1.5), admission first. Normal return: P0 validation -> P1.8.2.
-- **Completed out-of-order work:** P2.1.1, P2.3.4 (OOO-01), P2.6.5 (OOO-03), P6.1.4 (OOO-02), P5.1.5 (OOO-05). P6.1.5 (OOO-07) and P4.5.5 (OOO-08) are also DONE; OOO-06/09/04 remain proposals, in that order. Parent integration and CI/Linux/live gates remain unchanged.
-- **Current phase counts:** P0 15 DONE + 4 IN_PROGRESS; P1 44 DONE + 19 TODO; P2-P6 7 DONE + 93 TODO. Counts derive from unique task headings, not code volume.
+- **Completed out-of-order work:** P2.1.1, P2.3.4 (OOO-01), P2.6.5 (OOO-03), P6.1.4 (OOO-02), P5.1.5 (OOO-05). P6.1.5 (OOO-07) and P4.5.5 (OOO-08) are also DONE; OOO-06/P4.5.4 is also DONE; OOO-09/04 remain proposals, in that order. Parent integration and CI/Linux/live gates remain unchanged.
+- **Current phase counts:** P0 15 DONE + 4 IN_PROGRESS; P1 44 DONE + 19 TODO; P2-P6 8 DONE + 93 TODO. Counts derive from unique task headings, not code volume.
 - **Phase:** P0 validation reopened; P1 implementation checkpoint retained · **Next task:** P0.1.2 (with P0.6.1/P0.6.2/P0.6.4) · **Next P1 code task:** P1.8.2 · **Owner decisions blocking work:** none
 - **Open decisions needing an owner answer:** none (D-01, D-02, D-09, D-12, D-15 answered 2026-09-20 in `ANSWERS.md`; provisional defaults are labelled in §3)
 - **Previous completion state (2026-09-20, P5.1.5 completed):** P0: 15/19 DONE, 4 IN_PROGRESS (reopened CI validation). P1: 44/63 DONE, 19 TODO. P2-P6: 5 DONE (P2.1.1, P2.3.4, P2.6.5, P6.1.4, P5.1.5), 93 TODO. Total: **64/180 DONE (35.6%), 4 IN_PROGRESS, 112 TODO**. Counts measure task headings, not code or effort; phase/CI/Linux/live gates unchanged.
@@ -83,6 +84,17 @@ All three pass in the isolated local rerun; their remote failures remain unresol
 ### 1.2 Owner-authorized analytical work (2026-09-20)
 
 **Current card — State: COMPLETE**
+- Proposal: **OOO-06** | Canonical task: **P4.5.4** | Parent: P4.5.1 (TODO), consumer P4.5.2.
+- Authority: 2026-09-20 owner request for sequential implementation with protocols/docs/checkpoints.
+- Baseline: clean `feature/out-of-order-kernels` at `955fb77`.
+- Scope: finite policies, expected full cost/terminal masses, explicit unknowns, separate admission gates.
+- Producers: P0.3.3 Money and P0.2.2 Budget DONE; new Attempt* projections owned here. D-61.
+- Excluded: conditional calibration, real floor/eligibility inputs, Router/controller and FX-31/32/55.
+- Checkpoint: P4.5.4 DONE; 15 focused tests/300 seed-454 oracle policies, author review, ABI and full build pass. Core 840/6 skips and eval 30 executed; provider-api 15 reused. Commit containing this checkpoint.
+- Return: P0.1.2 + P0.6.1/P0.6.2/P0.6.4 -> P1.8.2. Next authorized proposal after completion OOO-09.
+- Journal: [P4.5.4](audit/OUT-OF-ORDER-P4.5.4.md).
+
+**Historical completed card — P4.5.5**
 - Proposal: **OOO-08** | Canonical task: **P4.5.5** | Parent: P4.5.3 (TODO).
 - Authority: continuing owner request for sequential out-of-order tasks with protocols/docs/checkpoints.
 - Baseline: clean `feature/out-of-order-kernels` at `eb143e8` (OOO-07 DONE).
@@ -219,6 +231,7 @@ A task may consume a type only after its producing task is `DONE` (I-01). Extend
 
 | Artifact | First declared (producer) | Extended by |
 |---|---|---|
+| `AttemptOutcome`, `AttemptBranch`, `AttemptState`, `AttemptPolicy`, `AttemptLimits`, `AttemptEstimateStatus`, `AttemptEstimate`, `AttemptGate`, `AttemptCandidate`, `AttemptSelectionInput`, `AttemptSelectionStatus`, `AttemptSelection`, `AttemptCost` | P4.5.4 (OOO-06, DONE) | P4.5.1 outcome calibration/real gate evidence/Router; P4.5.2 escalation/controller |
 | `ScheduleContext`, `ScheduleEdge`, `ScheduleCostModel`, `ScheduleCosts`, `ScheduleProblem`, `ScheduleLimits`, `ScheduleStatus`, `ScheduleResult`, `DagSchedule` | P4.5.5 (OOO-08, DONE) | P4.5.3 calibrated model/ordering hook; P2.2.2 dispatch; P6 shadow evaluation |
 | `WorkloadPartition`, `WorkloadGrouping`, `WorkloadTask`, `WorkloadTrialKey`, `WorkloadLink`, `WorkloadWindow`, `WorkloadQuota`, `WorkloadPolicy`, `WorkloadDesign`, `WorkloadGroup`, `WorkloadMass`, `WorkloadSplitStatus`, `WorkloadSplitResult`, `WorkloadSplit` | P6.1.5 (OOO-07, DONE) | P6.1.2 frozen manifests/integrity; P6.1.1 runner |
 | `ScopeRelation`, `ScopeResult`, `ScopeUnknownReason`, `ScopeSearchLimits`, `ScopeAnalysis`, `ScopeAlgebra` | P5.1.5 (OOO-05, DONE) | P5.1.1 ownership; P5.1.4 shape admission; physical checks remain WorkspacePath/ScopeGuard |
@@ -321,6 +334,8 @@ Dispositions follow `ANSWERS.md` (2026-09-20): **CONFIRMED** (owner answer) · *
 | D-59 | Out-of-order constrained workload partition | **LOCAL IMPLEMENTATION CHOICE** P6.1.5 owns immutable metadata-only task/repetition/policy projections. Task-level exact decimal weight; explicit repository/family/extra must-links; half-open time windows; hard mass quotas and weighted absolute-deviation objective. DSU plus bounded iterative exact search; sound suffix bounds; immutable fingerprints; unknown metadata, invalid assignment, exhausted limits and proof of infeasibility stay distinct. [Frozen model/oracle](audit/OUT-OF-ORDER-P6.1.5.md). P6.1.2 retains contamination/holdout/manifest integration and FX-47. | P6.1.5, P6.1.2 |
 
 | D-60 | Out-of-order exact DAG sequencing oracle | **LOCAL IMPLEMENTATION CHOICE** P4.5.5 consumes immutable graph and frozen context/cost projections. Only Pending selected increments, explicit completed external prerequisites, full mandatory precedence, pairwise/Markov-only costs. Exact decimal initial + switch + fixed charges, subset-DP and witness; deterministic mask/ID ties; bounded dense table/transitions with explicit ResourceLimit. [Model/oracle](audit/OUT-OF-ORDER-P4.5.5.md). No runtime activation or provider-savings claim. | P4.5.5, P4.5.3 |
+
+| D-61 | Out-of-order finite attempt-policy costs | **LOCAL IMPLEMENTATION CHOICE** P4.5.4 owns immutable finite-state policies; one step per substantive attempt, explicit conditional/terminal/exhaustion charges. Exact decimal probability mass, rolling finite-horizon recurrence, unknown propagation, separate supplied eligibility/floors/conservative affordability before cost comparison. [Model and oracle](audit/OUT-OF-ORDER-P4.5.4.md). No learning, demotion or dispatch authority. | P4.5.4, P4.5.1, P4.5.2 |
 
 ### 3.1 Specification refinements recorded by this plan
 The plan follows the refined reading below; a later documentation-maintenance pass should apply them to the cited sections (they are not silent redesigns — each keeps the section's intent and closes an ambiguity found in review):
@@ -1285,6 +1300,7 @@ Goal: [§18.2 Stage D](docs/implementation/roadmap.md#sec-18-2): KB with queue/c
 
 ### P4.5 Routing
 #### P4.5.1 [M] Tier table, function table, `Router.selectProfile` · TODO
+- Integration: use completed P4.5.4 AttemptCost for supplied finite policies. Real conditional estimates, eligibility/floors, conservative estimates, controller wiring and FX-32/55 remain here; prior implicit prerequisites unchanged.
 - Why: [§11.1–11.2](docs/operations/routing.md#sec-11-1) N7; F24; F07 (re-apply both floors after calibration); D6 in [§20.2](docs/reference/decisions.md#sec-20-2).
 - Pkg: `route`
 - Build: `Tier { low, medium, high, extraHigh, deterministic }`, `TierTable` (versioned data with calibration date; profiles per tier), `FunctionTable` rows per §11.1 (default tier, effort per call class, escalate-when, never-below, if-unaffordable action); `Router.selectProfile(function, packet, impact, policy)`: `eligible` (capabilities, authorization, context fit, availability, user pins, calibrated quality floor) → `tier = max(function default, plan suggestion, risk_floor(risk, contracts_touched, fanin, reversibility))` (risk-floor table D-34 — declared `packet.risk` maps explicitly; contract touch and fan-in supplement it and cannot erase a high-risk obligation with undiscovered dependencies) → `adjust_with_calibration` (D-35: promotion only; automatic demotion **off** until comparable verified outcomes for the proposed cheaper tier exist from a frozen/shadow evaluation) → `tier = max(tier, never_below(function), risk_floor)` (FX-55) → `affordable` = conservative estimate ≤ remaining − reserves → empty ⇒ `REFUSE(narrow_unit | checkpoint | ask_for_changed_constraint)` (never clamp; FX-32) → argmin expected total cost incl. retries/reviews/integration; `(function, tier, effort, outcome)` quadruples logged (`CalibrationLog`); helper calls never inside a worker loop; provider reasoning artifacts opaque per provider; cross-provider handoff transfers explicit goals/decisions/evidence/open questions only.
@@ -1302,7 +1318,7 @@ Goal: [§18.2 Stage D](docs/implementation/roadmap.md#sec-18-2): KB with queue/c
 - Done: FX-45; ordering hint test.
 
 #### P4.5.5 [M][V] Exact small-DAG scheduling oracle (OOO-08) · DONE
-- Deps: P2.1.1, P0.3.3, P0.2.1. P4.5.4 remains a proposal, not an implicit prerequisite.
+- Deps: P2.1.1, P0.3.3, P0.2.1. P4.5.4 is independent, not an implicit prerequisite.
 - Pkg: `core` / `route`.
 - Spec: [routing §11.4](docs/operations/routing.md#sec-11-4), proposal §8.4/§9.1, D-60.
 - Build: frozen context/pairwise costs, external-completion/mandatory-order checks; bounded exact subset-DP, reconstructed order, exact cost components/provenance and explicit unsupported/unknown/limit outcomes.
@@ -1312,6 +1328,18 @@ Goal: [§18.2 Stage D](docs/implementation/roadmap.md#sec-18-2): KB with queue/c
 - Log: 2026-09-20 — A/B/C implemented; 12 focused tests pass, including every topological order for 200 seed-455 DAGs, greedy counterexample, unknown/model/graph/limit/immutability checks. Core ABI updated/inspected. Independent review clear; full build running; no runtime activation.
 
 - Log: 2026-09-20 — DONE. Independent review found no required issues. Core ABI regenerated/inspected, full Windows/JDK 26 build passed in 3m18s: core 825 tests/0 failures/errors/6 platform skips; eval 30/0 failures/errors/skips, both executed; provider-api 15 reused. API guide and protocol complete. Parent P4.5.3/runtime/FX-45 and CI/Linux/live gates remain open. Next out-of-order OOO-06; normal return P0 validation -> P1.8.2.
+
+#### P4.5.4 [M] Finite attempt-policy cost kernel (OOO-06) · DONE
+- Deps: P0.3.3, P0.2.2 (explicit; independent of P4.5.1–P4.5.3/P4.5.5).
+- Pkg: `core` / `route`.
+- Spec: [routing §§11.2–11.3](docs/operations/routing.md#sec-11-2), proposal §8.2/§9.1, D-61.
+- Build: immutable finite policies, full expected cost/complete acceptance/terminal masses, exhaustion, uncertainty/provenance; bounded evaluation; separate supplied eligibility/floors and conservative affordability before deterministic comparison.
+- Done: all A/B/C, independent trajectory oracle, cheap-start counterexample, p=0/1, horizon/cycle/unknown/currency/permutation/mutation/limit/gate cases; review, ABI/full build and API/protocol docs. Parent runtime/FX/live gates unchanged.
+- Log: 2026-09-20 — admitted from 955fb77, model frozen in [protocol](audit/OUT-OF-ORDER-P4.5.4.md); next RED test.
+
+- Log: 2026-09-20 — 15 focused tests pass, seed-454 trajectory enumeration and edge/unknown/admission/limit tests; author review fixed early decimal bounds; ABI updated. Full build running.
+
+- Log: 2026-09-20 — DONE. 15 focused tests/300 seeded trajectory oracles; author review resolved; ABI/full Windows/JDK 26 build green in 3m19s. Core 840/0 failures/errors/6 skips, eval 30/0 failures/errors/skips executed; provider-api 15 reused. Protocol/API/handoff complete. P4.5.1/P4.5.2/FX/CI/Linux/live gates unchanged.
 
 ### P4.6 Recovery ladder
 #### P4.6.1 [M] Failure classes and `recover()` · TODO

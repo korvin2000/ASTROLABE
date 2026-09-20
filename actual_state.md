@@ -1,5 +1,17 @@
 # ASTROLABE 1.0.1 Kotlin SOTA AI Coding Agent Harness — actual state
 
+**P4.5.4 / OOO-06 DONE**, D-61, from `955fb77`; commit containing this checkpoint.
+Exact finite attempt policies, full cost/terminal masses, unknowns and separate admission checks.
+**67/183 DONE, 4 IN_PROGRESS, 112 TODO**. No ACTIVE override. 15 focused tests and 300 seed-454
+trajectory oracles pass; author review resolved; core ABI and full Windows/JDK 26 build pass in 3m19s.
+Core **840 tests/0 failures/errors/6 platform skips**, eval **30/0 failures/errors/skips** executed;
+provider-api 15 green results reused. [Protocol](audit/OUT-OF-ORDER-P4.5.4.md), [API](core/README.md).
+Do not reimplement AttemptCost. P4.5.1/P4.5.2 retain real estimates/gates/Router/controller/FX work.
+Next authorized proposal **OOO-09 / candidate P1.11.3**, then OOO-04; admission and D-62 check first.
+Normal return P0.1.2 + P0.6.1/P0.6.2/P0.6.4 -> P1.8.2. CI/Linux/live gates remain open/UNMEASURED.
+
+**Historical checkpoints below.**
+
 **Completed this session: P6.1.5 / OOO-07, then P4.5.5 / OOO-08**, D-59/D-60.
 P6.1.5 commit `eb143e8`; P4.5.5 is the commit containing this checkpoint, on `feature/out-of-order-kernels`.
 Current **66/182 DONE (36.3%), 4 IN_PROGRESS, 112 TODO**. No ACTIVE override remains.

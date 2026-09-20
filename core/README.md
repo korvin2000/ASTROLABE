@@ -1,5 +1,32 @@
 # Core implementation notes
 
+## Finite attempt costs (P4.5.4)
+
+`route.AttemptCost.evaluate(policy, remainingAttempts, limits)` evaluates a frozen `AttemptPolicy`.
+Each `Step` consumes one substantive attempt, charges its base plus the selected branch's auxiliary
+cost, and visits the successor. Include conditional helpers, reviews and integration in branch charges.
+At zero attempts a step charges `exhaustedCost` and ends Exhausted; a Terminal still charges its final
+cost and records Accepted/Failed/Blocked/Cancelled/Exhausted. Accepted means complete acceptance.
+
+Probabilities are supplied conditional finite decimals summing exactly to one; null remains unknown.
+States must encode relevant history. All charges use one nonnegative currency. Exact arithmetic
+preserves failure costs and all terminal masses; an unknown price leaves acceptance calculable but
+cost null, while unknown reachable probabilities leave both unknown. Zero-probability edges do not
+transmit unknowns. There is no statistical confidence bound or inference from marginal Profile rates.
+
+`AttemptCost.select(input, limits)` checks supplied whole-policy eligibility and floor evidence,
+then conservative cost against remaining money minus reserves, before minimizing expected cost.
+The caller owns those facts; conservative cost is independent of the expectation. Budget bounds the
+remaining attempt count. Unknown eligible alternatives prevent a minimum claim; ties use policy ID.
+Selection creates no reservation and grants no dispatch authority. `E[cost]/P(accepted)` is not its objective.
+
+Snapshots/results retain version/provenance and immutable collections. Malformed scalar/currency
+values throw `IllegalArgumentException`; InvalidInput, Unknown and ResourceLimit are separate results.
+Limits bound `(H+1)*V` and decimal precision/scale, including unreachable rows. The rolling recurrence
+uses O(H*(V+E)) arithmetic operations and O(V+E) storage; decimal bit complexity is additional.
+P4.5.1/P4.5.2 retain real outcome calibration, floor/eligibility evidence, Router/controller and FX gates.
+[Model, proof, tests and checkpoint](../audit/OUT-OF-ORDER-P4.5.4.md).
+
 ## Symbolic write scopes (P5.1.5)
 
 `workspace.ScopeAlgebra` compares `contract.Scope` records in one integration destination namespace:

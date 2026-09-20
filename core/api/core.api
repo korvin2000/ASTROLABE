@@ -9717,6 +9717,162 @@ public final class io/astrolabe/register/Validator {
 	public final fun check (Lio/astrolabe/register/Register;Lio/astrolabe/register/Patch;Lio/astrolabe/register/ValidationContext;)Lio/astrolabe/register/Validation;
 }
 
+public final class io/astrolabe/route/AttemptBranch {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Lio/astrolabe/provider/Money;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/math/BigDecimal;
+	public final fun component4 ()Lio/astrolabe/provider/Money;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Lio/astrolabe/provider/Money;)Lio/astrolabe/route/AttemptBranch;
+	public static synthetic fun copy$default (Lio/astrolabe/route/AttemptBranch;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Lio/astrolabe/provider/Money;ILjava/lang/Object;)Lio/astrolabe/route/AttemptBranch;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCost ()Lio/astrolabe/provider/Money;
+	public final fun getId ()Ljava/lang/String;
+	public final fun getProbability ()Ljava/math/BigDecimal;
+	public final fun getTarget ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/route/AttemptCandidate {
+	public fun <init> (Lio/astrolabe/route/AttemptPolicy;Lio/astrolabe/route/AttemptGate;Lio/astrolabe/route/AttemptGate;Lio/astrolabe/provider/Money;)V
+	public final fun component1 ()Lio/astrolabe/route/AttemptPolicy;
+	public final fun component2 ()Lio/astrolabe/route/AttemptGate;
+	public final fun component3 ()Lio/astrolabe/route/AttemptGate;
+	public final fun component4 ()Lio/astrolabe/provider/Money;
+	public final fun copy (Lio/astrolabe/route/AttemptPolicy;Lio/astrolabe/route/AttemptGate;Lio/astrolabe/route/AttemptGate;Lio/astrolabe/provider/Money;)Lio/astrolabe/route/AttemptCandidate;
+	public static synthetic fun copy$default (Lio/astrolabe/route/AttemptCandidate;Lio/astrolabe/route/AttemptPolicy;Lio/astrolabe/route/AttemptGate;Lio/astrolabe/route/AttemptGate;Lio/astrolabe/provider/Money;ILjava/lang/Object;)Lio/astrolabe/route/AttemptCandidate;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getConservativeCost ()Lio/astrolabe/provider/Money;
+	public final fun getEligibility ()Lio/astrolabe/route/AttemptGate;
+	public final fun getFloors ()Lio/astrolabe/route/AttemptGate;
+	public final fun getPolicy ()Lio/astrolabe/route/AttemptPolicy;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/route/AttemptCost {
+	public static final field INSTANCE Lio/astrolabe/route/AttemptCost;
+	public static final fun evaluate (Lio/astrolabe/route/AttemptPolicy;ILio/astrolabe/route/AttemptLimits;)Lio/astrolabe/route/AttemptEstimate;
+	public static final fun select (Lio/astrolabe/route/AttemptSelectionInput;Lio/astrolabe/route/AttemptLimits;)Lio/astrolabe/route/AttemptSelection;
+}
+
+public final class io/astrolabe/route/AttemptEstimate {
+	public final fun getAcceptanceProbability ()Ljava/math/BigDecimal;
+	public final fun getExpectedCost ()Lio/astrolabe/provider/Money;
+	public final fun getIssues ()Ljava/util/List;
+	public final fun getPolicy ()Lio/astrolabe/route/AttemptPolicy;
+	public final fun getRemainingAttempts ()I
+	public final fun getStatus ()Lio/astrolabe/route/AttemptEstimateStatus;
+	public final fun getTerminalProbabilities ()Ljava/util/Map;
+}
+
+public final class io/astrolabe/route/AttemptEstimateStatus : java/lang/Enum {
+	public static final field InvalidInput Lio/astrolabe/route/AttemptEstimateStatus;
+	public static final field Known Lio/astrolabe/route/AttemptEstimateStatus;
+	public static final field ResourceLimit Lio/astrolabe/route/AttemptEstimateStatus;
+	public static final field Unknown Lio/astrolabe/route/AttemptEstimateStatus;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/route/AttemptEstimateStatus;
+	public static fun values ()[Lio/astrolabe/route/AttemptEstimateStatus;
+}
+
+public final class io/astrolabe/route/AttemptGate : java/lang/Enum {
+	public static final field Fail Lio/astrolabe/route/AttemptGate;
+	public static final field Pass Lio/astrolabe/route/AttemptGate;
+	public static final field Unknown Lio/astrolabe/route/AttemptGate;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/route/AttemptGate;
+	public static fun values ()[Lio/astrolabe/route/AttemptGate;
+}
+
+public final class io/astrolabe/route/AttemptLimits {
+	public fun <init> (J)V
+	public fun <init> (JI)V
+	public synthetic fun <init> (JIILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()J
+	public final fun component2 ()I
+	public final fun copy (JI)Lio/astrolabe/route/AttemptLimits;
+	public static synthetic fun copy$default (Lio/astrolabe/route/AttemptLimits;JIILjava/lang/Object;)Lio/astrolabe/route/AttemptLimits;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMaxDecimalDigits ()I
+	public final fun getMaxStateEvaluations ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/route/AttemptOutcome : java/lang/Enum {
+	public static final field Accepted Lio/astrolabe/route/AttemptOutcome;
+	public static final field Blocked Lio/astrolabe/route/AttemptOutcome;
+	public static final field Cancelled Lio/astrolabe/route/AttemptOutcome;
+	public static final field Exhausted Lio/astrolabe/route/AttemptOutcome;
+	public static final field Failed Lio/astrolabe/route/AttemptOutcome;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/route/AttemptOutcome;
+	public static fun values ()[Lio/astrolabe/route/AttemptOutcome;
+}
+
+public final class io/astrolabe/route/AttemptPolicy {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/Map;)V
+	public final fun getCurrency ()Ljava/lang/String;
+	public final fun getId ()Ljava/lang/String;
+	public final fun getInitial ()Ljava/lang/String;
+	public final fun getProvenance ()Ljava/lang/String;
+	public final fun getStates ()Ljava/util/Map;
+	public final fun getVersion ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/route/AttemptSelection {
+	public final fun getEstimates ()Ljava/util/Map;
+	public final fun getExclusions ()Ljava/util/Map;
+	public final fun getInput ()Lio/astrolabe/route/AttemptSelectionInput;
+	public final fun getSelectedPolicyId ()Ljava/lang/String;
+	public final fun getStatus ()Lio/astrolabe/route/AttemptSelectionStatus;
+}
+
+public final class io/astrolabe/route/AttemptSelectionInput {
+	public fun <init> (Ljava/util/List;Lio/astrolabe/budget/Budget;ILio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;)V
+	public final fun getBudget ()Lio/astrolabe/budget/Budget;
+	public final fun getCandidates ()Ljava/util/List;
+	public final fun getRemainingAttempts ()I
+	public final fun getRemainingCost ()Lio/astrolabe/provider/Money;
+	public final fun getReservedCost ()Lio/astrolabe/provider/Money;
+}
+
+public final class io/astrolabe/route/AttemptSelectionStatus : java/lang/Enum {
+	public static final field InvalidInput Lio/astrolabe/route/AttemptSelectionStatus;
+	public static final field Refused Lio/astrolabe/route/AttemptSelectionStatus;
+	public static final field ResourceLimit Lio/astrolabe/route/AttemptSelectionStatus;
+	public static final field Selected Lio/astrolabe/route/AttemptSelectionStatus;
+	public static final field Unknown Lio/astrolabe/route/AttemptSelectionStatus;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/route/AttemptSelectionStatus;
+	public static fun values ()[Lio/astrolabe/route/AttemptSelectionStatus;
+}
+
+public abstract interface class io/astrolabe/route/AttemptState {
+}
+
+public final class io/astrolabe/route/AttemptState$Step : io/astrolabe/route/AttemptState {
+	public fun <init> (Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Ljava/util/List;)V
+	public final fun getBranches ()Ljava/util/List;
+	public final fun getCost ()Lio/astrolabe/provider/Money;
+	public final fun getExhaustedCost ()Lio/astrolabe/provider/Money;
+}
+
+public final class io/astrolabe/route/AttemptState$Terminal : io/astrolabe/route/AttemptState {
+	public fun <init> (Lio/astrolabe/route/AttemptOutcome;Lio/astrolabe/provider/Money;)V
+	public final fun component1 ()Lio/astrolabe/route/AttemptOutcome;
+	public final fun component2 ()Lio/astrolabe/provider/Money;
+	public final fun copy (Lio/astrolabe/route/AttemptOutcome;Lio/astrolabe/provider/Money;)Lio/astrolabe/route/AttemptState$Terminal;
+	public static synthetic fun copy$default (Lio/astrolabe/route/AttemptState$Terminal;Lio/astrolabe/route/AttemptOutcome;Lio/astrolabe/provider/Money;ILjava/lang/Object;)Lio/astrolabe/route/AttemptState$Terminal;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCost ()Lio/astrolabe/provider/Money;
+	public final fun getOutcome ()Lio/astrolabe/route/AttemptOutcome;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class io/astrolabe/route/DagSchedule {
 	public static final field INSTANCE Lio/astrolabe/route/DagSchedule;
 	public static final fun solve (Lio/astrolabe/route/ScheduleProblem;Lio/astrolabe/route/ScheduleLimits;)Lio/astrolabe/route/ScheduleResult;
