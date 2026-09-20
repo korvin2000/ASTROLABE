@@ -3856,6 +3856,219 @@ public final class io/astrolabe/os/UntrackedFiles : java/lang/Enum {
 	public static fun values ()[Lio/astrolabe/os/UntrackedFiles;
 }
 
+public final class io/astrolabe/os/search/Hit {
+	public fun <init> (Ljava/lang/String;ILjava/lang/Integer;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()I
+	public final fun component3 ()Ljava/lang/Integer;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;ILjava/lang/Integer;Ljava/lang/String;)Lio/astrolabe/os/search/Hit;
+	public static synthetic fun copy$default (Lio/astrolabe/os/search/Hit;Ljava/lang/String;ILjava/lang/Integer;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/os/search/Hit;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getColumn ()Ljava/lang/Integer;
+	public final fun getLine ()I
+	public final fun getPath ()Ljava/lang/String;
+	public final fun getText ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/search/Hits {
+	public fun <init> (Ljava/util/List;Lio/astrolabe/os/search/SearchScope;ZZLio/astrolabe/os/search/SearchBackend;Ljava/lang/Integer;)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun component2 ()Lio/astrolabe/os/search/SearchScope;
+	public final fun component3 ()Z
+	public final fun component4 ()Z
+	public final fun component5 ()Lio/astrolabe/os/search/SearchBackend;
+	public final fun component6 ()Ljava/lang/Integer;
+	public final fun copy (Ljava/util/List;Lio/astrolabe/os/search/SearchScope;ZZLio/astrolabe/os/search/SearchBackend;Ljava/lang/Integer;)Lio/astrolabe/os/search/Hits;
+	public static synthetic fun copy$default (Lio/astrolabe/os/search/Hits;Ljava/util/List;Lio/astrolabe/os/search/SearchScope;ZZLio/astrolabe/os/search/SearchBackend;Ljava/lang/Integer;ILjava/lang/Object;)Lio/astrolabe/os/search/Hits;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBackend ()Lio/astrolabe/os/search/SearchBackend;
+	public final fun getComplete ()Z
+	public final fun getFilesSearched ()Ljava/lang/Integer;
+	public final fun getHits ()Ljava/util/List;
+	public final fun getScope ()Lio/astrolabe/os/search/SearchScope;
+	public final fun getTruncated ()Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/search/IncompleteReason : java/lang/Enum {
+	public static final field BudgetBytesExceeded Lio/astrolabe/os/search/IncompleteReason;
+	public static final field MaxHitsReached Lio/astrolabe/os/search/IncompleteReason;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/os/search/IncompleteReason;
+	public static fun values ()[Lio/astrolabe/os/search/IncompleteReason;
+}
+
+public final class io/astrolabe/os/search/PatternSubset {
+	public static final field INSTANCE Lio/astrolabe/os/search/PatternSubset;
+	public final fun check (Ljava/lang/String;Lio/astrolabe/os/search/SearchMode;)Lio/astrolabe/os/search/SearchOutcome$Unsupported;
+}
+
+public abstract interface class io/astrolabe/os/search/RipgrepProbe {
+	public abstract fun ripgrepAvailable ()Z
+}
+
+public abstract interface class io/astrolabe/os/search/Search {
+	public abstract fun find (Lio/astrolabe/os/search/SearchRequest;)Lio/astrolabe/os/search/SearchOutcome;
+	public abstract fun getBackend ()Lio/astrolabe/os/search/SearchBackend;
+}
+
+public final class io/astrolabe/os/search/SearchBackend : java/lang/Enum {
+	public static final field Jvm Lio/astrolabe/os/search/SearchBackend;
+	public static final field Ripgrep Lio/astrolabe/os/search/SearchBackend;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/os/search/SearchBackend;
+	public static fun values ()[Lio/astrolabe/os/search/SearchBackend;
+}
+
+public final class io/astrolabe/os/search/SearchMode : java/lang/Enum {
+	public static final field Literal Lio/astrolabe/os/search/SearchMode;
+	public static final field Regex Lio/astrolabe/os/search/SearchMode;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/os/search/SearchMode;
+	public static fun values ()[Lio/astrolabe/os/search/SearchMode;
+}
+
+public abstract interface class io/astrolabe/os/search/SearchOutcome {
+}
+
+public final class io/astrolabe/os/search/SearchOutcome$Denied : io/astrolabe/os/search/SearchOutcome {
+	public fun <init> (Ljava/lang/String;Ljava/util/List;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/util/List;
+	public final fun copy (Ljava/lang/String;Ljava/util/List;)Lio/astrolabe/os/search/SearchOutcome$Denied;
+	public static synthetic fun copy$default (Lio/astrolabe/os/search/SearchOutcome$Denied;Ljava/lang/String;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/os/search/SearchOutcome$Denied;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getPaths ()Ljava/util/List;
+	public final fun getReason ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/search/SearchOutcome$Failed : io/astrolabe/os/search/SearchOutcome {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/astrolabe/os/search/SearchOutcome$Failed;
+	public static synthetic fun copy$default (Lio/astrolabe/os/search/SearchOutcome$Failed;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/os/search/SearchOutcome$Failed;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getReason ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/search/SearchOutcome$Found : io/astrolabe/os/search/SearchOutcome {
+	public fun <init> (Lio/astrolabe/os/search/Hits;)V
+	public final fun component1 ()Lio/astrolabe/os/search/Hits;
+	public final fun copy (Lio/astrolabe/os/search/Hits;)Lio/astrolabe/os/search/SearchOutcome$Found;
+	public static synthetic fun copy$default (Lio/astrolabe/os/search/SearchOutcome$Found;Lio/astrolabe/os/search/Hits;ILjava/lang/Object;)Lio/astrolabe/os/search/SearchOutcome$Found;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getHits ()Lio/astrolabe/os/search/Hits;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/search/SearchOutcome$Incomplete : io/astrolabe/os/search/SearchOutcome {
+	public fun <init> (Lio/astrolabe/os/search/Hits;Lio/astrolabe/os/search/IncompleteReason;)V
+	public final fun component1 ()Lio/astrolabe/os/search/Hits;
+	public final fun component2 ()Lio/astrolabe/os/search/IncompleteReason;
+	public final fun copy (Lio/astrolabe/os/search/Hits;Lio/astrolabe/os/search/IncompleteReason;)Lio/astrolabe/os/search/SearchOutcome$Incomplete;
+	public static synthetic fun copy$default (Lio/astrolabe/os/search/SearchOutcome$Incomplete;Lio/astrolabe/os/search/Hits;Lio/astrolabe/os/search/IncompleteReason;ILjava/lang/Object;)Lio/astrolabe/os/search/SearchOutcome$Incomplete;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getHits ()Lio/astrolabe/os/search/Hits;
+	public final fun getReason ()Lio/astrolabe/os/search/IncompleteReason;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/search/SearchOutcome$Unsupported : io/astrolabe/os/search/SearchOutcome {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/astrolabe/os/search/SearchOutcome$Unsupported;
+	public static synthetic fun copy$default (Lio/astrolabe/os/search/SearchOutcome$Unsupported;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/os/search/SearchOutcome$Unsupported;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getReason ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/search/SearchRequest {
+	public fun <init> (Ljava/lang/String;Lio/astrolabe/os/search/SearchMode;Lio/astrolabe/os/search/SearchScope;JLjava/time/Instant;ZLjava/lang/Integer;)V
+	public synthetic fun <init> (Ljava/lang/String;Lio/astrolabe/os/search/SearchMode;Lio/astrolabe/os/search/SearchScope;JLjava/time/Instant;ZLjava/lang/Integer;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lio/astrolabe/os/search/SearchMode;
+	public final fun component3 ()Lio/astrolabe/os/search/SearchScope;
+	public final fun component4 ()J
+	public final fun component5 ()Ljava/time/Instant;
+	public final fun component6 ()Z
+	public final fun component7 ()Ljava/lang/Integer;
+	public final fun copy (Ljava/lang/String;Lio/astrolabe/os/search/SearchMode;Lio/astrolabe/os/search/SearchScope;JLjava/time/Instant;ZLjava/lang/Integer;)Lio/astrolabe/os/search/SearchRequest;
+	public static synthetic fun copy$default (Lio/astrolabe/os/search/SearchRequest;Ljava/lang/String;Lio/astrolabe/os/search/SearchMode;Lio/astrolabe/os/search/SearchScope;JLjava/time/Instant;ZLjava/lang/Integer;ILjava/lang/Object;)Lio/astrolabe/os/search/SearchRequest;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBudgetBytes ()J
+	public final fun getCaseSensitive ()Z
+	public final fun getMaxHits ()Ljava/lang/Integer;
+	public final fun getMode ()Lio/astrolabe/os/search/SearchMode;
+	public final fun getPattern ()Ljava/lang/String;
+	public final fun getScope ()Lio/astrolabe/os/search/SearchScope;
+	public final fun getSince ()Ljava/time/Instant;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/astrolabe/os/search/SearchScope {
+	public abstract fun getRoot ()Ljava/nio/file/Path;
+}
+
+public final class io/astrolabe/os/search/SearchScope$All : io/astrolabe/os/search/SearchScope {
+	public fun <init> (Ljava/nio/file/Path;)V
+	public final fun component1 ()Ljava/nio/file/Path;
+	public final fun copy (Ljava/nio/file/Path;)Lio/astrolabe/os/search/SearchScope$All;
+	public static synthetic fun copy$default (Lio/astrolabe/os/search/SearchScope$All;Ljava/nio/file/Path;ILjava/lang/Object;)Lio/astrolabe/os/search/SearchScope$All;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getRoot ()Ljava/nio/file/Path;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/search/SearchScope$Glob : io/astrolabe/os/search/SearchScope {
+	public fun <init> (Ljava/nio/file/Path;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/nio/file/Path;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Ljava/nio/file/Path;Ljava/lang/String;)Lio/astrolabe/os/search/SearchScope$Glob;
+	public static synthetic fun copy$default (Lio/astrolabe/os/search/SearchScope$Glob;Ljava/nio/file/Path;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/os/search/SearchScope$Glob;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getGlob ()Ljava/lang/String;
+	public fun getRoot ()Ljava/nio/file/Path;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/search/SearchScope$Paths : io/astrolabe/os/search/SearchScope {
+	public fun <init> (Ljava/nio/file/Path;Ljava/util/List;)V
+	public final fun component1 ()Ljava/nio/file/Path;
+	public final fun component2 ()Ljava/util/List;
+	public final fun copy (Ljava/nio/file/Path;Ljava/util/List;)Lio/astrolabe/os/search/SearchScope$Paths;
+	public static synthetic fun copy$default (Lio/astrolabe/os/search/SearchScope$Paths;Ljava/nio/file/Path;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/os/search/SearchScope$Paths;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getPaths ()Ljava/util/List;
+	public fun getRoot ()Ljava/nio/file/Path;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/search/Searches {
+	public static final field INSTANCE Lio/astrolabe/os/search/Searches;
+	public static final fun auto (Lio/astrolabe/os/search/RipgrepProbe;)Lio/astrolabe/os/search/Search;
+	public static final fun available ()Lio/astrolabe/os/search/Search;
+	public static final fun jvm ()Lio/astrolabe/os/search/Search;
+	public static final fun ripgrep ()Lio/astrolabe/os/search/Search;
+	public static final fun ripgrep (Ljava/lang/String;)Lio/astrolabe/os/search/Search;
+	public static final fun ripgrepAvailable ()Z
+}
+
 public final class io/astrolabe/route/Tier : java/lang/Enum {
 	public static final field Companion Lio/astrolabe/route/Tier$Companion;
 	public static final field Deterministic Lio/astrolabe/route/Tier;
