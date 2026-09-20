@@ -492,6 +492,16 @@ public final class io/astrolabe/ShapePolicy$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
 }
 
+public final class io/astrolabe/auth/Boundary {
+	public static final field DATA_RULE Ljava/lang/String;
+	public static final field GAUGE_CLOSE Ljava/lang/String;
+	public static final field GAUGE_OPEN Ljava/lang/String;
+	public static final field INSTANCE Lio/astrolabe/auth/Boundary;
+	public static final field RESULT_CLOSE Ljava/lang/String;
+	public static final field RESULT_OPEN Ljava/lang/String;
+	public static final fun escape (Ljava/lang/String;)Ljava/lang/String;
+}
+
 public final class io/astrolabe/auth/ExecutionMode : java/lang/Enum {
 	public static final field Companion Lio/astrolabe/auth/ExecutionMode$Companion;
 	public static final field Confined Lio/astrolabe/auth/ExecutionMode;
@@ -4906,6 +4916,85 @@ public final class io/astrolabe/os/ChangeOrigin$Companion {
 	public final fun parse (C)Lio/astrolabe/os/ChangeOrigin;
 }
 
+public abstract interface class io/astrolabe/os/Command {
+	public static final field Companion Lio/astrolabe/os/Command$Companion;
+}
+
+public final class io/astrolabe/os/Command$Argv : io/astrolabe/os/Command {
+	public static final field Companion Lio/astrolabe/os/Command$Argv$Companion;
+	public fun <init> (Ljava/util/List;)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun copy (Ljava/util/List;)Lio/astrolabe/os/Command$Argv;
+	public static synthetic fun copy$default (Lio/astrolabe/os/Command$Argv;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/os/Command$Argv;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getArgv ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/os/Command$Argv$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/os/Command$Argv$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/os/Command$Argv;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/os/Command$Argv;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/os/Command$Argv$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/os/Command$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/os/Command$Shell : io/astrolabe/os/Command {
+	public static final field Companion Lio/astrolabe/os/Command$Shell$Companion;
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/astrolabe/os/Command$Shell;
+	public static synthetic fun copy$default (Lio/astrolabe/os/Command$Shell;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/os/Command$Shell;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCommandLine ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/os/Command$Shell$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/os/Command$Shell$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/os/Command$Shell;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/os/Command$Shell;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/os/Command$Shell$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/os/EnvPolicy {
+	public fun <init> ()V
+	public fun <init> (Ljava/util/Set;Ljava/util/Map;Z)V
+	public synthetic fun <init> (Ljava/util/Set;Ljava/util/Map;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/util/Set;
+	public final fun component2 ()Ljava/util/Map;
+	public final fun component3 ()Z
+	public final fun copy (Ljava/util/Set;Ljava/util/Map;Z)Lio/astrolabe/os/EnvPolicy;
+	public static synthetic fun copy$default (Lio/astrolabe/os/EnvPolicy;Ljava/util/Set;Ljava/util/Map;ZILjava/lang/Object;)Lio/astrolabe/os/EnvPolicy;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getExtra ()Ljava/util/Map;
+	public final fun getIncludeEssentials ()Z
+	public final fun getInheritedNames ()Ljava/util/Set;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class io/astrolabe/os/FileMode : java/lang/Enum {
 	public static final field ABSENT Lio/astrolabe/os/FileMode;
 	public static final field Companion Lio/astrolabe/os/FileMode$Companion;
@@ -5017,6 +5106,38 @@ public final class io/astrolabe/os/Identity {
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class io/astrolabe/os/IdentityKey {
+	public static final field Companion Lio/astrolabe/os/IdentityKey$Companion;
+	public static final field START_TOLERANCE_MILLIS J
+	public fun <init> (JLjava/lang/Long;)V
+	public synthetic fun <init> (JLjava/lang/Long;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()J
+	public final fun component2 ()Ljava/lang/Long;
+	public final fun copy (JLjava/lang/Long;)Lio/astrolabe/os/IdentityKey;
+	public static synthetic fun copy$default (Lio/astrolabe/os/IdentityKey;JLjava/lang/Long;ILjava/lang/Object;)Lio/astrolabe/os/IdentityKey;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getPid ()J
+	public final fun getStartEpochMillis ()Ljava/lang/Long;
+	public fun hashCode ()I
+	public final fun matches (Lio/astrolabe/os/IdentityKey;)Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/os/IdentityKey$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/os/IdentityKey$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/os/IdentityKey;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/os/IdentityKey;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/os/IdentityKey$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
 public final class io/astrolabe/os/IndexEntry {
 	public fun <init> (Lio/astrolabe/os/FileMode;Lio/astrolabe/os/ObjectId;Ljava/lang/String;)V
 	public final fun component1 ()Lio/astrolabe/os/FileMode;
@@ -5030,6 +5151,23 @@ public final class io/astrolabe/os/IndexEntry {
 	public final fun getPath ()Ljava/lang/String;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/LocalOs : io/astrolabe/os/Os {
+	public fun <init> ()V
+	public fun <init> (Ljava/time/Clock;)V
+	public fun <init> (Ljava/time/Clock;Lio/astrolabe/os/OwnerToken;)V
+	public synthetic fun <init> (Ljava/time/Clock;Lio/astrolabe/os/OwnerToken;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun advanceCursor (Lio/astrolabe/os/Proc;J)Lio/astrolabe/os/Proc;
+	public fun close ()V
+	public fun getOwnerToken ()Lio/astrolabe/os/OwnerToken;
+	public fun poll (Lio/astrolabe/os/Proc;JJ)Lio/astrolabe/os/Poll;
+	public fun realPath (Ljava/nio/file/Path;)Ljava/nio/file/Path;
+	public fun reattach (Lio/astrolabe/os/Proc;)Lio/astrolabe/os/Proc;
+	public fun replaceFileAtomically (Ljava/nio/file/Path;[B)V
+	public fun resolve (Ljava/nio/file/Path;)Lio/astrolabe/os/Proc;
+	public fun spawn (Lio/astrolabe/os/SpawnSpec;)Lio/astrolabe/os/Proc;
+	public fun terminate (Lio/astrolabe/os/Proc;)Lio/astrolabe/os/Proc;
 }
 
 public final class io/astrolabe/os/LsFilesEntry {
@@ -5068,6 +5206,199 @@ public final class io/astrolabe/os/ObjectId$Companion {
 	public final fun zeroLike (Lio/astrolabe/os/ObjectId;)Lio/astrolabe/os/ObjectId;
 }
 
+public abstract interface class io/astrolabe/os/Os : java/lang/AutoCloseable {
+	public abstract fun advanceCursor (Lio/astrolabe/os/Proc;J)Lio/astrolabe/os/Proc;
+	public abstract fun close ()V
+	public abstract fun getOwnerToken ()Lio/astrolabe/os/OwnerToken;
+	public abstract fun poll (Lio/astrolabe/os/Proc;JJ)Lio/astrolabe/os/Poll;
+	public abstract fun realPath (Ljava/nio/file/Path;)Ljava/nio/file/Path;
+	public abstract fun reattach (Lio/astrolabe/os/Proc;)Lio/astrolabe/os/Proc;
+	public abstract fun replaceFileAtomically (Ljava/nio/file/Path;[B)V
+	public abstract fun resolve (Ljava/nio/file/Path;)Lio/astrolabe/os/Proc;
+	public abstract fun spawn (Lio/astrolabe/os/SpawnSpec;)Lio/astrolabe/os/Proc;
+	public abstract fun terminate (Lio/astrolabe/os/Proc;)Lio/astrolabe/os/Proc;
+}
+
+public final class io/astrolabe/os/OsFailure : java/io/IOException {
+	public fun <init> (Ljava/lang/String;ILjava/lang/String;)V
+	public final fun getCall ()Ljava/lang/String;
+	public final fun getErrorCode ()I
+}
+
+public final class io/astrolabe/os/OwnerToken {
+	public static final field Companion Lio/astrolabe/os/OwnerToken$Companion;
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/astrolabe/os/OwnerToken;
+	public static synthetic fun copy$default (Lio/astrolabe/os/OwnerToken;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/os/OwnerToken;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getValue ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/os/OwnerToken$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/os/OwnerToken$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/os/OwnerToken;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/os/OwnerToken;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/os/OwnerToken$Companion {
+	public final fun random ()Lio/astrolabe/os/OwnerToken;
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/os/Poll {
+	public fun <init> ([BJLio/astrolabe/os/ProcStatus;Z)V
+	public final fun component1 ()[B
+	public final fun component2 ()J
+	public final fun component3 ()Lio/astrolabe/os/ProcStatus;
+	public final fun component4 ()Z
+	public final fun copy ([BJLio/astrolabe/os/ProcStatus;Z)Lio/astrolabe/os/Poll;
+	public static synthetic fun copy$default (Lio/astrolabe/os/Poll;[BJLio/astrolabe/os/ProcStatus;ZILjava/lang/Object;)Lio/astrolabe/os/Poll;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getNewBytes ()[B
+	public final fun getNextCursorBytes ()J
+	public final fun getStatus ()Lio/astrolabe/os/ProcStatus;
+	public final fun getTimedOut ()Z
+	public fun hashCode ()I
+	public final fun text ()Ljava/lang/String;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/Proc {
+	public static final field Companion Lio/astrolabe/os/Proc$Companion;
+	public fun <init> (JJLio/astrolabe/os/IdentityKey;Lio/astrolabe/os/OwnerToken;Ljava/lang/String;JLio/astrolabe/os/ProcStatus;Lio/astrolabe/os/Command;Ljava/lang/String;Ljava/lang/Long;Ljava/lang/Long;)V
+	public synthetic fun <init> (JJLio/astrolabe/os/IdentityKey;Lio/astrolabe/os/OwnerToken;Ljava/lang/String;JLio/astrolabe/os/ProcStatus;Lio/astrolabe/os/Command;Ljava/lang/String;Ljava/lang/Long;Ljava/lang/Long;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()J
+	public final fun component10 ()Ljava/lang/Long;
+	public final fun component11 ()Ljava/lang/Long;
+	public final fun component2 ()J
+	public final fun component3 ()Lio/astrolabe/os/IdentityKey;
+	public final fun component4 ()Lio/astrolabe/os/OwnerToken;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()J
+	public final fun component7 ()Lio/astrolabe/os/ProcStatus;
+	public final fun component8 ()Lio/astrolabe/os/Command;
+	public final fun component9 ()Ljava/lang/String;
+	public final fun copy (JJLio/astrolabe/os/IdentityKey;Lio/astrolabe/os/OwnerToken;Ljava/lang/String;JLio/astrolabe/os/ProcStatus;Lio/astrolabe/os/Command;Ljava/lang/String;Ljava/lang/Long;Ljava/lang/Long;)Lio/astrolabe/os/Proc;
+	public static synthetic fun copy$default (Lio/astrolabe/os/Proc;JJLio/astrolabe/os/IdentityKey;Lio/astrolabe/os/OwnerToken;Ljava/lang/String;JLio/astrolabe/os/ProcStatus;Lio/astrolabe/os/Command;Ljava/lang/String;Ljava/lang/Long;Ljava/lang/Long;ILjava/lang/Object;)Lio/astrolabe/os/Proc;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCommand ()Lio/astrolabe/os/Command;
+	public final fun getDeadlineSeconds ()Ljava/lang/Long;
+	public final fun getFinishedAtEpochMillis ()Ljava/lang/Long;
+	public final fun getIdentityKey ()Lio/astrolabe/os/IdentityKey;
+	public final fun getLog ()Ljava/nio/file/Path;
+	public final fun getLogCursorBytes ()J
+	public final fun getLogPath ()Ljava/lang/String;
+	public final fun getOwnerToken ()Lio/astrolabe/os/OwnerToken;
+	public final fun getPid ()J
+	public final fun getSidecarPath ()Ljava/nio/file/Path;
+	public final fun getStartedAtEpochMillis ()J
+	public final fun getStatus ()Lio/astrolabe/os/ProcStatus;
+	public final fun getWorkingDirectory ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/os/Proc$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/os/Proc$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/os/Proc;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/os/Proc;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/os/Proc$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+	public final fun sidecarPathFor (Ljava/nio/file/Path;)Ljava/nio/file/Path;
+}
+
+public abstract interface class io/astrolabe/os/ProcStatus {
+	public static final field Companion Lio/astrolabe/os/ProcStatus$Companion;
+	public fun isTerminal ()Z
+}
+
+public final class io/astrolabe/os/ProcStatus$Cancelled : io/astrolabe/os/ProcStatus {
+	public static final field INSTANCE Lio/astrolabe/os/ProcStatus$Cancelled;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun isTerminal ()Z
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/ProcStatus$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/os/ProcStatus$DeadlineExceeded : io/astrolabe/os/ProcStatus {
+	public static final field INSTANCE Lio/astrolabe/os/ProcStatus$DeadlineExceeded;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun isTerminal ()Z
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/ProcStatus$DefaultImpls {
+	public static fun isTerminal (Lio/astrolabe/os/ProcStatus;)Z
+}
+
+public final class io/astrolabe/os/ProcStatus$Exited : io/astrolabe/os/ProcStatus {
+	public static final field Companion Lio/astrolabe/os/ProcStatus$Exited$Companion;
+	public fun <init> (I)V
+	public final fun component1 ()I
+	public final fun copy (I)Lio/astrolabe/os/ProcStatus$Exited;
+	public static synthetic fun copy$default (Lio/astrolabe/os/ProcStatus$Exited;IILjava/lang/Object;)Lio/astrolabe/os/ProcStatus$Exited;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getExitCode ()I
+	public fun hashCode ()I
+	public fun isTerminal ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/os/ProcStatus$Exited$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/os/ProcStatus$Exited$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/os/ProcStatus$Exited;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/os/ProcStatus$Exited;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/os/ProcStatus$Exited$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/os/ProcStatus$Lost : io/astrolabe/os/ProcStatus {
+	public static final field INSTANCE Lio/astrolabe/os/ProcStatus$Lost;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun isTerminal ()Z
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/os/ProcStatus$Running : io/astrolabe/os/ProcStatus {
+	public static final field INSTANCE Lio/astrolabe/os/ProcStatus$Running;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun isTerminal ()Z
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class io/astrolabe/os/RefUpdateRejected : io/astrolabe/os/GitError {
 	public fun <init> (Ljava/lang/String;Lio/astrolabe/os/ObjectId;Ljava/util/List;ILjava/lang/String;)V
 	public final fun getExpectedOld ()Lio/astrolabe/os/ObjectId;
@@ -5080,6 +5411,26 @@ public final class io/astrolabe/os/RepositoryForm : java/lang/Enum {
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;
 	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/os/RepositoryForm;
 	public static fun values ()[Lio/astrolabe/os/RepositoryForm;
+}
+
+public final class io/astrolabe/os/SpawnSpec {
+	public fun <init> (Lio/astrolabe/os/Command;Ljava/nio/file/Path;Ljava/nio/file/Path;Lio/astrolabe/os/EnvPolicy;Ljava/lang/Long;)V
+	public synthetic fun <init> (Lio/astrolabe/os/Command;Ljava/nio/file/Path;Ljava/nio/file/Path;Lio/astrolabe/os/EnvPolicy;Ljava/lang/Long;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lio/astrolabe/os/Command;
+	public final fun component2 ()Ljava/nio/file/Path;
+	public final fun component3 ()Ljava/nio/file/Path;
+	public final fun component4 ()Lio/astrolabe/os/EnvPolicy;
+	public final fun component5 ()Ljava/lang/Long;
+	public final fun copy (Lio/astrolabe/os/Command;Ljava/nio/file/Path;Ljava/nio/file/Path;Lio/astrolabe/os/EnvPolicy;Ljava/lang/Long;)Lio/astrolabe/os/SpawnSpec;
+	public static synthetic fun copy$default (Lio/astrolabe/os/SpawnSpec;Lio/astrolabe/os/Command;Ljava/nio/file/Path;Ljava/nio/file/Path;Lio/astrolabe/os/EnvPolicy;Ljava/lang/Long;ILjava/lang/Object;)Lio/astrolabe/os/SpawnSpec;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCommand ()Lio/astrolabe/os/Command;
+	public final fun getDeadlineSeconds ()Ljava/lang/Long;
+	public final fun getEnvironment ()Lio/astrolabe/os/EnvPolicy;
+	public final fun getLogPath ()Ljava/nio/file/Path;
+	public final fun getWorkingDirectory ()Ljava/nio/file/Path;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class io/astrolabe/os/StatusCode : java/lang/Enum {
@@ -6426,6 +6777,891 @@ public final class io/astrolabe/route/Tier : java/lang/Enum {
 }
 
 public final class io/astrolabe/route/Tier$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public abstract interface class io/astrolabe/tool/Args {
+}
+
+public final class io/astrolabe/tool/Args$Edit : io/astrolabe/tool/Args {
+	public fun <init> (Lio/astrolabe/tool/EditArgs;)V
+	public final fun component1 ()Lio/astrolabe/tool/EditArgs;
+	public final fun copy (Lio/astrolabe/tool/EditArgs;)Lio/astrolabe/tool/Args$Edit;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/Args$Edit;Lio/astrolabe/tool/EditArgs;ILjava/lang/Object;)Lio/astrolabe/tool/Args$Edit;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getArgs ()Lio/astrolabe/tool/EditArgs;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/tool/Args$Kb : io/astrolabe/tool/Args {
+	public fun <init> (Lio/astrolabe/tool/KbArgs;)V
+	public final fun component1 ()Lio/astrolabe/tool/KbArgs;
+	public final fun copy (Lio/astrolabe/tool/KbArgs;)Lio/astrolabe/tool/Args$Kb;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/Args$Kb;Lio/astrolabe/tool/KbArgs;ILjava/lang/Object;)Lio/astrolabe/tool/Args$Kb;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getArgs ()Lio/astrolabe/tool/KbArgs;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/tool/Args$Look : io/astrolabe/tool/Args {
+	public fun <init> (Lio/astrolabe/tool/LookArgs;)V
+	public final fun component1 ()Lio/astrolabe/tool/LookArgs;
+	public final fun copy (Lio/astrolabe/tool/LookArgs;)Lio/astrolabe/tool/Args$Look;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/Args$Look;Lio/astrolabe/tool/LookArgs;ILjava/lang/Object;)Lio/astrolabe/tool/Args$Look;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getArgs ()Lio/astrolabe/tool/LookArgs;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/tool/Args$Run : io/astrolabe/tool/Args {
+	public fun <init> (Lio/astrolabe/tool/RunArgs;)V
+	public final fun component1 ()Lio/astrolabe/tool/RunArgs;
+	public final fun copy (Lio/astrolabe/tool/RunArgs;)Lio/astrolabe/tool/Args$Run;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/Args$Run;Lio/astrolabe/tool/RunArgs;ILjava/lang/Object;)Lio/astrolabe/tool/Args$Run;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getArgs ()Lio/astrolabe/tool/RunArgs;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/tool/Args$State : io/astrolabe/tool/Args {
+	public fun <init> (Lio/astrolabe/tool/StateArgs;)V
+	public final fun component1 ()Lio/astrolabe/tool/StateArgs;
+	public final fun copy (Lio/astrolabe/tool/StateArgs;)Lio/astrolabe/tool/Args$State;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/Args$State;Lio/astrolabe/tool/StateArgs;ILjava/lang/Object;)Lio/astrolabe/tool/Args$State;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getArgs ()Lio/astrolabe/tool/StateArgs;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/tool/Args$Task : io/astrolabe/tool/Args {
+	public fun <init> (Lio/astrolabe/tool/TaskArgs;)V
+	public final fun component1 ()Lio/astrolabe/tool/TaskArgs;
+	public final fun copy (Lio/astrolabe/tool/TaskArgs;)Lio/astrolabe/tool/Args$Task;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/Args$Task;Lio/astrolabe/tool/TaskArgs;ILjava/lang/Object;)Lio/astrolabe/tool/Args$Task;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getArgs ()Lio/astrolabe/tool/TaskArgs;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/tool/Args$Verify : io/astrolabe/tool/Args {
+	public fun <init> (Lio/astrolabe/tool/VerifyArgs;)V
+	public final fun component1 ()Lio/astrolabe/tool/VerifyArgs;
+	public final fun copy (Lio/astrolabe/tool/VerifyArgs;)Lio/astrolabe/tool/Args$Verify;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/Args$Verify;Lio/astrolabe/tool/VerifyArgs;ILjava/lang/Object;)Lio/astrolabe/tool/Args$Verify;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getArgs ()Lio/astrolabe/tool/VerifyArgs;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/tool/BlockedArgs {
+	public static final field Companion Lio/astrolabe/tool/BlockedArgs$Companion;
+	public fun <init> (Ljava/lang/String;Ljava/util/List;Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/util/List;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/util/List;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/util/List;Ljava/lang/String;)Lio/astrolabe/tool/BlockedArgs;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/BlockedArgs;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/tool/BlockedArgs;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEvidence ()Ljava/util/List;
+	public final fun getQuestion ()Ljava/lang/String;
+	public final fun getReason ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/tool/BlockedArgs$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/tool/BlockedArgs$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/tool/BlockedArgs;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/tool/BlockedArgs;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/BlockedArgs$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/EditArgs {
+	public static final field Companion Lio/astrolabe/tool/EditArgs$Companion;
+	public fun <init> (Ljava/util/List;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Ljava/util/List;Ljava/lang/String;)Lio/astrolabe/tool/EditArgs;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/EditArgs;Ljava/util/List;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/tool/EditArgs;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getOps ()Ljava/util/List;
+	public final fun getWhy ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/tool/EditArgs$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/tool/EditArgs$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/tool/EditArgs;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/tool/EditArgs;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/EditArgs$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/EditOpArgs {
+	public static final field Companion Lio/astrolabe/tool/EditOpArgs$Companion;
+	public fun <init> ()V
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lio/astrolabe/tool/TransformArgs;Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lio/astrolabe/tool/TransformArgs;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component10 ()Lio/astrolabe/tool/TransformArgs;
+	public final fun component11 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/util/List;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Ljava/lang/String;
+	public final fun component7 ()Ljava/lang/String;
+	public final fun component8 ()Ljava/lang/String;
+	public final fun component9 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lio/astrolabe/tool/TransformArgs;Ljava/lang/String;)Lio/astrolabe/tool/EditOpArgs;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/EditOpArgs;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lio/astrolabe/tool/TransformArgs;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/tool/EditOpArgs;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCondition ()Ljava/lang/String;
+	public final fun getContent ()Ljava/lang/String;
+	public final fun getCreate ()Ljava/lang/String;
+	public final fun getDelete ()Ljava/lang/String;
+	public final fun getExpect ()Ljava/lang/String;
+	public final fun getHunks ()Ljava/util/List;
+	public final fun getKind ()Ljava/lang/String;
+	public final fun getPath ()Ljava/lang/String;
+	public final fun getRename ()Ljava/lang/String;
+	public final fun getRevert ()Ljava/lang/String;
+	public final fun getTo ()Ljava/lang/String;
+	public final fun getTransform ()Lio/astrolabe/tool/TransformArgs;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/tool/EditOpArgs$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/tool/EditOpArgs$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/tool/EditOpArgs;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/tool/EditOpArgs;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/EditOpArgs$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/EffectClass : java/lang/Enum {
+	public static final field Companion Lio/astrolabe/tool/EffectClass$Companion;
+	public static final field D Lio/astrolabe/tool/EffectClass;
+	public static final field R Lio/astrolabe/tool/EffectClass;
+	public static final field W Lio/astrolabe/tool/EffectClass;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/tool/EffectClass;
+	public static fun values ()[Lio/astrolabe/tool/EffectClass;
+}
+
+public final class io/astrolabe/tool/EffectClass$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/Effects : java/lang/Enum {
+	public static final field Companion Lio/astrolabe/tool/Effects$Companion;
+	public static final field None Lio/astrolabe/tool/Effects;
+	public static final field Observed Lio/astrolabe/tool/Effects;
+	public static final field Unknown Lio/astrolabe/tool/Effects;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/tool/Effects;
+	public static fun values ()[Lio/astrolabe/tool/Effects;
+}
+
+public final class io/astrolabe/tool/Effects$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/Envelope {
+	public static final field INSTANCE Lio/astrolabe/tool/Envelope;
+	public static final fun render (Lio/astrolabe/tool/EnvelopeHeader;Ljava/lang/String;Lio/astrolabe/tool/Gauge;)Ljava/lang/String;
+}
+
+public final class io/astrolabe/tool/EnvelopeHeader {
+	public static final field Companion Lio/astrolabe/tool/EnvelopeHeader$Companion;
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Lio/astrolabe/tool/EffectClass;Ljava/util/Map;Lio/astrolabe/id/CandidateId;ZLio/astrolabe/tool/Effects;Ljava/util/List;Lio/astrolabe/tool/RuntimeFields;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Lio/astrolabe/tool/EffectClass;Ljava/util/Map;Lio/astrolabe/id/CandidateId;ZLio/astrolabe/tool/Effects;Ljava/util/List;Lio/astrolabe/tool/RuntimeFields;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Lio/astrolabe/tool/EffectClass;
+	public final fun component4 ()Ljava/util/Map;
+	public final fun component5 ()Lio/astrolabe/id/CandidateId;
+	public final fun component6 ()Z
+	public final fun component7 ()Lio/astrolabe/tool/Effects;
+	public final fun component8 ()Ljava/util/List;
+	public final fun component9 ()Lio/astrolabe/tool/RuntimeFields;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Lio/astrolabe/tool/EffectClass;Ljava/util/Map;Lio/astrolabe/id/CandidateId;ZLio/astrolabe/tool/Effects;Ljava/util/List;Lio/astrolabe/tool/RuntimeFields;)Lio/astrolabe/tool/EnvelopeHeader;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/EnvelopeHeader;Ljava/lang/String;Ljava/lang/String;Lio/astrolabe/tool/EffectClass;Ljava/util/Map;Lio/astrolabe/id/CandidateId;ZLio/astrolabe/tool/Effects;Ljava/util/List;Lio/astrolabe/tool/RuntimeFields;ILjava/lang/Object;)Lio/astrolabe/tool/EnvelopeHeader;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEffectClass ()Lio/astrolabe/tool/EffectClass;
+	public final fun getEffects ()Lio/astrolabe/tool/Effects;
+	public final fun getFlags ()Ljava/util/List;
+	public final fun getResultAlias ()Ljava/lang/String;
+	public final fun getRuntime ()Lio/astrolabe/tool/RuntimeFields;
+	public final fun getStamp ()Lio/astrolabe/id/CandidateId;
+	public final fun getTool ()Ljava/lang/String;
+	public final fun getTruncated ()Z
+	public final fun getVersions ()Ljava/util/Map;
+	public fun hashCode ()I
+	public final fun line ()Ljava/lang/String;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/tool/EnvelopeHeader$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/tool/EnvelopeHeader$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/tool/EnvelopeHeader;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/tool/EnvelopeHeader;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/EnvelopeHeader$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/ExpectedMatches {
+	public static final field Companion Lio/astrolabe/tool/ExpectedMatches$Companion;
+	public fun <init> (II)V
+	public final fun component1 ()I
+	public final fun component2 ()I
+	public final fun copy (II)Lio/astrolabe/tool/ExpectedMatches;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/ExpectedMatches;IIILjava/lang/Object;)Lio/astrolabe/tool/ExpectedMatches;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMax ()I
+	public final fun getMin ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/tool/ExpectedMatches$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/tool/ExpectedMatches$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/tool/ExpectedMatches;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/tool/ExpectedMatches;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/ExpectedMatches$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/Gauge {
+	public static final field Companion Lio/astrolabe/tool/Gauge$Companion;
+	public fun <init> (IZLjava/lang/String;IJIII)V
+	public final fun component1 ()I
+	public final fun component2 ()Z
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()I
+	public final fun component5 ()J
+	public final fun component6 ()I
+	public final fun component7 ()I
+	public final fun component8 ()I
+	public final fun copy (IZLjava/lang/String;IJIII)Lio/astrolabe/tool/Gauge;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/Gauge;IZLjava/lang/String;IJIIIILjava/lang/Object;)Lio/astrolabe/tool/Gauge;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getChecks ()Ljava/lang/String;
+	public final fun getContextPercent ()I
+	public final fun getKnownFiles ()I
+	public final fun getKnownTokens ()J
+	public final fun getReserveOk ()Z
+	public final fun getStateVersion ()I
+	public final fun getTurn ()I
+	public final fun getTurnsMax ()I
+	public fun hashCode ()I
+	public final fun line ()Ljava/lang/String;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/tool/Gauge$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/tool/Gauge$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/tool/Gauge;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/tool/Gauge;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/Gauge$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/HunkArgs {
+	public static final field Companion Lio/astrolabe/tool/HunkArgs$Companion;
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Lio/astrolabe/tool/HunkArgs;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/HunkArgs;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/tool/HunkArgs;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAnchor ()Ljava/lang/String;
+	public final fun getNear ()Ljava/lang/String;
+	public final fun getNew ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/tool/HunkArgs$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/tool/HunkArgs$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/tool/HunkArgs;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/tool/HunkArgs;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/HunkArgs$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/KbArgs {
+	public static final field Companion Lio/astrolabe/tool/KbArgs$Companion;
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lkotlinx/serialization/json/JsonElement;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lkotlinx/serialization/json/JsonElement;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/util/List;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Ljava/lang/String;
+	public final fun component7 ()Lkotlinx/serialization/json/JsonElement;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lkotlinx/serialization/json/JsonElement;)Lio/astrolabe/tool/KbArgs;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/KbArgs;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lkotlinx/serialization/json/JsonElement;ILjava/lang/Object;)Lio/astrolabe/tool/KbArgs;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getId ()Ljava/lang/String;
+	public final fun getKinds ()Ljava/util/List;
+	public final fun getNote ()Lkotlinx/serialization/json/JsonElement;
+	public final fun getOp ()Ljava/lang/String;
+	public final fun getQuery ()Ljava/lang/String;
+	public final fun getScope ()Ljava/lang/String;
+	public final fun getWhy ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/tool/KbArgs$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/tool/KbArgs$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/tool/KbArgs;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/tool/KbArgs;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/KbArgs$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/LookArgs {
+	public static final field Companion Lio/astrolabe/tool/LookArgs$Companion;
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()I
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Ljava/lang/String;
+	public final fun component7 ()Ljava/lang/String;
+	public final fun component8 ()Ljava/lang/String;
+	public final fun component9 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Lio/astrolabe/tool/LookArgs;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/LookArgs;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/tool/LookArgs;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBudget ()I
+	public final fun getGlob ()Ljava/lang/String;
+	public final fun getId ()Ljava/lang/String;
+	public final fun getNear ()Ljava/lang/String;
+	public final fun getRange ()Ljava/lang/String;
+	public final fun getScope ()Ljava/lang/String;
+	public final fun getSince ()Ljava/lang/String;
+	public final fun getTarget ()Ljava/lang/String;
+	public final fun getWhat ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/tool/LookArgs$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/tool/LookArgs$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/tool/LookArgs;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/tool/LookArgs;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/LookArgs$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public abstract interface class io/astrolabe/tool/ParsedCalls {
+}
+
+public final class io/astrolabe/tool/ParsedCalls$Invalid : io/astrolabe/tool/ParsedCalls {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;)Lio/astrolabe/tool/ParsedCalls$Invalid;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/ParsedCalls$Invalid;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/tool/ParsedCalls$Invalid;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getError ()Ljava/lang/String;
+	public final fun getProviderCallId ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/tool/ParsedCalls$Valid : io/astrolabe/tool/ParsedCalls {
+	public fun <init> (Ljava/util/List;)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun copy (Ljava/util/List;)Lio/astrolabe/tool/ParsedCalls$Valid;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/ParsedCalls$Valid;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/tool/ParsedCalls$Valid;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCalls ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/tool/RetrievalMissArgs {
+	public static final field Companion Lio/astrolabe/tool/RetrievalMissArgs$Companion;
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;)Lio/astrolabe/tool/RetrievalMissArgs;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/RetrievalMissArgs;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/tool/RetrievalMissArgs;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getNeed ()Ljava/lang/String;
+	public final fun getWhy ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/tool/RetrievalMissArgs$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/tool/RetrievalMissArgs$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/tool/RetrievalMissArgs;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/tool/RetrievalMissArgs;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/RetrievalMissArgs$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/RunArgs {
+	public static final field Companion Lio/astrolabe/tool/RunArgs$Companion;
+	public fun <init> ()V
+	public fun <init> (Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IIZLjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Long;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IIZLjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Long;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component10 ()Ljava/lang/String;
+	public final fun component11 ()Ljava/lang/String;
+	public final fun component12 ()Ljava/lang/String;
+	public final fun component13 ()Ljava/lang/Long;
+	public final fun component2 ()Ljava/util/List;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()I
+	public final fun component7 ()I
+	public final fun component8 ()Z
+	public final fun component9 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IIZLjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Long;)Lio/astrolabe/tool/RunArgs;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/RunArgs;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IIZLjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Long;ILjava/lang/Object;)Lio/astrolabe/tool/RunArgs;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getArgv ()Ljava/util/List;
+	public final fun getBg ()Z
+	public final fun getBudget ()I
+	public final fun getClassHint ()Ljava/lang/String;
+	public final fun getCmd ()Ljava/lang/String;
+	public final fun getCondition ()Ljava/lang/String;
+	public final fun getCwd ()Ljava/lang/String;
+	public final fun getHandle ()Ljava/lang/String;
+	public final fun getIntent ()Ljava/lang/String;
+	public final fun getOp ()Ljava/lang/String;
+	public final fun getShape ()Ljava/lang/String;
+	public final fun getSince ()Ljava/lang/Long;
+	public final fun getTimeout ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/tool/RunArgs$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/tool/RunArgs$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/tool/RunArgs;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/tool/RunArgs;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/RunArgs$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/RuntimeFields {
+	public static final field Companion Lio/astrolabe/tool/RuntimeFields$Companion;
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Lio/astrolabe/id/CandidateId;Lio/astrolabe/id/CandidateId;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;ZZZLjava/util/List;ZLjava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Lio/astrolabe/id/CandidateId;Lio/astrolabe/id/CandidateId;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;ZZZLjava/util/List;ZLjava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component10 ()Z
+	public final fun component11 ()Ljava/util/List;
+	public final fun component12 ()Z
+	public final fun component13 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Lio/astrolabe/id/CandidateId;
+	public final fun component4 ()Lio/astrolabe/id/CandidateId;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Ljava/lang/String;
+	public final fun component7 ()Ljava/util/List;
+	public final fun component8 ()Z
+	public final fun component9 ()Z
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Lio/astrolabe/id/CandidateId;Lio/astrolabe/id/CandidateId;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;ZZZLjava/util/List;ZLjava/lang/String;)Lio/astrolabe/tool/RuntimeFields;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/RuntimeFields;Ljava/lang/String;Ljava/lang/String;Lio/astrolabe/id/CandidateId;Lio/astrolabe/id/CandidateId;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;ZZZLjava/util/List;ZLjava/lang/String;ILjava/lang/Object;)Lio/astrolabe/tool/RuntimeFields;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getActionId ()Ljava/lang/String;
+	public final fun getArtifactRefs ()Ljava/util/List;
+	public final fun getCandidateAfter ()Lio/astrolabe/id/CandidateId;
+	public final fun getCandidateBefore ()Lio/astrolabe/id/CandidateId;
+	public final fun getCaptureComplete ()Z
+	public final fun getCompleteness ()Ljava/lang/String;
+	public final fun getDisplayTruncated ()Z
+	public final fun getEffectsObserved ()Ljava/util/List;
+	public final fun getEffectsUnknown ()Z
+	public final fun getRedactionApplied ()Z
+	public final fun getRetryClass ()Ljava/lang/String;
+	public final fun getScope ()Ljava/lang/String;
+	public final fun getStatus ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/tool/RuntimeFields$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/tool/RuntimeFields$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/tool/RuntimeFields;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/tool/RuntimeFields;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/RuntimeFields$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public abstract interface class io/astrolabe/tool/SchemaSelection {
+}
+
+public final class io/astrolabe/tool/SchemaSelection$Supported : io/astrolabe/tool/SchemaSelection {
+	public fun <init> (Lio/astrolabe/tool/SchemaSet;)V
+	public final fun component1 ()Lio/astrolabe/tool/SchemaSet;
+	public final fun copy (Lio/astrolabe/tool/SchemaSet;)Lio/astrolabe/tool/SchemaSelection$Supported;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/SchemaSelection$Supported;Lio/astrolabe/tool/SchemaSet;ILjava/lang/Object;)Lio/astrolabe/tool/SchemaSelection$Supported;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getSet ()Lio/astrolabe/tool/SchemaSet;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/tool/SchemaSelection$Unsupported : io/astrolabe/tool/SchemaSelection {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;)Lio/astrolabe/tool/SchemaSelection$Unsupported;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/SchemaSelection$Unsupported;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/tool/SchemaSelection$Unsupported;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getProfileId ()Ljava/lang/String;
+	public final fun getReason ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/tool/SchemaSet {
+	public fun <init> (Ljava/util/List;Lio/astrolabe/provider/ToolMask;Lio/astrolabe/provider/SchemaDialect;Lio/astrolabe/id/Digest;)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun component2 ()Lio/astrolabe/provider/ToolMask;
+	public final fun component3 ()Lio/astrolabe/provider/SchemaDialect;
+	public final fun component4 ()Lio/astrolabe/id/Digest;
+	public final fun copy (Ljava/util/List;Lio/astrolabe/provider/ToolMask;Lio/astrolabe/provider/SchemaDialect;Lio/astrolabe/id/Digest;)Lio/astrolabe/tool/SchemaSet;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/SchemaSet;Ljava/util/List;Lio/astrolabe/provider/ToolMask;Lio/astrolabe/provider/SchemaDialect;Lio/astrolabe/id/Digest;ILjava/lang/Object;)Lio/astrolabe/tool/SchemaSet;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDialect ()Lio/astrolabe/provider/SchemaDialect;
+	public final fun getFingerprint ()Lio/astrolabe/id/Digest;
+	public final fun getMask ()Lio/astrolabe/provider/ToolMask;
+	public final fun getSchemas ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/tool/StateArgs {
+	public static final field Companion Lio/astrolabe/tool/StateArgs$Companion;
+	public fun <init> (Ljava/lang/String;Ljava/util/List;Lio/astrolabe/tool/BlockedArgs;Lio/astrolabe/tool/RetrievalMissArgs;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/util/List;Lio/astrolabe/tool/BlockedArgs;Lio/astrolabe/tool/RetrievalMissArgs;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/util/List;
+	public final fun component3 ()Lio/astrolabe/tool/BlockedArgs;
+	public final fun component4 ()Lio/astrolabe/tool/RetrievalMissArgs;
+	public final fun copy (Ljava/lang/String;Ljava/util/List;Lio/astrolabe/tool/BlockedArgs;Lio/astrolabe/tool/RetrievalMissArgs;)Lio/astrolabe/tool/StateArgs;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/StateArgs;Ljava/lang/String;Ljava/util/List;Lio/astrolabe/tool/BlockedArgs;Lio/astrolabe/tool/RetrievalMissArgs;ILjava/lang/Object;)Lio/astrolabe/tool/StateArgs;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBlocked ()Lio/astrolabe/tool/BlockedArgs;
+	public final fun getOp ()Ljava/lang/String;
+	public final fun getPatch ()Ljava/util/List;
+	public final fun getRetrievalMiss ()Lio/astrolabe/tool/RetrievalMissArgs;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/tool/StateArgs$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/tool/StateArgs$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/tool/StateArgs;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/tool/StateArgs;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/StateArgs$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/TaskArgs {
+	public static final field Companion Lio/astrolabe/tool/TaskArgs$Companion;
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Lkotlinx/serialization/json/JsonElement;Ljava/lang/String;Ljava/lang/String;Lkotlinx/serialization/json/JsonElement;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Lkotlinx/serialization/json/JsonElement;Ljava/lang/String;Ljava/lang/String;Lkotlinx/serialization/json/JsonElement;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/util/List;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Lkotlinx/serialization/json/JsonElement;
+	public final fun component6 ()Ljava/lang/String;
+	public final fun component7 ()Ljava/lang/String;
+	public final fun component8 ()Lkotlinx/serialization/json/JsonElement;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Lkotlinx/serialization/json/JsonElement;Ljava/lang/String;Ljava/lang/String;Lkotlinx/serialization/json/JsonElement;)Lio/astrolabe/tool/TaskArgs;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/TaskArgs;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Lkotlinx/serialization/json/JsonElement;Ljava/lang/String;Ljava/lang/String;Lkotlinx/serialization/json/JsonElement;ILjava/lang/Object;)Lio/astrolabe/tool/TaskArgs;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getHandle ()Ljava/lang/String;
+	public final fun getKind ()Ljava/lang/String;
+	public final fun getMode ()Ljava/lang/String;
+	public final fun getOp ()Ljava/lang/String;
+	public final fun getOptions ()Ljava/util/List;
+	public final fun getPacket ()Lkotlinx/serialization/json/JsonElement;
+	public final fun getProposal ()Lkotlinx/serialization/json/JsonElement;
+	public final fun getQuestion ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/tool/TaskArgs$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/tool/TaskArgs$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/tool/TaskArgs;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/tool/TaskArgs;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/TaskArgs$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/ToolCall {
+	public fun <init> (ILjava/lang/String;Lio/astrolabe/tool/ToolFamily;Ljava/lang/String;Lio/astrolabe/tool/Args;Lkotlinx/serialization/json/JsonObject;)V
+	public final fun component1 ()I
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Lio/astrolabe/tool/ToolFamily;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Lio/astrolabe/tool/Args;
+	public final fun component6 ()Lkotlinx/serialization/json/JsonObject;
+	public final fun copy (ILjava/lang/String;Lio/astrolabe/tool/ToolFamily;Ljava/lang/String;Lio/astrolabe/tool/Args;Lkotlinx/serialization/json/JsonObject;)Lio/astrolabe/tool/ToolCall;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/ToolCall;ILjava/lang/String;Lio/astrolabe/tool/ToolFamily;Ljava/lang/String;Lio/astrolabe/tool/Args;Lkotlinx/serialization/json/JsonObject;ILjava/lang/Object;)Lio/astrolabe/tool/ToolCall;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getArgs ()Lio/astrolabe/tool/Args;
+	public final fun getCondition ()Ljava/lang/String;
+	public final fun getFamily ()Lio/astrolabe/tool/ToolFamily;
+	public final fun getName ()Ljava/lang/String;
+	public final fun getOp ()Ljava/lang/String;
+	public final fun getOpId ()I
+	public final fun getProviderCallId ()Ljava/lang/String;
+	public final fun getRaw ()Lkotlinx/serialization/json/JsonObject;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/tool/ToolCalls {
+	public static final field INSTANCE Lio/astrolabe/tool/ToolCalls;
+	public static final fun opOf (Lkotlinx/serialization/json/JsonObject;Lio/astrolabe/tool/ToolFamily;)Ljava/lang/String;
+	public static final fun parse (Ljava/util/List;)Lio/astrolabe/tool/ParsedCalls;
+}
+
+public final class io/astrolabe/tool/ToolFamily : java/lang/Enum {
+	public static final field Companion Lio/astrolabe/tool/ToolFamily$Companion;
+	public static final field Edit Lio/astrolabe/tool/ToolFamily;
+	public static final field Kb Lio/astrolabe/tool/ToolFamily;
+	public static final field Look Lio/astrolabe/tool/ToolFamily;
+	public static final field Run Lio/astrolabe/tool/ToolFamily;
+	public static final field State Lio/astrolabe/tool/ToolFamily;
+	public static final field Task Lio/astrolabe/tool/ToolFamily;
+	public static final field Verify Lio/astrolabe/tool/ToolFamily;
+	public static final fun byWire (Ljava/lang/String;)Lio/astrolabe/tool/ToolFamily;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getWire ()Ljava/lang/String;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/tool/ToolFamily;
+	public static fun values ()[Lio/astrolabe/tool/ToolFamily;
+}
+
+public final class io/astrolabe/tool/ToolFamily$Companion {
+	public final fun byWire (Ljava/lang/String;)Lio/astrolabe/tool/ToolFamily;
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/ToolOps {
+	public static final field INSTANCE Lio/astrolabe/tool/ToolOps;
+	public final fun getAll ()Ljava/util/Set;
+	public final fun getEdit ()Ljava/util/List;
+	public final fun getImplementingS0 ()Lio/astrolabe/provider/ToolMask;
+	public final fun getKb ()Ljava/util/List;
+	public final fun getLook ()Ljava/util/List;
+	public final fun getRun ()Ljava/util/List;
+	public final fun getState ()Ljava/util/List;
+	public final fun getTask ()Ljava/util/List;
+	public final fun getVerify ()Ljava/util/List;
+	public final fun name (Lio/astrolabe/tool/ToolFamily;Ljava/lang/String;)Ljava/lang/String;
+	public final fun of (Lio/astrolabe/tool/ToolFamily;)Ljava/util/List;
+}
+
+public final class io/astrolabe/tool/ToolSchemas {
+	public static final field INSTANCE Lio/astrolabe/tool/ToolSchemas;
+	public static final fun forLineage (Lio/astrolabe/provider/ProviderAdapter;Lio/astrolabe/provider/Profile;Lio/astrolabe/provider/ToolMask;)Lio/astrolabe/tool/SchemaSelection;
+	public final fun getDialect ()Lio/astrolabe/provider/SchemaDialect;
+	public static final fun schema (Lio/astrolabe/tool/ToolFamily;)Lio/astrolabe/provider/ToolSchema;
+}
+
+public final class io/astrolabe/tool/TransformArgs {
+	public static final field Companion Lio/astrolabe/tool/TransformArgs$Companion;
+	public fun <init> (Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/util/List;Lio/astrolabe/tool/ExpectedMatches;Ljava/util/List;Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/util/List;Lio/astrolabe/tool/ExpectedMatches;Ljava/util/List;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/util/List;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/util/List;
+	public final fun component5 ()Lio/astrolabe/tool/ExpectedMatches;
+	public final fun component6 ()Ljava/util/List;
+	public final fun component7 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/util/List;Lio/astrolabe/tool/ExpectedMatches;Ljava/util/List;Ljava/lang/String;)Lio/astrolabe/tool/TransformArgs;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/TransformArgs;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/util/List;Lio/astrolabe/tool/ExpectedMatches;Ljava/util/List;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/tool/TransformArgs;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getArgv ()Ljava/util/List;
+	public final fun getExpectedMatches ()Lio/astrolabe/tool/ExpectedMatches;
+	public final fun getInventory ()Ljava/util/List;
+	public final fun getPreconditions ()Ljava/util/List;
+	public final fun getScopeGlob ()Ljava/lang/String;
+	public final fun getScript ()Ljava/lang/String;
+	public final fun getWhy ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/tool/TransformArgs$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/tool/TransformArgs$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/tool/TransformArgs;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/tool/TransformArgs;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/TransformArgs$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/VerifyArgs {
+	public static final field Companion Lio/astrolabe/tool/VerifyArgs$Companion;
+	public fun <init> (Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/util/List;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/util/List;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;)Lio/astrolabe/tool/VerifyArgs;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/VerifyArgs;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/tool/VerifyArgs;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getIds ()Ljava/util/List;
+	public final fun getPaths ()Ljava/util/List;
+	public final fun getScope ()Ljava/lang/String;
+	public final fun getSelection ()Ljava/lang/String;
+	public final fun getWhat ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/tool/VerifyArgs$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/tool/VerifyArgs$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/tool/VerifyArgs;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/tool/VerifyArgs;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/tool/VerifyArgs$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
 }
 
