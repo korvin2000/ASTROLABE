@@ -1,0 +1,6 @@
+public final class io/astrolabe/Astrolabe {
+	public static final field INSTANCE Lio/astrolabe/Astrolabe;
+	public static final field MODULE Ljava/lang/String;
+	public final fun getProviderApi ()Ljava/lang/String;
+}
+

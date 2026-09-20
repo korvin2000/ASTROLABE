@@ -23,10 +23,11 @@
 In scope: the whole architecture through S3 as a library, validated with a **fake provider adapter**. Out of scope ([P7](#p7-deferred-out-of-scope-boundary)): live provider transports, auth, retry/backoff, HTTP clients, MCP client transports, confined-runner backends, live benchmark campaigns. Every phase states which fixtures it must pass and which platform/provider assumptions remain unsupported. The roadmap rule "no stage starts before the previous gate is measured" ([§18.2](docs/implementation/roadmap.md#sec-18-2)) is interpreted for this offline plan as: engineering proceeds through P6 with each live gate recorded `UNMEASURED` and its prerequisites named; promotion claims wait for live evaluation (I-19, D-28).
 
 ## 1 Progress
-- **Phase:** P0 · **Next task:** P0.1.1 · **Blocked:** none
+- **Phase:** P0 · **Next task:** P0.1.3 · **Blocked:** none
 - **Open decisions needing an owner answer:** none (D-01, D-02, D-09, D-12, D-15 answered 2026-09-20 in `ANSWERS.md`; provisional defaults are labelled in §3)
 - **Session log**
   - 2026-09-20 — plan created from docs 1.0.1; no Gradle project, no code. Local machine has git 2.45 and ripgrep, **no JDK/Gradle installed** (install JDK 26 + Gradle 9.7.0 wrapper before P0.1.1).
+  - 2026-09-20 — implementation started: P0.1.1 skeleton + P0.1.2 CI green locally (Windows, JDK 26). Toolchain found on the machine: Temurin 26.0.2.1 under `~/.gradle/jdks/`, Gradle 9.7.1 wrapper dist cached, ripgrep 15.2, git 2.45, Python 3.14, Node 24. Linux is validated only through the CI workflow (no local Linux runtime).
   - 2026-09-20 — first independent review applied (30 findings). Second review (`ANSWERS.md` D-01–D-42 + R01–R20, `ISSUES.md` I-01–I-25) applied: §3 re-dispositioned, D-43–D-53 added, §2.4 producer table, P1.2.6/P1.7.8 added, IX fixture rows, risk table in §6.
 
 ## 2 Target structure and conventions
@@ -195,16 +196,18 @@ Goal: scaffolding that establishes real contracts and boundaries; nothing here t
 **Fixtures:** AX-01..AX-10 at contract level (fake adapter + `validate()`); their runtime consequences are re-verified in the phases the §5 AX table names · **Unsupported until later:** any provider parity; confined execution.
 
 ### P0.1 Build and conventions
-#### P0.1.1 [C] Gradle multi-module skeleton · TODO
+#### P0.1.1 [C] Gradle multi-module skeleton · DONE
 - Why: reproducible build with Java-consumable outputs.
 - Deps: — (install JDK 26 first; D-01, D-02, I-25)
 - Build: `settings.gradle.kts` (root `astrolabe`; `includeBuild("build-logic")`; `include(":provider-api", ":core")`), `gradle/libs.versions.toml` with explicit pinned versions, Gradle **9.7.0** wrapper with `distributionSha256Sum`, `build-logic` convention plugin `astrolabe.kotlin-library` (see §2.1), `core/build.gradle.kts` (`api(project(":provider-api"))`, test fixtures), `.editorconfig`, `.gitignore`.
 - Notes: JDK 26 toolchain for compile, tests and the Gradle daemon; Kotlin `-Xjdk-release=26`, Java `--release 26`; `kotlin.explicitApi()`; `abiValidation()` opt-in (`ExperimentalAbiValidation`); `-Xjsr305=strict`; JUnit Platform; `maven-publish` with sources jar. `provider-api` must not depend on `core` (enforced by module graph). No placeholder modules for `index-treesitter`/`eval`.
 - Done: `gradlew build` green with an empty `core` and `provider-api` on JDK 26; `updateKotlinAbi` produces dumps; Java test fixture module compiles against `core`; wrapper checksum verified.
+- Log: 2026-09-20 — Gradle 9.7.1 wrapper pinned (sha256 from services.gradle.org; 9.7.1 is the current patch of the planned 9.7.0 line and was cached locally), JDK 26 via ~/.gradle/jdks (Temurin 26.0.2.1) + gradle-daemon-jvm.properties (toolchainVersion=26, foojay resolver), Kotlin 2.4.20, coroutines 1.11.0 (jdk8 module merged into core since 1.7 — not added), serialization 1.11.0, sqlite-jdbc 3.53.4.0, slf4j 2.0.19, JUnit Jupiter 6.1.3 (successor of JUnit 5 line; same org.junit.jupiter API). KGP 2.4 ABI DSL: calling abiValidation {} enables it; tasks are updateKotlinAbi/checkKotlinAbi (dumps in <module>/api/*.api, committed). Java test fixture (core/src/testFixtures/java) compiles against core; gradlew build green on Windows.
 
-#### P0.1.2 [V] CI matrix · TODO
+#### P0.1.2 [V] CI matrix · DONE
 - Build: workflow running `gradlew check` on Linux and Windows (D-12); caches Gradle; publishes test reports.
 - Done: both jobs green on the skeleton.
+- Log: 2026-09-20 — .github/workflows/ci.yml: ubuntu-latest + windows-latest matrix, Temurin 26, gradle/actions/setup-gradle, gradlew check, test reports uploaded. Not yet executed on a remote CI runner (no remote configured in this session); local Windows run green.
 
 #### P0.1.3 [C] `Config` and `Defaults` · TODO
 - Why: every number of [§17](docs/reference/defaults.md#sec-17) is configurable per task and none is hard-coded; harness changes take effect only at attempt boundaries (invariant 12).
