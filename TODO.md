@@ -87,6 +87,7 @@ All three pass in the isolated local rerun; their remote failures remain unresol
 - Validation: final Windows/JDK 26 build core **803 tests, zero failures/errors, six platform skips**; provider-api UP-TO-DATE (15 green results); ABI checked. Counts **62/178 DONE, 4 IN_PROGRESS, 112 TODO**.
 - Return: P0.1.2 + P0.6.1/P0.6.2/P0.6.4 → P1.8.2. OOO-02/04 remain proposals; CI/Linux/live gates unchanged.
 - Journal and implementation plan: [P2.6.5](audit/OUT-OF-ORDER-P2.6.5.md).
+- Proposal refresh at `2cb9372` (2026-09-20): owner requested more analytical candidates; [proposal §8](OUT-OF-ORDER-PROPOSAL-TASKS.md#8-повторный-отбор-пять-новых-кандидатов-на-checkpoint-2cb9372) adds OOO-05–OOO-09 (scope algebra, attempt-cost models, evaluation partitions, DAG sequencing, trace arithmetic). These are unregistered proposals, not ACTIVE work; existing task statuses/counts and the normal return point are unchanged.
 
 **Historical completed card — P2.3.4 (State: COMPLETE)**
 - Proposal: **OOO-01** | Canonical task: **P2.3.4** | Parent: P2.3.1.
