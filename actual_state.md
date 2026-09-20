@@ -2,6 +2,19 @@
 
 ## Current checkpoint (2026-09-20)
 
+**P6.1.4 / OOO-02 and P5.1.5 / OOO-05 DONE**, in the requested order. No ACTIVE override remains.
+Scorecard/paired inference: commit `89d10c9`, D-57, [protocol](audit/OUT-OF-ORDER-P6.1.4.md).
+Scope intersection/difference: D-58, [protocol](audit/OUT-OF-ORDER-P5.1.5.md), commit containing this checkpoint.
+Current **64/180 DONE (35.6%), 4 IN_PROGRESS, 112 TODO**. Both reviews clear; ABI/full build pass.
+Final Windows/JDK 26 build freshly executed **core 813 tests, 0 failures/errors, 6 platform skips** and
+**eval 18 tests, 0 failures/errors/skips** (including 7,000 simulations); provider-api reused 15 green results.
+Do not reimplement either kernel. P6.1.1/P6.1.2/P6.1.3 and P5.1.1/P5.1.4 retain their integration;
+CI/Linux findings and live gates remain unchanged/UNMEASURED. S3 stays off.
+Next out-of-order proposal: **OOO-07**, candidate P6.1.5; admission/registration before code.
+Normal return: P0.1.2 + P0.6.1/P0.6.2/P0.6.4 -> P1.8.2.
+
+## Earlier P6.1.4 checkpoint
+
 **OOO-02 / P6.1.4 DONE**, from `d1689ef`, D-57. No active override at this checkpoint.
 Q/E/cost, paired repository-cluster bounds, diagnostic verdict/repayment and immutable provenance are complete.
 [Journal](audit/OUT-OF-ORDER-P6.1.4.md) and [API guide](eval/README.md). Do not reimplement the kernel.

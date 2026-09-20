@@ -1,5 +1,16 @@
 # Continue ASTROLABE implementation
 
+**P6.1.4 / OOO-02 and P5.1.5 / OOO-05 DONE** in the requested order; no ACTIVE override remains.
+P6.1.4 committed at `89d10c9`; P5.1.5 is in the commit containing this checkpoint. Do not rebuild them.
+Protocols: [P6.1.4](audit/OUT-OF-ORDER-P6.1.4.md), [P5.1.5](audit/OUT-OF-ORDER-P5.1.5.md); D-57/D-58.
+Current **64/180 DONE (35.6%), 4 IN_PROGRESS, 112 TODO**. Both independent reviews, ABI and full build pass.
+Final Windows/JDK 26 build executed core **813 tests, 0 failures/errors, 6 platform skips** and eval
+**18 tests, 0 failures/errors/skips**, including 7,000 simulations. Provider-api's 15 green results were reused.
+Next out-of-order proposal: **OOO-07 / candidate P6.1.5**, admission and registration first (§8.3/§9.1).
+Normal return: P0.1.2 + P0.6.1/P0.6.2/P0.6.4 -> P1.8.2. Parents, CI/Linux/live gates remain unchanged.
+
+**Earlier completed checkpoint:**
+
 **OOO-02 / P6.1.4 DONE**, D-57, from `d1689ef`; do not reimplement it. No active override at this checkpoint.
 [Journal](audit/OUT-OF-ORDER-P6.1.4.md), [API guide](eval/README.md), TODO §1.2 contain the handoff.
 Current **63/179 DONE (35.2%), 4 IN_PROGRESS, 112 TODO**. Eighteen focused eval tests, 7,000 fixed

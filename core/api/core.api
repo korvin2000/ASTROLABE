@@ -13999,6 +13999,93 @@ public final class io/astrolabe/workspace/RevertResult$Reverted : io/astrolabe/w
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class io/astrolabe/workspace/ScopeAlgebra {
+	public static final field INSTANCE Lio/astrolabe/workspace/ScopeAlgebra;
+	public static final fun difference (Lio/astrolabe/id/WorkspaceId;Lio/astrolabe/contract/Scope;Lio/astrolabe/contract/Scope;Lio/astrolabe/workspace/ScopeSearchLimits;)Lio/astrolabe/workspace/ScopeAnalysis;
+	public static final fun intersection (Lio/astrolabe/id/WorkspaceId;Lio/astrolabe/contract/Scope;Lio/astrolabe/contract/Scope;Lio/astrolabe/workspace/ScopeSearchLimits;)Lio/astrolabe/workspace/ScopeAnalysis;
+}
+
+public final class io/astrolabe/workspace/ScopeAnalysis {
+	public final fun getDestination ()Lio/astrolabe/id/WorkspaceId;
+	public final fun getExploredTransitions ()J
+	public final fun getLeft ()Lio/astrolabe/contract/Scope;
+	public final fun getLimits ()Lio/astrolabe/workspace/ScopeSearchLimits;
+	public final fun getNfaStates ()I
+	public final fun getPolicyVersion ()Ljava/lang/String;
+	public final fun getRelation ()Lio/astrolabe/workspace/ScopeRelation;
+	public final fun getResult ()Lio/astrolabe/workspace/ScopeResult;
+	public final fun getRight ()Lio/astrolabe/contract/Scope;
+	public final fun getVisitedStates ()I
+}
+
+public final class io/astrolabe/workspace/ScopeRelation : java/lang/Enum {
+	public static final field Difference Lio/astrolabe/workspace/ScopeRelation;
+	public static final field Intersection Lio/astrolabe/workspace/ScopeRelation;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/workspace/ScopeRelation;
+	public static fun values ()[Lio/astrolabe/workspace/ScopeRelation;
+}
+
+public abstract interface class io/astrolabe/workspace/ScopeResult {
+}
+
+public final class io/astrolabe/workspace/ScopeResult$Disjoint : io/astrolabe/workspace/ScopeResult {
+	public static final field INSTANCE Lio/astrolabe/workspace/ScopeResult$Disjoint;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/workspace/ScopeResult$Overlap : io/astrolabe/workspace/ScopeResult {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/astrolabe/workspace/ScopeResult$Overlap;
+	public static synthetic fun copy$default (Lio/astrolabe/workspace/ScopeResult$Overlap;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/workspace/ScopeResult$Overlap;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getWitnessPath ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/workspace/ScopeResult$Unknown : io/astrolabe/workspace/ScopeResult {
+	public fun <init> (Lio/astrolabe/workspace/ScopeUnknownReason;Ljava/lang/String;)V
+	public final fun component1 ()Lio/astrolabe/workspace/ScopeUnknownReason;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Lio/astrolabe/workspace/ScopeUnknownReason;Ljava/lang/String;)Lio/astrolabe/workspace/ScopeResult$Unknown;
+	public static synthetic fun copy$default (Lio/astrolabe/workspace/ScopeResult$Unknown;Lio/astrolabe/workspace/ScopeUnknownReason;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/workspace/ScopeResult$Unknown;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDetail ()Ljava/lang/String;
+	public final fun getReason ()Lio/astrolabe/workspace/ScopeUnknownReason;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/workspace/ScopeSearchLimits {
+	public fun <init> (IIJ)V
+	public final fun component1 ()I
+	public final fun component2 ()I
+	public final fun component3 ()J
+	public final fun copy (IIJ)Lio/astrolabe/workspace/ScopeSearchLimits;
+	public static synthetic fun copy$default (Lio/astrolabe/workspace/ScopeSearchLimits;IIJILjava/lang/Object;)Lio/astrolabe/workspace/ScopeSearchLimits;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getNfaStates ()I
+	public final fun getProductStates ()I
+	public final fun getTransitions ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/workspace/ScopeUnknownReason : java/lang/Enum {
+	public static final field MatcherFailure Lio/astrolabe/workspace/ScopeUnknownReason;
+	public static final field NfaLimit Lio/astrolabe/workspace/ScopeUnknownReason;
+	public static final field StateLimit Lio/astrolabe/workspace/ScopeUnknownReason;
+	public static final field TransitionLimit Lio/astrolabe/workspace/ScopeUnknownReason;
+	public static final field UnsupportedUnicode Lio/astrolabe/workspace/ScopeUnknownReason;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/workspace/ScopeUnknownReason;
+	public static fun values ()[Lio/astrolabe/workspace/ScopeUnknownReason;
+}
+
 public final class io/astrolabe/workspace/Separated {
 	public fun <init> (Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;)V
 	public final fun component1 ()Ljava/util/Set;

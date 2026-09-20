@@ -154,3 +154,10 @@ models; the bounded-independent-block argument supplies the guarantee. No live a
   All thresholds/seeds above precede simulation results; no tuning after a desired verdict.
 
 Final bookkeeping check: 179 unique task IDs, 63 DONE / 4 IN_PROGRESS / 112 TODO; changed-document local file links resolve; `git diff --check` passes.
+
+Post-checkpoint clarification (`89d10c9`): the staged new generated `eval.api` reported a blank line at EOF
+under `git diff --cached --check`; the earlier unstaged check did not inspect that untracked file.
+Removing that line failed `:eval:checkKotlinAbi`, which compares the generator's exact bytes. Restored
+the canonical dump with `:eval:updateKotlinAbi`; full build passed again (all test tasks UP-TO-DATE).
+No ABI checker/format rule was weakened. Retain the generated line; source/document whitespace checks
+pass. The initial new-dump whitespace exception is recorded here rather than claiming a clean staged check.
