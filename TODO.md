@@ -23,7 +23,7 @@
 In scope: the whole architecture through S3 as a library, validated with a **fake provider adapter**. Out of scope ([P7](#p7-deferred-out-of-scope-boundary)): live provider transports, auth, retry/backoff, HTTP clients, MCP client transports, confined-runner backends, live benchmark campaigns. Every phase states which fixtures it must pass and which platform/provider assumptions remain unsupported. The roadmap rule "no stage starts before the previous gate is measured" ([§18.2](docs/implementation/roadmap.md#sec-18-2)) is interpreted for this offline plan as: engineering proceeds through P6 with each live gate recorded `UNMEASURED` and its prerequisites named; promotion claims wait for live evaluation (I-19, D-28).
 
 ## 1 Progress
-- **Phase:** P0 · **Next task:** P1.2.6 · **Blocked:** none
+- **Phase:** P1 · **Next task:** P1.1.1 · **Blocked:** none
 - **Open decisions needing an owner answer:** none (D-01, D-02, D-09, D-12, D-15 answered 2026-09-20 in `ANSWERS.md`; provisional defaults are labelled in §3)
 - **Session log**
   - 2026-09-20 — plan created from docs 1.0.1; no Gradle project, no code. Local machine has git 2.45 and ripgrep, **no JDK/Gradle installed** (install JDK 26 + Gradle 9.7.0 wrapper before P0.1.1).
@@ -325,12 +325,14 @@ Goal: [§18.2 Stage A](docs/implementation/roadmap.md#sec-18-2): one implementin
 **Fixtures:** FX-01..10, 13 (partial: `unavailable` receipt), 15, 16 (stale marking; reuse proofs P3), 18, 21, 23 (open-time reconciliation), 24, 25, 26 (single-cell form), 38, 39 (executor ceiling), 43, 48, 49 (S0), 50, 58, 59; IX-02, 04, 05, 06, 07, 08, 09, 10, 12, 13, 14, 15, 16, 17, 20 · **Unsupported until later:** resume across sessions (P2), rebuild (P2), blast radius/closures beyond `known(paths)` (P3), precise test-integrity classification (P3.4.2; P1 has the conservative policy of P1.7.8), review cells (P4; the human path exists from P1.7.8), KB content (P2/P4), confined execution (P7 — a host that requires it is refused, D-11), live providers (P7). Live gate (B1 vs B0/B-HELM): `UNMEASURED`.
 
 ### P1.1 Task Contract (S0 form)
-#### P1.1.1 [C][M] Contract records and store · IN_PROGRESS
+#### P1.1.1 [C][M] Contract records and store · DONE
 - Why: [§4.1](docs/state/contracts.md#sec-4-1) harness-owned, user-authoritative contract; invariant 1–2.
 - Pkg: `contract`
 - Build: `Contract(workId, version, attemptId, mode, shape, requests: append-only List<Request>, requirements, acceptance, constraints, exclusions, contractsTouched, scope: Scope(writePaths, protectedPaths), budget: Budget, authorization: Authorization(ladderCeiling, dClass, capabilitySet), risk, amendmentsPending)`, `Requirement(id, text, acceptance ids, dependsOn, authorityRef, status: harness-derived)`, `sealed Acceptance { Run(cmd, origin, last), Check(text, origin, evidenceRef), Review(text, origin, signedBy) }` with `Origin { user, harness, model(strengthens), amended(v) }`, `Constraint(id, text, authority)`, `Contracts` store (versioned rows; version bumps only on authorized amendment; failed attempts preserved); the **minimal** `Increment(id, requirementIds, accept, writeScope, expectedFiles, status)` and `Ledger(requirementId → status, evidence, stampValid)` records used by S0 (`G_single`) are declared here so P1 consumers never depend on P2 (I-01); P2.1.1 extends them with the graph fields.
 - Done: model-side APIs cannot mutate acceptance (only `strengthens` add and `propose`); store round trip; FX-15 test.
 - Log: 2026-09-20 — contract package: Contract (validated refs, unique ids), UserRequest, Requirement(+RequirementStatus), Origin sealed (user/harness/model(strengthens)/amended@v), Command(argv, cwd), Acceptance sealed Run/Check/Review with obligationVersion (D-52), Constraint, Scope, Authorization(+dClassAllowlist), Risk, Amendment, minimal Increment/IncrementStatus/Ledger/LedgerEntry for S0; Contract.strengthen is the only model-side mutation (add-only, Model origin required). ContractRepository seam (history/append/replaceLatest) with InMemoryContractRepository + Contracts store API. Remaining for DONE: SQLite ContractRepository over the store (after P0.5 merges).
+- Log: 2026-09-20 — P0 complete; SQLite ContractRepository next.
+- Log: 2026-09-20 — SqliteContractRepository(store, clock): contracts table keeps every version's full record; requests append-only by id; requirements/acceptance/constraints rewritten as the current-version projection; amendments upserted by id — so Views.contract reflects the store. Reopen round trip + FX-15 tests green.
 
 #### P1.1.2 [M] S0 auto-derivation · TODO
 - Why: [§4.1 auto-derivation](docs/state/contracts.md#sec-4-1); [§3.5 S0](docs/architecture/roles-shapes.md#sec-3-5).
@@ -410,11 +412,12 @@ Goal: [§18.2 Stage A](docs/implementation/roadmap.md#sec-18-2): one implementin
 - Done: fixture repos map to the right runner; unknown ⇒ `none` (never guessed).
 
 ### P1.4 Evidence store
-#### P1.4.1 [M] `Journal` · TODO
+#### P1.4.1 [M] `Journal` · DONE
 - Why: [§4.3](docs/state/evidence-coherence.md#sec-4-3) append-only journal searchable via `look(find, in="store")`.
 - Pkg: `evidence`
 - Build: `JournalEvent(eventId, ids, turn, kind: call|result|editIntent|editOutcome|check|nudge|boundary|intent|reconcile, argsDigest, refs)`, `Journal.append/search(query, scope)` (FTS over text views), ordering guarantees.
 - Done: append-only enforced (no update/delete API); search returns `complete` per scope.
+- Log: 2026-09-20 — Journal(store, clock): JournalEvent(eventId, ids, turn, kind ×9, argsDigest, refs, text, payload, at, seq) with seq assigned per work inside the append tx; append/get/events(scope)/search(query, scope, limit) → JournalHits(complete per scope)/lastSeq; no update or delete API. Search is an exhaustive case-insensitive scan over the text views (FTS reserved for notes in schema v1). SqliteIntentJournal and SqliteAliases back the P1.4.3 seams (open intents survive reopen; aliases monotone across reopen, never recycled).
 
 #### P1.4.2 [C][M] `Receipt`, `Observation`, `Claim` · DONE
 - Why: [§4.3](docs/state/evidence-coherence.md#sec-4-3), [§8.4](docs/verification/scheduler.md#sec-8-4) status vocabulary; invariant 4–5.
