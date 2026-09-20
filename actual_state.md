@@ -1,5 +1,11 @@
 # ASTROLABE 1.0.1 Kotlin SOTA AI Coding Agent Harness — actual state
 
+**Working branch: `main` (owner preference, 2026-09-20).** Ordinary development continues on `main`.
+All four commits from `feature/out-of-order-kernels` were integrated by fast-forward from `3e5c1ce`
+to `6298975`: P6.1.5, P4.5.5, P4.5.4 and P1.11.3. Source content matches the validated checkpoint
+below; this integration changes no task status. Historical branch names describe their original
+checkpoints and are not instructions to switch branches. The owner authorized publishing this integration.
+
 **Completed in order: P4.5.4 / OOO-06, then P1.11.3 / OOO-09**, D-61/D-62.
 P4.5.4 commit `817a32b`; P1.11.3 is the commit containing this checkpoint, `feature/out-of-order-kernels`.
 **68/184 DONE, 4 IN_PROGRESS, 112 TODO**. No ACTIVE override. Session ends at a complete checkpoint.

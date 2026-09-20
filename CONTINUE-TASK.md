@@ -1,5 +1,11 @@
 # Continue ASTROLABE implementation
 
+**Working branch: `main` (owner preference, 2026-09-20).** Continue ordinary work directly on `main`.
+The four outstanding analytical commits were integrated by fast-forward from `3e5c1ce` to `6298975`:
+P6.1.5, P4.5.5, P4.5.4 and P1.11.3. Historical feature-branch mentions below record original checkpoints;
+they do not require recreating or checking out that branch. Task statuses, next OOO-04 proposal and
+P0 validation return point are unchanged. The owner authorized publishing this integration.
+
 **Completed in order: P4.5.4 / OOO-06, then P1.11.3 / OOO-09**, D-61/D-62.
 P4.5.4 commit `817a32b`; P1.11.3 is the commit containing this checkpoint, `feature/out-of-order-kernels`.
 **68/184 DONE, 4 IN_PROGRESS, 112 TODO**. No ACTIVE override. Session ends at a complete checkpoint.
