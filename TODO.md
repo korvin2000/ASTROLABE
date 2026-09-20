@@ -23,7 +23,7 @@
 In scope: the whole architecture through S3 as a library, validated with a **fake provider adapter**. Out of scope ([P7](#p7-deferred-out-of-scope-boundary)): live provider transports, auth, retry/backoff, HTTP clients, MCP client transports, confined-runner backends, live benchmark campaigns. Every phase states which fixtures it must pass and which platform/provider assumptions remain unsupported. The roadmap rule "no stage starts before the previous gate is measured" ([§18.2](docs/implementation/roadmap.md#sec-18-2)) is interpreted for this offline plan as: engineering proceeds through P6 with each live gate recorded `UNMEASURED` and its prerequisites named; promotion claims wait for live evaluation (I-19, D-28).
 
 ## 1 Progress
-- **Phase:** P1 · **Next task:** P1.1.1 · **Blocked:** none
+- **Phase:** P1 · **Next task:** P1.4.4 · **Blocked:** none
 - **Open decisions needing an owner answer:** none (D-01, D-02, D-09, D-12, D-15 answered 2026-09-20 in `ANSWERS.md`; provisional defaults are labelled in §3)
 - **Session log**
   - 2026-09-20 — plan created from docs 1.0.1; no Gradle project, no code. Local machine has git 2.45 and ripgrep, **no JDK/Gradle installed** (install JDK 26 + Gradle 9.7.0 wrapper before P0.1.1).
@@ -347,11 +347,12 @@ Goal: [§18.2 Stage A](docs/implementation/roadmap.md#sec-18-2): one implementin
 - Done: FX-15; version bump only on authorized amendment; events `Contract.*` emitted.
 - Log: 2026-09-20 — Contracts.propose (pending, grants nothing), amendByUser (append request verbatim + version bump; authority = the message), resolve via Authority (weakening ⇒ Rejected by AutonomousAuthority; Accepted ⇒ apply + version bump with amended@vN provenance; Pending ⇒ unchanged), resolved() history; Contract.* events emitted. FX-15 covered: model cannot edit/remove acceptance; a rejected weakening leaves version and items unchanged.
 
-#### P1.1.4 [M] Contract digest and contract slice · TODO
+#### P1.1.4 [M] Contract digest and contract slice · DONE
 - Why: [§5.1](docs/runtime/context-layout.md#sec-5-1) digest ≤ 150 tokens in `[A]`, verbatim slice in `[K]`.
 - Pkg: `register.ContractDigest`, `context` (slice)
 - Build: `ContractDigest.render(contract, ledger) ≤ 150 tokens` (D-17: current authorized objective excerpt, obligation ids/status/currency, critical exclusions, deterministic truncation label), `ContractSlice.forIncrement(contract, increment)` = requirements verbatim, ALL constraints/exclusions, and the **complete** applicable acceptance definitions (run command/selector, check/review text, origin, obligation version, requirement links — D-52, I-11); ids-only rendering exists only inside the digest.
 - Done: token cap enforced with the estimator; byte-stable for equal inputs; a slice that carries an acceptance id without its definition fails coverage (IX-11).
+- Log: 2026-09-20 — register.ContractDigest.render(contract, ledger, obligations, estimator, cap=150): current authorized objective (every verbatim request, newest last), requirement statuses (snake_case wire names), obligation ids + status/currency text supplied by the scheduler, critical exclusions and pending-amendment count; deterministic labelled truncation (oldest request first, then statuses collapse to +N more; exclusions/requirements never dropped) — D-17. context.ContractSlice.forIncrement(contract, increment, originalObligations): requirements verbatim, ALL constraints/exclusions, complete acceptance definitions (command/criterion, origin, obligation version, links) + coverage() that fails on an id without its definition (IX-11) and a byte-stable render(). Tests green.
 
 ### P1.2 Workspace core
 #### P1.2.1 [C][M] `Workspace` and `VersionRegistry` · TODO
@@ -518,21 +519,23 @@ Goal: [§18.2 Stage A](docs/implementation/roadmap.md#sec-18-2): one implementin
 - Done: envelope `complete` semantics on the empty KB.
 
 ### P1.7 Verification baseline
-#### P1.7.1 [C][M] `Check` and `Checks` registry (S0 set) · TODO
+#### P1.7.1 [C][M] `Check` and `Checks` registry (S0 set) · DONE
 - Why: [§8.1](docs/verification/scheduler.md#sec-8-1) checks with kinds, selectors, cost classes, triggers; closures join coherence.
 - Pkg: `verify`
 - Build: `Check(id, kind: syntax|type|lint|unit|integration|acceptance|full|quality|review, selector: touched|blast|named(cmd)|all, inputClosure, definitionVersion (hash of definition + argv/cwd/selector + parser policy), closureManifest (P3.1.1), costClass, trigger, last)`, `Checks` registry seeded from sniffed commands + contract acceptance (`CHK-types-touched`, `CHK-lint`, `CHK-accept-<AC>`, `CHK-full`); S0 closures: `Known(touched paths)` for touched selectors, `Unknown` otherwise.
 - Done: definition_version changes when argv/parser policy changes (FX-16 input).
+- Log: 2026-09-20 — verify.Check(id, kind ×9, Selector touched|blast|named(cmd)|all, inputClosure, costClass, trigger, acceptanceIds, command, parserPolicy, last: LastResult(applicability computed)) with definitionVersion = digest(definition + argv/cwd/selector + parser policy); RunnerCommands(test/build/lint/typecheck) as the atlas→registry contract; Checks registry seeded with CHK-types-touched, CHK-lint (closure Known(touched)), CHK-accept-<AC> and CHK-full (closure Unknown), record/markStale (historical outcome never changes)/affectedBy(changedPaths)/required. FX-16 input test: argv or parser policy change ⇒ new definition version.
 
 #### P1.7.2 [M] End-of-turn `Checker` (synchronous, time-boxed) · TODO
 - Why: [§8.1 layer table](docs/verification/scheduler.md#sec-8-1); D12 sync first.
 - Build: `Checker.run(touched, timeBoxSeconds = 20)` invoking type/lint runners directly (D-09), scheduled after any mutation at the step boundary; `not_run` if deferred before dispatch, `timeout` if started then killed at the box (FX-58); Δ vs previous result + absolute status; superseded results archived, never presented as current.
 - Done: FX-18 (no new errors while failures persist ⇒ "no change · still N"), FX-58.
 
-#### P1.7.3 [M] `ChecksRender` (Δ + absolute) · TODO
+#### P1.7.3 [M] `ChecksRender` (Δ + absolute) · DONE
 - Why: L2; [§8.3](docs/verification/scheduler.md#sec-8-3).
 - Build: `── Checks @stamp ──` lines: scope (`touched`, `k ctx`, `blast 14`), Δ, absolute, stamp, receipt id; unchanged red compressed; ≤ 3 lines in `[A]`; `stale (…closure moved…)`/`not run` states.
 - Done: golden render of the §8.3 example.
+- Log: 2026-09-20 — verify.ChecksRender: CheckLine(label, scope, Δ, CheckState Green|Red|Stale|NotRun|Inconclusive|Unavailable, stamp, receipt alias, unchangedRed) → the §8.3 block with delta + absolute, compressed unchanged red ('no change · still N'), ≤ 3 lines with a +N fold; golden test.
 
 #### P1.7.4 [M] Receipt emission and currency · TODO
 - Why: [§8.4](docs/verification/scheduler.md#sec-8-4) refined by D-45 (I-04): a receipt supports the candidate actually tested.

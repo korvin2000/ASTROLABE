@@ -30,9 +30,14 @@ public data class UserRequest(
     }
 }
 
-/** Harness-derived, never model-written (§4.1). */
+/** Harness-derived, never model-written (§4.1). [wire] is the docs' snake_case spelling used in renders. */
 @Serializable
-public enum class RequirementStatus { Pending, InProgress, Verified, Blocked }
+public enum class RequirementStatus(public val wire: String) {
+    Pending("pending"),
+    InProgress("in_progress"),
+    Verified("verified"),
+    Blocked("blocked"),
+}
 
 @Serializable
 public data class Requirement(
