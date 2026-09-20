@@ -8,6 +8,6 @@ public final class JavaConsumerSmoke {
     }
 
     public static String describe() {
-        return Astrolabe.MODULE + " via " + Astrolabe.INSTANCE.getProviderApi();
+        return Astrolabe.MODULE + " via " + Astrolabe.INSTANCE.getClass().getSimpleName();
     }
 }

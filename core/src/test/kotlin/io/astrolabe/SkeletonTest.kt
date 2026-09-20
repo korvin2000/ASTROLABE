@@ -8,7 +8,7 @@ import kotlin.test.assertEquals
 class SkeletonTest {
     @Test
     fun `java test fixture compiles against core`() {
-        assertEquals("astrolabe-core via astrolabe-provider-api", JavaConsumerSmoke.describe())
+        assertEquals("astrolabe-core via Astrolabe", JavaConsumerSmoke.describe())
         assertEquals("astrolabe-core-testFixtures", TestKit.NAME)
     }
 }

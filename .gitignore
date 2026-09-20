@@ -37,3 +37,4 @@ build/
 *.iml
 out/
 .vscode/
+.claude/worktrees/

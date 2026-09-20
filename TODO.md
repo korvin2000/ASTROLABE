@@ -216,10 +216,11 @@ Goal: scaffolding that establishes real contracts and boundaries; nothing here t
 - Done: a test enumerates the §17 table against `Defaults` fields; every `[O]` flag defaults off; the validator rejects a reserve-off or test-integrity-off production config (IX-18).
 
 ### P0.2 Identities, hashing, tokens, budgets
-#### P0.2.1 [C] `id` package · TODO
+#### P0.2.1 [C] `id` package · DONE
 - Why: [§3.3](docs/architecture/components.md#sec-3-3) four identities on every record; namespace rule (`workspace_id`, projection generation).
 - Build: `WorkId`, `AttemptId`, `ContextId`, `WorkspaceId`, `Generation` (projection), `ExecutionGeneration`, `Identities(work, attempt, candidate: Stamp?, context: ContextId?)` — all validated non-empty/canonical at construction (D-08); `Digest` (SHA-256 hex; `hash8` short form); `FileVersion(digest)` = hash of **raw bytes**; `Stamp(baseCommit, trackedDeltaHash, untrackedManifestHash, envId) { val id }` where `id` hashes a **versioned canonical encoding** (sorted membership; explicit path/type/mode/content/environment fields) and the capture time `at` is stored as metadata **outside** identity (I-05); `IdGen` (injectable, deterministic in tests).
 - Done: equality/serialization tests; equal candidates captured at different times have equal `Stamp.id`; a mode/membership/environment change changes it; Java-visible (`data class`, D-08).
+- Log: 2026-09-20 — id package: WorkId/AttemptId/ContextId/WorkspaceId validated `[A-Za-z0-9._-]{1,128}`; Digest (SHA-256 hex, hash8), FileVersion (raw bytes), Stamp with @Transient id = digest of CanonicalEncoding('stamp', v1: base/tracked/untracked/env); CapturedStamp carries `at` outside identity; Identities carries CandidateId (= Stamp.id) instead of a full Stamp so rows never duplicate stamp components (the stamps table keeps them); Generation/ExecutionGeneration; IdGen with RandomIdGen + FixedIdGen (test fixtures). 11 tests green.
 
 #### P0.2.2 [C][M] `budget` package · TODO
 - Why: invariant 10 (every child/retry/rebuild consumes the originating budget); reservations enforced across concurrent calls ([§8.1 reserve](docs/verification/scheduler.md#sec-8-1)); FX-25.
@@ -228,25 +229,29 @@ Goal: scaffolding that establishes real contracts and boundaries; nothing here t
 - Done: concurrent reservation test cannot overspend; unknown usage keeps a hold until reconciled.
 
 ### P0.3 Provider API module (contract level only)
-#### P0.3.1 [C] Item model · TODO
+#### P0.3.1 [C] Item model · DONE
 - Why: [§15.1](docs/platform/adapters.md#sec-15-1) item-based internal message model mapping losslessly to Responses items and Messages blocks.
 - Pkg: `provider-api` / `io.astrolabe.provider`
 - Build: `sealed interface Item` — `Message(role, parts)`, `ToolCall(id, name, argsJson)`, `ToolResult(callId, content, isError)`, `ReasoningRef(providerTag, opaque)`, `UsageItem`, `OpaqueContinuation(providerTag, payload)`; each with `native: JsonElement?` passthrough (D-25). `ContentPart` (text; other kinds opaque).
 - Done: round-trip serialization; `ToolCall`/`ToolResult` pairing helper `pairs(items)` detects broken pairs (feeds FX-21).
+- Log: 2026-09-20 — Item sealed hierarchy (@SerialName discriminators, native passthrough), ContentPart Text|Opaque, Items.pairs → Pairing(unmatched/orphan/duplicate, broken). Round-trip + pairing tests.
 
-#### P0.3.2 [C] Request/Response and tool schema types · TODO
+#### P0.3.2 [C] Request/Response and tool schema types · DONE
 - Build: `ToolSchema(name, description, jsonSchema, dialect)`, `ToolMask(ops)`, `Segment(kind: S|R|K|T|A, items, breakpoint: Boolean)` (D-29), `Request(segments, tools, profile, effort, maxOutputTokens, continuation?)`, `InvocationId` (caller-assigned, registered before dispatch, D-51), `Response(items, stop: StopReason, usage: BillableUsage?, continuation?)`, `StopReason { EndTurn, ToolUse, OutputLimit, Refusal, Cancelled, Truncated }`, `Effort`; `interface TokenEstimator { estimate(text|request): Estimate }` and `Estimate(tokens, exact: Boolean, estimatorId, version, marginTokens)` live here so `Request` needs nothing from `core` (I-01); `Request.estimate(estimator)` charges every serialized contribution once (tools, pinned text, retained protocol items, effective continuation history where known) and reports `exact=false` with a margin whenever any part is estimated (I-17).
 - Done: an unknown continuation size yields `Estimate(exact=false, unknownHistory=true)`, never a silent fit; charging test per [§6.1](docs/context/compiler.md#sec-6-1).
+- Log: 2026-09-20 — ToolSchema/SchemaDialect/ToolMask/Segment(S..A, breakpoint)/Request (layout order + unique tool names enforced)/InvocationId/Response (Truncated|Cancelled ⇒ no ToolCall by construction)/StopReason/Effort; Estimate + TokenEstimator + Request.estimate charging tools, items and continuation once; OpaqueContinuation.effectiveHistoryTokens == null ⇒ unknownHistory, never a silent fit.
 
-#### P0.3.3 [C] Capabilities, profile, usage, money · TODO
+#### P0.3.3 [C] Capabilities, profile, usage, money · DONE
 - Why: [§15.1–15.2](docs/platform/adapters.md#sec-15-1) capability description separated from request construction; accounting without double counting; missing usage is `unknown`, never zero.
 - Build: `Capabilities(toolSchemaValidation, parallelToolCalls, streaming, outputLimit, contextLimit, nativeCompaction, continuation, cancellation, hostedExecution, caching: CacheCapability(breakpoints, minimumTokens), usageFields)`, `Profile(provider, model, config, capabilities, limits, priceTable, latency, stratumOutcomes)`, `PriceTable(date, currency, price per billable dimension)`, `BillableUsage(quantities: Map<BillingDimension, Long>, unknown: Set<BillingDimension>, native: JsonElement?, schemaVersion, provenance(provider, model, protocol))` where `BillingDimension` is provider-defined (e.g. `uncached_input`, `cache_read`, `cache_write_5m`, `cache_write_1h`, `output`, `hosted_tool_x`) — aggregate counts (`totalInput`, `totalCacheWrite`) are derived diagnostics, never priced (I-16); `reasoningIncludedInOutput` flag; `Money(currency, amount: BigDecimal, unknown: Boolean)`; `UsageNormalizer` (per-provider mapping interface; rules of §15.2 in KDoc; implementations deferred to P7 except the fake).
 - Done: `BillableUsage.price(table)` prices each dimension once; a mixed 5-minute/1-hour cache-write fixture prices both classes; an unpriced or missing dimension yields `Money.unknown = true`, never zero (IX-16).
+- Log: 2026-09-20 — Capabilities (context/output limits inside, no separate Limits type), CacheCapability(writeClasses), Profile, PriceTable (dated, per-million BigDecimal as decimal strings), BillingDimension (provider-defined, constants for common ones), BillableUsage(quantities, unknown, native, provenance, schemaVersion) with derived totals and price(table) → Money.unknown when any dimension is unknown or unpriced (IX-16 mixed 5m/1h fixture), UsageNormalizer fun interface with §15.2 rules in KDoc.
 
-#### P0.3.4 [C] `ProviderAdapter` contract and errors · TODO
+#### P0.3.4 [C] `ProviderAdapter` contract and errors · DONE
 - Build: `interface ProviderAdapter { capabilities(); validate(Request, Estimate): Validation (tool pairing, breakpoints supported, schema dialect supported, admission vs contextLimit + output headroom using exact-or-margin counts, no evicted-tail continuation); start(Request, InvocationId): Invocation; normalizer }`, `Invocation { suspend await(): Response; cancel(); state: Requested|CancelRequested|ProviderAcknowledged|TerminalReconciled; terminal: late output + usage observed exactly once }` (D-51), `sealed ProviderError { Transport, RateLimit(retryAfter), OutputLimit, Refusal, ExpiredContinuation, InvalidRequest, UnsupportedSchema, MissingUsage }`; Java SPI form `JavaProviderAdapter` (`CompletableFuture<Response>`, `cancel()`, documented threading/exception mapping) with a bridge to the Kotlin interface (D-07, I-14).
 - Notes: three retry semantics (provider / tool / verification) are recorded separately but **retry policy itself is P7**. Never expose a half-generated tool call: a truncated stream yields `StopReason.Truncated` and no executable `ToolCall`. Cancellation never ends the coroutine that receives terminal/late usage; the reservation holds until reconciled.
 - Done: KDoc states every rule of §15.1 the adapter must uphold; cancel-before-id, cancel racing a completed response and late usage after cancel settle spend once with no tool dispatch (IX-15); ABI dump committed.
+- Log: 2026-09-20 — ProviderAdapter/Validation/Problem(Kind)/Validations.standard (pairing, breakpoints, dialect, continuation support, unknown history, admission with margin + output headroom)/Invocation(await, cancel, terminal; InvocationState)/Terminal/ProviderError sealed; JavaProviderAdapter + JavaInvocation (CompletableFuture) + ProviderAdapters.fromJava bridge that never cancels the host's futures on coroutine cancellation (calls cancel(); terminal() still completes) with exception mapping; error mapping and cancel-then-late-usage tested; ABI dump committed. Cancel-before-id and cancel-racing-completion arrive with the fake adapter (P0.3.5).
 
 #### P0.3.5 [M] Fake adapter + scripted model (test fixtures) · TODO
 - Why: the only model used by this plan's validation; must exercise AX-01..AX-10.
