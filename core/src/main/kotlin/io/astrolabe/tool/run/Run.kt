@@ -293,15 +293,7 @@ public class Run(
     }
 
     /** Announces every stamped member that moved; a path nobody read before has `from = null` (conservative marking). */
-    private fun announce(before: StampReport, after: StampReport, cause: String): List<String> {
-        val changed = Stamper.diff(before, after).toList()
-        for (path in changed) {
-            val from = before.members[path]?.digest?.let(::FileVersion) ?: registry.recorded(path)
-            val to = after.members[path]?.digest?.let(::FileVersion) ?: registry.version(path)
-            if (from != to) registry.change(path, from, to, cause)
-        }
-        return changed
-    }
+    private fun announce(before: StampReport, after: StampReport, cause: String): List<String> = announceMoved(registry, before, after, cause)
 
     private fun unknown(args: RunArgs, alias: String, actionId: String, before: StampReport, intentId: String, cause: Throwable?): ToolOutcome {
         val after = runCatching { stamper.report() }.getOrNull()

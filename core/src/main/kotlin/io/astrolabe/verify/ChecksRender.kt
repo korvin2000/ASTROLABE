@@ -29,6 +29,10 @@ public sealed interface CheckState {
 
     @Serializable
     public data class Unavailable(val reason: String) : CheckState
+
+    /** Started and killed at the time box (FX-58): distinct from `not run`, which never started. */
+    @Serializable
+    public data class Timeout(val reason: String) : CheckState
 }
 
 /** A line of the `── Checks ──` block: label with scope, Δ when the run changed something, absolute status, stamp and receipt alias. */
@@ -85,6 +89,7 @@ public object ChecksRender {
             CheckState.NotRun -> sb.append("not run")
             is CheckState.Inconclusive -> sb.append("inconclusive (").append(s.reason).append(')')
             is CheckState.Unavailable -> sb.append("unavailable (").append(s.reason).append(')')
+            is CheckState.Timeout -> sb.append("timeout (").append(s.reason).append(')')
         }
         l.stampHash?.let { sb.append(" @").append(it.take(4)) }
         l.receiptAlias?.let { sb.append(" (").append(it).append(')') }

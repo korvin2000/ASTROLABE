@@ -11246,6 +11246,33 @@ public final class io/astrolabe/verify/CheckState$Stale$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
 }
 
+public final class io/astrolabe/verify/CheckState$Timeout : io/astrolabe/verify/CheckState {
+	public static final field Companion Lio/astrolabe/verify/CheckState$Timeout$Companion;
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/astrolabe/verify/CheckState$Timeout;
+	public static synthetic fun copy$default (Lio/astrolabe/verify/CheckState$Timeout;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/verify/CheckState$Timeout;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getReason ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/verify/CheckState$Timeout$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/verify/CheckState$Timeout$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/verify/CheckState$Timeout;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/verify/CheckState$Timeout;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/verify/CheckState$Timeout$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
 public final class io/astrolabe/verify/CheckState$Unavailable : io/astrolabe/verify/CheckState {
 	public static final field Companion Lio/astrolabe/verify/CheckState$Unavailable$Companion;
 	public fun <init> (Ljava/lang/String;)V
@@ -11271,6 +11298,67 @@ public final synthetic class io/astrolabe/verify/CheckState$Unavailable$$seriali
 
 public final class io/astrolabe/verify/CheckState$Unavailable$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/verify/Checker {
+	public static final field Companion Lio/astrolabe/verify/Checker$Companion;
+	public fun <init> (Lio/astrolabe/verify/Checks;Lio/astrolabe/tool/run/Runner;Lio/astrolabe/os/Os;Lio/astrolabe/workspace/Stamper;Lio/astrolabe/workspace/VersionRegistry;Lio/astrolabe/workspace/Workspace;Lio/astrolabe/store/BlobStore;Lio/astrolabe/auth/Redaction;Lio/astrolabe/id/IdGen;Lio/astrolabe/id/Identities;Ljava/nio/file/Path;Ljava/util/Set;Lio/astrolabe/event/Events;)V
+	public synthetic fun <init> (Lio/astrolabe/verify/Checks;Lio/astrolabe/tool/run/Runner;Lio/astrolabe/os/Os;Lio/astrolabe/workspace/Stamper;Lio/astrolabe/workspace/VersionRegistry;Lio/astrolabe/workspace/Workspace;Lio/astrolabe/store/BlobStore;Lio/astrolabe/auth/Redaction;Lio/astrolabe/id/IdGen;Lio/astrolabe/id/Identities;Ljava/nio/file/Path;Ljava/util/Set;Lio/astrolabe/event/Events;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public static final fun argvFor (Lio/astrolabe/verify/Check;Ljava/util/Collection;)Ljava/util/List;
+	public final fun history (Ljava/lang/String;)Ljava/util/List;
+	public final fun latest ()Ljava/util/List;
+	public final fun render (Lio/astrolabe/id/CandidateId;)Ljava/lang/String;
+	public final fun run (Ljava/util/Collection;J)Ljava/util/List;
+	public static synthetic fun run$default (Lio/astrolabe/verify/Checker;Ljava/util/Collection;JILjava/lang/Object;)Ljava/util/List;
+}
+
+public final class io/astrolabe/verify/Checker$Companion {
+	public final fun argvFor (Lio/astrolabe/verify/Check;Ljava/util/Collection;)Ljava/util/List;
+}
+
+public final class io/astrolabe/verify/CheckerResult {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Lio/astrolabe/verify/CheckKind;Lio/astrolabe/verify/Selector;Lio/astrolabe/evidence/Outcome;Ljava/util/List;Lio/astrolabe/verify/Delta;Ljava/lang/Integer;Lio/astrolabe/id/CandidateId;Lio/astrolabe/id/CandidateId;Lio/astrolabe/id/Digest;JLjava/util/List;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Lio/astrolabe/verify/CheckKind;Lio/astrolabe/verify/Selector;Lio/astrolabe/evidence/Outcome;Ljava/util/List;Lio/astrolabe/verify/Delta;Ljava/lang/Integer;Lio/astrolabe/id/CandidateId;Lio/astrolabe/id/CandidateId;Lio/astrolabe/id/Digest;JLjava/util/List;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component10 ()Lio/astrolabe/id/CandidateId;
+	public final fun component11 ()Lio/astrolabe/id/Digest;
+	public final fun component12 ()J
+	public final fun component13 ()Ljava/util/List;
+	public final fun component14 ()Ljava/util/List;
+	public final fun component15 ()Ljava/lang/String;
+	public final fun component16 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Lio/astrolabe/verify/CheckKind;
+	public final fun component4 ()Lio/astrolabe/verify/Selector;
+	public final fun component5 ()Lio/astrolabe/evidence/Outcome;
+	public final fun component6 ()Ljava/util/List;
+	public final fun component7 ()Lio/astrolabe/verify/Delta;
+	public final fun component8 ()Ljava/lang/Integer;
+	public final fun component9 ()Lio/astrolabe/id/CandidateId;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Lio/astrolabe/verify/CheckKind;Lio/astrolabe/verify/Selector;Lio/astrolabe/evidence/Outcome;Ljava/util/List;Lio/astrolabe/verify/Delta;Ljava/lang/Integer;Lio/astrolabe/id/CandidateId;Lio/astrolabe/id/CandidateId;Lio/astrolabe/id/Digest;JLjava/util/List;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;)Lio/astrolabe/verify/CheckerResult;
+	public static synthetic fun copy$default (Lio/astrolabe/verify/CheckerResult;Ljava/lang/String;Ljava/lang/String;Lio/astrolabe/verify/CheckKind;Lio/astrolabe/verify/Selector;Lio/astrolabe/evidence/Outcome;Ljava/util/List;Lio/astrolabe/verify/Delta;Ljava/lang/Integer;Lio/astrolabe/id/CandidateId;Lio/astrolabe/id/CandidateId;Lio/astrolabe/id/Digest;JLjava/util/List;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/verify/CheckerResult;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getChangedPaths ()Ljava/util/List;
+	public final fun getCheckId ()Ljava/lang/String;
+	public final fun getDelta ()Lio/astrolabe/verify/Delta;
+	public final fun getDurationMillis ()J
+	public final fun getErrorLines ()Ljava/util/List;
+	public final fun getErrors ()I
+	public final fun getExit ()Ljava/lang/Integer;
+	public final fun getKind ()Lio/astrolabe/verify/CheckKind;
+	public final fun getLog ()Lio/astrolabe/id/Digest;
+	public final fun getOutcome ()Lio/astrolabe/evidence/Outcome;
+	public final fun getReason ()Ljava/lang/String;
+	public final fun getResultId ()Ljava/lang/String;
+	public final fun getSelector ()Lio/astrolabe/verify/Selector;
+	public final fun getStampAfter ()Lio/astrolabe/id/CandidateId;
+	public final fun getStampBefore ()Lio/astrolabe/id/CandidateId;
+	public final fun getSupersedes ()Ljava/lang/String;
+	public final fun getTouched ()Ljava/util/List;
+	public fun hashCode ()I
+	public final fun line (Ljava/lang/String;)Lio/astrolabe/verify/CheckLine;
+	public static synthetic fun line$default (Lio/astrolabe/verify/CheckerResult;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/verify/CheckLine;
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class io/astrolabe/verify/Checks : io/astrolabe/workspace/ChangeListener {
