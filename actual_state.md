@@ -1,5 +1,21 @@
 # ASTROLABE 1.0.1 Kotlin SOTA AI Coding Agent Harness — actual state
 
+**Current checkpoint — P3.2.7 / OOO-04 DONE (2026-09-20)**, D-63, on `main`.
+Checkpoint is the commit containing this record; baseline `3f3edc4`. Do not reimplement this kernel.
+Immutable qualified impact snapshots, reverse BFS, test/acceptance closure joins, contract anchors,
+added+deleted line risk and explicit package/workspace fallback requirements are complete.
+**69/185 DONE, 4 IN_PROGRESS, 112 TODO**. All nine out-of-order proposals are complete; no ACTIVE override.
+20 new impact tests, 500 graph and 300 hunk oracle cases; all 76 atlas tests, author review and ABI pass.
+Final Windows/JDK 26 full build: **core 875 tests/0 failures/errors/6 existing platform skips** executed;
+eval 30 and provider-api 15 green results reused. Eval also executed in the first full run.
+The first full run repeated the known FX-22 poll/terminal-status failure; isolated and final full reruns
+passed without code/test changes. Failure evidence is preserved; the P0 investigation remains open.
+[Protocol](audit/OUT-OF-ORDER-P3.2.7.md), [API guide](core/README.md#impact-snapshots-p327); TODO §1.2 governs.
+P3.2.1–P3.2.6 retain discovery, runtime assembly, tools, nudges, scheduler/pre-scan and runtime FX-37/54.
+Return: **P0.1.2 + P0.6.1/P0.6.2/P0.6.4 -> P1.8.2**. CI/Linux/live gates remain open/UNMEASURED.
+
+**Historical checkpoints below; their former next-candidate instructions are superseded.**
+
 **Working branch: `main` (owner preference, 2026-09-20).** Ordinary development continues on `main`.
 All four commits from `feature/out-of-order-kernels` were integrated by fast-forward from `3e5c1ce`
 to `6298975`: P6.1.5, P4.5.5, P4.5.4 and P1.11.3. Source content matches the validated checkpoint

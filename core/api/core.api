@@ -722,6 +722,185 @@ public final class io/astrolabe/atlas/Focus$Root : io/astrolabe/atlas/Focus {
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class io/astrolabe/atlas/Impact {
+	public static final field INSTANCE Lio/astrolabe/atlas/Impact;
+	public static final fun analyze (Lio/astrolabe/atlas/ImpactRequest;)Lio/astrolabe/atlas/ImpactAnalysis;
+	public static final fun analyze (Lio/astrolabe/atlas/ImpactRequest;Lio/astrolabe/Defaults;)Lio/astrolabe/atlas/ImpactAnalysis;
+	public static synthetic fun analyze$default (Lio/astrolabe/atlas/ImpactRequest;Lio/astrolabe/Defaults;ILjava/lang/Object;)Lio/astrolabe/atlas/ImpactAnalysis;
+}
+
+public final class io/astrolabe/atlas/ImpactAnalysis {
+	public final fun getAffectedTests ()Ljava/util/Set;
+	public final fun getBlast ()Ljava/util/Set;
+	public final fun getBlastComplete ()Z
+	public final fun getComplete ()Z
+	public final fun getContractsComplete ()Z
+	public final fun getContractsTouched ()Ljava/util/Set;
+	public final fun getIssues ()Ljava/util/Set;
+	public final fun getRequest ()Lio/astrolabe/atlas/ImpactRequest;
+	public final fun getRisk ()Lio/astrolabe/atlas/ImpactRisk;
+	public final fun getTier ()Lio/astrolabe/atlas/IndexTier;
+	public final fun getVerificationScopes ()Ljava/util/Set;
+}
+
+public final class io/astrolabe/atlas/ImpactCheck {
+	public fun <init> (Ljava/lang/String;Lio/astrolabe/atlas/ImpactScope;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Z)V
+	public final fun getClosure ()Ljava/util/Set;
+	public final fun getClosureComplete ()Z
+	public final fun getId ()Ljava/lang/String;
+	public final fun getNamingTargets ()Ljava/util/Set;
+	public final fun getScope ()Lio/astrolabe/atlas/ImpactScope;
+	public final fun getTestFiles ()Ljava/util/Set;
+}
+
+public final class io/astrolabe/atlas/ImpactContract {
+	public fun <init> (Ljava/lang/String;Ljava/util/Set;Z)V
+	public final fun getAnchors ()Ljava/util/Set;
+	public final fun getComplete ()Z
+	public final fun getId ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/atlas/ImpactDependency {
+	public fun <init> (Lio/astrolabe/atlas/ImpactFile;Ljava/lang/String;)V
+	public final fun component1 ()Lio/astrolabe/atlas/ImpactFile;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Lio/astrolabe/atlas/ImpactFile;Ljava/lang/String;)Lio/astrolabe/atlas/ImpactDependency;
+	public static synthetic fun copy$default (Lio/astrolabe/atlas/ImpactDependency;Lio/astrolabe/atlas/ImpactFile;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/atlas/ImpactDependency;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDescription ()Ljava/lang/String;
+	public final fun getImporter ()Lio/astrolabe/atlas/ImpactFile;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/atlas/ImpactFanIn {
+	public fun <init> (Ljava/lang/Long;Lio/astrolabe/atlas/IndexTier;Z)V
+	public final fun component1 ()Ljava/lang/Long;
+	public final fun component2 ()Lio/astrolabe/atlas/IndexTier;
+	public final fun component3 ()Z
+	public final fun copy (Ljava/lang/Long;Lio/astrolabe/atlas/IndexTier;Z)Lio/astrolabe/atlas/ImpactFanIn;
+	public static synthetic fun copy$default (Lio/astrolabe/atlas/ImpactFanIn;Ljava/lang/Long;Lio/astrolabe/atlas/IndexTier;ZILjava/lang/Object;)Lio/astrolabe/atlas/ImpactFanIn;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getComplete ()Z
+	public final fun getCount ()Ljava/lang/Long;
+	public final fun getTier ()Lio/astrolabe/atlas/IndexTier;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/atlas/ImpactFile {
+	public fun <init> (Lio/astrolabe/atlas/ImpactScope;Ljava/lang/String;)V
+	public final fun component1 ()Lio/astrolabe/atlas/ImpactScope;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Lio/astrolabe/atlas/ImpactScope;Ljava/lang/String;)Lio/astrolabe/atlas/ImpactFile;
+	public static synthetic fun copy$default (Lio/astrolabe/atlas/ImpactFile;Lio/astrolabe/atlas/ImpactScope;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/atlas/ImpactFile;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getPath ()Ljava/lang/String;
+	public final fun getScope ()Lio/astrolabe/atlas/ImpactScope;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/atlas/ImpactGraph {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/util/Set;Ljava/util/Set;Lio/astrolabe/atlas/IndexTier;ZLjava/util/Set;Ljava/util/Set;)V
+	public final fun getComplete ()Z
+	public final fun getCoverage ()Ljava/util/Set;
+	public final fun getFiles ()Ljava/util/Set;
+	public final fun getImports ()Ljava/util/Set;
+	public final fun getProvenance ()Ljava/lang/String;
+	public final fun getTier ()Lio/astrolabe/atlas/IndexTier;
+	public final fun getUnresolved ()Ljava/util/Set;
+	public final fun getVersion ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/atlas/ImpactHunk {
+	public fun <init> (Lio/astrolabe/atlas/ImpactFile;Lio/astrolabe/atlas/ImpactLines;Lio/astrolabe/atlas/ImpactLines;Ljava/lang/String;Lio/astrolabe/atlas/ImpactFanIn;)V
+	public final fun component1 ()Lio/astrolabe/atlas/ImpactFile;
+	public final fun component2 ()Lio/astrolabe/atlas/ImpactLines;
+	public final fun component3 ()Lio/astrolabe/atlas/ImpactLines;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Lio/astrolabe/atlas/ImpactFanIn;
+	public final fun copy (Lio/astrolabe/atlas/ImpactFile;Lio/astrolabe/atlas/ImpactLines;Lio/astrolabe/atlas/ImpactLines;Ljava/lang/String;Lio/astrolabe/atlas/ImpactFanIn;)Lio/astrolabe/atlas/ImpactHunk;
+	public static synthetic fun copy$default (Lio/astrolabe/atlas/ImpactHunk;Lio/astrolabe/atlas/ImpactFile;Lio/astrolabe/atlas/ImpactLines;Lio/astrolabe/atlas/ImpactLines;Ljava/lang/String;Lio/astrolabe/atlas/ImpactFanIn;ILjava/lang/Object;)Lio/astrolabe/atlas/ImpactHunk;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFanIn ()Lio/astrolabe/atlas/ImpactFanIn;
+	public final fun getFile ()Lio/astrolabe/atlas/ImpactFile;
+	public final fun getNewLines ()Lio/astrolabe/atlas/ImpactLines;
+	public final fun getOldLines ()Lio/astrolabe/atlas/ImpactLines;
+	public final fun getSymbol ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/atlas/ImpactImport {
+	public fun <init> (Lio/astrolabe/atlas/ImpactFile;Lio/astrolabe/atlas/ImpactFile;)V
+	public final fun component1 ()Lio/astrolabe/atlas/ImpactFile;
+	public final fun component2 ()Lio/astrolabe/atlas/ImpactFile;
+	public final fun copy (Lio/astrolabe/atlas/ImpactFile;Lio/astrolabe/atlas/ImpactFile;)Lio/astrolabe/atlas/ImpactImport;
+	public static synthetic fun copy$default (Lio/astrolabe/atlas/ImpactImport;Lio/astrolabe/atlas/ImpactFile;Lio/astrolabe/atlas/ImpactFile;ILjava/lang/Object;)Lio/astrolabe/atlas/ImpactImport;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDependency ()Lio/astrolabe/atlas/ImpactFile;
+	public final fun getImporter ()Lio/astrolabe/atlas/ImpactFile;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/atlas/ImpactLines {
+	public fun <init> (JJ)V
+	public final fun component1 ()J
+	public final fun component2 ()J
+	public final fun copy (JJ)Lio/astrolabe/atlas/ImpactLines;
+	public static synthetic fun copy$default (Lio/astrolabe/atlas/ImpactLines;JJILjava/lang/Object;)Lio/astrolabe/atlas/ImpactLines;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCount ()J
+	public final fun getStart ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/atlas/ImpactRequest {
+	public fun <init> (Lio/astrolabe/atlas/ImpactGraph;Ljava/util/Set;Ljava/util/List;Ljava/util/List;Ljava/util/List;Z)V
+	public final fun getChecks ()Ljava/util/List;
+	public final fun getContracts ()Ljava/util/List;
+	public final fun getContractsComplete ()Z
+	public final fun getEdits ()Ljava/util/Set;
+	public final fun getGraph ()Lio/astrolabe/atlas/ImpactGraph;
+	public final fun getHunks ()Ljava/util/List;
+}
+
+public final class io/astrolabe/atlas/ImpactRisk {
+	public fun <init> (Ljava/math/BigInteger;Ljava/lang/Double;ZILjava/lang/Boolean;)V
+	public final fun component1 ()Ljava/math/BigInteger;
+	public final fun component2 ()Ljava/lang/Double;
+	public final fun component3 ()Z
+	public final fun component4 ()I
+	public final fun component5 ()Ljava/lang/Boolean;
+	public final fun copy (Ljava/math/BigInteger;Ljava/lang/Double;ZILjava/lang/Boolean;)Lio/astrolabe/atlas/ImpactRisk;
+	public static synthetic fun copy$default (Lio/astrolabe/atlas/ImpactRisk;Ljava/math/BigInteger;Ljava/lang/Double;ZILjava/lang/Boolean;ILjava/lang/Object;)Lio/astrolabe/atlas/ImpactRisk;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getChangedLines ()Ljava/math/BigInteger;
+	public final fun getComplete ()Z
+	public final fun getEstimate ()Ljava/lang/Double;
+	public final fun getExceedsThreshold ()Ljava/lang/Boolean;
+	public final fun getRequiresSlowChecks ()Z
+	public final fun getThreshold ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/atlas/ImpactScope {
+	public fun <init> (Lio/astrolabe/id/WorkspaceId;Ljava/lang/String;)V
+	public final fun component1 ()Lio/astrolabe/id/WorkspaceId;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Lio/astrolabe/id/WorkspaceId;Ljava/lang/String;)Lio/astrolabe/atlas/ImpactScope;
+	public static synthetic fun copy$default (Lio/astrolabe/atlas/ImpactScope;Lio/astrolabe/id/WorkspaceId;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/atlas/ImpactScope;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getPackageId ()Ljava/lang/String;
+	public final fun getWorkspace ()Lio/astrolabe/id/WorkspaceId;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class io/astrolabe/atlas/Importers {
 	public fun <init> (Ljava/lang/String;Ljava/util/List;Lio/astrolabe/atlas/IndexTier;Z)V
 	public final fun component1 ()Ljava/lang/String;

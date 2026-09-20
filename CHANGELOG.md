@@ -2,6 +2,9 @@
 
 ## Implementation checkpoints — 20 September 2026
 
+- P3.2.7: immutable impact snapshots with cycle-safe reverse reachability, closure/anchor joins and
+  added-plus-deleted line risk. Unknown graph, package, fan-in and closure data retain explicit
+  uncertainty and wider verification requirements; runtime integration stays with P3.2.1–P3.2.6.
 - P4.5.5: exact bounded ordering of a small dependency DAG under frozen pairwise switching costs,
   including initial/fixed charges, external prerequisite checks and explicit unsupported/limit outcomes.
 - P6.1.5: metadata-only workload partition validation and bounded exact construction, preserving

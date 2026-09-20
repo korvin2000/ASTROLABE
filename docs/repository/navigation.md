@@ -66,6 +66,11 @@ impact(E):   E = edit set (or paths)
 | Model-callable | `look(impact, E)` lets the worker ask "what does changing X touch?" before a risky change |
 
 **Impact nudge.** After an edit batch the harness diffs outlines of touched files; a changed definition of a symbol with `fanin > 0` whose references were not inspected since the change fires one `[A]` line ([§5.6](../runtime/gates-termination.md#sec-5-6)). Fallback without an index: a repository-wide literal count excluding the edited file. This turns the missing-complement discipline into a deterministic gate at ~30 tokens, exactly when invented-interface failures (F3) become likely.
+
+**Calculation component:** [P3.2.7 / D-63](../../audit/OUT-OF-ORDER-P3.2.7.md) implements the pure
+snapshot arithmetic; [API guide](../../core/README.md#impact-snapshots-p327). Its qualified projections,
+added-plus-deleted hunk counts and explicit unknowns do not supply import extraction, KB loading,
+nudges, scheduler execution or pre-scan. Those integrations retain P3.2.1–P3.2.6 and their runtime gates.
 <!-- end-source-section: 7.4 -->
 
 <!-- source-section: 7.5 -->
@@ -101,4 +106,3 @@ Scope searches by package and likely dependency direction, then widen on evidenc
 
 ---
 <!-- end-source-section: 7.7 -->
-

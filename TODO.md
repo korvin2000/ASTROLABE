@@ -23,14 +23,15 @@
 In scope: the whole architecture through S3 as a library, validated with a **fake provider adapter**. Out of scope ([P7](#p7-deferred-out-of-scope-boundary)): live provider transports, auth, retry/backoff, HTTP clients, MCP client transports, confined-runner backends, live benchmark campaigns. Every phase states which fixtures it must pass and which platform/provider assumptions remain unsupported. The roadmap rule "no stage starts before the previous gate is measured" ([§18.2](docs/implementation/roadmap.md#sec-18-2)) is interpreted for this offline plan as: engineering proceeds through P6 with each live gate recorded `UNMEASURED` and its prerequisites named; promotion claims wait for live evaluation (I-19, D-28).
 
 ## 1 Progress
+- **Current checkpoint: P3.2.7 / OOO-04 DONE**, D-63, on `main`; commit containing this checkpoint. 20 new impact tests, 500 graph and 300 hunk oracles; 76 atlas tests, author review and additive ABI pass. Final full Windows/JDK 26 build: core **875/0 failures/errors/6 platform skips** executed; eval 30 and provider-api 15 green results reused (eval also executed in first full run). First-run FX-22 polling failure and isolated pass preserved in [protocol](audit/OUT-OF-ORDER-P3.2.7.md). **69/185 DONE, 4 IN_PROGRESS, 112 TODO**. No ACTIVE override; all nine proposals complete. Return P0 validation -> P1.8.2.
 - **Main integration (2026-09-20):** owner requested all completed work in `main`; ordinary development now continues on `main`. Fast-forward from `3e5c1ce` to `6298975` preserves `eb143e8` (P6.1.5), `955fb77` (P4.5.5), `817a32b` (P4.5.4), `6298975` (P1.11.3). The merged source tree is identical to the already reviewed/validated checkpoint: core 855 tests/6 platform skips, eval 30, ABI/full build passed; no redundant test rerun for branch movement and these documentation changes. Task counts and CI/Linux/live gates unchanged. Publication to `origin/main` is authorized by this owner request.
-- **Latest checkpoint: P4.5.4 / OOO-06 and P1.11.3 / OOO-09 DONE**, in requested order, D-61/D-62. P4.5.4 commit `817a32b`; P1.11.3 commit containing this checkpoint. 30 focused tests, independent oracles on 300 attempt policies + 300 traces; author reviews resolved; ABI and full Windows/JDK 26 build pass. Core **855 tests/0 failures/errors/6 platform skips**, eval **30/0 failures/errors/skips** executed; provider-api 15 green results reused. **68/184 DONE, 4 IN_PROGRESS, 112 TODO**. No ACTIVE override. Next proposal OOO-04; session stops at completed checkpoint. Normal return P0 validation -> P1.8.2.
+- **Previous checkpoint: P4.5.4 / OOO-06 and P1.11.3 / OOO-09 DONE**, in requested order, D-61/D-62. P4.5.4 commit `817a32b`; P1.11.3 commit containing this checkpoint. 30 focused tests, independent oracles on 300 attempt policies + 300 traces; author reviews resolved; ABI and full Windows/JDK 26 build pass. Core **855 tests/0 failures/errors/6 platform skips**, eval **30/0 failures/errors/skips** executed; provider-api 15 green results reused. **68/184 DONE, 4 IN_PROGRESS, 112 TODO**. No ACTIVE override. Next proposal OOO-04; session stops at completed checkpoint. Normal return P0 validation -> P1.8.2.
 - **Previous checkpoint: P4.5.4 / OOO-06 DONE**, D-61, from `955fb77`; 15 focused tests, 300 seed-454 path-enumeration policies, author review resolved, ABI and full Windows/JDK 26 build pass. Core **840 tests/0 failures/errors/6 platform skips**, eval **30/0 failures/errors/skips** executed; provider-api 15 green results reused. **67/183 DONE, 4 IN_PROGRESS, 112 TODO**. No ACTIVE override. Next authorized proposal OOO-09; normal return P0 validation -> P1.8.2. [Protocol](audit/OUT-OF-ORDER-P4.5.4.md).
 - **Previous checkpoint: P6.1.5 / OOO-07 and P4.5.5 / OOO-08 DONE**, in requested order, D-59/D-60. Commits: P6.1.5 `eb143e8`; P4.5.5 commit containing this record. 24 new focused tests, independent oracles (300 workload tables + 200 DAGs), reviews resolved, ABI/full build pass. Final Windows/JDK 26 build executed core **825 tests, 0 failures/errors, 6 platform skips**, eval **30 tests, 0 failures/errors/skips**; provider-api 15 green results reused. Current **66/182 DONE (36.3%), 4 IN_PROGRESS, 112 TODO**. No ACTIVE override; next proposal OOO-06. Normal return P0 validation -> P1.8.2.
 - **Previous checkpoint: P6.1.5 / OOO-07 DONE**, D-59. 12 focused tests, 300 seed-615 oracle tables, independent review correction/regression, ABI and full Windows/JDK 26 build pass. Eval 30 tests executed; core 813/6 skips and provider-api 15 reused. Current **65/181 DONE (35.9%), 4 IN_PROGRESS, 112 TODO**. No active override; next authorized proposal OOO-08. Return P0 validation -> P1.8.2. [Protocol](audit/OUT-OF-ORDER-P6.1.5.md).
 - **Previous out-of-order checkpoint:** **P6.1.4 (OOO-02) and P5.1.5 (OOO-05) DONE**, in the requested order; D-57/D-58. Both independent reviews clear, ABI checks and full offline Windows/JDK 26 build pass. Final build executed core **813 tests, 0 failures/errors, 6 platform skips** and eval **18 tests, 0 failures/errors/skips**; provider-api UP-TO-DATE (15 green results). Protocols: [P6.1.4](audit/OUT-OF-ORDER-P6.1.4.md), [P5.1.5](audit/OUT-OF-ORDER-P5.1.5.md). No active override remains; next out-of-order proposal **OOO-07** (candidate P6.1.5), admission first. Normal return: P0 validation -> P1.8.2.
-- **Completed out-of-order work:** P2.1.1, P2.3.4 (OOO-01), P2.6.5 (OOO-03), P6.1.4 (OOO-02), P5.1.5 (OOO-05). P6.1.5 (OOO-07) and P4.5.5 (OOO-08) are also DONE; OOO-06/P4.5.4 and OOO-09/P1.11.3 are also DONE; OOO-04 remains a proposal. Parent integration and CI/Linux/live gates remain unchanged.
-- **Current phase counts:** P0 15 DONE + 4 IN_PROGRESS; P1 45 DONE + 19 TODO; P2-P6 8 DONE + 93 TODO. Counts derive from unique task headings, not code volume.
+- **Completed out-of-order work:** P2.1.1, P2.3.4 (OOO-01), P2.6.5 (OOO-03), P6.1.4 (OOO-02), P5.1.5 (OOO-05). P6.1.5 (OOO-07) and P4.5.5 (OOO-08) are also DONE; OOO-06/P4.5.4 and OOO-09/P1.11.3 are also DONE; OOO-04/P3.2.7 is also DONE; the proposal queue is empty. Parent integration and CI/Linux/live gates remain unchanged.
+- **Current phase counts:** P0 15 DONE + 4 IN_PROGRESS; P1 45 DONE + 19 TODO; P2-P6 9 DONE + 93 TODO. Counts derive from unique task headings, not code volume.
 - **Phase:** P0 validation reopened; P1 implementation checkpoint retained · **Next task:** P0.1.2 (with P0.6.1/P0.6.2/P0.6.4) · **Next P1 code task:** P1.8.2 · **Owner decisions blocking work:** none
 - **Open decisions needing an owner answer:** none (D-01, D-02, D-09, D-12, D-15 answered 2026-09-20 in `ANSWERS.md`; provisional defaults are labelled in §3)
 - **Previous completion state (2026-09-20, P5.1.5 completed):** P0: 15/19 DONE, 4 IN_PROGRESS (reopened CI validation). P1: 44/63 DONE, 19 TODO. P2-P6: 5 DONE (P2.1.1, P2.3.4, P2.6.5, P6.1.4, P5.1.5), 93 TODO. Total: **64/180 DONE (35.6%), 4 IN_PROGRESS, 112 TODO**. Counts measure task headings, not code or effort; phase/CI/Linux/live gates unchanged.
@@ -86,6 +87,18 @@ All three pass in the isolated local rerun; their remote failures remain unresol
 ### 1.2 Owner-authorized analytical work (2026-09-20)
 
 **Current card — State: COMPLETE**
+- Proposal: **OOO-04** | Canonical task: **P3.2.7** | Parent: P3.2.2; consumer P3.2.5 (TODO).
+- Authority: 2026-09-20 owner request to implement last proposal with protocols/docs, on main.
+- Baseline: clean `main` at `3f3edc4`; no foreign dirty paths.
+- Scope: immutable graph/edit/check/anchor projections, reverse closure, joins, risk and conservative scopes.
+- Producers: P0.2.1 WorkspaceId, P0.1.3 Defaults, P1.3.3 IndexTier, all DONE. D-63.
+- Excluded: P3.2.1 parsers/resolution, P3.2.2 runtime assembly, P3.2.3 tools, P3.2.4 nudges,
+  P3.2.5 scheduler/verify, P3.2.6 pre-scan, KB loading, routing and runtime FX-37/54.
+- Checkpoint: P3.2.7 DONE; 20 impact tests/500 graph/300 hunk oracles, author review, ABI and final full build pass. Commit containing this checkpoint. No remaining proposals.
+- Validation: Windows/JDK 26 atlas 76 green; final full core 875/0 failures/errors/6 platform skips executed, eval 30/provider-api 15 reused. First full FX-22 failure and isolated pass preserved; P0 finding remains open.
+- Return: P0.1.2 + P0.6.1/P0.6.2/P0.6.4 -> P1.8.2. Journal: [P3.2.7](audit/OUT-OF-ORDER-P3.2.7.md).
+
+**Historical completed card — P1.11.3**
 - Proposal: **OOO-09** | Canonical task: **P1.11.3** | Parents: P1.11.1/P1.11.2 (TODO).
 - Authority: continuing owner request for sequential out-of-order implementation/protocols/docs.
 - Baseline: clean `817a32b`, `feature/out-of-order-kernels`, after P4.5.4 DONE.
@@ -244,6 +257,7 @@ A task may consume a type only after its producing task is `DONE` (I-01). Extend
 
 | Artifact | First declared (producer) | Extended by |
 |---|---|---|
+| `ImpactScope`, `ImpactFile`, `ImpactImport`, `ImpactDependency`, `ImpactGraph`, `ImpactLines`, `ImpactFanIn`, `ImpactHunk`, `ImpactCheck`, `ImpactContract`, `ImpactRequest`, `ImpactRisk`, `ImpactAnalysis`, `Impact` | P3.2.7 (OOO-04, DONE) | P3.2.1 graph inputs; P3.2.2 runtime assembly; P3.2.3/P3.2.5/P3.2.6 consumers |
 | `TraceSpanStatus`, `TraceSpan`, `TraceUnitKind`, `TraceUnit`, `TraceEdge`, `TraceSnapshot`, `TraceLimits`, `TraceStatus`, `TraceBand`, `TraceTiming`, `TraceCriticalPath`, `TraceAnalysis`, `TraceAnalytics` | P1.11.3 (OOO-09, DONE) | P1.11.1 runtime/emission/metrics; P1.11.2 accounting/reconciliation/export |
 | `AttemptOutcome`, `AttemptBranch`, `AttemptState`, `AttemptPolicy`, `AttemptLimits`, `AttemptEstimateStatus`, `AttemptEstimate`, `AttemptGate`, `AttemptCandidate`, `AttemptSelectionInput`, `AttemptSelectionStatus`, `AttemptSelection`, `AttemptCost` | P4.5.4 (OOO-06, DONE) | P4.5.1 outcome calibration/real gate evidence/Router; P4.5.2 escalation/controller |
 | `ScheduleContext`, `ScheduleEdge`, `ScheduleCostModel`, `ScheduleCosts`, `ScheduleProblem`, `ScheduleLimits`, `ScheduleStatus`, `ScheduleResult`, `DagSchedule` | P4.5.5 (OOO-08, DONE) | P4.5.3 calibrated model/ordering hook; P2.2.2 dispatch; P6 shadow evaluation |
@@ -352,6 +366,8 @@ Dispositions follow `ANSWERS.md` (2026-09-20): **CONFIRMED** (owner answer) · *
 | D-61 | Out-of-order finite attempt-policy costs | **LOCAL IMPLEMENTATION CHOICE** P4.5.4 owns immutable finite-state policies; one step per substantive attempt, explicit conditional/terminal/exhaustion charges. Exact decimal probability mass, rolling finite-horizon recurrence, unknown propagation, separate supplied eligibility/floors/conservative affordability before cost comparison. [Model and oracle](audit/OUT-OF-ORDER-P4.5.4.md). No learning, demotion or dispatch authority. | P4.5.4, P4.5.1, P4.5.2 |
 
 | D-62 | Out-of-order exact trace analytics | **LOCAL IMPLEMENTATION CHOICE** P1.11.3 owns immutable trace snapshots, one WorkId/currency, dedup by payload; cost ancestry distinct from explicit exclusive execution/wait DAG. BigInteger nanoseconds, endpoint sweep, bottom-up costs and iterative longest path. Unknown money/clocks/open intervals/causal completeness preserved. [Model/oracles](audit/OUT-OF-ORDER-P1.11.3.md). No runtime accounting/emission/export completion. | P1.11.3, P1.11.1, P1.11.2 |
+
+| D-63 | Out-of-order snapshot impact analysis | **LOCAL IMPLEMENTATION CHOICE** P3.2.7 owns qualified immutable graph/diff/check/anchor projections; reverse BFS permits cycles, check closures intersect blast, contract anchors intersect edits. Added+deleted line counts, duplicate dedup/overlap refusal, explicit unknown fan-in and broad package/workspace verification requirements. [Frozen model/oracle](audit/OUT-OF-ORDER-P3.2.7.md). Runtime producers/consumers and FX-37/54 remain with parents. | P3.2.7, P3.2.2, P3.2.5 |
 
 ### 3.1 Specification refinements recorded by this plan
 The plan follows the refined reading below; a later documentation-maintenance pass should apply them to the cited sections (they are not silent redesigns — each keeps the section's intent and closes an ambiguity found in review):
@@ -1160,6 +1176,7 @@ Goal: [§18.2 Stage C](docs/implementation/roadmap.md#sec-18-2): scheduler with 
 - Done: FX-37 (runtime-only dependency ⇒ `complete:false` visible, package-suite fallback).
 
 #### P3.2.2 [M] `Impact.analyze(E)` · TODO
+- Integration: use completed P3.2.7. Retain P3.2.1 prerequisite, runtime graph/diff/check/KB assembly, all four consumers and original runtime Done.
 - Why: [§7.4](docs/repository/navigation.md#sec-7-4) one analysis, four consumers; F04 (intersection).
 - Build: `Impact(fanin(sym) with tier/complete, importersClosure(E) (BFS), affectedTests(E) = tests in closure ∪ tests naming E's modules/symbols ∪ acceptance `run:` items whose closure ∩ closure(E) ≠ ∅ (unknown closures widen), contractsTouched(E) = CON/ADR notes with anchors ∩ E, risk(E) = Σ_hunks Δlines·(1 + log2(1 + fanin(enclosing symbol))), θ = 40)`; consumers: verification depth (slow checks early when `risk > θ`), routing risk floor (P4.5.1), shape/human anchors (contract touch ⇒ S2 + ADR in main line; interface change never auto-merged/never in an S3 child), `look(impact)`.
 - Done: worked example from §7.4 reproduced; FX-54 via `affectedTests`.
@@ -1174,12 +1191,27 @@ Goal: [§18.2 Stage C](docs/implementation/roadmap.md#sec-18-2): scheduler with 
 - Done: nudge fires once per changed symbol; exit gate refuses with an unresolved nudge.
 
 #### P3.2.5 [M] Blast radius selection · TODO
+- Integration: use completed P3.2.7; retain P3.2.1–P3.2.4 prerequisites, scheduler/verify execution, scope rendering and runtime fixtures.
 - Build: `blast(E) = closure(importers(E)) ∪ E`; tests = `tests_for(blast(E))`; incomplete graph ⇒ widen to the package suite and say so in the verify line; `verify(tests(blast))` unmasked.
 - Done: verify line names the scope (`blast 14` / `package pay`).
 
 #### P3.2.6 [I] Impact pre-scan at campaign open · TODO
 - Build: `Controller.open` runs `Impact` over the request's candidate paths (D-40: paths named in the request, lexical hits of request identifiers, atlas hubs; logged as inputs) and records the pre-scan as **incomplete discovery** — coverage, unresolved dependencies and explicit risk; zero hits never means no contract impact; the scan is refreshed when actual touched symbols/paths become known and the controller stops or upgrades before a now-disallowed action (I-23) ⇒ `impact.contract_touch`, fan-in estimate ⇒ `ShapeSelector` risk inputs and `contracts_touched` in the contract.
 - Done: shape decisions logged with pre-scan inputs.
+
+#### P3.2.7 [C][M] Snapshot impact calculation kernel (OOO-04) · DONE
+- Why: owner-authorized independent calculation while P3.2.1 runtime producers are absent; D-63.
+- Deps: P0.2.1, P0.1.3, P1.3.3 (explicit; no implicit dependency on earlier P3.2 tasks).
+- Pkg: `core` / `atlas`.
+- Build: immutable Impact* graph/edit/check/contract projections; reverse import BFS, affected-test joins,
+  anchored contract intersection, added+deleted line risk and package/workspace fallback requirements.
+- Spec: [navigation §§7.3–7.4](docs/repository/navigation.md#sec-7-3), [scheduler §8.1](docs/verification/scheduler.md#sec-8-1), [proposal OOO-04](OUT-OF-ORDER-PROPOSAL-TASKS.md).
+- Done: closures/intersections/risk and honest unknowns; independent seeded oracle, cycles/namespaces/
+  overlaps/40–41 boundary/large input/immutability; computational FX-37/54; review, ABI and full build.
+- Notes: P3.2.1–P3.2.6 retain parsers, runtime assembly, tools, nudges, scheduler, pre-scan and runtime FX;
+  KB and routing integration retain their owners. Kernel success never supplies a reuse proof.
+- Log: 2026-09-20 — admission/model before code; implementation and author review complete; 20 impact tests, 500 seed-327 graph and 300 seed-3271 hunk oracles, atlas package green. Review regression RED then fixed for unknown packages. Next ABI/full build. [Protocol](audit/OUT-OF-ORDER-P3.2.7.md).
+- Log: 2026-09-20 — DONE after additive ABI and final full build: core 875/0 failures/errors/6 platform skips; eval 30/provider-api 15 reused. First-run FX-22 failure and isolated pass retained in protocol. API guide, D-63, producer mapping and handoffs synchronized; P3.2.1–P3.2.6 retain their original runtime gates.
 
 ### P3.3 Scripted transform path
 #### P3.3.1 [M] `edit(transform)` with diff receipt · TODO

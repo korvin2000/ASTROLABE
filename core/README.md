@@ -1,5 +1,52 @@
 # Core implementation notes
 
+## Impact snapshots (P3.2.7)
+
+`atlas.Impact.analyze(request, defaults)` calculates blast radius, affected check IDs, touched CON/ADR
+IDs, line-weighted risk and required wider verification scopes. `ImpactRequest` contains the immutable,
+versioned/provenanced `ImpactGraph`, explicit edit set, complete hunk inventory (or null for pre-scan),
+qualified check projections and contract anchors. `ImpactFile` identifies workspace + package ID +
+canonical workspace-relative path; equal names in different packages/workspaces remain distinct.
+The producer supplies package identity; null is unknown, never a match for a guessed package.
+
+Graph edges point **importer -> dependency**. Reverse BFS includes edits and permits cycles. Completeness
+is scoped to the supplied coverage; a lexical tier, missing edited vertex/coverage, unknown package,
+unresolved edge or incomplete attestation prevents a complete blast claim. Supplied graph/coverage/tier/
+unresolved records remain accessible through the result's request. An incomplete graph requires suites
+for all covered/represented scopes and supplied checks, including disconnected unresolved importers.
+`ImpactScope(workspace, packageId)` requests a package suite; null package requests the whole workspace.
+Workspace requirements subsume that workspace's package suites, without merging other workspaces.
+
+Checks are selected by test files in blast, naming targets in blast, or **closure intersection** with
+blast. Closures may cross packages/workspaces because their members are qualified. Unknown/partial
+closures retain the check and require its containing suite. Unqualified file identities also widen.
+This projection does not replace `evidence.Closure`, compute receipt currency or prove closure reuse.
+Mandatory acceptance still belongs to the scheduler/exit gate, even when a check is outside this selection.
+Contract anchors intersect the original edit set, not transitive blast. `contractsComplete` also requires
+an explicitly complete inventory and complete qualified anchors; empty touched IDs alone prove nothing.
+
+Hunks use separate zero-based half-open old/new ranges. `changedLines` is the BigInteger sum of deleted
+plus added lines, so a replacement counts both sides. Exact duplicate hunks deduplicate; other overlaps
+on either side throw `IllegalArgumentException`. Zero-length ranges do not overlap. The caller attests
+the hunk inventory covers the entire supplied edit batch; an empty inventory means only zero-line changes,
+not missing diff information. Null means unknown inventory. Fan-in is supplied for the enclosing symbol,
+with its own count/tier/completeness, never inferred from import degree. The numeric estimate is
+`sum(changedLines * (1 + log2(1 + fanIn)))`, with Double logarithms and deterministic compensated sums.
+It is not a semantic-risk bound. Unknown count gives null total estimate; incomplete numeric fan-in
+retains an estimate but gives null threshold verdict. Zero-line hunks contribute zero without fan-in.
+
+`risk.exceedsThreshold` compares strictly against `defaults.theta` (40): the manual 10-line/fanin-3 plus
+5-line/fanin-1 example equals 40 and does not exceed it; another line/fanin-0 gives 41. Unknown risk
+conservatively sets `requiresSlowChecks`. Graph, contract and risk completeness stay separate;
+overall `complete` concerns this supplied analytic model, not runtime discovery, acceptance or promotion.
+Invalid scalar/reference/overlap/duplicate-ID input throws `IllegalArgumentException`; missing knowledge
+returns explicit uncertainty. Collections are copied and immutable. No command executes.
+
+Adjacency construction/BFS costs O(V+E); membership joins cost O(total supplied test/naming/closure/anchor
+memberships). Deterministic input/output sorting and hunk overlap validation add sorting costs; integer
+arithmetic depends on count size. P3.2.1–P3.2.6 retain discovery, runtime assembly, tools, nudges, scheduler,
+pre-scan and runtime FX-37/54. [Decision, proofs and tests](../audit/OUT-OF-ORDER-P3.2.7.md).
+
 ## Trace snapshots (P1.11.3)
 
 `telemetry.TraceAnalytics.analyze(snapshot, limits)` is pure analytics over a caller-supplied,
