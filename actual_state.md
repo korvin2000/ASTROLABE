@@ -8,6 +8,7 @@
 - **Verification:** 44 focused tests passed; final Windows/JDK 26 offline `build` succeeded. Core executed 777 tests: zero failures/errors, six existing platform skips. Provider-api was UP-TO-DATE (15 green test results). Nineteen tests added; Kotlin ABI regenerated and checked. Linux/remote CI and all live gates remain unvalidated/UNMEASURED.
 - **Retained observation:** the first full build once failed RunTest FX-22 when `bg-end` arrived before the terminal status; isolated and later full runs passed. OS/run code and tests were unchanged. Keep this finding with P0.6.1/P0.6.4; a passing rerun is not a diagnosis.
 - **Protocol, design choices, commands and integration owners:** [TODO §1.2](TODO.md#12-owner-authorized-analytical-work-2026-09-20) and [implementation log](audit/OUT-OF-ORDER-P2.1.1.md).
+- **Future analytical work:** [OUT-OF-ORDER-PROPOSAL-TASKS.md](OUT-OF-ORDER-PROPOSAL-TASKS.md) ranks context selection, statistical evaluation, calibration and impact analysis. All four are proposals; none has been activated or added to the task count. Use its activation protocol when the owner requests further out-of-order implementation; the normal resume point above remains current.
 
 ## Session 2 + targeted readiness audit (2026-09-20) — earlier checkpoint
 

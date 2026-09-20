@@ -2,6 +2,8 @@
 
 **Out-of-order analytical checkpoint (2026-09-20):** TODO §1.2 is **COMPLETE**; **P2.1.1 is DONE** as a graph/ledger component. No active override remains: resume reopened P0 validation, then P1.8.2. Do not redo P2.1.1 or jump to P2.1.2; P2 runtime/storage integration is still pending. Dependencies, existing task IDs, acceptance and validation gates remain binding. [Implementation and verification log](audit/OUT-OF-ORDER-P2.1.1.md).
 
+**When the owner asks for further out-of-order implementation:** read [OUT-OF-ORDER-PROPOSAL-TASKS.md](OUT-OF-ORDER-PROPOSAL-TASKS.md), first resume any ACTIVE card in TODO §1.2, otherwise select a dependency-admissible candidate using its ranking and activation protocol. The proposal itself starts no code task and changes no completion count; an ordinary request to continue the main plan follows the queue below.
+
 Resume the existing `TODO.md` plan from the checked-out implementation: first resolve the reopened P0 validation tasks, then continue the remaining P1 work. Implement and validate successive dependency-ready tasks; preserve the architecture, ownership boundaries, terminology and task IDs. The goal is a reusable Kotlin/JVM SDK consumable from Java, with host events/hooks and no UI coupling. This is implementation work; the earlier planning-only instructions are historical.
 
 **Checkpoint and starting point**
