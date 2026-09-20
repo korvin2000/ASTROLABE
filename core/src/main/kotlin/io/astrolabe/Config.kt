@@ -1,6 +1,7 @@
 package io.astrolabe
 
 import io.astrolabe.auth.ExecutionMode
+import io.astrolabe.auth.RedactionConfig
 import io.astrolabe.auth.Stage
 import io.astrolabe.id.Digest
 import io.astrolabe.provider.Profile
@@ -23,12 +24,15 @@ public data class Config(
     val ceiling: Stage = defaults.ceiling,
     /** The one authorized rules file (D-32); discovery alone never binds one. */
     val rulesFile: RulesBinding? = null,
+    /** Secret patterns, env allowlist and scan cap applied before model exposure and persistence (D-14). */
+    val redaction: RedactionConfig = RedactionConfig(),
     /** External durable state root (D-44); `null` selects the OS user-state directory. */
     val stateRoot: String? = null,
     val flags: Flags = Flags(),
 ) {
     public fun violations(): List<ConfigViolation> = buildList {
         addAll(defaults.violations())
+        addAll(redaction.violations())
         if (profiles.isNotEmpty() || profileRoles.main.isNotEmpty()) {
             if (profileRoles.main !in profiles) add(ConfigViolation("profileRoles.main", "profile '${profileRoles.main}' is not configured"))
             profileRoles.helper?.let { if (it !in profiles) add(ConfigViolation("profileRoles.helper", "profile '$it' is not configured")) }

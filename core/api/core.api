@@ -51,10 +51,11 @@ public final class io/astrolabe/AttemptConfig$Companion {
 public final class io/astrolabe/Config {
 	public static final field Companion Lio/astrolabe/Config$Companion;
 	public fun <init> ()V
-	public fun <init> (Lio/astrolabe/Defaults;Ljava/util/Map;Lio/astrolabe/ProfileRoles;Lio/astrolabe/Mode;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/DClassPolicy;Lio/astrolabe/auth/Stage;Lio/astrolabe/RulesBinding;Ljava/lang/String;Lio/astrolabe/Flags;)V
-	public synthetic fun <init> (Lio/astrolabe/Defaults;Ljava/util/Map;Lio/astrolabe/ProfileRoles;Lio/astrolabe/Mode;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/DClassPolicy;Lio/astrolabe/auth/Stage;Lio/astrolabe/RulesBinding;Ljava/lang/String;Lio/astrolabe/Flags;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Lio/astrolabe/Defaults;Ljava/util/Map;Lio/astrolabe/ProfileRoles;Lio/astrolabe/Mode;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/DClassPolicy;Lio/astrolabe/auth/Stage;Lio/astrolabe/RulesBinding;Lio/astrolabe/auth/RedactionConfig;Ljava/lang/String;Lio/astrolabe/Flags;)V
+	public synthetic fun <init> (Lio/astrolabe/Defaults;Ljava/util/Map;Lio/astrolabe/ProfileRoles;Lio/astrolabe/Mode;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/DClassPolicy;Lio/astrolabe/auth/Stage;Lio/astrolabe/RulesBinding;Lio/astrolabe/auth/RedactionConfig;Ljava/lang/String;Lio/astrolabe/Flags;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Lio/astrolabe/Defaults;
-	public final fun component10 ()Lio/astrolabe/Flags;
+	public final fun component10 ()Ljava/lang/String;
+	public final fun component11 ()Lio/astrolabe/Flags;
 	public final fun component2 ()Ljava/util/Map;
 	public final fun component3 ()Lio/astrolabe/ProfileRoles;
 	public final fun component4 ()Lio/astrolabe/Mode;
@@ -62,9 +63,9 @@ public final class io/astrolabe/Config {
 	public final fun component6 ()Lio/astrolabe/DClassPolicy;
 	public final fun component7 ()Lio/astrolabe/auth/Stage;
 	public final fun component8 ()Lio/astrolabe/RulesBinding;
-	public final fun component9 ()Ljava/lang/String;
-	public final fun copy (Lio/astrolabe/Defaults;Ljava/util/Map;Lio/astrolabe/ProfileRoles;Lio/astrolabe/Mode;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/DClassPolicy;Lio/astrolabe/auth/Stage;Lio/astrolabe/RulesBinding;Ljava/lang/String;Lio/astrolabe/Flags;)Lio/astrolabe/Config;
-	public static synthetic fun copy$default (Lio/astrolabe/Config;Lio/astrolabe/Defaults;Ljava/util/Map;Lio/astrolabe/ProfileRoles;Lio/astrolabe/Mode;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/DClassPolicy;Lio/astrolabe/auth/Stage;Lio/astrolabe/RulesBinding;Ljava/lang/String;Lio/astrolabe/Flags;ILjava/lang/Object;)Lio/astrolabe/Config;
+	public final fun component9 ()Lio/astrolabe/auth/RedactionConfig;
+	public final fun copy (Lio/astrolabe/Defaults;Ljava/util/Map;Lio/astrolabe/ProfileRoles;Lio/astrolabe/Mode;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/DClassPolicy;Lio/astrolabe/auth/Stage;Lio/astrolabe/RulesBinding;Lio/astrolabe/auth/RedactionConfig;Ljava/lang/String;Lio/astrolabe/Flags;)Lio/astrolabe/Config;
+	public static synthetic fun copy$default (Lio/astrolabe/Config;Lio/astrolabe/Defaults;Ljava/util/Map;Lio/astrolabe/ProfileRoles;Lio/astrolabe/Mode;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/DClassPolicy;Lio/astrolabe/auth/Stage;Lio/astrolabe/RulesBinding;Lio/astrolabe/auth/RedactionConfig;Ljava/lang/String;Lio/astrolabe/Flags;ILjava/lang/Object;)Lio/astrolabe/Config;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getCeiling ()Lio/astrolabe/auth/Stage;
 	public final fun getDClass ()Lio/astrolabe/DClassPolicy;
@@ -75,6 +76,7 @@ public final class io/astrolabe/Config {
 	public final fun getMode ()Lio/astrolabe/Mode;
 	public final fun getProfileRoles ()Lio/astrolabe/ProfileRoles;
 	public final fun getProfiles ()Ljava/util/Map;
+	public final fun getRedaction ()Lio/astrolabe/auth/RedactionConfig;
 	public final fun getRulesFile ()Lio/astrolabe/RulesBinding;
 	public final fun getStateRoot ()Ljava/lang/String;
 	public fun hashCode ()I
@@ -500,6 +502,306 @@ public final class io/astrolabe/auth/Boundary {
 	public static final field RESULT_CLOSE Ljava/lang/String;
 	public static final field RESULT_OPEN Ljava/lang/String;
 	public static final fun escape (Ljava/lang/String;)Ljava/lang/String;
+	public static final fun present (Ljava/lang/String;)Lio/astrolabe/auth/Boundary$DataView;
+}
+
+public final class io/astrolabe/auth/Boundary$DataView {
+	public fun <init> (Ljava/lang/String;Lio/astrolabe/auth/InstructionShape$Detection;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lio/astrolabe/auth/InstructionShape$Detection;
+	public final fun copy (Ljava/lang/String;Lio/astrolabe/auth/InstructionShape$Detection;)Lio/astrolabe/auth/Boundary$DataView;
+	public static synthetic fun copy$default (Lio/astrolabe/auth/Boundary$DataView;Ljava/lang/String;Lio/astrolabe/auth/InstructionShape$Detection;ILjava/lang/Object;)Lio/astrolabe/auth/Boundary$DataView;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBody ()Ljava/lang/String;
+	public final fun getDetection ()Lio/astrolabe/auth/InstructionShape$Detection;
+	public final fun getFlags ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/auth/Capability : java/lang/Enum {
+	public static final field Companion Lio/astrolabe/auth/Capability$Companion;
+	public static final field GitRefs Lio/astrolabe/auth/Capability;
+	public static final field Network Lio/astrolabe/auth/Capability;
+	public static final field OutsideWorkspace Lio/astrolabe/auth/Capability;
+	public static final field PackageInstall Lio/astrolabe/auth/Capability;
+	public static final field Privilege Lio/astrolabe/auth/Capability;
+	public static final field RunLocal Lio/astrolabe/auth/Capability;
+	public static final field WorkspaceRead Lio/astrolabe/auth/Capability;
+	public static final field WorkspaceWrite Lio/astrolabe/auth/Capability;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getWire ()Ljava/lang/String;
+	public fun toString ()Ljava/lang/String;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/auth/Capability;
+	public static fun values ()[Lio/astrolabe/auth/Capability;
+}
+
+public final class io/astrolabe/auth/Capability$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/CapabilitySet {
+	public static final field BUILT_IN Ljava/util/Map;
+	public static final field Companion Lio/astrolabe/auth/CapabilitySet$Companion;
+	public static final field WORKSPACE_LOCAL_TEST_ONLY Lio/astrolabe/auth/CapabilitySet;
+	public static final field WORKSPACE_READ_ONLY Lio/astrolabe/auth/CapabilitySet;
+	public fun <init> (Ljava/lang/String;Ljava/util/Set;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/util/Set;
+	public final fun contains (Lio/astrolabe/auth/Capability;)Z
+	public final fun copy (Ljava/lang/String;Ljava/util/Set;)Lio/astrolabe/auth/CapabilitySet;
+	public static synthetic fun copy$default (Lio/astrolabe/auth/CapabilitySet;Ljava/lang/String;Ljava/util/Set;ILjava/lang/Object;)Lio/astrolabe/auth/CapabilitySet;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCapabilities ()Ljava/util/Set;
+	public final fun getName ()Ljava/lang/String;
+	public fun hashCode ()I
+	public final fun missing (Ljava/util/Set;)Ljava/util/Set;
+	public static final fun resolve (Ljava/lang/String;)Lio/astrolabe/auth/CapabilitySet;
+	public static final fun resolve (Ljava/lang/String;Ljava/util/Map;)Lio/astrolabe/auth/CapabilitySet;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/auth/CapabilitySet$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/auth/CapabilitySet$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/auth/CapabilitySet;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/auth/CapabilitySet;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/CapabilitySet$Companion {
+	public final fun resolve (Ljava/lang/String;)Lio/astrolabe/auth/CapabilitySet;
+	public final fun resolve (Ljava/lang/String;Ljava/util/Map;)Lio/astrolabe/auth/CapabilitySet;
+	public static synthetic fun resolve$default (Lio/astrolabe/auth/CapabilitySet$Companion;Ljava/lang/String;Ljava/util/Map;ILjava/lang/Object;)Lio/astrolabe/auth/CapabilitySet;
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/Ceiling {
+	public static final field Companion Lio/astrolabe/auth/Ceiling$Companion;
+	public fun <init> (Lio/astrolabe/auth/CapabilitySet;Lio/astrolabe/auth/Stage;Lio/astrolabe/auth/ExecutionMode;)V
+	public final fun allows (Lio/astrolabe/auth/Classification;)Lio/astrolabe/auth/Refusal;
+	public final fun allows (Lio/astrolabe/auth/Stage;)Lio/astrolabe/auth/Refusal;
+	public final fun allows (Ljava/lang/String;Lio/astrolabe/provider/ToolMask;)Lio/astrolabe/auth/Refusal;
+	public final fun component1 ()Lio/astrolabe/auth/CapabilitySet;
+	public final fun component2 ()Lio/astrolabe/auth/Stage;
+	public final fun component3 ()Lio/astrolabe/auth/ExecutionMode;
+	public final fun copy (Lio/astrolabe/auth/CapabilitySet;Lio/astrolabe/auth/Stage;Lio/astrolabe/auth/ExecutionMode;)Lio/astrolabe/auth/Ceiling;
+	public static synthetic fun copy$default (Lio/astrolabe/auth/Ceiling;Lio/astrolabe/auth/CapabilitySet;Lio/astrolabe/auth/Stage;Lio/astrolabe/auth/ExecutionMode;ILjava/lang/Object;)Lio/astrolabe/auth/Ceiling;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCapabilities ()Lio/astrolabe/auth/CapabilitySet;
+	public final fun getExecutionMode ()Lio/astrolabe/auth/ExecutionMode;
+	public final fun getStage ()Lio/astrolabe/auth/Stage;
+	public fun hashCode ()I
+	public static final fun of (Lio/astrolabe/contract/Authorization;Lio/astrolabe/auth/ExecutionMode;)Lio/astrolabe/auth/Ceiling;
+	public static final fun of (Lio/astrolabe/contract/Authorization;Lio/astrolabe/auth/ExecutionMode;Ljava/util/Map;)Lio/astrolabe/auth/Ceiling;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/auth/Ceiling$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/auth/Ceiling$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/auth/Ceiling;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/auth/Ceiling;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/Ceiling$Companion {
+	public final fun of (Lio/astrolabe/contract/Authorization;Lio/astrolabe/auth/ExecutionMode;)Lio/astrolabe/auth/Ceiling;
+	public final fun of (Lio/astrolabe/contract/Authorization;Lio/astrolabe/auth/ExecutionMode;Ljava/util/Map;)Lio/astrolabe/auth/Ceiling;
+	public static synthetic fun of$default (Lio/astrolabe/auth/Ceiling$Companion;Lio/astrolabe/contract/Authorization;Lio/astrolabe/auth/ExecutionMode;Ljava/util/Map;ILjava/lang/Object;)Lio/astrolabe/auth/Ceiling;
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/Classification {
+	public static final field Companion Lio/astrolabe/auth/Classification$Companion;
+	public fun <init> (Lio/astrolabe/tool/EffectClass;Ljava/util/List;Ljava/util/Set;Ljava/lang/String;ZZ)V
+	public synthetic fun <init> (Lio/astrolabe/tool/EffectClass;Ljava/util/List;Ljava/util/Set;Ljava/lang/String;ZZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lio/astrolabe/tool/EffectClass;
+	public final fun component2 ()Ljava/util/List;
+	public final fun component3 ()Ljava/util/Set;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Z
+	public final fun component6 ()Z
+	public final fun copy (Lio/astrolabe/tool/EffectClass;Ljava/util/List;Ljava/util/Set;Ljava/lang/String;ZZ)Lio/astrolabe/auth/Classification;
+	public static synthetic fun copy$default (Lio/astrolabe/auth/Classification;Lio/astrolabe/tool/EffectClass;Ljava/util/List;Ljava/util/Set;Ljava/lang/String;ZZILjava/lang/Object;)Lio/astrolabe/auth/Classification;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getApproximate ()Z
+	public final fun getCommand ()Ljava/lang/String;
+	public final fun getEffectClass ()Lio/astrolabe/tool/EffectClass;
+	public final fun getEffectsUnknown ()Z
+	public final fun getReasons ()Ljava/util/List;
+	public final fun getRequiredCapabilities ()Ljava/util/Set;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/auth/Classification$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/auth/Classification$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/auth/Classification;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/auth/Classification;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/Classification$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/ContentClass : java/lang/Enum {
+	public static final field Companion Lio/astrolabe/auth/ContentClass$Companion;
+	public static final field ModelFacing Lio/astrolabe/auth/ContentClass;
+	public static final field NativeReplay Lio/astrolabe/auth/ContentClass;
+	public static final field RecoveryPreimage Lio/astrolabe/auth/ContentClass;
+	public static final field ReusableEvidence Lio/astrolabe/auth/ContentClass;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/auth/ContentClass;
+	public static fun values ()[Lio/astrolabe/auth/ContentClass;
+}
+
+public final class io/astrolabe/auth/ContentClass$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/EffectPolicy {
+	public static final field INSTANCE Lio/astrolabe/auth/EffectPolicy;
+	public static final fun classify (Lio/astrolabe/tool/RunArgs;Ljava/lang/String;)Lio/astrolabe/auth/Classification;
+	public static final fun classify (Lio/astrolabe/tool/RunArgs;Ljava/lang/String;Ljava/util/List;)Lio/astrolabe/auth/Classification;
+	public static final fun classify (Lio/astrolabe/tool/RunArgs;Ljava/lang/String;Ljava/util/List;Lio/astrolabe/auth/EffectPolicyConfig;)Lio/astrolabe/auth/Classification;
+	public static final fun classify (Ljava/util/List;Ljava/lang/String;)Lio/astrolabe/auth/Classification;
+	public static final fun classify (Ljava/util/List;Ljava/lang/String;Ljava/lang/String;)Lio/astrolabe/auth/Classification;
+	public static final fun classify (Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;)Lio/astrolabe/auth/Classification;
+	public static final fun classify (Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Lio/astrolabe/auth/EffectPolicyConfig;)Lio/astrolabe/auth/Classification;
+	public static synthetic fun classify$default (Lio/astrolabe/tool/RunArgs;Ljava/lang/String;Ljava/util/List;Lio/astrolabe/auth/EffectPolicyConfig;ILjava/lang/Object;)Lio/astrolabe/auth/Classification;
+	public static synthetic fun classify$default (Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Lio/astrolabe/auth/EffectPolicyConfig;ILjava/lang/Object;)Lio/astrolabe/auth/Classification;
+}
+
+public final class io/astrolabe/auth/EffectPolicyConfig {
+	public static final field Companion Lio/astrolabe/auth/EffectPolicyConfig$Companion;
+	public static final field DEFAULT_DESTRUCTIVE_FILE Ljava/util/Set;
+	public static final field DEFAULT_GIT_REF_MUTATIONS Ljava/util/Set;
+	public static final field DEFAULT_NETWORK Ljava/util/Set;
+	public static final field DEFAULT_PACKAGE_INSTALL Ljava/util/Set;
+	public static final field DEFAULT_PRIVILEGE Ljava/util/Set;
+	public static final field DEFAULT_SCRIPT_INTERPRETERS Ljava/util/Set;
+	public static final field DEFAULT_WRITING Ljava/util/Set;
+	public fun <init> ()V
+	public fun <init> (Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;ZZ)V
+	public synthetic fun <init> (Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;ZZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/util/Set;
+	public final fun component10 ()Z
+	public final fun component2 ()Ljava/util/Set;
+	public final fun component3 ()Ljava/util/Set;
+	public final fun component4 ()Ljava/util/Set;
+	public final fun component5 ()Ljava/util/Set;
+	public final fun component6 ()Ljava/util/Set;
+	public final fun component7 ()Ljava/util/Set;
+	public final fun component8 ()Ljava/util/Set;
+	public final fun component9 ()Z
+	public final fun copy (Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;ZZ)Lio/astrolabe/auth/EffectPolicyConfig;
+	public static synthetic fun copy$default (Lio/astrolabe/auth/EffectPolicyConfig;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;Ljava/util/Set;ZZILjava/lang/Object;)Lio/astrolabe/auth/EffectPolicyConfig;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCaseInsensitivePaths ()Z
+	public final fun getDestructiveFileCommands ()Ljava/util/Set;
+	public final fun getGitRefMutations ()Ljava/util/Set;
+	public final fun getNetworkCommands ()Ljava/util/Set;
+	public final fun getPackageInstallCommands ()Ljava/util/Set;
+	public final fun getPackageInstallIsDClass ()Z
+	public final fun getPrivilegeCommands ()Ljava/util/Set;
+	public final fun getScriptInterpreters ()Ljava/util/Set;
+	public final fun getTmpPrefixes ()Ljava/util/Set;
+	public final fun getWritingCommands ()Ljava/util/Set;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/auth/EffectPolicyConfig$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/auth/EffectPolicyConfig$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/auth/EffectPolicyConfig;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/auth/EffectPolicyConfig;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/EffectPolicyConfig$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public abstract interface class io/astrolabe/auth/ExecutionDecision {
+	public static final field Companion Lio/astrolabe/auth/ExecutionDecision$Companion;
+}
+
+public final class io/astrolabe/auth/ExecutionDecision$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/ExecutionDecision$Dispatch : io/astrolabe/auth/ExecutionDecision {
+	public static final field Companion Lio/astrolabe/auth/ExecutionDecision$Dispatch$Companion;
+	public fun <init> (Lio/astrolabe/auth/ExecutionMode;Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Lio/astrolabe/auth/ExecutionMode;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (Lio/astrolabe/auth/ExecutionMode;Ljava/lang/String;Ljava/lang/String;)Lio/astrolabe/auth/ExecutionDecision$Dispatch;
+	public static synthetic fun copy$default (Lio/astrolabe/auth/ExecutionDecision$Dispatch;Lio/astrolabe/auth/ExecutionMode;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/auth/ExecutionDecision$Dispatch;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBackend ()Ljava/lang/String;
+	public final fun getLabel ()Ljava/lang/String;
+	public final fun getMode ()Lio/astrolabe/auth/ExecutionMode;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/auth/ExecutionDecision$Dispatch$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/auth/ExecutionDecision$Dispatch$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/auth/ExecutionDecision$Dispatch;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/auth/ExecutionDecision$Dispatch;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/ExecutionDecision$Dispatch$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/ExecutionDecision$Refused : io/astrolabe/auth/ExecutionDecision {
+	public static final field Companion Lio/astrolabe/auth/ExecutionDecision$Refused$Companion;
+	public fun <init> (Lio/astrolabe/auth/Refusal;)V
+	public final fun component1 ()Lio/astrolabe/auth/Refusal;
+	public final fun copy (Lio/astrolabe/auth/Refusal;)Lio/astrolabe/auth/ExecutionDecision$Refused;
+	public static synthetic fun copy$default (Lio/astrolabe/auth/ExecutionDecision$Refused;Lio/astrolabe/auth/Refusal;ILjava/lang/Object;)Lio/astrolabe/auth/ExecutionDecision$Refused;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getRefusal ()Lio/astrolabe/auth/Refusal;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/auth/ExecutionDecision$Refused$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/auth/ExecutionDecision$Refused$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/auth/ExecutionDecision$Refused;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/auth/ExecutionDecision$Refused;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/ExecutionDecision$Refused$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
 }
 
 public final class io/astrolabe/auth/ExecutionMode : java/lang/Enum {
@@ -515,6 +817,566 @@ public final class io/astrolabe/auth/ExecutionMode$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
 }
 
+public final class io/astrolabe/auth/ExecutionModeLabel {
+	public static final field INSTANCE Lio/astrolabe/auth/ExecutionModeLabel;
+	public static final fun render (Lio/astrolabe/auth/ExecutionMode;)Ljava/lang/String;
+	public static final fun short (Lio/astrolabe/auth/ExecutionMode;)Ljava/lang/String;
+}
+
+public final class io/astrolabe/auth/Executors {
+	public static final field INSTANCE Lio/astrolabe/auth/Executors;
+	public static final field NO_BACKEND Ljava/lang/String;
+	public static final fun require (Lio/astrolabe/auth/ExecutionMode;)Lio/astrolabe/auth/ExecutionDecision;
+	public static final fun require (Lio/astrolabe/auth/ExecutionMode;Ljava/util/Set;)Lio/astrolabe/auth/ExecutionDecision;
+	public static synthetic fun require$default (Lio/astrolabe/auth/ExecutionMode;Ljava/util/Set;ILjava/lang/Object;)Lio/astrolabe/auth/ExecutionDecision;
+}
+
+public final class io/astrolabe/auth/InstructionCue {
+	public static final field Companion Lio/astrolabe/auth/InstructionCue$Companion;
+	public fun <init> (Lio/astrolabe/auth/InstructionSignal;ILjava/lang/String;)V
+	public final fun component1 ()Lio/astrolabe/auth/InstructionSignal;
+	public final fun component2 ()I
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (Lio/astrolabe/auth/InstructionSignal;ILjava/lang/String;)Lio/astrolabe/auth/InstructionCue;
+	public static synthetic fun copy$default (Lio/astrolabe/auth/InstructionCue;Lio/astrolabe/auth/InstructionSignal;ILjava/lang/String;ILjava/lang/Object;)Lio/astrolabe/auth/InstructionCue;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getExcerpt ()Ljava/lang/String;
+	public final fun getLine ()I
+	public final fun getSignal ()Lio/astrolabe/auth/InstructionSignal;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/auth/InstructionCue$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/auth/InstructionCue$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/auth/InstructionCue;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/auth/InstructionCue;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/InstructionCue$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/InstructionShape {
+	public static final field FLAG Ljava/lang/String;
+	public static final field INSTANCE Lio/astrolabe/auth/InstructionShape;
+	public static final field MAX_SCAN_CHARS I
+	public static final field THRESHOLD I
+	public static final fun detect (Ljava/lang/String;)Lio/astrolabe/auth/InstructionShape$Detection;
+}
+
+public final class io/astrolabe/auth/InstructionShape$Detection {
+	public static final field Companion Lio/astrolabe/auth/InstructionShape$Detection$Companion;
+	public fun <init> (ZILjava/util/List;Z)V
+	public synthetic fun <init> (ZILjava/util/List;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Z
+	public final fun component2 ()I
+	public final fun component3 ()Ljava/util/List;
+	public final fun component4 ()Z
+	public final fun copy (ZILjava/util/List;Z)Lio/astrolabe/auth/InstructionShape$Detection;
+	public static synthetic fun copy$default (Lio/astrolabe/auth/InstructionShape$Detection;ZILjava/util/List;ZILjava/lang/Object;)Lio/astrolabe/auth/InstructionShape$Detection;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCues ()Ljava/util/List;
+	public final fun getFlagged ()Z
+	public final fun getFlags ()Ljava/util/List;
+	public final fun getReasons ()Ljava/util/List;
+	public final fun getScanTruncated ()Z
+	public final fun getScore ()I
+	public fun hashCode ()I
+	public final fun signals ()Ljava/util/Set;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/auth/InstructionShape$Detection$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/auth/InstructionShape$Detection$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/auth/InstructionShape$Detection;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/auth/InstructionShape$Detection;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/InstructionShape$Detection$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/InstructionSignal : java/lang/Enum {
+	public static final field AgentAddress Lio/astrolabe/auth/InstructionSignal;
+	public static final field ChatTemplate Lio/astrolabe/auth/InstructionSignal;
+	public static final field Companion Lio/astrolabe/auth/InstructionSignal$Companion;
+	public static final field HarnessDelimiter Lio/astrolabe/auth/InstructionSignal;
+	public static final field ImperativeToAgent Lio/astrolabe/auth/InstructionSignal;
+	public static final field OverrideInstruction Lio/astrolabe/auth/InstructionSignal;
+	public static final field RoleLabel Lio/astrolabe/auth/InstructionSignal;
+	public static final field SystemPromptMarker Lio/astrolabe/auth/InstructionSignal;
+	public static final field ToolCallShape Lio/astrolabe/auth/InstructionSignal;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getLabel ()Ljava/lang/String;
+	public final fun getWeight ()I
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/auth/InstructionSignal;
+	public static fun values ()[Lio/astrolabe/auth/InstructionSignal;
+}
+
+public final class io/astrolabe/auth/InstructionSignal$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/OpCapabilities {
+	public static final field INSTANCE Lio/astrolabe/auth/OpCapabilities;
+	public static final fun required (Ljava/lang/String;)Ljava/util/Set;
+}
+
+public final class io/astrolabe/auth/PermissionLadder {
+	public static final field Companion Lio/astrolabe/auth/PermissionLadder$Companion;
+	public static final field REACHABLE Ljava/util/Set;
+	public fun <init> (Lio/astrolabe/auth/Stage;)V
+	public fun <init> (Lio/astrolabe/auth/Stage;Ljava/util/Set;)V
+	public synthetic fun <init> (Lio/astrolabe/auth/Stage;Ljava/util/Set;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getCeiling ()Lio/astrolabe/auth/Stage;
+	public final fun getHighestAuthorizedStage ()Lio/astrolabe/auth/Stage;
+	public final fun getReachable ()Ljava/util/Set;
+	public final fun getRefusals ()Ljava/util/List;
+	public static final fun of (Lio/astrolabe/contract/Authorization;)Lio/astrolabe/auth/PermissionLadder;
+	public static final fun of (Lio/astrolabe/contract/Authorization;Ljava/util/Set;)Lio/astrolabe/auth/PermissionLadder;
+	public final fun record (Lio/astrolabe/auth/Stage;)V
+	public final fun report ()Ljava/lang/String;
+	public final fun request (Lio/astrolabe/auth/Stage;)Lio/astrolabe/auth/StageGrant;
+}
+
+public final class io/astrolabe/auth/PermissionLadder$Companion {
+	public final fun of (Lio/astrolabe/contract/Authorization;)Lio/astrolabe/auth/PermissionLadder;
+	public final fun of (Lio/astrolabe/contract/Authorization;Ljava/util/Set;)Lio/astrolabe/auth/PermissionLadder;
+	public static synthetic fun of$default (Lio/astrolabe/auth/PermissionLadder$Companion;Lio/astrolabe/contract/Authorization;Ljava/util/Set;ILjava/lang/Object;)Lio/astrolabe/auth/PermissionLadder;
+}
+
+public abstract interface class io/astrolabe/auth/Provenance {
+	public static final field Companion Lio/astrolabe/auth/Provenance$Companion;
+	public abstract fun getLabel ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/auth/Provenance$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/Provenance$HostConfig : io/astrolabe/auth/Provenance {
+	public static final field INSTANCE Lio/astrolabe/auth/Provenance$HostConfig;
+	public fun getLabel ()Ljava/lang/String;
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/auth/Provenance$UserAuthority : io/astrolabe/auth/Provenance {
+	public static final field Companion Lio/astrolabe/auth/Provenance$UserAuthority$Companion;
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/astrolabe/auth/Provenance$UserAuthority;
+	public static synthetic fun copy$default (Lio/astrolabe/auth/Provenance$UserAuthority;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/auth/Provenance$UserAuthority;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getLabel ()Ljava/lang/String;
+	public final fun getWho ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/auth/Provenance$UserAuthority$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/auth/Provenance$UserAuthority$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/auth/Provenance$UserAuthority;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/auth/Provenance$UserAuthority;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/Provenance$UserAuthority$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/Redacted {
+	public static final field Companion Lio/astrolabe/auth/Redacted$Companion;
+	public fun <init> (Ljava/lang/String;Lio/astrolabe/evidence/RedactionMask;Ljava/util/List;)V
+	public synthetic fun <init> (Ljava/lang/String;Lio/astrolabe/evidence/RedactionMask;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lio/astrolabe/evidence/RedactionMask;
+	public final fun component3 ()Ljava/util/List;
+	public final fun copy (Ljava/lang/String;Lio/astrolabe/evidence/RedactionMask;Ljava/util/List;)Lio/astrolabe/auth/Redacted;
+	public static synthetic fun copy$default (Lio/astrolabe/auth/Redacted;Ljava/lang/String;Lio/astrolabe/evidence/RedactionMask;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/auth/Redacted;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getApplied ()Z
+	public final fun getHits ()Ljava/util/List;
+	public final fun getLimitations ()Ljava/util/List;
+	public final fun getMask ()Lio/astrolabe/evidence/RedactionMask;
+	public final fun getText ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/auth/Redacted$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/auth/Redacted$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/auth/Redacted;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/auth/Redacted;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/Redacted$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/Redaction {
+	public static final field Companion Lio/astrolabe/auth/Redaction$Companion;
+	public fun <init> ()V
+	public fun <init> (Lio/astrolabe/auth/RedactionConfig;)V
+	public synthetic fun <init> (Lio/astrolabe/auth/RedactionConfig;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun apply (Ljava/lang/String;)Lio/astrolabe/auth/Redacted;
+	public final fun apply (Ljava/lang/String;Lio/astrolabe/auth/ContentClass;)Lio/astrolabe/auth/Redacted;
+	public final fun applyBytes ([B)Lio/astrolabe/auth/Redacted;
+	public final fun applyBytes ([BLio/astrolabe/auth/ContentClass;)Lio/astrolabe/auth/Redacted;
+	public final fun getConfig ()Lio/astrolabe/auth/RedactionConfig;
+	public static final fun neverRewrite (Lio/astrolabe/auth/ContentClass;)Z
+	public final fun refuse (Lio/astrolabe/auth/ContentClass;)Lio/astrolabe/auth/Refusal;
+}
+
+public final class io/astrolabe/auth/Redaction$Companion {
+	public final fun neverRewrite (Lio/astrolabe/auth/ContentClass;)Z
+}
+
+public final class io/astrolabe/auth/RedactionConfig {
+	public static final field Companion Lio/astrolabe/auth/RedactionConfig$Companion;
+	public static final field DEFAULT_ENV_ALLOWLIST Ljava/util/Set;
+	public static final field DEFAULT_PATTERNS Ljava/util/List;
+	public fun <init> ()V
+	public fun <init> (Ljava/util/List;Ljava/util/Set;I)V
+	public synthetic fun <init> (Ljava/util/List;Ljava/util/Set;IILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun component2 ()Ljava/util/Set;
+	public final fun component3 ()I
+	public final fun copy (Ljava/util/List;Ljava/util/Set;I)Lio/astrolabe/auth/RedactionConfig;
+	public static synthetic fun copy$default (Lio/astrolabe/auth/RedactionConfig;Ljava/util/List;Ljava/util/Set;IILjava/lang/Object;)Lio/astrolabe/auth/RedactionConfig;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEnvAllowlist ()Ljava/util/Set;
+	public final fun getMaxBytes ()I
+	public final fun getPatterns ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+	public final fun violations ()Ljava/util/List;
+}
+
+public final synthetic class io/astrolabe/auth/RedactionConfig$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/auth/RedactionConfig$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/auth/RedactionConfig;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/auth/RedactionConfig;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/RedactionConfig$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/RedactionHit {
+	public static final field Companion Lio/astrolabe/auth/RedactionHit$Companion;
+	public fun <init> (Ljava/lang/String;I)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()I
+	public final fun copy (Ljava/lang/String;I)Lio/astrolabe/auth/RedactionHit;
+	public static synthetic fun copy$default (Lio/astrolabe/auth/RedactionHit;Ljava/lang/String;IILjava/lang/Object;)Lio/astrolabe/auth/RedactionHit;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getKind ()Ljava/lang/String;
+	public final fun getLine ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/auth/RedactionHit$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/auth/RedactionHit$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/auth/RedactionHit;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/auth/RedactionHit;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/RedactionHit$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/RedactionPattern {
+	public static final field Companion Lio/astrolabe/auth/RedactionPattern$Companion;
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;)Lio/astrolabe/auth/RedactionPattern;
+	public static synthetic fun copy$default (Lio/astrolabe/auth/RedactionPattern;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/auth/RedactionPattern;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getKind ()Ljava/lang/String;
+	public final fun getRegex ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/auth/RedactionPattern$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/auth/RedactionPattern$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/auth/RedactionPattern;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/auth/RedactionPattern;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/RedactionPattern$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/Refusal {
+	public static final field Companion Lio/astrolabe/auth/Refusal$Companion;
+	public fun <init> (Ljava/lang/String;Lio/astrolabe/auth/RefusalReason;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lio/astrolabe/auth/RefusalReason;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Lio/astrolabe/auth/RefusalReason;Ljava/lang/String;)Lio/astrolabe/auth/Refusal;
+	public static synthetic fun copy$default (Lio/astrolabe/auth/Refusal;Ljava/lang/String;Lio/astrolabe/auth/RefusalReason;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/auth/Refusal;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDetail ()Ljava/lang/String;
+	public final fun getReason ()Lio/astrolabe/auth/RefusalReason;
+	public final fun getSubject ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/auth/Refusal$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/auth/Refusal$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/auth/Refusal;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/auth/Refusal;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/Refusal$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/RefusalReason : java/lang/Enum {
+	public static final field AboveStageCeiling Lio/astrolabe/auth/RefusalReason;
+	public static final field Companion Lio/astrolabe/auth/RefusalReason$Companion;
+	public static final field ConfinementUnavailable Lio/astrolabe/auth/RefusalReason;
+	public static final field MaskedOp Lio/astrolabe/auth/RefusalReason;
+	public static final field MissingCapability Lio/astrolabe/auth/RefusalReason;
+	public static final field ProtectedContent Lio/astrolabe/auth/RefusalReason;
+	public static final field StageNotImplemented Lio/astrolabe/auth/RefusalReason;
+	public static final field UnknownOp Lio/astrolabe/auth/RefusalReason;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getWire ()Ljava/lang/String;
+	public fun toString ()Ljava/lang/String;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/auth/RefusalReason;
+	public static fun values ()[Lio/astrolabe/auth/RefusalReason;
+}
+
+public final class io/astrolabe/auth/RefusalReason$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/RulesCandidate {
+	public static final field Companion Lio/astrolabe/auth/RulesCandidate$Companion;
+	public fun <init> (Ljava/lang/String;Lio/astrolabe/id/Digest;J)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lio/astrolabe/id/Digest;
+	public final fun component3 ()J
+	public final fun copy (Ljava/lang/String;Lio/astrolabe/id/Digest;J)Lio/astrolabe/auth/RulesCandidate;
+	public static synthetic fun copy$default (Lio/astrolabe/auth/RulesCandidate;Ljava/lang/String;Lio/astrolabe/id/Digest;JILjava/lang/Object;)Lio/astrolabe/auth/RulesCandidate;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDigest ()Lio/astrolabe/id/Digest;
+	public final fun getPath ()Ljava/lang/String;
+	public final fun getSizeBytes ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/auth/RulesCandidate$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/auth/RulesCandidate$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/auth/RulesCandidate;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/auth/RulesCandidate;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/RulesCandidate$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/RulesSnapshot {
+	public static final field Companion Lio/astrolabe/auth/RulesSnapshot$Companion;
+	public fun <init> (Lio/astrolabe/RulesBinding;Ljava/lang/String;Lio/astrolabe/id/Digest;)V
+	public final fun component1 ()Lio/astrolabe/RulesBinding;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Lio/astrolabe/id/Digest;
+	public final fun copy (Lio/astrolabe/RulesBinding;Ljava/lang/String;Lio/astrolabe/id/Digest;)Lio/astrolabe/auth/RulesSnapshot;
+	public static synthetic fun copy$default (Lio/astrolabe/auth/RulesSnapshot;Lio/astrolabe/RulesBinding;Ljava/lang/String;Lio/astrolabe/id/Digest;ILjava/lang/Object;)Lio/astrolabe/auth/RulesSnapshot;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBinding ()Lio/astrolabe/RulesBinding;
+	public final fun getDigest ()Lio/astrolabe/id/Digest;
+	public final fun getText ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/auth/RulesSnapshot$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/auth/RulesSnapshot$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/auth/RulesSnapshot;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/auth/RulesSnapshot;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/RulesSnapshot$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public abstract interface class io/astrolabe/auth/RulesStatus {
+	public static final field Companion Lio/astrolabe/auth/RulesStatus$Companion;
+}
+
+public final class io/astrolabe/auth/RulesStatus$Approved : io/astrolabe/auth/RulesStatus {
+	public static final field Companion Lio/astrolabe/auth/RulesStatus$Approved$Companion;
+	public fun <init> (Lio/astrolabe/auth/RulesSnapshot;)V
+	public final fun component1 ()Lio/astrolabe/auth/RulesSnapshot;
+	public final fun copy (Lio/astrolabe/auth/RulesSnapshot;)Lio/astrolabe/auth/RulesStatus$Approved;
+	public static synthetic fun copy$default (Lio/astrolabe/auth/RulesStatus$Approved;Lio/astrolabe/auth/RulesSnapshot;ILjava/lang/Object;)Lio/astrolabe/auth/RulesStatus$Approved;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getSnapshot ()Lio/astrolabe/auth/RulesSnapshot;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/auth/RulesStatus$Approved$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/auth/RulesStatus$Approved$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/auth/RulesStatus$Approved;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/auth/RulesStatus$Approved;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/RulesStatus$Approved$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/RulesStatus$ChangedSinceApproval : io/astrolabe/auth/RulesStatus {
+	public static final field Companion Lio/astrolabe/auth/RulesStatus$ChangedSinceApproval$Companion;
+	public fun <init> (Lio/astrolabe/id/Digest;Lio/astrolabe/id/Digest;)V
+	public final fun component1 ()Lio/astrolabe/id/Digest;
+	public final fun component2 ()Lio/astrolabe/id/Digest;
+	public final fun copy (Lio/astrolabe/id/Digest;Lio/astrolabe/id/Digest;)Lio/astrolabe/auth/RulesStatus$ChangedSinceApproval;
+	public static synthetic fun copy$default (Lio/astrolabe/auth/RulesStatus$ChangedSinceApproval;Lio/astrolabe/id/Digest;Lio/astrolabe/id/Digest;ILjava/lang/Object;)Lio/astrolabe/auth/RulesStatus$ChangedSinceApproval;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getApproved ()Lio/astrolabe/id/Digest;
+	public final fun getCurrent ()Lio/astrolabe/id/Digest;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/auth/RulesStatus$ChangedSinceApproval$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/auth/RulesStatus$ChangedSinceApproval$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/auth/RulesStatus$ChangedSinceApproval;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/auth/RulesStatus$ChangedSinceApproval;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/RulesStatus$ChangedSinceApproval$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/RulesStatus$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/RulesStatus$Missing : io/astrolabe/auth/RulesStatus {
+	public static final field INSTANCE Lio/astrolabe/auth/RulesStatus$Missing;
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/auth/RulesStatus$Unreadable : io/astrolabe/auth/RulesStatus {
+	public static final field Companion Lio/astrolabe/auth/RulesStatus$Unreadable$Companion;
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/astrolabe/auth/RulesStatus$Unreadable;
+	public static synthetic fun copy$default (Lio/astrolabe/auth/RulesStatus$Unreadable;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/auth/RulesStatus$Unreadable;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getReason ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/auth/RulesStatus$Unreadable$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/auth/RulesStatus$Unreadable$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/auth/RulesStatus$Unreadable;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/auth/RulesStatus$Unreadable;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/RulesStatus$Unreadable$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/RulesStatus$Untrusted : io/astrolabe/auth/RulesStatus {
+	public static final field INSTANCE Lio/astrolabe/auth/RulesStatus$Untrusted;
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/auth/RulesTrust {
+	public static final field CANDIDATE_PATHS Ljava/util/List;
+	public static final field Companion Lio/astrolabe/auth/RulesTrust$Companion;
+	public fun <init> (Ljava/nio/file/Path;)V
+	public final fun approved (Lio/astrolabe/RulesBinding;)Lio/astrolabe/auth/RulesSnapshot;
+	public final fun bind (Lio/astrolabe/auth/RulesCandidate;Lio/astrolabe/auth/Provenance;)Lio/astrolabe/RulesBinding;
+	public final fun candidate (Ljava/lang/String;)Lio/astrolabe/auth/RulesCandidate;
+	public final fun discover ()Ljava/util/List;
+	public final fun status (Lio/astrolabe/RulesBinding;)Lio/astrolabe/auth/RulesStatus;
+	public final fun status (Lio/astrolabe/auth/RulesCandidate;Lio/astrolabe/RulesBinding;)Lio/astrolabe/auth/RulesStatus;
+}
+
+public final class io/astrolabe/auth/RulesTrust$Companion {
+}
+
 public final class io/astrolabe/auth/Stage : java/lang/Enum {
 	public static final field Companion Lio/astrolabe/auth/Stage$Companion;
 	public static final field Deploy Lio/astrolabe/auth/Stage;
@@ -528,6 +1390,70 @@ public final class io/astrolabe/auth/Stage : java/lang/Enum {
 }
 
 public final class io/astrolabe/auth/Stage$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public abstract interface class io/astrolabe/auth/StageGrant {
+	public static final field Companion Lio/astrolabe/auth/StageGrant$Companion;
+}
+
+public final class io/astrolabe/auth/StageGrant$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/StageGrant$Granted : io/astrolabe/auth/StageGrant {
+	public static final field Companion Lio/astrolabe/auth/StageGrant$Granted$Companion;
+	public fun <init> (Lio/astrolabe/auth/Stage;)V
+	public final fun component1 ()Lio/astrolabe/auth/Stage;
+	public final fun copy (Lio/astrolabe/auth/Stage;)Lio/astrolabe/auth/StageGrant$Granted;
+	public static synthetic fun copy$default (Lio/astrolabe/auth/StageGrant$Granted;Lio/astrolabe/auth/Stage;ILjava/lang/Object;)Lio/astrolabe/auth/StageGrant$Granted;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getStage ()Lio/astrolabe/auth/Stage;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/auth/StageGrant$Granted$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/auth/StageGrant$Granted$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/auth/StageGrant$Granted;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/auth/StageGrant$Granted;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/StageGrant$Granted$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/StageGrant$Refused : io/astrolabe/auth/StageGrant {
+	public static final field Companion Lio/astrolabe/auth/StageGrant$Refused$Companion;
+	public fun <init> (Lio/astrolabe/auth/Stage;Lio/astrolabe/auth/Refusal;)V
+	public final fun component1 ()Lio/astrolabe/auth/Stage;
+	public final fun component2 ()Lio/astrolabe/auth/Refusal;
+	public final fun copy (Lio/astrolabe/auth/Stage;Lio/astrolabe/auth/Refusal;)Lio/astrolabe/auth/StageGrant$Refused;
+	public static synthetic fun copy$default (Lio/astrolabe/auth/StageGrant$Refused;Lio/astrolabe/auth/Stage;Lio/astrolabe/auth/Refusal;ILjava/lang/Object;)Lio/astrolabe/auth/StageGrant$Refused;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getRefusal ()Lio/astrolabe/auth/Refusal;
+	public final fun getStage ()Lio/astrolabe/auth/Stage;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/auth/StageGrant$Refused$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/auth/StageGrant$Refused$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/auth/StageGrant$Refused;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/auth/StageGrant$Refused;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/auth/StageGrant$Refused$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
 }
 

@@ -647,25 +647,29 @@ Goal: [§18.2 Stage A](docs/implementation/roadmap.md#sec-18-2): one implementin
 - Done: P1.12.3 uses only `AstrolabeJava` with Java-authored adapter and authority; ABI dump reviewed.
 
 ### P1.10 Authority and integrity baseline
-#### P1.10.1 [M] `Boundary`: delimiters and instruction-shape flag · TODO
+#### P1.10.1 [M] `Boundary`: delimiters and instruction-shape flag · DONE
 - Why: [§14.3](docs/platform/security.md#sec-14-3); F11; delimiters are cues, not security.
 - Pkg: `auth`
 - Build: escape of delimiter-like payload bytes; `InstructionShape.detect(text)` heuristics ⇒ envelope flag `⚠ instruction-shaped content` (never filtered, never executed); `RulesTrust` (D-32): discovery proposes candidate files; only a binding from host configuration or explicit user authority (canonical path + digest + provenance) promotes a snapshot to instruction text; the approved snapshot is reused across resumes; replaced bytes drop back to data until re-approved; editing the rules path never elevates edited bytes; `[S]` data/instruction rule text.
 - Done: FX-38 (repo file / tool result instructing the agent ⇒ data, flagged, authorization unchanged); an untrusted rules-named file stays data, a trusted snapshot loads, replacement + resume cannot elevate new instructions (IX-08).
+- Log: 2026-09-20 — auth (delegated worktree agent, merged): InstructionShape.detect (8 weighted signals, threshold 3, FLAG '⚠ instruction-shaped content'; a cue, never a filter), Boundary.present(payload) = escape + flag; RulesTrust(workspaceRoot): discover (.astrolabe/rules.md, AGENTS.md, CLAUDE.md as data), bind(candidate, Provenance HostConfig|UserAuthority) → RulesBinding (pure, records the digest shown to the authority), status/approved ⇒ Untrusted | Missing | Unreadable | ChangedSinceApproval | Approved(snapshot); replaced bytes never inherit approval, resume reuses the binding (IX-08, FX-38). Consumers not yet wired: [S] render (P1.8.2), look/recall/export redaction (P1.6.3).
 
-#### P1.10.2 [M] Capability ceiling and effect policy · TODO
+#### P1.10.2 [M] Capability ceiling and effect policy · DONE
 - Why: L10; [§14.1](docs/platform/security.md#sec-14-1); executor enforces regardless of model request.
 - Build: `Capability`/`Ceiling` from `Contract.authorization.capabilitySet`; `Policy.classify(run) → EffectClass` (protected paths ⇒ D; network/outside-workspace/git refs/package install (configurable)/privilege/destructive git ⇒ D); generated scripts inherit the caller's ceiling; `ExecutionMode { TrustedLocal, Confined }` label in `[S]` and every report (the label describes limitations, it enforces nothing); a host that *requires* `Confined` fails at configuration/dispatch until a backend exists (P7) — trusted-local is never substituted (D-11).
 - Done: a masked/denied op is refused in the executor even when the schema would allow it; FX-39 (ceiling) single-executor form; `Confined` required + no backend ⇒ refusal, not a relabelled trusted-local run.
+- Log: 2026-09-20 — Capability (8) / CapabilitySet (workspace-local-test-only, workspace-read-only, host sets), Ceiling.of(authorization, executionMode) with allows(op, mask) → Refusal (masked/unknown/missing capability/stage) — refuses even when the schema lists the op (FX-39 single-executor); EffectPolicy.classify(argv|RunArgs, cwd, workspaceRoot, protectedPaths, config) → Classification(effectClass, reasons, requiredCapabilities, effectsUnknown, approximate) with a configurable D-class table (privilege, network, package install, git ref mutation, destructive deletes outside tmp, any argument outside the workspace or under a protected path), W for known builders/formatters/runners, R otherwise (label only; stamp diff reclassifies in P1.6.5); shell cmd segments classified individually (most restrictive wins, approximate); ExecutionModeLabel + Executors.require(mode, backends) ⇒ Refused when Confined is required without a backend (D-11).
 
-#### P1.10.3 [M] `Redaction` · TODO
+#### P1.10.3 [M] `Redaction` · DONE
 - Build: `Redaction.apply(bytes) → (redacted, mask: source-line ↔ rendered-line mapping, limitations)` before model exposure and before reusable evidence persistence; the mask travels with the `Observation` and excludes redacted lines from coverage (D-49); recall and export never return unredacted bytes; signed opaque provider items are stored in protected `native/` and never rewritten (D-25); env allowlist in runner; recovery preimages exempt and access-restricted (D-14); `capture.redacted` and redaction limits recorded per observation.
 - Done: secret patterns never reach envelopes, notes, recall or exports in tests; a redacted line inside a multi-line anchor grants no coverage while exact unredacted spans remain usable (IX-10); preimage revert still exact.
+- Log: 2026-09-20 — Redaction(config): RedactionConfig(patterns ×9 defaults incl. private-key blocks, AWS/GitHub/OpenAI/Slack tokens, JWT, bearer, URL credentials, secret assignments; envAllowlist; maxBytes 256 KiB) validated through Config.violations(); apply/applyBytes → Redacted(text, RedactionMask hiddenLines, hits, limitations) preserving line count so the mask is line-exact (IX-10 coverage test); byte cap cuts at a line boundary and records a limitation, never returns the tail; ContentClass ModelFacing|ReusableEvidence|NativeReplay|RecoveryPreimage with refuse()/neverRewrite() guarding native replay items (D-25) and recovery preimages (D-14). Config gained the redaction section.
 
-#### P1.10.4 [C] `PermissionLadder` data model · TODO
+#### P1.10.4 [C] `PermissionLadder` data model · DONE
 - Why: [§14.2](docs/platform/security.md#sec-14-2) separate grants `patch → local commit → push → merge → deploy`; ceiling from the contract.
 - Build: `Stage` enum, `PermissionLadder(ceiling)`, `highestAuthorizedStage` tracking; only `patch` reachable in P1 (commit policy P5.2).
 - Done: any attempt above the ceiling is refused and recorded.
+- Log: 2026-09-20 — PermissionLadder(ceiling, reachable = {Patch}): request(stage) → Granted | Refused (above ceiling or not yet implemented), record(stage) monotone highestAuthorizedStage, refusals kept for the finish receipt; only Patch reachable in P1 (commit policy P5.2).
 
 ### P1.11 Telemetry and accounting
 #### P1.11.1 [M] `Span`s and metrics · TODO
