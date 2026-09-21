@@ -210,6 +210,24 @@ class FakeAdapterTest {
     }
 
     @Test
+    fun `an appended breakpoint segment reads its previous prefix from cache and pays only for the tail`() = runTest {
+        val adapter = FakeAdapter(ScriptedModel.of(), cachePolicy = FakeCachePolicy(listOf(BillingDimension.CACHE_WRITE_5M)))
+        val opening = Message.text(Role.User, "turn 1 " + "word ".repeat(40))
+        val appended = Message.text(Role.Assistant, "turn 2 reply " + "word ".repeat(10))
+        fun history(vararg items: io.astrolabe.provider.Item) = Segment(SegmentKind.T, items.toList(), breakpoint = true)
+        adapter.start(request(history(opening)), id()).await()
+        val prefix = FakeTokenizer.count(kernel.items) + FakeTokenizer.count(prime.items)
+
+        val append = adapter.start(request(history(opening, appended)), id()).await().usage!!
+        assertEquals(prefix + FakeTokenizer.count(opening), append.quantities.getValue(BillingDimension.CACHE_READ), "the prefix the previous breakpoint closed is still cached")
+        assertEquals(FakeTokenizer.count(appended), append.quantities.getValue(BillingDimension.CACHE_WRITE_5M), "only the tail is written")
+
+        val rewrite = adapter.start(request(history(Message.text(Role.User, "turn 1 rewritten"), appended)), id()).await().usage!!
+        assertEquals(prefix, rewrite.quantities.getValue(BillingDimension.CACHE_READ), "a rewrite before the previous end misses the whole segment (F26)")
+        assertEquals(FakeTokenizer.count(listOf(Message.text(Role.User, "turn 1 rewritten"), appended)), rewrite.quantities.getValue(BillingDimension.CACHE_WRITE_5M))
+    }
+
+    @Test
     fun `IX-17 the provider counts with its own tokenizer so drift is recorded and admission is not fooled`() {
         val adapter = FakeAdapter(ScriptedModel.of())
         val adversarial = "a ".repeat(1_500) // 3000 bytes ≈ 834 heuristic tokens, 1500 fake tokens

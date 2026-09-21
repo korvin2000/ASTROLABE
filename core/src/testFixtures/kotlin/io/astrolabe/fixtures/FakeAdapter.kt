@@ -30,7 +30,6 @@ import io.astrolabe.provider.UsageProvenance
 import io.astrolabe.provider.Validation
 import io.astrolabe.provider.Validations
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -53,9 +52,12 @@ public class FakeCachePolicy(private val writeClasses: List<BillingDimension> = 
  * with its own tokenizer, injectable faults, and D-51 invocation states with cancellation races.
  *
  * Cache simulation (D-29, a simulation, not a prediction): the leading segments that are byte-identical to the
- * previous request's and were marked as breakpoints there are billed as `cache_read`; everything else is
- * `uncached_input`, and every breakpoint segment not already cached is additionally billed as a cache write
- * in the class chosen by [cachePolicy].
+ * previous request's and were marked as breakpoints there are billed as `cache_read`; a segment that merely
+ * *appends* items after such a previous breakpoint segment still reads that prefix from cache and pays only for
+ * its tail (the prefix the breakpoint closed is unchanged, as with a provider's prefix cache); everything else is
+ * `uncached_input`, and every breakpoint segment not already cached is additionally billed as a cache write, for
+ * the uncached part, in the class chosen by [cachePolicy]. A rewrite anywhere before a segment's previous end is
+ * therefore a miss for that segment and everything after it (F26, P1.8.6).
  */
 public class FakeAdapter(
     private val model: ScriptedModel,
@@ -132,10 +134,21 @@ public class FakeAdapter(
 
     public fun invocation(id: InvocationId): Invocation? = invocations[id]
 
-    private data class SegmentFingerprint(val kind: SegmentKind, val digest: Digest, val breakpoint: Boolean, val tokens: Long)
+    private data class ItemFingerprint(val digest: Digest, val tokens: Long)
 
-    private fun fingerprints(request: Request): List<SegmentFingerprint> = request.segments.map {
-        SegmentFingerprint(it.kind, Digest.ofUtf8(Json.encodeToString(ListSerializer(Item.serializer()), it.items)), it.breakpoint, FakeTokenizer.count(it.items))
+    private data class SegmentFingerprint(val kind: SegmentKind, val items: List<ItemFingerprint>, val breakpoint: Boolean) {
+        val tokens: Long get() = items.sumOf { it.tokens }
+
+        /** Tokens of the leading items of this segment that [previous] closed under its breakpoint; 0 unless every previous item is still in place. */
+        fun cachedPrefixTokens(previous: SegmentFingerprint): Long {
+            if (!previous.breakpoint || previous.items.size > items.size) return 0
+            for (i in previous.items.indices) if (previous.items[i].digest != items[i].digest) return 0
+            return previous.tokens
+        }
+    }
+
+    private fun fingerprints(request: Request): List<SegmentFingerprint> = request.segments.map { segment ->
+        SegmentFingerprint(segment.kind, segment.items.map { ItemFingerprint(Digest.ofUtf8(Json.encodeToString(Item.serializer(), it)), FakeTokenizer.count(it)) }, segment.breakpoint)
     }
 
     private data class Bill(val cacheRead: Long, val uncached: Long, val writes: Map<BillingDimension, Long>)
@@ -150,13 +163,16 @@ public class FakeAdapter(
         var prefixStable = true
         current.forEachIndexed { i, seg ->
             val prev = previousSegments.getOrNull(i)
-            val cached = prefixStable && prev != null && prev.digest == seg.digest && prev.breakpoint
-            if (cached) {
+            val identical = prefixStable && prev != null && prev.breakpoint && prev.items == seg.items
+            if (identical) {
                 cacheRead += seg.tokens
             } else {
+                val cachedPrefix = if (prefixStable && prev != null) seg.cachedPrefixTokens(prev) else 0L
                 prefixStable = false
-                uncached += seg.tokens
-                if (seg.breakpoint) writes.merge(cachePolicy.next(), seg.tokens, Long::plus)
+                cacheRead += cachedPrefix
+                val tail = seg.tokens - cachedPrefix
+                uncached += tail
+                if (seg.breakpoint && tail > 0) writes.merge(cachePolicy.next(), tail, Long::plus)
             }
         }
         previousSegments = current
