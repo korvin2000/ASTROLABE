@@ -141,19 +141,26 @@ public class Validator(
         return Validation.Applied(next, eligible, dropped, flags, sizes)
     }
 
-    /** Heuristic (§5.6 "stale fact in Next"): an `h` or `v(stale)` fact sharing a significant word with Next or the active step. */
-    private fun riskFlags(register: Register): List<String> {
-        val active = listOfNotNull(register.next, register.cursor?.text).flatMap { words(it) }.toSet()
-        if (active.isEmpty()) return emptyList()
-        return register.facts
-            .filter { it.kind == ClaimKind.Hypothesis || it.stale }
-            .filter { words(it.text).any { w -> w in active } }
-            .map { f -> "${if (f.stale) "stale" else "h"} fact ${f.n} rests under Next/active step: ${f.text}" }
-    }
-
-    private fun words(text: String): Set<String> = text.lowercase().split(Regex("[^a-z0-9_]+")).filter { it.length >= 5 }.toSet()
-
     private fun nextN(existing: List<Int>): Int = (existing.maxOrNull() ?: 0) + 1
+
+    public companion object {
+        /**
+         * Heuristic (§5.6 "stale fact in Next"): an `h` or `v(stale)` fact sharing a significant word with Next or
+         * the active step. Shared with the cell's stale-fact gate, which evaluates it every turn because the
+         * harness marks facts stale without a patch.
+         */
+        @JvmStatic
+        public fun riskFlags(register: Register): List<String> {
+            val active = listOfNotNull(register.next, register.cursor?.text).flatMap { words(it) }.toSet()
+            if (active.isEmpty()) return emptyList()
+            return register.facts
+                .filter { it.kind == ClaimKind.Hypothesis || it.stale }
+                .filter { words(it.text).any { w -> w in active } }
+                .map { f -> "${if (f.stale) "stale" else "h"} fact ${f.n} rests under Next/active step: ${f.text}" }
+        }
+
+        private fun words(text: String): Set<String> = text.lowercase().split(Regex("[^a-z0-9_]+")).filter { it.length >= 5 }.toSet()
+    }
 
     private fun opText(op: Op): String? = when (op) {
         is Op.PlanAdd -> op.text
