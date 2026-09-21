@@ -1,5 +1,68 @@
 # ASTROLABE 1.0.1 Kotlin SOTA AI Coding Agent Harness — actual state
 
+**Current checkpoint — P0 CLOSED, P1.8.2–P1.8.7 DONE, the S0 cell runs (2026-09-21).**
+On `main`; this record's commit. Session ended at a complete, pushed, green checkpoint.
+
+## What is true now
+
+**The P0 gate is closed.** [CI run 35623690223](https://github.com/korvin2000/ASTROLABE/actions/runs/35623690223)
+is green on **both** platforms at `8052946` — P0.1.2's acceptance and the both-platform criterion
+P0.6.1/P0.6.2/P0.6.4 were reopened for. Ubuntu 2m02 / three platform skips, Windows 8m45 / two.
+**P0 is `FIXTURE_VALIDATED`.** Every live gate stays `UNMEASURED` (P7). Do not reopen these.
+
+**The S0 cell runs.** `Cell.run(ctx, increment, budget): CellExit` wires `Layout` (`[S][R][K][T]`),
+`Anchor` (`[A]`), `Gauges`, `Gates` and `Residency`: it renders the turn, admits it, fails closed
+on an incomplete call set, partitions and dispatches, reconciles, drains the checker, evicts on
+the `k` cadence and leaves a **persisted checkpoint on every exit path**, including the failure
+ones, proved under fault injection. Exits are distinct: `Completed`, `Blocked`,
+`Partial(Pressure|TurnBudget|TokenBudget|Reserve|CompletionStalled)`, `Failed`, `Cancelled`.
+Do not reimplement any of P1.8.1–P1.8.7.
+
+**Counts: 79/185 DONE, 0 IN_PROGRESS, 106 TODO.** P0 19/19; P1 51/64; P2–P6 9/102.
+Local Windows/JDK 26 full build at this checkpoint: **core 935 tests / 0 failures / 0 errors /
+6 existing platform skips**, eval 30, provider-api 15. `checkKotlinAbi` green.
+
+## Resume here
+
+**Next task: P1.8.8 Role completion and `ResultPacket`** — it fills the `RoleCompletion` /
+`RoleOutput` / `CompletionDecision` seam `CellContext` already declares. Then P1.9.1–P1.9.6
+(controller, S0 compiler, lifecycle controls, finish receipt, `Astrolabe`/`AstrolabeJava` facade),
+P1.11.1–P1.11.2 telemetry, P1.12.1–P1.12.4 validation. `Deps` and §2.4 producer readiness govern,
+not numeric order. Read each task's complete entry and its prerequisites' `Log:` lines first.
+
+## Carried forward — read before touching these
+
+1. **Only one 2026-09-20 audit debt is still open:** P1.9.2 must open the derived contract after
+   workspace capture, bind `ProtectedPaths`, pass `Sniff` commands into `Checks.seed` and approved
+   rules into `Prime`. Everything P1.8.2 and P1.8.7 owed is closed (TODO §1 resume notes).
+2. **Exit-gate refinement (TODO §3.1):** "red" means a receipt whose outcome is `failed`. An
+   inconclusive/timed-out/unavailable check is missing evidence, not red (L8) — it refuses
+   completion only where the check is required. Acceptance is unchanged. This mattered because a
+   generic shaper returns `inconclusive` until P3.1.4.
+3. **Open finding for P1.12.2:** recall pointers exist only for `look` results; a `run`/`edit`
+   alias resolves to an action or edit id, so a stubbed run body is recorded as a loss rather than
+   recalled. Decide there whether run/edit captures earn observation ids.
+4. **Recorded, not diagnosed:** one full-build run failed in `StamperTest` fixture setup with
+   `fixture git exited -1 … git config core.autocrlf false` and no output — a `git` process that
+   died under the suite's process load, not an assertion. It did not reproduce in an isolated
+   rerun or in the two following full builds. `TempRepo.runGit` has no timeout or retry and
+   reports only the exit code; start there if it recurs.
+5. **ABI:** `Currency` gained a `red` field, so its `copy` signature changed — the one
+   non-additive entry in the dump; `@JvmOverloads` preserves the previous constructor.
+
+## How this session worked
+
+P1.8.5, P1.8.6 and P1.8.7 were delegated to Fable worktree agents (owner instruction: route
+complex, non-trivial tasks to Fable) and merged with `--no-ff`; each ABI conflict was resolved by
+regenerating the dump, never by hand. Worktrees are removed and their branches deleted; on Windows
+`git worktree remove` fails with "Filename too long", so use PowerShell
+`Remove-Item -LiteralPath '\\?\<path>' -Recurse -Force` then `git worktree prune`.
+Delegated work was reviewed before merging, not taken on trust: two changes touched measuring
+instruments (the fake adapter's cache model, the exit gate's red rule) and both were checked to be
+fidelity fixes rather than criteria tuned to pass.
+
+**Historical checkpoints below; their former next-step instructions are superseded.**
+
 **Current checkpoint — P0 CLOSED and P1.8.2–P1.8.6 DONE (2026-09-21)**, on `main` at `fd7773c`.
 
 **The P0 gate is closed.** [CI run 35623690223](https://github.com/korvin2000/ASTROLABE/actions/runs/35623690223)
