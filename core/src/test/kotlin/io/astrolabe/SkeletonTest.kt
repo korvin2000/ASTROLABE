@@ -26,7 +26,8 @@ class SkeletonTest {
     @Test
     fun `gradlew is recorded executable so a POSIX runner can launch it`() {
         val root = repositoryRoot()
-        assumeTrue(root != null && Files.isDirectory(root.resolve(".git")), "not a git checkout")
+        // A linked worktree records `.git` as a file, not a directory; both are git checkouts.
+        assumeTrue(root != null && Files.exists(root.resolve(".git")), "not a git checkout")
         val listed = Runners.run(listOf("git", "ls-files", "-s", "gradlew"), root!!, timeoutSeconds = 30)
         assumeTrue(listed.succeeded, "git is unavailable: ${listed.stderr}")
         assertTrue(
