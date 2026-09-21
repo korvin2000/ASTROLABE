@@ -56,6 +56,12 @@ public object Runners {
         firstThatRuns(listOf("node"), listOf("--version")) { NODE_VERSION.containsMatchIn(it) }
     }
 
+    private val nodeMajor: Int? by lazy {
+        val interpreter = node ?: return@lazy null
+        val printed = probe(listOf(interpreter, "--version"))?.combined.orEmpty()
+        NODE_VERSION.find(printed)?.groupValues?.get(1)?.toIntOrNull()
+    }
+
     private val gradle: String? by lazy {
         firstThatRuns(gradleCandidates(), listOf("--version")) { it.contains("Gradle ") }
     }
@@ -68,6 +74,19 @@ public object Runners {
 
     /** The `node` on this host. */
     public fun node(): String? = node
+
+    /**
+     * The major version of [node], or `null` when node is absent.
+     *
+     * Test-runner output is version-dependent: the junit reporter only carries a `file` attribute
+     * from Node 24 on, and that attribute is the single thing that tells two same-name tests in
+     * different files apart (D-27, D-50, IX-13). A test that asserts the disambiguation therefore
+     * states its minimum instead of failing obscurely on an older runtime.
+     */
+    public fun nodeMajor(): Int? = nodeMajor
+
+    /** The Node major version from which `--test-reporter=junit` names each test's file. */
+    public const val NODE_MAJOR_WITH_TEST_FILE: Int = 24
 
     /**
      * A Gradle launcher: `GRADLE_HOME/bin`, then `gradle` on `PATH`, then the newest distribution
@@ -203,7 +222,7 @@ public object Runners {
     private const val DRAIN_TIMEOUT_SECONDS = 10L
     private const val TIMED_OUT_EXIT_CODE = -1
     private const val DIST_DEPTH = 5
-    private val NODE_VERSION = Regex("""^v\d+\.""", RegexOption.MULTILINE)
+    private val NODE_VERSION = Regex("""^v(\d+)\.""", RegexOption.MULTILINE)
     private val DIST_VERSION = Regex("""/gradle-(\d+(?:\.\d+)*)/bin/""")
     private val VERSION_ORDER: Comparator<List<Int>> = Comparator { left, right ->
         val size = maxOf(left.size, right.size)

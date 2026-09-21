@@ -1,5 +1,6 @@
 package io.astrolabe.os
 
+import io.astrolabe.fixtures.Runners
 import io.astrolabe.fixtures.TempRepo
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -14,6 +15,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.io.TempDir
 
 /** P0.6.2: the `Git` wrapper exercised against real temporary repositories. */
@@ -298,6 +300,66 @@ class GitTest {
             }
             assertTrue(failure.message.orEmpty().contains("D-53"), "message names the decision: ${failure.message}")
         }
+    }
+
+    /**
+     * Regression for the P0.1.2 CI finding: the guard compared path *spellings*, so the user's
+     * index slipped through whenever the caller spelled it differently from
+     * `rev-parse --absolute-git-dir` — a Windows 8.3 short name on the CI runner, a symlinked
+     * temporary directory on POSIX. The guard now compares what the filesystem reports.
+     */
+    @Test
+    fun `update index refuses another spelling of the repository index`() {
+        TempRepo.create().use { repo ->
+            repo.write("seed.txt", "seed\n")
+            repo.commit("base")
+            val id = repo.git.hashObject("x\n".toByteArray(StandardCharsets.UTF_8), write = true)
+            val index = repo.resolve(".git/index")
+            val alias = secondSpellingOf(index)
+            assumeTrue(alias != null, "this host offers no second spelling of a path")
+            assertNotEquals(
+                index.toAbsolutePath().normalize(),
+                alias!!.toAbsolutePath().normalize(),
+                "the alias must differ lexically, otherwise it proves nothing",
+            )
+            assertTrue(Files.isSameFile(index, alias), "the alias must name the same file")
+
+            val failure = assertFailsWith<IllegalArgumentException> {
+                repo.git.updateIndex(alias, listOf(IndexEntry(FileMode.REGULAR, id, "x.txt")))
+            }
+            assertTrue(failure.message.orEmpty().contains("D-53"), "message names the decision: ${failure.message}")
+            assertTrue(Files.exists(index), "the user index survived the refusal")
+        }
+    }
+
+    /**
+     * A second spelling of [file]: through a directory symlink where the host permits one, else
+     * the Windows 8.3 short form. `null` when the host offers neither.
+     */
+    private fun secondSpellingOf(file: Path): Path? {
+        val link = scratch.resolve("alias-${file.hashCode()}")
+        val target = file.parent ?: return null
+        runCatching { Files.createSymbolicLink(link, target) }
+            .onSuccess { return link.resolve(file.fileName) }
+        return shortSpellingOf(file)
+    }
+
+    /** `%~s1` as `cmd.exe` expands it; `null` off Windows or where 8.3 names are disabled. */
+    private fun shortSpellingOf(file: Path): Path? {
+        if (!System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true)) return null
+        // A one-line script keeps the path out of the command line's quoting rules.
+        val script = scratch.resolve("short.cmd")
+        Files.writeString(script, "@echo off\r\n@echo %~s1\r\n")
+        val printed = Runners.run(
+            listOf("cmd.exe", "/d", "/c", script.toString(), file.toString()),
+            scratch,
+            timeoutSeconds = 30,
+        )
+        if (!printed.succeeded) return null
+        val short = printed.stdout.trim().lines().firstOrNull()?.trim().orEmpty()
+        if (short.isEmpty()) return null
+        val candidate = Path.of(short).toAbsolutePath().normalize()
+        return if (candidate == file.toAbsolutePath().normalize()) null else candidate
     }
 
     // -------------------------------------------- unsupported forms (D-53)

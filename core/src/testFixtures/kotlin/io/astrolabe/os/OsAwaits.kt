@@ -24,15 +24,23 @@ public fun Os.awaitTerminal(proc: Proc, timeoutSeconds: Long = 30): Proc {
  * [timeoutSeconds]. Returns everything read so far.
  */
 public fun Os.awaitLogMatch(proc: Proc, pattern: Regex, timeoutSeconds: Long = 30): String {
-    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds)
+    val started = System.nanoTime()
+    val deadline = started + TimeUnit.SECONDS.toNanos(timeoutSeconds)
     val seen = StringBuilder()
     var cursor = 0L
+    var status = proc.status
     while (System.nanoTime() < deadline) {
         val poll = poll(proc, cursor, 1)
         seen.append(poll.text())
         cursor = poll.nextCursorBytes
+        status = poll.status
         if (pattern.containsMatchIn(seen)) return seen.toString()
         if (poll.status.isTerminal && !poll.timedOut && poll.newBytes.isEmpty()) break
     }
-    throw AssertionError("pattern $pattern never appeared in the log of pid ${proc.pid}; saw: $seen")
+    // Naming the status separates "the child was still starting" from "the child was killed first".
+    val elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+    throw AssertionError(
+        "pattern $pattern never appeared in the log of pid ${proc.pid} " +
+            "after ${elapsed}ms, status $status; saw: $seen",
+    )
 }

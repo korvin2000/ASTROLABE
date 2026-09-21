@@ -1,4 +1,4 @@
-# TODO P0.1.2: equal Windows/Linux targets on JDK 26 (D-02, D-12).
+# P0.1.2: equal Windows/Linux targets on JDK 26 (D-02, D-12).
 name: ci
 
 on:
@@ -22,6 +22,21 @@ jobs:
         with:
           distribution: temurin
           java-version: "26"
+      # The junit reporter names each test's file only from Node 24 (Runners.nodeMajor); without
+      # the pin a runner's default Node silently skips the ts-small disambiguation fixture.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      # Without ripgrep the whole search backend-parity suite skips (128 tests on the 2026-09-20
+      # run), so the P0.6.3 both-backends criterion would never be exercised on CI.
+      - name: Install ripgrep
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            choco install ripgrep -y --no-progress
+          else
+            sudo apt-get update && sudo apt-get install -y ripgrep
+          fi
+        shell: bash
       - uses: gradle/actions/setup-gradle@v4
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
@@ -30,6 +45,7 @@ jobs:
           python --version
           node --version
           git --version
+          rg --version
         shell: bash
       - run: ./gradlew check --console=plain --no-daemon
         shell: bash

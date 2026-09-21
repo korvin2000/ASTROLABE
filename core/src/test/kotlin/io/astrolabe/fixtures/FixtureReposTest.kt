@@ -84,23 +84,42 @@ class FixtureReposTest {
     }
 
     @Test
-    fun `ts-small passes and only the junit reporter separates its same-name tests`() {
-        val node = Runners.node()
-        assumeTrue(node != null, "no node on this host")
+    fun `ts-small passes with both same-name tests and every parameterized case`() {
+        assumeTrue(Runners.node() != null, "no node on this host")
         FixtureRepos.materialize(Fixture.TsSmall).use { repo ->
             val result = FixtureRepos.runTests(Fixture.TsSmall, repo)
             assertTrue(result.succeeded, describe(result))
             assertContains(result, "pass 7")
             assertContains(result, "fail 0")
 
+            assertTrue(repo.git.status().isClean, "running the suite dirtied the tree")
+        }
+    }
+
+    /**
+     * Two files declare a test called `smoke`; the spec reporter prints both as a bare `smoke` and
+     * only the junit reporter's `file` attribute tells them apart (D-27, D-50, IX-13). That
+     * attribute exists from Node 24 on — Node 22's junit reporter emits neither `file` nor a
+     * per-file `testsuite`, so on an older runtime this fixture guarantee simply does not hold and
+     * the test says so instead of failing obscurely (P0.1.2 CI finding, 2026-09-21).
+     */
+    @Test
+    fun `the junit reporter separates ts-small's same-name tests by file`() {
+        val node = Runners.node()
+        assumeTrue(node != null, "no node on this host")
+        val major = Runners.nodeMajor()
+        assumeTrue(
+            major != null && major >= Runners.NODE_MAJOR_WITH_TEST_FILE,
+            "node $major has no `file` attribute in its junit reporter; " +
+                "${Runners.NODE_MAJOR_WITH_TEST_FILE} or newer is required",
+        )
+        FixtureRepos.materialize(Fixture.TsSmall).use { repo ->
             val junit = Runners.run(
                 listOf(node!!, "--test", "--test-reporter=junit"),
                 repo.root,
                 TOOL_TIMEOUT,
             )
             assertTrue(junit.succeeded, describe(junit))
-            // Same name in two files: the spec reporter prints both as a bare `smoke`, only the
-            // junit reporter's `file` attribute tells them apart (D-27, D-50, IX-13).
             assertEquals(2, occurrences(junit.stdout, "name=\"smoke\""), describe(junit))
             assertContains(junit, "index.test.ts")
             assertContains(junit, "router.test.ts")

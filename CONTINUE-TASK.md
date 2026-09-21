@@ -1,5 +1,26 @@
 # Continue ASTROLABE implementation
 
+**Current checkpoint — P0 validation repair applied (2026-09-21)**, on `main`; commit containing this record, from `1e23b90`.
+All four failures of [CI run 35514932596](https://github.com/korvin2000/ASTROLABE/actions/runs/35514932596)
+were diagnosed from that run's own logs and report artifact — not from reruns — and repaired:
+`gradlew` mode `100755` (Linux exit 126); a **real product defect** in `Git`'s D-53 index guard,
+which compared path spellings and let the runner's short `TEMP` name through; Node 22's junit
+reporter having no `file` attribute (the fixture guarantee needs Node 24); and a fixed 10s
+execution deadline shorter than the launcher's ~20s start-up on the runner. The workflow now
+installs ripgrep on both runners (128 of the 130 Windows skips were `rg is not on PATH`) and
+pins Node 24. The local FX-22 intermittency is diagnosed too: two wall-clock races in `RunTest`,
+both reproduced locally and removed. Each repair has a test that fails without it; the `Git`
+guard was checked with a reverted-guard negative control.
+Local Windows/JDK 26 full build: **core 878 tests / 0 failures / 0 errors / 6 existing platform
+skips**, eval 30, provider-api 15, all executed; ABI dumps unchanged.
+**69/185 DONE, 4 IN_PROGRESS, 112 TODO** — unchanged: P0.1.2, P0.6.1, P0.6.2 and P0.6.4 close
+only when both remote jobs are green, and **Linux is still entirely unvalidated**. That needs a
+push, which is the owner's call.
+Return: **push -> confirm CI green -> P1.8.2 Layout**. TODO §1.1 holds the evidence table; §1.2
+has no active override. All live gates remain UNMEASURED.
+
+**Historical checkpoints below; their former next-step instructions are superseded.**
+
 **Current checkpoint — P3.2.7 / OOO-04 DONE (2026-09-20)**, D-63, on `main`.
 Checkpoint is the commit containing this record; baseline `3f3edc4`. Do not reimplement this kernel.
 Immutable qualified impact snapshots, reverse BFS, test/acceptance closure joins, contract anchors,

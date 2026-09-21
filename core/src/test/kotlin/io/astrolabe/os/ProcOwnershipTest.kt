@@ -8,6 +8,7 @@ import org.junit.jupiter.api.condition.OS
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -45,12 +46,19 @@ class ProcOwnershipTest {
         assertTrue(ChildCommands.awaitPidGone(grandchild, 15_000L), "grandchild $grandchild survived termination")
     }
 
+    /**
+     * The deadline must outlast the launcher's own start-up, otherwise the tree is killed before
+     * the grandchild even exists and the test measures the wrong thing. That start-up is under a
+     * second locally and was ~20s on the CI Windows runner, where a fixed 10s deadline made this
+     * test fail (P0.1.2, 2026-09-21) — so it is measured here rather than assumed.
+     */
     @Test
     fun `the execution deadline kills a grandchild it spawned`() {
-        val proc = spawn(ChildCommands.spawnGrandchildThenSleep(120), deadlineSeconds = 10L)
+        val deadline = maxOf(MIN_DEADLINE_SECONDS, launcherStartupSeconds() * 3 + 5)
+        val proc = spawn(ChildCommands.spawnGrandchildThenSleep(120), deadlineSeconds = deadline)
         val grandchild = grandchildPidOf(proc)
 
-        assertEquals(ProcStatus.DeadlineExceeded, os.awaitTerminal(proc, 45L).status)
+        assertEquals(ProcStatus.DeadlineExceeded, os.awaitTerminal(proc, deadline + 30L).status)
 
         assertTrue(ChildCommands.awaitPidGone(grandchild, 15_000L), "grandchild $grandchild survived the deadline")
     }
@@ -98,6 +106,15 @@ class ProcOwnershipTest {
         assertEquals("\"c:\\dir with space\\\\\"", WindowsOwner.quoteArgument("c:\\dir with space\\"))
     }
 
+    /** Seconds this host needs to get the grandchild launcher's interpreter to its first output. */
+    private fun launcherStartupSeconds(): Long {
+        val started = System.nanoTime()
+        val probe = spawn(ChildCommands.launcherReady())
+        os.awaitLogMatch(probe, Regex(ChildCommands.READY_MARKER), timeoutSeconds = 120L)
+        os.awaitTerminal(probe, 30L)
+        return TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - started) + 1L
+    }
+
     private fun grandchildPidOf(proc: Proc): Long {
         val text = os.awaitLogMatch(proc, Regex("""GRANDCHILD=\d+"""), timeoutSeconds = 45L)
         return assertNotNull(ChildCommands.grandchildPid(text), "no grandchild pid in: $text")
@@ -111,4 +128,9 @@ class ProcOwnershipTest {
             deadlineSeconds = deadlineSeconds,
         ),
     )
+
+    private companion object {
+        /** Long enough for a warm launcher; [launcherStartupSeconds] raises it on a slow host. */
+        const val MIN_DEADLINE_SECONDS = 10L
+    }
 }

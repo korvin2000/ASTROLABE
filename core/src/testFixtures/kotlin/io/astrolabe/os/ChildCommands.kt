@@ -22,6 +22,26 @@ public object ChildCommands {
     public fun print(line: String): Command =
         Command.Shell(if (isWindows) "echo $line" else "echo $line")
 
+    /** Marker the [launcherReady] probe prints once its interpreter is up. */
+    public const val READY_MARKER: String = "READY"
+
+    /**
+     * The interpreter [spawnGrandchildThenSleep] uses, running a script that prints [READY_MARKER]
+     * and exits. Timing it measures what a grandchild launch costs on this host before the script
+     * itself runs — milliseconds locally, tens of seconds on a loaded CI runner — so a test can
+     * size an execution deadline from a measurement instead of a guess (P0.6.1 CI finding).
+     */
+    public fun launcherReady(): Command = if (isWindows) {
+        Command.Argv(
+            listOf(
+                "powershell.exe", "-NoProfile", "-NonInteractive",
+                "-Command", "Write-Output '$READY_MARKER'",
+            ),
+        )
+    } else {
+        Command.Shell("echo $READY_MARKER")
+    }
+
     /** Prints [line] through an argument vector rather than a shell wrapper. */
     public fun printViaArgv(line: String): Command = Command.Argv(
         if (isWindows) listOf("cmd.exe", "/d", "/s", "/c", "echo $line")

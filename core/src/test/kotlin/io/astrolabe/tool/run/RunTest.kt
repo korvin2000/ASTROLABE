@@ -131,6 +131,16 @@ class RunTest {
 
     private fun shell(windowsLine: String, posixLine: String) = if (windows) windowsLine else posixLine
 
+    /** Polls [handle] until it stops reporting `running`; each poll is itself bounded. */
+    private suspend fun awaitSettled(handle: String, polls: Int = 5): ToolOutcome {
+        var last = run("""{"op":"poll","handle":"$handle","timeout":30}""")
+        repeat(polls) {
+            if (status(last) != "running") return last
+            last = run("""{"op":"poll","handle":"$handle","timeout":30}""")
+        }
+        return last
+    }
+
     @Test
     fun `a foreground run captures output and exit code, stamps the tree and stays class R when nothing moved`() = runTest {
         val out = run("""{"cmd":"echo hello-run"}""")
@@ -243,24 +253,36 @@ class RunTest {
         assertEquals("running", handle.status)
         assertTrue(Files.exists(Path.of(handle.proc.logPath)))
 
-        // The same harness polls the same handle: an observation timeout leaves the process running, no relaunch.
-        val early = run("""{"op":"poll","handle":"handle-1","timeout":1}""")
+        // The same harness polls the same handle: output that has arrived returns at once, and the
+        // process is never relaunched. The poll waits long enough that a slow start cannot fail it;
+        // it returns as soon as the line is there.
+        val early = run("""{"op":"poll","handle":"handle-1","timeout":20}""")
         assertEquals("running", status(early), early.body)
         assertTrue(early.body.contains("bg-start"), "output that has arrived returns at once: ${early.body}")
-        val quiet = run("""{"op":"poll","handle":"handle-1","timeout":1}""")
-        assertEquals("running", status(quiet), quiet.body)
-        assertTrue(quiet.body.contains("observation timed out after 1s, the process keeps running (no relaunch)"), "the process sleeps for seconds after its first line; a one-second poll times out: ${quiet.body}")
         assertEquals(handle.proc.pid, SqliteHandles(store, clock).get("handle-1")!!.proc.pid, "same process, same handle")
         val done = run("""{"op":"poll","handle":"handle-1","timeout":30}""")
-        assertTrue(status(done) != "running", done.body)
         assertTrue(done.body.contains("bg-end"), done.body)
         assertTrue(done.body.startsWith("run #1"), done.body)
+        // A poll returns as soon as new output arrives, which is a moment before the shell that
+        // wrote it exits; the terminal status belongs to the poll that observes the exit.
+        val settled = awaitSettled("handle-1")
+        assertTrue(status(settled) != "running", settled.body)
         assertEquals("exited", SqliteHandles(store, clock).get("handle-1")!!.status)
         assertTrue(SqliteHandles(store, clock).open().isEmpty())
 
         // After a harness restart the supervisor is gone: the persisted handle resolves `lost` (D-43), never relaunched.
         val sleeper = run("""{"cmd":"${shell("ping -n 61 127.0.0.1 >NUL", "sleep 60")}","bg":true}""")
         assertEquals("running", status(sleeper), sleeper.body)
+
+        // An observation timeout leaves the process running and is not a failure. It is asserted on
+        // this silent, minute-long process rather than between two polls of handle-1: there the
+        // quiet window was the child's own sleep, and a slow start consumed it (intermittent FX-22
+        // failure recorded under P0.6.1, diagnosed 2026-09-21).
+        val quiet = run("""{"op":"poll","handle":"handle-2","timeout":1}""")
+        assertEquals("running", status(quiet), quiet.body)
+        assertTrue(quiet.body.contains("observation timed out after 1s, the process keeps running (no relaunch)"), "a silent process makes a one-second poll time out: ${quiet.body}")
+        assertEquals("running", SqliteHandles(store, clock).get("handle-2")!!.status, "the timed-out poll left the handle open")
+
         val restarted = LocalOs(clock, token)
         try {
             val after = runner(os = restarted).execute(call("""{"op":"poll","handle":"handle-2","timeout":1}"""), context())
