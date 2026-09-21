@@ -97,10 +97,11 @@ public object ExitGate {
             }
         }
         // A red check outside the increment's required set needs an Open item that names it; a required red is refused above.
+        // Inconclusive or unavailable is missing evidence, not red: it blocks only where the check is required.
         val requiredIds = increment.accept.map { Checks.acceptId(it) }.toSet() + increment.accept.toSet()
         val openTexts = register.open.filter { !it.closed }.map { it.text }
         for ((checkId, currency) in currencies) {
-            if (checkId in requiredIds || currency.green || currency.receiptId == null) continue
+            if (checkId in requiredIds || !currency.red || currency.receiptId == null) continue
             if (openTexts.none { it.contains(checkId) }) missing += "$checkId is red without an Open item naming it"
         }
         register.plan.filter { it.mark == Mark.Todo || it.mark == Mark.Cursor }.forEach { step ->

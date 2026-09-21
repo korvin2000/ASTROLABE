@@ -27,6 +27,7 @@ import io.astrolabe.tool.ToolFamily
 import io.astrolabe.tool.ToolOps
 import io.astrolabe.tool.ToolOutcome
 import io.astrolabe.tool.TurnContext
+import io.astrolabe.workspace.VersionChange
 import java.time.Clock
 
 /** A `state(blocked)` the cell must end with, after reconciliation (§5.9: `blocked` with a question is a success path). */
@@ -71,7 +72,21 @@ public class StateTool(
     public var pendingBlock: BlockedRequest? = null
         private set
 
+    /** The validator's refusal of the latest `patch`, `null` once a patch applied; the loop feeds it to the register gates (§5.6). */
+    public var lastRejection: Validation.Rejected? = null
+        private set
+
     private val misses = ArrayList<RetrievalMiss>()
+
+    /** Harness-side (§4.4 cell horizon): `v` facts anchored at the moved path are marked stale in place; only the model clears the mark, by re-verifying. */
+    public fun markStale(change: VersionChange) {
+        register = register.markStale(change)
+    }
+
+    /** Harness-side (P1.5.2): trips whose predicate matches an edited path fire once, rendered by the anchor. */
+    public fun fireTrips(editedPaths: Collection<String>) {
+        register = register.fireTrips(editedPaths)
+    }
 
     /** Retrieval misses declared so far, oldest first. */
     public val retrievalMisses: List<RetrievalMiss> get() = misses.toList()
@@ -94,11 +109,15 @@ public class StateTool(
             is ParsedPatch.Valid -> p.patch
         }
         return when (val validation = validator.check(register, parsed, validation)) {
-            is Validation.Rejected -> result(
-                "rejected",
-                "STATE v${register.version} unchanged · rejected: ${validation.rule} — ${validation.detail} · register ${validation.sizes.registerTokens}/${validation.sizes.registerCapTokens} tokens · patch ${validation.sizes.patchTokens}/${validation.sizes.patchCapTokens} tokens",
-            )
+            is Validation.Rejected -> {
+                lastRejection = validation
+                result(
+                    "rejected",
+                    "STATE v${register.version} unchanged · rejected: ${validation.rule} — ${validation.detail} · register ${validation.sizes.registerTokens}/${validation.sizes.registerCapTokens} tokens · patch ${validation.sizes.patchTokens}/${validation.sizes.patchCapTokens} tokens",
+                )
+            }
             is Validation.Applied -> {
+                lastRejection = null
                 val next = if (validation.register.version > register.version) validation.register else validation.register.copy(version = register.version + 1)
                 register = next
                 versions.save(ids, next)
