@@ -57,12 +57,18 @@ public data class ScratchPolicy(val prefixes: Set<String> = DEFAULT_PREFIXES) {
 }
 
 /** The currency of a check's last receipt for the candidate at hand (§8.4 refined by D-45). */
-public data class Currency(
+public data class Currency @JvmOverloads constructor(
     val receiptId: String?,
     val applicability: Applicability,
     val eligible: Boolean,
     val green: Boolean,
     val reasons: List<String>,
+    /**
+     * The receipt's outcome is `failed`: a red verify line (§8.7). An inconclusive, timed-out or unavailable
+     * check is not green, but it is not red either — it is missing evidence, which only a required check turns
+     * into a refusal. Defaults to `!green` for callers that predate the distinction.
+     */
+    val red: Boolean = !green,
 ) {
     /** Only a current, eligible, green receipt certifies the final tree for its check. */
     val certifies: Boolean get() = applicability == Applicability.Current && eligible && green
@@ -183,7 +189,7 @@ public class Scheduler(
         }
         val green = receipt?.outcome?.green ?: false
         if (receipt != null && !green) reasons += "outcome ${receipt.outcome.name.lowercase()}"
-        return Currency(last.receiptId, refreshed.applicability, eligible, green, reasons)
+        return Currency(last.receiptId, refreshed.applicability, eligible, green, reasons, red = receipt?.outcome == Outcome.Failed)
     }
 
     /** The paths whose stability the receipt vouches for: the declared closure minus scratch, or [inputs] for an unknown closure. */
