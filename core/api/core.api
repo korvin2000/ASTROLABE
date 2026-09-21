@@ -2486,6 +2486,38 @@ public final class io/astrolabe/budget/Tokens$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
 }
 
+public final class io/astrolabe/cell/Anchor {
+	public static final field INSTANCE Lio/astrolabe/cell/Anchor;
+	public static final fun render (Lio/astrolabe/provider/TokenEstimator;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Lio/astrolabe/cell/AnchorRender;
+	public static final fun render (Lio/astrolabe/provider/TokenEstimator;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;)Lio/astrolabe/cell/AnchorRender;
+	public static final fun render (Lio/astrolabe/provider/TokenEstimator;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;)Lio/astrolabe/cell/AnchorRender;
+	public static final fun render (Lio/astrolabe/provider/TokenEstimator;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;)Lio/astrolabe/cell/AnchorRender;
+	public static final fun render (Lio/astrolabe/provider/TokenEstimator;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Lio/astrolabe/cell/AnchorRender;
+	public static final fun render (Lio/astrolabe/provider/TokenEstimator;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Lio/astrolabe/cell/AnchorRender;
+	public static final fun render (Lio/astrolabe/provider/TokenEstimator;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;)Lio/astrolabe/cell/AnchorRender;
+	public static final fun render (Lio/astrolabe/provider/TokenEstimator;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/util/List;)Lio/astrolabe/cell/AnchorRender;
+	public static final fun render (Lio/astrolabe/provider/TokenEstimator;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/util/List;Lio/astrolabe/Defaults;)Lio/astrolabe/cell/AnchorRender;
+	public static synthetic fun render$default (Lio/astrolabe/provider/TokenEstimator;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/util/List;Lio/astrolabe/Defaults;ILjava/lang/Object;)Lio/astrolabe/cell/AnchorRender;
+}
+
+public final class io/astrolabe/cell/AnchorRender {
+	public fun <init> (Ljava/lang/String;JZLjava/util/List;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()J
+	public final fun component3 ()Z
+	public final fun component4 ()Ljava/util/List;
+	public final fun copy (Ljava/lang/String;JZLjava/util/List;)Lio/astrolabe/cell/AnchorRender;
+	public static synthetic fun copy$default (Lio/astrolabe/cell/AnchorRender;Ljava/lang/String;JZLjava/util/List;ILjava/lang/Object;)Lio/astrolabe/cell/AnchorRender;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getOverBudget ()Z
+	public final fun getReductions ()Ljava/util/List;
+	public final fun getText ()Ljava/lang/String;
+	public final fun getTokens ()J
+	public fun hashCode ()I
+	public final fun segment ()Lio/astrolabe/provider/Segment;
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class io/astrolabe/cell/CompiledK {
 	public fun <init> (Lio/astrolabe/context/ContractSlice;)V
 	public fun <init> (Lio/astrolabe/context/ContractSlice;Lio/astrolabe/verify/PreexistingLedger;)V
@@ -2534,6 +2566,12 @@ public final class io/astrolabe/cell/ErrorPolicy {
 	public static final field VERSION Ljava/lang/String;
 	public final fun getRows ()Ljava/util/List;
 	public static final fun render ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/cell/Gauges {
+	public static final field INSTANCE Lio/astrolabe/cell/Gauges;
+	public static final fun of (ILio/astrolabe/budget/CellBudget$Snapshot;Ljava/lang/String;Lio/astrolabe/workset/Workset;Lio/astrolabe/register/Register;II)Lio/astrolabe/tool/Gauge;
+	public static final fun result (Lio/astrolabe/tool/ToolOutcome;Lio/astrolabe/tool/Gauge;)Ljava/lang/String;
 }
 
 public final class io/astrolabe/cell/Kernel {
@@ -2634,6 +2672,64 @@ public final class io/astrolabe/cell/Roles {
 	public static final field review Lio/astrolabe/cell/Role;
 	public static final field writer Lio/astrolabe/cell/Role;
 	public static final fun shapeMask (Lio/astrolabe/contract/Shape;)Lio/astrolabe/provider/ToolMask;
+}
+
+public final class io/astrolabe/cell/TouchKind : java/lang/Enum {
+	public static final field Added Lio/astrolabe/cell/TouchKind;
+	public static final field Deleted Lio/astrolabe/cell/TouchKind;
+	public static final field Modified Lio/astrolabe/cell/TouchKind;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getLetter ()Ljava/lang/String;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/cell/TouchKind;
+	public static fun values ()[Lio/astrolabe/cell/TouchKind;
+}
+
+public final class io/astrolabe/cell/Touched {
+	public static final field Companion Lio/astrolabe/cell/Touched$Companion;
+	public fun <init> (Ljava/lang/String;Lio/astrolabe/cell/TouchKind;)V
+	public fun <init> (Ljava/lang/String;Lio/astrolabe/cell/TouchKind;Ljava/lang/Integer;)V
+	public fun <init> (Ljava/lang/String;Lio/astrolabe/cell/TouchKind;Ljava/lang/Integer;Ljava/lang/Integer;)V
+	public fun <init> (Ljava/lang/String;Lio/astrolabe/cell/TouchKind;Ljava/lang/Integer;Ljava/lang/Integer;Lio/astrolabe/id/FileVersion;)V
+	public fun <init> (Ljava/lang/String;Lio/astrolabe/cell/TouchKind;Ljava/lang/Integer;Ljava/lang/Integer;Lio/astrolabe/id/FileVersion;Lio/astrolabe/id/FileVersion;)V
+	public fun <init> (Ljava/lang/String;Lio/astrolabe/cell/TouchKind;Ljava/lang/Integer;Ljava/lang/Integer;Lio/astrolabe/id/FileVersion;Lio/astrolabe/id/FileVersion;Ljava/lang/String;)V
+	public fun <init> (Ljava/lang/String;Lio/astrolabe/cell/TouchKind;Ljava/lang/Integer;Ljava/lang/Integer;Lio/astrolabe/id/FileVersion;Lio/astrolabe/id/FileVersion;Ljava/lang/String;Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;Lio/astrolabe/cell/TouchKind;Ljava/lang/Integer;Ljava/lang/Integer;Lio/astrolabe/id/FileVersion;Lio/astrolabe/id/FileVersion;Ljava/lang/String;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lio/astrolabe/cell/TouchKind;
+	public final fun component3 ()Ljava/lang/Integer;
+	public final fun component4 ()Ljava/lang/Integer;
+	public final fun component5 ()Lio/astrolabe/id/FileVersion;
+	public final fun component6 ()Lio/astrolabe/id/FileVersion;
+	public final fun component7 ()Ljava/lang/String;
+	public final fun component8 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Lio/astrolabe/cell/TouchKind;Ljava/lang/Integer;Ljava/lang/Integer;Lio/astrolabe/id/FileVersion;Lio/astrolabe/id/FileVersion;Ljava/lang/String;Ljava/lang/String;)Lio/astrolabe/cell/Touched;
+	public static synthetic fun copy$default (Lio/astrolabe/cell/Touched;Ljava/lang/String;Lio/astrolabe/cell/TouchKind;Ljava/lang/Integer;Ljava/lang/Integer;Lio/astrolabe/id/FileVersion;Lio/astrolabe/id/FileVersion;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/cell/Touched;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAdded ()Ljava/lang/Integer;
+	public final fun getAlias ()Ljava/lang/String;
+	public final fun getFrom ()Lio/astrolabe/id/FileVersion;
+	public final fun getKind ()Lio/astrolabe/cell/TouchKind;
+	public final fun getNote ()Ljava/lang/String;
+	public final fun getPath ()Ljava/lang/String;
+	public final fun getRemoved ()Ljava/lang/Integer;
+	public final fun getTo ()Lio/astrolabe/id/FileVersion;
+	public fun hashCode ()I
+	public static final fun of (Lio/astrolabe/workspace/VersionChange;)Lio/astrolabe/cell/Touched;
+	public static final fun of (Lio/astrolabe/workspace/VersionChange;Ljava/lang/Integer;)Lio/astrolabe/cell/Touched;
+	public static final fun of (Lio/astrolabe/workspace/VersionChange;Ljava/lang/Integer;Ljava/lang/Integer;)Lio/astrolabe/cell/Touched;
+	public static final fun of (Lio/astrolabe/workspace/VersionChange;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/String;)Lio/astrolabe/cell/Touched;
+	public static final fun of (Lio/astrolabe/workspace/VersionChange;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/String;Ljava/lang/String;)Lio/astrolabe/cell/Touched;
+	public final fun render ()Ljava/lang/String;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/cell/Touched$Companion {
+	public final fun of (Lio/astrolabe/workspace/VersionChange;)Lio/astrolabe/cell/Touched;
+	public final fun of (Lio/astrolabe/workspace/VersionChange;Ljava/lang/Integer;)Lio/astrolabe/cell/Touched;
+	public final fun of (Lio/astrolabe/workspace/VersionChange;Ljava/lang/Integer;Ljava/lang/Integer;)Lio/astrolabe/cell/Touched;
+	public final fun of (Lio/astrolabe/workspace/VersionChange;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/String;)Lio/astrolabe/cell/Touched;
+	public final fun of (Lio/astrolabe/workspace/VersionChange;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/String;Ljava/lang/String;)Lio/astrolabe/cell/Touched;
+	public static synthetic fun of$default (Lio/astrolabe/cell/Touched$Companion;Lio/astrolabe/workspace/VersionChange;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/cell/Touched;
 }
 
 public final class io/astrolabe/cell/Transcript {
