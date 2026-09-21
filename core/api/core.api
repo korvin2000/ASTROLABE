@@ -2486,6 +2486,21 @@ public final class io/astrolabe/budget/Tokens$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
 }
 
+public final class io/astrolabe/cell/CompiledK {
+	public fun <init> (Lio/astrolabe/context/ContractSlice;)V
+	public fun <init> (Lio/astrolabe/context/ContractSlice;Lio/astrolabe/verify/PreexistingLedger;)V
+	public synthetic fun <init> (Lio/astrolabe/context/ContractSlice;Lio/astrolabe/verify/PreexistingLedger;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lio/astrolabe/context/ContractSlice;
+	public final fun component2 ()Lio/astrolabe/verify/PreexistingLedger;
+	public final fun copy (Lio/astrolabe/context/ContractSlice;Lio/astrolabe/verify/PreexistingLedger;)Lio/astrolabe/cell/CompiledK;
+	public static synthetic fun copy$default (Lio/astrolabe/cell/CompiledK;Lio/astrolabe/context/ContractSlice;Lio/astrolabe/verify/PreexistingLedger;ILjava/lang/Object;)Lio/astrolabe/cell/CompiledK;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getLedger ()Lio/astrolabe/verify/PreexistingLedger;
+	public final fun getSlice ()Lio/astrolabe/context/ContractSlice;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class io/astrolabe/cell/ContextPart : java/lang/Enum {
 	public static final field Anchor Lio/astrolabe/cell/ContextPart;
 	public static final field BehaviourMaps Lio/astrolabe/cell/ContextPart;
@@ -2512,6 +2527,28 @@ public final class io/astrolabe/cell/ContextPart : java/lang/Enum {
 
 public final class io/astrolabe/cell/ContextPart$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/cell/ErrorPolicy {
+	public static final field INSTANCE Lio/astrolabe/cell/ErrorPolicy;
+	public static final field VERSION Ljava/lang/String;
+	public final fun getRows ()Ljava/util/List;
+	public static final fun render ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/cell/Kernel {
+	public static final field INSTANCE Lio/astrolabe/cell/Kernel;
+	public static final field VERSION Ljava/lang/String;
+	public final fun getEvidenceLines ()Ljava/util/List;
+	public final fun getLines ()Ljava/util/List;
+	public static final fun render ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/cell/Layout {
+	public static final field INSTANCE Lio/astrolabe/cell/Layout;
+	public static final fun compiled (Lio/astrolabe/cell/CompiledK;)Ljava/lang/String;
+	public static final fun render (Lio/astrolabe/cell/Role;Lio/astrolabe/provider/ToolMask;Lio/astrolabe/auth/ExecutionMode;Ljava/lang/String;Lio/astrolabe/cell/CompiledK;Lio/astrolabe/cell/Transcript;)Ljava/util/List;
+	public static final fun system (Lio/astrolabe/cell/Role;Lio/astrolabe/provider/ToolMask;Lio/astrolabe/auth/ExecutionMode;)Ljava/lang/String;
 }
 
 public final class io/astrolabe/cell/PacketKind : java/lang/Enum {
@@ -2597,6 +2634,23 @@ public final class io/astrolabe/cell/Roles {
 	public static final field review Lio/astrolabe/cell/Role;
 	public static final field writer Lio/astrolabe/cell/Role;
 	public static final fun shapeMask (Lio/astrolabe/contract/Shape;)Lio/astrolabe/provider/ToolMask;
+}
+
+public final class io/astrolabe/cell/Transcript {
+	public fun <init> ()V
+	public fun <init> (Ljava/util/List;)V
+	public fun <init> (Ljava/util/List;Ljava/util/List;)V
+	public synthetic fun <init> (Ljava/util/List;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun component2 ()Ljava/util/List;
+	public final fun copy (Ljava/util/List;Ljava/util/List;)Lio/astrolabe/cell/Transcript;
+	public static synthetic fun copy$default (Lio/astrolabe/cell/Transcript;Ljava/util/List;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/cell/Transcript;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getItems ()Ljava/util/List;
+	public final fun getPinned ()Ljava/util/List;
+	public fun hashCode ()I
+	public final fun isEmpty ()Z
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class io/astrolabe/context/ContextArithmetic {

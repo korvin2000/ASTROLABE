@@ -1,5 +1,31 @@
 # ASTROLABE 1.0.1 Kotlin SOTA AI Coding Agent Harness — actual state
 
+**Current checkpoint — P1.8.2 Layout DONE (2026-09-21)**, on `main`; commit containing this record,
+from `e51cb9a`. `cell.Layout` renders the cached `[S][R][K][T]` regions: `[S]` = the frozen `Kernel`
+contract (Appendix A, `kernel/1`) + role duties/packet + the seven families with an `enabled this
+turn` line + the three evidence lines + the normative `ErrorPolicy` table + `Boundary.DATA_RULE` +
+`ExecutionModeLabel`; `[R]` = the prime text; `[K]` = `CompiledK` (slice verbatim + pre-existing
+ledger); `[T]` = `Transcript` (pinned user messages verbatim, then native items). Four breakpoints,
+no clock/counter/absolute path in any cached region, omitted rather than empty regions. 7 tests.
+Seeds, ranked notes, skills and carry-forward join `CompiledK` in P2–P4, not here. Do not redo this.
+
+**P0 validation: repaired, second CI run pending.** All four failures of run 35514932596 — repeated
+exactly by run 35532489501 at `3f3edc4`, so there is no fifth mode — were diagnosed from those runs'
+own logs and artifacts: `gradlew` mode `100644`; a **real product defect** in `Git`'s D-53 index
+guard (it compared path spellings, so the runner's short `TEMP` name passed); Node 22's junit
+reporter having no `file` attribute; and a 10s execution deadline shorter than the launcher's ~20s
+start-up. ripgrep and Node 24 are now installed/pinned in the workflow. Run **35621166065** is the
+first to reach the Linux suite at all: **878 tests, 1 failure, 3 skips**, and that one failure was a
+host-dependent status assertion this session had just added to FX-22, now removed. A rerun is
+needed; **P0.1.2, P0.6.1, P0.6.2 and P0.6.4 stay IN_PROGRESS until both jobs are green**.
+
+Local Windows/JDK 26 full build: **core 885 tests / 0 failures / 0 errors / 6 existing platform
+skips**, eval 30, provider-api 15; ABI additive. **70/185 DONE, 4 IN_PROGRESS, 111 TODO**.
+Return: **confirm CI green -> P1.8.3 Anchor**, then P1.8.4–8, P1.9.*, P1.11.*, P1.12.*.
+TODO §1.1 holds the CI evidence table; §1.2 has no active override. All live gates UNMEASURED.
+
+**Historical checkpoints below; their former next-step instructions are superseded.**
+
 **Current checkpoint — P0 validation repair applied (2026-09-21)**, on `main`; commit containing this record, from `1e23b90`.
 All four failures of [CI run 35514932596](https://github.com/korvin2000/ASTROLABE/actions/runs/35514932596)
 were diagnosed from that run's own logs and report artifact — not from reruns — and repaired:
