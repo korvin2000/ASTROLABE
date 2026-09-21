@@ -1,5 +1,47 @@
 # ASTROLABE 1.0.1 Kotlin SOTA AI Coding Agent Harness — actual state
 
+**Current checkpoint — P0 CLOSED and P1.8.2–P1.8.6 DONE (2026-09-21)**, on `main` at `fd7773c`.
+
+**The P0 gate is closed.** [CI run 35623690223](https://github.com/korvin2000/ASTROLABE/actions/runs/35623690223)
+is green on **both** platforms at `8052946`, which is P0.1.2's acceptance and the both-platform
+criterion P0.6.1/P0.6.2/P0.6.4 were reopened for: Ubuntu 2m02 / three platform skips, Windows
+8m45 / two. **P0 is `FIXTURE_VALIDATED`**; every live gate stays `UNMEASURED` (P7).
+Three rounds were needed and two of them were this session's own test assumptions, not the
+harness. (1) The four recorded failures: `gradlew` mode `100644`; a **real product defect** in
+`Git`'s D-53 index guard, which compared path spellings so the runner's short `TEMP` name passed
+and `update-index` would have rewritten the user's index; Node 22's junit reporter having no
+`file` attribute, so the fixture guarantee needs Node 24; and a fixed 10s execution deadline
+shorter than the launcher's ~20s start-up. ripgrep is now installed on both runners — 128 of the
+130 Windows skips were `rg is not on PATH`, leaving P0.6.3's both-backends criterion unexercised.
+(2) An FX-22 assertion that a background child was still `running`, true only while its sleep
+outlasts the poll. (3) The mirror of the original race: the *measured* deadline could exceed the
+root's fixed 120s lifetime, so it exited 0 first; the lifetime is now derived from the deadline.
+Diagnoses came from the runs' own logs and report artifacts, never from a passing rerun.
+
+**The cell's context machinery is complete.** `Layout` renders the cached `[S][R][K][T]` prefix;
+`Anchor` the volatile `[A]` tail with per-block caps, a fixed reduction order and a measured size;
+`Gauges` the ~20-token line on every result; `Gates` the S0 gate set as pure functions with a
+registration seam for P3/P4 and once-per-condition keys; `Residency` batched eviction, stubs,
+recall and `C(t)`. 42 focused tests. P1.8.5 and P1.8.6 were delegated to Fable worktree agents and
+merged `--no-ff`. Do not reimplement any of these.
+
+Local Windows/JDK 26 full build: **core 921 tests / 0 failures / 0 errors / 6 existing platform
+skips**, eval 30, provider-api 15; ABI additive, `checkKotlinAbi` green after resolving the two
+delegated branches' dump conflict by regenerating. **78/185 DONE, 0 IN_PROGRESS, 107 TODO**;
+P0 complete, P1 at 50/64.
+
+**Recorded, not diagnosed:** one full-build run failed in `StamperTest` fixture setup with
+`fixture git exited -1 … git config core.autocrlf false` and no output — a `git` process that died
+abnormally under the suite's process load, not an assertion. It did not reproduce in an isolated
+rerun or the following full build. `TempRepo.runGit` has no timeout or retry and reports only the
+exit code; if it recurs, start there.
+
+Return: **P1.8.7 Cell turn loop** (delegated when this record was written), then P1.8.8
+ResultPacket, P1.9.* controller/facade, P1.11.* telemetry, P1.12.* validation. TODO §1.1 holds the
+CI evidence; §1.2 has no active override.
+
+**Historical checkpoints below; their former next-step instructions are superseded.**
+
 **Current checkpoint — P1.8.2 Layout DONE (2026-09-21)**, on `main`; commit containing this record,
 from `e51cb9a`. `cell.Layout` renders the cached `[S][R][K][T]` regions: `[S]` = the frozen `Kernel`
 contract (Appendix A, `kernel/1`) + role duties/packet + the seven families with an `enabled this
