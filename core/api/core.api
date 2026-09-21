@@ -2568,6 +2568,47 @@ public final class io/astrolabe/cell/ErrorPolicy {
 	public static final fun render ()Ljava/lang/String;
 }
 
+public final class io/astrolabe/cell/Eviction {
+	public fun <init> (ILio/astrolabe/cell/EvictionTrigger;IIJJLjava/util/List;Ljava/util/List;ILjava/util/List;)V
+	public final fun component1 ()I
+	public final fun component10 ()Ljava/util/List;
+	public final fun component2 ()Lio/astrolabe/cell/EvictionTrigger;
+	public final fun component3 ()I
+	public final fun component4 ()I
+	public final fun component5 ()J
+	public final fun component6 ()J
+	public final fun component7 ()Ljava/util/List;
+	public final fun component8 ()Ljava/util/List;
+	public final fun component9 ()I
+	public final fun copy (ILio/astrolabe/cell/EvictionTrigger;IIJJLjava/util/List;Ljava/util/List;ILjava/util/List;)Lio/astrolabe/cell/Eviction;
+	public static synthetic fun copy$default (Lio/astrolabe/cell/Eviction;ILio/astrolabe/cell/EvictionTrigger;IIJJLjava/util/List;Ljava/util/List;ILjava/util/List;ILjava/lang/Object;)Lio/astrolabe/cell/Eviction;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getItems ()Ljava/util/List;
+	public final fun getK ()I
+	public final fun getLiveResultTokensAfter ()J
+	public final fun getLiveResultTokensBefore ()J
+	public final fun getLosses ()Ljava/util/List;
+	public final fun getOverBound ()Z
+	public final fun getRMaxTokens ()I
+	public final fun getResidents ()Ljava/util/List;
+	public final fun getRewritten ()Z
+	public final fun getStubbed ()Ljava/util/List;
+	public final fun getTrigger ()Lio/astrolabe/cell/EvictionTrigger;
+	public final fun getTrimmed ()I
+	public final fun getTurn ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/cell/EvictionTrigger : java/lang/Enum {
+	public static final field Age Lio/astrolabe/cell/EvictionTrigger;
+	public static final field Budget Lio/astrolabe/cell/EvictionTrigger;
+	public static final field Immediate Lio/astrolabe/cell/EvictionTrigger;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/cell/EvictionTrigger;
+	public static fun values ()[Lio/astrolabe/cell/EvictionTrigger;
+}
+
 public final class io/astrolabe/cell/Gauges {
 	public static final field INSTANCE Lio/astrolabe/cell/Gauges;
 	public static final fun of (ILio/astrolabe/budget/CellBudget$Snapshot;Ljava/lang/String;Lio/astrolabe/workset/Workset;Lio/astrolabe/register/Register;II)Lio/astrolabe/tool/Gauge;
@@ -2589,6 +2630,51 @@ public final class io/astrolabe/cell/Layout {
 	public static final fun system (Lio/astrolabe/cell/Role;Lio/astrolabe/provider/ToolMask;Lio/astrolabe/auth/ExecutionMode;)Ljava/lang/String;
 }
 
+public final class io/astrolabe/cell/Loss {
+	public fun <init> (ILjava/lang/String;JLjava/lang/String;)V
+	public final fun component1 ()I
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()J
+	public final fun component4 ()Ljava/lang/String;
+	public final fun copy (ILjava/lang/String;JLjava/lang/String;)Lio/astrolabe/cell/Loss;
+	public static synthetic fun copy$default (Lio/astrolabe/cell/Loss;ILjava/lang/String;JLjava/lang/String;ILjava/lang/Object;)Lio/astrolabe/cell/Loss;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getLabel ()Ljava/lang/String;
+	public final fun getReason ()Ljava/lang/String;
+	public final fun getTokens ()J
+	public final fun getTurn ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/cell/Occupancy {
+	public fun <init> (Lio/astrolabe/cell/PrefixTokens;JJIJJJ)V
+	public final fun component1 ()Lio/astrolabe/cell/PrefixTokens;
+	public final fun component2 ()J
+	public final fun component3 ()J
+	public final fun component4 ()I
+	public final fun component5 ()J
+	public final fun component6 ()J
+	public final fun component7 ()J
+	public final fun copy (Lio/astrolabe/cell/PrefixTokens;JJIJJJ)Lio/astrolabe/cell/Occupancy;
+	public static synthetic fun copy$default (Lio/astrolabe/cell/Occupancy;Lio/astrolabe/cell/PrefixTokens;JJIJJJILjava/lang/Object;)Lio/astrolabe/cell/Occupancy;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAnchorTokens ()J
+	public final fun getCachedTokens ()J
+	public final fun getLiveResultTokens ()J
+	public final fun getMessageTokens ()J
+	public final fun getNewTokens ()J
+	public final fun getPrefix ()Lio/astrolabe/cell/PrefixTokens;
+	public final fun getStubCount ()I
+	public final fun getStubTokens ()J
+	public final fun getTLiveTokens ()J
+	public final fun getTotalTokens ()J
+	public final fun getUncachedTokens ()J
+	public fun hashCode ()I
+	public final fun percentOf (I)I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class io/astrolabe/cell/PacketKind : java/lang/Enum {
 	public static final field Companion Lio/astrolabe/cell/PacketKind$Companion;
 	public static final field Diagnosis Lio/astrolabe/cell/PacketKind;
@@ -2605,6 +2691,139 @@ public final class io/astrolabe/cell/PacketKind : java/lang/Enum {
 
 public final class io/astrolabe/cell/PacketKind$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/cell/PrefixTokens {
+	public fun <init> (JJJ)V
+	public final fun component1 ()J
+	public final fun component2 ()J
+	public final fun component3 ()J
+	public final fun copy (JJJ)Lio/astrolabe/cell/PrefixTokens;
+	public static synthetic fun copy$default (Lio/astrolabe/cell/PrefixTokens;JJJILjava/lang/Object;)Lio/astrolabe/cell/PrefixTokens;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getKTokens ()J
+	public final fun getRTokens ()J
+	public final fun getSTokens ()J
+	public final fun getTotal ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/cell/RecallPointer {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Lio/astrolabe/id/Digest;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Lio/astrolabe/id/Digest;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Lio/astrolabe/id/Digest;)Lio/astrolabe/cell/RecallPointer;
+	public static synthetic fun copy$default (Lio/astrolabe/cell/RecallPointer;Ljava/lang/String;Ljava/lang/String;Lio/astrolabe/id/Digest;ILjava/lang/Object;)Lio/astrolabe/cell/RecallPointer;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAlias ()Ljava/lang/String;
+	public final fun getContentRef ()Lio/astrolabe/id/Digest;
+	public final fun getObservationId ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/cell/Residence : java/lang/Enum {
+	public static final field Live Lio/astrolabe/cell/Residence;
+	public static final field Stubbed Lio/astrolabe/cell/Residence;
+	public static final field Trimmed Lio/astrolabe/cell/Residence;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/cell/Residence;
+	public static fun values ()[Lio/astrolabe/cell/Residence;
+}
+
+public final class io/astrolabe/cell/Residency {
+	public static final field Companion Lio/astrolabe/cell/Residency$Companion;
+	public fun <init> (IILio/astrolabe/provider/TokenEstimator;)V
+	public final fun batch (Ljava/util/List;I)Lio/astrolabe/cell/Eviction;
+	public final fun batch (Ljava/util/List;ILio/astrolabe/cell/EvictionTrigger;)Lio/astrolabe/cell/Eviction;
+	public static synthetic fun batch$default (Lio/astrolabe/cell/Residency;Ljava/util/List;ILio/astrolabe/cell/EvictionTrigger;ILjava/lang/Object;)Lio/astrolabe/cell/Eviction;
+	public final fun due (Ljava/util/List;I)Lio/astrolabe/cell/EvictionTrigger;
+	public final fun getK ()I
+	public final fun getModelTrimTurns ()I
+	public final fun getRMaxTokens ()I
+	public final fun items (Ljava/util/List;)Ljava/util/List;
+	public final fun liveResultTokens (Ljava/util/List;)J
+	public final fun markStale (Ljava/util/List;Ljava/util/Set;)Ljava/util/List;
+	public final fun occupancy (Lio/astrolabe/cell/PrefixTokens;Ljava/util/List;IJ)Lio/astrolabe/cell/Occupancy;
+	public final fun occupancy (Lio/astrolabe/cell/PrefixTokens;Ljava/util/List;IJJ)Lio/astrolabe/cell/Occupancy;
+	public static synthetic fun occupancy$default (Lio/astrolabe/cell/Residency;Lio/astrolabe/cell/PrefixTokens;Ljava/util/List;IJJILjava/lang/Object;)Lio/astrolabe/cell/Occupancy;
+	public static final fun of (Lio/astrolabe/Defaults;Lio/astrolabe/provider/TokenEstimator;)Lio/astrolabe/cell/Residency;
+	public final fun recall (Ljava/util/List;Ljava/lang/String;)Lio/astrolabe/cell/RecallPointer;
+	public final fun refetchability (Lio/astrolabe/cell/Resident;I)D
+	public final fun stubNow (Ljava/util/List;Ljava/util/Set;I)Lio/astrolabe/cell/Eviction;
+	public final fun stubs (Ljava/util/List;)Ljava/util/List;
+}
+
+public final class io/astrolabe/cell/Residency$Companion {
+	public final fun of (Lio/astrolabe/Defaults;Lio/astrolabe/provider/TokenEstimator;)Lio/astrolabe/cell/Residency;
+}
+
+public final class io/astrolabe/cell/Resident {
+	public static final field Companion Lio/astrolabe/cell/Resident$Companion;
+	public fun <init> (Lio/astrolabe/provider/Item;IJZLio/astrolabe/cell/RecallPointer;Lio/astrolabe/cell/ResultClass;Ljava/lang/String;ZLio/astrolabe/cell/Residence;)V
+	public synthetic fun <init> (Lio/astrolabe/provider/Item;IJZLio/astrolabe/cell/RecallPointer;Lio/astrolabe/cell/ResultClass;Ljava/lang/String;ZLio/astrolabe/cell/Residence;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public static final fun call (Lio/astrolabe/provider/ToolCall;IJ)Lio/astrolabe/cell/Resident;
+	public final fun component1 ()Lio/astrolabe/provider/Item;
+	public final fun component2 ()I
+	public final fun component3 ()J
+	public final fun component4 ()Z
+	public final fun component5 ()Lio/astrolabe/cell/RecallPointer;
+	public final fun component6 ()Lio/astrolabe/cell/ResultClass;
+	public final fun component7 ()Ljava/lang/String;
+	public final fun component8 ()Z
+	public final fun component9 ()Lio/astrolabe/cell/Residence;
+	public final fun copy (Lio/astrolabe/provider/Item;IJZLio/astrolabe/cell/RecallPointer;Lio/astrolabe/cell/ResultClass;Ljava/lang/String;ZLio/astrolabe/cell/Residence;)Lio/astrolabe/cell/Resident;
+	public static synthetic fun copy$default (Lio/astrolabe/cell/Resident;Lio/astrolabe/provider/Item;IJZLio/astrolabe/cell/RecallPointer;Lio/astrolabe/cell/ResultClass;Ljava/lang/String;ZLio/astrolabe/cell/Residence;ILjava/lang/Object;)Lio/astrolabe/cell/Resident;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAlias ()Ljava/lang/String;
+	public final fun getItem ()Lio/astrolabe/provider/Item;
+	public final fun getLabel ()Ljava/lang/String;
+	public final fun getPinned ()Z
+	public final fun getPointer ()Lio/astrolabe/cell/RecallPointer;
+	public final fun getResidence ()Lio/astrolabe/cell/Residence;
+	public final fun getResultClass ()Lio/astrolabe/cell/ResultClass;
+	public final fun getStale ()Z
+	public final fun getTokens ()J
+	public final fun getTurn ()I
+	public fun hashCode ()I
+	public final fun isLiveResult ()Z
+	public final fun isResult ()Z
+	public static final fun message (Lio/astrolabe/provider/Message;IJ)Lio/astrolabe/cell/Resident;
+	public static final fun message (Lio/astrolabe/provider/Message;IJZ)Lio/astrolabe/cell/Resident;
+	public static final fun result (Lio/astrolabe/provider/ToolResult;IJLio/astrolabe/cell/ResultClass;)Lio/astrolabe/cell/Resident;
+	public static final fun result (Lio/astrolabe/provider/ToolResult;IJLio/astrolabe/cell/ResultClass;Lio/astrolabe/cell/RecallPointer;)Lio/astrolabe/cell/Resident;
+	public static final fun result (Lio/astrolabe/provider/ToolResult;IJLio/astrolabe/cell/ResultClass;Lio/astrolabe/cell/RecallPointer;Ljava/lang/String;)Lio/astrolabe/cell/Resident;
+	public static final fun result (Lio/astrolabe/provider/ToolResult;IJLio/astrolabe/cell/ResultClass;Lio/astrolabe/cell/RecallPointer;Ljava/lang/String;Z)Lio/astrolabe/cell/Resident;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/cell/Resident$Companion {
+	public final fun call (Lio/astrolabe/provider/ToolCall;IJ)Lio/astrolabe/cell/Resident;
+	public final fun message (Lio/astrolabe/provider/Message;IJ)Lio/astrolabe/cell/Resident;
+	public final fun message (Lio/astrolabe/provider/Message;IJZ)Lio/astrolabe/cell/Resident;
+	public static synthetic fun message$default (Lio/astrolabe/cell/Resident$Companion;Lio/astrolabe/provider/Message;IJZILjava/lang/Object;)Lio/astrolabe/cell/Resident;
+	public final fun result (Lio/astrolabe/provider/ToolResult;IJLio/astrolabe/cell/ResultClass;)Lio/astrolabe/cell/Resident;
+	public final fun result (Lio/astrolabe/provider/ToolResult;IJLio/astrolabe/cell/ResultClass;Lio/astrolabe/cell/RecallPointer;)Lio/astrolabe/cell/Resident;
+	public final fun result (Lio/astrolabe/provider/ToolResult;IJLio/astrolabe/cell/ResultClass;Lio/astrolabe/cell/RecallPointer;Ljava/lang/String;)Lio/astrolabe/cell/Resident;
+	public final fun result (Lio/astrolabe/provider/ToolResult;IJLio/astrolabe/cell/ResultClass;Lio/astrolabe/cell/RecallPointer;Ljava/lang/String;Z)Lio/astrolabe/cell/Resident;
+	public static synthetic fun result$default (Lio/astrolabe/cell/Resident$Companion;Lio/astrolabe/provider/ToolResult;IJLio/astrolabe/cell/ResultClass;Lio/astrolabe/cell/RecallPointer;Ljava/lang/String;ZILjava/lang/Object;)Lio/astrolabe/cell/Resident;
+}
+
+public final class io/astrolabe/cell/ResultClass : java/lang/Enum {
+	public static final field Companion Lio/astrolabe/cell/ResultClass$Companion;
+	public static final field Observation Lio/astrolabe/cell/ResultClass;
+	public static final field Search Lio/astrolabe/cell/ResultClass;
+	public static final field Verdict Lio/astrolabe/cell/ResultClass;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static final fun of (Ljava/lang/String;)Lio/astrolabe/cell/ResultClass;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/cell/ResultClass;
+	public static fun values ()[Lio/astrolabe/cell/ResultClass;
+}
+
+public final class io/astrolabe/cell/ResultClass$Companion {
+	public final fun of (Ljava/lang/String;)Lio/astrolabe/cell/ResultClass;
 }
 
 public final class io/astrolabe/cell/Role {
@@ -2672,6 +2891,27 @@ public final class io/astrolabe/cell/Roles {
 	public static final field review Lio/astrolabe/cell/Role;
 	public static final field writer Lio/astrolabe/cell/Role;
 	public static final fun shapeMask (Lio/astrolabe/contract/Shape;)Lio/astrolabe/provider/ToolMask;
+}
+
+public final class io/astrolabe/cell/Stub {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;JLio/astrolabe/cell/RecallPointer;I)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()J
+	public final fun component4 ()Lio/astrolabe/cell/RecallPointer;
+	public final fun component5 ()I
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;JLio/astrolabe/cell/RecallPointer;I)Lio/astrolabe/cell/Stub;
+	public static synthetic fun copy$default (Lio/astrolabe/cell/Stub;Ljava/lang/String;Ljava/lang/String;JLio/astrolabe/cell/RecallPointer;IILjava/lang/Object;)Lio/astrolabe/cell/Stub;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAlias ()Ljava/lang/String;
+	public final fun getLabel ()Ljava/lang/String;
+	public final fun getPointer ()Lio/astrolabe/cell/RecallPointer;
+	public final fun getRecoverable ()Z
+	public final fun getTokens ()J
+	public final fun getTurn ()I
+	public fun hashCode ()I
+	public final fun render ()Ljava/lang/String;
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class io/astrolabe/cell/TouchKind : java/lang/Enum {
