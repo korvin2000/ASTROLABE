@@ -47,15 +47,20 @@ class ProcOwnershipTest {
     }
 
     /**
-     * The deadline must outlast the launcher's own start-up, otherwise the tree is killed before
-     * the grandchild even exists and the test measures the wrong thing. That start-up is under a
-     * second locally and was ~20s on the CI Windows runner, where a fixed 10s deadline made this
-     * test fail (P0.1.2, 2026-09-21) — so it is measured here rather than assumed.
+     * Three orderings have to hold for this scenario to test what it claims, and on a CI runner
+     * none of them is free (P0.1.2, 2026-09-21):
+     *
+     *  1. the grandchild must exist before the deadline fires — the launcher's own start-up is under
+     *     a second locally and was tens of seconds on the Windows runner, so it is measured, not
+     *     assumed, and the deadline is a multiple of it;
+     *  2. the root must still be alive when the deadline fires — so its lifetime is derived from the
+     *     deadline instead of being a constant that a long deadline can outrun;
+     *  3. the wait for a terminal status must outlast the deadline.
      */
     @Test
     fun `the execution deadline kills a grandchild it spawned`() {
-        val deadline = maxOf(MIN_DEADLINE_SECONDS, launcherStartupSeconds() * 3 + 5)
-        val proc = spawn(ChildCommands.spawnGrandchildThenSleep(120), deadlineSeconds = deadline)
+        val deadline = (launcherStartupSeconds() * 3 + 5).coerceIn(MIN_DEADLINE_SECONDS, MAX_DEADLINE_SECONDS)
+        val proc = spawn(ChildCommands.spawnGrandchildThenSleep((deadline * 3).toInt()), deadlineSeconds = deadline)
         val grandchild = grandchildPidOf(proc)
 
         assertEquals(ProcStatus.DeadlineExceeded, os.awaitTerminal(proc, deadline + 30L).status)
@@ -132,5 +137,8 @@ class ProcOwnershipTest {
     private companion object {
         /** Long enough for a warm launcher; [launcherStartupSeconds] raises it on a slow host. */
         const val MIN_DEADLINE_SECONDS = 10L
+
+        /** Keeps the scenario bounded when a host is pathologically slow to start an interpreter. */
+        const val MAX_DEADLINE_SECONDS = 90L
     }
 }
