@@ -9,6 +9,9 @@ On `main`; this record's commit. Session ended at a complete, pushed, green chec
 is green on **both** platforms at `8052946` — P0.1.2's acceptance and the both-platform criterion
 P0.6.1/P0.6.2/P0.6.4 were reopened for. Ubuntu 2m02 / three platform skips, Windows 8m45 / two.
 **P0 is `FIXTURE_VALIDATED`.** Every live gate stays `UNMEASURED` (P7). Do not reopen these.
+[Run 35630868103](https://github.com/korvin2000/ASTROLABE/actions/runs/35630868103) is green on
+both platforms for `de507a9` itself, so this checkpoint's own tree is CI-validated, not just the
+commit that closed the gate.
 
 **The S0 cell runs.** `Cell.run(ctx, increment, budget): CellExit` wires `Layout` (`[S][R][K][T]`),
 `Anchor` (`[A]`), `Gauges`, `Gates` and `Residency`: it renders the turn, admits it, fails closed
