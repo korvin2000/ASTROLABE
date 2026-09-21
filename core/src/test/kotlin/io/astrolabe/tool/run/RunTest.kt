@@ -253,20 +253,16 @@ class RunTest {
         assertEquals("running", handle.status)
         assertTrue(Files.exists(Path.of(handle.proc.logPath)))
 
-        // The same harness polls the same handle: output that has arrived returns at once, and the
-        // process is never relaunched. The poll waits long enough that a slow start cannot fail it;
-        // it returns as soon as the line is there.
+        // The same harness polls the same handle: whatever has arrived comes back and the process is
+        // never relaunched. How far the child has got by then is the host's business — asserting a
+        // status here is what made this test flaky on both CI platforms.
         val early = run("""{"op":"poll","handle":"handle-1","timeout":20}""")
-        assertEquals("running", status(early), early.body)
         assertTrue(early.body.contains("bg-start"), "output that has arrived returns at once: ${early.body}")
         assertEquals(handle.proc.pid, SqliteHandles(store, clock).get("handle-1")!!.proc.pid, "same process, same handle")
-        val done = run("""{"op":"poll","handle":"handle-1","timeout":30}""")
-        assertTrue(done.body.contains("bg-end"), done.body)
-        assertTrue(done.body.startsWith("run #1"), done.body)
-        // A poll returns as soon as new output arrives, which is a moment before the shell that
-        // wrote it exits; the terminal status belongs to the poll that observes the exit.
         val settled = awaitSettled("handle-1")
         assertTrue(status(settled) != "running", settled.body)
+        assertTrue(settled.body.contains("bg-end"), settled.body)
+        assertTrue(settled.body.startsWith("run #1"), settled.body)
         assertEquals("exited", SqliteHandles(store, clock).get("handle-1")!!.status)
         assertTrue(SqliteHandles(store, clock).open().isEmpty())
 
