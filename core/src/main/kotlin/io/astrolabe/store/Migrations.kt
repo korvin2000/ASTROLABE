@@ -22,7 +22,7 @@ import java.time.Clock
  * | verifier | `receipts` |
  * | runner | `journal` (call/result kinds), `intents`, `handles`, `usage` |
  * | cell runtime | `cells`, `turns`, `manifests`, `register_versions`, `workset_exports`, `observations`, `claims`, `packets` |
- * | curator | `notes`, `notes_fts`, `note_queue`, `note_usage` |
+ * | curator | `notes`, `notes_fts`, `note_queue`, `note_usage`, `note_revisions` |
  * | router | `routing_log` |
  * | blob store | `blobs` |
  * | alias allocator | `aliases` |
@@ -44,7 +44,7 @@ import java.time.Clock
  */
 public object Migrations {
     /** The schema version this build writes; every row records it. */
-    public const val SCHEMA_VERSION: Int = 3
+    public const val SCHEMA_VERSION: Int = 4
 
     /** Every table of the current schema, in creation order (`notes_fts` is the FTS5 virtual table). */
     public val TABLES: List<String> = listOf(
@@ -82,6 +82,7 @@ public object Migrations {
         "packets",
         "campaigns",
         "attempts",
+        "note_revisions",
     )
 
     /**
@@ -285,6 +286,15 @@ public object Migrations {
                 "CREATE INDEX requirements_by_work ON requirements (work_id, contract_version)",
                 "CREATE INDEX acceptance_by_work ON acceptance (work_id, contract_version)",
                 "CREATE INDEX constraints_by_work ON constraints (work_id, contract_version)",
+            ),
+        ),
+        Migration(
+            version = 4,
+            statements = listOf(
+                // ---- note revisions (§4.5, P2.6.1): append-only; `notes` holds the latest revision -----------
+                "CREATE TABLE note_revisions (" +
+                    "note_id TEXT NOT NULL REFERENCES notes (note_id), revision INTEGER NOT NULL, $IDS, $META, " +
+                    "PRIMARY KEY (note_id, revision))",
             ),
         ),
     )

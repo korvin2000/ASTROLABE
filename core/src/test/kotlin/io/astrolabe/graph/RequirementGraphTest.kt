@@ -168,7 +168,7 @@ class RequirementGraphTest {
         val started = initial.continueIncrement(contract, "I1", ContextId("cell-1"))
         val continued = started.continueIncrement(contract, "I1", ContextId("cell-2"))
         assertEquals(listOf(ContextId("cell-1"), ContextId("cell-2")), continued.increments.single().cells)
-        assertEquals(Sizing(7, 1, 2, 3), continued.increments.single().sizing)
+        assertEquals(Sizing(7, 2, 2, 3), continued.increments.single().sizing, "counters are kept; the second cell is counted as a continuation (P2.1.4)")
         assertEquals(continued, continued.continueIncrement(contract, "I1", ContextId("cell-2")))
         val cancelled = continued.cancel("I1", "hypothesis refuted")
         assertEquals("hypothesis refuted", cancelled.increments.single().cancelledReason)

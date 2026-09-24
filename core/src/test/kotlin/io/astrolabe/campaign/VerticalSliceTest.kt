@@ -19,6 +19,7 @@ import io.astrolabe.contract.Origin
 import io.astrolabe.contract.SqliteContractRepository
 import io.astrolabe.evidence.JournalKind
 import io.astrolabe.evidence.JournalScope
+import io.astrolabe.evidence.SqliteAliases
 import io.astrolabe.fixtures.FakeAdapter
 import io.astrolabe.fixtures.FakeClock
 import io.astrolabe.fixtures.FakeProfiles
@@ -95,6 +96,7 @@ class VerticalSliceTest {
 
             // ---- first run: the controller dies between the edit and the acceptance receipt -------------------
             val firstTurns: Int
+            val firstAliases: List<io.astrolabe.evidence.Alias>
             Controller(config(), clock, idGen, faults = faults).let { controller ->
                 controller.open(repo.root, request, policy).use { c ->
                     val v = c.registry.version("src/helper.py")!!
@@ -112,6 +114,7 @@ class VerticalSliceTest {
                     assertEquals("def scale(x):\n    return x * 10\n", Files.readString(repo.root.resolve("src/helper.py")), "the guarded patch applied")
                     val running = c.campaigns.load(request.work, request.attempt)!!.running!!
                     firstTurns = io.astrolabe.cell.SqliteCheckpoints(c.store, clock).latest(running.cell)!!.turn
+                    firstAliases = aliases(SqliteAliases(c.store, clock), request.work)
                 }
             }
 
@@ -145,7 +148,19 @@ class VerticalSliceTest {
                 assertEquals(5, firstTurns, "the last settled checkpoint is the turn before the death")
                 assertEquals(2, run.exit!!.turns)
                 assertIs<io.astrolabe.verify.CompletionResult.Accepted>(run.completion)
+
+                // IX-06 (P1 form): cell 1's `#n` keep their meaning after the crash and reopen; cell 2 continues the numbering.
+                val all = aliases(SqliteAliases(c.store, clock), request.work)
+                assertEquals(firstAliases, all.take(firstAliases.size), "earlier references resolve unchanged")
+                assertTrue(all.size > firstAliases.size, "the second cell allocated its own aliases")
+                assertEquals(all.size, all.map { it.canonicalId }.toSet().size, "no number designates two artifacts")
+                val firstContexts = firstAliases.map { it.context }.toSet()
+                assertTrue(all.drop(firstAliases.size).none { it.context in firstContexts }, "provenance names the producing cell")
+                assertTrue(firstAliases.any { it.kind == "edit" }, "the guarded-revert resolver still finds cell 1's edit")
             }
         }
     }
+
+    private fun aliases(store: SqliteAliases, work: WorkId) =
+        generateSequence(1) { it + 1 }.map { store.resolve(work, it) }.takeWhile { it != null }.filterNotNull().toList()
 }

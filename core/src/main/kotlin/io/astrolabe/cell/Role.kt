@@ -63,7 +63,7 @@ public data class Role(
 
 /** The declared role table (§3.4) and the shape masks that bound it. */
 public object Roles {
-    public const val POLICY_TEXT_VERSION: String = "roles/1"
+    public const val POLICY_TEXT_VERSION: String = "roles/2"
 
     private fun ops(vararg names: String): ToolMask = ToolMask(names.toSet())
 
@@ -95,6 +95,11 @@ public object Roles {
         duties = listOf("requirement graph and acceptance proposals", "increments with write scopes and an ownership map", "decision packets, CON/ADR candidates, shape suggestion"),
         askBack = true,
         packetKind = PacketKind.PlanArtifacts,
+        personaLines = listOf(
+            "Plan, do not implement: end with task.propose(plan) holding pending increments, each with a run: or a check: naming its evidence kind.",
+            "A requirement no command can decide gets a review: item naming the judgment it needs, never an invented oracle.",
+            "Record consequential choices with decision.add; mark those that cross a boundary as ADR candidates.",
+        ),
     )
 
     @JvmField

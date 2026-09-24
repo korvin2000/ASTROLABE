@@ -25,18 +25,31 @@ public sealed interface Production {
 @Serializable
 public enum class RedOkUntil { IncrementEnd }
 
-/** Observed counts, not scheduling estimates. Collection/persistence belongs to P2.1.4. */
+/**
+ * Observed counts, not scheduling estimates (§6.7 inputs, P2.1.4): updated by the controller at each cell end.
+ * [continuations] counts cells after the first; [rebuilds] counts pressure stops, a decomposition failure
+ * (§3.8); [touched] is the union of the paths the increment's cells touched, and [filesTouched] its size.
+ * The expected count stays on the increment (`expectedFiles`).
+ */
 @Serializable
-public data class Sizing(
+public data class Sizing @JvmOverloads constructor(
     val turns: Int = 0,
     val continuations: Int = 0,
     val rebuilds: Int = 0,
     val filesTouched: Int = 0,
+    val touched: List<String> = emptyList(),
 ) {
     init {
         require(turns >= 0 && continuations >= 0 && rebuilds >= 0 && filesTouched >= 0) {
             "sizing counts must be non-negative"
         }
+        require(touched.isEmpty() || filesTouched == touched.size) { "filesTouched counts the touched paths" }
+    }
+
+    /** One more cell of this increment ended after [cellTurns] turns, touching [paths]. */
+    public fun afterCell(cellTurns: Int, paths: Collection<String>, rebuilt: Int): Sizing {
+        val union = (touched + paths).distinct().sorted()
+        return copy(turns = turns + cellTurns, rebuilds = rebuilds + rebuilt, filesTouched = union.size, touched = union)
     }
 }
 

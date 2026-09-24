@@ -57,8 +57,8 @@ public data class BudgetLine(
 /**
  * The campaign finish receipt (§5.9) in its S0 form. [status] is `completed` only for a campaign that finished
  * verified; a budget stop is `partial`, never verified; every other outcome keeps its own word. Fields whose
- * producer comes later are present and empty: acceptance-surface reasons (P3.4, `null` = not assessed), ADR
- * candidates, routing decisions and memory candidates (P4). [highestAuthorizedStage] is `patch` in P1 — never
+ * producer comes later are present and empty: acceptance-surface reasons (P3.4, `null` = not assessed), routing
+ * decisions and memory candidates (P4). ADR candidates are the registers' boundary-crossing decisions (P2.1.3). [highestAuthorizedStage] is `patch` in P1 — never
  * "delivered" for a patch.
  */
 @Serializable
@@ -167,7 +167,10 @@ public object FinishReceipts {
             notVerified = requirements.filter { it.status != RequirementStatus.Verified.wire }.map { it.id } + acceptance.filter { it.status != "green" }.map { it.id },
             deadEnds = registers.flatMap { r -> r.deadEnds.map { it.text } },
             decisions = registers.flatMap { r -> r.decisions.map { "${it.text} because ${it.because}" } },
-            adrCandidates = emptyList(),
+            // §4.2: a boundary-crossing decision is promoted to an ADR candidate; the curator admits it (P4.1).
+            adrCandidates = registers.flatMap { r ->
+                r.decisions.filter { it.adrCandidate }.map { d -> "${d.text} because ${d.because}" + (d.rejected?.let { "; rejected: $it" } ?: "") + (d.probe?.let { "; probe: $it" } ?: "") }
+            },
             openItems = registers.flatMap { r -> r.open.filter { !it.closed }.map { it.text } },
             pendingAmendments = contract.amendmentsPending.map { it.change },
             routingDecisions = emptyList(),

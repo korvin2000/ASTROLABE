@@ -13,6 +13,21 @@ import kotlinx.serialization.Serializable
  * Host-supplied configuration of one SDK instance. Everything a policy may read lives here; nothing here is
  * read mid-attempt — [AttemptConfig.freeze] snapshots it at campaign open (invariant 12). Sections owned by
  * later tasks (role texts, redaction set, tier table, injection weights) are added by those tasks.
+ *
+ * **Supported execution modes** (D-12, D-43, D-44, D-47; validated by the OS-contract tests on
+ * Windows and Linux, JDK 26 — an unlisted behaviour is unsupported, not assumed):
+ * - Platforms: Windows (job objects: kill-on-close, breakaway denied) and Linux (a new session and
+ *   process group per launch, `killpg`). macOS and other POSIX systems are untested and unsupported.
+ * - Processes: owned by the harness and ended with it. Timeouts, deadlines, cancellation, parent
+ *   exit and grandchildren are covered; after a harness crash a handle resolves `lost` (a recycled
+ *   pid included) and is never relaunched. A detached, harness-surviving mode does not exist.
+ * - Files: every operation resolves through `WorkspacePath`; mutation through a symlink, junction or
+ *   other reparse ancestor is refused, and case aliases are unified on case-insensitive filesystems.
+ *   Publication is an atomic rename with no compare-and-replace against external writers.
+ * - Text: edits accept UTF-8 only (a BOM and CRLF endings are preserved); other encodings and
+ *   binary files are refused as `unsupported`. Versions hash raw bytes.
+ * - Recovery: process termination at any point on both platforms. OS crash or power loss only where
+ *   fsync holds; on Windows the directory entry rests on NTFS journaling (see `Layout`).
  */
 @Serializable
 public data class Config(

@@ -115,6 +115,20 @@ class StoredEvidenceTest {
     }
 
     @Test
+    fun `parallel children allocate distinct campaign-global aliases (IX-06)`() {
+        val aliases = SqliteAliases(store, clock)
+        val children = (1..4).map { c ->
+            Thread { repeat(25) { n -> aliases.allocate(work, "child-$c-$n", "result", ContextId("child-$c"), null) } }
+        }
+        children.forEach(Thread::start)
+        children.forEach(Thread::join)
+        val all = (1..100).map { assertNotNull(aliases.resolve(work, it)) }
+        assertNull(aliases.resolve(work, 101))
+        assertEquals(100, all.map { it.canonicalId }.toSet().size, "no number designates two artifacts")
+        all.forEach { assertEquals(it.context!!.value, it.canonicalId.substringBeforeLast('-'), "provenance stays with the producing child") }
+    }
+
+    @Test
     fun `contracts persist versions and the projection tables feed the contract view`() {
         val repository = SqliteContractRepository(store, clock)
         val contracts = Contracts(repository, FixedIdGen(), clock)

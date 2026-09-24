@@ -152,7 +152,7 @@ class TaskToolTest {
     fun `delegate, collect and propose are masked in S0`() = runTest {
         val tool = tool(AutonomousAuthority())
         assertEquals("masked", status(ask(tool, """{"op":"delegate","kind":"probe"}""")))
-        assertEquals("masked", status(ask(tool, """{"op":"propose","proposal":{"x":1}}""")))
+        assertEquals("masked", status(ask(tool, """{"op":"propose","kind":"plan","proposal":{"x":1}}""")))
         assertTrue(tool.asked.isEmpty())
     }
 }

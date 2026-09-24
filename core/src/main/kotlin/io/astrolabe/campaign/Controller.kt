@@ -29,6 +29,7 @@ import io.astrolabe.context.Compiled
 import io.astrolabe.context.Compiler
 import io.astrolabe.contract.Contract
 import io.astrolabe.contract.Contracts
+import io.astrolabe.contract.Shape
 import io.astrolabe.contract.SqliteContractRepository
 import io.astrolabe.event.AgentEvent
 import io.astrolabe.event.Authority
@@ -349,9 +350,20 @@ public class Controller @JvmOverloads public constructor(
         val leases = Leases(store, clock)
         val lease = leases.acquire(WORKSPACE, ids, "controller:${store.holder.pid}", leaseDuration)
         val prescan = Prescan.UNKNOWN
-        val shape = ShapeSelector.select(contract, prescan, effective.defaults.shapePolicy, policy.resumeExpected)
+        val selected = ShapeSelector.select(contract, prescan, effective.defaults.shapePolicy, policy.resumeExpected)
         events?.emit(AgentEvent.Campaign.Opened(ids, contract.requests.last().id))
-        events?.emit(AgentEvent.Campaign.ShapeSelected(ids, (shape as? ShapeDecision.Selected)?.shape?.name ?: "blocked", "contract:v${contract.version}"))
+        val inputs = when (selected) {
+            is ShapeDecision.Selected -> selected.inputs
+            is ShapeDecision.Unavailable -> selected.inputs
+        }
+        events?.emit(AgentEvent.Campaign.ShapeSelected(ids, (selected as? ShapeDecision.Selected)?.shape?.name ?: "blocked", "contract:v${contract.version} ${inputs?.log.orEmpty()}".trim()))
+        // Until the campaign loop (P2.2.2) this controller runs S0 only: any other selection is an honest block.
+        val shape = when {
+            selected is ShapeDecision.Selected && selected.shape != Shape.S0 ->
+                ShapeDecision.Unavailable("shape S1+ unavailable: ${selected.shape} selected (${selected.inputs?.log}); this build runs S0 only (campaign loop P2.2.2)", selected.inputs)
+            selected is ShapeDecision.Unavailable -> ShapeDecision.Unavailable("shape S1+ unavailable: ${selected.reason}", selected.inputs)
+            else -> selected
+        }
         if (shape is ShapeDecision.Unavailable && state?.phase == CampaignPhase.Running && state.running == null) {
             state = Lifecycle.apply(state, contract, Transition.Stopped(CampaignOutcome.BlockedExternal, shape.reason)).also(campaigns::save)
         }

@@ -77,7 +77,7 @@ It triggers on **push to `main`** and on **pull requests**, so a session branch 
   Also RunTest FX-22 `bg-end` arriving before the terminal status. Re-run once; a repeat means a real failure to investigate.
 - In the sandbox JDK 26 cannot be provisioned (foojay/Adoptium/GitHub downloads refused). `rsync` is absent.
   `apt-get install openjdk-25-jdk-headless` works. Maven Central answers 429 in bursts: the wrapper retries.
-- Backtick test names may not contain `:` or `;`. A KDoc must not contain `*/`, even inside backticks.
+- Backtick test names may not contain `.`, `:` or `;` (so no `(P1.12.4)`-style task ids in names). A KDoc must not contain `*/`, even inside backticks.
 - On Windows, the JDK's argument quoting escapes inner quotes for `cmd.exe /c`: fake test commands avoid inner quotes.
 - The blob store enforces artifact-before-row: publish the raw blob before recording a receipt.
 - A second `FixedIdGen()` in one test collides on SQLite primary keys. Share one.
