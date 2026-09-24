@@ -1129,7 +1129,7 @@ Goal: [§18.2 Stage B](docs/implementation/roadmap.md#sec-18-2): campaign contro
 - Log: 2026-09-20 — registered before code against clean `2c78d75`; implementation plan and future integration owners in [journal](audit/OUT-OF-ORDER-P2.3.4.md).
 - Log: 2026-09-20 — DONE: ContextCover exact planning arithmetic, immutable dependency projections, mandatory refusal, deterministic marginal greedy selection and diagnostics; 13 focused tests, 160 DAG oracle cases and exhaustive feasible-set comparisons. Independent review corrections verified; final Windows build core 790/0 failures/6 skips, provider-api 15 cached green results, ABI checked. Parent P2.3.1 and rendering/manifest/admission integration remain TODO; no Linux/live gate closed.
 
-- [ ] **Gate P2.3:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+- [x] **Gate P2.3:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate). — [CI run 36001412845](https://github.com/korvin2000/ASTROLABE/actions/runs/36001412845) green on Ubuntu + Windows at `3fc2e94` (P2.3.1–P2.3.3, 2026-09-24); merged to `main` as `345c6f2` (korvin2000/ASTROLABE#3).
 
 ### P2.4 Carry-forward and cross-cell coherence
 #### P2.4.1 [M] `CarryForward` · DONE
@@ -1218,7 +1218,7 @@ Goal: [§18.2 Stage B](docs/implementation/roadmap.md#sec-18-2): campaign contro
 - Log: 2026-09-20 — registered before code at clean `5ec1e0c`; [implementation plan and journal](audit/OUT-OF-ORDER-P2.6.5.md).
 - Log: 2026-09-20 — DONE: immutable CalibrationStats/observations, explicit inclusive bands and versioned series, checkpoint dedup/conflict refusal, terminal/censored counts, medians, DECIMAL128 mean ratios and pure strict >50% warning. 13 calibration + 13 context tests passed; rational oracle seed 265 (120 histories), independent review approved, exact rounding regression added. Final Windows build core 803/0 failures/6 skips, provider-api 15 cached green results; ABI checked. P2.1.4 collection and P2.6.4 persistence/controller events/optional prior remain pending; no Linux/live gate claim.
 
-- [ ] **Gate P2.6:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+- [x] **Gate P2.6:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate). — [CI run 36001412845](https://github.com/korvin2000/ASTROLABE/actions/runs/36001412845) green on Ubuntu + Windows at `3fc2e94` (P2.6.2–P2.6.4, 2026-09-24); merged to `main` as `345c6f2` (korvin2000/ASTROLABE#3).
 
 ### P2.7 Stage B validation
 #### P2.7.1 [V] Fixtures and crash intervals · TODO
