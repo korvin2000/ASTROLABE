@@ -132,6 +132,10 @@ public class Compiler(
         return missing.distinct()
     }
 
+    /** The same assertion over an already compiled `[K]`: what a pre-compiled context (§6.6) would miss now. */
+    public fun coverage(contract: Contract, increment: Increment, k: CompiledK, repository: String, pinned: List<String>, inputs: CompileInputs): List<String> =
+        coverage(contract, increment, Layout.compiled(k), repository, contract.requests.map { it.text } + pinned, inputs)
+
     private class Candidate(val unit: ContextUnit, val section: KSection?, val order: Int)
 
     private fun candidates(increment: Increment, contract: Contract, role: Role, prime: String, inputs: CompileInputs): List<Candidate> {

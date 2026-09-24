@@ -121,10 +121,20 @@ public class RequirementGraph(
      * This selects candidates only: token/money/lease admission must still run before dispatch.
      * Order = longest prerequisite depth, then id. Verified nodes are never executable, even when stale.
      */
-    public fun readyFrontier(contract: Contract, availableCells: Int): List<Increment> {
+    public fun readyFrontier(contract: Contract, availableCells: Int): List<Increment> = frontier(contract, availableCells, emptySet())
+
+    /**
+     * `G.peek_next()` (§6.6): the increment the frontier would offer first once [closing] is verified, for boundary
+     * pre-compilation; `null` when none would be ready. A prediction only: the frontier at the boundary governs.
+     */
+    public fun peekNext(contract: Contract, closing: String): Increment? =
+        frontier(contract, increments.size, setOf(closing)).firstOrNull { it.id != closing }
+
+    private fun frontier(contract: Contract, availableCells: Int, assumedVerified: Set<String>): List<Increment> {
         require(availableCells >= 0) { "available cells must be non-negative" }
         val verified = increments.filter { supported(it) && currentIdentity(contract, evidence.getValue(it.id)) }
             .mapTo(HashSet()) { it.id }
+        verified += assumedVerified
         val conflicts = validate(contract)
         check(conflicts.isEmpty()) { "invalid requirement graph: ${conflicts.joinToString { it.detail }}" }
         // Cancelled nodes remain terminal leaves for ordering; active edges to them cannot become ready.

@@ -77,6 +77,7 @@ import io.astrolabe.verify.CheckState
 import io.astrolabe.verify.ChecksRender
 import io.astrolabe.verify.Currency
 import io.astrolabe.verify.Layer
+import io.astrolabe.verify.Layers
 import io.astrolabe.verify.RefactorMode
 import io.astrolabe.verify.Selector
 import io.astrolabe.verify.TestIntegrity
@@ -390,6 +391,8 @@ public class Cell @JvmOverloads constructor(
             // End-of-turn checker on the paths the horizons scheduled; the atlas follows the same set.
             val proposal = native.isEmpty() && (response.stop == StopReason.EndTurn || response.stop == StopReason.ToolUse)
             val turnEnd = drainScheduled(contract) ?: after
+            // §6.6: the controller may pre-build the next [K] while verify-on-stop runs, if only slow checks remain.
+            if (proposal) ctx.precompile?.completionProposed(turnEnd.candidateId, remainingAcceptance(turnEnd.candidateId))
             // §8.1 layer table: a `[>]` move runs blast ∪ the left step's accept:, a completion proposal verify-on-stop;
             // each runs only missing or stale checks, reused receipts stand.
             val layerRuns = listOfNotNull(
@@ -829,6 +832,13 @@ public class Cell @JvmOverloads constructor(
 
         private fun currencies(stampNow: CandidateId?): Map<String, Currency> =
             ws.checks.all().filter { it.last != null }.associate { it.id to ws.scheduler.currency(it, stampNow) }
+
+        /** The acceptance checks verify-on-stop is about to run at [stampNow] — the same selection [Verify.onStop] makes. */
+        private fun remainingAcceptance(stampNow: CandidateId): List<Check> =
+            Layers.select(Layer.IncrementAcceptance, ws.checks, increment.accept) { check ->
+                val currency = ws.scheduler.currency(check, stampNow)
+                currency.receiptId == null || currency.applicability != Applicability.Current || !currency.eligible
+            }.run
 
         /** Acceptance ids of the increment certified on the tree now. */
         private fun certified(currencies: Map<String, Currency>): Set<String> =
