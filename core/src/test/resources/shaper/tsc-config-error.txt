@@ -1,0 +1,1 @@
+error TS5057: Cannot find a tsconfig.json file at the specified directory: './web'.

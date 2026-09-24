@@ -1,0 +1,8 @@
+/home/dev/shop/src/shop/cart.py
+  /home/dev/shop/src/shop/cart.py:12:12 - error: Type "str" is not assignable to return type "int"
+    "str" is not assignable to "int" (reportReturnType)
+  /home/dev/shop/src/shop/cart.py:20:5 - warning: Variable "unused" is not accessed (reportUnusedVariable)
+/home/dev/shop/src/shop/pricing.py
+  /home/dev/shop/src/shop/pricing.py:7:14 - error: Argument of type "None" cannot be assigned to parameter "rate" of type "float" (reportArgumentType)
+  /home/dev/shop/src/shop/pricing.py:9:1 - information: Import "json" is not accessed
+2 errors, 1 warning, 1 information

@@ -1,0 +1,16 @@
+src/cart.ts:3:7 - error TS2322: Type 'string' is not assignable to type 'number'.
+
+3 const total: number = "0";
+        ~~~~~
+
+src/pricing.ts:11:14 - error TS2345: Argument of type 'undefined' is not assignable to parameter of type 'number'.
+
+11   discount(undefined);
+                ~~~~~~~~~
+
+
+Found 2 errors in 2 files.
+
+Errors  Files
+     1  src/cart.ts:3
+     1  src/pricing.ts:11

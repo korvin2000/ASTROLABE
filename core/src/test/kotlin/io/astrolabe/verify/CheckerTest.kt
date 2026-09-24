@@ -4,6 +4,7 @@ import io.astrolabe.auth.Redaction
 import io.astrolabe.contract.Command
 import io.astrolabe.evidence.Closure
 import io.astrolabe.evidence.Coherence
+import io.astrolabe.evidence.Counts
 import io.astrolabe.evidence.Outcome
 import io.astrolabe.evidence.SqliteObservations
 import io.astrolabe.fixtures.FakeClock
@@ -31,6 +32,7 @@ import io.astrolabe.workspace.Workspace
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.attribute.PosixFilePermissions
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -88,6 +90,27 @@ class CheckerTest {
             Command(listOf("/bin/sh", "-c", "cat '$file'; if [ -s '$file' ]; then exit 1; fi"))
         }
     }
+
+    /**
+     * A fake checker whose argv names the tool (`<dir>/ruff` or `ruff.cmd`), so the diagnostics parser recognises it:
+     * it prints the recorded output [resource] and exits with [exit]. The script lives outside the workspace.
+     */
+    private fun fakeTool(name: String, resource: String, exit: Int): Command {
+        val dir = Files.createDirectories(stateRoot.resolve("bin"))
+        val output = dir.resolve("$name-$exit.txt")
+        Files.writeString(output, recorded(resource))
+        val script = if (windows) {
+            dir.resolve("$name.cmd").also { Files.writeString(it, "@echo off\r\ntype $output\r\nexit /b $exit\r\n") }
+        } else {
+            dir.resolve(name).also {
+                Files.writeString(it, "#!/bin/sh\ncat '$output'\nexit $exit\n")
+                Files.setPosixFilePermissions(it, PosixFilePermissions.fromString("rwxr-xr-x"))
+            }
+        }
+        return Command(listOf(script.toString(), "check"))
+    }
+
+    private fun recorded(name: String) = javaClass.getResourceAsStream("/shaper/$name")!!.use { String(it.readAllBytes(), Charsets.UTF_8) }
 
     private fun shell(windowsLine: String, posixLine: String): Command =
         if (windows) Command(listOf("cmd.exe", "/d", "/s", "/c", windowsLine)) else Command(listOf("/bin/sh", "-c", posixLine))
@@ -157,6 +180,39 @@ class CheckerTest {
         assertEquals(0, clean.exit)
         assertTrue(ChecksRender.line(clean.line()).startsWith("lint: inconclusive (exit 0 · no diagnostics parser for"), ChecksRender.line(clean.line()))
         assertNull(checks["CHK-lint"]!!.last!!.counts)
+    }
+
+    @Test
+    fun `a recognised tool is green on its success signature and red with its exact diagnostics, warnings never counting`() {
+        val checks = Checks.empty()
+        checks.register(check("CHK-lint", fakeTool("ruff", "ruff-pass.txt", 0), kind = CheckKind.Lint, selector = Selector.Touched))
+        checks.register(check("CHK-types-touched", fakeTool("mypy", "mypy-fail.txt", 1)))
+        checks.register(check("CHK-cargo", fakeTool("cargo", "cargo-check-pass.txt", 0), kind = CheckKind.Type))
+        val (clean, failing, cargo) = checker(checks).run(listOf("src/a.py", "src/b.py"))
+
+        assertEquals(Outcome.Passed, clean.outcome)
+        assertEquals(0, clean.errors)
+        assertNull(clean.reason)
+        assertEquals("lint(touched): ✓ 2 files @${clean.stampAfter!!.hash8.take(4)}", ChecksRender.line(clean.line()))
+        assertEquals(Counts(discovered = 2), checks["CHK-lint"]!!.last!!.counts, "a pass records the files given to the checker (D-72)")
+        assertEquals(Outcome.Passed, checks["CHK-lint"]!!.last!!.outcome)
+
+        assertEquals(Outcome.Failed, failing.outcome)
+        assertEquals(
+            listOf(
+                "src/shop/cart.py:12: Incompatible return value type (got \"str\", expected \"int\")",
+                "src/shop/pricing.py:7:5: Argument 1 to \"discount\" has incompatible type \"None\"; expected \"float\"",
+            ),
+            failing.errorLines,
+            "the note and the warning are not errors",
+        )
+        assertEquals("types: now 2 @${failing.stampAfter!!.hash8.take(4)}", ChecksRender.line(failing.line()))
+        assertEquals(Counts(errors = 2), checks["CHK-types-touched"]!!.last!!.counts)
+
+        // `cargo check` with a warning and `Finished` is green: warnings are not errors (§8.3).
+        assertEquals(Outcome.Passed, cargo.outcome)
+        assertEquals(emptyList(), cargo.errorLines)
+        assertEquals(Counts(discovered = 2), checks["CHK-cargo"]!!.last!!.counts)
     }
 
     @Test

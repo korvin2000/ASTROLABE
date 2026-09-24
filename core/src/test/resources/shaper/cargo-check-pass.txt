@@ -1,0 +1,11 @@
+    Checking shop v0.1.0 (/home/dev/shop)
+warning: unused variable: `rate`
+ --> src/pricing.rs:4:9
+  |
+4 |     let rate = 0.1;
+  |         ^^^^ help: if this is intentional, prefix it with an underscore: `_rate`
+  |
+  = note: `#[warn(unused_variables)]` on by default
+
+warning: `shop` (bin "shop") generated 1 warning
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.31s

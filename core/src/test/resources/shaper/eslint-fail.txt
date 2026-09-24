@@ -1,0 +1,10 @@
+
+/home/dev/shop/src/cart.js
+   3:7   error    'total' is assigned a value but never used  no-unused-vars
+  10:1   warning  Unexpected console statement                no-console
+
+/home/dev/shop/src/pricing.js
+  1:1  error  Parsing error: Unexpected token )
+
+✖ 3 problems (2 errors, 1 warning)
+
