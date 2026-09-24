@@ -19,6 +19,11 @@ public data class Intent(
     val expectedEffect: String,
     val idempotencyKey: String? = null,
     val status: IntentStatus = IntentStatus.Recorded,
+    /**
+     * A read-only action whose argv predicts its effects: once the workspace is reconciled it may run again.
+     * Every other unknown outcome blocks a relaunch of the same command until it is reconciled (§13.1, D-65).
+     */
+    val replaySafe: Boolean = false,
     @Serializable(with = InstantSerializer::class) val at: Instant,
 ) {
     init {

@@ -19,6 +19,7 @@ import io.astrolabe.evidence.ActionOutcome
 import io.astrolabe.evidence.Counts
 import io.astrolabe.evidence.Intent
 import io.astrolabe.evidence.IntentJournal
+import io.astrolabe.evidence.IntentStatus
 import io.astrolabe.evidence.Observation
 import io.astrolabe.evidence.Observations
 import io.astrolabe.evidence.Outcome
@@ -177,10 +178,15 @@ public class Run(
             if (!approval.approved) return refused(args, Outcome.Denied, "D-class effect denied: ${approval.reason ?: "no approval"} (${classification.reasons.joinToString("; ")})")
         }
 
+        val replaySafe = classification.effectClass == EffectClass.R && !classification.effectsUnknown
+        if (!replaySafe) intents.open().firstOrNull { it.ids.work == ids.work && it.status == IntentStatus.Unknown && !it.replaySafe && it.argv == argv && it.cwd == args.cwd }?.let {
+            return refused(args, Outcome.UnknownOutcome, "unknown_outcome: intent ${it.intentId} ran this command and its effect is unreconciled; reconcile before any retry (§13.1), never relaunch")
+        }
+
         val actionId = idGen.next("act")
         val alias = aliases.allocate(ids.work, actionId, "result", ids.context, workspace.id)
         val before = stamper.report()
-        val intent = Intent(idGen.next("intent"), ids, actionId, argv, args.cwd, classification.toString(), at = clock.instant())
+        val intent = Intent(idGen.next("intent"), ids, actionId, argv, args.cwd, classification.toString(), at = clock.instant(), replaySafe = replaySafe)
         val spec = SpawnSpec(
             command = if (shell) Command.Shell(args.cmd!!) else Command.Argv(argv),
             workingDirectory = cwd,
