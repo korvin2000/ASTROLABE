@@ -1,8 +1,8 @@
 # Continue ASTROLABE implementation
 
 **Current checkpoint — P1.9.1 `Lifecycle` DONE (2026-09-24).**
-On branch `claude/inspiring-goodall-9viaxy` (this session's designated branch), a fast-forward of `main`
-that also carries the P1.8.8 commits; this record's commit. `main` is updated only by a fast-forward.
+On `main` at `12fc5d7` (fast-forwarded from the session branch `claude/inspiring-goodall-9viaxy`,
+owner-approved); the P1.8.8 commits were already on `main`.
 
 ## What is true now
 
@@ -24,7 +24,9 @@ the stored `seq` by one. **Store schema is v2** (`campaigns` table). Do not reim
 Verification (Linux cloud sandbox, JDK 25 scratch copy): `LifecycleTest` **9/9**, graph + store suites
 71/0; full core **950 tests, 2 failures, 6 skips** — both failures are the known environmental ones
 (`FixtureReposTest` gradle-small, `SearchBackendParityTest` café), outside the change; `checkKotlinAbi`
-green with the regenerated, purely additive dump. JDK 26 CI has not yet run on this commit.
+green with the regenerated, purely additive dump.
+[CI run 35941844915](https://github.com/korvin2000/ASTROLABE/actions/runs/35941844915) is **green on both
+platforms** (JDK 26, `check` incl. `checkKotlinAbi`) at `12fc5d7`, the P1.9.1 commit.
 
 ## Resume here
 
