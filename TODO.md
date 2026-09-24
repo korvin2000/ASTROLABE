@@ -1185,7 +1185,7 @@ Goal: [§18.2 Stage B](docs/implementation/roadmap.md#sec-18-2): campaign contro
 - Done: FX-19.
 - Log: 2026-09-24 — `Rebuild.run(…, coverage)`: the new projection's mandatory coverage (`Compiler.coverage` over its rendered `[K]`, `[R]` and pinned `[T]`: constraints, acceptance definitions, requests/amendments, anchored CON/ADR, rules) is compared with the old one's; anything lost ⇒ `RebuildHooks.rehydrate(lost)` runs first and the previous projection stays installed (`RebuildRecord.lost`, generation unchanged). `RebuildTest` FX-19: a lossy `[K]` without constraint C1 and a carry without amendment U2 ⇒ not installed, rehydrated; the clean rebuild installs generation 4. The in-cell pressure rebuild re-renders the slice from the contract every turn, so it cannot lose it; the controller's cell-end/role-switch rebuilds pass the check (P2.2.2/P2.2.3).
 
-- [ ] **Gate P2.5:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+- [x] **Gate P2.5:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate). — [CI run 36003465907](https://github.com/korvin2000/ASTROLABE/actions/runs/36003465907) green on Ubuntu + Windows at `09b180a` (P2.5.1–P2.5.3 with P2.2.2, 2026-09-24); merged to `main` as `6b6e081` (korvin2000/ASTROLABE#4).
 
 ### P2.6 Knowledge base read path, STATUS/CAL (deterministic)
 #### P2.6.1 [C][M] `Note` model, `Kb` store, index generation, Markdown export · DONE
