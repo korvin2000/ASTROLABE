@@ -186,15 +186,16 @@ public object Roles {
     public val defaults: Map<String, Role> = listOf(implementing, plan, probe, review, qa, writer, repair, extractor).associateBy { it.name }
 
     /**
-     * What a shape enables (§3.5 collapsibility): S0 = one implementing cell without delegation, proposals,
-     * transforms or reviews; S1 adds proposals and note proposals; S2 adds probes, reviews and collection;
-     * S3 everything. Only S0 is exercised in P1.
+     * What a shape enables (§3.5 collapsibility): S0 = one implementing cell without delegation, proposals or
+     * reviews; S1 adds proposals and note proposals; S2 adds probes, reviews and collection; S3 everything. The
+     * tools, transforms included, are active in every shape (§3.5 table; D-97): the role mask and the capability
+     * ceiling still bound them.
      */
     @JvmStatic
     public fun shapeMask(shape: Shape): ToolMask = when (shape) {
         Shape.S0 -> ToolOps.implementingS0
         Shape.S1 -> ToolMask(ToolOps.implementingS0.allowed + setOf("task.propose", "kb.propose"))
-        Shape.S2 -> ToolMask(all - setOf("edit.transform"))
+        Shape.S2 -> ToolMask(all)
         Shape.S3 -> ToolMask(all)
     }
 }

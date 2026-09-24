@@ -173,8 +173,60 @@ public object LineDiff {
     /** Unified-style hunks with [context] lines, at most [maxOutputLines] lines; `null` when either side is too large. */
     @JvmStatic
     public fun unified(old: String, new: String, context: Int = 2, maxOutputLines: Int = 80): String? {
-        val a = old.lines()
-        val b = new.lines()
+        val ops = ops(old.lines(), new.lines()) ?: return null
+        val keep = BooleanArray(ops.size)
+        ops.forEachIndexed { index, op -> if (op.first != ' ') for (k in maxOf(0, index - context)..minOf(ops.size - 1, index + context)) keep[k] = true }
+        val out = ArrayList<String>()
+        var gap = false
+        for ((index, op) in ops.withIndex()) {
+            if (!keep[index]) { gap = true; continue }
+            if (gap && out.isNotEmpty()) out += "…"
+            gap = false
+            out += "${op.first}${op.second}"
+        }
+        if (out.isEmpty()) return "(no line differs; whitespace or encoding changed)"
+        return if (out.size > maxOutputLines) (out.take(maxOutputLines) + "… ${out.size - maxOutputLines} more diff lines").joinToString("\n") else out.joinToString("\n")
+    }
+
+    /** One maximal run of differing lines (§9.2 hunks); [oldFrom] and [newFrom] are 1-based line numbers where the run starts. */
+    public data class Hunk(val oldFrom: Int, val newFrom: Int, val removed: List<String>, val added: List<String>)
+
+    /** The hunks between [old] and [new] in file order; `null` when either side exceeds [MAX_LINES]. */
+    @JvmStatic
+    public fun hunks(old: String, new: String): List<Hunk>? {
+        val ops = ops(old.lines(), new.lines()) ?: return null
+        val out = ArrayList<Hunk>()
+        var oldLine = 1
+        var newLine = 1
+        var k = 0
+        while (k < ops.size) {
+            if (ops[k].first == ' ') {
+                oldLine++
+                newLine++
+                k++
+                continue
+            }
+            val oldFrom = oldLine
+            val newFrom = newLine
+            val removed = ArrayList<String>()
+            val added = ArrayList<String>()
+            while (k < ops.size && ops[k].first != ' ') {
+                if (ops[k].first == '-') {
+                    removed += ops[k].second
+                    oldLine++
+                } else {
+                    added += ops[k].second
+                    newLine++
+                }
+                k++
+            }
+            out += Hunk(oldFrom, newFrom, removed, added)
+        }
+        return out
+    }
+
+    /** LCS edit script as `' '`, `'-'`, `'+'` ops; `null` when either side exceeds [MAX_LINES]. */
+    private fun ops(a: List<String>, b: List<String>): List<Pair<Char, String>>? {
         if (a.size > MAX_LINES || b.size > MAX_LINES) return null
         val lcs = Array(a.size + 1) { IntArray(b.size + 1) }
         for (i in a.indices.reversed()) for (j in b.indices.reversed()) {
@@ -192,17 +244,6 @@ public object LineDiff {
         }
         while (i < a.size) { ops += '-' to a[i]; i++ }
         while (j < b.size) { ops += '+' to b[j]; j++ }
-        val keep = BooleanArray(ops.size)
-        ops.forEachIndexed { index, op -> if (op.first != ' ') for (k in maxOf(0, index - context)..minOf(ops.size - 1, index + context)) keep[k] = true }
-        val out = ArrayList<String>()
-        var gap = false
-        for ((index, op) in ops.withIndex()) {
-            if (!keep[index]) { gap = true; continue }
-            if (gap && out.isNotEmpty()) out += "…"
-            gap = false
-            out += "${op.first}${op.second}"
-        }
-        if (out.isEmpty()) return "(no line differs; whitespace or encoding changed)"
-        return if (out.size > maxOutputLines) (out.take(maxOutputLines) + "… ${out.size - maxOutputLines} more diff lines").joinToString("\n") else out.joinToString("\n")
+        return ops
     }
 }

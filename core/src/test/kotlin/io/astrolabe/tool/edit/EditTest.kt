@@ -334,7 +334,7 @@ class EditTest {
         val binary = run(anchored("src/blob.bin", vbin, hunk("x", "y")))
         assertTrue(binary.body.contains("unsupported: 'src/blob.bin' is not valid UTF-8 text"), binary.body)
         val transform = run("""{"ops":[{"transform":{"argv":["sed"],"scope_glob":"src/**","why":"w"}}],"why":"w"}""")
-        assertTrue(transform.body.contains("unsupported: edit.transform is masked in this role"), transform.body)
+        assertTrue(transform.body.contains("unsupported: transform unsupported: this cell has no transform runner (D-41)"), transform.body)
     }
 
     @Test

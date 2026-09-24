@@ -89,6 +89,7 @@ import io.astrolabe.kb.EmptyKb
 import io.astrolabe.kb.Kb
 import io.astrolabe.kb.KbWriter
 import io.astrolabe.kb.Notes
+import io.astrolabe.os.EnvPolicy
 import io.astrolabe.os.Git
 import io.astrolabe.os.LocalOs
 import io.astrolabe.os.ProcStatus
@@ -108,6 +109,7 @@ import io.astrolabe.tool.TurnCheckpoint
 import io.astrolabe.tool.TurnContext
 import io.astrolabe.tool.edit.CliSyntax
 import io.astrolabe.tool.edit.Edit
+import io.astrolabe.tool.edit.TransformExecution
 import io.astrolabe.tool.edit.SyntaxCheck
 import io.astrolabe.tool.kb.KbTool
 import io.astrolabe.tool.look.Look
@@ -914,7 +916,10 @@ public class Controller @JvmOverloads public constructor(
         val tools = CellTools(
             state = StateTool(Validator(estimator), registerVersions, c.journal, estimator, idGen, ids, clock, register ?: Register.empty(cellId, increment.id, increment.title), events),
             look = Look(c.workspace, c.registry, workset, c.atlas, Searches.jvm(), c.journal, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, checks = c.checks),
-            edit = Edit(c.workspace, c.registry, workset, c.os, preimages, ScopeGuard(c.workspace), c.contracts, c.checks, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, syntax),
+            edit = Edit(
+                c.workspace, c.registry, workset, c.os, preimages, ScopeGuard(c.workspace), c.contracts, c.checks, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, syntax,
+                transforms = TransformExecution(runner, c.stamper, logs, config.executionMode, EnvPolicy(inheritedNames = config.redaction.envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1"))),
+            ),
             run = Run(c.workspace, c.registry, c.stamper, runner, c.os, c.intents, SqliteHandles(c.store, clock), observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, c.contracts, authority, config, clock, logs),
             verify = verify,
             task = if (proposals == null) TaskTool(authority, c.contracts, c.journal, estimator, idGen, ids, clock, events)
