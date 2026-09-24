@@ -532,3 +532,11 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
   ref (store moved on reopen); id-only contract projection keys broke a project's second campaign; a racy
   `CellTest` event assertion. Gate P1.9+P1.11 via draft PR korvin2000/ASTROLABE#1 (CI run 35989613165).
   Counts 90/185 DONE, 0 IN_PROGRESS, 95 TODO; P1 62/64.
+- 2026-09-24 — session (cloud, branch `claude/compassionate-cerf-j4qunn`): P1.12.1 (fixture map + IX-06), P1.12.4
+  (BOM edit test, `Config` platform statement) ⇒ **P1 `FIXTURE_VALIDATED`**; then P2.1.2–P2.1.5 (plan packet/validator/
+  intake, decision packets, sizing, `task.propose`), P2.2.1–P2.2.6 (shape selector S0–S2, S1 campaign loop, role-switch
+  boundaries, resume, attempt freeze views, campaign finish), P2.3.1–P2.3.3 (full compile, manifest, admission),
+  P2.4.1–P2.4.4 (carry-forward, fact retention, STATUS, seeds/recall), P2.5.1–P2.5.3 (rebuild, pressure, validation),
+  P2.6.1–P2.6.4 (notes/KbWriter/index, `StoreKb`, note horizon, calibration). Schema v4. D-68–D-70. Gates merged to
+  `main` via korvin2000/ASTROLABE#2–#4; P2.2 gate in #5. Gotcha recorded: `.` is illegal in backtick test names.
+  Counts 116/185 DONE, 0 IN_PROGRESS, 69 TODO; P2 27/30.

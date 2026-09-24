@@ -4,42 +4,40 @@ Snapshot, rewritten each session (≤60 lines). Progress truth is the TODO task 
 next work is `CONTINUE-TASK.md`; history is `audit/SESSION-HISTORY.md`.
 
 ## Counts (2026-09-24, from `#### P… · STATUS` headings)
-**90/185 DONE, 0 IN_PROGRESS, 95 TODO.** P0 19/19 · P1 62/64 · P2 3/30 · P3 1/25 · P4 2/25 · P5 1/15 · P6 2/7.
-Recount: `rg -c '^#### P\d+\.\d+\.\d+ .*· DONE' TODO.md` (per phase: `'^#### P1\.\d+\.\d+ .*· DONE'`).
+**116/185 DONE, 0 IN_PROGRESS, 69 TODO.** P0 19/19 · P1 64/64 · P2 27/30 · P3 1/25 · P4 2/25 · P5 1/15 · P6 2/7.
+Recount: `rg -c '^#### P\d+\.\d+\.\d+ .*· DONE' TODO.md` (per phase: `'^#### P2\.\d+\.\d+ .*· DONE'`).
 
 ## Completion levels
-- **P0:** complete, `FIXTURE_VALIDATED` on Windows + Linux CI (JDK 26).
-- **P1:** everything but P1.12.1 (harness fixture tests) and P1.12.4 (platform validation). The S0 campaign
-  runs end to end: `Controller.open` (capture, contract, reconcile intents + drift, lease, frozen attempt
-  config, shape) → `runS0` (compile, cell, verify on receipts, commit, finish) → `FinishReceipt`; lifecycle
-  controls (cancellation token, leases, `Interrupted`/`Lost` transitions); `Astrolabe`/`AstrolabeJava` facade;
-  spans, metrics, per-call accounting, `exports/`. First vertical slice and the Java smoke pass.
-- **Out of order, DONE as kernels:** P2.1.1, P2.3.4, P2.6.5, P3.2.7, P4.5.4, P4.5.5, P5.1.5, P6.1.4, P6.1.5.
-- Every live gate `UNMEASURED` (P7). Optional layers off (`otelExport` exists, off); S3 off.
+- **P0, P1:** complete, `FIXTURE_VALIDATED` on Windows + Linux CI (JDK 26). P1 gate: CI run 35995814928.
+- **P2:** everything but P2.7 (validation). The S1 campaign runs: `Controller.run` → plan cell (`task.propose(plan)`,
+  `PlanPacketValidator`, `PlanIntake`, `Transition.Planned`) → one cell per ready increment compiled with carry-forward
+  and hash-checked seeds → verify/commit → regression refresh → finish (review predicate, full suite, cadence).
+  Pressure rebuilds in place; resume carries lost cells forward with a resume note; STATUS notes at boundaries.
+- **Out of order, DONE as kernels:** P3.2.7, P4.5.4, P4.5.5, P5.1.5, P6.1.4, P6.1.5.
+- Every live gate `UNMEASURED` (P7). Optional layers off (`calibrationPrior`, `otelExport` exist, off); S2/S3 blocked.
 
 ## Key types by package (entry points only)
-- root: `Astrolabe` (`open` → `Project`, `campaign` → `CampaignHandle`), `Config` (+ Java withers), `AttemptConfig`.
+- root: `Astrolabe` (`campaign` → `Controller.run`), `Config` (supported-modes KDoc, P1.12.4), `AttemptConfig`.
 - `java`: `AstrolabeJava`, `JavaCampaignHandle`, `JavaAuthority`.
-- `campaign`: `Controller` (`open`, `runS0` → `S0Run`), `OpenedCampaign`, `ShapeSelector`, `Lifecycle`,
-  `CampaignState`, `Transition` (+ `Interrupted`, `Lost`), `Cancellation`, `Leases`, `Attempts`, `FinishReceipts`.
-- `context`: `Compiler` (S0 form), `ContractSlice`, `ContextCover`.
-- `telemetry`: `Spans`, `CellMetrics`/`CampaignMetrics`/`ProjectMetrics`, `Outcomes`, `Accounting`, `Export`,
-  `TraceAnalytics`.
-- `cell`: `Cell.run`, `CellContext` (+ `accounting`), `ResultPacket`; `graph`: `RequirementGraph`.
-- `verify`: `Checker`, `ExitGate`/`Verifier`, `Scheduler`; `tool`: look · edit · run · verify · state · task · kb.
+- `campaign`: `Controller` (`open`, `run`, `runS0`), `ShapeSelector` (S0–S2, `ShapeInputs`, capabilities),
+  `Lifecycle` (+ `Planned`), `Plan.kt` (`PlanPacket`, `PlanIntake`, proposals), `Proposals.kt` (`CampaignProposals`,
+  splits), `Calibration`, `CampaignFinish`, `FinishReceipts`, `Attempts` (`next`, campaigns/ view).
+- `context`: `Compiler` (full, `CompileInputs`), `ContextCover`, `ContractSlice`, `CarryForward`, `FactCoherence`,
+  `Seeds`, `StatusNotes`, `Manifest`/`SqliteManifests`, `ContextAdmission`, `Rebuild`.
+- `kb`: `Note`, `KbWriter`, `Notes`, `KbIndex`, `KbExport`, `StoreKb`, `NoteHorizon`, `CalibrationStats`.
+- `cell`: `Cell.run` (admission, in-cell pressure rebuild), `CellContext` (+ `sections`, `manifest`, `admission`).
+- `graph`: `RequirementGraph` (+ `recordCell`, sizing); `tool.task`: `TaskTool` (+ `propose`), `Proposals`.
 
 ## Store
-Schema **v3**: `attempts` table; `requirements`/`acceptance`/`constraints` keyed by `(work_id, id)`.
-`usage` written by `Accounting`; `leases` by `Leases`; `campaigns` by `SqliteCampaigns`.
+Schema **v4**: `note_revisions` (append-only). `packets` hold plan proposals and split requests; `manifests` one
+row per compiled context; `sizing` one row per (increment, latest cell); `attempts` + `campaigns/` JSON views.
 
 ## Last verification
-- Gate P1.9 + P1.11: see `CONTINUE-TASK.md` (PR korvin2000/ASTROLABE#1, CI on both platforms).
-- Local (Linux sandbox, JDK 25 scratch copy): full core 1011 tests, only the 2 known environmental failures,
-  6 skips; eval 30; ABI check green.
+- Gates green on Ubuntu + Windows: P1.12 (35995814928), P2.1 (35998105732), P2.4 (35999628531),
+  P2.3+P2.6 (36001412845), P2.5 (36003465907). P2.2 pending in PR korvin2000/ASTROLABE#5.
+- Local (Linux sandbox, JDK 25 scratch copy): full build 1061 tests, only the 2 known environmental failures, 6 skips.
 
 ## Recorded deviations (details in task `Log:` lines)
-Gradle 9.7.1 (not 9.7.0) · JUnit Jupiter 6.1.3 for "JUnit 5" · no `kotlinx-coroutines-jdk8` ·
-`Identities.candidate` is a `CandidateId` · `Config.redaction` section (P1.10.3) · `auth.ExecutionMode`,
-`auth.Stage`, `route.Tier`, root `Mode`/`DClassPolicy` declared by P0.1.3 · generic shapers return
-`Inconclusive` for ruff/tsc/eslint until P3.1.4 · `Git.rootCommits` ignores `refs/astrolabe/*` (P1.9.2) ·
-`Astrolabe` is a class (constants in its companion) · D-65/D-66/D-67 local choices.
+Gradle 9.7.1 · JUnit Jupiter 6.1.3 · no `kotlinx-coroutines-jdk8` · `Identities.candidate` is a `CandidateId` ·
+generic shapers return `Inconclusive` without counts (a counted log is needed for a green full suite) ·
+`Astrolabe` is a class · local choices D-65–D-70 (plan intake origins, model amendments are weakening, S1 loop).
