@@ -51,7 +51,8 @@ public class KbTool(
         val shown = hits.hits.take(maxHits)
         val head = "${hits.hits.size} note${if (hits.hits.size == 1) "" else "s"} match '${args.query}' in ${hits.scope}" +
             (if (hits.complete) " · complete" else " · incomplete: the scope was not fully searched") +
-            (if (shown.size < hits.hits.size) " · showing ${shown.size}" else "")
+            (if (shown.size < hits.hits.size) " · showing ${shown.size}" else "") +
+            (hits.degradation?.let { " · degraded: $it" } ?: "")
         val lines = shown.map { "  ${it.id} [${it.kind}]${if (it.stale) " stale" else ""}: ${it.summary}" }
         return result("ok", (listOf(head) + lines).joinToString("\n"), hits.scope, complete = hits.complete, truncated = hits.truncated || shown.size < hits.hits.size)
     }

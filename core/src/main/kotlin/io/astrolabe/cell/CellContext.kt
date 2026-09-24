@@ -3,6 +3,7 @@ package io.astrolabe.cell
 import io.astrolabe.Config
 import io.astrolabe.atlas.Atlas
 import io.astrolabe.auth.CapabilitySet
+import io.astrolabe.context.ContextAdmission
 import io.astrolabe.contract.Contracts
 import io.astrolabe.contract.Ledger
 import io.astrolabe.evidence.Aliases
@@ -129,6 +130,10 @@ public class CellContext @JvmOverloads constructor(
     public val generation: ExecutionGeneration = ExecutionGeneration.INITIAL,
     /** Per-call accounting (P1.11.2): every response, and every call whose usage never arrived, is priced and stored. */
     public val accounting: Accounting? = null,
+    /** The id of the context manifest this cell was compiled under (§6.5, P2.3.2); `Cell.Ended` links it. */
+    public val manifest: String? = null,
+    /** The hard admission check (§6.1, P2.3.3); one per lineage, created by the cell when absent. */
+    public val admission: ContextAdmission? = null,
 ) {
     init {
         require(ids.context != null) { "a cell runs under its own context id" }

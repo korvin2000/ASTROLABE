@@ -218,6 +218,8 @@ public class Row internal constructor(private val results: ResultSet) {
 
     public fun long(column: String): Long = results.getLong(column)
 
+    public fun double(column: String): Double = results.getDouble(column)
+
     public fun long(index: Int): Long = results.getLong(index)
 
     public fun longOrNull(column: String): Long? {

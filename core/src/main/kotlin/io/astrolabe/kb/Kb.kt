@@ -10,11 +10,13 @@ public data class KbHit(
 )
 
 /** Search hits with the completeness of the declared scope (L8: an empty scoped search is not absence). */
-public data class KbHits(
+public data class KbHits @JvmOverloads constructor(
     val hits: List<KbHit>,
     val scope: String,
     val complete: Boolean,
     val truncated: Boolean = false,
+    /** An optional retrieval layer that was unavailable and how the search degraded (FX-46); never a block. */
+    val degradation: String? = null,
 )
 
 /** A note or skill body served by `kb(get)` / `kb(skill)`. */
