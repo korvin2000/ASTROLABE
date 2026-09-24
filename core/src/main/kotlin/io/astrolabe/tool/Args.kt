@@ -172,6 +172,14 @@ public data class TaskArgs(
     init {
         require(op in ToolOps.task) { "unknown task op '$op'" }
         if (op == "ask") require(!question.isNullOrBlank()) { "task(ask) needs a question" }
+        if (op == "propose") {
+            require(kind in PROPOSAL_KINDS) { "task(propose) needs kind ${PROPOSAL_KINDS.joinToString("|")}, got '$kind'" }
+            require(proposal != null) { "task(propose) needs a proposal object" }
+        }
+    }
+
+    public companion object {
+        public val PROPOSAL_KINDS: List<String> = listOf("plan", "increment_split", "amendment")
     }
 }
 

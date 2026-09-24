@@ -49,6 +49,17 @@ import io.astrolabe.id.ContextId
 import io.astrolabe.id.Identities
 import io.astrolabe.id.WorkId
 import io.astrolabe.store.Store
+import io.astrolabe.budget.HeuristicEstimator
+import io.astrolabe.budget.Reservations
+import io.astrolabe.provider.ToolCall as ProviderCall
+import io.astrolabe.provider.ToolMask
+import io.astrolabe.register.Register
+import io.astrolabe.tool.ParsedCalls
+import io.astrolabe.tool.ToolCalls
+import io.astrolabe.tool.ToolOutcome
+import io.astrolabe.tool.TurnContext
+import io.astrolabe.tool.task.TaskTool
+import io.astrolabe.workset.Workset
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Path
@@ -206,5 +217,72 @@ class PlanTest {
                 assertNull(proposals.latest(WorkId("W-other"), null))
             }
         }
+    }
+
+    private val wirePlan = """{"increments":[
+        {"id":"I1","requirements":["R1"],"accept":["AC1"],"write_scope":["src/"],"expected_files":1,"produces":"artifact"},
+        {"id":"I2","requirements":["R2"],"accept":["AC1","AC-R2"],"write_scope":["src/"],"depends_on":["I1"],"produces":"artifact"}],
+        "ownership":{"src/parser.py":"I1"},
+        "acceptance":[{"id":"AC-R2","requirement":"R2","review":"a maintainer judges the message readable"}],
+        "con":[{"summary":"parser error contract","scope":"src/parser.py"}],"shape":"S1"}"""
+
+    private fun proposing(contracts: Contracts, plans: PlanProposals, splits: SplitRequests, register: Register?) = TaskTool(
+        authority(emptySet()), contracts, null, HeuristicEstimator(), FixedIdGen(), Identities(work, AttemptId("a1"), context = cell), clock,
+        mask = ToolMask(Roles.plan.toolMask.allowed), proposals = CampaignProposals(plans, splits, { contracts.current(work) }, { register }),
+    )
+
+    private suspend fun TaskTool.propose(kind: String, proposal: String): ToolOutcome {
+        val call = (ToolCalls.parse(listOf(ProviderCall("c1", "task", """{"op":"propose","kind":"$kind","proposal":$proposal}"""))) as ParsedCalls.Valid).calls.single()
+        return execute(call, TurnContext(1, Workset().snapshot(), Reservations(Tokens(1_000))))
+    }
+
+    @Test
+    fun `task propose records a plan with the register's decisions and changes neither contract nor graph`() = runBlocking<Unit> {
+        val contracts = contracts(Mode.Autonomous)
+        val plans = InMemoryPlanProposals(FixedIdGen())
+        val register = Register.empty(cell, "plan", "plan the parser work").copy(decisions = listOf(
+            io.astrolabe.register.Decision(1, "split parser and messages", "they fail independently", "one increment", adrCandidate = true),
+        ))
+        val tool = proposing(contracts, plans, InMemorySplitRequests(FixedIdGen()), register)
+
+        val out = tool.propose("plan", wirePlan)
+        assertEquals("proposed", out.header!!.runtime.status, out.body)
+        assertTrue("2 increments, 1 acceptance proposals; passes the controller's checks" in out.body, out.body)
+        val stored = plans.latest(work, cell)!!.packet
+        assertEquals(listOf("I1", "I2"), stored.graphProposal.increments.map { it.id })
+        assertEquals(Origin.Model("R2"), stored.acceptanceProposals.single().item.origin)
+        assertEquals(register.decisions, stored.decisionPackets)
+        assertEquals(listOf("split parser and messages because they fail independently; rejected: one increment"), stored.adrCandidates.map { it.summary })
+        assertEquals(contract(Mode.Autonomous), contracts.current(work), "a proposal never changes the contract")
+
+        val bad = tool.propose("plan", """{"increments":[{"id":"I1","requirements":["R1"],"accept":["AC1"],"produces":"soon"}]}""")
+        assertEquals("rejected", bad.header!!.runtime.status)
+        assertTrue("produces must be artifact or resolves:<question>" in bad.body, bad.body)
+        val gaps = tool.propose("plan", """{"increments":[{"id":"I1","requirements":["R1"],"accept":["AC1"],"produces":"artifact"}]}""")
+        assertTrue("gaps: " in gaps.body && "R2 has no acceptance" in gaps.body, gaps.body)
+    }
+
+    @Test
+    fun `a split proposal reaches the plan role as a packet and an amendment stays pending as a weakening`() = runBlocking<Unit> {
+        val contracts = contracts(Mode.Autonomous)
+        TempRepo.create().use { repo ->
+            repo.write("a.txt", "a")
+            repo.commit("initial")
+            Store.open(stateRoot, repo.git, clock).use { store ->
+                val splits = SqliteSplitRequests(store, FixedIdGen(), clock)
+                val tool = proposing(contracts, InMemoryPlanProposals(FixedIdGen()), splits, null)
+                val out = tool.propose("increment_split", """{"increment":"I2","reason":"message work is independent","parts":["wording","tests"]}""")
+                assertEquals("proposed", out.header!!.runtime.status, out.body)
+                assertEquals(listOf(IncrementSplit("I2", "message work is independent", listOf("wording", "tests"))), splits.forPlanRole(work).map { it.split })
+
+                val amendment = tool.propose("amendment", """{"change":"drop R2","reason":"out of scope"}""")
+                assertEquals("proposed", amendment.header!!.runtime.status, amendment.body)
+                val pending = contracts.current(work)!!.amendmentsPending.single()
+                assertTrue(pending.weakening, "a model amendment is never auto-accepted as non-weakening (D-69)")
+                assertEquals(1, contracts.current(work)!!.version)
+            }
+        }
+        val masked = TaskTool(authority(emptySet()), contracts, null, HeuristicEstimator(), FixedIdGen(), Identities(work, AttemptId("a1"), context = cell), clock)
+        assertEquals("masked", masked.propose("plan", wirePlan).header!!.runtime.status, "S0 masks propose")
     }
 }
