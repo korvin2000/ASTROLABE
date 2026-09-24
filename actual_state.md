@@ -49,7 +49,7 @@ campaign-review rows; receipt JSON carries the closure manifest.
 | P3.2 | 36054813717 |
 | P3 phase (P3.3 + P3.8) | 36059635140 |
 | P4.1 (+ P4.4.1, P4.5.1) | 36066888792 |
-| P4.2 | see the TODO gate line |
+| P4.2 | 36069237870 |
 - Local (Windows, JDK 26): the full build runs about 1170 core tests (6 platform skips), eval and provider-api.
 
 ## Recorded deviations

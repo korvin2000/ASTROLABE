@@ -4,7 +4,7 @@ Rewritten every session (≤40 lines). Workflow: `CLAUDE.md` § Workflow. State 
 History: `audit/SESSION-HISTORY.md` (never read at startup).
 
 **Checkpoint:** local Windows session, branch `claude/p3-2-impact`, fast-forwarded into `main` at every gate. **150/185 DONE.**
-P3 is complete (25/25, phase gate CI 36059635140). P4 is 9/25: P4.1 (gate CI 36066888792), P4.2 (gate: see TODO), P4.4.1,
+P3 is complete (25/25, phase gate CI 36059635140). P4 is 9/25: P4.1 (gate CI 36066888792), P4.2 (gate CI 36069237870), P4.4.1,
 P4.5.1, plus the earlier kernels P4.5.4/P4.5.5. Start the next session from `main`.
 
 ## Next block (queue order, Deps govern)
