@@ -3,7 +3,8 @@
 Rewritten every session (≤40 lines). Workflow: `CLAUDE.md` § Workflow. State snapshot: `actual_state.md`.
 History: `audit/SESSION-HISTORY.md` (never read at startup).
 
-**Checkpoint:** `3681040` on `main` and `claude/blissful-shannon-a5ey09` (P1.9.1 code at `12fc5d7`).
+**Checkpoint:** `main` (workflow retune merged 2026-09-24; last code commit `12fc5d7`, P1.9.1). Work on a fresh
+session branch from `main`; old `claude/*` branches were merged and deleted.
 **Last gate:** [CI run 35941844915](https://github.com/korvin2000/ASTROLABE/actions/runs/35941844915) green on
 Ubuntu + Windows (JDK 26, `check` incl. `checkKotlinAbi`) at `12fc5d7`. Nothing ungated since then except
 workflow files (no code).
