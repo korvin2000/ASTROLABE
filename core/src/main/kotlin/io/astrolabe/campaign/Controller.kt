@@ -12,6 +12,7 @@ import io.astrolabe.auth.Redaction
 import io.astrolabe.auth.RulesTrust
 import io.astrolabe.budget.CellBudget
 import io.astrolabe.budget.HeuristicEstimator
+import io.astrolabe.budget.Reservations
 import io.astrolabe.budget.Tokens
 import io.astrolabe.cell.Cell
 import io.astrolabe.cell.CellContext
@@ -62,6 +63,7 @@ import io.astrolabe.evidence.IntentStatus
 import io.astrolabe.evidence.Journal
 import io.astrolabe.evidence.JournalEvent
 import io.astrolabe.evidence.JournalKind
+import io.astrolabe.evidence.Outcome
 import io.astrolabe.evidence.SqliteAliases
 import io.astrolabe.evidence.SqliteIntentJournal
 import io.astrolabe.evidence.SqliteObservations
@@ -92,7 +94,10 @@ import io.astrolabe.store.Store
 import io.astrolabe.telemetry.Accounting
 import io.astrolabe.telemetry.Spans
 import io.astrolabe.telemetry.TraceSpanStatus
+import io.astrolabe.tool.ParsedCalls
+import io.astrolabe.tool.ToolCalls
 import io.astrolabe.tool.TurnCheckpoint
+import io.astrolabe.tool.TurnContext
 import io.astrolabe.tool.edit.CliSyntax
 import io.astrolabe.tool.edit.Edit
 import io.astrolabe.tool.edit.SyntaxCheck
@@ -475,7 +480,7 @@ public class Controller @JvmOverloads public constructor(
             val contract = c.contract
             val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock)
             val unverified = state.ledger.unfinished()
-            if (unverified.isEmpty()) return last.copy(state = stopOrFinish(c, "requirements remain unverified", scheduler))
+            if (unverified.isEmpty()) return last.copy(state = stopOrFinish(c, "requirements remain unverified", scheduler, campaign = true))
             val ready = state.graph.readyFrontier(contract, 1).firstOrNull()
             if (ready == null) {
                 // FX-42: verified work is never re-executed; its regression evidence is refreshed from current receipts.
@@ -532,6 +537,9 @@ public class Controller @JvmOverloads public constructor(
                     }
                     c.advance(Transition.Committed(disposition.accepted, stampNow))
                     events?.emit(AgentEvent.Campaign.IncrementClosed(c.ids, increment.id, "verified"))
+                    // §7.3 cadence: the full suite every K verified increments; a red result is a regression on record.
+                    val verified = checkNotNull(c.state).graph.increments.count { it.status == IncrementStatus.Verified }
+                    if (verified % CampaignFinish.FULL_SUITE_EVERY == 0 && checkNotNull(c.state).ledger.unfinished().isNotEmpty()) fullSuite(c, "cadence after $verified verified increments")
                 }
                 // S1: a partial continues the same increment from its carry-forward; the cell cap bounds it (D-70).
                 is Disposition.Continue -> Unit
@@ -813,10 +821,21 @@ public class Controller @JvmOverloads public constructor(
      * `finish` (§3.7) in its S0 form: every requirement verified and every `run:` item re-certified by a current
      * receipt at the final stamp, else an honest stop — never `completed` over a gap.
      */
-    private fun stopOrFinish(c: OpenedCampaign, unfinished: String, scheduler: Scheduler? = null): CampaignState {
+    private suspend fun stopOrFinish(c: OpenedCampaign, unfinished: String, scheduler: Scheduler? = null, campaign: Boolean = false): CampaignState {
         val state = checkNotNull(c.state)
         if (state.ledger.unfinished().isNotEmpty() || scheduler == null) {
             return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, unfinished))
+        }
+        if (campaign) {
+            // §8.7 campaign gate (P2.2.6): the campaign review predicate, then the full suite at campaign end.
+            CampaignFinish.reviewRequired(c.contract, state.graph.increments.count { it.status != IncrementStatus.Cancelled })?.let {
+                return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, it))
+            }
+            when (val full = fullSuite(c, "campaign end")) {
+                is FullSuite.Red -> return c.advance(Transition.Stopped(CampaignOutcome.Failed, "final full suite red: ${full.detail}"))
+                is FullSuite.NotCertified -> return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "final full suite could not certify: ${full.detail}"))
+                FullSuite.Green, FullSuite.Undeclared -> Unit
+            }
         }
         val stamp = c.stamper.report().candidateId
         val currencies = currencies(c, scheduler, stamp)
@@ -833,6 +852,42 @@ public class Controller @JvmOverloads public constructor(
         }
         c.advance(Transition.Finishing(stamp))
         return c.advance(Transition.Finished(stamp, receipts.distinct()))
+    }
+
+    private sealed interface FullSuite {
+        data object Green : FullSuite
+        data object Undeclared : FullSuite
+        data class Red(val detail: String) : FullSuite
+        data class NotCertified(val detail: String) : FullSuite
+    }
+
+    /** Runs the declared full suite through the `verify` tool path (receipts, closures, redaction) and journals the result. */
+    private suspend fun fullSuite(c: OpenedCampaign, why: String): FullSuite {
+        val check = c.checks[Checks.FULL]
+        val ids = c.ids.copy(context = ContextId(idGen.next("finish")))
+        if (check == null) {
+            c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, text = "full suite ($why): none declared by the repository — an explicit gap, acceptance runs stand", at = clock.instant()))
+            return FullSuite.Undeclared
+        }
+        val config = c.attempt.config
+        val redaction = Redaction(config.redaction)
+        val logs = c.store.layout.root.resolve("logs")
+        val runner = TrustedLocalRunner(c.os)
+        val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, ids, clock)
+        val checker = Checker(c.checks, runner, c.os, c.stamper, c.registry, c.workspace, c.store.blobs, redaction, idGen, ids, logs)
+        val verify = Verify(checks = c.checks, scheduler = scheduler, checker = checker, baseline = null, s0 = c.s0.stampId, workspace = c.workspace, runner = runner, os = c.os, stamper = c.stamper, blobs = c.store.blobs, redaction = redaction, estimator = HeuristicEstimator(), idGen = idGen, ids = ids, contracts = c.contracts, logsDir = logs)
+        val call = (ToolCalls.parse(listOf(io.astrolabe.provider.ToolCall("full", "verify", """{"what":"tests","selection":"full"}"""))) as ParsedCalls.Valid).calls.single()
+        verify.execute(call, TurnContext(0, Workset().snapshot(), Reservations(Tokens(config.defaults.runBudgetTokens.toLong()))))
+        val last = c.checks[Checks.FULL]?.last
+        val stamp = c.stamper.report().candidateId
+        // The full suite's closure is unknown (every file), so its evidence is a pass recorded at this very stamp.
+        val result = when {
+            last?.outcome == Outcome.Passed && last.stamp == stamp -> FullSuite.Green
+            last?.outcome == Outcome.Failed -> FullSuite.Red("${last.receiptId} failed at @${stamp.hash8}")
+            else -> FullSuite.NotCertified("${last?.receiptId ?: "no receipt"} ${last?.outcome?.name?.lowercase() ?: "not run"} at @${stamp.hash8}")
+        }
+        c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, refs = listOfNotNull(last?.receiptId), text = "full suite ($why): ${result::class.simpleName!!.lowercase()}", at = clock.instant()))
+        return result
     }
 
     /** The outcome of a refused dispatch or publication: `cancelled` for a cancellation, else the lost lease blocks. */

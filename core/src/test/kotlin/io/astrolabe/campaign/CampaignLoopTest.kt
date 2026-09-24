@@ -55,7 +55,8 @@ class CampaignLoopTest {
     @BeforeTest
     fun setUp() {
         repo = TempRepo.create()
-        repo.write("Makefile", "test:\n\techo ok\n")
+        // The full suite runs at S1 finish (P2.2.6): a counted pytest log certifies; Windows declares none (no `make`).
+        if (!WINDOWS) repo.write("Makefile", "test:\n\tcat pytest_pass.txt\n")
         repo.write("src/a.py", "def a():\n    return 1\n")
         repo.write("src/b.py", "def b():\n    return 2\n")
         repo.write("pytest_pass.txt", javaClass.getResourceAsStream("/shaper/pytest-pass.txt")!!.use { String(it.readAllBytes(), Charsets.UTF_8) })
@@ -135,6 +136,8 @@ class CampaignLoopTest {
             val finish = run.finish!!
             assertEquals(listOf("src/a.py", "src/b.py"), finish.changes.agent.sorted())
             assertEquals(listOf("green", "green"), finish.acceptance.map { it.status })
+            val suite = c.journal.events(io.astrolabe.evidence.JournalScope(request.work, kinds = setOf(io.astrolabe.evidence.JournalKind.Boundary))).map { it.text }.filter { it.startsWith("full suite (campaign end)") }
+            assertEquals(listOf(if (WINDOWS) "full suite (campaign end): none declared by the repository — an explicit gap, acceptance runs stand" else "full suite (campaign end): green"), suite)
         }
     }
 
@@ -148,6 +151,38 @@ class CampaignLoopTest {
             assertEquals(IncrementStatus.Verified, state.graph.increments.first { it.id == "I1" }.status)
             assertEquals(IncrementStatus.Pending, state.graph.increments.first { it.id == "I2" }.status)
             assertTrue("1 requirements unverified" in run.state!!.reason!!, run.state!!.reason)
+        }
+    }
+
+    @Test
+    fun `finish never reports completed over a stale acceptance receipt`() = runBlocking<Unit> {
+        controller().open(repo.root, request, policy).use { c ->
+            val va = c.registry.version("src/a.py")!!
+            val vb = c.registry.version("src/b.py")!!
+            // I2 verifies first and edits afterwards: its receipts describe a tree that no longer exists.
+            val replies = planning() + implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"") + listOf(
+                Scripted.Reply(listOf<Item>(say("reading"), read("r-b", "src/b.py"))),
+                Scripted.Reply(listOf<Item>(say("verifying early"), call("v-b", "verify", """{"what":"acceptance","ids":["AC-1","AC-2"]}"""))),
+                Scripted.Reply(listOf<Item>(say("editing after the receipt"), anchored("e-b", "src/b.py", vb, "    return 2", "    return 20"))),
+                Scripted.Reply(listOf<Item>(say("done"))),
+            )
+            assertTrue(va != vb)
+            val run = controller().run(c, model(replies), maxCells = 3)
+            assertTrue(run.outcome != CampaignOutcome.Completed, "never completed over a stale receipt: ${run.outcome} ${run.state?.reason}")
+            assertTrue(c.campaigns.load(request.work, request.attempt)!!.graph.increments.first { it.id == "I2" }.status != IncrementStatus.Verified)
+        }
+    }
+
+    @Test
+    fun `the campaign review predicate names why a review is owed`() {
+        Store.open(stateRoot, repo.git, clock).use { store ->
+            val contract = Contracts(SqliteContractRepository(store, clock), idGen, clock).current(request.work)!!
+            assertEquals(null, CampaignFinish.reviewRequired(contract, 2))
+            assertTrue(CampaignFinish.reviewRequired(contract.copy(shape = Shape.S2), 3)!!.contains("shape S2 with 3 increments"))
+            assertEquals(null, CampaignFinish.reviewRequired(contract.copy(shape = Shape.S2), 2))
+            assertTrue(CampaignFinish.reviewRequired(contract, 1, refactorMode = true)!!.contains("refactor mode"))
+            val review = contract.copy(acceptance = contract.acceptance + Acceptance.Review("AC-R", "a maintainer approves", Origin.User))
+            assertTrue(CampaignFinish.reviewRequired(review, 1)!!.contains("unsigned review items AC-R"))
         }
     }
 }

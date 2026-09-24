@@ -190,3 +190,26 @@ public object FinishReceipts {
         return digest.hex to Files.write(dir.resolve("finish-receipt.json"), bytes)
     }
 }
+
+/** The §8.7 campaign gate's policy parts (P2.2.6). */
+public object CampaignFinish {
+    /** §7.3 full-suite cadence: every K verified increments, and at campaign end. */
+    public const val FULL_SUITE_EVERY: Int = 5
+
+    /**
+     * The campaign review predicate `(shape ≥ S2 ∧ increments ≥ 3) ∨ refactor_mode ∨ explicitly required`: the reason a
+     * review is owed, or `null`. An unsigned `review:` acceptance item is an explicit requirement; refactor mode arrives
+     * with its flag (P3). The human path is P3.5.2, the review cell P4.4.3.
+     */
+    @JvmStatic
+    @JvmOverloads
+    public fun reviewRequired(contract: io.astrolabe.contract.Contract, increments: Int, refactorMode: Boolean = false): String? {
+        val unsigned = contract.acceptance.filterIsInstance<io.astrolabe.contract.Acceptance.Review>().filter { it.signedBy == null }.map { it.id }
+        return when {
+            contract.shape >= io.astrolabe.contract.Shape.S2 && increments >= 3 -> "campaign review required: shape ${contract.shape} with $increments increments (P3.5.2/P4.4.3)"
+            refactorMode -> "campaign review required: refactor mode (P3.5.2/P4.4.3)"
+            unsigned.isNotEmpty() -> "campaign review required: unsigned review items ${unsigned.joinToString(", ")} (P3.5.2/P4.4.3)"
+            else -> null
+        }
+    }
+}
