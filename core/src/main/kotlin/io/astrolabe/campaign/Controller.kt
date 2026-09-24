@@ -38,7 +38,10 @@ import io.astrolabe.context.CarryForward
 import io.astrolabe.context.CompileInputs
 import io.astrolabe.context.Compiled
 import io.astrolabe.context.Compiler
+import io.astrolabe.context.Fingerprint
 import io.astrolabe.context.Manifest
+import io.astrolabe.context.Precompile
+import io.astrolabe.context.PrecompileTrigger
 import io.astrolabe.context.RebuildReason
 import io.astrolabe.context.Seeds
 import io.astrolabe.context.SqliteManifests
@@ -58,6 +61,9 @@ import io.astrolabe.event.AutonomousAuthority
 import io.astrolabe.event.Events
 import io.astrolabe.event.Phase
 import io.astrolabe.event.SpanId
+import io.astrolabe.telemetry.PrecompileMetrics
+import io.astrolabe.telemetry.PrecompileOutcome
+import io.astrolabe.telemetry.PrecompileSample
 import io.astrolabe.evidence.Aliases
 import io.astrolabe.evidence.Coherence
 import io.astrolabe.evidence.IntentJournal
@@ -120,6 +126,7 @@ import io.astrolabe.verify.Checker
 import io.astrolabe.verify.Checks
 import io.astrolabe.verify.CompletionProposal
 import io.astrolabe.verify.CompletionResult
+import io.astrolabe.verify.CostClass
 import io.astrolabe.verify.Currency
 import io.astrolabe.verify.RefactorMode
 import io.astrolabe.verify.RunnerCommands
@@ -143,6 +150,7 @@ import java.time.Clock
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
@@ -285,6 +293,8 @@ public class Controller @JvmOverloads public constructor(
     private val spans: Spans? = null,
     /** How long a workspace lease lasts; its expiry revokes publication authority only (§13.1). */
     private val leaseDuration: Duration = Duration.ofHours(1),
+    /** Boundary pre-compilation telemetry (§6.6, §19.5): hits, misses and boundary latency, recorded with the flag on. */
+    public val precompiles: PrecompileMetrics = PrecompileMetrics(),
 ) {
     /**
      * Opens or reopens [request]'s campaign over [repo]. Order (§3.7, §13.1): the store and its project lock, the
@@ -501,6 +511,9 @@ public class Controller @JvmOverloads public constructor(
         }
         var last = S0Run(c.state, null, null, null)
         var cells = 0
+        // §6.6 `[O]`: boundary pre-compilation only under the frozen `precompile` flag; off, nothing below runs.
+        val precompile = if (c.attempt.config.flags.precompile) Precompile(c.journal, idGen, clock) else null
+        var closed: Pair<ContextId, Long>? = null
         while (true) {
             c.refusal()?.let { return last.copy(state = c.advance(Transition.Stopped(stopOutcome(c), "dispatch refused: $it"))) }
             val state = checkNotNull(c.state)
@@ -524,9 +537,24 @@ public class Controller @JvmOverloads public constructor(
             val seeds = carry?.let { Seeds.render(it.seeds, c.registry::read) }
             val resume = resumeNote(c, ready, carry)
             val inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) })
-            val compiled = Compiler(model.estimator, c.attempt.config).compile(
+            val pinned = listOfNotNull(resume)
+            val compiler = Compiler(model.estimator, c.attempt.config)
+            // §6.6: a pre-compiled [K] is served for cell_end(next_increment) only, on a full-fingerprint and coverage match.
+            val take = precompile?.let { p ->
+                if (ready.cells.isNotEmpty()) {
+                    p.discard("${ready.id} continues; pre-compilation applies to the next increment only")
+                    null
+                } else {
+                    p.take(fingerprint(c, contract, ready, c.stamper.report().candidateId, model, inputs, null, pinned)) { compiled ->
+                        (compiled as? Compiled.Ready)?.let { compiler.coverage(contract, ready, it.k, c.prime, pinned, inputs) }.orEmpty()
+                    }
+                }
+            }
+            val compiled = take?.compiled ?: compiler.compile(
                 ready, contract, model.profile, Roles.implementing, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = inputs,
             )
+            closed?.let { (cell, at) -> precompiles.record(PrecompileSample(cell, ready.id, take?.outcome ?: PrecompileOutcome.None, take?.reason, (precompiles.now() - at).coerceAtLeast(0))) }
+            closed = null
             // §6.5: why this context is built — a new increment after a closed one, a partial's continuation, or a resume.
             val boundaryReason = when (ready.cells.lastOrNull()?.let { previous -> state.cells.firstOrNull { it.cell == previous }?.status }) {
                 null, CellStatus.Completed -> BoundaryReason.Done
@@ -543,7 +571,14 @@ public class Controller @JvmOverloads public constructor(
             val dispatched = c.advance(Transition.Dispatched(ready.id, cellId))
             val increment = dispatched.graph.increments.first { it.id == ready.id }
             val register = carry?.register?.copy(cell = cellId, increment = increment.id, incrementTitle = increment.title)
-            val run = runCell(c, cellId, increment, Roles.implementing, model, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = listOfNotNull(resume), boundary = boundaryReason, inputs = inputs)
+            // The pre-compile job lives in this scope: joined at cell close, cancelled with the cell (§6.6).
+            val run = coroutineScope {
+                val trigger = precompile?.let { p -> trigger(c, this, p, cellId, increment, model) }
+                runCell(c, cellId, increment, Roles.implementing, model, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = pinned, boundary = boundaryReason, inputs = inputs, precompile = trigger).also { run ->
+                    if (run.exit !is CellExit.Completed) precompile?.discard("cell ${cellId.value} ended ${run.exit?.let { it::class.simpleName!!.lowercase() } ?: "cancelled"}: never a continuation of a red increment")
+                }
+            }
+            if (precompile != null) closed = cellId to precompiles.now()
             val exit = run.exit
             if (exit == null) {
                 snapshot(c)
@@ -581,6 +616,37 @@ public class Controller @JvmOverloads public constructor(
             last = last.copy(state = c.state)
         }
     }
+
+    /** The full compile-input fingerprint (§6.6, F06) of an implementing compile of [increment] at [stamp]. */
+    private fun fingerprint(c: OpenedCampaign, contract: Contract, increment: Increment, stamp: CandidateId, model: CellModel, inputs: CompileInputs, registerVersion: Int?, pinned: List<String>): Fingerprint =
+        Fingerprint.of(stamp, contract, increment, Roles.implementing, model.profile, c.attempt, c.prime, model.estimator, model.maxOutputTokens, inputs, registerVersion, pinned)
+
+    /**
+     * §6.6: at a completion proposal of [increment]'s cell that leaves only slow or expensive checks to run, pre-build
+     * the `[K]` of the increment the frontier would offer next, locally and in [scope]; a fast check still to run, or
+     * no next increment, skips it. Only `cell_end(next_increment)` can consume it (never a continuation).
+     */
+    private fun trigger(c: OpenedCampaign, scope: CoroutineScope, precompile: Precompile, cell: ContextId, increment: Increment, model: CellModel): PrecompileTrigger =
+        PrecompileTrigger { stamp, remaining ->
+            val ids = c.ids.copy(context = cell)
+            if (!precompile.eligible(remaining)) {
+                val fast = remaining.filter { it.costClass != CostClass.Slow && it.costClass != CostClass.Expensive }
+                c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, text = "precompile skipped: ${fast.joinToString(", ") { "${it.id} ${it.costClass.name.lowercase()}" }} still to run at the boundary", at = clock.instant()))
+                return@PrecompileTrigger
+            }
+            val contract = c.contract
+            val next = checkNotNull(c.state).graph.peekNext(contract, increment.id)
+            if (next == null) {
+                c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, text = "precompile skipped: no increment ready after ${increment.id}", at = clock.instant()))
+                return@PrecompileTrigger
+            }
+            // The next increment has no previous cell: no carry-forward, no seeds, no resume note (§6.2).
+            val inputs = CompileInputs(currentVersion = { c.registry.version(it) })
+            val compiler = Compiler(model.estimator, c.attempt.config)
+            precompile.start(scope, ids, fingerprint(c, contract, next, stamp, model, inputs, null, emptyList()), next.id, remaining) {
+                compiler.compile(next, contract, model.profile, Roles.implementing, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = inputs)
+            }
+        }
 
     /**
      * Regression obligations (§4.2, FX-42): a verified increment whose evidence no longer holds at the current stamp is
@@ -803,6 +869,7 @@ public class Controller @JvmOverloads public constructor(
         pinned: List<String> = emptyList(),
         boundary: BoundaryReason? = null,
         inputs: CompileInputs = CompileInputs(),
+        precompile: PrecompileTrigger? = null,
     ): CellRun {
         val ids = c.ids.copy(context = cellId)
         val config = c.attempt.config
@@ -847,6 +914,7 @@ public class Controller @JvmOverloads public constructor(
             manifest = manifest.id,
             sections = compiled.k.sections,
             pinned = pinned,
+            precompile = precompile,
         )
         val budget = CellBudget.of(contract.budget.tokens, contract.budget.turnsPerCell, contract.budget.reserves)
         val cellSpan = spans?.start(Phase.Edit, ids, span)

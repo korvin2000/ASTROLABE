@@ -37,7 +37,7 @@ public data class CellMetrics(
     public companion object {
         @JvmStatic
         @JvmOverloads
-        public fun of(cell: ContextId, records: List<EventRecord>, layerOf: Map<String, String> = emptyMap()): CellMetrics {
+        public fun of(cell: ContextId, records: List<EventRecord>, layerOf: Map<String, String> = emptyMap(), precompilationHit: Boolean? = null): CellMetrics {
             val own = records.filter { it.event.ids.context == cell }
             val usages = own.map { it.event }.filterIsInstance<AgentEvent.Cell.ModelResponded>().map { it.usage }
             val dimensions = usages.filterNotNull().flatMap { it.quantities.keys + it.unknown }.distinct()
@@ -64,6 +64,7 @@ public data class CellMetrics(
                 turns = events.filterIsInstance<AgentEvent.Cell.TurnStarted>().maxOfOrNull { it.turn } ?: 0,
                 boundaryReason = events.filterIsInstance<AgentEvent.Cell.Ended>().lastOrNull()?.status,
                 anchorTokens = events.filterIsInstance<AgentEvent.Cell.ModelRequested>().map { it.anchorTokens }.let { sizes -> if (sizes.isEmpty() || null in sizes) null else sizes.sumOf { it!! } },
+                precompilationHit = precompilationHit,
             )
         }
     }

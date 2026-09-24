@@ -4,6 +4,7 @@ import io.astrolabe.Config
 import io.astrolabe.atlas.Atlas
 import io.astrolabe.auth.CapabilitySet
 import io.astrolabe.context.ContextAdmission
+import io.astrolabe.context.PrecompileTrigger
 import io.astrolabe.contract.Contracts
 import io.astrolabe.contract.Ledger
 import io.astrolabe.evidence.Aliases
@@ -136,6 +137,8 @@ public class CellContext @JvmOverloads constructor(
     public val admission: ContextAdmission? = null,
     /** The compiled `[K]` sections after the slice (§6.1: carry-forward, seeds, notes); the slice re-renders every turn. */
     public val sections: List<KSection> = emptyList(),
+    /** Boundary pre-compilation (§6.6, `precompile` flag): told at each completion proposal which checks still run. */
+    public val precompile: PrecompileTrigger? = null,
 ) {
     init {
         require(ids.context != null) { "a cell runs under its own context id" }
