@@ -13,6 +13,7 @@ import io.astrolabe.tool.state.BlockedRequest
 import io.astrolabe.verify.CompletionProposal
 import io.astrolabe.verify.TestIntegrityFlag
 import io.astrolabe.workset.Entry
+import kotlinx.serialization.Serializable
 
 /**
  * The status a packet proposes (§5.9). It is derived from how the cell ended, never read from the model's
@@ -92,6 +93,7 @@ public data class PacketFlags @JvmOverloads constructor(
 }
 
 /** A note the cell proposes (§4.5); the curator decides admission (P4.1). */
+@Serializable
 public data class NoteCandidate(val kind: String, val summary: String, val scope: String, val evidenceRefs: List<String>, val anchors: List<String>)
 
 /** Informs routing calibration (P2.1.4, P4.5.1); never decides anything. */
