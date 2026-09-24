@@ -17,6 +17,7 @@ import io.astrolabe.route.FunctionTable
 import io.astrolabe.route.RoutingFunction
 import io.astrolabe.route.Tier
 import io.astrolabe.store.Store
+import io.astrolabe.verify.Finding
 import java.time.Clock
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -61,17 +62,22 @@ public data class Candidate @JvmOverloads constructor(
     val dependsOn: List<String> = emptyList(),
     /** The `BMAP`/`SKILL` note this delta replaces (never rewritten in place). */
     val supersedes: String? = null,
+    /** A `NEG` candidate's typed state (§12.2, P4.2.2): required for `NEG`, absent otherwise. */
+    val negative: NegativeEvidence? = null,
 ) {
     init {
         require(name.isNotBlank() && name.none { it.isWhitespace() }) { "a candidate name is one token" }
         // D-42: the model never writes calibration statistics; the harness aggregates the CAL delta.
         require(kind != CandidateKind.CAL_DELTA) { "a CAL delta is aggregated from CalibrationStats, never proposed" }
+        require((kind == CandidateKind.NEG) == (negative != null)) { "a NEG candidate carries its typed state, and only a NEG does" }
     }
 
     val id: String get() = "${kind.noteKind.name}-$name"
 
+    /** The note; a `NEG` summary is prefixed with its `[state]` and its body opens with the state's own reading. */
     public fun note(origin: NoteOrigin): Note = Note(
-        id, kind.noteKind, NoteStatus.Candidate, summary, diagnosis.render(), scope, anchors, confidence,
+        id, kind.noteKind, NoteStatus.Candidate, negative?.let { "[${it.state.wire}] $summary" } ?: summary,
+        listOfNotNull(negative?.render(), diagnosis.render()).joinToString(" · "), scope, anchors, confidence,
         NoteBasis(evidenceRefs = diagnosis.evidence), NoteValidity(dependsOn, diagnosis.sourceRevision, diagnosis.invalidation),
         supersedes, origin = origin,
     )
@@ -144,13 +150,18 @@ public class Extractor @JvmOverloads constructor(
     private val notes = Notes(store)
     public val queue: Queue = Queue(store, KbWriter(store, estimator, clock), idGen, clock)
 
-    /** Extracts from [trace] under the originating cell's [ids]. */
-    public fun run(trace: ExtractionTrace, ids: Identities): ExtractionReport {
+    /**
+     * Extracts from [trace] under the originating cell's [ids]: first the record-derived candidates (P4.2.2, from
+     * the trace, the campaign review's [findings] and the [earlier] cells' registers), then the model step's.
+     */
+    @JvmOverloads
+    public fun run(trace: ExtractionTrace, ids: Identities, findings: List<Finding> = emptyList(), earlier: List<Register> = emptyList()): ExtractionReport {
         val enqueued = ArrayList<QueueEntry>()
         val refused = LinkedHashMap<String, String>()
         var tokens = 0L
         var failure: String? = null
         try {
+            for (candidate in Derived.candidates(trace, findings, earlier)) enqueue(candidate.note(origin(ids, HARNESS_DERIVED)), ids, enqueued, refused)
             val result = extraction.extract(trace, row.defaultTier, row.effort)
             tokens = result.tokens
             for (candidate in result.candidates) enqueue(candidate.note(origin(ids, EXTRACTOR)), ids, enqueued, refused)
@@ -224,6 +235,9 @@ public class Extractor @JvmOverloads constructor(
     public companion object {
         /** `origin.extractor` of a model-produced candidate. */
         public const val EXTRACTOR: String = "extractor"
+
+        /** `origin.extractor` of a candidate derived from records (P4.2.2). */
+        public const val HARNESS_DERIVED: String = "harness:derived"
 
         /** `origin.extractor` prefix of the CAL delta, followed by the statistics' algorithm version; the policy admits it (D-110). */
         public const val HARNESS_CALIBRATION: String = "harness:"

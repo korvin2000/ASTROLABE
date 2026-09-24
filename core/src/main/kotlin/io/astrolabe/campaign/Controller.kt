@@ -99,6 +99,7 @@ import io.astrolabe.id.WorkspaceId
 import io.astrolabe.evidence.JournalScope
 import io.astrolabe.kb.CalibrationSeries
 import io.astrolabe.kb.CalibrationStats
+import io.astrolabe.kb.Derived
 import io.astrolabe.kb.Extraction
 import io.astrolabe.kb.ExtractionTrace
 import io.astrolabe.kb.Extractor
@@ -154,6 +155,9 @@ import io.astrolabe.verify.Baseline
 import io.astrolabe.verify.BehaviourSnapshots
 import io.astrolabe.verify.CampaignReview
 import io.astrolabe.verify.CampaignReviewOutcome
+import io.astrolabe.verify.CampaignReviewRecord
+import io.astrolabe.verify.Finding
+import kotlinx.serialization.json.Json
 import io.astrolabe.verify.CheckKind
 import io.astrolabe.verify.Checker
 import io.astrolabe.verify.Checks
@@ -834,7 +838,7 @@ public class Controller @JvmOverloads public constructor(
 
     /** The carry-forward of [cell] (§6.2): its latest register, its end export and its packet, re-validated now. */
     private fun carryFrom(c: OpenedCampaign, cell: ContextId, packet: ResultPacket?): Carry? {
-        val register = SqliteRegisterVersions(c.store, clock).latest(cell) ?: return null
+        val register = withReviewOpenItems(c, SqliteRegisterVersions(c.store, clock).latest(cell) ?: return null)
         val aliases = SqliteAliases(c.store, clock)
         return CarryForward.carry(
             register, Seeds.cellEnd(SqliteCheckpoints(c.store, clock), cell), packet, { c.registry.version(it) },
@@ -862,13 +866,29 @@ public class Controller @JvmOverloads public constructor(
     private fun extract(c: OpenedCampaign, packets: List<ResultPacket>) {
         val extractor = Extractor(c.store, HeuristicEstimator(), idGen, clock, extraction, c.journal, events)
         val stamp = c.stamper.report().candidateId.digest.hex
-        for (packet in packets) {
+        val findings = reviewFindings(c)
+        for ((i, packet) in packets.withIndex()) {
             val trace = ExtractionTrace(packet, c.journal.events(JournalScope(c.ids.work, packet.ids.context)), packet.stamp?.digest?.hex ?: stamp)
-            extractor.run(trace, packet.ids)
+            // §8.8 findings are the campaign's, derived once: with the last packet; recurring dead ends see the earlier registers.
+            extractor.run(trace, packet.ids, if (i == packets.lastIndex) findings else emptyList(), packets.take(i).map { it.register })
         }
         val policy = Calibration.policy(c.attempt.config.defaults.shapePolicy)
         val series = CalibrationSeries(c.workspace.root.fileName?.toString() ?: "repo", c.attempt.harnessVersion, policy.version)
         extractor.calibrate({ CalibrationStats.aggregate(Calibration.observations(c.store, series), policy) }, series, c.ids)
+    }
+
+    /** The attempt's latest campaign review findings (§8.8), or none. */
+    private fun reviewFindings(c: OpenedCampaign): List<Finding> = c.store.db.query(
+        "SELECT body FROM packets WHERE work_id = ? AND attempt_id = ? AND kind = ? ORDER BY rowid DESC LIMIT 1",
+        c.ids.work, c.ids.attempt, CampaignReview.KIND,
+    ) { Json.decodeFromString(CampaignReviewRecord.serializer(), it.string("body")) }.firstOrNull()?.verdict?.findings.orEmpty()
+
+    /** §8.8 (P4.2.2): findings at or above major not yet in [register] become its `Open` items, numbered after its last. */
+    private fun withReviewOpenItems(c: OpenedCampaign, register: Register): Register {
+        val findings = reviewFindings(c)
+        if (findings.isEmpty()) return register
+        val fresh = Derived.openItems(findings, (register.open.maxOfOrNull { it.n } ?: 0) + 1).filter { item -> register.open.none { it.text == item.text } }
+        return if (fresh.isEmpty()) register else register.copy(open = register.open + fresh)
     }
 
     private suspend fun runS0(campaign: OpenedCampaign, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?): S0Run {
