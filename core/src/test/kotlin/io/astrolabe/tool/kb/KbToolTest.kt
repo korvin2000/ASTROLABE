@@ -21,7 +21,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-/** P1.6.10 `kb` contract: complete-empty results on the S0 base (never "absent"), stale hits labelled, propose masked. */
+/** P1.6.10 `kb` contract: complete-empty results on the S0 base (never "absent"), stale hits labelled, propose needs a queue (P4.1.3). */
 class KbToolTest {
     private fun call(json: String) = (ToolCalls.parse(listOf(ProviderCall("c1", "kb", json))) as ParsedCalls.Valid).calls.single()
 
@@ -44,7 +44,8 @@ class KbToolTest {
         assertEquals("no note 'CON-007' in the knowledge base (complete: the base was searched)", missing.body)
         assertEquals("complete", missing.header!!.runtime.completeness)
         assertEquals("not_found", status(run(EmptyKb, """{"op":"skill","id":"SK-1"}""")))
-        assertEquals("masked", status(run(EmptyKb, """{"op":"propose","note":{"kind":"LES"}}""")))
+        // P4.1.3: `propose` is unmasked; without an admission queue it is unsupported, never silently dropped.
+        assertEquals("unsupported", status(run(EmptyKb, """{"op":"propose","note":{"kind":"LES"}}""")))
     }
 
     @Test

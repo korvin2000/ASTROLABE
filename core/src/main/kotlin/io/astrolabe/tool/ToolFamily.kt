@@ -68,9 +68,9 @@ public object ToolOps {
 
     /**
      * Everything an S0 implementing cell may call in Stage A (refs/importers/impact since P3.2.3, transform since P3.3.1;
-     * bmap, delegate/collect/propose, kb.propose arrive later). `verify.review` is the campaign-scope human review path (P3.5.2, D-23); the review cell is P4.4.3.
+     * kb.propose since P4.1.3; bmap, delegate/collect/propose arrive later). `verify.review` is the campaign-scope human review path (P3.5.2, D-23); the review cell is P4.4.3.
      */
     public val implementingS0: ToolMask = ToolMask(
-        all - setOf("look.bmap", "task.delegate", "task.collect", "task.propose", "kb.propose"),
+        all - setOf("look.bmap", "task.delegate", "task.collect", "task.propose"),
     )
 }

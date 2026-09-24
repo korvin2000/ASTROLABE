@@ -37,6 +37,7 @@ import io.astrolabe.verify.Verifier
 import io.astrolabe.workset.Workset
 import io.astrolabe.workspace.Preimages
 import io.astrolabe.workspace.Stamper
+import io.astrolabe.kb.CellKnowledge
 import io.astrolabe.workspace.VersionRegistry
 import io.astrolabe.workspace.Workspace
 
@@ -139,6 +140,8 @@ public class CellContext @JvmOverloads constructor(
     public val sections: List<KSection> = emptyList(),
     /** Boundary pre-compilation (§6.6, `precompile` flag): told at each completion proposal which checks still run. */
     public val precompile: PrecompileTrigger? = null,
+    /** Focus notes and register citations (§6.3, P4.1.3); absent on the empty base. */
+    public val knowledge: CellKnowledge? = null,
 ) {
     init {
         require(ids.context != null) { "a cell runs under its own context id" }

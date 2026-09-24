@@ -27,6 +27,7 @@ import io.astrolabe.cell.DispatchRefusal
 import io.astrolabe.cell.Gates
 import io.astrolabe.cell.PacketStatus
 import io.astrolabe.cell.ResultPacket
+import io.astrolabe.cell.Role
 import io.astrolabe.cell.Roles
 import io.astrolabe.cell.SqliteCheckpoints
 import io.astrolabe.cell.TouchKind
@@ -85,10 +86,24 @@ import io.astrolabe.id.Identities
 import io.astrolabe.id.RandomIdGen
 import io.astrolabe.id.WorkId
 import io.astrolabe.id.WorkspaceId
-import io.astrolabe.kb.EmptyKb
+import io.astrolabe.kb.Injection
+import io.astrolabe.kb.InjectionExclusion
+import io.astrolabe.kb.InjectionInputs
+import io.astrolabe.kb.InjectionResult
 import io.astrolabe.kb.Kb
+import io.astrolabe.kb.KbIndex
+import io.astrolabe.kb.KbInjection
+import io.astrolabe.kb.KbNegatives
 import io.astrolabe.kb.KbWriter
+import io.astrolabe.kb.KnowledgeUse
+import io.astrolabe.kb.Note
+import io.astrolabe.kb.NoteKind
+import io.astrolabe.kb.NoteStatus
 import io.astrolabe.kb.Notes
+import io.astrolabe.kb.Queue
+import io.astrolabe.kb.StoreKb
+import io.astrolabe.kb.Usage
+import io.astrolabe.kb.UsageEvent
 import io.astrolabe.os.EnvPolicy
 import io.astrolabe.os.Git
 import io.astrolabe.os.LocalOs
@@ -230,6 +245,8 @@ public class OpenedCampaign internal constructor(
     /** The workspace lease taken after reconciliation; publication needs it live (§13.1). */
     public val lease: Lease?,
     private val leases: Leases,
+    /** The notes as of open, the `Frozen` arm of `Flags.kbInjection` (§19.5 ablation). */
+    public val frozenNotes: List<Note> = emptyList(),
 ) : AutoCloseable {
     /** Cancels this campaign: no further dispatch, no publication; effects already made are archived (D-26). */
     public val cancellation: Cancellation = Cancellation()
@@ -335,6 +352,9 @@ public class Controller @JvmOverloads public constructor(
         val registry = VersionRegistry(workspace)
         val stamper = Stamper(workspace, EnvFingerprint.compute(env))
         val journal = Journal(store, clock)
+        // P4.1: the store-backed base; with no notes it behaves as the empty base (every search complete and empty).
+        val negatives = KbNegatives(journal, idGen, clock)
+        val kb = StoreKb(store, request.work, registry::version) { negatives.retrievalMiss(ids, null, it) }
         val intents = SqliteIntentJournal(store, clock)
         val contracts = Contracts(SqliteContractRepository(store, clock), idGen, clock, events)
         val campaigns = SqliteCampaigns(store, clock)
@@ -354,7 +374,7 @@ public class Controller @JvmOverloads public constructor(
 
         val atlas = Atlas.build(workspace.root)
         // §3.7 impact_prescan (D-40): incomplete discovery over the request's candidate paths; it feeds both shape selections.
-        val impactPrescan = ImpactPrescan.of(atlas, WORKSPACE, ImpactPrescan.inputs(atlas, WORKSPACE, request.text), EmptyKb.contractAnchors())
+        val impactPrescan = ImpactPrescan.of(atlas, WORKSPACE, ImpactPrescan.inputs(atlas, WORKSPACE, request.text), kb.contractAnchors())
         val derived = contracts.deriveS0(request.work, request.attempt, request.text, atlas, effective, policy.tokens, protected, policy.cost)
         val stored = contracts.current(request.work)
         check(stored == null || stored.attemptId == request.attempt) { "work ${request.work.value} is attempt ${stored?.attemptId?.value}; a new attempt is P2" }
@@ -443,8 +463,8 @@ public class Controller @JvmOverloads public constructor(
 
         return OpenedCampaign(
             request, ids, store, os, workspace, registry, stamper, dirty, shadow, s0, atlas, derived.sniffed, commands,
-            contracts, checks, rules, prime, EmptyKb, journal, intents, campaigns, reconciliation, prescan, impactPrescan, shape, state, refusal, owned,
-            frozen, lease, leases,
+            contracts, checks, rules, prime, kb, journal, intents, campaigns, reconciliation, prescan, impactPrescan, shape, state, refusal, owned,
+            frozen, lease, leases, frozenNotes = Notes(store).all(),
         )
     }
 
@@ -545,7 +565,8 @@ public class Controller @JvmOverloads public constructor(
             val carry = ready.cells.lastOrNull()?.let { previous -> carryFrom(c, previous, packets.lastOrNull { it.ids.context == previous }) }
             val seeds = carry?.let { Seeds.render(it.seeds, c.registry::read) }
             val resume = resumeNote(c, ready, carry)
-            val inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) })
+            val knowledge = knowledge(c, ready, Roles.implementing, model, touched = carry?.seeds.orEmpty().map { it.path }.toSet())
+            val inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) }, notes = knowledge.notes, contractsIndex = knowledge.contractsIndex)
             val pinned = listOfNotNull(resume)
             val compiler = Compiler(model.estimator, c.attempt.config)
             // §6.6: a pre-compiled [K] is served for cell_end(next_increment) only, on a full-fingerprint and coverage match.
@@ -664,7 +685,8 @@ public class Controller @JvmOverloads public constructor(
                 return@PrecompileTrigger
             }
             // The next increment has no previous cell: no carry-forward, no seeds, no resume note (§6.2).
-            val inputs = CompileInputs(currentVersion = { c.registry.version(it) })
+            val knowledge = knowledge(c, next, Roles.implementing, model)
+            val inputs = CompileInputs(currentVersion = { c.registry.version(it) }, notes = knowledge.notes, contractsIndex = knowledge.contractsIndex)
             val compiler = Compiler(model.estimator, c.attempt.config)
             precompile.start(scope, ids, fingerprint(c, contract, next, stamp, model, inputs, null, emptyList()), next.id, remaining) {
                 compiler.compile(next, contract, model.profile, Roles.implementing, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = inputs)
@@ -710,13 +732,15 @@ public class Controller @JvmOverloads public constructor(
         fun blocked(reason: String) = Transition.Stopped(CampaignOutcome.BlockedExternal, reason)
         val contract = c.contract
         val planning = Increment(PLAN, contract.requirements.map { it.id }, contract.acceptance.map { it.id }, emptyList(), 0, title = "plan ${c.ids.work.value}")
-        val compiled = Compiler(model.estimator, c.attempt.config).compile(planning, contract, model.profile, Roles.plan, c.prime, maxOutputTokens = model.maxOutputTokens)
+        val knowledge = knowledge(c, planning, Roles.plan, model)
+        val planInputs = CompileInputs(notes = knowledge.notes, contractsIndex = knowledge.contractsIndex)
+        val compiled = Compiler(model.estimator, c.attempt.config).compile(planning, contract, model.profile, Roles.plan, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = planInputs)
         if (compiled !is Compiled.Ready) return blocked("the plan cell cannot be compiled: $compiled")
         val cellId = ContextId(idGen.next("cell"))
         val proposals = SqlitePlanProposals(c.store, idGen, clock)
         val intake = CampaignProposals(proposals, SqliteSplitRequests(c.store, idGen, clock), { c.contracts.current(c.ids.work) }, { null }, { c.kb.contractAnchors() })
         val completion = io.astrolabe.cell.RoleCompletion.forRole(Roles.plan, mapOf(io.astrolabe.cell.PacketKind.PlanArtifacts to PlanPacketValidator.completion({ c.contract }, proposals, conAnchors = { c.kb.contractAnchors() })))
-        val run = runCell(c, cellId, planning, Roles.plan, model, authority, syntax, compiled, span, null, proposals = intake, completion = completion)
+        val run = runCell(c, cellId, planning, Roles.plan, model, authority, syntax, compiled, span, null, proposals = intake, completion = completion, inputs = planInputs)
         val exit = run.exit ?: return Transition.Stopped(CampaignOutcome.Cancelled, "cancelled while planning")
         packets += exit.packet
         if (exit !is CellExit.Completed) {
@@ -811,10 +835,9 @@ public class Controller @JvmOverloads public constructor(
         val carry = ready.cells.lastOrNull()?.let { previous -> carryFrom(c, previous, null) }
         val seeds = carry?.let { Seeds.render(it.seeds, c.registry::read) }
         val resume = resumeNote(c, ready, carry)
-        val compiled = Compiler(model.estimator, config).compile(
-            ready, contract, model.profile, role, c.prime, maxOutputTokens = model.maxOutputTokens,
-            inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) }),
-        )
+        val knowledge = knowledge(c, ready, role, model, touched = carry?.seeds.orEmpty().map { it.path }.toSet())
+        val inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) }, notes = knowledge.notes, contractsIndex = knowledge.contractsIndex)
+        val compiled = Compiler(model.estimator, config).compile(ready, contract, model.profile, role, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = inputs)
         when (compiled) {
             is Compiled.Ready -> Unit
             is Compiled.NeedsRescoping -> return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "NEEDS_RESCOPING_OR_LARGER_PROFILE: ${compiled.reason}")), null, null, compiled)
@@ -826,7 +849,7 @@ public class Controller @JvmOverloads public constructor(
         val dispatched = c.advance(Transition.Dispatched(ready.id, cellId))
         val increment = dispatched.graph.increments.first { it.id == ready.id }
         val register = carry?.register?.copy(cell = cellId, increment = increment.id, incrementTitle = increment.title)
-        val run = runCell(c, cellId, increment, Roles.implementing, model, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = listOfNotNull(resume))
+        val run = runCell(c, cellId, increment, Roles.implementing, model, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = listOfNotNull(resume), inputs = inputs)
         val ids = run.ids
         val scheduler = run.scheduler
         val exit = run.exit
@@ -875,6 +898,29 @@ public class Controller @JvmOverloads public constructor(
      * the S1 loop's increment cells and the plan cell. Every compiled context leaves a manifest; the cell's cost is
      * priced once for its span.
      */
+    /** What one compile carries from the base (§6.3, P4.1.3): the ranked notes under the `kbInjection` arm and the contracts index. */
+    private class Knowledge(val notes: List<Note>, val contractsIndex: String?, val log: String)
+
+    private fun knowledge(c: OpenedCampaign, increment: Increment, role: Role, model: CellModel, touched: Set<String> = emptySet()): Knowledge {
+        val arm = c.attempt.config.flags.kbInjection
+        val all = if (arm == KbInjection.Frozen) c.frozenNotes else Notes(c.store).all()
+        if (all.isEmpty()) return Knowledge(emptyList(), null, "no notes")
+        val contracts = all.filter { it.kind == NoteKind.CON && it.status == NoteStatus.Admitted }
+        val inputs = InjectionInputs(
+            role, c.ids.work, increment.writeScope, touched, contractsInPlay = contracts.map { it.id }.toSet(),
+            stamp = c.stamper.report().candidateId.digest.hex, usage = Usage(c.store, clock).all(), currentVersion = { c.registry.version(it) },
+        )
+        val ranked = Injection.select(all, inputs, model.estimator)
+        // `Off` keeps F23 (CON in scope compiled in) and drops the ranked advice; `Frozen`/`Live` differ in the base they rank.
+        val result = if (arm != KbInjection.Off) ranked else InjectionResult(
+            ranked.selected.filter { it.mandatory },
+            ranked.excluded + ranked.selected.filter { !it.mandatory }.map { InjectionExclusion(it.note.id, "ranked injection is off (kbInjection arm)") },
+        )
+        val index = if (contracts.isEmpty()) null else KbIndex.render(all, model.estimator).getValue("contracts.md")
+        c.journal.append(JournalEvent(idGen.next("ev"), c.ids, null, JournalKind.Boundary, refs = result.notes.map { it.id }, text = "kb ${arm.name.lowercase()} for ${increment.id}: ${result.log}", at = clock.instant()))
+        return Knowledge(result.notes, index, result.log)
+    }
+
     private suspend fun runCell(
         c: OpenedCampaign,
         cellId: ContextId,
@@ -926,8 +972,20 @@ public class Controller @JvmOverloads public constructor(
             verify = verify,
             task = if (proposals == null) TaskTool(authority, c.contracts, c.journal, estimator, idGen, ids, clock, events)
             else TaskTool(authority, c.contracts, c.journal, estimator, idGen, ids, clock, events, role.effectiveOps(contract.shape, Ceiling.of(contract.authorization, config.executionMode)), proposals),
-            kb = KbTool(c.kb, estimator, idGen),
+            kb = KbTool(c.kb, estimator, idGen, queue = Queue(c.store, KbWriter(c.store, estimator, clock), idGen, clock), ids = ids, events = events),
         )
+        // §6.3: what this cell was given is logged per note; the register-citation hook turns `injected` into `cited`.
+        val usage = Usage(c.store, clock)
+        val injected = inputs.notes.filter { it.status == NoteStatus.Admitted }.map { it.id }.toSet()
+        for (id in injected) usage.record(id, ids, UsageEvent.Injected)
+        if (injected.isNotEmpty()) c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, refs = injected.toList(), text = "kb injected: ${injected.joinToString(", ")}", at = clock.instant()))
+        // Focus notes follow the same ablation arm as the ranked injection: none when off, the open-time base when frozen.
+        val focusBase = when (config.flags.kbInjection) {
+            KbInjection.Off -> emptyList()
+            KbInjection.Frozen -> c.frozenNotes
+            KbInjection.Live -> Notes(c.store).all()
+        }
+        val knowledge = KnowledgeUse(focusBase, injected, usage, ids, estimator, config.defaults.focusNotesMaxTokens, KbNegatives(c.journal, idGen, clock))
         val coherence = Coherence(c.registry)
         val accounting = Accounting(c.store, clock)
         // §6.5: every compiled context leaves a manifest; the cell's end event links it.
@@ -944,6 +1002,7 @@ public class Controller @JvmOverloads public constructor(
             sections = compiled.k.sections,
             pinned = pinned,
             precompile = precompile,
+            knowledge = knowledge,
         )
         val budget = CellBudget.of(contract.budget.tokens, contract.budget.turnsPerCell, contract.budget.reserves)
         val cellSpan = spans?.start(Phase.Edit, ids, span)

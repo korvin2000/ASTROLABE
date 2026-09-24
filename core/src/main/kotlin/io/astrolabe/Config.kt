@@ -6,6 +6,7 @@ import io.astrolabe.auth.Stage
 import io.astrolabe.cell.Role
 import io.astrolabe.cell.Roles
 import io.astrolabe.id.Digest
+import io.astrolabe.kb.KbInjection
 import io.astrolabe.provider.Profile
 import kotlinx.serialization.Serializable
 
@@ -113,6 +114,8 @@ public data class Flags(
     val s3Writers: Boolean = false,
     val otelExport: Boolean = false,
     val worthTestEstimate: Boolean = false,
+    /** `[O gate: ablation KB injection off/frozen/live]` (§4.5, P4.1.3): ranked note injection; `CON` in scope is compiled in regardless (F23). */
+    val kbInjection: KbInjection = KbInjection.Off,
 )
 
 /**
