@@ -19,13 +19,12 @@ recorded gaps. Do not reimplement any of P1.8.1–P1.8.8.
 Verification this session (Linux cloud sandbox, JDK 25 scratch copy — JDK 26 is unreachable there, see
 TODO §1 resume notes): cell **65/65** (6 new `ResultPacketTest`); full core **941 tests, 3 failures,
 6 skips**, all three outside the change and reproduced on the unmodified baseline or passing in isolation.
-**CI on `main` (JDK 26, both platforms) is the authority for this commit and has not been observed yet.**
+[CI run 35939243934](https://github.com/korvin2000/ASTROLABE/actions/runs/35939243934) is **green on both
+platforms** (JDK 26, `check` incl. `checkKotlinAbi`) at `b9ead19`, the P1.8.8 commit.
 
 ## Resume here
 
-1. **Confirm CI on this commit** (both jobs). If `checkKotlinAbi` or a JDK 26-only difference fails,
-   fix from the run's own log before anything else.
-2. **Next task: P1.9.1 `Lifecycle` state machines**, then P1.9.2–P1.9.6 (campaign open, S0 run +
+1. **Next task: P1.9.1 `Lifecycle` state machines**, then P1.9.2–P1.9.6 (campaign open, S0 run +
    `Compiler`, lifecycle controls, `FinishReceipt`, `Astrolabe`/`AstrolabeJava`), P1.11.1–P1.11.2,
    P1.12.1–P1.12.4. `Deps` and §2.4 producer readiness govern. The controller consumes
    `CellExit.packet`: `packet.proposal()` → `Verifier.accept` → commit; `ChangeOrigin` feeds P1.9.5's
