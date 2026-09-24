@@ -19,6 +19,7 @@ import io.astrolabe.provider.ProviderAdapter
 import io.astrolabe.provider.TokenEstimator
 import io.astrolabe.register.Register
 import io.astrolabe.register.RegisterVersions
+import io.astrolabe.telemetry.Accounting
 import io.astrolabe.tool.ToolExecutor
 import io.astrolabe.tool.TurnCheckpoint
 import io.astrolabe.tool.edit.Edit
@@ -126,6 +127,8 @@ public class CellContext @JvmOverloads constructor(
     public val pinned: List<String> = emptyList(),
     /** The controller's execution generation (§13.1), carried into the packet and checked before acceptance. */
     public val generation: ExecutionGeneration = ExecutionGeneration.INITIAL,
+    /** Per-call accounting (P1.11.2): every response, and every call whose usage never arrived, is priced and stored. */
+    public val accounting: Accounting? = null,
 ) {
     init {
         require(ids.context != null) { "a cell runs under its own context id" }

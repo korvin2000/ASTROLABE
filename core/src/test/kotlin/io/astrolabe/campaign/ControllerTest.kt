@@ -42,7 +42,10 @@ import io.astrolabe.id.AttemptId
 import io.astrolabe.id.ContextId
 import io.astrolabe.id.WorkId
 import io.astrolabe.provider.ToolCall as ProviderCall
+import io.astrolabe.provider.BillingDimension
 import io.astrolabe.store.Store
+import io.astrolabe.telemetry.Accounting
+import io.astrolabe.telemetry.Export
 import io.astrolabe.tool.ParsedCalls
 import io.astrolabe.tool.ToolCalls
 import io.astrolabe.tool.TurnContext
@@ -206,12 +209,13 @@ class ControllerTest {
         seedContract()
         open().use { c ->
             val v = c.registry.version("src/a.py")!!
-            val run = controller().runS0(c, model(
+            val adapter = FakeAdapter(ScriptedModel.of(
                 Scripted.Reply(listOf(say("reading"), read("c1", "src/a.py"))),
                 Scripted.Reply(listOf(say("editing"), anchored("c2", "src/a.py", v, "    return 1", "    return 10"))),
                 Scripted.Reply(listOf(say("verifying"), call("c3", "verify", """{"what":"acceptance","ids":["AC-1"]}"""))),
                 Scripted.Reply(listOf(say("done: a returns 10"))),
             ))
+            val run = controller().runS0(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator()))
             assertIs<CellExit.Completed>(run.exit, run.state?.reason)
             assertIs<CompletionResult.Accepted>(run.completion)
             assertIs<Compiled.Ready>(run.compiled)
@@ -220,6 +224,18 @@ class ControllerTest {
             assertEquals(RequirementStatus.Verified, state.ledger.entries.getValue("R1").status)
             assertEquals(IncrementStatus.Verified, state.graph.increments.single().status)
             assertEquals("def a():\n    return 10\n", Files.readString(repo.root.resolve("src/a.py")))
+
+            // P1.11.2: every call is priced and stored, and the fake provider's invoices reconcile with it.
+            val calls = Accounting(c.store, clock).calls(request.work)
+            assertEquals(adapter.calls.map { it.invocation.value }, calls.map { it.invocationId })
+            for ((billed, account) in adapter.calls.zip(calls)) {
+                assertEquals(billed.cacheReadTokens, account.usage!!.quantities[BillingDimension.CACHE_READ])
+                assertEquals(billed.cacheWriteTokens, account.usage!!.totalCacheWrite)
+                assertTrue(!account.money.unknown && account.quantities.bytesTransmitted!! > 0)
+            }
+            val files = Export(c.store).write(request.work, acceptedTasks = 1, currency = "USD")
+            assertEquals(listOf("usage.json", "accounting.json"), files.map { it.fileName.toString() })
+            assertTrue("\"costPerAcceptedTask\"" in Files.readString(files[1]))
         }
         open().use { c -> assertTrue(c.reconciliation.external.isEmpty(), "the cell's own edit is snapshotted, not external at reopen") }
     }

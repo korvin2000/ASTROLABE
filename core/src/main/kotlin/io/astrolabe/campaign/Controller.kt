@@ -28,11 +28,11 @@ import io.astrolabe.contract.Contract
 import io.astrolabe.contract.Contracts
 import io.astrolabe.contract.SqliteContractRepository
 import io.astrolabe.event.AgentEvent
-import io.astrolabe.event.Phase
-import io.astrolabe.event.SpanId
 import io.astrolabe.event.Authority
 import io.astrolabe.event.AutonomousAuthority
 import io.astrolabe.event.Events
+import io.astrolabe.event.Phase
+import io.astrolabe.event.SpanId
 import io.astrolabe.evidence.Coherence
 import io.astrolabe.evidence.IntentJournal
 import io.astrolabe.evidence.IntentStatus
@@ -63,7 +63,9 @@ import io.astrolabe.register.SqliteRegisterVersions
 import io.astrolabe.register.Validator
 import io.astrolabe.store.FaultPoints
 import io.astrolabe.store.Store
+import io.astrolabe.telemetry.Accounting
 import io.astrolabe.telemetry.Spans
+import io.astrolabe.telemetry.TraceSpanStatus
 import io.astrolabe.tool.TurnCheckpoint
 import io.astrolabe.tool.edit.CliSyntax
 import io.astrolabe.tool.edit.Edit
@@ -384,19 +386,29 @@ public class Controller @JvmOverloads public constructor(
             kb = KbTool(c.kb, estimator, idGen),
         )
         val coherence = Coherence(c.registry)
+        val accounting = Accounting(c.store, clock)
         val ctx = CellContext(
             ids = ids, role = role, contracts = c.contracts, model = model, tools = tools,
             workspace = CellWorkspace(c.workspace, c.registry, coherence, c.stamper, workset, c.checks, scheduler, c.atlas, checker),
             evidence = CellEvidence(c.journal, observations, aliases, receipts, c.intents, registerVersions, checkpoints, preimages),
             prime = c.prime, ledger = dispatched.ledger, preexisting = compiled.k.ledger, config = config,
             turnCheckpoint = TurnCheckpoint { snapshot(c) },
+            accounting = accounting,
         )
         val budget = CellBudget.of(contract.budget.tokens, contract.budget.turnsPerCell, contract.budget.reserves)
+        val cellSpan = spans?.start(Phase.Edit, ids, span)
         val exit = try {
-            val cell = Cell(clock, idGen, config.defaults, Gates.s0(), events)
-            spans?.span(Phase.Edit, ids, span) { cell.run(ctx, increment, budget) } ?: cell.run(ctx, increment, budget)
+            Cell(clock, idGen, config.defaults, Gates.s0(), events).run(ctx, increment, budget)
+        } catch (failure: Throwable) {
+            cellSpan?.let { spans?.end(it, status = TraceSpanStatus.Cancelled) }
+            throw failure
         } finally {
             coherence.close()
+        }
+        if (cellSpan != null && spans != null) {
+            // The cell's exclusive cost is its own model calls, priced once here and never again by a parent.
+            val cost = Accounting.totals(accounting.calls(c.ids.work).filter { it.ids.context == cellId }, 0, spans.currency).money
+            spans.end(cellSpan, cost)
         }
         // The tree after the cell is the base the next open reconciles against: only moves after this are external.
         snapshot(c)

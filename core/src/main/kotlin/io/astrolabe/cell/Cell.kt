@@ -265,10 +265,12 @@ public class Cell @JvmOverloads constructor(
             } catch (error: ProviderError) {
                 admission.release()
                 cost += null
+                ctx.accounting?.record(ids, invocationId.value, ctx.model.profile, request, null)
                 return failed("provider ${error::class.simpleName}: ${error.message}")
             }
             val usage = response.usage
             cost += usage
+            ctx.accounting?.record(ids, invocationId.value, ctx.model.profile, request, usage)
             admission.reconcile(Tokens(usage?.let { it.totalInput + (it.quantities[BillingDimension.OUTPUT] ?: 0L) } ?: admission.estimate.value))
             events?.emit(AgentEvent.Cell.ModelResponded(ids, invocationId.value, response.stop, usage))
 
