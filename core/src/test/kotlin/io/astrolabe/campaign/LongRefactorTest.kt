@@ -11,6 +11,8 @@ import io.astrolabe.cell.CellFixture.Companion.read
 import io.astrolabe.cell.CellFixture.Companion.say
 import io.astrolabe.cell.CellModel
 import io.astrolabe.cell.WINDOWS
+import io.astrolabe.context.BoundaryReason
+import io.astrolabe.context.Manifest
 import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Command
 import io.astrolabe.contract.Contracts
@@ -20,8 +22,8 @@ import io.astrolabe.contract.Requirement
 import io.astrolabe.contract.RequirementStatus
 import io.astrolabe.contract.Shape
 import io.astrolabe.contract.SqliteContractRepository
-import io.astrolabe.context.BoundaryReason
-import io.astrolabe.context.Manifest
+import io.astrolabe.event.Events
+import io.astrolabe.fixtures.EventRecorder
 import io.astrolabe.fixtures.FakeAdapter
 import io.astrolabe.fixtures.FakeClock
 import io.astrolabe.fixtures.FakeProfiles
@@ -149,10 +151,12 @@ class LongRefactorTest {
     @Test
     fun `a long refactor under context pressure continues the partial increment and drops nothing`() = runBlocking<Unit> {
         val config = Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all + (small.id to small))
-        Controller(config, clock, idGen).open(repo.root, request, policy).use { c ->
+        val events = Events(clock)
+        val recorder = EventRecorder().also(events::subscribe)
+        events.use { Controller(config, clock, idGen, events).open(repo.root, request, policy).use { c ->
             val script = Script(c, ::fresh, plan)
             val adapter = FakeAdapter(ScriptedModel(listOf(ScriptedModel.Turn({ true }, script::next, once = false))), FakeProfiles.all + (small.id to small))
-            val run = Controller(config, clock, idGen).run(c, CellModel(adapter, small, HeuristicEstimator()))
+            val run = Controller(config, clock, idGen, events).run(c, CellModel(adapter, small, HeuristicEstimator()))
 
             assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
             val state = c.campaigns.load(request.work, request.attempt)!!
@@ -187,6 +191,21 @@ class LongRefactorTest {
             // STATUS notes at every boundary: the role switch after the plan, then each cell end.
             val status = Notes(c.store).revisions("STATUS-W-long").map { it.body.lineSequence().first().substringAfter("boundary: ").substringBefore(" ·") }
             assertEquals(listOf("role_switch", "cell_end", "cell_end", "cell_end", "cell_end"), status)
-        }
+
+            // P2.7.3: the economics report from manifests, the usage table, checkpoints and the cell events.
+            assertTrue(recorder.awaitCount(events.lastSeq.toInt()))
+            val report = Economics.report(c, clock, recorder.records)
+            assertEquals(manifests.map { it.cell }, report.cells.map { it.cell })
+            assertEquals(mapOf("I1" to 0, "I2" to 1, "I3" to 0), report.continuationsPerIncrement)
+            assertEquals(1.0 / 5, report.rebuildsPerCell)
+            assertEquals(adapter.calls.size, report.cells.sumOf { it.calls })
+            assertTrue(report.boundaryCostShare!! > 0 && report.boundaryCostShare!! < 1, "boundary share ${report.boundaryCostShare}")
+            assertTrue(report.anchorShare!! > 0 && report.anchorShare!! < 1, "[A] share ${report.anchorShare}")
+            assertTrue(report.tokensByCacheClass.isNotEmpty() && report.tokensByCacheClass.values.none { it == null }, "${report.tokensByCacheClass}")
+            assertEquals(manifests.drop(1).map { it.cell }, report.breakEven.map { it.cell }, "one break-even diagnostic per boundary")
+            assertEquals(EconomicsReport.LIVE_GATE, report.liveGate)
+            val exported = Files.readString(Economics.export(c, report))
+            assertTrue(exported.startsWith("# Economics — W-long") && "B2 ≥ B1: UNMEASURED" in exported && "| ${i2[1].value} | I2 | partial |" in exported, exported)
+        } }
     }
 }

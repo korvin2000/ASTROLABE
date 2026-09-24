@@ -87,7 +87,7 @@ public sealed interface AgentEvent {
 
         @Serializable
         @SerialName("cell.model_requested")
-        public data class ModelRequested(override val ids: Identities, val invocationId: String, val estimatedTokens: Long, val profileId: String, override val phase: Phase = Phase.Understand, override val span: SpanId? = null, override val parent: SpanId? = null) : Cell
+        public data class ModelRequested(override val ids: Identities, val invocationId: String, val estimatedTokens: Long, val profileId: String, override val phase: Phase = Phase.Understand, override val span: SpanId? = null, override val parent: SpanId? = null, val anchorTokens: Long? = null) : Cell
 
         @Serializable
         @SerialName("cell.model_responded")

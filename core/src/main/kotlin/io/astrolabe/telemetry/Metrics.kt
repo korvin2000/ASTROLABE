@@ -13,7 +13,7 @@ import java.time.Instant
 
 /**
  * Per-cell metrics of §15.5, derived from the cell's events. A quantity no producer reports yet is `null`
- * (unmeasured), never zero: `[A]` size and STATE upkeep (P2.3 manifest), manifest ref and pre-compilation hit
+ * (unmeasured), never zero: STATE upkeep (P2.3 manifest), manifest ref and pre-compilation hit
  * (P2.3.4). A billed dimension missing from any call's usage is `null` for the whole cell (§15.2).
  */
 public data class CellMetrics(
@@ -63,6 +63,7 @@ public data class CellMetrics(
                 rebuilds = events.count { it is AgentEvent.Cell.Rebuilt },
                 turns = events.filterIsInstance<AgentEvent.Cell.TurnStarted>().maxOfOrNull { it.turn } ?: 0,
                 boundaryReason = events.filterIsInstance<AgentEvent.Cell.Ended>().lastOrNull()?.status,
+                anchorTokens = events.filterIsInstance<AgentEvent.Cell.ModelRequested>().map { it.anchorTokens }.let { sizes -> if (sizes.isEmpty() || null in sizes) null else sizes.sumOf { it!! } },
             )
         }
     }
