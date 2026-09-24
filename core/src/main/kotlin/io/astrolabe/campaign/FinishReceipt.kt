@@ -132,9 +132,13 @@ public object FinishReceipts {
             }
         }
         val changes = packets.flatMap { it.changes }
+        // A cell that never handed back a packet (lost or interrupted) still named what it touched in its checkpoint.
+        val reported = packets.mapNotNull { it.ids.context }.toSet()
+        val unreported = state.cells.filter { it.cell !in reported && it.status != io.astrolabe.cell.CellStatus.Running }
+            .flatMap { io.astrolabe.cell.SqliteCheckpoints(c.store, java.time.Clock.systemUTC()).latest(it.cell)?.touched.orEmpty() }
         val separated = DirtyState.separate(
             c.s0, report,
-            agentEdits = changes.filter { it.origin == ChangeOrigin.Edit }.map { it.path }.toSet(),
+            agentEdits = (changes.filter { it.origin == ChangeOrigin.Edit }.map { it.path } + unreported).toSet(),
             runTouched = changes.filter { it.origin == ChangeOrigin.Run }.map { it.path }.toSet(),
         )
         val checksRun = c.checks.all().flatMap { check -> check.last?.receiptId?.let(receipts)?.let(::listOf).orEmpty() }

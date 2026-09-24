@@ -3,31 +3,29 @@
 Rewritten every session (≤40 lines). Workflow: `CLAUDE.md` § Workflow. State snapshot: `actual_state.md`.
 History: `audit/SESSION-HISTORY.md` (never read at startup).
 
-**Checkpoint:** `main` (workflow retune merged 2026-09-24; last code commit `12fc5d7`, P1.9.1). Work on a fresh
-session branch from `main`; old `claude/*` branches were merged and deleted.
-**Last gate:** [CI run 35941844915](https://github.com/korvin2000/ASTROLABE/actions/runs/35941844915) green on
-Ubuntu + Windows (JDK 26, `check` incl. `checkKotlinAbi`) at `12fc5d7`. Nothing ungated since then except
-workflow files (no code).
+**Checkpoint:** branch `claude/nifty-feynman-wk181l` (draft PR korvin2000/ASTROLABE#1 → `main`). P1.9.2–P1.9.6,
+P1.11.1–P1.11.2, P1.12.2–P1.12.3 DONE; 90/185 DONE. Start the next session from `main` once the gate is merged,
+else from this branch.
+**Last gate:** P1.9 + P1.11 block at `8a5cbb1` — [CI run 35989613165](https://github.com/korvin2000/ASTROLABE/actions/runs/35989613165)
+**green on Ubuntu + Windows**; `main` fast-forwarded to `8a5cbb1`. Ungated since then: P1.12.2, P1.12.3, schema v3 rekey, a
+`CellTest` race fix and the ABI dump (`0c33262`) — they ride the P1.12 phase gate.
 
-## Next block — P1.9 remainder, then P1.11 + P1.12 (phase end, P1 gate)
-1. **P1.9.2** campaign open and reconciliation — `Lifecycle.open` + `Transition.Reconciled` (+ `Resumed` on
-   reopen of a resumable campaign), saved through `Campaigns`. Carries debt 1 below.
-2. **P1.9.3** S0 run + `Compiler` — `Dispatched → Returned → disposition → Committed → Finishing → Finished`;
-   S0 maps `Continue` to its `fallback` (D-64).
-3. **P1.9.4** lifecycle controls (Deps include P1.11.2 — check before starting) · **P1.9.5** `FinishReceipt` ·
-   **P1.9.6** `Astrolabe`/`AstrolabeJava`.
-4. Then P1.11.1–P1.11.2, P1.12.1–P1.12.4. `Deps` and TODO §2.4 producer readiness govern, not numbering.
+## Next block — P1.12 remainder (phase end, P1 gate)
+1. **P1.12.1** harness fixture tests: map each listed FX/AX/IX id to an existing test or add the missing one
+   (many exist: FX-22/23/24/25/26/48/49/59, IX-02/18 are covered by Run/Controller/Controls/Accounting tests;
+   grep test names for the ids first). Size L — consider a Fable worktree agent per fixture group.
+2. **P1.12.4** platform validation (ProcessOwner, file replacement, `WorkspacePath` aliases, encodings) —
+   mostly Windows/Linux CI evidence; document supported execution modes and D-44 recovery coverage.
+3. Then the **P1 phase gate** (full build → push → CI both platforms), tick `Gate P1.12`, set P1 `FIXTURE_VALIDATED`.
 
 ## Carried-forward debts (owner task in bold)
-1. **P1.9.2:** open the derived contract after workspace capture, bind `ProtectedPaths`, pass `Sniff` commands
-   into `Checks.seed` and approved rules into `Prime`.
-2. **P1.9.3:** `Lifecycle.open` and `graph.recordAccepted` require `RequirementGraph.validate(contract)` empty, so
-   the `G_single(C)` increment needs `produces`, a run/check acceptance with an evidence kind, full coverage.
-3. Exit gate (TODO §3.1): red = a `failed` receipt; inconclusive is missing evidence, not red.
-4. **P1.12.2:** recall pointers exist only for `look` results.
-5. Packet gaps by design: no `diffstat` (**P1.9.5**), `transforms` empty until P3.3, `waiting` null until P2
-   handles (so `waiting_for_process` has no producer yet).
-6. Recorded, not diagnosed: transient `StamperTest` `git exited -1` under load (`TempRepo.runGit`, no timeout).
+1. Exit gate (TODO §3.1): red = a `failed` receipt; inconclusive is missing evidence, not red.
+2. **P1.12.2** done; **P2.2.4** owns full resume (lost cells are only recorded `lost`; a new cell re-verifies).
+3. Recall pointers exist only for `look` results (**P1.12.1/P2**).
+4. Packet gaps by design: no `diffstat`; `transforms` empty until P3.3; `waiting` null until P2 handles.
+5. S0 finish does not run the full suite (D-66); `Views` has no finish-receipt projection (export + blob only).
+6. Controller-built cells use `CliSyntax` without interpreters (`not_run`) until the host names them (D-66).
+7. Recorded, not diagnosed: transient `StamperTest` `git exited -1` under load (`TempRepo.runGit`, no timeout).
 
 ## Blockers
-None. No owner decision pending. No ACTIVE out-of-order card (TODO §1.2).
+None. No owner decision pending (D-65/D-66 local, D-67 provisional). No ACTIVE out-of-order card.

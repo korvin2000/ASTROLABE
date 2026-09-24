@@ -266,6 +266,25 @@ public object Migrations {
                 "CREATE TABLE attempts (" +
                     "$IDS, fingerprint TEXT NOT NULL, $META, " +
                     "PRIMARY KEY (work_id, attempt_id))",
+                // ---- contract projections are per work: `R1`/`AC-1` recur in every campaign of a project ----
+                "CREATE TABLE requirements_v3 (" +
+                    "id TEXT NOT NULL, $IDS, contract_version INTEGER NOT NULL, $META, PRIMARY KEY (work_id, id))",
+                "INSERT INTO requirements_v3 SELECT id, work_id, attempt_id, candidate_id, context_id, contract_version, schema_version, created_at, body FROM requirements",
+                "DROP TABLE requirements",
+                "ALTER TABLE requirements_v3 RENAME TO requirements",
+                "CREATE TABLE acceptance_v3 (" +
+                    "id TEXT NOT NULL, $IDS, contract_version INTEGER NOT NULL, kind TEXT NOT NULL, $META, PRIMARY KEY (work_id, id))",
+                "INSERT INTO acceptance_v3 SELECT id, work_id, attempt_id, candidate_id, context_id, contract_version, kind, schema_version, created_at, body FROM acceptance",
+                "DROP TABLE acceptance",
+                "ALTER TABLE acceptance_v3 RENAME TO acceptance",
+                "CREATE TABLE constraints_v3 (" +
+                    "id TEXT NOT NULL, $IDS, contract_version INTEGER NOT NULL, $META, PRIMARY KEY (work_id, id))",
+                "INSERT INTO constraints_v3 SELECT id, work_id, attempt_id, candidate_id, context_id, contract_version, schema_version, created_at, body FROM constraints",
+                "DROP TABLE constraints",
+                "ALTER TABLE constraints_v3 RENAME TO constraints",
+                "CREATE INDEX requirements_by_work ON requirements (work_id, contract_version)",
+                "CREATE INDEX acceptance_by_work ON acceptance (work_id, contract_version)",
+                "CREATE INDEX constraints_by_work ON constraints (work_id, contract_version)",
             ),
         ),
     )
