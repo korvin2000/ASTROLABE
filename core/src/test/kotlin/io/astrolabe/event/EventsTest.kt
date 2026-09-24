@@ -62,17 +62,24 @@ class EventsTest {
         Events(clock, replay = 0).use { events ->
             val good = EventRecorder()
             val gate = CountDownLatch(1)
+            val blocked = CountDownLatch(1)
             val slow = EventRecorder()
             val slowSubscription = events.subscribe(
                 { record ->
-                    if (record.seq == 1L) gate.await(5, TimeUnit.SECONDS)
+                    if (record.seq == 1L) {
+                        blocked.countDown()
+                        gate.await(5, TimeUnit.SECONDS)
+                    }
                     slow.onEvent(record)
                 },
                 bufferCapacity = 2,
             )
             events.subscribe(good)
             events.subscribe { throw IllegalStateException("boom") }
-            val emitted = (1..8).map { events.emit(AgentEvent.Warning(ids, "k", "w$it")) }
+            // The slow listener holds seq 1 before the rest is emitted, so the overflow is an interior gap, never a race.
+            val first = events.emit(AgentEvent.Warning(ids, "k", "w1"))
+            assertTrue(blocked.await(5, TimeUnit.SECONDS))
+            val emitted = listOf(first) + (2..8).map { events.emit(AgentEvent.Warning(ids, "k", "w$it")) }
             assertEquals(8, emitted.size)
             assertEquals(8L, events.lastSeq)
             assertTrue(good.awaitCount(8))

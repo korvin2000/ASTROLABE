@@ -11,12 +11,15 @@ import io.astrolabe.auth.Ceiling
 import io.astrolabe.auth.Redaction
 import io.astrolabe.auth.RulesTrust
 import io.astrolabe.budget.CellBudget
+import io.astrolabe.budget.HeuristicEstimator
+import io.astrolabe.budget.Reservations
 import io.astrolabe.budget.Tokens
 import io.astrolabe.cell.Cell
 import io.astrolabe.cell.CellContext
 import io.astrolabe.cell.CellEvidence
 import io.astrolabe.cell.CellExit
 import io.astrolabe.cell.CellModel
+import io.astrolabe.cell.CellStatus
 import io.astrolabe.cell.CellTools
 import io.astrolabe.cell.CellWorkspace
 import io.astrolabe.cell.DispatchAuthority
@@ -28,14 +31,20 @@ import io.astrolabe.cell.Roles
 import io.astrolabe.cell.SqliteCheckpoints
 import io.astrolabe.cell.TouchKind
 import io.astrolabe.cell.Touched
+import io.astrolabe.context.BoundaryReason
+import io.astrolabe.context.CarriedReceipt
 import io.astrolabe.context.Carry
 import io.astrolabe.context.CarryForward
 import io.astrolabe.context.CompileInputs
 import io.astrolabe.context.Compiled
 import io.astrolabe.context.Compiler
 import io.astrolabe.context.Manifest
+import io.astrolabe.context.RebuildReason
 import io.astrolabe.context.Seeds
 import io.astrolabe.context.SqliteManifests
+import io.astrolabe.context.StatusBoundary
+import io.astrolabe.context.StatusNotes
+import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Contract
 import io.astrolabe.contract.Contracts
 import io.astrolabe.contract.Increment
@@ -56,6 +65,7 @@ import io.astrolabe.evidence.IntentStatus
 import io.astrolabe.evidence.Journal
 import io.astrolabe.evidence.JournalEvent
 import io.astrolabe.evidence.JournalKind
+import io.astrolabe.evidence.Outcome
 import io.astrolabe.evidence.SqliteAliases
 import io.astrolabe.evidence.SqliteIntentJournal
 import io.astrolabe.evidence.SqliteObservations
@@ -71,8 +81,11 @@ import io.astrolabe.id.WorkId
 import io.astrolabe.id.WorkspaceId
 import io.astrolabe.kb.EmptyKb
 import io.astrolabe.kb.Kb
+import io.astrolabe.kb.KbWriter
+import io.astrolabe.kb.Notes
 import io.astrolabe.os.Git
 import io.astrolabe.os.LocalOs
+import io.astrolabe.os.ProcStatus
 import io.astrolabe.os.search.Searches
 import io.astrolabe.provider.Money
 import io.astrolabe.register.Register
@@ -83,7 +96,10 @@ import io.astrolabe.store.Store
 import io.astrolabe.telemetry.Accounting
 import io.astrolabe.telemetry.Spans
 import io.astrolabe.telemetry.TraceSpanStatus
+import io.astrolabe.tool.ParsedCalls
+import io.astrolabe.tool.ToolCalls
 import io.astrolabe.tool.TurnCheckpoint
+import io.astrolabe.tool.TurnContext
 import io.astrolabe.tool.edit.CliSyntax
 import io.astrolabe.tool.edit.Edit
 import io.astrolabe.tool.edit.SyntaxCheck
@@ -151,6 +167,8 @@ public data class Reconciliation(
     val external: List<Touched>,
     /** The tree at the end of reconciliation. */
     val stamp: CandidateId,
+    /** Background handles as reattached at open (§13.4): `handle-1 running|exited|lost`; a handle is polled, never relaunched. */
+    val handles: List<String> = emptyList(),
 )
 
 /**
@@ -353,7 +371,19 @@ public class Controller @JvmOverloads public constructor(
         if (external.isNotEmpty()) {
             journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Reconcile, refs = external.map { it.path }, text = "open: ${external.size} paths moved while closed (external) · reconciled @${stamp.hash8}", at = clock.instant()))
         }
-        val reconciliation = Reconciliation(unknown.map { it.intentId }, external, stamp)
+        // §13.4: live background handles resolve to running, exited or lost by identity, never by pid alone.
+        val handles = SqliteHandles(store, clock).open().filter { it.ids.work == request.work }.map { handle ->
+            val status = when (runCatching { os.reattach(handle.proc).status }.getOrDefault(ProcStatus.Lost)) {
+                ProcStatus.Running -> "running"
+                is ProcStatus.Exited -> "exited"
+                ProcStatus.DeadlineExceeded -> "deadline_exceeded"
+                ProcStatus.Cancelled -> "cancelled"
+                ProcStatus.Lost -> "lost"
+            }
+            journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Reconcile, refs = listOf(handle.handleId, handle.actionId), text = "open: handle ${handle.handleId} (${handle.argv.joinToString(" ")}) $status · polled, never relaunched", at = clock.instant()))
+            "${handle.handleId} $status"
+        }
+        val reconciliation = Reconciliation(unknown.map { it.intentId }, external, stamp, handles)
         // A cell still running in the stored state belonged to a controller that stopped mid-cell: it is lost.
         state?.running?.takeIf { state.phase == CampaignPhase.Running }?.let { running ->
             val checkpoint = SqliteCheckpoints(store, clock).latest(running.cell)
@@ -442,7 +472,10 @@ public class Controller @JvmOverloads public constructor(
         check(opened.phase == CampaignPhase.Running && opened.running == null) { "run needs a reconciled campaign with no running cell; it is ${opened.phase}" }
         // §4.2: the first cell of S1 is the plan cell; the placeholder graph is replaced once, before any dispatch.
         if (opened.graph.increments.none { it.cells.isNotEmpty() || it.status != IncrementStatus.Pending }) {
-            plan(c, model, authority, syntax, span, packets)?.let { reason -> return S0Run(c.advance(Transition.Stopped(stopOutcome(c).takeIf { c.refusal() != null } ?: CampaignOutcome.BlockedExternal, reason)), null, null, null) }
+            plan(c, model, authority, syntax, span, packets)?.let { stop ->
+                val outcome = if (c.refusal() != null) stopOutcome(c) else stop.outcome
+                return S0Run(c.advance(Transition.Stopped(outcome, stop.reason)), null, null, null)
+            }
         }
         var last = S0Run(c.state, null, null, null)
         var cells = 0
@@ -452,7 +485,7 @@ public class Controller @JvmOverloads public constructor(
             val contract = c.contract
             val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock)
             val unverified = state.ledger.unfinished()
-            if (unverified.isEmpty()) return last.copy(state = stopOrFinish(c, "requirements remain unverified", scheduler))
+            if (unverified.isEmpty()) return last.copy(state = stopOrFinish(c, "requirements remain unverified", scheduler, campaign = true))
             val ready = state.graph.readyFrontier(contract, 1).firstOrNull()
             if (ready == null) {
                 // FX-42: verified work is never re-executed; its regression evidence is refreshed from current receipts.
@@ -467,10 +500,17 @@ public class Controller @JvmOverloads public constructor(
             // §6.2: a continuation starts from the previous cell's validated register, seeds and packet — never its transcript.
             val carry = ready.cells.lastOrNull()?.let { previous -> carryFrom(c, previous, packets.lastOrNull { it.ids.context == previous }) }
             val seeds = carry?.let { Seeds.render(it.seeds, c.registry::read) }
+            val resume = resumeNote(c, ready, carry)
+            val inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) })
             val compiled = Compiler(model.estimator, c.attempt.config).compile(
-                ready, contract, model.profile, Roles.implementing, c.prime, maxOutputTokens = model.maxOutputTokens,
-                inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) }),
+                ready, contract, model.profile, Roles.implementing, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = inputs,
             )
+            // §6.5: why this context is built — a new increment after a closed one, a partial's continuation, or a resume.
+            val boundaryReason = when (ready.cells.lastOrNull()?.let { previous -> state.cells.firstOrNull { it.cell == previous }?.status }) {
+                null, CellStatus.Completed -> BoundaryReason.Done
+                CellStatus.Partial, CellStatus.Blocked -> BoundaryReason.Partial
+                CellStatus.Running, CellStatus.Failed, CellStatus.Cancelled -> BoundaryReason.Resume
+            }
             when (compiled) {
                 is Compiled.Ready -> Unit
                 is Compiled.NeedsRescoping -> return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "NEEDS_RESCOPING_OR_LARGER_PROFILE for ${ready.id}: ${compiled.reason} — ask the plan role for an increment_split")), compiled = compiled)
@@ -481,7 +521,7 @@ public class Controller @JvmOverloads public constructor(
             val dispatched = c.advance(Transition.Dispatched(ready.id, cellId))
             val increment = dispatched.graph.increments.first { it.id == ready.id }
             val register = carry?.register?.copy(cell = cellId, increment = increment.id, incrementTitle = increment.title)
-            val run = runCell(c, cellId, increment, Roles.implementing, model, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty())
+            val run = runCell(c, cellId, increment, Roles.implementing, model, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = listOfNotNull(resume), boundary = boundaryReason, inputs = inputs)
             val exit = run.exit
             if (exit == null) {
                 snapshot(c)
@@ -491,6 +531,7 @@ public class Controller @JvmOverloads public constructor(
             packets += exit.packet
             snapshot(c)
             c.advance(Transition.Returned(exit))
+            boundary(c, cellId, RebuildReason.CellEnd(if (exit is CellExit.Completed) RebuildReason.CellEnd.Next.NextIncrement else RebuildReason.CellEnd.Next.Continuation))
             val stampNow = c.stamper.report().candidateId
             val completion = if (exit is CellExit.Completed) {
                 val returned = checkNotNull(c.state).graph.increments.first { it.id == increment.id }
@@ -507,6 +548,9 @@ public class Controller @JvmOverloads public constructor(
                     }
                     c.advance(Transition.Committed(disposition.accepted, stampNow))
                     events?.emit(AgentEvent.Campaign.IncrementClosed(c.ids, increment.id, "verified"))
+                    // §7.3 cadence: the full suite every K verified increments; a red result is a regression on record.
+                    val verified = checkNotNull(c.state).graph.increments.count { it.status == IncrementStatus.Verified }
+                    if (verified % CampaignFinish.FULL_SUITE_EVERY == 0 && checkNotNull(c.state).ledger.unfinished().isNotEmpty()) fullSuite(c, "cadence after $verified verified increments")
                 }
                 // S1: a partial continues the same increment from its carry-forward; the cell cap bounds it (D-70).
                 is Disposition.Continue -> Unit
@@ -518,9 +562,24 @@ public class Controller @JvmOverloads public constructor(
 
     /**
      * Regression obligations (§4.2, FX-42): a verified increment whose evidence no longer holds at the current stamp is
-     * re-accepted from the receipts current now — never re-executed; one without current receipts stays unfinished.
+     * re-accepted from the receipts current now — never re-executed. Its green `run:` acceptances are regression
+     * obligations the harness re-runs at campaign end (§4.1); one still without current receipts stays unfinished.
      */
-    private fun refreshRegressions(c: OpenedCampaign, scheduler: Scheduler) {
+    private suspend fun refreshRegressions(c: OpenedCampaign, scheduler: Scheduler) {
+        reaccept(c, scheduler)
+        val state = checkNotNull(c.state)
+        val stale = state.ledger.unfinished().toSet()
+        val runs = c.contract.acceptance.filterIsInstance<Acceptance.Run>().map { it.id }.toSet()
+        val obligations = state.graph.increments.filter { it.status == IncrementStatus.Verified && it.requirementIds.any { r -> r in stale } }
+            .flatMap { it.accept }.filter { it in runs }.distinct()
+        if (obligations.isEmpty()) return
+        val ids = c.ids.copy(context = ContextId(idGen.next("finish")))
+        val outcome = harnessVerify(c, ids, "regression", """{"what":"acceptance","ids":[${obligations.joinToString(",") { "\"$it\"" }}]}""")
+        c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, text = "regression obligations re-run (campaign end): ${obligations.joinToString(", ")} · ${outcome.body.lineSequence().joinToString(" ")}", at = clock.instant()))
+        reaccept(c, scheduler)
+    }
+
+    private fun reaccept(c: OpenedCampaign, scheduler: Scheduler) {
         val report = c.stamper.report()
         val state = checkNotNull(c.state)
         val stale = state.ledger.unfinished().toSet()
@@ -532,28 +591,70 @@ public class Controller @JvmOverloads public constructor(
         }
     }
 
-    /** The plan cell (§3.4, P2.1.2): `null` once a plan is admitted and installed, else why none could be. */
-    private suspend fun plan(c: OpenedCampaign, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?, packets: MutableList<ResultPacket>): String? {
+    /**
+     * The plan cell (§3.4, P2.1.2): `null` once a plan is admitted and installed, else the stop — a budget partial is
+     * `budget_exhausted` (FX-49 S1), every other failure to plan blocks.
+     */
+    private suspend fun plan(c: OpenedCampaign, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?, packets: MutableList<ResultPacket>): Transition.Stopped? {
+        fun blocked(reason: String) = Transition.Stopped(CampaignOutcome.BlockedExternal, reason)
         val contract = c.contract
         val planning = Increment(PLAN, contract.requirements.map { it.id }, contract.acceptance.map { it.id }, emptyList(), 0, title = "plan ${c.ids.work.value}")
         val compiled = Compiler(model.estimator, c.attempt.config).compile(planning, contract, model.profile, Roles.plan, c.prime, maxOutputTokens = model.maxOutputTokens)
-        if (compiled !is Compiled.Ready) return "the plan cell cannot be compiled: $compiled"
+        if (compiled !is Compiled.Ready) return blocked("the plan cell cannot be compiled: $compiled")
         val cellId = ContextId(idGen.next("cell"))
         val proposals = SqlitePlanProposals(c.store, idGen, clock)
         val intake = CampaignProposals(proposals, SqliteSplitRequests(c.store, idGen, clock), { c.contracts.current(c.ids.work) }, { null })
         val completion = io.astrolabe.cell.RoleCompletion.forRole(Roles.plan, mapOf(io.astrolabe.cell.PacketKind.PlanArtifacts to PlanPacketValidator.completion({ c.contract }, proposals)))
         val run = runCell(c, cellId, planning, Roles.plan, model, authority, syntax, compiled, span, null, proposals = intake, completion = completion)
-        val exit = run.exit ?: return "cancelled while planning"
+        val exit = run.exit ?: return Transition.Stopped(CampaignOutcome.Cancelled, "cancelled while planning")
         packets += exit.packet
-        if (exit !is CellExit.Completed) return "the plan cell ended ${exit.packet.status.wire}: ${exit.packet.reason}"
-        val stored = proposals.latest(c.ids.work, cellId) ?: return "the plan cell proposed no plan"
+        if (exit !is CellExit.Completed) {
+            val outcome = when (val d = Lifecycle.disposition(exit, null)) {
+                is Disposition.Stop -> d.outcome
+                is Disposition.Continue -> d.fallback.takeIf { it == CampaignOutcome.BudgetExhausted } ?: CampaignOutcome.BlockedExternal
+                is Disposition.Close -> CampaignOutcome.BlockedExternal
+            }
+            return Transition.Stopped(outcome, "the plan cell ended ${exit.packet.status.wire}: ${exit.packet.reason}")
+        }
+        val stored = proposals.latest(c.ids.work, cellId) ?: return blocked("the plan cell proposed no plan")
         return when (val admission = PlanIntake(c.contracts).admit(c.ids.work, stored, authority)) {
             is PlanAdmission.Admitted -> {
                 c.advance(Transition.Planned(admission.graph))
+                boundary(c, cellId, RebuildReason.RoleSwitch(Roles.implementing))
                 null
             }
-            is PlanAdmission.Refused -> "plan ${stored.id} refused: ${admission.gaps.joinToString("; ")}"
+            is PlanAdmission.Refused -> blocked("plan ${stored.id} refused: ${admission.gaps.joinToString("; ")}")
         }
+    }
+
+    /**
+     * A §5.8 boundary between S1 cells (P2.2.3): the next cell starts a fresh projection — empty tail (m = 0), its role's
+     * mask and knowledge view, a fresh provider lineage — so the boundary records the rebuild and writes the STATUS
+     * revision (role switch, cell end) with the checks' last receipts and the open intents.
+     */
+    private fun boundary(c: OpenedCampaign, cell: ContextId, reason: RebuildReason) {
+        val ids = c.ids.copy(context = cell)
+        val verification = c.checks.all().mapNotNull { check -> check.last?.let { CarriedReceipt(check.id, it.receiptId, it.applicability.name.lowercase()) } }
+        val status = StatusNotes(KbWriter(c.store, HeuristicEstimator(), clock), Notes(c.store), c.store.layout.kb)
+        status.checkpoint(ids, if (reason is RebuildReason.RoleSwitch) StatusBoundary.RoleSwitch else StatusBoundary.CellEnd, emptyList(), verification, c.intents.open().map { it.intentId })
+        val revision = Notes(c.store).revisions(status.id(c.ids.work)).size
+        c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, text = "rebuilt: ${reason.wire} · fresh lineage, empty tail · STATUS revision $revision", at = clock.instant()))
+    }
+
+    /**
+     * The one-line resume note of §13.4 for a cell that continues [increment] after its previous cell was lost or
+     * interrupted: what open reconciled — the tree stamp, external moves, unknown outcomes, background handles — and
+     * that KNOWN is the seeds only; the register is never trusted over the workspace.
+     */
+    private fun resumeNote(c: OpenedCampaign, increment: Increment, carry: Carry?): String? {
+        val previous = increment.cells.lastOrNull() ?: return null
+        val status = checkNotNull(c.state).cells.firstOrNull { it.cell == previous }?.status ?: return null
+        if (status != CellStatus.Failed && status != CellStatus.Cancelled) return null
+        val r = c.reconciliation
+        return "resumed: cell ${previous.value} ended ${status.name.lowercase()}; tree reconciled @${r.stamp.hash8}" +
+            " · external ${r.external.size}" + (if (r.unknownOutcomes.isEmpty()) "" else " · unknown outcomes ${r.unknownOutcomes.joinToString(", ")} (reconcile before any retry)") +
+            (if (r.handles.isEmpty()) "" else " · handles ${r.handles.joinToString(", ")} (poll, never relaunch)") +
+            " · " + (carry?.known ?: "KNOWN: seeds only (0) · NOT SEEN: everything else")
     }
 
     /** The carry-forward of [cell] (§6.2): its latest register, its end export and its packet, re-validated now. */
@@ -589,7 +690,14 @@ public class Controller @JvmOverloads public constructor(
         val ready = opened.graph.readyFrontier(contract, 1).firstOrNull()
             ?: return S0Run(stopOrFinish(c, "no ready increment: an empty frontier never means completed"), null, null, null)
         val role = Roles.implementing
-        val compiled = Compiler(model.estimator, config).compile(ready, contract, model.profile, role, c.prime, maxOutputTokens = model.maxOutputTokens)
+        // §13.4 rebuild(resume): a cell that continues a lost or interrupted one starts from its validated carry-forward.
+        val carry = ready.cells.lastOrNull()?.let { previous -> carryFrom(c, previous, null) }
+        val seeds = carry?.let { Seeds.render(it.seeds, c.registry::read) }
+        val resume = resumeNote(c, ready, carry)
+        val compiled = Compiler(model.estimator, config).compile(
+            ready, contract, model.profile, role, c.prime, maxOutputTokens = model.maxOutputTokens,
+            inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) }),
+        )
         when (compiled) {
             is Compiled.Ready -> Unit
             is Compiled.NeedsRescoping -> return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "NEEDS_RESCOPING_OR_LARGER_PROFILE: ${compiled.reason}")), null, null, compiled)
@@ -600,7 +708,8 @@ public class Controller @JvmOverloads public constructor(
         events?.emit(AgentEvent.Campaign.IncrementSelected(c.ids, ready.id))
         val dispatched = c.advance(Transition.Dispatched(ready.id, cellId))
         val increment = dispatched.graph.increments.first { it.id == ready.id }
-        val run = runCell(c, cellId, increment, Roles.implementing, model, authority, syntax, compiled, span, dispatched.ledger)
+        val register = carry?.register?.copy(cell = cellId, increment = increment.id, incrementTitle = increment.title)
+        val run = runCell(c, cellId, increment, Roles.implementing, model, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = listOfNotNull(resume))
         val ids = run.ids
         val scheduler = run.scheduler
         val exit = run.exit
@@ -663,6 +772,9 @@ public class Controller @JvmOverloads public constructor(
         seeds: List<io.astrolabe.workset.Entry> = emptyList(),
         proposals: io.astrolabe.tool.task.Proposals? = null,
         completion: io.astrolabe.cell.RoleCompletion? = null,
+        pinned: List<String> = emptyList(),
+        boundary: BoundaryReason? = null,
+        inputs: CompileInputs = CompileInputs(),
     ): CellRun {
         val ids = c.ids.copy(context = cellId)
         val config = c.attempt.config
@@ -696,7 +808,7 @@ public class Controller @JvmOverloads public constructor(
         val accounting = Accounting(c.store, clock)
         // §6.5: every compiled context leaves a manifest; the cell's end event links it.
         val manifests = SqliteManifests(c.store, clock)
-        val manifest = Manifest.of(idGen.next("manifest"), compiled, increment, contract, ids, model.profile, effort = model.effort.name.lowercase()).also { manifests.save(ids, it) }
+        val manifest = Manifest.of(idGen.next("manifest"), compiled, increment, contract, ids, model.profile, inputs, register?.version, boundary, model.effort.name.lowercase()).also { manifests.save(ids, it) }
         val ctx = CellContext(
             ids = ids, role = role, contracts = c.contracts, model = model, tools = tools,
             workspace = CellWorkspace(c.workspace, c.registry, coherence, c.stamper, workset, c.checks, scheduler, c.atlas, checker),
@@ -706,6 +818,7 @@ public class Controller @JvmOverloads public constructor(
             accounting = accounting,
             manifest = manifest.id,
             sections = compiled.k.sections,
+            pinned = pinned,
         )
         val budget = CellBudget.of(contract.budget.tokens, contract.budget.turnsPerCell, contract.budget.reserves)
         val cellSpan = spans?.start(Phase.Edit, ids, span)
@@ -747,10 +860,21 @@ public class Controller @JvmOverloads public constructor(
      * `finish` (§3.7) in its S0 form: every requirement verified and every `run:` item re-certified by a current
      * receipt at the final stamp, else an honest stop — never `completed` over a gap.
      */
-    private fun stopOrFinish(c: OpenedCampaign, unfinished: String, scheduler: Scheduler? = null): CampaignState {
+    private suspend fun stopOrFinish(c: OpenedCampaign, unfinished: String, scheduler: Scheduler? = null, campaign: Boolean = false): CampaignState {
         val state = checkNotNull(c.state)
         if (state.ledger.unfinished().isNotEmpty() || scheduler == null) {
             return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, unfinished))
+        }
+        if (campaign) {
+            // §8.7 campaign gate (P2.2.6): the campaign review predicate, then the full suite at campaign end.
+            CampaignFinish.reviewRequired(c.contract, state.graph.increments.count { it.status != IncrementStatus.Cancelled })?.let {
+                return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, it))
+            }
+            when (val full = fullSuite(c, "campaign end")) {
+                is FullSuite.Red -> return c.advance(Transition.Stopped(CampaignOutcome.Failed, "final full suite red: ${full.detail}"))
+                is FullSuite.NotCertified -> return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "final full suite could not certify: ${full.detail}"))
+                FullSuite.Green, FullSuite.Undeclared -> Unit
+            }
         }
         val stamp = c.stamper.report().candidateId
         val currencies = currencies(c, scheduler, stamp)
@@ -767,6 +891,49 @@ public class Controller @JvmOverloads public constructor(
         }
         c.advance(Transition.Finishing(stamp))
         return c.advance(Transition.Finished(stamp, receipts.distinct()))
+    }
+
+    private sealed interface FullSuite {
+        data object Green : FullSuite
+        data object Undeclared : FullSuite
+        data class Red(val detail: String) : FullSuite
+        data class NotCertified(val detail: String) : FullSuite
+    }
+
+    /** Runs the declared full suite through the `verify` tool path (receipts, closures, redaction) and journals the result. */
+    private suspend fun fullSuite(c: OpenedCampaign, why: String): FullSuite {
+        val check = c.checks[Checks.FULL]
+        val ids = c.ids.copy(context = ContextId(idGen.next("finish")))
+        if (check == null) {
+            c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, text = "full suite ($why): none declared by the repository — an explicit gap, acceptance runs stand", at = clock.instant()))
+            return FullSuite.Undeclared
+        }
+        harnessVerify(c, ids, "full", """{"what":"tests","selection":"full"}""")
+        val last = c.checks[Checks.FULL]?.last
+        val stamp = c.stamper.report().candidateId
+        // The full suite's closure is unknown (every file), so its evidence is a pass recorded at this very stamp.
+        val result = when {
+            last?.outcome == Outcome.Passed && last.stamp == stamp -> FullSuite.Green
+            last?.outcome == Outcome.Failed -> FullSuite.Red("${last.receiptId} failed at @${stamp.hash8}")
+            else -> FullSuite.NotCertified("${last?.receiptId ?: "no receipt"} ${last?.outcome?.name?.lowercase() ?: "not run"} at @${stamp.hash8}")
+        }
+        c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, refs = listOfNotNull(last?.receiptId), text = "full suite ($why): ${result::class.simpleName!!.lowercase()}", at = clock.instant()))
+        return result
+    }
+
+    /** One `verify` call the harness makes on its own authority (full suite, regression obligations), outside any cell. */
+    private suspend fun harnessVerify(c: OpenedCampaign, ids: Identities, callId: String, args: String): io.astrolabe.tool.ToolOutcome {
+        val config = c.attempt.config
+        val redaction = Redaction(config.redaction)
+        val logs = c.store.layout.root.resolve("logs")
+        val runner = TrustedLocalRunner(c.os)
+        val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, ids, clock)
+        val checker = Checker(c.checks, runner, c.os, c.stamper, c.registry, c.workspace, c.store.blobs, redaction, idGen, ids, logs)
+        val verify = Verify(checks = c.checks, scheduler = scheduler, checker = checker, baseline = null, s0 = c.s0.stampId, workspace = c.workspace, runner = runner, os = c.os, stamper = c.stamper, blobs = c.store.blobs, redaction = redaction, estimator = HeuristicEstimator(), idGen = idGen, ids = ids, contracts = c.contracts, logsDir = logs)
+        // An unknown closure is rescanned over the atlas rows, as in a cell; without them no receipt can certify the tree.
+        verify.inputs = c.atlas.rows.map { it.path }
+        val call = (ToolCalls.parse(listOf(io.astrolabe.provider.ToolCall(callId, "verify", args))) as ParsedCalls.Valid).calls.single()
+        return verify.execute(call, TurnContext(0, Workset().snapshot(), Reservations(Tokens(config.defaults.runBudgetTokens.toLong()))))
     }
 
     /** The outcome of a refused dispatch or publication: `cancelled` for a cancellation, else the lost lease blocks. */

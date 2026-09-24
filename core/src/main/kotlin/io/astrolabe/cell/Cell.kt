@@ -284,7 +284,7 @@ public class Cell @JvmOverloads constructor(
 
             // Complete.
             val invocationId = InvocationId(idGen.next("inv"))
-            events?.emit(AgentEvent.Cell.ModelRequested(ids, invocationId.value, estimate.tokens, ctx.model.profile.id))
+            events?.emit(AgentEvent.Cell.ModelRequested(ids, invocationId.value, estimate.tokens, ctx.model.profile.id, anchorTokens = anchor.tokens))
             val response = try {
                 ctx.model.adapter.start(request, invocationId).await()
             } catch (error: ProviderError) {
