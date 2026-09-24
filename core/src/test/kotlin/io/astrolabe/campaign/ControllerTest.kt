@@ -1,13 +1,29 @@
 package io.astrolabe.campaign
 
 import io.astrolabe.Config
+import io.astrolabe.atlas.Atlas
 import io.astrolabe.auth.Redaction
 import io.astrolabe.budget.HeuristicEstimator
 import io.astrolabe.budget.Reservations
 import io.astrolabe.budget.Tokens
+import io.astrolabe.cell.CellExit
+import io.astrolabe.cell.CellFixture.Companion.anchored
+import io.astrolabe.cell.CellFixture.Companion.call
+import io.astrolabe.cell.CellFixture.Companion.read
+import io.astrolabe.cell.CellFixture.Companion.say
+import io.astrolabe.cell.CellModel
 import io.astrolabe.cell.TouchKind
+import io.astrolabe.cell.WINDOWS
 import io.astrolabe.cell.echo
+import io.astrolabe.context.Compiled
+import io.astrolabe.contract.Acceptance
+import io.astrolabe.contract.Command
+import io.astrolabe.contract.Contracts
+import io.astrolabe.contract.IncrementStatus
+import io.astrolabe.contract.Origin
+import io.astrolabe.contract.RequirementStatus
 import io.astrolabe.contract.Shape
+import io.astrolabe.contract.SqliteContractRepository
 import io.astrolabe.event.AutonomousAuthority
 import io.astrolabe.evidence.Intent
 import io.astrolabe.evidence.IntentStatus
@@ -15,13 +31,18 @@ import io.astrolabe.evidence.JournalKind
 import io.astrolabe.evidence.JournalScope
 import io.astrolabe.evidence.SqliteAliases
 import io.astrolabe.evidence.SqliteObservations
+import io.astrolabe.fixtures.FakeAdapter
 import io.astrolabe.fixtures.FakeClock
+import io.astrolabe.fixtures.FakeProfiles
 import io.astrolabe.fixtures.FixedIdGen
+import io.astrolabe.fixtures.Scripted
+import io.astrolabe.fixtures.ScriptedModel
 import io.astrolabe.fixtures.TempRepo
 import io.astrolabe.id.AttemptId
 import io.astrolabe.id.ContextId
 import io.astrolabe.id.WorkId
 import io.astrolabe.provider.ToolCall as ProviderCall
+import io.astrolabe.store.Store
 import io.astrolabe.tool.ParsedCalls
 import io.astrolabe.tool.ToolCalls
 import io.astrolabe.tool.TurnContext
@@ -29,9 +50,11 @@ import io.astrolabe.tool.run.Run
 import io.astrolabe.tool.run.SqliteHandles
 import io.astrolabe.tool.run.TrustedLocalRunner
 import io.astrolabe.verify.Checks
+import io.astrolabe.verify.CompletionResult
 import io.astrolabe.workset.Workset
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.io.TempDir
+import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -158,6 +181,59 @@ class ControllerTest {
             assertEquals(CampaignOutcome.WaitingForInput, stop.outcome)
             assertTrue("run: acceptance" in stop.reason)
             assertNull(c.campaigns.load(request.work, request.attempt))
+        }
+    }
+
+    private fun recorded(name: String) = javaClass.getResourceAsStream("/shaper/$name")!!.use { String(it.readAllBytes(), Charsets.UTF_8) }
+
+    /** Stores the contract before the first open, with a `run:` item whose output the pytest shaper counts (D-50). */
+    private fun seedContract() {
+        repo.write("pytest_pass.txt", recorded("pytest-pass.txt"))
+        repo.commit("fixture output")
+        val printing = if (WINDOWS) Command(listOf("cmd.exe", "/d", "/s", "/c", "type pytest_pass.txt")) else Command(listOf("/bin/sh", "-c", "cat pytest_pass.txt"))
+        Store.open(stateRoot, repo.git, clock).use { store ->
+            val contracts = Contracts(SqliteContractRepository(store, clock), idGen, clock)
+            val derived = contracts.deriveS0(request.work, request.attempt, request.text, Atlas.build(repo.root), Config(), policy.tokens).contract
+            contracts.open(derived.copy(acceptance = listOf(Acceptance.Run("AC-1", printing, Origin.Harness, scope = Contracts.TOUCHED))))
+        }
+    }
+
+    private fun model(vararg replies: Scripted): CellModel =
+        CellModel(FakeAdapter(ScriptedModel.of(*replies)), FakeProfiles.main, HeuristicEstimator())
+
+    @Test
+    fun `S0 end to end - a scripted cell edits, runs acceptance and the campaign completes on receipts`() = runTest {
+        seedContract()
+        open().use { c ->
+            val v = c.registry.version("src/a.py")!!
+            val run = controller().runS0(c, model(
+                Scripted.Reply(listOf(say("reading"), read("c1", "src/a.py"))),
+                Scripted.Reply(listOf(say("editing"), anchored("c2", "src/a.py", v, "    return 1", "    return 10"))),
+                Scripted.Reply(listOf(say("verifying"), call("c3", "verify", """{"what":"acceptance","ids":["AC-1"]}"""))),
+                Scripted.Reply(listOf(say("done: a returns 10"))),
+            ))
+            assertIs<CellExit.Completed>(run.exit, run.state?.reason)
+            assertIs<CompletionResult.Accepted>(run.completion)
+            assertIs<Compiled.Ready>(run.compiled)
+            assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+            val state = c.campaigns.load(request.work, request.attempt)!!
+            assertEquals(RequirementStatus.Verified, state.ledger.entries.getValue("R1").status)
+            assertEquals(IncrementStatus.Verified, state.graph.increments.single().status)
+            assertEquals("def a():\n    return 10\n", Files.readString(repo.root.resolve("src/a.py")))
+        }
+        open().use { c -> assertTrue(c.reconciliation.external.isEmpty(), "the cell's own edit is snapshotted, not external at reopen") }
+    }
+
+    @Test
+    fun `S0 without receipts never moves the ledger - the cell stops honestly instead`() = runTest {
+        seedContract()
+        open().use { c ->
+            val run = controller().runS0(c, model(Scripted.Reply(listOf(say("done, trust me")))))
+            assertTrue(run.exit !is CellExit.Completed, "a done claim without a current receipt is not a completion")
+            assertTrue(run.completion !is CompletionResult.Accepted)
+            val outcome = assertNotNull(run.outcome)
+            assertTrue(outcome != CampaignOutcome.Completed, run.state?.reason)
+            assertEquals(RequirementStatus.Pending, c.campaigns.load(request.work, request.attempt)!!.ledger.entries.getValue("R1").status)
         }
     }
 }

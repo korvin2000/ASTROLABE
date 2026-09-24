@@ -5,23 +5,44 @@ import io.astrolabe.atlas.Atlas
 import io.astrolabe.atlas.Prime
 import io.astrolabe.atlas.RulesSnapshot
 import io.astrolabe.atlas.Sniffed
+import io.astrolabe.auth.Redaction
 import io.astrolabe.auth.RulesTrust
+import io.astrolabe.budget.CellBudget
 import io.astrolabe.budget.Tokens
+import io.astrolabe.cell.Cell
+import io.astrolabe.cell.CellContext
+import io.astrolabe.cell.CellEvidence
+import io.astrolabe.cell.CellExit
+import io.astrolabe.cell.CellModel
+import io.astrolabe.cell.CellTools
+import io.astrolabe.cell.CellWorkspace
+import io.astrolabe.cell.Gates
+import io.astrolabe.cell.Roles
+import io.astrolabe.cell.SqliteCheckpoints
 import io.astrolabe.cell.TouchKind
 import io.astrolabe.cell.Touched
+import io.astrolabe.context.Compiled
+import io.astrolabe.context.Compiler
 import io.astrolabe.contract.Contract
 import io.astrolabe.contract.Contracts
 import io.astrolabe.contract.SqliteContractRepository
 import io.astrolabe.event.AgentEvent
+import io.astrolabe.event.Authority
+import io.astrolabe.event.AutonomousAuthority
 import io.astrolabe.event.Events
+import io.astrolabe.evidence.Coherence
 import io.astrolabe.evidence.IntentJournal
 import io.astrolabe.evidence.IntentStatus
 import io.astrolabe.evidence.Journal
 import io.astrolabe.evidence.JournalEvent
 import io.astrolabe.evidence.JournalKind
+import io.astrolabe.evidence.SqliteAliases
 import io.astrolabe.evidence.SqliteIntentJournal
+import io.astrolabe.evidence.SqliteObservations
+import io.astrolabe.evidence.SqliteReceipts
 import io.astrolabe.id.AttemptId
 import io.astrolabe.id.CandidateId
+import io.astrolabe.id.ContextId
 import io.astrolabe.id.FileVersion
 import io.astrolabe.id.IdGen
 import io.astrolabe.id.Identities
@@ -32,14 +53,38 @@ import io.astrolabe.kb.EmptyKb
 import io.astrolabe.kb.Kb
 import io.astrolabe.os.Git
 import io.astrolabe.os.LocalOs
+import io.astrolabe.os.search.Searches
 import io.astrolabe.provider.Money
+import io.astrolabe.register.Register
+import io.astrolabe.register.SqliteRegisterVersions
+import io.astrolabe.register.Validator
 import io.astrolabe.store.FaultPoints
 import io.astrolabe.store.Store
+import io.astrolabe.tool.TurnCheckpoint
+import io.astrolabe.tool.edit.CliSyntax
+import io.astrolabe.tool.edit.Edit
+import io.astrolabe.tool.edit.SyntaxCheck
+import io.astrolabe.tool.kb.KbTool
+import io.astrolabe.tool.look.Look
+import io.astrolabe.tool.run.Run
+import io.astrolabe.tool.run.SqliteHandles
+import io.astrolabe.tool.run.TrustedLocalRunner
+import io.astrolabe.tool.state.StateTool
+import io.astrolabe.tool.task.TaskTool
+import io.astrolabe.tool.verify.Verify
+import io.astrolabe.verify.Checker
 import io.astrolabe.verify.Checks
+import io.astrolabe.verify.CompletionResult
+import io.astrolabe.verify.Currency
 import io.astrolabe.verify.RunnerCommands
+import io.astrolabe.verify.Scheduler
+import io.astrolabe.verify.ScopeGuard
+import io.astrolabe.verify.Verifier
+import io.astrolabe.workset.Workset
 import io.astrolabe.workspace.DirtyState
 import io.astrolabe.workspace.EnvFingerprint
 import io.astrolabe.workspace.EnvInputs
+import io.astrolabe.workspace.Preimages
 import io.astrolabe.workspace.ProtectedPaths
 import io.astrolabe.workspace.ShadowRef
 import io.astrolabe.workspace.Snapshot
@@ -141,6 +186,16 @@ public class OpenedCampaign internal constructor(
             store.close()
         }
     }
+}
+
+/** What [Controller.runS0] did: the campaign state it left, the cell's exit, the verifier's result and the compile. */
+public data class S0Run(
+    val state: CampaignState?,
+    val exit: CellExit?,
+    val completion: CompletionResult?,
+    val compiled: Compiled?,
+) {
+    public val outcome: CampaignOutcome? get() = state?.outcome
 }
 
 /**
@@ -250,6 +305,140 @@ public class Controller @JvmOverloads public constructor(
             request, ids, store, os, workspace, registry, stamper, dirty, shadow, s0, atlas, derived.sniffed, commands,
             contracts, checks, rules, prime, EmptyKb, journal, intents, campaigns, reconciliation, prescan, shape, state, refusal,
         )
+    }
+
+    /**
+     * `Controller.runS0()` (§3.6, §3.7 in the S0 shape): compile the one ready increment, run one implementing
+     * cell, reconcile and persist its return, verify the completion against current receipts (never the model's
+     * word), commit it if the tree is still the one it is about, and finish at the final stamp — or stop with the
+     * honest outcome `dispatch_outcome` gives (S0 has no continuation cell or replan, D-64). The ledger moves only
+     * through [Transition.Committed] on a verifier-accepted completion.
+     */
+    @JvmOverloads
+    public suspend fun runS0(
+        campaign: OpenedCampaign,
+        model: CellModel,
+        authority: Authority = AutonomousAuthority(),
+        syntax: SyntaxCheck = CliSyntax(campaign.os, campaign.workspace.root, campaign.store.layout.root.resolve("logs"), python = null, node = null),
+    ): S0Run {
+        val c = campaign
+        c.stop?.let { return S0Run(c.state, null, null, null) }
+        val opened = checkNotNull(c.state)
+        check(opened.phase == CampaignPhase.Running && opened.running == null) { "runS0 needs a reconciled campaign with no running cell; it is ${opened.phase}" }
+        val contract = c.contract
+        val ready = opened.graph.readyFrontier(contract, 1).firstOrNull()
+            ?: return S0Run(stopOrFinish(c, "no ready increment: an empty frontier never means completed"), null, null, null)
+        val role = Roles.implementing
+        val compiled = Compiler(model.estimator, config).compile(ready, contract, model.profile, role, c.prime, maxOutputTokens = model.maxOutputTokens)
+        when (compiled) {
+            is Compiled.Ready -> Unit
+            is Compiled.NeedsRescoping -> return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "NEEDS_RESCOPING_OR_LARGER_PROFILE: ${compiled.reason}")), null, null, compiled)
+            is Compiled.NeedsEvidence -> return S0Run(c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, "NEEDS_MORE_EVIDENCE: acceptance without definition ${compiled.missing}")), null, null, compiled)
+        }
+
+        val cellId = ContextId(idGen.next("cell"))
+        events?.emit(AgentEvent.Campaign.IncrementSelected(c.ids, ready.id))
+        val dispatched = c.advance(Transition.Dispatched(ready.id, cellId))
+        val increment = dispatched.graph.increments.first { it.id == ready.id }
+        val ids = c.ids.copy(context = cellId)
+        val redaction = Redaction(config.redaction)
+        val logs = c.store.layout.root.resolve("logs")
+        val estimator = model.estimator
+        val runner = TrustedLocalRunner(c.os)
+        val workset = Workset(immediateStubTokens = config.defaults.immediateStubTokens)
+        val observations = SqliteObservations(c.store, clock)
+        val aliases = SqliteAliases(c.store, clock)
+        val receipts = SqliteReceipts(c.store, clock)
+        val registerVersions = SqliteRegisterVersions(c.store, clock)
+        val checkpoints = SqliteCheckpoints(c.store, clock)
+        val preimages = Preimages(c.workspace, c.store.blobs, ids, clock)
+        val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, receipts, aliases, idGen, ids, clock)
+        val checker = Checker(c.checks, runner, c.os, c.stamper, c.registry, c.workspace, c.store.blobs, redaction, idGen, ids, logs)
+        val verify = Verify(checks = c.checks, scheduler = scheduler, checker = checker, baseline = null, s0 = c.s0.stampId, workspace = c.workspace, runner = runner, os = c.os, stamper = c.stamper, blobs = c.store.blobs, redaction = redaction, estimator = estimator, idGen = idGen, ids = ids, contracts = c.contracts, logsDir = logs)
+        verify.inputs = c.atlas.rows.map { it.path }
+        val tools = CellTools(
+            state = StateTool(Validator(estimator), registerVersions, c.journal, estimator, idGen, ids, clock, Register.empty(cellId, increment.id, increment.title), events),
+            look = Look(c.workspace, c.registry, workset, c.atlas, Searches.jvm(), c.journal, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids),
+            edit = Edit(c.workspace, c.registry, workset, c.os, preimages, ScopeGuard(c.workspace), c.contracts, c.checks, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, syntax),
+            run = Run(c.workspace, c.registry, c.stamper, runner, c.os, c.intents, SqliteHandles(c.store, clock), observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, c.contracts, authority, config, clock, logs),
+            verify = verify,
+            task = TaskTool(authority, c.contracts, c.journal, estimator, idGen, ids, clock, events),
+            kb = KbTool(c.kb, estimator, idGen),
+        )
+        val coherence = Coherence(c.registry)
+        val ctx = CellContext(
+            ids = ids, role = role, contracts = c.contracts, model = model, tools = tools,
+            workspace = CellWorkspace(c.workspace, c.registry, coherence, c.stamper, workset, c.checks, scheduler, c.atlas, checker),
+            evidence = CellEvidence(c.journal, observations, aliases, receipts, c.intents, registerVersions, checkpoints, preimages),
+            prime = c.prime, ledger = dispatched.ledger, preexisting = compiled.k.ledger, config = config,
+            turnCheckpoint = TurnCheckpoint { snapshot(c) },
+        )
+        val budget = CellBudget.of(contract.budget.tokens, contract.budget.turnsPerCell, contract.budget.reserves)
+        val exit = try {
+            Cell(clock, idGen, config.defaults, Gates.s0(), events).run(ctx, increment, budget)
+        } finally {
+            coherence.close()
+        }
+        // The tree after the cell is the base the next open reconciles against: only moves after this are external.
+        snapshot(c)
+        c.advance(Transition.Returned(exit))
+
+        val stampNow = c.stamper.report().candidateId
+        val completion = if (exit is CellExit.Completed) {
+            val current = c.contract
+            val returned = checkNotNull(c.state).graph.increments.first { it.id == increment.id }
+            Verifier().accept(exit.packet.proposal(), current, returned, exit.register, checkNotNull(c.state).ledger, stampNow, currencies(c, scheduler, stampNow))
+        } else {
+            null
+        }
+        val state = when (val disposition = Lifecycle.disposition(exit, completion)) {
+            is Disposition.Close -> {
+                c.advance(Transition.Committed(disposition.accepted, stampNow))
+                events?.emit(AgentEvent.Campaign.IncrementClosed(c.ids, increment.id, "verified"))
+                stopOrFinish(c, "requirements remain unverified after ${increment.id}", scheduler)
+            }
+            // S0 has no continuation cell: the fallback is the honest outcome (D-64).
+            is Disposition.Continue -> c.advance(Transition.Stopped(disposition.fallback, disposition.reason))
+            is Disposition.Stop -> c.advance(Transition.Stopped(disposition.outcome, disposition.reason))
+        }
+        return S0Run(state, exit, completion, compiled)
+    }
+
+    /**
+     * `finish` (§3.7) in its S0 form: every requirement verified and every `run:` item re-certified by a current
+     * receipt at the final stamp, else an honest stop — never `completed` over a gap.
+     */
+    private fun stopOrFinish(c: OpenedCampaign, unfinished: String, scheduler: Scheduler? = null): CampaignState {
+        val state = checkNotNull(c.state)
+        if (state.ledger.unfinished().isNotEmpty() || scheduler == null) {
+            return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, unfinished))
+        }
+        val stamp = c.stamper.report().candidateId
+        val currencies = currencies(c, scheduler, stamp)
+        val contract = c.contract
+        val gaps = ArrayList<String>()
+        val receipts = ArrayList<String>()
+        for (item in contract.acceptance.filterIsInstance<io.astrolabe.contract.Acceptance.Run>()) {
+            val receipt = c.checks.forAcceptance(item.id).firstNotNullOfOrNull { check -> currencies[check.id]?.takeIf { it.certifies }?.receiptId }
+            if (receipt == null) gaps += "${item.id}: no current receipt at @${stamp.hash8}" else receipts += receipt
+        }
+        if (gaps.isNotEmpty() || receipts.isEmpty()) {
+            return c.advance(Transition.Stopped(CampaignOutcome.Failed, "final acceptance at @${stamp.hash8} failed: ${gaps.ifEmpty { listOf("no run: receipt") }.joinToString("; ")}"))
+        }
+        c.advance(Transition.Finishing(stamp))
+        val finished = c.advance(Transition.Finished(stamp, receipts.distinct()))
+        events?.emit(AgentEvent.Campaign.Finished(c.ids, CampaignOutcome.Completed.wire, null))
+        return finished
+    }
+
+    private fun currencies(c: OpenedCampaign, scheduler: Scheduler, stamp: CandidateId): Map<String, Currency> =
+        c.checks.all().filter { it.last != null }.associate { it.id to scheduler.currency(it, stamp) }
+
+    /** Records the tree as the next shadow snapshot, when it moved since the last one. */
+    private fun snapshot(c: OpenedCampaign) {
+        val last = c.shadow.records().last()
+        val now = c.dirty.capture(last.turn + 1)
+        if (now.manifestDigest != checkNotNull(c.shadow.manifest(last.turn)).manifestDigest) c.shadow.snapshot(now)
     }
 
     /**
