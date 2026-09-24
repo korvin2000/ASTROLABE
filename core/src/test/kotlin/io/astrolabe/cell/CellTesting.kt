@@ -130,6 +130,8 @@ internal class CellFixture(
     val defaults: Defaults = Defaults(),
     files: Map<String, String> = DEFAULT_FILES,
     osOverride: ((LocalOs) -> Os)? = null,
+    /** The verbatim request the S0 contract derives from; a behaviour-preserving one activates refactor mode. */
+    val request: String = REQUEST,
 ) : AutoCloseable {
     val repo: TempRepo = TempRepo.create().also { repo -> files.forEach { (path, text) -> repo.write(path, text) }; repo.commit("initial") }
     val clock = FakeClock.at("2026-09-21T10:00:00Z")
@@ -146,7 +148,7 @@ internal class CellFixture(
     val estimator = HeuristicEstimator()
     val contracts = Contracts(InMemoryContractRepository(), FixedIdGen(), clock)
     val atlas: Atlas = Atlas.build(repo.root)
-    val contract: Contract = contracts.deriveS0(ids.work, ids.attempt, REQUEST, atlas, Config(), Tokens(200_000)).contract
+    val contract: Contract = contracts.deriveS0(ids.work, ids.attempt, request, atlas, Config(), Tokens(200_000)).contract
         .let { it.copy(scope = it.scope.copy(writePaths = listOf("src/", "tests/"))) }
         .also { contracts.open(it) }
     val checks: Checks = Checks.seed(contract, RunnerCommands(typecheck = echo("types ok")))
@@ -161,7 +163,7 @@ internal class CellFixture(
     val scheduler = Scheduler(checks, workspace, registry, stamper, receipts, aliases, idGen, ids, clock)
     val logs: Path = stateRoot.resolve("logs")
     val checker = Checker(checks, TrustedLocalRunner(os), os, stamper, registry, workspace, store.blobs, Redaction(), idGen, ids, logs)
-    val increment = Increment("inc-1", listOf("R1"), accept = contract.acceptance.map { it.id }, writeScope = listOf("src/"), expectedFiles = 1, title = REQUEST)
+    val increment = Increment("inc-1", listOf("R1"), accept = contract.acceptance.map { it.id }, writeScope = listOf("src/"), expectedFiles = 1, title = request)
     val events = Events(clock)
     val recorder = EventRecorder().also { events.subscribe(it) }
 

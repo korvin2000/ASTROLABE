@@ -77,6 +77,7 @@ import io.astrolabe.verify.CheckState
 import io.astrolabe.verify.ChecksRender
 import io.astrolabe.verify.Currency
 import io.astrolabe.verify.Layer
+import io.astrolabe.verify.RefactorMode
 import io.astrolabe.verify.Selector
 import io.astrolabe.verify.TestIntegrity
 import io.astrolabe.verify.TestIntegrityFlag
@@ -185,6 +186,9 @@ public class Cell @JvmOverloads constructor(
         // The packet's runtime-owned fields, collected as the cell runs (§5.9).
         private var base: StampReport? = null
         private var contractVersion = 0
+
+        /** §8.9 `red_ok_until: increment_end`: while true, a red check is not required in `Open` before `[>]` advances. */
+        private var redOkUntilIncrementEnd = false
         private val readVersions = LinkedHashMap<String, FileVersion>()
         private val displayed = LinkedHashMap<Pair<String, FileVersion>, Ranges>()
         private val origins = LinkedHashMap<String, ChangeOrigin>()
@@ -254,6 +258,13 @@ public class Cell @JvmOverloads constructor(
             // Render: [A] first (rebuilt every turn), then the cached regions, then admission.
             val contract = contract()
             contractVersion = contract.version
+            val refactor = RefactorMode.detect(contract)
+            if (refactor.active && !redOkUntilIncrementEnd) {
+                // §8.9 item 2: inline syntax, the checker and the step-boundary layer still run; only the red-not-recorded
+                // gate waits for the increment end, where the exit gate refuses a red completion as ever.
+                ev.journal.append(JournalEvent(idGen.next("ev"), ids, turn, JournalKind.Boundary, text = "refactor mode (${refactor.reasons.first()}): red_ok_until ${RefactorMode.RED_OK_UNTIL}", at = clock.instant()))
+            }
+            redOkUntilIncrementEnd = refactor.active
             val mask = maskFor(contract, reserveTurn)
             val schemas = when (val selection = ToolSchemas.forLineage(ctx.model.adapter, ctx.model.profile, mask)) {
                 is SchemaSelection.Supported -> selection.set
@@ -970,7 +981,8 @@ public class Cell @JvmOverloads constructor(
                 return ws.checks.forAcceptance(accept).any { currencies[it.id]?.certifies == true } || currencies[accept]?.certifies == true
             }
 
-            override val redChecks: Set<String> get() = ws.checks.all().filter { it.last?.outcome == Outcome.Failed }.map { it.id }.toSet()
+            override val redChecks: Set<String>
+                get() = if (redOkUntilIncrementEnd) emptySet() else ws.checks.all().filter { it.last?.outcome == Outcome.Failed }.map { it.id }.toSet()
 
             override val greenOps: Set<Int> get() = outcomes.filterValues { it.green }.keys
 
