@@ -51,6 +51,11 @@ public data class Config(
      * not — an override must keep its tool mask within, and its permission at or below, the SDK default.
      */
     val roles: Map<String, Role> = emptyMap(),
+    /**
+     * Project-configured quality gates (complexity, duplication thresholds): each becomes a `CHK-quality-gate*`
+     * check run with the full suite (§8.1, P3.6.2). Never invented: none unless the host configures them.
+     */
+    val qualityGates: List<io.astrolabe.contract.Command> = emptyList(),
 ) {
     /** Java hosts (D-07): the fields a host sets most, without the full constructor. */
     public fun withStateRoot(stateRoot: String?): Config = copy(stateRoot = stateRoot)

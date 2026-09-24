@@ -193,7 +193,7 @@ public object FinishReceipts {
 
 /** The §8.7 campaign gate's policy parts (P2.2.6). */
 public object CampaignFinish {
-    /** §7.3 full-suite cadence: every K verified increments, and at campaign end. */
+    /** §7.3 full-suite cadence default (`Defaults.fullSuiteCadence` is what the controller reads): every K verified increments, and at campaign end. */
     public const val FULL_SUITE_EVERY: Int = 5
 
     /**

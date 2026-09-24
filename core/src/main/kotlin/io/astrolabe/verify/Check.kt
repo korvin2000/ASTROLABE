@@ -325,9 +325,13 @@ public class Checks private constructor(private val checks: LinkedHashMap<String
         @JvmStatic
         public fun empty(): Checks = Checks(LinkedHashMap())
 
-        /** The S0 seed set (§8.1 layer table): fast checks on touched files, every `run:` acceptance, the full suite. */
+        /**
+         * The S0 seed set (§8.1 layer table): fast checks on touched files, every `run:` acceptance, the full suite,
+         * and one `CHK-quality-gate` check per configured [qualityGates] command (none are ever invented).
+         */
         @JvmStatic
-        public fun seed(contract: Contract, commands: RunnerCommands, touched: Set<String> = emptySet()): Checks {
+        @JvmOverloads
+        public fun seed(contract: Contract, commands: RunnerCommands, touched: Set<String> = emptySet(), qualityGates: List<Command> = emptyList()): Checks {
             val registry = Checks(LinkedHashMap())
             commands.typecheck?.let {
                 registry.register(Check(TYPES_TOUCHED, CheckKind.Type, Selector.Touched, Closure.Known(touched), CostClass.Fast, Trigger.EndOfTurn, command = it))
@@ -345,6 +349,10 @@ public class Checks private constructor(private val checks: LinkedHashMap<String
             }
             commands.test?.let {
                 registry.register(Check(FULL, CheckKind.Full, Selector.All, Closure.Unknown, CostClass.Expensive, Trigger.CampaignEnd, command = it))
+            }
+            qualityGates.forEachIndexed { i, command ->
+                val id = if (i == 0) QUALITY_GATE else "$QUALITY_GATE-${i + 1}"
+                registry.register(Check(id, CheckKind.Quality, Selector.Named(command), Closure.Unknown, CostClass.Expensive, Trigger.CampaignEnd, command = command))
             }
             return registry
         }

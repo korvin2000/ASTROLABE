@@ -343,7 +343,7 @@ public class Controller @JvmOverloads public constructor(
             if ((initial as? ShapeDecision.Selected)?.shape == Shape.S1) d.copy(shape = Shape.S1) else d
         })
         val commands = derived.primary?.let(RunnerCommands::of) ?: RunnerCommands()
-        val checks = Checks.seed(contract, commands)
+        val checks = Checks.seed(contract, commands, qualityGates = effective.qualityGates)
         val rules = RulesTrust(workspace.root).approved(effective.rulesFile)?.let { RulesSnapshot(it.binding.path, it.digest, it.text) }
         val prime = Prime.render(atlas, derived.sniffed, rules)
 
@@ -551,7 +551,7 @@ public class Controller @JvmOverloads public constructor(
                     events?.emit(AgentEvent.Campaign.IncrementClosed(c.ids, increment.id, "verified"))
                     // §7.3 cadence: the full suite every K verified increments; a red result is a regression on record.
                     val verified = checkNotNull(c.state).graph.increments.count { it.status == IncrementStatus.Verified }
-                    if (verified % CampaignFinish.FULL_SUITE_EVERY == 0 && checkNotNull(c.state).ledger.unfinished().isNotEmpty()) fullSuite(c, "cadence after $verified verified increments")
+                    if (verified % c.attempt.config.defaults.fullSuiteCadence == 0 && checkNotNull(c.state).ledger.unfinished().isNotEmpty()) fullSuite(c, "cadence after $verified verified increments")
                 }
                 // S1: a partial continues the same increment from its carry-forward; the cell cap bounds it (D-70).
                 is Disposition.Continue -> Unit

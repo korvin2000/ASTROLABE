@@ -1393,9 +1393,10 @@ Goal: [§18.2 Stage C](docs/implementation/roadmap.md#sec-18-2): scheduler with 
 - Done: fixture with a nondeterministic test yields `inconclusive`, never `passed`.
 - Log: 2026-09-24 — `Verify.runTriaged` (every `verify` tests/acceptance run and layer run): a `failed` check is rerun once alone; the same outcome stands (latest receipt), a different one ⇒ `Scheduler.flaky(check, v, first, second)` records a third `inconclusive` receipt over the rerun's candidate with a `flaky` limit naming both attempts and makes it the check's result; the view asks for an Open item (the harness does not write the register). No further reruns. "Pre-existing" still needs the baseline receipt (unchanged). Tests: `VerifyTest` nondeterministic check ⇒ failed, passed, inconclusive, not certifying; always-red AC-2 ⇒ two agreeing failures; `ControllerTest` red acceptance assertion updated.
 
-#### P3.6.2 [M] Full-suite cadence and quality gates · TODO
+#### P3.6.2 [M] Full-suite cadence and quality gates · DONE
 - Build: `K = 5` verified increments + campaign end (P2.2.6 wiring); `CHK-quality-gate` = configured complexity/duplication threshold commands (`[O]` until a project configures them; never invented).
 - Done: cadence test over a scripted 7-increment campaign.
+- Log: 2026-09-24 — The controller reads `Defaults.fullSuiteCadence` (K = 5) instead of the constant; `Config.qualityGates: List<Command>` (default empty — never invented) seeds `CHK-quality-gate`, `CHK-quality-gate-2`, … (`Checks.seed(…, qualityGates)`, kind `Quality`, `campaign_end`), which run with the full suite at cadence and campaign end (P3.1.4 wiring; a red gate is a red suite). Test: `CadenceTest` scripted S1 campaign of 7 increments ⇒ `full suite (cadence after 5 verified increments)` then `full suite (campaign end)`, 2 quality-gate receipts, completed.
 
 - [ ] **Gate P3.6:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
 
