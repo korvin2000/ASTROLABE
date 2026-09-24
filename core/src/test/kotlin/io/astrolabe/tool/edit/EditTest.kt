@@ -315,7 +315,7 @@ class EditTest {
     }
 
     @Test
-    fun `a UTF-8 BOM, non-ASCII text and CRLF endings survive an edit byte-exactly outside the hunk (P1.12.4)`() = runTest {
+    fun `a UTF-8 BOM, non-ASCII text and CRLF endings survive an edit byte-exactly outside the hunk`() = runTest {
         val v = seen("src/bom.py", 1, 2)
         assertEquals("ok", status(run(anchored("src/bom.py", v, hunk("w = 1", "w = 2")))))
         val bytes = Files.readAllBytes(repo.resolve("src/bom.py"))
