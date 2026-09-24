@@ -1,6 +1,58 @@
 # ASTROLABE 1.0.1 Kotlin SOTA AI Coding Agent Harness — actual state
 
-**Current checkpoint — P1.8.8 DONE, the P1 cell runtime is complete (2026-09-24).**
+**Current checkpoint — P1.9.1 `Lifecycle` DONE (2026-09-24).**
+On branch `claude/inspiring-goodall-9viaxy` (this session's designated branch), a fast-forward of `main`
+that also carries the P1.8.8 commits; this record's commit. `main` is updated only by a fast-forward.
+
+## What is true now
+
+**The controller has its state machine.** `campaign.Lifecycle` over `CampaignState` (work, attempt,
+contract version, `CampaignPhase { Opened, Running, Finishing, Ended }`, `RequirementGraph`, `Ledger`,
+`CellState`s, `CampaignOutcome`, `seq`). A state is made only by `Lifecycle.open(contract, graph)` and
+advanced only by `Lifecycle.apply(state, contract, transition)` (private constructor,
+`@ConsistentCopyVisibility`). Each `Transition` carries its record: `Reconciled`, `Dispatched`,
+`Returned(exit)`, `Committed(Accepted, stampNow)` (only the increment's latest *completed* cell, about the
+tree now), `Unblocked`, `IncrementCancelled`, `Finishing`/`Finished` (every requirement `stampValid` at one
+stamp, receipts non-empty — the only path to `completed`), `Stopped(outcome ≠ completed)` (no running
+cell), `Resumed` (resumable outcomes only). `Lifecycle.disposition(exit, completion)` is the §3.7
+`dispatch_outcome` table: `Close` · `Continue(reason, fallback)` · `Stop(outcome)` (D-64 fixes the S0
+fallbacks). `RequirementGraph` gained `block`/`unblock`. `SqliteCampaigns` persists the state plus the
+`increments`/`ledger` rows `Views.ledger` reads, in one transaction, refusing any save that does not extend
+the stored `seq` by one. **Store schema is v2** (`campaigns` table). Do not reimplement P1.9.1.
+
+**Counts: 81/185 DONE, 0 IN_PROGRESS, 104 TODO.** P0 19/19; P1 53/64; P2–P6 9/102.
+Verification (Linux cloud sandbox, JDK 25 scratch copy): `LifecycleTest` **9/9**, graph + store suites
+71/0; full core **950 tests, 2 failures, 6 skips** — both failures are the known environmental ones
+(`FixtureReposTest` gradle-small, `SearchBackendParityTest` café), outside the change; `checkKotlinAbi`
+green with the regenerated, purely additive dump. JDK 26 CI has not yet run on this commit.
+
+## Resume here
+
+1. **Next task: P1.9.2 campaign open and reconciliation**, then P1.9.3 (S0 run + `Compiler`), P1.9.4
+   (lifecycle controls), P1.9.5 (`FinishReceipt`), P1.9.6 (`Astrolabe`/`AstrolabeJava`), P1.11.1–P1.11.2,
+   P1.12.1–P1.12.4. `Deps` and §2.4 producer readiness govern. P1.9.2 produces `Lifecycle.open` +
+   `Transition.Reconciled` (and `Resumed` on reopen of a resumable campaign) and saves through `Campaigns`;
+   P1.9.3 drives `Dispatched → Returned → disposition → Committed → Finishing → Finished`, mapping
+   `Continue` to its `fallback` in S0.
+
+## Carried forward — read before touching these
+
+1. **P1.9.2 audit debt (unchanged):** open the derived contract after workspace capture, bind
+   `ProtectedPaths`, pass `Sniff` commands into `Checks.seed` and approved rules into `Prime`.
+2. **S0 graph must validate:** `Lifecycle.open` and `graph.recordAccepted` both require
+   `RequirementGraph.validate(contract)` to be empty, so P1.9.3's `G_single(C)` increment needs
+   `produces`, a run/check acceptance with an evidence kind, and full acceptance coverage.
+3. **Exit-gate refinement (TODO §3.1):** red = a `failed` receipt; inconclusive is missing evidence.
+4. **Open finding for P1.12.2:** recall pointers exist only for `look` results.
+5. **Recorded, not diagnosed:** the transient `StamperTest` `git exited -1` under load (`TempRepo.runGit`).
+6. **Packet gaps by design:** no `diffstat` (P1.9.5), `transforms` empty until P3.3, `waiting` null until P2
+   handles (so `waiting_for_process` has no producer yet).
+7. **Sandbox build:** JDK 26 is unreachable in the Linux cloud sandbox; see TODO §1 resume notes (scratch
+   copy retargeted to JDK 25, never committed; `rsync` is absent — copy with `tar`). Maven Central 429s: retry.
+
+**Historical checkpoints below; their former next-step instructions are superseded.**
+
+**Previous checkpoint — P1.8.8 DONE, the P1 cell runtime is complete (2026-09-24).**
 On `main`; this record's commit.
 
 ## What is true now

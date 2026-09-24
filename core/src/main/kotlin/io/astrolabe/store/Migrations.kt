@@ -3,7 +3,8 @@ package io.astrolabe.store
 import java.time.Clock
 
 /**
- * Schema v1 of `state.sqlite` and the versioned, idempotent migration runner (D-03, D-25, IX-21).
+ * The schema of `state.sqlite` and the versioned, idempotent migration runner (D-03, D-25, IX-21): v1 is the P0
+ * schema, v2 adds `campaigns`, the controller's lifecycle state (P1.9.1).
  *
  * ## Shape of every table
  * Each row carries the four identity columns of §3.3 — `work_id`, `attempt_id`, `candidate_id`,
@@ -17,7 +18,7 @@ import java.time.Clock
  * ## One writer per table (L9)
  * | Writer | Tables |
  * |---|---|
- * | controller | `contracts`, `requests`, `requirements`, `acceptance`, `constraints`, `amendments`, `increments`, `ledger`, `sizing`, `leases` |
+ * | controller | `contracts`, `requests`, `requirements`, `acceptance`, `constraints`, `amendments`, `increments`, `ledger`, `sizing`, `leases`, `campaigns` |
  * | verifier | `receipts` |
  * | runner | `journal` (call/result kinds), `intents`, `handles`, `usage` |
  * | cell runtime | `cells`, `turns`, `manifests`, `register_versions`, `workset_exports`, `observations`, `claims`, `packets` |
@@ -43,9 +44,9 @@ import java.time.Clock
  */
 public object Migrations {
     /** The schema version this build writes; every row records it. */
-    public const val SCHEMA_VERSION: Int = 1
+    public const val SCHEMA_VERSION: Int = 2
 
-    /** Every table of schema v1, in creation order (`notes_fts` is the FTS5 virtual table). */
+    /** Every table of the current schema, in creation order (`notes_fts` is the FTS5 virtual table). */
     public val TABLES: List<String> = listOf(
         "schema_version",
         "blobs",
@@ -79,6 +80,7 @@ public object Migrations {
         "leases",
         "handles",
         "packets",
+        "campaigns",
     )
 
     /**
@@ -245,6 +247,15 @@ public object Migrations {
                 "CREATE INDEX usage_by_work ON usage (work_id, created_at)",
                 "CREATE INDEX packets_by_work_kind ON packets (work_id, kind, created_at)",
                 "CREATE INDEX note_usage_by_context ON note_usage (context_id)",
+            ),
+        ),
+        Migration(
+            version = 2,
+            statements = listOf(
+                // ---- campaign lifecycle (§3.2 "one state machine over typed records") -----------
+                "CREATE TABLE campaigns (" +
+                    "$IDS, phase TEXT NOT NULL, outcome TEXT, seq INTEGER NOT NULL, $META, " +
+                    "PRIMARY KEY (work_id, attempt_id))",
             ),
         ),
     )

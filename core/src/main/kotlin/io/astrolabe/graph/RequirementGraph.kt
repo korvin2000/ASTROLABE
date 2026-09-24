@@ -158,6 +158,22 @@ public class RequirementGraph(
         return replace(increment.copy(status = IncrementStatus.Cancelled, cancelledReason = reason))
     }
 
+    /** A `blocked` packet from the increment's latest cell parks it on the authority (§5.9); nothing else can. */
+    public fun block(id: String, cell: ContextId): RequirementGraph {
+        val increment = increments.single { it.id == id }
+        check(increment.status == IncrementStatus.InProgress && increment.cells.lastOrNull() == cell) {
+            "only the latest cell of an in-progress increment blocks it; $id is ${increment.status}"
+        }
+        return replace(increment.copy(status = IncrementStatus.Blocked))
+    }
+
+    /** The authority answered or amended: the increment resumes where it stopped, its cells kept. */
+    public fun unblock(id: String): RequirementGraph {
+        val increment = increments.single { it.id == id }
+        check(increment.status == IncrementStatus.Blocked) { "$id is ${increment.status}, not blocked" }
+        return replace(increment.copy(status = if (increment.cells.isEmpty()) IncrementStatus.Pending else IncrementStatus.InProgress))
+    }
+
     /**
      * Commit a verifier result, or refresh regression evidence without starting another implementation cell.
      * The controller must check candidate/lease/generation before committing this snapshot (P2.2.2).
