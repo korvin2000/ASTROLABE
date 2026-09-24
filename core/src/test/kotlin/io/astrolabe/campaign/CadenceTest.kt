@@ -91,8 +91,8 @@ class CadenceTest {
 
     @Test
     fun `the configured quality gates run on the cadence even when the repository declares no full suite`() {
-        java.nio.file.Files.deleteIfExists(repo.root.resolve("Makefile"))
-        repo.commit("no declared suite")
+        // Windows never writes the Makefile, so there is only something to commit on POSIX.
+        if (java.nio.file.Files.deleteIfExists(repo.root.resolve("Makefile"))) repo.commit("no declared suite")
         cadence()
     }
 
