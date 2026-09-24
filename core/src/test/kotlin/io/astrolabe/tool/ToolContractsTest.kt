@@ -28,7 +28,8 @@ class ToolContractsTest {
         val strict = ToolSchemas.forLineage(adapter, FakeProfiles.strictOnly, ToolOps.implementingS0)
         assertIs<SchemaSelection.Unsupported>(strict)
         assertTrue(ToolOps.implementingS0.allows("edit.anchored"))
-        assertTrue(!ToolOps.implementingS0.allows("edit.transform"))
+        assertTrue(ToolOps.implementingS0.allows("edit.transform"), "transforms are unmasked since P3.3.1")
+        assertTrue(!ToolOps.implementingS0.allows("look.bmap"))
         assertEquals(7 + 6 + 3 + 5 + 3 + 4 + 4, ToolOps.all.size + 0 - 0 - 0 + 0 - (ToolOps.all.size - 32))
     }
 

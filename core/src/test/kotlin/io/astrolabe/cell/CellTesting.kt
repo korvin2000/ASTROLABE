@@ -56,6 +56,7 @@ import io.astrolabe.store.Store
 import io.astrolabe.tool.edit.Edit
 import io.astrolabe.tool.edit.SyntaxCheck
 import io.astrolabe.tool.edit.SyntaxResult
+import io.astrolabe.tool.edit.TransformExecution
 import io.astrolabe.tool.kb.KbTool
 import io.astrolabe.tool.look.Look
 import io.astrolabe.tool.run.Run
@@ -169,7 +170,10 @@ internal class CellFixture(
 
     val state = StateTool(Validator(estimator), registerVersions, journal, estimator, idGen, ids, clock, Register.empty(ids.context!!, increment.id, increment.title), events)
     val look = Look(workspace, registry, workset, atlas, Searches.jvm(), journal, observations, aliases, store.blobs, Redaction(), estimator, idGen, ids)
-    val edit = Edit(workspace, registry, workset, os, preimages, ScopeGuard(workspace), contracts, checks, observations, aliases, store.blobs, Redaction(), estimator, idGen, ids, SyntaxCheck { _, _, _ -> SyntaxResult.Ok })
+    val edit = Edit(
+        workspace, registry, workset, os, preimages, ScopeGuard(workspace), contracts, checks, observations, aliases, store.blobs, Redaction(), estimator, idGen, ids, SyntaxCheck { _, _, _ -> SyntaxResult.Ok },
+        transforms = TransformExecution(TrustedLocalRunner(os), stamper, logs),
+    )
     val run = Run(workspace, registry, stamper, TrustedLocalRunner(os), os, intents, SqliteHandles(store, clock), observations, aliases, store.blobs, Redaction(), estimator, idGen, ids, contracts, AutonomousAuthority(), Config(), clock, logs)
     val verify = Verify(checks, scheduler, checker, null, null, workspace, TrustedLocalRunner(os), os, stamper, store.blobs, Redaction(), estimator, idGen, ids, contracts, logs)
     val task = TaskTool(AutonomousAuthority(), contracts, journal, estimator, idGen, ids, clock, events)

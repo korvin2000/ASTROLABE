@@ -3,6 +3,7 @@ package io.astrolabe.tool.edit
 import io.astrolabe.atlas.Language
 import io.astrolabe.atlas.Outline
 import io.astrolabe.auth.ContentClass
+import io.astrolabe.auth.ExecutionModeLabel
 import io.astrolabe.auth.InstructionShape
 import io.astrolabe.auth.Redaction
 import io.astrolabe.contract.Contract
@@ -102,6 +103,8 @@ public data class EditResult(
     val touchedOutsideScope: List<String>,
     val testIntegrity: List<TestIntegrityFlag>,
     val error: EditError? = null,
+    /** The diff receipt when the batch was one `transform` op (§9.2); a rejected transform keeps its receipt. */
+    val transform: TransformReceipt? = null,
 ) {
     /** Some ops reached the workspace before the batch stopped (mid-batch failure, §9.1). */
     val partial: Boolean get() = !ok && applied.isNotEmpty()
@@ -109,7 +112,8 @@ public data class EditResult(
 
 /**
  * The `edit` family (§9.1, §9.3, §9.5, TODO P1.6.4): anchored compare-and-swap hunks, `create`, `delete`,
- * `rename`, `revert:#id` and `revert:turn:N`; a transform is P3.3.
+ * `rename`, `revert:#id`, `revert:turn:N` and, when a [TransformExecution] is given, the scripted `transform`
+ * of §9.2 (P3.3), which is a batch of its own (D-95).
  *
  * Every op is preflighted before any write — committed-contract scope and protected paths through the
  * [ScopeGuard], `expect` re-hashed from raw bytes, anchors located (D-33) inside the dispatch-time displayed
@@ -139,11 +143,20 @@ public class Edit(
     private val shadowRef: ShadowRef? = null,
     private val mask: ToolMask = ToolOps.implementingS0,
     private val viewContextLines: Int = 3,
+    /** Without it every `transform` is `unsupported`: no runner means no jail and no post-hoc diff (D-41). */
+    transforms: TransformExecution? = null,
 ) : ToolExecutor {
     init {
         require(ids.context != null) { "edit runs inside a cell: ids.context is its lineage" }
         require(viewContextLines >= 0) { "viewContextLines must be ≥ 0" }
     }
+
+    private val transformRun: TransformRun? = transforms?.let { TransformRun(workspace, registry, workset, os, preimages, blobs, syntax, ids, it) }
+
+    private val receipts = ArrayList<TransformReceipt>()
+
+    /** Every transform receipt of this cell, accepted or rejected, in order; the Result Packet carries them (§5.9, P4.4.3). */
+    public val transforms: List<TransformReceipt> get() = receipts.toList()
 
     /** The increment whose write scope earns a warning when crossed (§8.6); the cell sets it. */
     public var increment: Increment? = null
@@ -171,7 +184,7 @@ public class Edit(
         if (!mask.allows(call.name)) {
             return render(args, alias, actionId, EditResult(false, editId, emptyList(), emptyList(), emptyMap(), emptyMap(), emptyMap(), emptyList(), emptyList(), EditError("unsupported", null, null, "${call.name} is masked in this role")), context)
         }
-        val result = workspace.mutation.withLock { run(args, contract, context, editId, alias) }
+        val result = workspace.mutation.withLock { run(args, contract, context, editId, alias, actionId) }
         return render(args, alias, actionId, result, context)
     }
 
@@ -195,14 +208,18 @@ public class Edit(
 
     private class Refusal(val error: EditError) : RuntimeException(error.detail)
 
-    private fun run(args: EditArgs, contract: Contract, context: TurnContext, editId: String, alias: String): EditResult {
+    private fun run(args: EditArgs, contract: Contract, context: TurnContext, editId: String, alias: String, actionId: String): EditResult {
         val none = EditResult(false, editId, emptyList(), emptyList(), emptyMap(), emptyMap(), emptyMap(), emptyList(), emptyList())
+        val transform = args.ops.firstOrNull { it.kind == "transform" }?.transform
         args.ops.forEachIndexed { i, op ->
-            if (op.kind == "transform") return none.copy(error = EditError("unsupported", i + 1, null, "transform is a P3.3 operation; not available in this role"))
+            if (op.kind == "transform" && transformRun == null) return none.copy(error = EditError("unsupported", i + 1, null, "transform unsupported: this cell has no transform runner (D-41)"))
+            if (op.kind == "transform" && args.ops.size > 1) return none.copy(error = EditError("unsupported", i + 1, null, "a transform is a batch of its own (D-95); send it alone"))
             if (op.kind == "invalid") return none.copy(error = EditError("unsupported", i + 1, null, "op ${i + 1} names no supported form"))
         }
-        // Scope first (§8.6): every path the batch would touch, against the committed contract only.
-        val paths = args.ops.flatMap { op -> listOfNotNull(op.path, op.create, op.delete, op.rename, op.to) + revertPaths(op) }
+        // Scope first (§8.6): every path the batch would touch, against the committed contract only. A transform's
+        // allowed inventory is resolved here, before dispatch (§9.2).
+        val inScope = transform?.let { transformRun!!.inventory(it.scopeGlob) }.orEmpty()
+        val paths = args.ops.flatMap { op -> listOfNotNull(op.path, op.create, op.delete, op.rename, op.to) + revertPaths(op) } + inScope
         val verdict = scopeGuard.check(paths, contract, increment)
         if (verdict is ScopeVerdict.Refused) {
             val first = verdict.refusals.first()
@@ -218,6 +235,14 @@ public class Edit(
             )
         }
         if (outside.isNotEmpty()) warnedOutsideIncrement = true
+        if (transform != null) {
+            if (inScope.isEmpty()) return none.copy(error = EditError("missing", 1, null, "scope_glob '${transform.scopeGlob}' names no workspace file"), touchedOutsideScope = outside)
+            val outcome = transformRun!!.apply(1, transform, editId, alias, actionId, contract, inScope, context.turn)
+            val flags = TestIntegrity.classify(outcome.surface, "transform $alias", contract, checks).map { it.copy(reason = transform.why) }
+            flagsByAlias[alias] = flags
+            outcome.receipt?.let { receipts += it }
+            return EditResult(outcome.error == null, editId, outcome.applied, emptyList(), outcome.versions, outcome.syntax, outcome.diffstat, outside, flags, outcome.error, outcome.receipt)
+        }
         val plans = try {
             args.ops.mapIndexed { i, op -> preflight(i + 1, op, context) }
         } catch (refusal: Refusal) {
@@ -533,22 +558,29 @@ public class Edit(
     private fun render(args: EditArgs, alias: String, actionId: String, result: EditResult, context: TurnContext): ToolOutcome {
         val status = when {
             result.ok -> "ok"
+            // A rejected transform is not a half-applied batch: its receipt's effect line is the per-file truth (§9.2).
+            result.transform != null -> "rejected"
             result.partial -> "partial"
             else -> "refused"
         }
         val lines = ArrayList<String>()
         lines += "edit $alias $status · ${args.why}"
-        for (op in result.applied) {
-            val stat = result.diffstat[op.path]?.let { " $it" } ?: ""
-            val syn = result.syntax[op.path]?.let { " · syntax $it" } ?: ""
-            lines += "✓ ${op.opIndex} ${op.kind} ${op.path} @${op.versionBefore?.hash8 ?: "new"}→@${op.versionAfter?.hash8 ?: "gone"}$stat$syn"
+        val receipt = result.transform
+        if (receipt != null) {
+            lines += transformLines(receipt)
+        } else {
+            for (op in result.applied) {
+                val stat = result.diffstat[op.path]?.let { " $it" } ?: ""
+                val syn = result.syntax[op.path]?.let { " · syntax $it" } ?: ""
+                lines += "✓ ${op.opIndex} ${op.kind} ${op.path} @${op.versionBefore?.hash8 ?: "new"}→@${op.versionAfter?.hash8 ?: "gone"}$stat$syn"
+            }
         }
         for (view in result.views) {
             lines += "  post-edit ${view.path}:${view.range} @${view.version.hash8}"
             lines += redaction.apply(view.text, ContentClass.ModelFacing).text.lines().map { "  $it" }
         }
         result.error?.let { e ->
-            lines += "✗ ${e.opIndex?.let { "op $it " } ?: ""}${e.kind}: ${e.detail}"
+            if (receipt == null) lines += "✗ ${e.opIndex?.let { "op $it " } ?: ""}${e.kind}: ${e.detail}"
         }
         if (result.touchedOutsideScope.isNotEmpty()) lines += "outside the increment's write scope (inside the contract): ${result.touchedOutsideScope.joinToString(", ")}"
         result.testIntegrity.forEach { lines += it.line }
@@ -568,11 +600,34 @@ public class Edit(
             runtime = RuntimeFields(
                 actionId = actionId, status = status, candidateBefore = null, candidateAfter = null,
                 scope = result.applied.map { it.path }.distinct().joinToString(", ").ifEmpty { args.ops.mapNotNull { it.path ?: it.create ?: it.delete ?: it.rename ?: it.revert }.joinToString(", ") },
-                completeness = "complete", artifactRefs = listOf(blob.hex), effectsObserved = result.applied.map { "${it.kind} ${it.path}" },
+                completeness = "complete", artifactRefs = listOf(blob.hex) + listOfNotNull(result.transform?.diffRef?.hex), effectsObserved = result.applied.map { "${it.kind} ${it.path}" },
                 effectsUnknown = result.error?.kind == "io",
             ),
         )
         return ToolOutcome(body, header, applied = result.ok, tokens = estimator.estimate(body).tokens)
+    }
+
+    /** The §9.2 diff receipt as the model sees it: bounded per-file summary, counts, sites, the two honesty labels. */
+    private fun transformLines(r: TransformReceipt): List<String> {
+        val lines = ArrayList<String>()
+        val expected = r.expectedMatches?.let { " (expected ${it.min}–${it.max})" } ?: " (expected unspecified)"
+        val syntaxOk = r.syntax.values.count { it is SyntaxResult.Ok }
+        lines += "transform: ${r.filesChanged} files, ${r.hunks} hunks · diff #${r.diffRef.hash8} · match_count ${r.matchCount}$expected · inventory_ok ${r.inventoryOk.wire} · " +
+            "touched_outside_scope: ${if (r.touchedOutsideScope.isEmpty()) "none" else r.touchedOutsideScope.joinToString(", ")} · syntax ok $syntaxOk/${r.syntax.size} · exit ${r.exitCode ?: "none"}"
+        r.perFile.take(PER_FILE_LINES).forEach { f -> lines += "  ${f.line}" + (r.syntax[f.path]?.takeIf { it !is SyntaxResult.Ok }?.let { " · syntax $it" } ?: "") }
+        if (r.perFile.size > PER_FILE_LINES) lines += "  +${r.perFile.size - PER_FILE_LINES} more files (recall the diff)"
+        if (r.representativeSites.isNotEmpty()) lines += "  representative: " + r.representativeSites.joinToString(" · ")
+        lines += "  unusual: " + (if (r.unusualSites.isEmpty()) "none (every hunk has the same shape)" else r.unusualSites.joinToString(" · "))
+        r.limits.forEach { lines += "  limit: $it" }
+        lines += "  transformation-based validation: the harness diffed the tree; nobody read every edited byte. Changed files are touched-by-transform (NOT SEEN): read before an anchored edit. Blast-radius tests are required before the increment closes."
+        lines += "  execution: ${ExecutionModeLabel.short(r.executionMode)} — a diff is not a jail: effects outside the workspace are unobserved (D-41)."
+        if (!r.accepted) {
+            lines += "  rejected: ${r.rejection} · effect: ${r.effect?.wire}" +
+                (if (r.restored.isEmpty()) "" else " · restored ${r.restored.size}") +
+                (if (r.notRestored.isEmpty()) "" else " · not restored: " + r.notRestored.joinToString("; ")) +
+                " — no unit rollback and no undo of external effects is claimed"
+        }
+        return lines
     }
 
     private fun outlineOf(path: String, bytes: ByteArray): String {
@@ -587,5 +642,10 @@ public class Edit(
         Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString()
     } catch (malformed: CharacterCodingException) {
         null
+    }
+
+    private companion object {
+        /** Per-file lines shown in a transform receipt; the rest is in the recallable diff (§9.2 bounded summary). */
+        const val PER_FILE_LINES = 12
     }
 }

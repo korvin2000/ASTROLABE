@@ -801,7 +801,7 @@ public class Cell @JvmOverloads constructor(
                 contractVersion = contractVersion, executionGeneration = ctx.generation,
                 base = base?.let { PacketBase(it.candidateId, ws.workspace.id) }, readVersions = readVersions.toMap(),
                 status = status, reason = reason, waiting = null, register = register, worksetExport = ws.workset.export(),
-                changes = changes, transforms = emptyList(), receipts = ws.checks.all().mapNotNull { it.last?.receiptId },
+                changes = changes, transforms = tools.edit?.transforms.orEmpty().map(TransformRecord::of), receipts = ws.checks.all().mapNotNull { it.last?.receiptId },
                 stamp = report?.candidateId, envId = report?.env?.envId,
                 coverage = PacketCoverage(displayed.values.sumOf { it.ranges.size }, own.filter { it.path !in shown }.map { it.path }),
                 flags = PacketFlags(own.filter { c -> increment.writeScope.none { PathPattern.matches(it, c.path) } }.map { it.path }, flags.values.toList()),

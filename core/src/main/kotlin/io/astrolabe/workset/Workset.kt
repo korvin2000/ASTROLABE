@@ -8,8 +8,13 @@ import io.astrolabe.workspace.Ranges
 import io.astrolabe.workspace.VersionChange
 import kotlinx.serialization.Serializable
 
+/**
+ * Who registered the entry. [Transform] marks a file a scripted transform changed (§9.2): it is registered at the
+ * new version with every line hidden, so it grants no coverage — `touched-by-transform (NOT SEEN)` — and an
+ * anchored edit on it needs a fresh read.
+ */
 @Serializable
-public enum class EntrySource { Look, PostEdit, Seed, Recall }
+public enum class EntrySource { Look, PostEdit, Seed, Recall, Transform }
 
 /**
  * One Workset entry (§5.3): exact source bytes delivered in the current projection, at one version. Only the
@@ -157,9 +162,12 @@ public class Workset(
 
     /** `KNOWN: … · NOT SEEN: everything else` plus named stale drops, capped at [renderCapTokens]. */
     public fun render(estimator: TokenEstimator): String {
-        val known = live.sortedWith(compareBy({ it.path }, { it.range.ranges.first().from }))
+        val known = live.filter { it.source != EntrySource.Transform }.sortedWith(compareBy({ it.path }, { it.range.ranges.first().from }))
             .joinToString(" · ") { "${it.path}:${it.range}@${it.version.hash8.take(4)}" }
-        val base = "KNOWN: " + (if (known.isEmpty()) "(nothing)" else known) + " · NOT SEEN: everything else"
+        val transformed = live.filter { it.source == EntrySource.Transform }.map { it.path }.distinct().sorted()
+        val base = "KNOWN: " + (if (known.isEmpty()) "(nothing)" else known) +
+            (if (transformed.isEmpty()) "" else " · touched-by-transform (NOT SEEN): " + transformed.joinToString(", ")) +
+            " · NOT SEEN: everything else"
         val dropLines = drops.map { it.text }
         var text = base
         for (line in dropLines) {
@@ -176,8 +184,11 @@ public class Workset(
     private fun truncate(text: String, estimator: TokenEstimator): String {
         if (estimator.estimate(text).tokens <= renderCapTokens) return text
         // Drop KNOWN detail before the drops: coverage is authoritative in the registry, this line is a hint.
-        val paths = live.map { it.path }.toSet()
-        val short = "KNOWN: ${paths.size} files/${live.size} ranges · NOT SEEN: everything else" +
+        val known = live.filter { it.source != EntrySource.Transform }
+        val transformed = live.filter { it.source == EntrySource.Transform }.map { it.path }.toSet()
+        val short = "KNOWN: ${known.map { it.path }.toSet().size} files/${known.size} ranges" +
+            (if (transformed.isEmpty()) "" else " · touched-by-transform (NOT SEEN): ${transformed.size} files") +
+            " · NOT SEEN: everything else" +
             (if (drops.isEmpty()) "" else "; ${drops.size} stale drops (recall)")
         return short
     }

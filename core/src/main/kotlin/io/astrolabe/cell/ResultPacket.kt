@@ -9,6 +9,8 @@ import io.astrolabe.id.WorkspaceId
 import io.astrolabe.provider.BillableUsage
 import io.astrolabe.provider.BillingDimension
 import io.astrolabe.register.Register
+import io.astrolabe.tool.edit.InventoryVerdict
+import io.astrolabe.tool.edit.TransformReceipt
 import io.astrolabe.tool.state.BlockedRequest
 import io.astrolabe.verify.CompletionProposal
 import io.astrolabe.verify.TestIntegrityFlag
@@ -68,8 +70,14 @@ public data class Change(
     }
 }
 
-/** One declared transform (§9.2, P3.3); a P1 cell has none. */
-public data class TransformRecord(val scriptHash: Digest, val files: Int, val diffRef: String, val inventoryOk: Boolean)
+/** One transform of the cell (§9.2, P3.3): the receipt's identity for review (P4.4.3), rejected ones included. */
+public data class TransformRecord(val scriptHash: Digest, val files: Int, val diffRef: String, val inventoryOk: InventoryVerdict, val accepted: Boolean) {
+    public companion object {
+        @JvmStatic
+        public fun of(receipt: TransformReceipt): TransformRecord =
+            TransformRecord(receipt.scriptHash, receipt.filesChanged, receipt.diffRef.hex, receipt.inventoryOk, receipt.accepted)
+    }
+}
 
 /** What the cell was shown and what it changed unseen (§5.9 `coverage`), from the Workset — never from the model. */
 public data class PacketCoverage @JvmOverloads constructor(
