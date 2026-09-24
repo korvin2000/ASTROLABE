@@ -50,8 +50,10 @@ import java.nio.file.Path
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -89,6 +91,7 @@ class EditTest {
         repo.write("src/b.py", "x = 1\ny = 2\n")
         repo.write("src/win.py", "def w():\r\n    return 1\r\n")
         repo.write("src/blob.bin", byteArrayOf(0, 1, 2, -1, -2))
+        repo.write("src/bom.py", byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()) + "v = 'é'\r\nw = 1\r\n".toByteArray())
         repo.write("tests/test_a.py", "def test_a():\n    assert a() == 1\n")
         repo.write("docs/readme.md", "# docs\n")
         repo.write("pyproject.toml", "[project]\nname = \"p\"\n\n[tool.pytest.ini_options]\ntestpaths = [\"tests\"]\n")
@@ -309,6 +312,15 @@ class EditTest {
         val out = run(anchored("src/win.py", v, hunk("def w():\n\treturn 1", "def w():\n    return 2\n    # two")))
         assertEquals("ok", status(out))
         assertEquals("def w():\r\n    return 2\r\n    # two\r\n", Files.readString(repo.resolve("src/win.py")))
+    }
+
+    @Test
+    fun `a UTF-8 BOM, non-ASCII text and CRLF endings survive an edit byte-exactly outside the hunk (P1.12.4)`() = runTest {
+        val v = seen("src/bom.py", 1, 2)
+        assertEquals("ok", status(run(anchored("src/bom.py", v, hunk("w = 1", "w = 2")))))
+        val bytes = Files.readAllBytes(repo.resolve("src/bom.py"))
+        assertContentEquals(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()) + "v = 'é'\r\nw = 2\r\n".toByteArray(), bytes)
+        assertNotEquals(v, registry.version("src/bom.py"), "the version hashes the new raw bytes")
     }
 
     @Test
