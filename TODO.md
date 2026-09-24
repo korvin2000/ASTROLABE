@@ -1127,11 +1127,12 @@ Goal: [§18.2 Stage B](docs/implementation/roadmap.md#sec-18-2): campaign contro
 - [ ] **Gate P2.3:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
 
 ### P2.4 Carry-forward and cross-cell coherence
-#### P2.4.1 [M] `CarryForward` · TODO
+#### P2.4.1 [M] `CarryForward` · DONE
 - Why: [§6.2](docs/context/continuity.md#sec-6-2) table.
 - Pkg: `context`
 - Build: register validated (v facts re-checked against store + file versions; stale tagged); seeds = Workset entries referenced by the next step's plan text, `Focus` or `Next`, re-served at current versions ≤ 4K (changed ⇒ NOT SEEN announced); dead ends/open/decisions verbatim into `[K]`; last receipt per check with validity; touched ledger compressed (paths + versions); pinned messages + packet always; probe findings as pointers (P4.4.2). Transcript, model prose, raw logs never carried.
 - Done: FX-11 (amendments and scoped dead ends survive a rollover; KNOWN = seeds only, declared).
+- Log: 2026-09-24 — `context/CarryForward.kt`: `CarryForward.carry(previous register, workset export, packet?, currentVersion, evidenceExists, receipts, pinned, seedCap = 4K)` → `Carry`: register validated (`v` facts with a moved anchor tagged `staleAt`, unresolvable evidence listed for P2.4.2), seeds = export entries named by the next step (cursor or first todo, its accept, `Next`) by path or file name, or under `Focus`, re-served at the current version as `Seed` entries within the token cap in path order; changed or over-budget entries announced as `NotSeen`; last receipt per check with validity, touched paths compressed to versions, pinned user messages, the previous packet's runtime-owned line (status, reason, gaps, receipts — never claims). `render()` is the verbatim `[K]` block (pinned, refuted, dead ends with scope/reopen, open, decisions, proposed amendments, verification, touched) ending in the declared `KNOWN: seeds only (n) · NOT SEEN …` line. `CarryForwardTest`: FX-11 and determinism/budget. Probe pointers stay P4.4.2; compiling the carry into `[K]` is P2.3.1.
 
 #### P2.4.2 [M] Cross-cell fact coherence and bounded retention · TODO
 - Why: [§6.4](docs/context/continuity.md#sec-6-4); F08 (bounded register vs durable evidence); FX-57.
