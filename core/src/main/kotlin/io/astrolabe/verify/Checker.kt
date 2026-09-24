@@ -18,6 +18,7 @@ import io.astrolabe.os.ProcStatus
 import io.astrolabe.os.SpawnSpec
 import io.astrolabe.store.BlobKind
 import io.astrolabe.store.BlobStore
+import io.astrolabe.tool.run.DiagnosticsParser
 import io.astrolabe.tool.run.GenericShaper
 import io.astrolabe.tool.run.Runner
 import io.astrolabe.tool.run.announceMoved
@@ -29,10 +30,11 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 /**
- * One end-of-turn checker run (§8.1 layer table). [errorLines] are the error-shaped lines of the capture —
- * the count the render reports until the P3.1.4 diagnostics parsers exist; [delta] is the set difference
- * against the superseded result of the same check, so "no new errors while failures persist" renders as
- * `no change · still N` (FX-18). [supersedes] names the archived previous result.
+ * One end-of-turn checker run (§8.1 layer table). [errorLines] are the rendered error diagnostics of a
+ * recognised tool ([DiagnosticsParser]: `path:line:col: message`), or the error-shaped lines of the capture
+ * for a tool without a parser; [delta] is the set difference against the superseded result of the same
+ * check, so "no new errors while failures persist" renders as `no change · still N` (FX-18). [supersedes]
+ * names the archived previous result.
  */
 public data class CheckerResult(
     val checkId: String,
@@ -54,6 +56,17 @@ public data class CheckerResult(
 ) {
     val errors: Int get() = errorLines.size
 
+    /**
+     * The receipt's parsed counts: the error diagnostics when there are any; for a pass, the files given to
+     * the checker as `discovered` (D-72: a checker pass has no test count, its evidence of scope is the touched
+     * file set the tool was pointed at, and a passed receipt needs parsed counts); otherwise none.
+     */
+    val counts: Counts? get() = when {
+        errors > 0 -> Counts(errors = errors)
+        outcome == Outcome.Passed -> Counts(discovered = touched.size) // D-72
+        else -> null
+    }
+
     /** The §8.3 line: signal on delta, state the absolute (L2). */
     public fun line(receiptAlias: String? = null): CheckLine {
         val label = when (kind) {
@@ -61,7 +74,7 @@ public data class CheckerResult(
             else -> kind.name.lowercase()
         }
         val state = when (outcome) {
-            Outcome.Passed -> CheckState.Green("✓")
+            Outcome.Passed -> CheckState.Green("✓ ${touched.size} ${if (touched.size == 1) "file" else "files"}")
             Outcome.Failed -> CheckState.Red("", errors)
             Outcome.Timeout -> CheckState.Timeout(reason ?: "time box")
             Outcome.NotRun -> CheckState.NotRun
@@ -88,8 +101,10 @@ public data class CheckerResult(
  * whole batch: a check the box no longer allows to start is `not_run`; a check that started and was killed
  * at the box is `timeout` (FX-58). Superseded results are archived here and never presented as current.
  *
- * Verdicts are conservative until the P3.1.4 parsers exist: a non-zero exit or error-shaped output is red
- * with the error-line count, exit 0 without a diagnostics parser is `inconclusive` (D-50), a runner that
+ * Verdicts come from the tool's own output (P3.1.4, [DiagnosticsParser]): a recognised tool is red with its
+ * exact error diagnostics when it reported any or exited non-zero, and green only on exit 0 with zero
+ * errors and its success signature. A tool without a parser is red on a non-zero exit or error-shaped
+ * output and `inconclusive` on exit 0 (D-50): an exit code alone never becomes a count (§8.3). A runner that
  * cannot start is `unavailable`. A check that moves files is announced like any run (§9.4).
  */
 public class Checker(
@@ -173,16 +188,21 @@ public class Checker(
         val changed = announceMoved(registry, before, after, "check ${check.id}")
         val text = redaction.applyBytes(output.toByteArray(), ContentClass.ReusableEvidence).text
         val blob = blobs.put(text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
-        val errorLines = GenericShaper.errorShapedLines(text)
         val exit = (proc.status as? ProcStatus.Exited)?.exitCode
+        val parsed = DiagnosticsParser.parse(argv, text, exit)
+        val errorLines = parsed?.errors?.map { it.render() } ?: GenericShaper.errorShapedLines(text)
         val (outcome, reason) = when {
             outcomeOverride != null -> outcomeOverride to "the observation was lost; reconcile before retry"
             proc.status == ProcStatus.DeadlineExceeded -> Outcome.Timeout to "started, killed at the ${remainingSeconds}s time box"
             proc.status is ProcStatus.Lost -> Outcome.UnknownOutcome to "process lost"
             proc.status is ProcStatus.Cancelled -> Outcome.UnknownOutcome to "cancelled"
+            // A recognised tool: its diagnostics and summary decide; exit 0 alone is never green (§8.3).
+            parsed != null && (exit != 0 || parsed.errorCount > 0 || (parsed.summaryErrors ?: 0) > 0) -> Outcome.Failed to null
+            parsed != null && parsed.successSignature -> Outcome.Passed to null
+            parsed != null -> Outcome.Inconclusive to "exit 0 · ${parsed.tool.id} printed no success signature"
             exit != null && exit != 0 -> Outcome.Failed to null
             errorLines.isNotEmpty() -> Outcome.Failed to null
-            else -> Outcome.Inconclusive to "exit 0 · no diagnostics parser for ${argv.first()} (P3.1.4)"
+            else -> Outcome.Inconclusive to "exit 0 · no diagnostics parser for ${argv.first()}"
         }
         return CheckerResult(check.id, idGen.next("chk"), check.kind, check.selector, outcome, errorLines, null, exit, before.candidateId, after.candidateId, blob, elapsed(started), touched, changed, reason = reason)
     }
@@ -207,7 +227,7 @@ public class Checker(
             check.id,
             LastResult(
                 result.resultId, result.stampAfter ?: result.stampBefore, check.definitionVersion, result.outcome,
-                if (result.errors > 0) Counts(errors = result.errors) else null, Applicability.Current,
+                result.counts, Applicability.Current,
             ),
         )
         events?.emit(AgentEvent.Check.Finished(ids, check.id, result.resultId, result.outcome.name.lowercase()))

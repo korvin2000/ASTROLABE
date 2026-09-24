@@ -1,0 +1,6 @@
+
+/home/dev/shop/src/cart.js
+  10:1  warning  Unexpected console statement  no-console
+
+✖ 1 problem (0 errors, 1 warning)
+

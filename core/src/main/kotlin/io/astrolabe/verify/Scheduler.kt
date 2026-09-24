@@ -165,7 +165,7 @@ public class Scheduler(
             command = command?.let { Checker.argvFor(check, result.touched) } ?: emptyList(), cwd = command?.cwd, shell = false,
             stampBefore = result.stampBefore, stampAfter = result.stampAfter ?: result.stampBefore, envId = stamper.report().env.envId,
             verifierVersion = verifierVersion, checkDefinitionVersion = check.definitionVersion, contractVersion = contractVersion,
-            outcome = result.outcome, parsed = if (result.errors > 0) Counts(errors = result.errors) else null, inputClosure = check.inputClosure,
+            outcome = result.outcome, parsed = result.counts, inputClosure = check.inputClosure,
             testedInputs = TestedInputs(result.touched.mapNotNull { path -> registry.version(path)?.let { path to it } }.toMap(), InputStability.Unknown),
             raw = result.log, limits = limits, exitCode = result.exit, at = clock.instant(),
         )

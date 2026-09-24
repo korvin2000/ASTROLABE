@@ -1,0 +1,5 @@
+# example.com/shop/cart
+cart/cart.go:12:2: unreachable code
+cart/cart.go:20:9: fmt.Printf format %d has arg s of wrong type string
+# example.com/shop/pricing
+vet: pricing/pricing.go:7:1: undefined: discount

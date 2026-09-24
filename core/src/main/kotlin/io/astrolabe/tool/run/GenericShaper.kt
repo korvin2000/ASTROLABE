@@ -6,7 +6,8 @@ import io.astrolabe.evidence.Counts
  * The fallback shaper: head + tail with every error-shaped line (§5.4). Counts appear only when a
  * recognisable summary does (`cargo test`, `go test`, `unittest`, `dotnet test`, `mocha`); otherwise the
  * result carries `counts = null` and a "no parser" limitation, because a generic exit code never becomes a
- * count (§8.3) and unparsed evidence is never green (D-50). Tool-specific parsers arrive in P3.1.4.
+ * count (§8.3) and unparsed evidence is never green (D-50). The end-of-turn checkers' diagnostics parsers
+ * are [DiagnosticsParser].
  */
 public class GenericShaper : Shaper {
     override val id: String = "generic"
@@ -65,7 +66,7 @@ public class GenericShaper : Shaper {
     private fun errorLines(text: String): List<String> = errorShapedLines(text)
 
     internal companion object {
-        /** Error-shaped lines of a capture: the checker's count until the P3.1.4 parsers give exact diagnostics. */
+        /** Error-shaped lines of a capture: the checker's count for a tool without a [DiagnosticsParser]. */
         internal fun errorShapedLines(text: String): List<String> = text.lineSequence()
             .map { it.trimEnd() }
             .filter { it.isNotBlank() && (ERROR_WORD.containsMatchIn(it) || DIAGNOSTIC.containsMatchIn(it) || TSC_DIAGNOSTIC.containsMatchIn(it)) }

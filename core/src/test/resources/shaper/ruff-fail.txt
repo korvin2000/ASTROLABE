@@ -1,0 +1,5 @@
+src/shop/cart.py:1:8: F401 [*] `os` imported but unused
+src/shop/cart.py:14:80: E501 Line too long (96 > 88)
+src/shop/pricing.py:7:5: F841 Local variable `total` is assigned to but never used
+Found 3 errors.
+[*] 1 fixable with the `--fix` option.

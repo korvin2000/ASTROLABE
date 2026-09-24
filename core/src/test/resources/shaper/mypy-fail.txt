@@ -1,0 +1,5 @@
+src/shop/cart.py:12: error: Incompatible return value type (got "str", expected "int")  [return-value]
+src/shop/cart.py:12: note: Consider using "int(...)" here
+src/shop/pricing.py:7:5: error: Argument 1 to "discount" has incompatible type "None"; expected "float"  [arg-type]
+src/shop/pricing.py:9: warning: Unused "type: ignore" comment
+Found 2 errors in 2 files (checked 5 source files)
