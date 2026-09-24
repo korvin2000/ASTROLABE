@@ -284,6 +284,9 @@ class CellTest {
             assertEquals("which key?", blocked.request.question)
             assertEquals(1, blocked.turns)
             assertEquals(CellStatus.Blocked, f.checkpoints.latest(f.ids.context!!)!!.status)
+            // Host events are delivered asynchronously: wait for the end event rather than racing it under load.
+            val deadline = System.nanoTime() + 5_000_000_000L
+            while (f.recorder.ofType<AgentEvent.Cell.Ended>().isEmpty() && System.nanoTime() < deadline) Thread.sleep(10)
             assertEquals("blocked", f.recorder.ofType<AgentEvent.Cell.Ended>().single().status)
         }
     }
