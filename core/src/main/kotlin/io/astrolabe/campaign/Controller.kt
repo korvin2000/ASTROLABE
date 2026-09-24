@@ -18,6 +18,7 @@ import io.astrolabe.cell.CellContext
 import io.astrolabe.cell.CellEvidence
 import io.astrolabe.cell.CellExit
 import io.astrolabe.cell.CellModel
+import io.astrolabe.cell.CellStatus
 import io.astrolabe.cell.CellTools
 import io.astrolabe.cell.CellWorkspace
 import io.astrolabe.cell.DispatchAuthority
@@ -80,6 +81,7 @@ import io.astrolabe.kb.KbWriter
 import io.astrolabe.kb.Notes
 import io.astrolabe.os.Git
 import io.astrolabe.os.LocalOs
+import io.astrolabe.os.ProcStatus
 import io.astrolabe.os.search.Searches
 import io.astrolabe.provider.Money
 import io.astrolabe.register.Register
@@ -158,6 +160,8 @@ public data class Reconciliation(
     val external: List<Touched>,
     /** The tree at the end of reconciliation. */
     val stamp: CandidateId,
+    /** Background handles as reattached at open (§13.4): `handle-1 running|exited|lost`; a handle is polled, never relaunched. */
+    val handles: List<String> = emptyList(),
 )
 
 /**
@@ -360,7 +364,19 @@ public class Controller @JvmOverloads public constructor(
         if (external.isNotEmpty()) {
             journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Reconcile, refs = external.map { it.path }, text = "open: ${external.size} paths moved while closed (external) · reconciled @${stamp.hash8}", at = clock.instant()))
         }
-        val reconciliation = Reconciliation(unknown.map { it.intentId }, external, stamp)
+        // §13.4: live background handles resolve to running, exited or lost by identity, never by pid alone.
+        val handles = SqliteHandles(store, clock).open().filter { it.ids.work == request.work }.map { handle ->
+            val status = when (runCatching { os.reattach(handle.proc).status }.getOrDefault(ProcStatus.Lost)) {
+                ProcStatus.Running -> "running"
+                is ProcStatus.Exited -> "exited"
+                ProcStatus.DeadlineExceeded -> "deadline_exceeded"
+                ProcStatus.Cancelled -> "cancelled"
+                ProcStatus.Lost -> "lost"
+            }
+            journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Reconcile, refs = listOf(handle.handleId, handle.actionId), text = "open: handle ${handle.handleId} (${handle.argv.joinToString(" ")}) $status · polled, never relaunched", at = clock.instant()))
+            "${handle.handleId} $status"
+        }
+        val reconciliation = Reconciliation(unknown.map { it.intentId }, external, stamp, handles)
         // A cell still running in the stored state belonged to a controller that stopped mid-cell: it is lost.
         state?.running?.takeIf { state.phase == CampaignPhase.Running }?.let { running ->
             val checkpoint = SqliteCheckpoints(store, clock).latest(running.cell)
@@ -474,6 +490,7 @@ public class Controller @JvmOverloads public constructor(
             // §6.2: a continuation starts from the previous cell's validated register, seeds and packet — never its transcript.
             val carry = ready.cells.lastOrNull()?.let { previous -> carryFrom(c, previous, packets.lastOrNull { it.ids.context == previous }) }
             val seeds = carry?.let { Seeds.render(it.seeds, c.registry::read) }
+            val resume = resumeNote(c, ready, carry)
             val compiled = Compiler(model.estimator, c.attempt.config).compile(
                 ready, contract, model.profile, Roles.implementing, c.prime, maxOutputTokens = model.maxOutputTokens,
                 inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) }),
@@ -488,7 +505,7 @@ public class Controller @JvmOverloads public constructor(
             val dispatched = c.advance(Transition.Dispatched(ready.id, cellId))
             val increment = dispatched.graph.increments.first { it.id == ready.id }
             val register = carry?.register?.copy(cell = cellId, increment = increment.id, incrementTitle = increment.title)
-            val run = runCell(c, cellId, increment, Roles.implementing, model, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty())
+            val run = runCell(c, cellId, increment, Roles.implementing, model, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = listOfNotNull(resume))
             val exit = run.exit
             if (exit == null) {
                 snapshot(c)
@@ -579,6 +596,22 @@ public class Controller @JvmOverloads public constructor(
         c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, text = "rebuilt: ${reason.wire} · fresh lineage, empty tail · STATUS revision $revision", at = clock.instant()))
     }
 
+    /**
+     * The one-line resume note of §13.4 for a cell that continues [increment] after its previous cell was lost or
+     * interrupted: what open reconciled — the tree stamp, external moves, unknown outcomes, background handles — and
+     * that KNOWN is the seeds only; the register is never trusted over the workspace.
+     */
+    private fun resumeNote(c: OpenedCampaign, increment: Increment, carry: Carry?): String? {
+        val previous = increment.cells.lastOrNull() ?: return null
+        val status = checkNotNull(c.state).cells.firstOrNull { it.cell == previous }?.status ?: return null
+        if (status != CellStatus.Failed && status != CellStatus.Cancelled) return null
+        val r = c.reconciliation
+        return "resumed: cell ${previous.value} ended ${status.name.lowercase()}; tree reconciled @${r.stamp.hash8}" +
+            " · external ${r.external.size}" + (if (r.unknownOutcomes.isEmpty()) "" else " · unknown outcomes ${r.unknownOutcomes.joinToString(", ")} (reconcile before any retry)") +
+            (if (r.handles.isEmpty()) "" else " · handles ${r.handles.joinToString(", ")} (poll, never relaunch)") +
+            " · " + (carry?.known ?: "KNOWN: seeds only (0) · NOT SEEN: everything else")
+    }
+
     /** The carry-forward of [cell] (§6.2): its latest register, its end export and its packet, re-validated now. */
     private fun carryFrom(c: OpenedCampaign, cell: ContextId, packet: ResultPacket?): Carry? {
         val register = SqliteRegisterVersions(c.store, clock).latest(cell) ?: return null
@@ -612,7 +645,14 @@ public class Controller @JvmOverloads public constructor(
         val ready = opened.graph.readyFrontier(contract, 1).firstOrNull()
             ?: return S0Run(stopOrFinish(c, "no ready increment: an empty frontier never means completed"), null, null, null)
         val role = Roles.implementing
-        val compiled = Compiler(model.estimator, config).compile(ready, contract, model.profile, role, c.prime, maxOutputTokens = model.maxOutputTokens)
+        // §13.4 rebuild(resume): a cell that continues a lost or interrupted one starts from its validated carry-forward.
+        val carry = ready.cells.lastOrNull()?.let { previous -> carryFrom(c, previous, null) }
+        val seeds = carry?.let { Seeds.render(it.seeds, c.registry::read) }
+        val resume = resumeNote(c, ready, carry)
+        val compiled = Compiler(model.estimator, config).compile(
+            ready, contract, model.profile, role, c.prime, maxOutputTokens = model.maxOutputTokens,
+            inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) }),
+        )
         when (compiled) {
             is Compiled.Ready -> Unit
             is Compiled.NeedsRescoping -> return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "NEEDS_RESCOPING_OR_LARGER_PROFILE: ${compiled.reason}")), null, null, compiled)
@@ -623,7 +663,8 @@ public class Controller @JvmOverloads public constructor(
         events?.emit(AgentEvent.Campaign.IncrementSelected(c.ids, ready.id))
         val dispatched = c.advance(Transition.Dispatched(ready.id, cellId))
         val increment = dispatched.graph.increments.first { it.id == ready.id }
-        val run = runCell(c, cellId, increment, Roles.implementing, model, authority, syntax, compiled, span, dispatched.ledger)
+        val register = carry?.register?.copy(cell = cellId, increment = increment.id, incrementTitle = increment.title)
+        val run = runCell(c, cellId, increment, Roles.implementing, model, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = listOfNotNull(resume))
         val ids = run.ids
         val scheduler = run.scheduler
         val exit = run.exit
@@ -686,6 +727,7 @@ public class Controller @JvmOverloads public constructor(
         seeds: List<io.astrolabe.workset.Entry> = emptyList(),
         proposals: io.astrolabe.tool.task.Proposals? = null,
         completion: io.astrolabe.cell.RoleCompletion? = null,
+        pinned: List<String> = emptyList(),
     ): CellRun {
         val ids = c.ids.copy(context = cellId)
         val config = c.attempt.config
@@ -729,6 +771,7 @@ public class Controller @JvmOverloads public constructor(
             accounting = accounting,
             manifest = manifest.id,
             sections = compiled.k.sections,
+            pinned = pinned,
         )
         val budget = CellBudget.of(contract.budget.tokens, contract.budget.turnsPerCell, contract.budget.reserves)
         val cellSpan = spans?.start(Phase.Edit, ids, span)
