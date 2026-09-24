@@ -540,3 +540,9 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
   P2.6.1–P2.6.4 (notes/KbWriter/index, `StoreKb`, note horizon, calibration). Schema v4. D-68–D-70. Gates merged to
   `main` via korvin2000/ASTROLABE#2–#4; P2.2 gate in #5. Gotcha recorded: `.` is illegal in backtick test names.
   Counts 116/185 DONE, 0 IN_PROGRESS, 69 TODO; P2 27/30.
+- 2026-09-24 — session continued (cloud, same branch): P2.7.1 (fixture map; FX-45, FX-49 S1, IX-11 in S1), P2.7.2
+  (`LongRefactorTest`: pressure partial + continuation on a 16k window), P2.7.3 (`Economics` report/export) ⇒ **P2
+  complete**; P3.1.1 (`ClosureManifest`, `Closures.blast`). Fixes found: plan-cell budget stop was `blocked_external`;
+  S1 manifests lacked boundary reason/seeds; stale `run:` acceptances were never re-run at campaign end (§4.1);
+  harness verify passed no unknown-closure inputs; racy `EventsTest` slow listener (PR #5 Ubuntu red). D-71. P2 phase
+  gate in korvin2000/ASTROLABE#5. Counts 120/185 DONE, 0 IN_PROGRESS, 65 TODO.
