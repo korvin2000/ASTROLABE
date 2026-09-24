@@ -17442,6 +17442,10 @@ public final class io/astrolabe/verify/Checks : io/astrolabe/workspace/ChangeLis
 	public static final field Companion Lio/astrolabe/verify/Checks$Companion;
 	public static final field FULL Ljava/lang/String;
 	public static final field LINT Ljava/lang/String;
+	public static final field QUALITY_GATE Ljava/lang/String;
+	public static final field REVIEW_CAMPAIGN Ljava/lang/String;
+	public static final field REVIEW_INCREMENT Ljava/lang/String;
+	public static final field TESTS_BLAST Ljava/lang/String;
 	public static final field TYPES_TOUCHED Ljava/lang/String;
 	public final fun affectedBy (Ljava/util/Collection;)Ljava/util/List;
 	public final fun all ()Ljava/util/List;
@@ -17470,6 +17474,72 @@ public final class io/astrolabe/verify/ChecksRender {
 	public static final fun line (Lio/astrolabe/verify/CheckLine;)Ljava/lang/String;
 	public static final fun render (Lio/astrolabe/id/CandidateId;Ljava/util/List;I)Ljava/lang/String;
 	public static synthetic fun render$default (Lio/astrolabe/id/CandidateId;Ljava/util/List;IILjava/lang/Object;)Ljava/lang/String;
+}
+
+public final class io/astrolabe/verify/ClosureCompleteness : java/lang/Enum {
+	public static final field Companion Lio/astrolabe/verify/ClosureCompleteness$Companion;
+	public static final field Complete Lio/astrolabe/verify/ClosureCompleteness;
+	public static final field Partial Lio/astrolabe/verify/ClosureCompleteness;
+	public static final field Unknown Lio/astrolabe/verify/ClosureCompleteness;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/verify/ClosureCompleteness;
+	public static fun values ()[Lio/astrolabe/verify/ClosureCompleteness;
+}
+
+public final class io/astrolabe/verify/ClosureCompleteness$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/verify/ClosureManifest {
+	public static final field Companion Lio/astrolabe/verify/ClosureManifest$Companion;
+	public fun <init> (Ljava/util/Map;Ljava/util/Map;Ljava/util/Map;Ljava/util/Map;Lio/astrolabe/verify/ClosureCompleteness;Ljava/util/List;)V
+	public final fun component1 ()Ljava/util/Map;
+	public final fun component2 ()Ljava/util/Map;
+	public final fun component3 ()Ljava/util/Map;
+	public final fun component4 ()Ljava/util/Map;
+	public final fun component5 ()Lio/astrolabe/verify/ClosureCompleteness;
+	public final fun component6 ()Ljava/util/List;
+	public final fun copy (Ljava/util/Map;Ljava/util/Map;Ljava/util/Map;Ljava/util/Map;Lio/astrolabe/verify/ClosureCompleteness;Ljava/util/List;)Lio/astrolabe/verify/ClosureManifest;
+	public static synthetic fun copy$default (Lio/astrolabe/verify/ClosureManifest;Ljava/util/Map;Ljava/util/Map;Ljava/util/Map;Ljava/util/Map;Lio/astrolabe/verify/ClosureCompleteness;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/verify/ClosureManifest;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCompleteness ()Lio/astrolabe/verify/ClosureCompleteness;
+	public final fun getConfigAndLockfiles ()Ljava/util/Map;
+	public final fun getDigest ()Lio/astrolabe/id/Digest;
+	public final fun getDirectoryMembership ()Ljava/util/Map;
+	public final fun getExclusions ()Ljava/util/List;
+	public final fun getFixtures ()Ljava/util/Map;
+	public final fun getPathsAtVersions ()Ljava/util/Map;
+	public fun hashCode ()I
+	public static final fun of (Lio/astrolabe/evidence/Closure;Ljava/util/Collection;Lkotlin/jvm/functions/Function1;)Lio/astrolabe/verify/ClosureManifest;
+	public static final fun of (Lio/astrolabe/evidence/Closure;Ljava/util/Collection;Lkotlin/jvm/functions/Function1;Ljava/util/Map;)Lio/astrolabe/verify/ClosureManifest;
+	public static final fun of (Lio/astrolabe/evidence/Closure;Ljava/util/Collection;Lkotlin/jvm/functions/Function1;Ljava/util/Map;Lkotlin/jvm/functions/Function1;)Lio/astrolabe/verify/ClosureManifest;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/verify/ClosureManifest$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/verify/ClosureManifest$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/verify/ClosureManifest;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/verify/ClosureManifest;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/verify/ClosureManifest$Companion {
+	public final fun of (Lio/astrolabe/evidence/Closure;Ljava/util/Collection;Lkotlin/jvm/functions/Function1;)Lio/astrolabe/verify/ClosureManifest;
+	public final fun of (Lio/astrolabe/evidence/Closure;Ljava/util/Collection;Lkotlin/jvm/functions/Function1;Ljava/util/Map;)Lio/astrolabe/verify/ClosureManifest;
+	public final fun of (Lio/astrolabe/evidence/Closure;Ljava/util/Collection;Lkotlin/jvm/functions/Function1;Ljava/util/Map;Lkotlin/jvm/functions/Function1;)Lio/astrolabe/verify/ClosureManifest;
+	public static synthetic fun of$default (Lio/astrolabe/verify/ClosureManifest$Companion;Lio/astrolabe/evidence/Closure;Ljava/util/Collection;Lkotlin/jvm/functions/Function1;Ljava/util/Map;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Lio/astrolabe/verify/ClosureManifest;
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/verify/Closures {
+	public static final field INSTANCE Lio/astrolabe/verify/Closures;
+	public static final fun blast (Lio/astrolabe/atlas/ImpactAnalysis;)Lio/astrolabe/evidence/Closure;
+	public static final fun blast (Lio/astrolabe/atlas/ImpactAnalysis;Lkotlin/jvm/functions/Function1;)Lio/astrolabe/evidence/Closure;
+	public static synthetic fun blast$default (Lio/astrolabe/atlas/ImpactAnalysis;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Lio/astrolabe/evidence/Closure;
 }
 
 public final class io/astrolabe/verify/CompletionProposal {
