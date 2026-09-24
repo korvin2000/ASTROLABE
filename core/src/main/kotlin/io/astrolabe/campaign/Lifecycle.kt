@@ -219,8 +219,8 @@ public object Lifecycle {
                 val cell = checkNotNull(exit.packet.ids.context)
                 val running = checkNotNull(s.running) { "no cell is running" }
                 check(running.cell == cell && running.increment == exit.packet.increment) { "packet of $cell is not the running cell ${running.cell}" }
-                // §3.8: a pressure stop is the P1 form of a pressure rebuild, counted as a decomposition failure.
-                val rebuilt = if (exit is CellExit.Partial && exit.reason == PartialReason.Pressure) 1 else 0
+                // §3.8: every pressure rebuild in the cell and a terminating pressure stop are decomposition failures.
+                val rebuilt = exit.checkpoint.rebuilds + if (exit is CellExit.Partial && exit.reason == PartialReason.Pressure) 1 else 0
                 val sized = s.graph.recordCell(running.increment, cell, exit.turns, exit.checkpoint.touched, rebuilt)
                 val graph = if (exit is CellExit.Blocked) sized.block(running.increment, cell) else sized
                 s.next(graph = graph, cells = s.cells.map { if (it.cell == cell) it.copy(status = exit.status) else it }, contractVersion = v)

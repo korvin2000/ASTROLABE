@@ -181,24 +181,32 @@ class CellTest {
     }
 
     @Test
-    fun `pressure ends the cell partial with a replan hint, at admission or from the gate`() = runTest {
+    fun `the first pressure rebuilds the projection, a second one ends the cell partial, at admission or from the gate`() = runTest {
         CellFixture(stateRoot).use { f ->
             val overflow = f.run(ScriptedModel.of(Scripted.Reply(listOf(say("look"), tree("c1")))), profile = FakeProfiles.tiny)
             val partial = assertIs<CellExit.Partial>(overflow)
             assertEquals(PartialReason.Pressure, partial.reason)
-            assertTrue(partial.hint.contains("does not fit the window"), partial.hint)
+            assertTrue(partial.hint.contains("does not fit the window after a rebuild"), partial.hint)
             assertTrue(f.adapter.calls.isEmpty(), "refused before any spend")
+            assertEquals(1, partial.checkpoint.rebuilds)
             assertEquals(CellStatus.Partial, f.checkpoints.latest(f.ids.context!!)!!.status)
         }
         CellFixture(stateRoot.resolve("gate"), defaults = Defaults(alpha = 0.1)).use { f ->
             val small = Profile("small", FakeProfiles.PROVIDER, "fake-small", FakeProfiles.capabilities(12_000, 500), FakeProfiles.main.priceTable)
-            val exit = f.run(ScriptedModel.of(Scripted.Reply(listOf(say("look"), tree("c1")))), profile = small, profiles = FakeProfiles.all + (small.id to small))
+            val deadEnd = """{"deadend.add":{"text":"monkeypatching the clock","evidence":null,"scope":"tests/","reopen":"fixtures isolated"}},{"next":"look again"}"""
+            val model = ScriptedModel.of(Scripted.Reply(listOf(say("look"), tree("c1"), patch("c0", deadEnd))), Scripted.Reply(listOf(say("look again"), tree("c2"))))
+            val exit = f.run(model, profile = small, profiles = FakeProfiles.all + (small.id to small))
             val partial = assertIs<CellExit.Partial>(exit)
             assertEquals(PartialReason.Pressure, partial.reason)
-            assertTrue(partial.hint.contains("pressure: context") && partial.hint.contains("never summarises"), partial.hint)
-            assertEquals(1, f.adapter.calls.size)
-            assertEquals(1, partial.checkpoint.turn)
-            assertEquals(CellStatus.Partial, partial.checkpoint.status)
+            assertTrue(partial.hint.contains("pressure: context") && partial.hint.contains("second pressure"), partial.hint)
+            assertEquals(2, f.adapter.calls.size, "the rebuilt projection took one more turn")
+            assertEquals(2, partial.checkpoint.turn)
+            assertEquals(1, partial.checkpoint.rebuilds)
+            assertTrue(f.transcript(2).filterIsInstance<io.astrolabe.provider.Message>().any { it.text.startsWith("rebuilt: pressure (generation 1)") }, "the rebuild is announced in the pinned transcript")
+            assertTrue(f.journal.events(JournalScope(f.ids.work, kinds = setOf(JournalKind.Boundary))).any { it.text.startsWith("rebuilt: pressure (generation 1)") })
+            // FX-11 through pressure: the scoped dead end survives the rebuild and KNOWN is declared as the seeds only.
+            assertTrue(f.anchorText(2).contains("monkeypatching the clock") && f.anchorText(2).contains("scope: tests/"), f.anchorText(2))
+            assertTrue(f.transcript(2).filterIsInstance<io.astrolabe.provider.Message>().any { "KNOWN: seeds only" in it.text })
         }
     }
 

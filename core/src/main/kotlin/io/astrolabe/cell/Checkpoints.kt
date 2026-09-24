@@ -37,6 +37,8 @@ public data class CellCheckpoint(
     val unresolvedFlags: List<String>,
     val journalSeq: Long,
     val reason: String? = null,
+    /** Pressure rebuilds performed in this cell so far (§5.8); each is a decomposition failure (§3.8). */
+    val rebuilds: Int = 0,
 ) {
     init {
         require(turn >= 0) { "turn must be ≥ 0" }

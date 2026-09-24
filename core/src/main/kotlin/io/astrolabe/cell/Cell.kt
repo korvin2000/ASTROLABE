@@ -10,8 +10,12 @@ import io.astrolabe.budget.CellBudget
 import io.astrolabe.budget.Spend
 import io.astrolabe.budget.Tokens
 import io.astrolabe.context.AdmissionDecision
+import io.astrolabe.context.CapacityCondition
+import io.astrolabe.context.CarryForward
 import io.astrolabe.context.ContextAdmission
 import io.astrolabe.context.ContractSlice
+import io.astrolabe.context.Rebuild
+import io.astrolabe.context.RebuildReason
 import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Contract
 import io.astrolabe.contract.Increment
@@ -103,9 +107,9 @@ import io.astrolabe.provider.ToolCall as NativeCall
  * 5. partition and dispatch; every result carries the gauge;
  * 6. the workspace reconciled (stamp diff announced, checks refreshed, the scheduled checker drained, the
  *    atlas refreshed) and a checkpoint persisted — on every path out of a turn, including the failing ones;
- * 7. gates on records, terminal requests honoured, eviction on the `k` cadence, pressure ⇒ `partial`.
+ * 7. gates on records, terminal requests honoured, eviction on the `k` cadence, pressure ⇒ rebuild, then `partial`.
  *
- * A P1 cell never summarises and never rebuilds: pressure and turn exhaustion end it `partial` with a hint
+ * A cell never summarises: the first pressure rebuilds its projection (§5.8), a second one and turn exhaustion end it `partial` with a hint
  * for the controller. A no-call turn is a completion proposal assessed by the role's [RoleCompletion]
  * (resolved by [RoleCompletion.forRole] unless one is given); refused proposals are recorded as gaps. Every
  * exit carries the [ResultPacket] the loop collected from records (§5.9), never from the model's text.
@@ -171,6 +175,8 @@ public class Cell @JvmOverloads constructor(
         private var reconciledTurn = 0
         private var occupancy: Occupancy? = null
         private var atlas = ws.atlas
+        private var rebuilds = 0
+        private val rebuildNotes = ArrayList<String>()
 
         // The packet's runtime-owned fields, collected as the cell runs (§5.9).
         private var base: StampReport? = null
@@ -251,14 +257,24 @@ public class Cell @JvmOverloads constructor(
                     val problems = validation.problems.joinToString("; ") { "${it.kind}: ${it.detail}" }
                     if (validation.problems.any { it.kind == ProblemKind.ContextOverflow }) contextAdmission.rejected(estimate)
                     // next_request_exceeds_usable_context: a P1 cell checkpoints and stops rather than rebuilds.
-                    if (validation.problems.any { it.kind == ProblemKind.ContextOverflow }) return partial(PartialReason.Pressure, "replan: the next request does not fit the window ($problems); a P1 cell never summarises — narrow the increment or resume with a fresh lineage")
+                    if (validation.problems.any { it.kind == ProblemKind.ContextOverflow }) {
+                        if (rebuilds >= 1) return partial(PartialReason.Pressure, "replan: the next request does not fit the window after a rebuild ($problems) — split the increment")
+                        rebuild("the next request does not fit the window ($problems)")
+                        return null
+                    }
                     return failed("request refused by ${ctx.model.adapter.id}: $problems")
                 }
             }
             // §6.1: the hard admission check — never an oversize request, never a fit claimed on unknown history.
             when (val decision = contextAdmission.check(request, estimate)) {
                 is AdmissionDecision.Admitted -> Unit
-                is AdmissionDecision.Capacity -> return partial(PartialReason.Pressure, "replan: capacity ${decision.condition.name.lowercase()} — ${decision.detail}; a P1 cell never summarises")
+                is AdmissionDecision.Capacity -> {
+                    if (decision.condition != CapacityCondition.OverWindow || rebuilds >= 1) {
+                        return partial(PartialReason.Pressure, "replan: capacity ${decision.condition.name.lowercase()} — ${decision.detail}")
+                    }
+                    rebuild("capacity: ${decision.detail}")
+                    return null
+                }
             }
             val spend = if (reserveTurn) Spend.Check else Spend.Generation
             val admission = when (val admitted = budget.admit(spend, Tokens(estimate.upperBoundTokens + ctx.model.maxOutputTokens))) {
@@ -364,7 +380,7 @@ public class Cell @JvmOverloads constructor(
                 turn = turn, register = register, contract = contract, increment = increment, calls = calls, signatures = signatures.toList(),
                 patchRejection = if (calls.any { it.family == ToolFamily.State && it.op == "patch" }) tools.state.lastRejection else null,
                 lastProgressTurn = lastProgressTurn, liveRunOutput = liveRunOutput,
-                contextTokens = current.totalTokens, contextMaxTokens = capabilities.contextLimitTokens.toLong(), rebuilds = 0,
+                contextTokens = current.totalTokens, contextMaxTokens = capabilities.contextLimitTokens.toLong(), rebuilds = rebuilds,
                 reserve = budget.verdict(outstanding(currenciesNow)), turnsMax = budget.turns, completionProposed = proposal,
                 currencies = currenciesNow, flags = unresolved, fired = fired, defaults = defaults,
             )
@@ -395,7 +411,9 @@ public class Cell @JvmOverloads constructor(
                 }
             }
             report.nudges.firstOrNull { it.key.gate == Gates.PRESSURE }?.let {
-                return partial(PartialReason.Pressure, "replan: ${it.line}; a P1 cell never summarises — resume the increment with a fresh lineage from this checkpoint")
+                // §5.8: the first pressure rebuilds the projection; a second means the increment was mis-sized.
+                if (rebuilds >= 1) return partial(PartialReason.Pressure, "replan: ${it.line}; a second pressure in one cell — split the increment")
+                rebuild(it.line)
             }
             return null
         }
@@ -420,7 +438,7 @@ public class Cell @JvmOverloads constructor(
         private fun pinned(contract: Contract): List<String> =
             contract.requests.map { it.text } + ctx.pinned + tools.task?.asked.orEmpty().map { asked ->
                 "question ${asked.question.id}: ${asked.question.text}" + (asked.answer?.let { "\nanswer: ${it.text}" } ?: "\nanswer: none")
-            }
+            } + rebuildNotes
 
         private fun pinnedTokens(contract: Contract): Long = pinned(contract).sumOf { estimator.estimate(it).tokens }
 
@@ -629,7 +647,28 @@ public class Cell @JvmOverloads constructor(
             knownFiles = ws.workset.entries.map { it.path }.distinct().size, knownTokens = ws.workset.knownTokens,
             openIntents = ev.intents.open().map { it.intentId }, touched = touched.toList(),
             unresolvedFlags = TestIntegrity.unresolved(flags.values.toList()).map { it.line }, journalSeq = ev.journal.lastSeq(ids.work), reason = reason,
+            rebuilds = rebuilds,
         )
+
+        /**
+         * `Rebuild(Pressure)` inside the cell (§5.8, P2.5.2): the whole projection is replaced — `[T]` keeps the last
+         * m = 6 complete protocol turns, the Workset becomes the carried seeds (KNOWN = seeds only), STATE is validated
+         * and a pinned `rebuilt:` note names the generation. Nothing is summarised by a model.
+         */
+        private fun rebuild(why: String) {
+            rebuilds += 1
+            val kept = Rebuild.tail(residency.items(residents), RebuildReason.Pressure.tailTurns).toSet()
+            residents = residents.filter { it.item in kept }
+            val carry = CarryForward.carry(
+                register, ws.workset.export(), null, { ws.registry.version(it) },
+                { id -> Aliases.parse(id)?.let { ev.aliases.resolve(ids.work, it) } != null }, emptyList(), emptyList(),
+            )
+            ws.workset.rebuild(carry.seeds)
+            tools.state.validated(carry.register)
+            val note = "rebuilt: pressure (generation $rebuilds) — $why · ${carry.known}"
+            rebuildNotes += note
+            ev.journal.append(JournalEvent(idGen.next("ev"), ids, turn, JournalKind.Boundary, text = note, at = clock.instant()))
+        }
 
         private fun persist(checkpoint: CellCheckpoint) {
             val stamped = ids.withCandidate(checkpoint.stamp)
