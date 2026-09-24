@@ -1,5 +1,6 @@
 package io.astrolabe.campaign
 
+import io.astrolabe.AttemptConfig
 import io.astrolabe.Config
 import io.astrolabe.Project
 import io.astrolabe.atlas.Atlas
@@ -17,6 +18,8 @@ import io.astrolabe.cell.CellExit
 import io.astrolabe.cell.CellModel
 import io.astrolabe.cell.CellTools
 import io.astrolabe.cell.CellWorkspace
+import io.astrolabe.cell.DispatchAuthority
+import io.astrolabe.cell.DispatchRefusal
 import io.astrolabe.cell.Gates
 import io.astrolabe.cell.Roles
 import io.astrolabe.cell.SqliteCheckpoints
@@ -98,8 +101,15 @@ import io.astrolabe.workspace.SnapshotEntryKind
 import io.astrolabe.workspace.Stamper
 import io.astrolabe.workspace.VersionRegistry
 import io.astrolabe.workspace.Workspace
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import java.nio.file.Path
 import java.time.Clock
+import java.time.Duration
+import java.util.concurrent.atomic.AtomicReference
 
 /** What a host opens a campaign for (§3.7 `campaign(request, repo, policy)`); a reopen passes the same ids. */
 public data class CampaignRequest(val work: WorkId, val attempt: AttemptId, val text: String) {
@@ -164,7 +174,18 @@ public class OpenedCampaign internal constructor(
     private val refusal: String?,
     /** False when a [io.astrolabe.Project] owns the store and the OS; then [close] releases nothing of theirs. */
     private val owned: Boolean = true,
+    /** The configuration this attempt runs under, frozen at its first open (invariant 12). */
+    public val attempt: AttemptConfig,
+    /** The workspace lease taken after reconciliation; publication needs it live (§13.1). */
+    public val lease: Lease?,
+    private val leases: Leases,
 ) : AutoCloseable {
+    /** Cancels this campaign: no further dispatch, no publication; effects already made are archived (D-26). */
+    public val cancellation: Cancellation = Cancellation()
+
+    /** Why dispatch or publication is refused now: cancellation first, then the lease; `null` when authorized. */
+    public fun refusal(): String? = cancellation.reason?.let { "cancelled: $it" } ?: lease?.let { leases.authority(it).refusal() }
+
     @Volatile
     public var state: CampaignState? = state
         private set
@@ -221,6 +242,8 @@ public class Controller @JvmOverloads public constructor(
     private val faults: FaultPoints = FaultPoints.NONE,
     /** Runtime spans (P1.11.1): a campaign-run span and one child span per cell; `null` records none. */
     private val spans: Spans? = null,
+    /** How long a workspace lease lasts; its expiry revokes publication authority only (§13.1). */
+    private val leaseDuration: Duration = Duration.ofHours(1),
 ) {
     /**
      * Opens or reopens [request]'s campaign over [repo]. Order (§3.7, §13.1): the store and its project lock, the
@@ -260,6 +283,12 @@ public class Controller @JvmOverloads public constructor(
         val intents = SqliteIntentJournal(store, clock)
         val contracts = Contracts(SqliteContractRepository(store, clock), idGen, clock, events)
         val campaigns = SqliteCampaigns(store, clock)
+        val attempts = Attempts(store, clock)
+        val frozen = attempts.load(request.work, request.attempt) ?: AttemptConfig.freeze(config).also { attempts.save(request.work, request.attempt, it) }
+        val effective = frozen.config
+        if (effective != config) {
+            events?.emit(AgentEvent.Warning(ids, "config-frozen", "the configuration changed during attempt ${request.attempt.value}; it takes effect at the next attempt (invariant 12)"))
+        }
         val dirty = DirtyState(workspace, store.blobs, stamper, ids, clock)
         val shadow = ShadowRef(request.work, request.attempt, workspace, store, dirty, os, clock)
 
@@ -269,13 +298,13 @@ public class Controller @JvmOverloads public constructor(
         val external = if (first) emptyList() else drift(shadow, dirty)
 
         val atlas = Atlas.build(workspace.root)
-        val derived = contracts.deriveS0(request.work, request.attempt, request.text, atlas, config, policy.tokens, protected, policy.cost)
+        val derived = contracts.deriveS0(request.work, request.attempt, request.text, atlas, effective, policy.tokens, protected, policy.cost)
         val stored = contracts.current(request.work)
         check(stored == null || stored.attemptId == request.attempt) { "work ${request.work.value} is attempt ${stored?.attemptId?.value}; a new attempt is P2" }
         val contract = stored ?: contracts.open(derived.contract)
         val commands = derived.primary?.let(RunnerCommands::of) ?: RunnerCommands()
         val checks = Checks.seed(contract, commands)
-        val rules = RulesTrust(workspace.root).approved(config.rulesFile)?.let { RulesSnapshot(it.binding.path, it.digest, it.text) }
+        val rules = RulesTrust(workspace.root).approved(effective.rulesFile)?.let { RulesSnapshot(it.binding.path, it.digest, it.text) }
         val prime = Prime.render(atlas, derived.sniffed, rules)
 
         var refusal: String? = null
@@ -308,8 +337,11 @@ public class Controller @JvmOverloads public constructor(
             state = Lifecycle.apply(state, contract, Transition.Reconciled(reconciliation.unknownOutcomes)).also(campaigns::save)
         }
 
+        // §13.1: the old owner's unknown effects are reconciled above, before this writer is granted the workspace.
+        val leases = Leases(store, clock)
+        val lease = leases.acquire(WORKSPACE, ids, "controller:${store.holder.pid}", leaseDuration)
         val prescan = Prescan.UNKNOWN
-        val shape = ShapeSelector.select(contract, prescan, config.defaults.shapePolicy, policy.resumeExpected)
+        val shape = ShapeSelector.select(contract, prescan, effective.defaults.shapePolicy, policy.resumeExpected)
         events?.emit(AgentEvent.Campaign.Opened(ids, contract.requests.last().id))
         events?.emit(AgentEvent.Campaign.ShapeSelected(ids, (shape as? ShapeDecision.Selected)?.shape?.name ?: "blocked", "contract:v${contract.version}"))
         if (shape is ShapeDecision.Unavailable && state?.phase == CampaignPhase.Running && state.running == null) {
@@ -319,6 +351,7 @@ public class Controller @JvmOverloads public constructor(
         return OpenedCampaign(
             request, ids, store, os, workspace, registry, stamper, dirty, shadow, s0, atlas, derived.sniffed, commands,
             contracts, checks, rules, prime, EmptyKb, journal, intents, campaigns, reconciliation, prescan, shape, state, refusal, owned,
+            frozen, lease, leases,
         )
     }
 
@@ -343,6 +376,9 @@ public class Controller @JvmOverloads public constructor(
     private suspend fun runS0(campaign: OpenedCampaign, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?): S0Run {
         val c = campaign
         c.stop?.let { return S0Run(c.state, null, null, null) }
+        // Every later use reads the attempt's frozen configuration, never the controller's live one (invariant 12).
+        val config = c.attempt.config
+        c.refusal()?.let { return S0Run(c.advance(Transition.Stopped(stopOutcome(c), "nothing dispatched: $it")), null, null, null) }
         val opened = checkNotNull(c.state)
         check(opened.phase == CampaignPhase.Running && opened.running == null) { "runS0 needs a reconciled campaign with no running cell; it is ${opened.phase}" }
         val contract = c.contract
@@ -397,13 +433,33 @@ public class Controller @JvmOverloads public constructor(
         )
         val budget = CellBudget.of(contract.budget.tokens, contract.budget.turnsPerCell, contract.budget.reserves)
         val cellSpan = spans?.start(Phase.Edit, ids, span)
+        val dispatch = DispatchAuthority { c.refusal()?.let { DispatchRefusal(it, cancelled = c.cancellation.cancelled) } }
+        // A cell that finished before the cancellation reached it keeps its exit: a late completion, archived below.
+        val finished = AtomicReference<CellExit?>(null)
         val exit = try {
-            Cell(clock, idGen, config.defaults, Gates.s0(), events).run(ctx, increment, budget)
+            coroutineScope {
+                val job = async { Cell(clock, idGen, config.defaults, Gates.s0(), events, authority = dispatch).run(ctx, increment, budget).also(finished::set) }
+                // A cancellation mid-call interrupts the in-flight request; the cell settles its checkpoint first.
+                c.cancellation.onCancel { job.cancel(CancellationException("cancelled: $it")) }.use { job.await() }
+            }
+        } catch (cancelled: CancellationException) {
+            if (!c.cancellation.cancelled || !currentCoroutineContext().isActive) {
+                cellSpan?.let { spans?.end(it, status = TraceSpanStatus.Cancelled) }
+                throw cancelled
+            }
+            finished.get()
         } catch (failure: Throwable) {
             cellSpan?.let { spans?.end(it, status = TraceSpanStatus.Cancelled) }
             throw failure
         } finally {
             coherence.close()
+        }
+        if (exit == null) {
+            cellSpan?.let { spans?.end(it, status = TraceSpanStatus.Cancelled) }
+            snapshot(c)
+            val checkpoint = checkNotNull(checkpoints.latest(cellId)) { "a cancelled cell settles its checkpoint" }
+            c.advance(Transition.Interrupted(checkpoint))
+            return S0Run(c.advance(Transition.Stopped(CampaignOutcome.Cancelled, checkNotNull(c.cancellation.reason))), null, null, compiled)
         }
         if (cellSpan != null && spans != null) {
             // The cell's exclusive cost is its own model calls, priced once here and never again by a parent.
@@ -424,6 +480,11 @@ public class Controller @JvmOverloads public constructor(
         }
         val state = when (val disposition = Lifecycle.disposition(exit, completion)) {
             is Disposition.Close -> {
+                // §3.7 publication: a completion that arrives after cancellation or lease loss is archived, never committed.
+                c.refusal()?.let { reason ->
+                    c.journal.append(JournalEvent(idGen.next("ev"), ids, exit.turns, JournalKind.Reconcile, refs = disposition.accepted.receiptIds, text = "late completion of ${increment.id} archived; publication refused: $reason", at = clock.instant()))
+                    return S0Run(c.advance(Transition.Stopped(stopOutcome(c), "late completion archived; publication refused: $reason")), exit, completion, compiled)
+                }
                 c.advance(Transition.Committed(disposition.accepted, stampNow))
                 events?.emit(AgentEvent.Campaign.IncrementClosed(c.ids, increment.id, "verified"))
                 stopOrFinish(c, "requirements remain unverified after ${increment.id}", scheduler)
@@ -453,6 +514,7 @@ public class Controller @JvmOverloads public constructor(
             val receipt = c.checks.forAcceptance(item.id).firstNotNullOfOrNull { check -> currencies[check.id]?.takeIf { it.certifies }?.receiptId }
             if (receipt == null) gaps += "${item.id}: no current receipt at @${stamp.hash8}" else receipts += receipt
         }
+        c.refusal()?.let { return c.advance(Transition.Stopped(stopOutcome(c), "final acceptance not published: $it")) }
         if (gaps.isNotEmpty() || receipts.isEmpty()) {
             return c.advance(Transition.Stopped(CampaignOutcome.Failed, "final acceptance at @${stamp.hash8} failed: ${gaps.ifEmpty { listOf("no run: receipt") }.joinToString("; ")}"))
         }
@@ -461,6 +523,10 @@ public class Controller @JvmOverloads public constructor(
         events?.emit(AgentEvent.Campaign.Finished(c.ids, CampaignOutcome.Completed.wire, null))
         return finished
     }
+
+    /** The outcome of a refused dispatch or publication: `cancelled` for a cancellation, else the lost lease blocks. */
+    private fun stopOutcome(c: OpenedCampaign): CampaignOutcome =
+        if (c.cancellation.cancelled) CampaignOutcome.Cancelled else CampaignOutcome.BlockedExternal
 
     private fun currencies(c: OpenedCampaign, scheduler: Scheduler, stamp: CandidateId): Map<String, Currency> =
         c.checks.all().filter { it.last != null }.associate { it.id to scheduler.currency(it, stamp) }

@@ -1,5 +1,6 @@
 package io.astrolabe.campaign
 
+import io.astrolabe.cell.CellCheckpoint
 import io.astrolabe.cell.CellExit
 import io.astrolabe.cell.CellStatus
 import io.astrolabe.cell.PartialReason
@@ -113,6 +114,16 @@ public sealed interface Transition {
     /** The running cell handed back its Result Packet (§5.9). */
     public data class Returned(val exit: CellExit) : Transition
 
+    /**
+     * The running cell was cancelled mid-call and settled [checkpoint] without handing back a packet (§3.7
+     * cancellation, D-26): the checkpoint is the record, and the cell is `cancelled`, never completed.
+     */
+    public data class Interrupted(val checkpoint: CellCheckpoint) : Transition {
+        init {
+            require(checkpoint.status == CellStatus.Cancelled) { "only a cancelled checkpoint interrupts a cell" }
+        }
+    }
+
     /** The verifier accepted a completion and the tree is still [stampNow] (§3.7 `commit_outcome_if_current`). */
     public data class Committed(val result: CompletionResult.Accepted, val stampNow: CandidateId) : Transition
 
@@ -199,6 +210,12 @@ public object Lifecycle {
                 check(running.cell == cell && running.increment == exit.packet.increment) { "packet of $cell is not the running cell ${running.cell}" }
                 val graph = if (exit is CellExit.Blocked) s.graph.block(running.increment, cell) else s.graph
                 s.next(graph = graph, cells = s.cells.map { if (it.cell == cell) it.copy(status = exit.status) else it }, contractVersion = v)
+            }
+            is Transition.Interrupted -> {
+                expect(s, CampaignPhase.Running)
+                val running = checkNotNull(s.running) { "no cell is running" }
+                check(running.cell == transition.checkpoint.cell) { "checkpoint of ${transition.checkpoint.cell} is not the running cell ${running.cell}" }
+                s.next(cells = s.cells.map { if (it.cell == running.cell) it.copy(status = CellStatus.Cancelled) else it }, contractVersion = v)
             }
             is Transition.Committed -> {
                 expect(s, CampaignPhase.Running)

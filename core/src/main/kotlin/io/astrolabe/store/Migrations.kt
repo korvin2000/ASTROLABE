@@ -18,7 +18,7 @@ import java.time.Clock
  * ## One writer per table (L9)
  * | Writer | Tables |
  * |---|---|
- * | controller | `contracts`, `requests`, `requirements`, `acceptance`, `constraints`, `amendments`, `increments`, `ledger`, `sizing`, `leases`, `campaigns` |
+ * | controller | `contracts`, `requests`, `requirements`, `acceptance`, `constraints`, `amendments`, `increments`, `ledger`, `sizing`, `leases`, `campaigns`, `attempts` |
  * | verifier | `receipts` |
  * | runner | `journal` (call/result kinds), `intents`, `handles`, `usage` |
  * | cell runtime | `cells`, `turns`, `manifests`, `register_versions`, `workset_exports`, `observations`, `claims`, `packets` |
@@ -44,7 +44,7 @@ import java.time.Clock
  */
 public object Migrations {
     /** The schema version this build writes; every row records it. */
-    public const val SCHEMA_VERSION: Int = 2
+    public const val SCHEMA_VERSION: Int = 3
 
     /** Every table of the current schema, in creation order (`notes_fts` is the FTS5 virtual table). */
     public val TABLES: List<String> = listOf(
@@ -81,6 +81,7 @@ public object Migrations {
         "handles",
         "packets",
         "campaigns",
+        "attempts",
     )
 
     /**
@@ -255,6 +256,15 @@ public object Migrations {
                 // ---- campaign lifecycle (§3.2 "one state machine over typed records") -----------
                 "CREATE TABLE campaigns (" +
                     "$IDS, phase TEXT NOT NULL, outcome TEXT, seq INTEGER NOT NULL, $META, " +
+                    "PRIMARY KEY (work_id, attempt_id))",
+            ),
+        ),
+        Migration(
+            version = 3,
+            statements = listOf(
+                // ---- attempt freeze (invariant 12, D-48): the configuration an attempt runs under ---------
+                "CREATE TABLE attempts (" +
+                    "$IDS, fingerprint TEXT NOT NULL, $META, " +
                     "PRIMARY KEY (work_id, attempt_id))",
             ),
         ),

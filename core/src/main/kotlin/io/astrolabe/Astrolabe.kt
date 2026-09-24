@@ -162,9 +162,12 @@ public class CampaignHandle internal constructor(
         return if (job.isCancelled) CampaignOutcome.Cancelled else job.await()
     }
 
-    /** Cancels the campaign: the cell settles its checkpoint and the work stops (§3.7 cancellation). */
+    /**
+     * Cancels the campaign through its token (§3.7, D-26): an in-flight model call is interrupted, the cell settles
+     * its checkpoint, nothing is dispatched or published afterwards, and effects already made are archived.
+     */
     public fun cancel() {
-        job.cancel()
+        opened.cancellation.cancel("cancelled by the host")
     }
 
     /** A user amendment (§4.1): recorded against the contract at once; the running cell sees it on its next turn. */

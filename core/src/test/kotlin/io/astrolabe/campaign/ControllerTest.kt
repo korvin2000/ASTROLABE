@@ -92,7 +92,7 @@ class ControllerTest {
         repo.close()
     }
 
-    private fun controller() = Controller(Config(stateRoot = stateRoot.toString()), clock, idGen)
+    private fun controller(config: Config = Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all)) = Controller(config, clock, idGen)
 
     private fun open(policy: CampaignPolicy = this.policy): OpenedCampaign = controller().open(repo.root, request, policy)
 
