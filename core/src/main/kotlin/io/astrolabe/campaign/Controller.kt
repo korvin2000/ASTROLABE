@@ -96,6 +96,12 @@ import io.astrolabe.id.Identities
 import io.astrolabe.id.RandomIdGen
 import io.astrolabe.id.WorkId
 import io.astrolabe.id.WorkspaceId
+import io.astrolabe.evidence.JournalScope
+import io.astrolabe.kb.CalibrationSeries
+import io.astrolabe.kb.CalibrationStats
+import io.astrolabe.kb.Extraction
+import io.astrolabe.kb.ExtractionTrace
+import io.astrolabe.kb.Extractor
 import io.astrolabe.kb.Injection
 import io.astrolabe.kb.InjectionExclusion
 import io.astrolabe.kb.InjectionInputs
@@ -328,6 +334,8 @@ public class Controller @JvmOverloads public constructor(
     public val precompiles: PrecompileMetrics = PrecompileMetrics(),
     /** The §11.2 router (P4.5.1) asked once per cell; its calibration log holds the `(function, tier, effort, outcome)` quadruples. */
     public val router: Router = Router(),
+    /** The post-cell extractor's model step (§12.1, P4.2.1), run at finish from the archived traces; `NONE` leaves the harness-derived candidates and the CAL delta. */
+    private val extraction: Extraction = Extraction.NONE,
 ) {
     /**
      * Opens or reopens [request]'s campaign over [repo]. Order (§3.7, §13.1): the store and its project lock, the
@@ -842,7 +850,25 @@ public class Controller @JvmOverloads public constructor(
         val receipt = FinishReceipts.build(c, packets, currencies(c, scheduler, c.stamper.report().candidateId), receipts::get)
         val (ref, _) = FinishReceipts.export(c, receipt)
         events?.emit(AgentEvent.Campaign.Finished(c.ids, outcome.wire, ref))
+        extract(c, packets)
         return result.copy(finish = receipt)
+    }
+
+    /**
+     * §12.1 post-cell extraction at finish (P4.2.1): each archived packet with its cell's journal goes to the
+     * extractor under the originating cell's ids (its cost is charged there), then the §6.7 `CAL-<repo>` delta is
+     * aggregated over every stored campaign. The extractor contains its own failures; the receipt is already exported.
+     */
+    private fun extract(c: OpenedCampaign, packets: List<ResultPacket>) {
+        val extractor = Extractor(c.store, HeuristicEstimator(), idGen, clock, extraction, c.journal, events)
+        val stamp = c.stamper.report().candidateId.digest.hex
+        for (packet in packets) {
+            val trace = ExtractionTrace(packet, c.journal.events(JournalScope(c.ids.work, packet.ids.context)), packet.stamp?.digest?.hex ?: stamp)
+            extractor.run(trace, packet.ids)
+        }
+        val policy = Calibration.policy(c.attempt.config.defaults.shapePolicy)
+        val series = CalibrationSeries(c.workspace.root.fileName?.toString() ?: "repo", c.attempt.harnessVersion, policy.version)
+        extractor.calibrate({ CalibrationStats.aggregate(Calibration.observations(c.store, series), policy) }, series, c.ids)
     }
 
     private suspend fun runS0(campaign: OpenedCampaign, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?): S0Run {

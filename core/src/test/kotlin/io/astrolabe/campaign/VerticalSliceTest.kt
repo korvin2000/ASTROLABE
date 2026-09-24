@@ -17,9 +17,23 @@ import io.astrolabe.contract.Command
 import io.astrolabe.contract.Contracts
 import io.astrolabe.contract.Origin
 import io.astrolabe.contract.SqliteContractRepository
+import io.astrolabe.evidence.Aliases
 import io.astrolabe.evidence.JournalKind
 import io.astrolabe.evidence.JournalScope
 import io.astrolabe.evidence.SqliteAliases
+import io.astrolabe.evidence.SqliteReceipts
+import io.astrolabe.kb.Candidate
+import io.astrolabe.kb.CandidateKind
+import io.astrolabe.kb.Diagnosis
+import io.astrolabe.kb.Extraction
+import io.astrolabe.kb.ExtractionResult
+import io.astrolabe.kb.ExtractionTrace
+import io.astrolabe.kb.KbResolver
+import io.astrolabe.kb.KbWriter
+import io.astrolabe.kb.Lint
+import io.astrolabe.kb.NoteAnchor
+import io.astrolabe.kb.Notes
+import io.astrolabe.kb.Queue
 import io.astrolabe.fixtures.FakeAdapter
 import io.astrolabe.fixtures.FakeClock
 import io.astrolabe.fixtures.FakeProfiles
@@ -119,7 +133,21 @@ class VerticalSliceTest {
             }
 
             // ---- reopen: reconcile the lost cell and the tree, then a new cell verifies the candidate ----------
-            val controller = Controller(config(), clock, idGen)
+            // P4.2.1: a scripted extractor reads the archived trace at finish; its candidates are lint-passing and queued.
+            var traced: ExtractionTrace? = null
+            val extraction = Extraction { trace, _, _ ->
+                traced = trace
+                val evidence = (trace.receipts + trace.packet.evidenceRefs).distinct()
+                val diagnosis = Diagnosis(
+                    "total() off by 10x", "when scale() multiplies by 1", "a patch against a stale helper.py", "the stale edit refused, the current one applied",
+                    "helper.py carries the factor", evidence, trace.sourceRevision, "scale() leaves helper.py",
+                )
+                ExtractionResult(listOf(
+                    Candidate(CandidateKind.LES, "scale-factor-lives-in-helper", "the scale factor lives in src/helper.py, not in total()", "subsystem:src", diagnosis, listOf(NoteAnchor("src/helper.py")), confidence = 0.5),
+                    Candidate(CandidateKind.PIT, "stale-anchored-patch", "an anchored patch from memory is refused when helper.py moved", "subsystem:src", diagnosis, listOf(NoteAnchor("src/helper.py")), confidence = 0.5),
+                ))
+            }
+            val controller = Controller(config(), clock, idGen, extraction = extraction)
             controller.open(repo.root, request, policy).use { c ->
                 val state = c.state!!
                 assertEquals(CampaignPhase.Running, state.phase)
@@ -138,6 +166,27 @@ class VerticalSliceTest {
                 assertEquals("the user's own draft, never touched\n", Files.readString(repo.root.resolve("NOTES.md")))
                 assertTrue("src/helper.py" in finish.changes.agent + finish.changes.unattributed)
                 assertEquals("green", finish.acceptance.single().status)
+
+                // P4.2.1: the extractor ran post-cell on the archived trace (final STATE, journal, receipts, packet), never inside it.
+                val trace = traced!!
+                assertEquals(run.exit!!.packet, trace.packet)
+                assertTrue(trace.journal.all { it.ids.context == trace.packet.ids.context } && trace.journal.isNotEmpty(), "the cell's own journal")
+                assertTrue(trace.journalDigest().lines().isNotEmpty())
+                val notes = Notes(c.store)
+                val receipts = SqliteReceipts(c.store, clock)
+                val resolver = KbResolver.of({ Files.exists(repo.root.resolve(it)) }) { ref ->
+                    when {
+                        // The CAL delta's evidence is the stored campaign rows its statistics came from.
+                        ref.startsWith("campaign:") -> ref.removePrefix("campaign:").split('/').let { (w, a) -> c.campaigns.load(WorkId(w), AttemptId(a)) != null }
+                        else -> receipts.get(ref) != null || Aliases.parse(ref)?.let { n -> SqliteAliases(c.store, clock).resolve(request.work, n) } != null
+                    }
+                }
+                val extraction = c.journal.events(JournalScope(request.work, kinds = setOf(JournalKind.Boundary))).filter { "extraction of" in it.text || "calibration delta" in it.text }
+                assertEquals(2, extraction.size, "one extraction line per packet and the CAL delta")
+                assertTrue("enqueued 2, refused 0" in extraction[0].text, extraction[0].text)
+                val queued = Queue(c.store, KbWriter(c.store, HeuristicEstimator(), clock), idGen, clock).pending().map { it.noteId }
+                assertEquals(listOf("LES-scale-factor-lives-in-helper", "PIT-stale-anchored-patch", "CAL-" + repo.root.fileName), queued)
+                for (id in queued) assertEquals(emptyList(), Lint.check(notes.get(id)!!, notes.all(), resolver), "lint-passing candidate $id")
 
                 // Per-call billed usage is visible in the exports; the turn counts are the fake-adapter baseline.
                 val calls = Accounting(c.store, clock).calls(request.work)

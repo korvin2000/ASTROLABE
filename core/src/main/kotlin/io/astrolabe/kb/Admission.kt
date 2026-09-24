@@ -158,6 +158,9 @@ public sealed interface AdmissionDecision {
  */
 public object AdmissionPolicy {
     public const val POLICY: String = "policy"
+
+    /** `admitted_by` of a harness-aggregated note (D-36, D-110). */
+    public const val HARNESS: String = "harness"
     public const val AUTO_ADMIT_MAX_CONFIDENCE: Double = 0.6
 
     @JvmStatic
@@ -167,6 +170,8 @@ public object AdmissionPolicy {
             AdmissionMode.Interactive -> AdmissionDecision.Wait("queued for the user")
             AdmissionMode.Autonomous -> when {
                 candidate.kind == NoteKind.ADR -> AdmissionDecision.Wait("an ADR is signed only through Authority.resolve")
+                // D-110: the CAL delta is harness data aggregated from CalibrationStats (D-42), so the policy admits it as `harness`.
+                candidate.kind == NoteKind.CAL && candidate.origin.extractor?.startsWith(Extractor.HARNESS_CALIBRATION) == true -> AdmissionDecision.Admit(HARNESS)
                 candidate.kind != NoteKind.LES && candidate.kind != NoteKind.PIT -> AdmissionDecision.Wait("${candidate.kind} waits for the user")
                 candidate.anchors.isEmpty() -> AdmissionDecision.Wait("policy admits anchored notes only")
                 NoteScope.kind(candidate.scope) !in AUTO_SCOPES -> AdmissionDecision.Wait("policy admits subsystem- or task-family-scoped notes only")
