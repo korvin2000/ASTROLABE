@@ -113,6 +113,8 @@ import io.astrolabe.tool.task.TaskTool
 import io.astrolabe.tool.verify.Verify
 import io.astrolabe.verify.Baseline
 import io.astrolabe.verify.BehaviourSnapshots
+import io.astrolabe.verify.CampaignReview
+import io.astrolabe.verify.CampaignReviewOutcome
 import io.astrolabe.verify.CheckKind
 import io.astrolabe.verify.Checker
 import io.astrolabe.verify.Checks
@@ -505,7 +507,7 @@ public class Controller @JvmOverloads public constructor(
             val contract = c.contract
             val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = candidates(c))
             val unverified = state.ledger.unfinished()
-            if (unverified.isEmpty()) return last.copy(state = stopOrFinish(c, "requirements remain unverified", scheduler, campaign = true))
+            if (unverified.isEmpty()) return last.copy(state = stopOrFinish(c, "requirements remain unverified", scheduler, campaign = true, authority = authority))
             val ready = state.graph.readyFrontier(contract, 1).firstOrNull()
             if (ready == null) {
                 // FX-42: verified work is never re-executed; its regression evidence is refreshed from current receipts.
@@ -623,8 +625,8 @@ public class Controller @JvmOverloads public constructor(
         if (compiled !is Compiled.Ready) return blocked("the plan cell cannot be compiled: $compiled")
         val cellId = ContextId(idGen.next("cell"))
         val proposals = SqlitePlanProposals(c.store, idGen, clock)
-        val intake = CampaignProposals(proposals, SqliteSplitRequests(c.store, idGen, clock), { c.contracts.current(c.ids.work) }, { null })
-        val completion = io.astrolabe.cell.RoleCompletion.forRole(Roles.plan, mapOf(io.astrolabe.cell.PacketKind.PlanArtifacts to PlanPacketValidator.completion({ c.contract }, proposals)))
+        val intake = CampaignProposals(proposals, SqliteSplitRequests(c.store, idGen, clock), { c.contracts.current(c.ids.work) }, { null }, { c.kb.contractAnchors() })
+        val completion = io.astrolabe.cell.RoleCompletion.forRole(Roles.plan, mapOf(io.astrolabe.cell.PacketKind.PlanArtifacts to PlanPacketValidator.completion({ c.contract }, proposals, conAnchors = { c.kb.contractAnchors() })))
         val run = runCell(c, cellId, planning, Roles.plan, model, authority, syntax, compiled, span, null, proposals = intake, completion = completion)
         val exit = run.exit ?: return Transition.Stopped(CampaignOutcome.Cancelled, "cancelled while planning")
         packets += exit.packet
@@ -640,6 +642,12 @@ public class Controller @JvmOverloads public constructor(
         return when (val admission = PlanIntake(c.contracts).admit(c.ids.work, stored, authority)) {
             is PlanAdmission.Admitted -> {
                 c.advance(Transition.Planned(admission.graph))
+                // §8.9 item 4: without CON notes to validate against, a missing CON reference is a recorded planning gap, not a refusal.
+                if (c.kb.contractAnchors().isEmpty()) {
+                    for (gap in PlanPacketValidator.planningGaps(c.contract, stored.packet)) {
+                        c.journal.append(JournalEvent(idGen.next("ev"), c.ids.copy(context = cellId), null, JournalKind.Boundary, refs = listOf(stored.id), text = gap, at = clock.instant()))
+                    }
+                }
                 boundary(c, cellId, RebuildReason.RoleSwitch(Roles.implementing))
                 null
             }
@@ -812,7 +820,7 @@ public class Controller @JvmOverloads public constructor(
         val preimages = Preimages(c.workspace, c.store.blobs, ids, clock)
         val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, receipts, aliases, idGen, ids, clock, candidates = candidates(c))
         val checker = Checker(c.checks, runner, c.os, c.stamper, c.registry, c.workspace, c.store.blobs, redaction, idGen, ids, logs)
-        val verify = Verify(checks = c.checks, scheduler = scheduler, checker = checker, baseline = null, s0 = c.s0.stampId, workspace = c.workspace, runner = runner, os = c.os, stamper = c.stamper, blobs = c.store.blobs, redaction = redaction, estimator = estimator, idGen = idGen, ids = ids, contracts = c.contracts, logsDir = logs)
+        val verify = Verify(checks = c.checks, scheduler = scheduler, checker = checker, baseline = null, s0 = c.s0.stampId, workspace = c.workspace, runner = runner, os = c.os, stamper = c.stamper, blobs = c.store.blobs, redaction = redaction, estimator = estimator, idGen = idGen, ids = ids, contracts = c.contracts, logsDir = logs, campaignReview = campaignReview(c, authority))
         verify.inputs = c.atlas.rows.map { it.path }
         val tools = CellTools(
             state = StateTool(Validator(estimator), registerVersions, c.journal, estimator, idGen, ids, clock, register ?: Register.empty(cellId, increment.id, increment.title), events),
@@ -880,16 +888,15 @@ public class Controller @JvmOverloads public constructor(
      * `finish` (§3.7) in its S0 form: every requirement verified and every `run:` item re-certified by a current
      * receipt at the final stamp, else an honest stop — never `completed` over a gap.
      */
-    private suspend fun stopOrFinish(c: OpenedCampaign, unfinished: String, scheduler: Scheduler? = null, campaign: Boolean = false): CampaignState {
+    private suspend fun stopOrFinish(c: OpenedCampaign, unfinished: String, scheduler: Scheduler? = null, campaign: Boolean = false, authority: Authority? = null): CampaignState {
         val state = checkNotNull(c.state)
         if (state.ledger.unfinished().isNotEmpty() || scheduler == null) {
             return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, unfinished))
         }
+        val refactor = RefactorMode.isActive(c.contract)
+        // §8.7 campaign gate (P2.2.6): the campaign review predicate names the review owed; P3.5.2 obtains it below, after the evidence.
+        val reviewOwed = if (campaign) CampaignFinish.reviewRequired(c.contract, state.graph.increments.count { it.status != IncrementStatus.Cancelled }, refactor) else null
         if (campaign) {
-            // §8.7 campaign gate (P2.2.6): the campaign review predicate, then the full suite at campaign end.
-            CampaignFinish.reviewRequired(c.contract, state.graph.increments.count { it.status != IncrementStatus.Cancelled })?.let {
-                return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, it))
-            }
             when (val full = fullSuite(c, "campaign end")) {
                 is FullSuite.Red -> return c.advance(Transition.Stopped(CampaignOutcome.Failed, "final full suite red: ${full.detail}"))
                 is FullSuite.NotCertified -> return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "final full suite could not certify: ${full.detail}"))
@@ -909,8 +916,32 @@ public class Controller @JvmOverloads public constructor(
         if (gaps.isNotEmpty() || receipts.isEmpty()) {
             return c.advance(Transition.Stopped(CampaignOutcome.Failed, "final acceptance at @${stamp.hash8} failed: ${gaps.ifEmpty { listOf("no run: receipt") }.joinToString("; ")}"))
         }
+        if (reviewOwed != null) {
+            // §8.9 items 5–6, D-23: the equivalence evidence, then the signed campaign-scope review — blocked when unavailable, never skipped.
+            val reviewer = campaignReview(c, authority ?: return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "$reviewOwed; no authority to review")))
+            val equivalence = if (refactor) reviewer.equivalence(stamp, currencies) else null
+            if (refactor && equivalence == null) {
+                return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "refactor mode without a behaviour snapshot: no equivalence evidence at @${stamp.hash8} (§8.9 item 5)"))
+            }
+            val current = currencies.values.filter { it.certifies }.mapNotNull { it.receiptId }.distinct()
+            when (val review = reviewer.review(c.contract, c.s0.stampId, current, equivalence, reviewOwed)) {
+                is CampaignReviewOutcome.Approved -> Unit
+                is CampaignReviewOutcome.Declined -> return c.advance(Transition.Stopped(if (review.terminal) CampaignOutcome.Failed else CampaignOutcome.BlockedExternal, "$reviewOwed; ${review.reason}"))
+                is CampaignReviewOutcome.Unavailable -> return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "$reviewOwed; ${review.reason}"))
+            }
+        }
         c.advance(Transition.Finishing(stamp))
         return c.advance(Transition.Finished(stamp, receipts.distinct()))
+    }
+
+    /** The D-23 human review path of this campaign: `Authority.review` over the full diff, the receipts and the rubric built from the admitted plan. */
+    private fun campaignReview(c: OpenedCampaign, authority: Authority): CampaignReview {
+        fun plan(): PlanPacket? = SqlitePlanProposals(c.store, idGen, clock).latest(c.ids.work, null)?.packet
+        return CampaignReview(
+            authority, c.shadow, c.workspace, c.stamper, c.store, c.journal, SqliteReceipts(c.store, clock), c.checks, idGen, c.ids, clock,
+            checklist = { plan()?.refactorChecklist },
+            conReferences = { plan()?.let { p -> p.conReferences + p.conCandidates.map { "new: ${it.summary}" } }.orEmpty() },
+        )
     }
 
     private sealed interface FullSuite {

@@ -26,6 +26,12 @@ public data class ReviewRequest(
     val criteria: List<String>,
     /** Pre-change tests or assertions beside a weakening diff (§8.6), when any. */
     val originalObligations: List<String> = emptyList(),
+    /** The full diff `s0 → candidate` as a blob id (campaign scope, §8.9 item 6); the packet, never the transcript. */
+    val diffRef: String? = null,
+    /** The receipts the verdict may rely on: current at [candidate] (§8.7). */
+    val receipts: List<String> = emptyList(),
+    /** The rubric the reviewer assesses against, one line per item (§8.8). */
+    val rubric: List<String> = emptyList(),
 ) {
     init {
         require(id.isNotBlank() && packetRef.isNotBlank()) { "review request needs an id and a packet reference" }

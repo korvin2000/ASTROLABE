@@ -301,4 +301,33 @@ class PlanTest {
         val masked = TaskTool(authority(emptySet()), contracts, null, HeuristicEstimator(), FixedIdGen(), Identities(work, AttemptId("a1"), context = cell), clock)
         assertEquals("masked", masked.propose("plan", wirePlan).header!!.runtime.status, "S0 masks propose")
     }
+
+    @Test
+    fun `a cross-boundary interface change references a CON note - validated against the knowledge base, else a recorded planning gap`() {
+        val refactor = contract(Mode.Autonomous).let { c -> c.copy(requirements = c.requirements.map { r -> if (r.id == "R1") r.copy(text = "refactor the parser without changing what it accepts") else r }) }
+        val checklist = RefactorChecklist("accepted inputs", "Parser.parse signature", "one release", "cli, api", "none", "golden CLI outputs", "CON parser contract")
+        val withCandidate = plan().copy(refactorChecklist = checklist)
+        val mechanical = withCandidate.copy(conCandidates = emptyList(), decisionPackets = listOf(io.astrolabe.register.Decision(1, "keep the parser contract", "callers depend on it", null)))
+        val anchors = mapOf("CON-parser" to setOf("src/parser.py"))
+
+        // No CON notes in the knowledge base: nothing to validate against, so the missing reference is a planning gap, never a refusal.
+        assertEquals(emptyList(), PlanPacketValidator.gaps(refactor, mechanical))
+        val planning = PlanPacketValidator.planningGaps(refactor, mechanical)
+        assertEquals(1, planning.size, planning.toString())
+        assertTrue(planning.single().startsWith("planning gap (no CON notes in the knowledge base to validate against): cross-boundary interface change (interfaces to change 'Parser.parse signature') references no CON note"), planning.single())
+        assertEquals(emptyList(), PlanPacketValidator.planningGaps(refactor, withCandidate), "a new CON candidate is the reference")
+        assertEquals(emptyList(), PlanPacketValidator.planningGaps(refactor, mechanical.copy(refactorChecklist = checklist.copy(interfacesToChange = "none"))), "no interface change: no CON owed")
+        assertEquals(emptyList(), PlanPacketValidator.planningGaps(contract(Mode.Autonomous), plan().copy(conCandidates = emptyList())), "outside refactor mode with no contracts touched, nothing is asked")
+
+        // With CON notes in the knowledge base the reference is validated: it must exist, or a new candidate must be named.
+        val missing = PlanPacketValidator.gaps(refactor, mechanical, anchors)
+        assertEquals(1, missing.size, missing.toString())
+        assertTrue(missing.single().contains("references no CON note"), missing.single())
+        assertEquals(emptyList(), PlanPacketValidator.gaps(refactor, mechanical.copy(conReferences = listOf("CON-parser")), anchors), "a superseded CON by id")
+        assertEquals(listOf("CON reference CON-nope is not a CON note of the knowledge base (known: CON-parser)"), PlanPacketValidator.gaps(refactor, mechanical.copy(conReferences = listOf("CON-nope")), anchors))
+        assertEquals(emptyList(), PlanPacketValidator.gaps(refactor, withCandidate, anchors), "a new CON candidate satisfies the rule")
+        // contractsTouched is the other cross-boundary signal, refactor mode or not.
+        val touched = contract(Mode.Autonomous).copy(contractsTouched = listOf("CON-parser"))
+        assertTrue(PlanPacketValidator.gaps(touched, plan().copy(conCandidates = emptyList()), anchors).single().contains("contracts touched CON-parser"))
+    }
 }

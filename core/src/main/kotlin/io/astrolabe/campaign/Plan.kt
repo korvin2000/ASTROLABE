@@ -51,6 +51,8 @@ public data class PlanPacket @JvmOverloads constructor(
     val shapeSuggestion: Shape? = null,
     /** The §8.9 checklist, recorded before the first increment when refactor mode is active (P3.5.1). */
     val refactorChecklist: RefactorChecklist? = null,
+    /** Existing `CON` note ids this plan changes or supersedes (§8.9 item 4); new ones travel as [conCandidates]. */
+    val conReferences: List<String> = emptyList(),
 )
 
 /** A plan proposal as stored: [id] is the evidence the completion seam cites. */
@@ -108,9 +110,15 @@ public class SqlitePlanProposals(private val store: Store, private val idGen: Id
  * acceptance added. A requirement nothing can decide must carry a `review:` naming the judgment (D17).
  */
 public object PlanPacketValidator {
-    /** Gaps of [packet] against [contract]; empty ⇔ the controller can admit it once its acceptance is resolved. */
+    /**
+     * Gaps of [packet] against [contract]; empty ⇔ the controller can admit it once its acceptance is resolved.
+     * [conAnchors] are the knowledge base's `CON` notes ([io.astrolabe.kb.Kb.contractAnchors]): with any, a
+     * cross-boundary interface change must reference one that exists; without any, the same rule is a planning
+     * gap ([planningGaps]), recorded and never a refusal (P3.5.2).
+     */
     @JvmStatic
-    public fun gaps(contract: Contract, packet: PlanPacket?): List<String> {
+    @JvmOverloads
+    public fun gaps(contract: Contract, packet: PlanPacket?, conAnchors: Map<String, Set<String>> = emptyMap()): List<String> {
         if (packet == null) return listOf("no plan proposed: end with task.propose(plan)")
         val gaps = ArrayList<String>()
         val graph = packet.graphProposal
@@ -130,6 +138,7 @@ public object PlanPacketValidator {
             if (item is Acceptance.Check && item.text.isBlank()) gaps += "check ${item.id} must state its claim"
         }
         gaps += refactorGaps(contract, packet)
+        if (conAnchors.isNotEmpty()) gaps += conReferenceGaps(contract, packet, conAnchors)
         if (gaps.isNotEmpty()) return gaps
         val preview = contract.copy(acceptance = contract.acceptance + proposed)
         gaps += graph.validate(preview).map { issue ->
@@ -161,6 +170,39 @@ public object PlanPacketValidator {
         return gaps
     }
 
+    /**
+     * §8.9 item 4 planning gaps: what [gaps] would refuse once the knowledge base holds `CON` notes, recorded now
+     * because it holds none — a cross-boundary interface change that references no `CON` note, new or superseded.
+     */
+    @JvmStatic
+    public fun planningGaps(contract: Contract, packet: PlanPacket): List<String> =
+        conReferenceGaps(contract, packet, emptyMap()).map { "planning gap (no CON notes in the knowledge base to validate against): $it" }
+
+    /**
+     * The cross-boundary signal is the contract's `contractsTouched` or, in refactor mode, a checklist that names
+     * interfaces to change; such a plan references a `CON` note: a new candidate or an existing id, which must be
+     * one of [conAnchors] when the knowledge base has any.
+     */
+    internal fun conReferenceGaps(contract: Contract, packet: PlanPacket, conAnchors: Map<String, Set<String>>): List<String> {
+        val interfaces = packet.refactorChecklist?.interfacesToChange?.takeIf { RefactorMode.isActive(contract) && it.isNotBlank() && !NONE.matches(it.trim()) }
+        val signal = when {
+            contract.contractsTouched.isNotEmpty() -> "contracts touched ${contract.contractsTouched.joinToString(", ")}"
+            interfaces != null -> "interfaces to change '$interfaces'"
+            else -> return emptyList()
+        }
+        val gaps = ArrayList<String>()
+        if (packet.conCandidates.isEmpty() && packet.conReferences.isEmpty()) {
+            gaps += "cross-boundary interface change ($signal) references no CON note: name a new CON candidate or the id of the CON it supersedes (§8.9 item 4)"
+        }
+        for (id in packet.conReferences) {
+            if (id.isBlank()) gaps += "a blank CON reference"
+            else if (conAnchors.isNotEmpty() && id !in conAnchors) gaps += "CON reference $id is not a CON note of the knowledge base (known: ${conAnchors.keys.sorted().joinToString(", ")})"
+        }
+        return gaps
+    }
+
+    private val NONE = Regex("""^(none|n/a|-|no interface changes?)$""", RegexOption.IGNORE_CASE)
+
     /** Requirements with no acceptance of their own: the plan must name an oracle or the judgment (D17). */
     internal fun unjudged(contract: Contract): List<String> = contract.requirements.filter { requirement ->
         requirement.acceptance.isEmpty() && contract.acceptance.none { (it.origin as? Origin.Model)?.strengthens == requirement.id }
@@ -178,11 +220,12 @@ public object PlanPacketValidator {
         contract: () -> Contract,
         proposals: PlanProposals,
         maxFinalizations: Int = Verifier().maxFinalizations,
+        conAnchors: () -> Map<String, Set<String>> = { emptyMap() },
     ): RoleCompletion {
         require(maxFinalizations >= 1) { "maxFinalizations must be ≥ 1" }
         return RoleCompletion { output, _ ->
             val plan = proposals.latest(output.packet.ids.work, output.packet.ids.context)
-            val gaps = gaps(contract(), plan?.packet)
+            val gaps = gaps(contract(), plan?.packet, conAnchors())
             when {
                 gaps.isEmpty() -> CompletionDecision.Accepted(listOf(plan!!.id))
                 output.refusals + 1 >= maxFinalizations -> CompletionDecision.CannotProgress(gaps)

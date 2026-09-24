@@ -12,7 +12,10 @@ import io.astrolabe.id.WorkId
 import io.astrolabe.provider.Money
 import io.astrolabe.store.BlobKind
 import io.astrolabe.telemetry.Accounting
+import io.astrolabe.verify.CampaignReview
+import io.astrolabe.verify.CampaignReviewRecord
 import io.astrolabe.verify.Currency
+import io.astrolabe.verify.EquivalenceReport
 import io.astrolabe.workspace.DirtyState
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -85,6 +88,22 @@ public data class FinishReceipt(
     val budget: BudgetLine,
     val memoryCandidates: List<String>,
     val highestAuthorizedStage: Stage,
+    /** §8.9 item 5 equivalence evidence at the final stamp (refactor mode); `null` when none was computed. */
+    val equivalence: EquivalenceReport? = null,
+    /** The campaign-scope review (§8.8, D-23 human path); `null` when none was owed. */
+    val review: ReviewLine? = null,
+)
+
+/** The campaign review as the receipt reports it: the request, the diff it saw, and the signed verdict or why none arrived. */
+@Serializable
+public data class ReviewLine(
+    val requestId: String,
+    val diffRef: String?,
+    val verdict: String?,
+    val signedBy: String?,
+    val confidence: Double?,
+    val unavailable: String?,
+    val reused: Boolean,
 )
 
 /** Builds, stores and exports the [FinishReceipt] of an ended campaign. */
@@ -147,6 +166,10 @@ public object FinishReceipts {
         val totals = Accounting.totals(Accounting(c.store, java.time.Clock.systemUTC()).calls(c.ids.work), state.graph.increments.count { it.status == io.astrolabe.contract.IncrementStatus.Verified }, c.attempt.config.profiles.values.firstOrNull()?.priceTable?.currency ?: "USD")
         val billed = totals.quantities.values.takeIf { values -> values.none { it == null } }?.sumOf { it!! }
         val helper = packets.sumOf { it.cost.helperTokens }
+        val review = c.store.db.query(
+            "SELECT body FROM packets WHERE work_id = ? AND attempt_id = ? AND kind = ? ORDER BY rowid DESC LIMIT 1",
+            state.work, state.attempt, CampaignReview.KIND,
+        ) { Json.decodeFromString(CampaignReviewRecord.serializer(), it.string("body")) }.firstOrNull()
         return FinishReceipt(
             work = state.work,
             attempt = state.attempt,
@@ -177,6 +200,12 @@ public object FinishReceipts {
             budget = BudgetLine(totals.quantities.mapKeys { it.key.id }, totals.money, billed?.takeIf { it > 0 }?.let { helper.toDouble() / it }),
             memoryCandidates = emptyList(),
             highestAuthorizedStage = Stage.Patch,
+            equivalence = review?.equivalence,
+            review = review?.let {
+                ReviewLine(
+                    it.request.id, it.request.diffRef, it.verdict?.outcome?.name?.lowercase(), it.verdict?.signedBy, it.verdict?.confidence, it.unavailable, it.reused,
+                )
+            },
         )
     }
 
