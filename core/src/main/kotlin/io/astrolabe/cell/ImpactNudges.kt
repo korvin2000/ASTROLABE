@@ -20,7 +20,7 @@ public data class ImpactNudge(val definition: ChangedDefinition, val references:
 /**
  * The cell's impact-nudge ledger (§7.4, §5.6): after each edit batch the changed definitions with
  * `fanin > 0` become pending; `look(refs)` on the symbol or a plan step naming it (rescoping) resolves
- * them (D-87). A re-change of a still-pending symbol keeps its first turn, so the nudge fires once.
+ * them (D-92). A re-change of a still-pending symbol keeps its first turn, so the nudge fires once.
  */
 public class ImpactNudges {
     private val pending = LinkedHashMap<Pair<String, String>, ImpactNudge>()
