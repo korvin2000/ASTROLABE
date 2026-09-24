@@ -10,15 +10,17 @@ import io.astrolabe.graph.Production
 import io.astrolabe.graph.RequirementGraph
 
 /**
- * The §3.7 `impact_prescan` result. Every field is `null` until the pre-scan exists (P3.2.6): incomplete
- * discovery is unknown, never low risk (D-16).
+ * The §3.7 `impact_prescan` result ([ImpactPrescan], P3.2.6). A `null` field was not assessed: incomplete discovery is
+ * unknown, never low risk (D-16). [filesEstimated] is the tier-0 blast, a lower bound; [fanIn] the highest lexical
+ * reference count of a request identifier.
  */
-public data class Prescan(
+public data class Prescan @JvmOverloads constructor(
     val filesEstimated: Int? = null,
     val crossPackage: Boolean? = null,
     val contractTouch: Boolean? = null,
+    val fanIn: Long? = null,
 ) {
-    public val unknown: Boolean get() = filesEstimated == null && crossPackage == null && contractTouch == null
+    public val unknown: Boolean get() = filesEstimated == null && crossPackage == null && contractTouch == null && fanIn == null
 
     public companion object {
         /** The P1 stub: nothing is assessed. */
@@ -159,7 +161,8 @@ public object ShapeSelector {
         val declared = contract.risk
         val risk = when {
             touch == true || declared?.reversibility == Reversibility.Hard -> RiskLevel.High
-            declared == null -> RiskLevel.Unknown
+            // D-94: a lexical fan-in only raises an unassessed risk, never to high and never down to low.
+            declared == null -> if ((prescan.fanIn ?: 0) >= policy.largeMinFiles) RiskLevel.Medium else RiskLevel.Unknown
             declared.blastRadius >= policy.largeMinFiles -> RiskLevel.High
             declared.blastRadius > policy.smallMaxFiles -> RiskLevel.Medium
             else -> RiskLevel.Low

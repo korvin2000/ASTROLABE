@@ -126,4 +126,14 @@ class ShapeSelectorTest {
         assertEquals(Shape.S2, ShapeSelector.adjust(Shape.S3, Shape.S1, evidence = emptyList(), outstandingReviews = 2))
         assertEquals(Shape.S1, ShapeSelector.adjust(Shape.S1, Shape.S0, evidence = emptyList(), outstandingReviews = 1))
     }
+
+    @Test
+    fun `a high lexical fan-in raises an unassessed risk to medium, never to high or low (P3 2 6)`() {
+        fun risk(fanIn: Long, declared: Risk? = null) =
+            (ShapeSelector.select(contract(risk = declared), Prescan(filesEstimated = 1, fanIn = fanIn), policy) as ShapeDecision.Selected).inputs!!.risk
+        assertEquals(RiskLevel.Medium, risk(policy.largeMinFiles.toLong()))
+        assertEquals(RiskLevel.Unknown, risk(policy.largeMinFiles - 1L))
+        assertEquals(RiskLevel.Low, risk(1_000, Risk(1, Reversibility.Easy, false)), "a declared risk is never overridden by a lexical count")
+        assertEquals(Shape.S1, (ShapeSelector.select(contract(risk = null), Prescan(filesEstimated = 1, fanIn = 100), policy) as ShapeDecision.Selected).shape)
+    }
 }

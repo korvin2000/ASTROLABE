@@ -216,6 +216,8 @@ public class OpenedCampaign internal constructor(
     public val campaigns: Campaigns,
     public val reconciliation: Reconciliation,
     public val prescan: Prescan,
+    /** The logged pre-scan behind [prescan]: its candidate inputs, blast, coverage and unresolved dependencies (P3.2.6). */
+    public val impactPrescan: ImpactPrescan,
     public val shape: ShapeDecision,
     state: CampaignState?,
     private val refusal: String?,
@@ -349,12 +351,14 @@ public class Controller @JvmOverloads public constructor(
         val external = if (first) emptyList() else drift(shadow, dirty)
 
         val atlas = Atlas.build(workspace.root)
+        // §3.7 impact_prescan (D-40): incomplete discovery over the request's candidate paths; it feeds both shape selections.
+        val impactPrescan = ImpactPrescan.of(atlas, WORKSPACE, ImpactPrescan.inputs(atlas, WORKSPACE, request.text), EmptyKb.contractAnchors())
         val derived = contracts.deriveS0(request.work, request.attempt, request.text, atlas, effective, policy.tokens, protected, policy.cost)
         val stored = contracts.current(request.work)
         check(stored == null || stored.attemptId == request.attempt) { "work ${request.work.value} is attempt ${stored?.attemptId?.value}; a new attempt is P2" }
         // §3.5: a new contract carries the shape its campaign runs in; the tool masks derive from it.
         val contract = stored ?: contracts.open(derived.contract.let { d ->
-            val initial = ShapeSelector.select(d, Prescan.UNKNOWN, effective.defaults.shapePolicy, policy.resumeExpected)
+            val initial = ShapeSelector.select(d, impactPrescan.prescan, effective.defaults.shapePolicy, policy.resumeExpected)
             if ((initial as? ShapeDecision.Selected)?.shape == Shape.S1) d.copy(shape = Shape.S1) else d
         })
         val commands = derived.primary?.let(RunnerCommands::of) ?: RunnerCommands()
@@ -413,14 +417,17 @@ public class Controller @JvmOverloads public constructor(
         // §13.1: the old owner's unknown effects are reconciled above, before this writer is granted the workspace.
         val leases = Leases(store, clock)
         val lease = leases.acquire(WORKSPACE, ids, "controller:${store.holder.pid}", leaseDuration)
-        val prescan = Prescan.UNKNOWN
+        val prescan = impactPrescan.prescan
+        journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, refs = impactPrescan.blast, text = "open: impact ${impactPrescan.log}", at = clock.instant()))
         val selected = ShapeSelector.select(contract, prescan, effective.defaults.shapePolicy, policy.resumeExpected)
         events?.emit(AgentEvent.Campaign.Opened(ids, contract.requests.last().id))
         val inputs = when (selected) {
             is ShapeDecision.Selected -> selected.inputs
             is ShapeDecision.Unavailable -> selected.inputs
         }
-        events?.emit(AgentEvent.Campaign.ShapeSelected(ids, (selected as? ShapeDecision.Selected)?.shape?.name ?: "blocked", "contract:v${contract.version} ${inputs?.log.orEmpty()}".trim()))
+        val shapeLog = "contract:v${contract.version} ${inputs?.log.orEmpty()} · ${impactPrescan.log}"
+        events?.emit(AgentEvent.Campaign.ShapeSelected(ids, (selected as? ShapeDecision.Selected)?.shape?.name ?: "blocked", shapeLog))
+        journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, text = "open: shape ${(selected as? ShapeDecision.Selected)?.shape?.name ?: "blocked"} · $shapeLog", at = clock.instant()))
         // S0 and S1 run here (P2.2.2); S2/S3 need review or parallel paths this build lacks: an honest block.
         val shape = when {
             selected is ShapeDecision.Selected && selected.shape != Shape.S0 && selected.shape != Shape.S1 ->
@@ -434,7 +441,7 @@ public class Controller @JvmOverloads public constructor(
 
         return OpenedCampaign(
             request, ids, store, os, workspace, registry, stamper, dirty, shadow, s0, atlas, derived.sniffed, commands,
-            contracts, checks, rules, prime, EmptyKb, journal, intents, campaigns, reconciliation, prescan, shape, state, refusal, owned,
+            contracts, checks, rules, prime, EmptyKb, journal, intents, campaigns, reconciliation, prescan, impactPrescan, shape, state, refusal, owned,
             frozen, lease, leases,
         )
     }
@@ -588,6 +595,7 @@ public class Controller @JvmOverloads public constructor(
             packets += exit.packet
             snapshot(c)
             c.advance(Transition.Returned(exit))
+            refreshPrescan(c, run.ids, exit)?.let { return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, it)), exit, null, compiled) }
             boundary(c, cellId, RebuildReason.CellEnd(if (exit is CellExit.Completed) RebuildReason.CellEnd.Next.NextIncrement else RebuildReason.CellEnd.Next.Continuation))
             val stampNow = c.stamper.report().candidateId
             val completion = if (exit is CellExit.Completed) {
@@ -615,6 +623,19 @@ public class Controller @JvmOverloads public constructor(
             }
             last = last.copy(state = c.state)
         }
+    }
+
+    /**
+     * §3.7/I-23 pre-scan refresh: once a cell's touched paths are known the pre-scan reruns over them; a contract touch
+     * it now finds stops an S0/S1 campaign before the commit it no longer allows (S2 with an ADR in the main line).
+     */
+    private fun refreshPrescan(c: OpenedCampaign, ids: Identities, exit: CellExit): String? {
+        val touched = exit.checkpoint.touched
+        if (touched.isEmpty()) return null
+        val refreshed = ImpactPrescan.of(c.atlas.refresh(touched), WORKSPACE, c.impactPrescan.inputs.copy(touched = touched.sorted()), c.kb.contractAnchors())
+        c.journal.append(JournalEvent(idGen.next("ev"), ids, exit.turns, JournalKind.Boundary, refs = refreshed.contractsTouched, text = "impact pre-scan refreshed: ${refreshed.log}", at = clock.instant()))
+        if (refreshed.prescan.contractTouch != true || c.contract.shape !in setOf(Shape.S0, Shape.S1)) return null
+        return "impact pre-scan refresh: contract ${refreshed.contractsTouched.joinToString(", ")} touched — S2 with an ADR in the main line is required before this lands (I-23)"
     }
 
     /** The full compile-input fingerprint (§6.6, F06) of an implementing compile of [increment] at [stamp]. */
@@ -816,6 +837,7 @@ public class Controller @JvmOverloads public constructor(
         // The tree after the cell is the base the next open reconciles against: only moves after this are external.
         snapshot(c)
         c.advance(Transition.Returned(exit))
+        refreshPrescan(c, ids, exit)?.let { return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, it)), exit, null, compiled) }
 
         val stampNow = c.stamper.report().candidateId
         val completion = if (exit is CellExit.Completed) {

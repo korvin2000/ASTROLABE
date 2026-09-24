@@ -121,6 +121,28 @@ class ControllerTest {
     }
 
     @Test
+    fun `the shape decision is logged with the impact pre-scan inputs, and plain words leave it unknown`() {
+        open().use { c ->
+            assertTrue(c.prescan.unknown, "make a return 10 names no path and no code-shaped identifier")
+            val lines = c.journal.events(JournalScope(request.work, kinds = setOf(JournalKind.Boundary))).map { it.text }
+            assertTrue(lines.any { it.startsWith("open: impact prescan named=[] identifiers=[] hubs=[] blast=0") }, lines.toString())
+            assertTrue(lines.any { it.startsWith("open: shape S0 · contract:v1 requirements=1 files=unknown") && "· prescan named=[]" in it }, lines.toString())
+        }
+    }
+
+    @Test
+    fun `a request naming a file estimates it through the pre-scan and logs the inputs behind the shape`() {
+        controller().open(repo.root, CampaignRequest(WorkId("W-2"), AttemptId("a1"), "make src/a.py return 10"), policy).use { c ->
+            assertEquals(Prescan(filesEstimated = 1, crossPackage = null, contractTouch = null, fanIn = null), c.prescan)
+            assertEquals(listOf("src/a.py"), c.impactPrescan.inputs.named)
+            val shape = assertIs<ShapeDecision.Selected>(c.shape)
+            assertEquals(1, shape.inputs!!.filesEstimated)
+            val lines = c.journal.events(JournalScope(WorkId("W-2"), kinds = setOf(JournalKind.Boundary))).map { it.text }
+            assertTrue(lines.any { it.startsWith("open: shape S0") && "files=1" in it && "named=[src/a.py]" in it && "complete=false" in it }, lines.toString())
+        }
+    }
+
+    @Test
     fun `FX-23 open-time - an open intent becomes unknown_outcome and its relaunch is refused`() = runTest {
         val argv = echo("hi").argv
         open().use { c ->

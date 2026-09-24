@@ -99,7 +99,7 @@ public class ImportGraph private constructor(
         private const val DESCRIPTION_LIMIT = 120
         private const val GENERATED_PROBE_LINES = 8
 
-        private val MANIFESTS = setOf(
+        internal val MANIFESTS = setOf(
             "pyproject.toml", "setup.py", "package.json",
             "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "pom.xml",
         )
