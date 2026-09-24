@@ -151,6 +151,32 @@ class VerifyTest {
     }
 
     @Test
+    fun `verify-on-stop runs only missing or stale checks and a second proposal after an unrelated edit reuses the receipt`() = runTest {
+        val known = Checks.empty()
+        known.register(Check("CHK-accept-AC-1", CheckKind.Acceptance, Selector.Named(printing("pytest_pass.txt", 0)), Closure.Known(setOf("src/a.py", "pytest_pass.txt")), CostClass.Slow, Trigger.IncrementEnd, acceptanceIds = listOf("AC-1"), command = printing("pytest_pass.txt", 0)))
+        known.register(Check(Checks.FULL, CheckKind.Full, Selector.All, Closure.Unknown, CostClass.Expensive, Trigger.CampaignEnd, acceptanceIds = listOf("AC-1"), command = printing("pytest_pass.txt", 0)))
+        coherence.register(known)
+        val receipts = SqliteReceipts(store, clock)
+        val stopScheduler = Scheduler(known, workspace, registry, stamper, receipts, InMemoryAliases(), idGen, ids, clock)
+        val stop = Verify(known, stopScheduler, null, null, null, workspace, TrustedLocalRunner(os), os, stamper, store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, contracts, stateRoot.resolve("logs"))
+
+        val first = stop.onStop(listOf("AC-1"))
+        assertEquals(listOf("CHK-accept-AC-1"), first.map { it.checkId }, "the missing check runs, the full suite never does")
+        assertEquals(Outcome.Passed, first.single().outcome)
+
+        repo.write("diag.txt", "unrelated\n")
+        assertEquals(emptyList(), stop.onStop(listOf("AC-1")), "the unchanged complete closure is reused, not rerun")
+        val currency = stopScheduler.currency(known["CHK-accept-AC-1"]!!, stamper.stamp().id)
+        assertTrue(currency.certifies, currency.reasons.toString())
+        assertEquals(first.single().receiptId, known["CHK-accept-AC-1"]!!.last!!.reuseProof!!.reuseOf)
+
+        repo.write("src/a.py", "def a():\n    return 2\n")
+        assertEquals(listOf("CHK-accept-AC-1"), stop.onStop(listOf("AC-1")).map { it.checkId }, "a moved closure path reruns the check")
+        assertEquals(2, receipts.forCheck("CHK-accept-AC-1").size)
+        assertEquals(emptyList(), receipts.forCheck(Checks.FULL))
+    }
+
+    @Test
     fun `a failed suite is red with parsed counts and a missing runner is an explicit unavailable receipt (FX-13 partial)`() = runTest {
         val failed = run("""{"what":"tests","selection":"ids","ids":["CHK-accept-AC-2"]}""")
         assertEquals("failed", status(failed), failed.body)

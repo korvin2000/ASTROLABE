@@ -32,6 +32,7 @@ import io.astrolabe.evidence.JournalKind
 import io.astrolabe.evidence.JournalScope
 import io.astrolabe.evidence.SqliteAliases
 import io.astrolabe.evidence.SqliteObservations
+import io.astrolabe.evidence.SqliteReceipts
 import io.astrolabe.fixtures.FakeAdapter
 import io.astrolabe.fixtures.FakeClock
 import io.astrolabe.fixtures.FakeProfiles
@@ -300,11 +301,14 @@ class ControllerTest {
     }
 
     @Test
-    fun `S0 without receipts never moves the ledger - the cell stops honestly instead`() = runTest {
+    fun `S0 without a green receipt never moves the ledger - the cell stops honestly instead`() = runTest {
         seedContract()
+        // The acceptance output is gone: verify-on-stop runs AC-1 on the done claim, and its receipt is not green.
+        Files.delete(repo.root.resolve("pytest_pass.txt"))
         open().use { c ->
             val run = controller().runS0(c, model(Scripted.Reply(listOf(say("done, trust me")))))
-            assertTrue(run.exit !is CellExit.Completed, "a done claim without a current receipt is not a completion")
+            assertTrue(run.exit !is CellExit.Completed, "a done claim without a current green receipt is not a completion")
+            assertFalse(SqliteReceipts(c.store, clock).forCheck("CHK-accept-AC-1").single().outcome.green)
             assertTrue(run.completion !is CompletionResult.Accepted)
             val outcome = assertNotNull(run.outcome)
             assertTrue(outcome != CampaignOutcome.Completed, run.state?.reason)

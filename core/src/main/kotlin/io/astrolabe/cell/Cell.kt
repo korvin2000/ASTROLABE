@@ -362,7 +362,14 @@ public class Cell @JvmOverloads constructor(
             observeWorkset()
 
             // End-of-turn checker on the paths the horizons scheduled; the atlas follows the same set.
-            val stampNow = drainScheduled(contract) ?: after
+            val proposal = native.isEmpty() && (response.stop == StopReason.EndTurn || response.stop == StopReason.ToolUse)
+            val turnEnd = drainScheduled(contract) ?: after
+            // §8.1 verify-on-stop: a completion proposal runs only the missing or stale acceptance checks; reused receipts stand.
+            val stoppedChecks = if (proposal) tools.verify?.onStop(increment.accept).orEmpty() else emptyList()
+            for (receipt in stoppedChecks) {
+                ev.journal.append(JournalEvent(idGen.next("ev"), ids, turn, JournalKind.Check, refs = listOf(receipt.receiptId), text = "verify-on-stop ${receipt.checkId}: ${receipt.outcome.name.lowercase()}", at = clock.instant()))
+            }
+            val stampNow = if (stoppedChecks.isEmpty()) turnEnd else ws.stamper.report()
             lastReport = stampNow
             ws.scheduler.refresh(stampNow.candidateId, stampNow.env)
             worksetDrops()
@@ -375,7 +382,6 @@ public class Cell @JvmOverloads constructor(
             val certifiedAfter = certified(currenciesNow)
             if (Progress.events(registerBefore, register, turn, certifiedBefore, certifiedAfter).isNotEmpty()) lastProgressTurn = turn
             val unresolved = TestIntegrity.unresolved(flags.values.toList())
-            val proposal = native.isEmpty() && (response.stop == StopReason.EndTurn || response.stop == StopReason.ToolUse)
             val state = GateState(
                 turn = turn, register = register, contract = contract, increment = increment, calls = calls, signatures = signatures.toList(),
                 patchRejection = if (calls.any { it.family == ToolFamily.State && it.op == "patch" }) tools.state.lastRejection else null,

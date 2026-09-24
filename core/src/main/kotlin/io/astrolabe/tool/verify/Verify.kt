@@ -38,6 +38,7 @@ import io.astrolabe.tool.run.RunCapture
 import io.astrolabe.tool.run.Runner
 import io.astrolabe.tool.run.ShapeBudget
 import io.astrolabe.tool.run.Shapers
+import io.astrolabe.verify.Applicability
 import io.astrolabe.verify.Baseline
 import io.astrolabe.verify.Check
 import io.astrolabe.verify.CheckKind
@@ -161,6 +162,21 @@ public class Verify(
         val line = ChecksRender.line(lineOf(suite, receipt, null, scheduler.aliasOf(receipt.receiptId)))
         val body = "baseline @${stamp.hash8.take(4)}: $line" + (result.ledger?.let { "\n" + it.render() } ?: "\nno pre-existing-failure ledger: the baseline produced no usable evidence (${receipt.outcome.name.lowercase()})")
         return outcome(args, if (result.ledger == null) "unavailable" else "ok", body, listOf(receipt), stamp)
+    }
+
+    /**
+     * Verify-on-stop (§8.1, P3.1.3): on a completion proposal, runs only the checks of [acceptanceIds] with no
+     * receipt or without a current, eligible one at the tree now; a receipt kept current by a reuse proof stands, a
+     * current red one is evidence too, and the full suite never runs here. Returns the receipts it recorded.
+     */
+    public suspend fun onStop(acceptanceIds: Collection<String>): List<Receipt> {
+        val contract = contracts.current(ids.work) ?: return emptyList()
+        val stampNow = stamper.stamp().id
+        val due = acceptanceIds.flatMap { checks.forAcceptance(it) }.distinctBy { it.id }.filter { it.kind != CheckKind.Full }.filter { check ->
+            val currency = scheduler.currency(check, stampNow)
+            currency.receiptId == null || currency.applicability != Applicability.Current || !currency.eligible
+        }
+        return due.map { runOne(it, contract).first }
     }
 
     // --------------------------------------------------------------- running

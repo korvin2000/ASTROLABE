@@ -210,7 +210,7 @@ public class RequirementGraph(
     /**
      * Derive requirement progress from ALL assigned active increments and current verifier evidence.
      * A changed candidate/contract invalidates currency, not execution history. Cross-candidate reuse proofs
-     * (P3.1.2) reach the ledger through verify-on-stop (P3.1.3); until then equality is deliberately conservative. Model-authored requirement.status
+     * (P3.1.2) reach the ledger through re-acceptance on current receipts (verify-on-stop, P3.1.3); here equality stays conservative. Model-authored requirement.status
      * and the S0 verifier's per-increment ledger cannot certify a partially implemented S1 requirement.
      */
     public fun ledger(contract: Contract, stamp: CandidateId): Ledger {

@@ -21,6 +21,7 @@ import io.astrolabe.contract.RequirementStatus
 import io.astrolabe.contract.Shape
 import io.astrolabe.evidence.JournalKind
 import io.astrolabe.evidence.JournalScope
+import io.astrolabe.evidence.SqliteReceipts
 import io.astrolabe.contract.SqliteContractRepository
 import io.astrolabe.fixtures.FakeAdapter
 import io.astrolabe.fixtures.FakeClock
@@ -182,7 +183,7 @@ class CampaignLoopTest {
     }
 
     @Test
-    fun `finish never reports completed over a stale acceptance receipt`() = runBlocking<Unit> {
+    fun `finish never certifies over a stale acceptance receipt - verify-on-stop reruns it on the final tree`() = runBlocking<Unit> {
         controller().open(repo.root, request, policy).use { c ->
             val va = c.registry.version("src/a.py")!!
             val vb = c.registry.version("src/b.py")!!
@@ -195,8 +196,13 @@ class CampaignLoopTest {
             )
             assertTrue(va != vb)
             val run = controller().run(c, model(replies), maxCells = 3)
-            assertTrue(run.outcome != CampaignOutcome.Completed, "never completed over a stale receipt: ${run.outcome} ${run.state?.reason}")
-            assertTrue(c.campaigns.load(request.work, request.attempt)!!.graph.increments.first { it.id == "I2" }.status != IncrementStatus.Verified)
+            // The done proposal reran the stale check on the edited tree (P3.1.3); only that receipt certifies I2.
+            assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+            val ac2 = SqliteReceipts(c.store, clock).forCheck("CHK-accept-AC-2")
+            val finalStamp = c.stamper.report().candidateId
+            assertTrue(ac2.size >= 2 && ac2.first().stampAfter != finalStamp, ac2.map { it.receiptId }.toString())
+            assertEquals(finalStamp, ac2.last().stampAfter)
+            assertEquals(IncrementStatus.Verified, c.campaigns.load(request.work, request.attempt)!!.graph.increments.first { it.id == "I2" }.status)
         }
     }
 
