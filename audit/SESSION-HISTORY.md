@@ -525,3 +525,10 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
   focused tests + local commit, full build/ABI/both-platform CI once per block gate; sandbox JDK-25 bootstrap
   automated (`.claude/hooks/session-start.sh`, `scripts/sandbox-gradle.sh`); `/next` entry command. Counts unchanged:
   81/185 DONE, 0 IN_PROGRESS, 104 TODO.
+- 2026-09-24 — session (cloud, branch `claude/nifty-feynman-wk181l`): P1.9.2 open/reconcile, P1.9.3 S0 run +
+  `Compiler`, P1.9.6 facade + `AstrolabeJava`, P1.11.1 spans/metrics, P1.11.2 accounting/exports, P1.9.4
+  lifecycle controls, P1.9.5 finish receipt, P1.12.3 Java smoke, P1.12.2 vertical slice. D-65–D-67. Schema v3
+  (`attempts`; contract projections keyed by work). Fixes found on the way: `Git.rootCommits` counted the shadow
+  ref (store moved on reopen); id-only contract projection keys broke a project's second campaign; a racy
+  `CellTest` event assertion. Gate P1.9+P1.11 via draft PR korvin2000/ASTROLABE#1 (CI run 35989613165).
+  Counts 90/185 DONE, 0 IN_PROGRESS, 95 TODO; P1 62/64.
