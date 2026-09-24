@@ -5,11 +5,9 @@
 ## 0 How to use this file
 
 ### 0.1 Resume protocol (every session)
-1. Read the [architecture map](SOTA-BEST-MIXED-AGENT.md), [components §3.2–3.3](docs/architecture/components.md#sec-3-2), [invariants §1.3](docs/architecture/principles.md#sec-1-3) and [laws §2](docs/architecture/principles.md#sec-2).
-2. Read §0–§3 of this file. An **active owner-authorized out-of-order task in §1.2** takes precedence over the normal queue; resume that exact task until it is checkpointed complete, then return to its recorded return point. Otherwise use `rg -n "· IN_PROGRESS|· BLOCKED" TODO.md`; continue that task, else take the first `· TODO` task of the current phase whose `Deps` are all `DONE` (listed order is a hint; `Deps` is authoritative; a task without `Deps` depends only on earlier tasks of its own work package). Check the [artifact → producer table §2.4](#24-artifact--producer-table) before consuming a type: its producer must be `DONE`. Out-of-order work never waives dependencies or phase validation gates.
-3. Load only the `Spec:` links of that task plus their "Read with" companions, and the `ANSWERS.md`/`ISSUES.md` rows the task cites. Do not preload the whole `docs/` tree.
-4. Implement; run the narrowest checks; update the task status, append a `Log:` line, update [§1 Progress](#1-progress).
-5. Anything not derivable from the docs → add a `D-nn` item, choose a default if safe, never redesign silently.
+Workflow, task selection, verification tiers, commands and session state are defined only in [CLAUDE.md](CLAUDE.md) § Workflow (auto-loaded with the [handoff](CONTINUE-TASK.md)). This file stays the progress authority: task statuses, `Log:` lines, `Deps`, §2.4 producers, `D-nn` decisions.
+
+**Precedence (2026-09-24):** per-task full-build, CI or both-platform steps written in task entries (`Done:`/`Log:` wording such as "ABI/full build", "green on both platforms") are discharged at the block gate (`- [ ] **Gate …**` lines at the end of each unfinished work package, see CLAUDE.md); a task is `DONE` when its `Build`/`Done` criteria pass with focused tests. A failing gate reopens only the tasks it implicates. Phase-validation tasks (P1.12.4, P2.7.x, …) are themselves gate work.
 
 ### 0.2 IDs, status, tags
 - **IDs** are stable: phase `P<n>`, work package `P<n>.<m>`, task `P<n>.<m>.<k>`, decision `D-nn`, runtime fixture `FX-nn` ([§5](#5-fixture-map)), adapter fixture `AX-nn`, issue-regression fixture `IX-nn` (from `ISSUES.md` I-nn).
@@ -43,8 +41,8 @@ In scope: the whole architecture through S3 as a library, validated with a **fak
 - **Previous completion state (2026-09-20, P5.1.5 completed):** P0: 15/19 DONE, 4 IN_PROGRESS (reopened CI validation). P1: 44/63 DONE, 19 TODO. P2-P6: 5 DONE (P2.1.1, P2.3.4, P2.6.5, P6.1.4, P5.1.5), 93 TODO. Total: **64/180 DONE (35.6%), 4 IN_PROGRESS, 112 TODO**. Counts measure task headings, not code or effort; phase/CI/Linux/live gates unchanged.
 - **Remaining P1 in dependency order:** P1.9.2–P1.9.6 controller/facade → P1.11.1–P1.11.2 telemetry → P1.12.1–P1.12.4 validation (the `Deps` fields stay authoritative).
 - **Resume notes**
-  - Build: `export JAVA_HOME=/c/Users/user/.gradle/jdks/eclipse_adoptium-26-amd64-windows.2` (Temurin 26.0.2.1; Windows form `C:\Users\user\.gradle\jdks\eclipse_adoptium-26-amd64-windows.2`), then `./gradlew build` (historical session-2 local reports: 773 tests, zero failures, six skips; fresh targeted audit: 59 passed, see section 1.1). Targeted runs: `./gradlew :core:test --tests 'io.astrolabe.<pkg>.*' --console=plain`. Kotlin ABI validation is on: after any public-API change run `./gradlew :core:updateKotlinAbi` (and `:provider-api:updateKotlinAbi` when touched) as its own invocation, then `build`, and commit the `*/api/*.api` dumps. The test JVM passes `--enable-native-access=ALL-UNNAMED` (FFM in `os`).
-  - **Linux cloud sandbox (2026-09-24):** only JDK 21/25 are installable; foojay, Adoptium and GitHub release downloads are refused by the egress policy, so the JDK 26 toolchain cannot be provisioned and Maven Central answers 429 in bursts (retry). Verification there uses a scratch copy (never committed) with the convention plugin retargeted to 25, `gradle/gradle-daemon-jvm.properties` removed and `org.gradle.java.installations.paths=/usr/lib/jvm/java-25-openjdk-amd64` + `auto-download=false`; the ABI dump regenerated there is JDK-independent and was copied back. `rsync` is not installed there: mirror the tree with `tar` (excluding `.git`, `build`, `.gradle`); `apt-get install openjdk-25-jdk-headless` works. Environmental failures there, reproduced on the unmodified baseline: `FixtureReposTest` gradle-small (nested offline Gradle) and `SearchBackendParityTest` case-insensitive café (rg/locale). CI on `main` remains the JDK 26 authority.
+  - Build commands (Windows JDK 26 and the Linux sandbox wrapper), ABI discipline and known environmental failures: [CLAUDE.md](CLAUDE.md) § Commands / § Known failures and gotchas.
+  - **Linux cloud sandbox (2026-09-24):** JDK 26 cannot be provisioned there; the scratch-copy JDK 25 retarget is automated by `.claude/hooks/session-start.sh` + `scripts/sandbox-gradle.sh` (never committed; CI on JDK 26 stays the authority). Details: CLAUDE.md § Commands.
   - Machine facts recorded in session 2: git 2.45, ripgrep 15.2, Python 3.14 (no pytest; unittest exercised), Node 24, no WSL distro, no Docker. POSIX code paths remain unvalidated: the latest Ubuntu CI job failed before tests started (see section 1.1).
   - Working method: contracts and component scaffolding were written in the main tree; the cell/controller runtime remains absent; self-contained packages were delegated to parallel worktree agents (`.claude/worktrees/agent-*`, branches `worktree-agent-*`), merged with `--no-ff`, ABI dumps regenerated after each merge, worktrees removed with PowerShell `Remove-Item -LiteralPath '\?\<path>'` (long paths). Each merged package's report is condensed in its task `Log:` line, including what stays unverified.
   - **Component wiring already present (source inspected; look/edit/run tests rerun):** look redacts displayed/persisted observations, records masks and excludes hidden lines from coverage; recall preserves masks; edit applies ScopeGuard before writes, records preimages, announces version transitions and returns TestIntegrity flags; run uses config.redaction.envAllowlist, CI=1/NO_COLOR=1, redacts logs and announces touched versions. Do not implement these again. This audit does not certify every export path.
@@ -921,6 +919,8 @@ Goal: [§18.2 Stage A](docs/implementation/roadmap.md#sec-18-2): one implementin
 - Build: `Astrolabe(config, adapter: ProviderAdapter, authority: Authority)`: `open(repo): Project` (state root, project lock, workspace, store, kb), `suspend campaign(project, request, policy?): CampaignHandle` (`workId`, `await(): CampaignOutcome`, `cancel()`, `amend(text)`, `events: Flow<AgentEvent>`, `views`), `close()` (resource closure documented); `AstrolabeJava` mirrors it with `CompletableFuture` (cancellation propagates to the campaign), blocking variants, `EventSink` registration, and accepts `JavaProviderAdapter`/`JavaAuthority` implementations through the bridges of P0.3.4/P0.4.2; documented exception mapping and callback threading; no `suspend`, `Flow` or `value class` in `io.astrolabe.java` (D-07, I-14).
 - Done: P1.12.3 uses only `AstrolabeJava` with Java-authored adapter and authority; ABI dump reviewed.
 
+- [ ] **Gate P1.9:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+
 ### P1.10 Authority and integrity baseline
 #### P1.10.1 [M] `Boundary`: delimiters and instruction-shape flag · DONE
 - Why: [§14.3](docs/platform/security.md#sec-14-3); F11; delimiters are cues, not security.
@@ -972,6 +972,8 @@ Goal: [§18.2 Stage A](docs/implementation/roadmap.md#sec-18-2): one implementin
 
 - Log: 2026-09-20 — DONE. 15 trace tests/300 seeded oracles, author review correction/regression, ABI and full Windows/JDK 26 build pass in 3m18s. Core 855/0 failures/errors/6 skips and eval 30/0 failures/errors/skips executed; provider-api 15 reused. API/protocol/handoff complete. P1.11.1/P1.11.2/FX-59/CI/Linux/live gates unchanged. Next OOO-04.
 
+- [ ] **Gate P1.11:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+
 ### P1.12 Stage A validation
 #### P1.12.1 [V] Harness fixture tests · TODO
 - Build: FX-01..10, 13 (partial), 15, 16 (stale marking), 18, 21, 23 (open-time), 24, 25, 26 (single-cell form), 38, 39 (executor ceiling), 43, 48, 49 (S0), 50, 58, 59 + AX-01..10 + IX-02, 04, 05, 06, 07, 08, 09, 10, 12, 13, 15, 16, 17, 20 as JUnit tests using the test kit and fault injector; invariant metrics that must be zero ([§19.4](docs/evaluation/method.md#sec-19-4)) asserted where applicable (unseen-content edits, destructive missteps, silent acceptance changes, stale bodies served, unauthorized publications, late superseded results merged, false green).
@@ -990,6 +992,8 @@ Goal: [§18.2 Stage A](docs/implementation/roadmap.md#sec-18-2): one implementin
 #### P1.12.4 [V] Platform validation · TODO
 - Build: Windows and Linux (equal targets, JDK 26) tests for the `ProcessOwner` backend (job objects / process groups: child spawning, parent exit, harness crash → `lost`, cancel/deadline races, log-cursor continuation, PID reuse), file replacement, `WorkspacePath` resolution (junctions/symlinks/case aliases), encoding (D-12, D-43, D-47); document supported execution modes and the recovery-coverage statement of D-44 per platform.
 - Done: both platforms green; unsupported behaviours listed in `Config` docs, not assumed (IX-20).
+
+- [ ] **Gate P1.12:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
 
 ---
 
@@ -1031,6 +1035,8 @@ Goal: [§18.2 Stage B](docs/implementation/roadmap.md#sec-18-2): campaign contro
 - Build: `propose(plan)` → plan proposal to the controller (plan role); `propose(increment_split)` → the controller records the request and re-plans within authorized coverage (a packet to the plan role); `propose(amendment)` → `Contracts.propose` (P1.1.3); all three are metadata writes after execution in the turn partition; unmasked for plan/implementing roles per shape.
 - Done: a split proposal reaches the plan role as a packet; proposals never change the contract or the graph directly.
 
+- [ ] **Gate P2.1:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+
 ### P2.2 Campaign controller (S1 path)
 #### P2.2.1 [M] `ShapeSelector` (S0–S2) and activation table · TODO
 - Why: [§3.5](docs/architecture/roles-shapes.md#sec-3-5) deterministic, logged `select_shape`; collapsibility contract; F09 (S3 only after validated planning, P5.1.4).
@@ -1066,6 +1072,8 @@ Goal: [§18.2 Stage B](docs/implementation/roadmap.md#sec-18-2): campaign contro
 - Build: `Controller.finish()`: all contract acceptance at the final stamp; full suite green or failures in the pre-existing ledger (allowed exceptions explicit); full-suite cadence every `K = 5` verified increments and at campaign end; campaign review predicate `(shape ≥ S2 ∧ increments ≥ 3) ∨ refactor_mode ∨ explicitly required` (human path P3 / cell P4); full `FinishReceipt`; explicit gaps otherwise.
 - Done: finish never reports `completed` with a stale acceptance receipt.
 
+- [ ] **Gate P2.2:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+
 ### P2.3 Context compiler
 #### P2.3.1 [M] `Compiler.compile()` (full) · TODO
 - Why: [§6.1](docs/context/compiler.md#sec-6-1) deterministic function of (increment, campaign state); L3; F06 (count the complete serialized context; validate all inputs).
@@ -1094,6 +1102,8 @@ Goal: [§18.2 Stage B](docs/implementation/roadmap.md#sec-18-2): campaign contro
 - Log: 2026-09-20 — registered before code against clean `2c78d75`; implementation plan and future integration owners in [journal](audit/OUT-OF-ORDER-P2.3.4.md).
 - Log: 2026-09-20 — DONE: ContextCover exact planning arithmetic, immutable dependency projections, mandatory refusal, deterministic marginal greedy selection and diagnostics; 13 focused tests, 160 DAG oracle cases and exhaustive feasible-set comparisons. Independent review corrections verified; final Windows build core 790/0 failures/6 skips, provider-api 15 cached green results, ABI checked. Parent P2.3.1 and rendering/manifest/admission integration remain TODO; no Linux/live gate closed.
 
+- [ ] **Gate P2.3:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+
 ### P2.4 Carry-forward and cross-cell coherence
 #### P2.4.1 [M] `CarryForward` · TODO
 - Why: [§6.2](docs/context/continuity.md#sec-6-2) table.
@@ -1117,6 +1127,8 @@ Goal: [§18.2 Stage B](docs/implementation/roadmap.md#sec-18-2): campaign contro
 - Done: two sequential cells and parallel children keep unambiguous earlier references across carry-forward, crash/resume, recall and guarded revert (IX-06).
 - Done: seed rendered ⇒ displayed at its hash; recall across cells labelled `historical` when changed.
 
+- [ ] **Gate P2.4:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+
 ### P2.5 The one rebuild mechanism (five uses)
 #### P2.5.1 [M] `Rebuild(reason)` · TODO
 - Why: [§5.8](docs/runtime/residency-rebuild.md#sec-5-8) N2; F03 (replace the whole projection; preserve protocol units; never reuse a continuation that restores evicted bodies).
@@ -1134,6 +1146,8 @@ Goal: [§18.2 Stage B](docs/implementation/roadmap.md#sec-18-2): campaign contro
 - Why: [§13.2 "lost constraint or evidence after a rebuild"](docs/operations/recovery.md#sec-13-2); FX-19.
 - Build: compare mandatory coverage before/after installation (constraints, acceptance ids, amendments, CON refs); on loss restore the previous projection and rehydrate authority before any action.
 - Done: FX-19.
+
+- [ ] **Gate P2.5:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
 
 ### P2.6 Knowledge base read path, STATUS/CAL (deterministic)
 #### P2.6.1 [C][M] `Note` model, `Kb` store, index generation, Markdown export · TODO
@@ -1166,6 +1180,8 @@ Goal: [§18.2 Stage B](docs/implementation/roadmap.md#sec-18-2): campaign contro
 - Log: 2026-09-20 — registered before code at clean `5ec1e0c`; [implementation plan and journal](audit/OUT-OF-ORDER-P2.6.5.md).
 - Log: 2026-09-20 — DONE: immutable CalibrationStats/observations, explicit inclusive bands and versioned series, checkpoint dedup/conflict refusal, terminal/censored counts, medians, DECIMAL128 mean ratios and pure strict >50% warning. 13 calibration + 13 context tests passed; rational oracle seed 265 (120 histories), independent review approved, exact rounding regression added. Final Windows build core 803/0 failures/6 skips, provider-api 15 cached green results; ABI checked. P2.1.4 collection and P2.6.4 persistence/controller events/optional prior remain pending; no Linux/live gate claim.
 
+- [ ] **Gate P2.6:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+
 ### P2.7 Stage B validation
 #### P2.7.1 [V] Fixtures and crash intervals · TODO
 - Build: FX-11, 19, 20, 22, 23, 35 (invalidation marks), 42, 45, 46, 49 (S1 parameterization: cancellation, lease, reservation, reconciliation, accounting paths), 51 (two contexts, same path + hash ⇒ context-local displayed ranges), 56, 57; IX-03, IX-06, IX-11, IX-17; crash during a command / after a mutation before its receipt / during a rebuild / after an external effect with lost acknowledgement.
@@ -1178,6 +1194,8 @@ Goal: [§18.2 Stage B](docs/implementation/roadmap.md#sec-18-2): campaign contro
 #### P2.7.3 [V] Economics report from manifests · TODO
 - Build: per-campaign export of boundary cost share, continuations per increment, rebuilds per cell, `[A]` share, cache classes from the fake adapter; break-even estimate per [§16.2](docs/economics/costs.md#sec-16-2) as a diagnostic.
 - Done: report generated; the B2 ≥ B1 gate is recorded as **deferred to live evaluation** (D-28).
+
+- [ ] **Gate P2.7:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
 
 ---
 
@@ -1214,6 +1232,8 @@ Goal: [§18.2 Stage C](docs/implementation/roadmap.md#sec-18-2): scheduler with 
 #### P3.1.6 [M] `unavailable` receipts and blocked path · TODO
 - Build: required check cannot run (missing runner/toolchain) ⇒ `unavailable` receipt + `blocked` report with the concrete blocker; no endless gating.
 - Done: FX-13 (full).
+
+- [ ] **Gate P3.1:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
 
 ### P3.2 Impact engine and index (tier 0/1 heuristics)
 #### P3.2.1 [M] `ImportGraph` and `tests_for` · TODO
@@ -1260,6 +1280,8 @@ Goal: [§18.2 Stage C](docs/implementation/roadmap.md#sec-18-2): scheduler with 
 - Log: 2026-09-20 — admission/model before code; implementation and author review complete; 20 impact tests, 500 seed-327 graph and 300 seed-3271 hunk oracles, atlas package green. Review regression RED then fixed for unknown packages. Next ABI/full build. [Protocol](audit/OUT-OF-ORDER-P3.2.7.md).
 - Log: 2026-09-20 — DONE after additive ABI and final full build: core 875/0 failures/errors/6 platform skips; eval 30/provider-api 15 reused. First-run FX-22 failure and isolated pass retained in protocol. API guide, D-63, producer mapping and handoffs synchronized; P3.2.1–P3.2.6 retain their original runtime gates.
 
+- [ ] **Gate P3.2:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+
 ### P3.3 Scripted transform path
 #### P3.3.1 [M] `edit(transform)` with diff receipt · TODO
 - Why: [§9.2](docs/runtime/workspace-editing.md#sec-9-2); F05 corrections (preimages first; discard or guarded inverse; honest partial state).
@@ -1271,6 +1293,8 @@ Goal: [§18.2 Stage C](docs/implementation/roadmap.md#sec-18-2): scheduler with 
 #### P3.3.2 [M] Out-of-scope and count-failure handling · TODO
 - Build: reject the transform when `touched_outside_scope ≠ ∅` or the match count misses `expected_matches`: discard the isolated candidate when one was used; else guarded inverse only where current bytes still match the transform's own postimages; report `restored | partial | unknown_outcome` with actual effects; never promise unit rollback or undo of external effects.
 - Done: FX-40.
+
+- [ ] **Gate P3.3:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
 
 ### P3.4 Scope guard and test-integrity guard
 #### P3.4.1 [M] `ScopeGuard` · TODO
@@ -1288,6 +1312,8 @@ Goal: [§18.2 Stage C](docs/implementation/roadmap.md#sec-18-2): scheduler with 
 - Build: register scope, acceptance-surface, contract-touch (needs CON anchors; active once any CON note exists) and repeated-failure-signature (fingerprints P4.6.2) gates with `Gates` (P1.8.5).
 - Done: gate table of [§5.6](docs/runtime/gates-termination.md#sec-5-6) fully populated except judge-dependent ones.
 
+- [ ] **Gate P3.4:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+
 ### P3.5 Refactor mode
 #### P3.5.1 [M] Activation, behaviour snapshot, `red_ok_until` · TODO
 - Why: [§8.9](docs/verification/refactoring.md#sec-8-9); [§1.2 broad refactor class](docs/architecture/principles.md#sec-1-2).
@@ -1300,6 +1326,8 @@ Goal: [§18.2 Stage C](docs/implementation/roadmap.md#sec-18-2): scheduler with 
 - Build: an increment changing a cross-boundary interface must reference a `CON` note (new or superseded) in `[K]` (validated when the KB has CON notes; otherwise recorded as a planning gap); equivalence evidence compares test identities, outcomes and boundary/compatibility cases of preserved tests and goldens at `s_n` vs `s0` (equal counts insufficient; new behaviour ⇒ new requirement); campaign-scope review mandatory: `Authority.review(ReviewRequest(full diff, contract, receipts, rubric))` human path; unavailable ⇒ `blocked`, never skipped; `verify(review)` unmasked in this human form.
 - Done: refactor campaign cannot be accepted without a signed review; equivalence report attached to the finish receipt.
 
+- [ ] **Gate P3.5:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+
 ### P3.6 Flaky policy, cadence, quality gates
 #### P3.6.1 [M] `Flaky` policy · TODO
 - Why: [§8.10](docs/verification/refactoring.md#sec-8-10).
@@ -1310,12 +1338,16 @@ Goal: [§18.2 Stage C](docs/implementation/roadmap.md#sec-18-2): scheduler with 
 - Build: `K = 5` verified increments + campaign end (P2.2.6 wiring); `CHK-quality-gate` = configured complexity/duplication threshold commands (`[O]` until a project configures them; never invented).
 - Done: cadence test over a scripted 7-increment campaign.
 
+- [ ] **Gate P3.6:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+
 ### P3.7 Boundary pre-compilation `[O gate: ablation §19.5 pre-compilation on/off; miss rate vs latency saved]`
 #### P3.7.1 [O][M] `Precompile` · TODO
 - Why: [§6.6](docs/context/continuity.md#sec-6-6) N4; F06 (full input fingerprint; no provider cache population locally).
 - Pkg: `context`
 - Build: after the cell's last mutation when only `slow|expensive` checks remain, build the next increment's `[K]` locally; `Fingerprint(candidate stamp, contract/authority revision, selected increment, carry-forward/register version, note/contract/skill/index versions, role, role-text version (D-38), profile, frozen policy)`; on cell close reuse iff fingerprint and required coverage still match, else discard and recompile; only for `cell_end(next_increment)`, never continuation of a red increment; provider pre-warm requests are a separate, budgeted, off-by-default option (not implemented here); hit/miss + p50/p95 boundary latency in telemetry.
 - Done: FX-44; no stale seed ever served (invariant test).
+
+- [ ] **Gate P3.7:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
 
 ### P3.8 Stage C validation
 #### P3.8.1 [V] Fixtures · TODO
@@ -1325,6 +1357,8 @@ Goal: [§18.2 Stage C](docs/implementation/roadmap.md#sec-18-2): scheduler with 
 #### P3.8.2 [V] Scripted migration and 40-file rename · TODO
 - Build: cross-file migration campaign completes with fewer redundant checks (reuse proofs visible in receipts) and no lost requirement; 40-file rename via transform is reconciled, reviewed (human path), reversible (`revert:turn:N`), and produces no false green.
 - Done: both scripted campaigns pass; invariant metrics zero.
+
+- [ ] **Gate P3.8:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
 
 ---
 
@@ -1349,6 +1383,8 @@ Goal: [§18.2 Stage D](docs/implementation/roadmap.md#sec-18-2): KB with queue/c
 - Build: `score = w_scope·match(scope, write_scope) + w_dep·overlap(depends_on, contracts in play) + w_fresh·freshness + w_use·use_value + w_evid·evidence_quality − w_len·tokens` (default weights and threshold D-37 with bounded feature definitions declared before use; staleness is an eligibility check *before* ranking; tunable from held-out usefulness data); cap 8 notes / 1.5K; `CON` for touched paths bypass the cap; nothing when nothing is strongly relevant; never re-inject unchanged advice within a cell; focus notes ≤ 300 tokens per turn anchored in `Focus` or files touched this turn, each once per cell, rendered in `[A]` (P1.8.3 slot); `(injected, cited-in-register?, outcome)` logged per note; `retrieval_miss` ops and `Open (needs: …)` lines logged as labelled negatives; `kb.propose` unmasked; the `CAL` note (P4.2.1) reaches the plan cell through this path and replaces the P2 statistics block (D-42).
 - Done: FX-29 (CON compiled in; impact flags the contract touch); ranking deterministic for equal inputs; `[O gate: ablation KB injection off/frozen/live]` flag for the live path.
 
+- [ ] **Gate P4.1:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+
 ### P4.2 Extractor
 #### P4.2.1 [M] Post-cell `Extractor` · TODO
 - Why: [§12.1](docs/knowledge/learning.md#sec-12-1), [§3.4 extractor row](docs/architecture/roles-shapes.md#sec-3-4); low tier, from the archived trace, never in the busy cell.
@@ -1362,6 +1398,8 @@ Goal: [§18.2 Stage D](docs/implementation/roadmap.md#sec-18-2): KB with queue/c
 - Build: `NEG` states `unknown · unsearched · searched-empty(scope, version, index coverage) · contradicted · verified-absent(bounded domain)`; `x` facts ⇒ `PIT` candidates at campaign end; review findings ≥ major ⇒ `Open` items in the next register + `PIT` candidates; recurring repair diagnoses ⇒ `PIT` candidates.
 - Done: a later cell reading a `NEG` note never sees "not found" as "absent" (render test).
 
+- [ ] **Gate P4.2:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+
 ### P4.3 Skills and behaviour maps
 #### P4.3.1 [M] `Skill` notes and module filtering · TODO
 - Why: [§12.2 skills](docs/knowledge/learning.md#sec-12-2); [§6.1 mandatory skill modules](docs/context/compiler.md#sec-6-1); F06 (mandatory invariants survive filters).
@@ -1373,6 +1411,8 @@ Goal: [§18.2 Stage D](docs/implementation/roadmap.md#sec-18-2): KB with queue/c
 - Why: [§7.5](docs/repository/navigation.md#sec-7-5) `[HYPOTHESIS]`; `[O gate: ablation behaviour maps on/off; measured on navigation + upkeep cost]`.
 - Build: `BMAP-<subsystem>`: behaviour → entry points → implementation → state read/written → important callers → tests → locators `path::symbol@hash`; generated from the index where possible, from validated worker observations otherwise (extractor `BMAP-delta`); locators validated at compile time (`unresolved` when the symbol moved); progressive disclosure subsystem → behaviour → symbol → source; `look(bmap, subsystem)` ≈ 200–400 tokens; `[R]` excerpt ≤ 300 for the focus subsystem.
 - Done: stale locators shown `unresolved`; maps never replace current source (an edit still needs a current read).
+
+- [ ] **Gate P4.3:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
 
 ### P4.4 Delegation
 #### P4.4.1 [C][M] Packets and `Delegator` · TODO
@@ -1406,6 +1446,8 @@ Goal: [§18.2 Stage D](docs/implementation/roadmap.md#sec-18-2): KB with queue/c
 - Deps: P4.4.2, P4.4.3, P4.4.4, P4.6.3, P4.2.1
 - Build: versioned default texts in `Config` resources per role (source: the duties and output columns of §3.4); the declared packet validators bound to `Completion.assess`; per-role `[S]` assembly reusing the shared evidence lines, error policy and data rule; hosts may override texts; texts are part of the frozen attempt configuration.
 - Done: every non-implementing role has a text and a validator; no role text grants authority or marks a requirement complete.
+
+- [ ] **Gate P4.4:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
 
 ### P4.5 Routing
 #### P4.5.1 [M] Tier table, function table, `Router.selectProfile` · TODO
@@ -1450,6 +1492,8 @@ Goal: [§18.2 Stage D](docs/implementation/roadmap.md#sec-18-2): KB with queue/c
 
 - Log: 2026-09-20 — DONE. 15 focused tests/300 seeded trajectory oracles; author review resolved; ABI/full Windows/JDK 26 build green in 3m19s. Core 840/0 failures/errors/6 skips, eval 30/0 failures/errors/skips executed; provider-api 15 reused. Protocol/API/handoff complete. P4.5.1/P4.5.2/FX/CI/Linux/live gates unchanged.
 
+- [ ] **Gate P4.5:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+
 ### P4.6 Recovery ladder
 #### P4.6.1 [M] Failure classes and `recover()` · TODO
 - Why: [§13.1–13.2](docs/operations/recovery.md#sec-13-1); F15; invariant 6.
@@ -1473,12 +1517,16 @@ Goal: [§18.2 Stage D](docs/implementation/roadmap.md#sec-18-2): KB with queue/c
 - Build: same hypothesis failed twice ⇒ new controller-assigned attempt id, same contract, STATE Dead ends + Decisions attached, empty tail, optional escalation profile; both attempts' receipts kept; selection by acceptance evidence never by plurality; attempt count not reset; no speculative branching before simpler recovery.
 - Done: alternative attempt preserves previous evidence and consumes the same increment allowance.
 
+- [ ] **Gate P4.6:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+
 ### P4.7 MCP mounts and catalog (contract)
 #### P4.7.1 [C] `Mount` contract and catalog · TODO
 - Why: [§15.3](docs/platform/adapters.md#sec-15-3); F11 corrections (annotations are hints); D-21.
 - Pkg: `tool` (catalog), `tool.run` (invocation)
 - Build: `Mount(server, tools: descriptors, localApproval, effectClassOverride)`; `look(catalog)` one-liners; `run(["mcp:<server>/<tool>", …])` through the same envelope/store/shaping/effect classes (locally approved validated read-only ⇒ `R`; otherwise `D` until configured); schemas never change mid-session; caller's ceiling inherited; `McpClient` transport interface only (P7).
 - Done: FX-39 with a fake mount; catalog stable within a session.
+
+- [ ] **Gate P4.7:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
 
 ### P4.8 Stage D validation
 #### P4.8.1 [V] Fixtures · TODO
@@ -1488,6 +1536,8 @@ Goal: [§18.2 Stage D](docs/implementation/roadmap.md#sec-18-2): KB with queue/c
 #### P4.8.2 [V] Review, recovery and routing fixtures · TODO
 - Build: labelled injected-defect diffs the review cell must catch (scripted judge responses validated against the protocol, not model quality); recovery ladder fixtures per failure class; routing table with fake profiles and budgets; warm-vs-cold KB comparison recorded as **deferred to live evaluation** (D-28).
 - Done: protocol fixtures green; judge calibration on real models listed under P7.
+
+- [ ] **Gate P4.8:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
 
 ---
 
@@ -1530,12 +1580,16 @@ Goal: [§18.2 Stage E](docs/implementation/roadmap.md#sec-18-2): writer cells + 
 - Log: 2026-09-20 — implemented exact tagged-NFA/lexical-DFA BFS, intersection/difference, shortest rechecked witnesses, Unicode scalar classes and three resource limits. Ten focused Windows/JDK 26 tests pass, including independent recursive matcher and 250 seeded scope pairs against exhaustive short paths. Corrected one test expectation: a/* excludes one level, not descendants. Next independent review/ABI/full build; still IN_PROGRESS.
 - Log: 2026-09-20 — complete. Independent review: no required findings. Core ABI regenerated/inspected; full offline Windows/JDK 26 build succeeded (core 813 tests, 0 failures/errors, 6 platform skips; eval 18 tests, 0 failures/errors/skips; provider-api 15 reused UP-TO-DATE). [API guide](core/README.md), [protocol](audit/OUT-OF-ORDER-P5.1.5.md); no new dependencies, weakened tests, S3 enablement or physical-write authority. P5.1.1/P5.1.4 retain integration. Next out-of-order candidate OOO-07; normal return P0 validation -> P1.8.2.
 
+- [ ] **Gate P5.1:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+
 ### P5.2 Permission ladder and commit policy
 #### P5.2.1 [M] Stages beyond `patch` · TODO
 - Why: [§14.2](docs/platform/security.md#sec-14-2); invariant: never "delivered" for a patch.
 - Pkg: `auth`, `campaign`
 - Build: `local commit` (on a harness branch or shadow ref, never the user's branch — [§20.1 TRACE rejection](docs/reference/decisions.md#sec-20-1)), `push`, `merge`, `deploy` as separate D-class grants through `Authority.approve`; autonomous commit predicate: ceiling ≥ commit ∧ low blast radius ∧ easy reversibility ∧ L0–L2 green with current stamps ∧ (S2+) judge approval; default human anchors: interface-contract changes, data migrations, production deploys, new network access, ceiling elevation; model-generated metadata can never grant permissions, lower mandatory verification or raise spending limits; `highest_authorized_stage` in the finish receipt.
 - Done: fixture "zero unauthorized-stage publications" across a scripted campaign with every ceiling value.
+
+- [ ] **Gate P5.2:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
 
 ### P5.3 QA cell (L3) and L4 gates `[O gate: L3/L4 fixtures; requires a disposable environment]`
 #### P5.3.1 [O][M] `QaCell` implementation · TODO
@@ -1546,6 +1600,8 @@ Goal: [§18.2 Stage E](docs/implementation/roadmap.md#sec-18-2): writer cells + 
 #### P5.3.2 [O][C] L4 measurement gate contract · TODO
 - Build: `Check.kind = quality` measurement variant: artifacts with workload, environment and variability; performance/safety claims require it ([§8.2 L4](docs/verification/scheduler.md#sec-8-2)).
 - Done: contract + validator; runner hook for project-defined measurement commands.
+
+- [ ] **Gate P5.3:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
 
 ### P5.4 Index tiers 1–2 `[O gate: ablation language-service adapter on/off]`
 #### P5.4.1 [O][M] `index-treesitter` module (tier 1) · TODO
@@ -1558,10 +1614,14 @@ Goal: [§18.2 Stage E](docs/implementation/roadmap.md#sec-18-2): writer cells + 
 - Build: `interface LanguageService { defs, refs (scope + unresolved dynamic cases), diagnostics, incrementalTypeCheck }` feeding `look(def/refs/impact)` with `tier = 2` and the fast checker; implementation (LSP-backed) deferred to P7.
 - Done: contract + fake implementation in test fixtures.
 
+- [ ] **Gate P5.4:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+
 ### P5.5 Dense retrieval seam `[O gate: only after measured lexical misses; ablation on/off]`
 #### P5.5.1 [O][C] `Retriever` interface · TODO
 - Build: `Retriever` with the lexical default (P2.6.2); embedding provider contract (compute + index in `indexes/`, disposable); a cold or missing service never blocks a cell (FX-46); measured lexical-miss rate from retrieval-miss logs is the enabling evidence.
 - Done: contract + fake; ranker can consume a second candidate source without protocol change.
+
+- [ ] **Gate P5.5:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
 
 ### P5.6 Generated tools and skills promotion `[O]`
 #### P5.6.1 [O][M] Generated tool lifecycle · TODO
@@ -1573,16 +1633,22 @@ Goal: [§18.2 Stage E](docs/implementation/roadmap.md#sec-18-2): writer cells + 
 - Build: `promote` output (P4.1.2) rendered as proposed tasks (test/linter/schema check) with the evidence on held-out tasks required before generalization; never auto-committed.
 - Done: proposal artifact in `exports/`.
 
+- [ ] **Gate P5.6:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+
 ### P5.7 Async checker seam `[O gate: only with a tier-2 adapter and an ablation sync vs async]`
 #### P5.7.1 [O][C] `Watcher` interface · TODO
 - Why: [§8.1 "why synchronous in the baseline"](docs/verification/scheduler.md#sec-8-1); D12 in [§20.2](docs/reference/decisions.md#sec-20-2).
 - Build: watcher results carry supersession + version tags and feed the same `ChecksRender`; off by default; sync checker remains the baseline.
 - Done: contract + fake watcher; superseded results never presented as current.
 
+- [ ] **Gate P5.7:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+
 ### P5.8 Stage E validation
 #### P5.8.1 [V] Fixtures and publication invariant · TODO
 - Build: FX-26, 27, 28, 39, 46, 49, 51; zero unauthorized-stage publications; S3 vs sequential S1 comparison recorded as deferred to live evaluation (D-28).
 - Done: green on both platforms; S3 flag default off verified.
+
+- [ ] **Gate P5.8:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
 
 ---
 
@@ -1629,16 +1695,22 @@ Goal: [§18.2 Stage F](docs/implementation/roadmap.md#sec-18-2), [§19](docs/eva
 
 - Log: 2026-09-20 — DONE. Review found validation-priority defect; corrected with zero-mass/split regression, reviewer confirmed no remaining required findings. Final focused 12 tests, ABI check and full Windows/JDK 26 build pass: eval 30 tests executed, core 813/6 skips and provider-api 15 reused. No parent or gate closure. Protocol and eval README updated; next authorized candidate OOO-08.
 
+- [ ] **Gate P6.1:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+
 ### P6.2 Offline improvement runner skeleton `[O]`
 #### P6.2.1 [O][M] Trace mining and experiment bookkeeping · TODO
 - Why: [§12.3](docs/knowledge/learning.md#sec-12-3); never editable by a candidate: evaluator access, acceptance, budget accounting, adoption rules; live attempts run a frozen harness.
 - Build: mine versioned traces for repeated failure categories (MAST-tagged distribution) and cost concentration; `Hypothesis(mechanism, module, predictedQuality, predictedEconomy)`; bounded change proposal record; matched-total-budget experiment plan vs the frozen baseline; integrated-evaluation and transfer-set bookkeeping; promotion for subsequent attempts with rollback; comparison against "spend the same on stronger reasoning / better context / another attempt".
 - Done: records and reports only; no automatic harness mutation.
 
+- [ ] **Gate P6.2:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+
 ### P6.3 Validation
 #### P6.3.1 [V] Runner and scorecard checks · TODO
 - Build: fixture suite green through the runner; scorecard tests; contamination fixture; export schema documented.
 - Done: `eval` module publishes its report format; live campaigns listed under P7.
+
+- [ ] **Gate P6.3:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
 
 ---
 

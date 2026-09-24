@@ -1,0 +1,527 @@
+# Session history (append-only)
+
+Archive of session checkpoints. **Never read at startup**; the current handoff is `CONTINUE-TASK.md`
+(next work) and `actual_state.md` (implemented state), and the workflow is `CLAUDE.md`. Every
+instruction below is historical and superseded. New sessions append ≤10 lines at the end.
+
+## Archived 2026-09-24 — `CONTINUE-TASK.md` as of `3681040` (verbatim)
+
+### Continue ASTROLABE implementation
+
+**Current checkpoint — P1.9.1 `Lifecycle` DONE (2026-09-24).**
+On `main` at `12fc5d7` (fast-forwarded from the session branch `claude/inspiring-goodall-9viaxy`,
+owner-approved); the P1.8.8 commits were already on `main`.
+
+#### What is true now
+
+**The controller has its state machine.** `campaign.Lifecycle` over `CampaignState` (work, attempt,
+contract version, `CampaignPhase { Opened, Running, Finishing, Ended }`, `RequirementGraph`, `Ledger`,
+`CellState`s, `CampaignOutcome`, `seq`). A state is made only by `Lifecycle.open(contract, graph)` and
+advanced only by `Lifecycle.apply(state, contract, transition)` (private constructor,
+`@ConsistentCopyVisibility`). Each `Transition` carries its record: `Reconciled`, `Dispatched`,
+`Returned(exit)`, `Committed(Accepted, stampNow)` (only the increment's latest *completed* cell, about the
+tree now), `Unblocked`, `IncrementCancelled`, `Finishing`/`Finished` (every requirement `stampValid` at one
+stamp, receipts non-empty — the only path to `completed`), `Stopped(outcome ≠ completed)` (no running
+cell), `Resumed` (resumable outcomes only). `Lifecycle.disposition(exit, completion)` is the §3.7
+`dispatch_outcome` table: `Close` · `Continue(reason, fallback)` · `Stop(outcome)` (D-64 fixes the S0
+fallbacks). `RequirementGraph` gained `block`/`unblock`. `SqliteCampaigns` persists the state plus the
+`increments`/`ledger` rows `Views.ledger` reads, in one transaction, refusing any save that does not extend
+the stored `seq` by one. **Store schema is v2** (`campaigns` table). Do not reimplement P1.9.1.
+
+**Counts: 81/185 DONE, 0 IN_PROGRESS, 104 TODO.** P0 19/19; P1 53/64; P2–P6 9/102.
+Verification (Linux cloud sandbox, JDK 25 scratch copy): `LifecycleTest` **9/9**, graph + store suites
+71/0; full core **950 tests, 2 failures, 6 skips** — both failures are the known environmental ones
+(`FixtureReposTest` gradle-small, `SearchBackendParityTest` café), outside the change; `checkKotlinAbi`
+green with the regenerated, purely additive dump.
+[CI run 35941844915](https://github.com/korvin2000/ASTROLABE/actions/runs/35941844915) is **green on both
+platforms** (JDK 26, `check` incl. `checkKotlinAbi`) at `12fc5d7`, the P1.9.1 commit.
+
+#### Resume here
+
+1. **Next task: P1.9.2 campaign open and reconciliation**, then P1.9.3 (S0 run + `Compiler`), P1.9.4
+   (lifecycle controls), P1.9.5 (`FinishReceipt`), P1.9.6 (`Astrolabe`/`AstrolabeJava`), P1.11.1–P1.11.2,
+   P1.12.1–P1.12.4. `Deps` and §2.4 producer readiness govern. P1.9.2 produces `Lifecycle.open` +
+   `Transition.Reconciled` (and `Resumed` on reopen of a resumable campaign) and saves through `Campaigns`;
+   P1.9.3 drives `Dispatched → Returned → disposition → Committed → Finishing → Finished`, mapping
+   `Continue` to its `fallback` in S0.
+
+#### Carried forward — read before touching these
+
+1. **P1.9.2 audit debt (unchanged):** open the derived contract after workspace capture, bind
+   `ProtectedPaths`, pass `Sniff` commands into `Checks.seed` and approved rules into `Prime`.
+2. **S0 graph must validate:** `Lifecycle.open` and `graph.recordAccepted` both require
+   `RequirementGraph.validate(contract)` to be empty, so P1.9.3's `G_single(C)` increment needs
+   `produces`, a run/check acceptance with an evidence kind, and full acceptance coverage.
+3. **Exit-gate refinement (TODO §3.1):** red = a `failed` receipt; inconclusive is missing evidence.
+4. **Open finding for P1.12.2:** recall pointers exist only for `look` results.
+5. **Recorded, not diagnosed:** the transient `StamperTest` `git exited -1` under load (`TempRepo.runGit`).
+6. **Packet gaps by design:** no `diffstat` (P1.9.5), `transforms` empty until P3.3, `waiting` null until P2
+   handles (so `waiting_for_process` has no producer yet).
+7. **Sandbox build:** JDK 26 is unreachable in the Linux cloud sandbox; see TODO §1 resume notes (scratch
+   copy retargeted to JDK 25, never committed; `rsync` is absent — copy with `tar`). Maven Central 429s: retry.
+
+**Historical checkpoints below; their former next-step instructions are superseded.**
+
+**Previous checkpoint — P1.8.8 DONE, the P1 cell runtime is complete (2026-09-24).**
+On `main`; this record's commit.
+
+#### What is true now
+
+**Every cell exit hands back a Result Packet.** `CellExit.packet` is a §5.9 `ResultPacket` collected by
+the loop from records — status from the exit, dispatch base, displayed read versions, net changes with
+their runtime-observed origin (Edit | Run | External), latest receipts, final stamp and environment,
+coverage, scope and test-integrity flags, usage by billable dimension — and journaled before the exit
+returns. The model reaches only `claims` (S0: open questions). `packet.proposal()` is the verifier's
+`CompletionProposal`; `done` stays a proposal until `Verifier.accept` (tested both ways). Role completion
+resolves per packet kind via `RoleCompletion.forRole`: the implementing exit gate, a registered validator,
+or an explicit `CannotProgress` — never the implementing gate for another role. Refused proposals are
+recorded gaps. Do not reimplement any of P1.8.1–P1.8.8.
+
+**Counts: 80/185 DONE, 0 IN_PROGRESS, 105 TODO.** P0 19/19; P1 52/64; P2–P6 9/102.
+Verification this session (Linux cloud sandbox, JDK 25 scratch copy — JDK 26 is unreachable there, see
+TODO §1 resume notes): cell **65/65** (6 new `ResultPacketTest`); full core **941 tests, 3 failures,
+6 skips**, all three outside the change and reproduced on the unmodified baseline or passing in isolation.
+[CI run 35939243934](https://github.com/korvin2000/ASTROLABE/actions/runs/35939243934) is **green on both
+platforms** (JDK 26, `check` incl. `checkKotlinAbi`) at `b9ead19`, the P1.8.8 commit.
+
+#### Resume here
+
+1. **Next task: P1.9.1 `Lifecycle` state machines**, then P1.9.2–P1.9.6 (campaign open, S0 run +
+   `Compiler`, lifecycle controls, `FinishReceipt`, `Astrolabe`/`AstrolabeJava`), P1.11.1–P1.11.2,
+   P1.12.1–P1.12.4. `Deps` and §2.4 producer readiness govern. The controller consumes
+   `CellExit.packet`: `packet.proposal()` → `Verifier.accept` → commit; `ChangeOrigin` feeds P1.9.5's
+   `agent | by_run | pre_existing` split; `CellContext.generation` takes P1.9.4's execution generation.
+
+#### Carried forward — read before touching these
+
+1. **P1.9.2 audit debt (unchanged):** open the derived contract after workspace capture, bind
+   `ProtectedPaths`, pass `Sniff` commands into `Checks.seed` and approved rules into `Prime`.
+2. **Exit-gate refinement (TODO §3.1):** red = a `failed` receipt; inconclusive is missing evidence.
+3. **Open finding for P1.12.2:** recall pointers exist only for `look` results (run/edit bodies stub as losses).
+4. **Recorded, not diagnosed:** the transient `StamperTest` `git exited -1` under load (`TempRepo.runGit`).
+5. **ABI (P1.8.8, non-additive, reviewed):** `CellExit` subclasses gain `packet`; `CellContext` gains
+   `generation` (older overloads kept); `Cell.completion` is nullable; `RoleOutput` gains `packet`.
+6. **Packet gaps by design:** no `diffstat` (P1.9.5 derives it from preimages), `transforms` empty until
+   P3.3, `waiting` null until P2 handles, `not_tested`/notes/self-assessment have no S0 producer.
+
+**Historical checkpoints below; their former next-step instructions are superseded.**
+
+**Current checkpoint — P0 CLOSED, P1.8.2–P1.8.7 DONE, the S0 cell runs (2026-09-21).**
+On `main`; this record's commit. Session ended at a complete, pushed, green checkpoint.
+
+#### What is true now
+
+**The P0 gate is closed.** [CI run 35623690223](https://github.com/korvin2000/ASTROLABE/actions/runs/35623690223)
+is green on **both** platforms at `8052946` — P0.1.2's acceptance and the both-platform criterion
+P0.6.1/P0.6.2/P0.6.4 were reopened for. Ubuntu 2m02 / three platform skips, Windows 8m45 / two.
+**P0 is `FIXTURE_VALIDATED`.** Every live gate stays `UNMEASURED` (P7). Do not reopen these.
+[Run 35630868103](https://github.com/korvin2000/ASTROLABE/actions/runs/35630868103) is green on
+both platforms for `de507a9` itself, so this checkpoint's own tree is CI-validated, not just the
+commit that closed the gate.
+
+**The S0 cell runs.** `Cell.run(ctx, increment, budget): CellExit` wires `Layout` (`[S][R][K][T]`),
+`Anchor` (`[A]`), `Gauges`, `Gates` and `Residency`: it renders the turn, admits it, fails closed
+on an incomplete call set, partitions and dispatches, reconciles, drains the checker, evicts on
+the `k` cadence and leaves a **persisted checkpoint on every exit path**, including the failure
+ones, proved under fault injection. Exits are distinct: `Completed`, `Blocked`,
+`Partial(Pressure|TurnBudget|TokenBudget|Reserve|CompletionStalled)`, `Failed`, `Cancelled`.
+Do not reimplement any of P1.8.1–P1.8.7.
+
+**Counts: 79/185 DONE, 0 IN_PROGRESS, 106 TODO.** P0 19/19; P1 51/64; P2–P6 9/102.
+Local Windows/JDK 26 full build at this checkpoint: **core 935 tests / 0 failures / 0 errors /
+6 existing platform skips**, eval 30, provider-api 15. `checkKotlinAbi` green.
+
+#### Resume here
+
+**Next task: P1.8.8 Role completion and `ResultPacket`** — it fills the `RoleCompletion` /
+`RoleOutput` / `CompletionDecision` seam `CellContext` already declares. Then P1.9.1–P1.9.6
+(controller, S0 compiler, lifecycle controls, finish receipt, `Astrolabe`/`AstrolabeJava` facade),
+P1.11.1–P1.11.2 telemetry, P1.12.1–P1.12.4 validation. `Deps` and §2.4 producer readiness govern,
+not numeric order. Read each task's complete entry and its prerequisites' `Log:` lines first.
+
+#### Carried forward — read before touching these
+
+1. **Only one 2026-09-20 audit debt is still open:** P1.9.2 must open the derived contract after
+   workspace capture, bind `ProtectedPaths`, pass `Sniff` commands into `Checks.seed` and approved
+   rules into `Prime`. Everything P1.8.2 and P1.8.7 owed is closed (TODO §1 resume notes).
+2. **Exit-gate refinement (TODO §3.1):** "red" means a receipt whose outcome is `failed`. An
+   inconclusive/timed-out/unavailable check is missing evidence, not red (L8) — it refuses
+   completion only where the check is required. Acceptance is unchanged. This mattered because a
+   generic shaper returns `inconclusive` until P3.1.4.
+3. **Open finding for P1.12.2:** recall pointers exist only for `look` results; a `run`/`edit`
+   alias resolves to an action or edit id, so a stubbed run body is recorded as a loss rather than
+   recalled. Decide there whether run/edit captures earn observation ids.
+4. **Recorded, not diagnosed:** one full-build run failed in `StamperTest` fixture setup with
+   `fixture git exited -1 … git config core.autocrlf false` and no output — a `git` process that
+   died under the suite's process load, not an assertion. It did not reproduce in an isolated
+   rerun or in the two following full builds. `TempRepo.runGit` has no timeout or retry and
+   reports only the exit code; start there if it recurs.
+5. **ABI:** `Currency` gained a `red` field, so its `copy` signature changed — the one
+   non-additive entry in the dump; `@JvmOverloads` preserves the previous constructor.
+
+#### How this session worked
+
+P1.8.5, P1.8.6 and P1.8.7 were delegated to Fable worktree agents (owner instruction: route
+complex, non-trivial tasks to Fable) and merged with `--no-ff`; each ABI conflict was resolved by
+regenerating the dump, never by hand. Worktrees are removed and their branches deleted; on Windows
+`git worktree remove` fails with "Filename too long", so use PowerShell
+`Remove-Item -LiteralPath '\\?\<path>' -Recurse -Force` then `git worktree prune`.
+Delegated work was reviewed before merging, not taken on trust: two changes touched measuring
+instruments (the fake adapter's cache model, the exit gate's red rule) and both were checked to be
+fidelity fixes rather than criteria tuned to pass.
+
+**Historical checkpoints below; their former next-step instructions are superseded.**
+
+**Current checkpoint — P0 CLOSED and P1.8.2–P1.8.6 DONE (2026-09-21)**, on `main` at `fd7773c`.
+
+**The P0 gate is closed.** [CI run 35623690223](https://github.com/korvin2000/ASTROLABE/actions/runs/35623690223)
+is green on **both** platforms at `8052946`, which is P0.1.2's acceptance and the both-platform
+criterion P0.6.1/P0.6.2/P0.6.4 were reopened for: Ubuntu 2m02 / three platform skips, Windows
+8m45 / two. **P0 is `FIXTURE_VALIDATED`**; every live gate stays `UNMEASURED` (P7).
+Three rounds were needed and two of them were this session's own test assumptions, not the
+harness. (1) The four recorded failures: `gradlew` mode `100644`; a **real product defect** in
+`Git`'s D-53 index guard, which compared path spellings so the runner's short `TEMP` name passed
+and `update-index` would have rewritten the user's index; Node 22's junit reporter having no
+`file` attribute, so the fixture guarantee needs Node 24; and a fixed 10s execution deadline
+shorter than the launcher's ~20s start-up. ripgrep is now installed on both runners — 128 of the
+130 Windows skips were `rg is not on PATH`, leaving P0.6.3's both-backends criterion unexercised.
+(2) An FX-22 assertion that a background child was still `running`, true only while its sleep
+outlasts the poll. (3) The mirror of the original race: the *measured* deadline could exceed the
+root's fixed 120s lifetime, so it exited 0 first; the lifetime is now derived from the deadline.
+Diagnoses came from the runs' own logs and report artifacts, never from a passing rerun.
+
+**The cell's context machinery is complete.** `Layout` renders the cached `[S][R][K][T]` prefix;
+`Anchor` the volatile `[A]` tail with per-block caps, a fixed reduction order and a measured size;
+`Gauges` the ~20-token line on every result; `Gates` the S0 gate set as pure functions with a
+registration seam for P3/P4 and once-per-condition keys; `Residency` batched eviction, stubs,
+recall and `C(t)`. 42 focused tests. P1.8.5 and P1.8.6 were delegated to Fable worktree agents and
+merged `--no-ff`. Do not reimplement any of these.
+
+Local Windows/JDK 26 full build: **core 921 tests / 0 failures / 0 errors / 6 existing platform
+skips**, eval 30, provider-api 15; ABI additive, `checkKotlinAbi` green after resolving the two
+delegated branches' dump conflict by regenerating. **78/185 DONE, 0 IN_PROGRESS, 107 TODO**;
+P0 complete, P1 at 50/64.
+
+**Recorded, not diagnosed:** one full-build run failed in `StamperTest` fixture setup with
+`fixture git exited -1 … git config core.autocrlf false` and no output — a `git` process that died
+abnormally under the suite's process load, not an assertion. It did not reproduce in an isolated
+rerun or the following full build. `TempRepo.runGit` has no timeout or retry and reports only the
+exit code; if it recurs, start there.
+
+Return: **P1.8.7 Cell turn loop** (delegated when this record was written), then P1.8.8
+ResultPacket, P1.9.* controller/facade, P1.11.* telemetry, P1.12.* validation. TODO §1.1 holds the
+CI evidence; §1.2 has no active override.
+
+**Historical checkpoints below; their former next-step instructions are superseded.**
+
+**Current checkpoint — P1.8.2 Layout DONE (2026-09-21)**, on `main`; commit containing this record,
+from `e51cb9a`. `cell.Layout` renders the cached `[S][R][K][T]` regions: `[S]` = the frozen `Kernel`
+contract (Appendix A, `kernel/1`) + role duties/packet + the seven families with an `enabled this
+turn` line + the three evidence lines + the normative `ErrorPolicy` table + `Boundary.DATA_RULE` +
+`ExecutionModeLabel`; `[R]` = the prime text; `[K]` = `CompiledK` (slice verbatim + pre-existing
+ledger); `[T]` = `Transcript` (pinned user messages verbatim, then native items). Four breakpoints,
+no clock/counter/absolute path in any cached region, omitted rather than empty regions. 7 tests.
+Seeds, ranked notes, skills and carry-forward join `CompiledK` in P2–P4, not here. Do not redo this.
+
+**P0 validation: repaired, second CI run pending.** All four failures of run 35514932596 — repeated
+exactly by run 35532489501 at `3f3edc4`, so there is no fifth mode — were diagnosed from those runs'
+own logs and artifacts: `gradlew` mode `100644`; a **real product defect** in `Git`'s D-53 index
+guard (it compared path spellings, so the runner's short `TEMP` name passed); Node 22's junit
+reporter having no `file` attribute; and a 10s execution deadline shorter than the launcher's ~20s
+start-up. ripgrep and Node 24 are now installed/pinned in the workflow. Run **35621166065** is the
+first to reach the Linux suite at all: **878 tests, 1 failure, 3 skips**, and that one failure was a
+host-dependent status assertion this session had just added to FX-22, now removed. A rerun is
+needed; **P0.1.2, P0.6.1, P0.6.2 and P0.6.4 stay IN_PROGRESS until both jobs are green**.
+
+Local Windows/JDK 26 full build: **core 885 tests / 0 failures / 0 errors / 6 existing platform
+skips**, eval 30, provider-api 15; ABI additive. **70/185 DONE, 4 IN_PROGRESS, 111 TODO**.
+Return: **confirm CI green -> P1.8.3 Anchor**, then P1.8.4–8, P1.9.*, P1.11.*, P1.12.*.
+TODO §1.1 holds the CI evidence table; §1.2 has no active override. All live gates UNMEASURED.
+
+**Historical checkpoints below; their former next-step instructions are superseded.**
+
+**Current checkpoint — P0 validation repair applied (2026-09-21)**, on `main`; commit containing this record, from `1e23b90`.
+All four failures of [CI run 35514932596](https://github.com/korvin2000/ASTROLABE/actions/runs/35514932596)
+were diagnosed from that run's own logs and report artifact — not from reruns — and repaired:
+`gradlew` mode `100755` (Linux exit 126); a **real product defect** in `Git`'s D-53 index guard,
+which compared path spellings and let the runner's short `TEMP` name through; Node 22's junit
+reporter having no `file` attribute (the fixture guarantee needs Node 24); and a fixed 10s
+execution deadline shorter than the launcher's ~20s start-up on the runner. The workflow now
+installs ripgrep on both runners (128 of the 130 Windows skips were `rg is not on PATH`) and
+pins Node 24. The local FX-22 intermittency is diagnosed too: two wall-clock races in `RunTest`,
+both reproduced locally and removed. Each repair has a test that fails without it; the `Git`
+guard was checked with a reverted-guard negative control.
+Local Windows/JDK 26 full build: **core 878 tests / 0 failures / 0 errors / 6 existing platform
+skips**, eval 30, provider-api 15, all executed; ABI dumps unchanged.
+**69/185 DONE, 4 IN_PROGRESS, 112 TODO** — unchanged: P0.1.2, P0.6.1, P0.6.2 and P0.6.4 close
+only when both remote jobs are green, and **Linux is still entirely unvalidated**. That needs a
+push, which is the owner's call.
+Return: **push -> confirm CI green -> P1.8.2 Layout**. TODO §1.1 holds the evidence table; §1.2
+has no active override. All live gates remain UNMEASURED.
+
+**Historical checkpoints below; their former next-step instructions are superseded.**
+
+**Current checkpoint — P3.2.7 / OOO-04 DONE (2026-09-20)**, D-63, on `main`.
+Checkpoint is the commit containing this record; baseline `3f3edc4`. Do not reimplement this kernel.
+Immutable qualified impact snapshots, reverse BFS, test/acceptance closure joins, contract anchors,
+added+deleted line risk and explicit package/workspace fallback requirements are complete.
+**69/185 DONE, 4 IN_PROGRESS, 112 TODO**. All nine out-of-order proposals are complete; no ACTIVE override.
+20 new impact tests, 500 graph and 300 hunk oracle cases; all 76 atlas tests, author review and ABI pass.
+Final Windows/JDK 26 full build: **core 875 tests/0 failures/errors/6 existing platform skips** executed;
+eval 30 and provider-api 15 green results reused. Eval also executed in the first full run.
+The first full run repeated the known FX-22 poll/terminal-status failure; isolated and final full reruns
+passed without code/test changes. Failure evidence is preserved; the P0 investigation remains open.
+[Protocol](audit/OUT-OF-ORDER-P3.2.7.md), [API guide](core/README.md#impact-snapshots-p327); TODO §1.2 governs.
+P3.2.1–P3.2.6 retain discovery, runtime assembly, tools, nudges, scheduler/pre-scan and runtime FX-37/54.
+Return: **P0.1.2 + P0.6.1/P0.6.2/P0.6.4 -> P1.8.2**. CI/Linux/live gates remain open/UNMEASURED.
+
+**Historical checkpoints below; their former next-candidate instructions are superseded.**
+
+**Working branch: `main` (owner preference, 2026-09-20).** Continue ordinary work directly on `main`.
+The four outstanding analytical commits were integrated by fast-forward from `3e5c1ce` to `6298975`:
+P6.1.5, P4.5.5, P4.5.4 and P1.11.3. Historical feature-branch mentions below record original checkpoints;
+they do not require recreating or checking out that branch. Task statuses, next OOO-04 proposal and
+P0 validation return point are unchanged. The owner authorized publishing this integration.
+
+**Completed in order: P4.5.4 / OOO-06, then P1.11.3 / OOO-09**, D-61/D-62.
+P4.5.4 commit `817a32b`; P1.11.3 is the commit containing this checkpoint, `feature/out-of-order-kernels`.
+**68/184 DONE, 4 IN_PROGRESS, 112 TODO**. No ACTIVE override. Session ends at a complete checkpoint.
+AttemptCost: exact finite attempt costs/terminal probabilities and separate admission checks.
+TraceAnalytics: immutable dedup, exclusive/inclusive money, worker/busy/concurrency/elapsed time and
+explicit causal paths with honest lower-bound/unknown semantics. Do not reimplement these kernels.
+30 focused tests; independent oracles on 300 attempt policies and 300 traces; author reviews resolved.
+Final Windows/JDK 26 full build passed in 3m18s: **core 855/0 failures/errors/6 platform skips**,
+**eval 30/0 failures/errors/skips** executed; provider-api 15 green results reused. ABI checks pass.
+Protocols: [P4.5.4](audit/OUT-OF-ORDER-P4.5.4.md), [P1.11.3](audit/OUT-OF-ORDER-P1.11.3.md).
+[API guide](core/README.md). P4.5.1/P4.5.2 and P1.11.1/P1.11.2 retain their runtime/integration gates.
+Next out-of-order: **OOO-04 / candidate P3.2.7**, not registered/started; apply admission §4 and check
+D-63 availability before code. Normal return P0.1.2 + P0.6.1/P0.6.2/P0.6.4 -> P1.8.2.
+TODO §1.2 governs. Remote CI/Linux and all live gates remain open/UNMEASURED.
+
+**Historical checkpoints below.**
+
+**P4.5.4 / OOO-06 DONE**, D-61, from `955fb77`; commit containing this checkpoint.
+Exact finite attempt policies, full cost/terminal masses, unknowns and separate admission checks.
+**67/183 DONE, 4 IN_PROGRESS, 112 TODO**. No ACTIVE override. 15 focused tests and 300 seed-454
+trajectory oracles pass; author review resolved; core ABI and full Windows/JDK 26 build pass in 3m19s.
+Core **840 tests/0 failures/errors/6 platform skips**, eval **30/0 failures/errors/skips** executed;
+provider-api 15 green results reused. [Protocol](audit/OUT-OF-ORDER-P4.5.4.md), [API](core/README.md).
+Do not reimplement AttemptCost. P4.5.1/P4.5.2 retain real estimates/gates/Router/controller/FX work.
+Next authorized proposal **OOO-09 / candidate P1.11.3**, then OOO-04; admission and D-62 check first.
+Normal return P0.1.2 + P0.6.1/P0.6.2/P0.6.4 -> P1.8.2. CI/Linux/live gates remain open/UNMEASURED.
+
+**Historical checkpoints below.**
+
+**Completed this session: P6.1.5 / OOO-07, then P4.5.5 / OOO-08**, D-59/D-60.
+P6.1.5 commit `eb143e8`; P4.5.5 is the commit containing this checkpoint, on `feature/out-of-order-kernels`.
+Current **66/182 DONE (36.3%), 4 IN_PROGRESS, 112 TODO**. No ACTIVE override remains.
+Workload partitioning: immutable metadata, weighted quotas, transitive groups/time, bounded exact search.
+DAG oracle: dependency-safe subset-DP with exact initial/switch/fixed costs and explicit model/resource limits.
+24 new focused tests; independent 300-table workload + 200-DAG oracles; reviews resolved; ABI/full build pass.
+Final Windows/JDK 26 build executed **core 825 tests, 0 failures/errors, 6 platform skips**, **eval 30 tests,
+0 failures/errors/skips**; provider-api reused 15 green results. Linux/CI/live gates remain open/UNMEASURED.
+Protocols: [P6.1.5](audit/OUT-OF-ORDER-P6.1.5.md), [P4.5.5](audit/OUT-OF-ORDER-P4.5.5.md).
+Do not reimplement these kernels. P6.1.2 retains runner/manifest/holdout/FX-47 work; P4.5.3 retains
+calibration/controller/shadow/FX-45 work. The session ends at this complete checkpoint.
+Next out-of-order: **OOO-06 → candidate P4.5.4**, then OOO-09 → OOO-04; admission/registration first.
+Normal return: P0.1.2 + P0.6.1/P0.6.2/P0.6.4 -> P1.8.2. TODO §1.2 remains authoritative.
+
+**Earlier checkpoint:**
+
+**P6.1.5 / OOO-07 DONE**, D-59; checkpoint is the commit containing this record.
+Immutable workload metadata, must-link/time/quota validator and exact bounded assignment are ready.
+Current **65/181 DONE (35.9%), 4 IN_PROGRESS, 112 TODO**. 12 focused tests, 300 oracle tables,
+independent review resolved, ABI and full Windows/JDK 26 build pass: eval 30 tests executed;
+core 813 tests/6 platform skips and provider-api 15 green results reused UP-TO-DATE.
+[Protocol](audit/OUT-OF-ORDER-P6.1.5.md). No active override; next authorized proposal OOO-08.
+Normal return P0 validation -> P1.8.2. Parents/CI/Linux/live gates unchanged. Do not rebuild P6.1.5.
+
+**Previous checkpoints below are historical.**
+
+**P6.1.4 / OOO-02 and P5.1.5 / OOO-05 DONE** in the requested order; no ACTIVE override remains.
+P6.1.4 committed at `89d10c9`; P5.1.5 is in the commit containing this checkpoint. Do not rebuild them.
+Protocols: [P6.1.4](audit/OUT-OF-ORDER-P6.1.4.md), [P5.1.5](audit/OUT-OF-ORDER-P5.1.5.md); D-57/D-58.
+Current **64/180 DONE (35.6%), 4 IN_PROGRESS, 112 TODO**. Both independent reviews, ABI and full build pass.
+Final Windows/JDK 26 build executed core **813 tests, 0 failures/errors, 6 platform skips** and eval
+**18 tests, 0 failures/errors/skips**, including 7,000 simulations. Provider-api's 15 green results were reused.
+Next out-of-order proposal: **OOO-07 / candidate P6.1.5**, admission and registration first (§8.3/§9.1).
+Normal return: P0.1.2 + P0.6.1/P0.6.2/P0.6.4 -> P1.8.2. Parents, CI/Linux/live gates remain unchanged.
+
+**Earlier completed checkpoint:**
+
+**OOO-02 / P6.1.4 DONE**, D-57, from `d1689ef`; do not reimplement it. No active override at this checkpoint.
+[Journal](audit/OUT-OF-ORDER-P6.1.4.md), [API guide](eval/README.md), TODO §1.2 contain the handoff.
+Current **63/179 DONE (35.2%), 4 IN_PROGRESS, 112 TODO**. Eighteen focused eval tests, 7,000 fixed
+simulation campaigns, independent review, ABI and full offline Windows/JDK 26 build pass. The full build
+executed 18 eval tests; core 803 tests/6 skips and provider-api 15 were UP-TO-DATE, not fresh executions.
+Parent P6.1.3 and P6.1.1/P6.1.2 remain TODO; no adoption/live claim. Normal return P0 validation -> P1.8.2.
+Under the continuing multi-kernel request, admit OOO-05 next (candidate P5.1.5); use proposal §4/§8.1.
+
+**Earlier checkpoint (historical):**
+
+**P2.3.4 / OOO-01 and P2.6.5 / OOO-03 are DONE. No active out-of-order override remains.**
+Resume **P0.1.2 + P0.6.1/P0.6.2/P0.6.4, then P1.8.2**. Do not reimplement either kernel or P2.1.1.
+
+- [Context selection journal](audit/OUT-OF-ORDER-P2.3.4.md): dependency closure, exact budget arithmetic, deterministic marginal greedy policy, omissions and capacity refusal; commit `5ec1e0c`.
+- [Calibration journal](audit/OUT-OF-ORDER-P2.6.5.md): versioned grouping, deduplicated terminal/censored observations, median/ratios and pure warning; completed from `5ec1e0c` in the commit containing this checkpoint.
+- Verification: **26 new focused tests**; independent random graph/exhaustive and exact-rational oracles; independent reviews resolved. Final Windows/JDK 26 build: **core 803 tests, zero failures/errors, six existing platform skips**; provider-api UP-TO-DATE (15 green results). ABI checks pass.
+- Current counts: P0 15 DONE + 4 IN_PROGRESS; P1 44 DONE + 19 TODO; P2-P6 3 DONE + 93 TODO. Total **62/178 DONE (34.8%), 4 IN_PROGRESS, 112 TODO**.
+- P2.3.1/P2.6.4 stay TODO: real sources/rendering/manifest/admission and sizing collection/persistence/controller events/optional CAL injection remain with their owners. OOO-02/04 remain proposals.
+- Future out-of-order implementation: resume any ACTIVE/partial kernel first; otherwise use [descending difficulty, proposal §2](OUT-OF-ORDER-PROPOSAL-TASKS.md#complexity-order), starting with OOO-02 (candidate P6.1.4), and [implementation handoff §9](OUT-OF-ORDER-PROPOSAL-TASKS.md#implementation-handoff). The owner requested sorting/preparation only in this update; all seven pending proposals remain unregistered. Normal queue, task count and inactive override remain unchanged.
+- Linux/remote CI findings and live gates are unchanged; no promotion claim. Earlier checkpoints below are historical.
+
+**Earlier P2.1.1 checkpoint (2026-09-20):** TODO §1.2 is **COMPLETE**; **P2.1.1 is DONE** as a graph/ledger component. No active override remains: resume reopened P0 validation, then P1.8.2. Do not redo P2.1.1 or jump to P2.1.2; P2 runtime/storage integration is still pending. Dependencies, existing task IDs, acceptance and validation gates remain binding. [Implementation and verification log](audit/OUT-OF-ORDER-P2.1.1.md).
+
+**When the owner asks for further out-of-order implementation:** read [OUT-OF-ORDER-PROPOSAL-TASKS.md](OUT-OF-ORDER-PROPOSAL-TASKS.md), first resume any ACTIVE card in TODO §1.2, otherwise select a dependency-admissible candidate using its ranking and activation protocol. The proposal itself starts no code task and changes no completion count; an ordinary request to continue the main plan follows the queue below.
+
+Resume the existing `TODO.md` plan from the checked-out implementation: first resolve the reopened P0 validation tasks, then continue the remaining P1 work. Implement and validate successive dependency-ready tasks; preserve the architecture, ownership boundaries, terminology and task IDs. The goal is a reusable Kotlin/JVM SDK consumable from Java, with host events/hooks and no UI coupling. This is implementation work; the earlier planning-only instructions are historical.
+
+**Earlier audit checkpoint and general workflow**
+
+- Audit baseline: `main` at `468f5b0`, containing implementation checkpoint `0b94875`; remote CI ran against `468f5b0`. Check local status/history before editing, preserve user changes and published history, and leave pushes to the owner. Both handoff documents are tracked; `DESCRIPTION_RU.md` was untracked at audit start.
+- Historical counts after P2.1.1: P0 **15 DONE + 4 IN_PROGRESS**, P1 **44 DONE + 19 TODO**, P2–P6 **1 DONE + 93 TODO**; total **60/176 DONE (34.1%), 4 IN_PROGRESS, 112 TODO**. P0 foundation code exists, but P0.1.2/P0.6.1/P0.6.2/P0.6.4 remain reopened for failed or missing CI validation. These are task counts, not code-volume or effort percentages.
+- P1 has contract storage/amendments/digest/S0 auto-derivation, workspace/versioning/recovery, atlas/sniff, evidence records/journal/intents/coherence, register/workset, all seven tool families (look, edit, run, verify, state, task.ask, kb contract) with partition/dispatcher, the verification baseline (checker, receipts/currency, baseline ledger, reserve, exit gate/verifier, scope guard/test integrity), authority controls and the role table. These are components, not a working end-to-end agent: the built JAR has only role configuration in `cell` and constants in `Astrolabe`; controller orchestration and the SDK facade remain pending. `EmptyKb` is not a persistent KB, and the existing Java fixture tests constants, not a campaign.
+- Resolve **P0.1.2 CI validation**, including the failures owned by P0.6.1/P0.6.2/P0.6.4 (TODO §1.1). The next P1 code task remains **P1.8.2 Layout render**, then P1.8.3 Anchor, P1.8.4 Gauge, P1.8.5 Gates, P1.8.6 Residency, P1.8.7 Cell loop, P1.8.8 ResultPacket, P1.9.1–P1.9.6 controller/facade, P1.11 telemetry, P1.12 validation. Use TODO §1's distinction between completed component wiring and outstanding runtime integration.
+- Historical planning-only banners elsewhere are not current status. TODO sections 1 and 1.1 and the audit notes on reopened tasks supersede the session-2 summaries. Use actual code, executed checks and the latest task logs to establish progress. Do not redo completed components or equate scaffolding with completed integration.
+
+**Load only the context needed**
+
+1. Read `SOTA-BEST-MIXED-AGENT.md`, `docs/architecture/principles.md` §§1.3 and 2, and `docs/architecture/components.md` §§3.2–3.3 for invariants, ownership and identities.
+2. Read `TODO.md` §§0–1, §2.3 (binding conventions), §3.1 (accepted specification refinements), and the current phase goal/validation boundary. Keep §1's integration debts and recorded deviations in view. Consult §§2.1–2.2, §2.4 and §3 only for the modules, producers and decisions relevant to the active task.
+3. Select an existing `IN_PROGRESS` task or resolve a recorded blocker; otherwise take the next dependency-ready `TODO`. `Deps` and producer readiness govern, not numeric order. Read its complete entry, prerequisite `Log:` notes, cited specification sections and companion sections only where a boundary is crossed; inspect the affected implementation/tests before designing changes. P1.4.4 Coherence is already implemented and passed the targeted audit; do not restart it.
+
+`TODO.md` is the execution/progress authority; current subsystem documents define the design, with the accepted refinements in TODO §3/§3.1 applied. `ANSWERS.md` and `ISSUES.md` are historical decisions already integrated into the plan: consult a cited entry only if its rationale or regression details are needed. Skip `PREPARE_IMPLEMENTATION_PLAN.md`, historical `sources/`, review/audit history and unrelated subsystems at startup. Record genuinely new ambiguities as `D-nn`; use a documented safe default where possible and ask only for decisions that block correct implementation.
+
+**Other documents to be lazy-loaded if needed**
+- `READING-GUIDE.md` - is only a selective loading guide containing information about how to load a parse a project specification.
+- `PREPARE_IMPLEMENTATION_PLAN.md` - treat it as historical planning requirements; its “do not implement” instruction belonged to the earlier planning task.
+- `actual_state.md` - brief information about previous session and last finished step.
+
+**Implementation discipline**
+
+- Keep the pinned build: Kotlin 2.4.20, Gradle wrapper 9.7.1, JDK 26; `gradle/libs.versions.toml` and the convention plugin define dependency versions. Existing libraries are coroutines, kotlinx.serialization, sqlite-jdbc with explicit SQL, SLF4J, JUnit Jupiter 6.1.3 and kotlin-test. Use Git CLI, ripgrep/JVM search and JDK FFM; preserve `provider-api`'s independence from `core`.
+- Follow `.editorconfig`, TODO §2.3 and nearby code: compact idiomatic Kotlin, cohesive domain packages, typed records/outcomes, explicit public APIs, algorithms over extra frameworks, comments for rationale/invariants. Keep one suspend/Flow engine with Java-compatible host SPIs/facade; no public value classes or Kotlin `Result`. Inject clocks/IDs, keep policies deterministic and defaults configurable.
+- Preserve harness-owned facts/acceptance, workspace-qualified raw-byte identities, displayed-coverage and redaction boundaries, immutable evidence, single mutation ownership and durable consequential-action ordering. Complete §1's integration debts in their owning tasks.
+- Stay within the offline P0–P6 plan: fake provider execution and OpenAI Responses/Anthropic Messages-compatible contracts. Live transports, provider credentials/retries/HTTP, MCP networking, confined backends and live benchmarks remain P7. Optional features retain their gates; mandatory correctness controls stay enabled.
+- Follow §2.3: compact domain-oriented Kotlin, cohesive packages, precise names, deterministic policies, explicit ownership, Java-consumable APIs, injected clocks/identities and algorithms over unnecessary frameworks. Preserve authority boundaries, stamped evidence, namespace-qualified coverage, mandatory lifecycle/correctness controls and honest unknown/stale outcomes. Implement small, testable slices without weakening acceptance or adding speculative scaffolding.
+
+**Verify and checkpoint each slice**
+
+Mark the task `IN_PROGRESS`, implement its `Build`/`Done` criteria and mapped FX/AX/IX fixtures, then run focused tests. Use JDK 26; the recorded Windows installation is `C:\Users\user\.gradle\jdks\eclipse_adoptium-26-amd64-windows.2` (`JAVA_HOME`). In PowerShell use `./gradlew.bat`; in Bash use `./gradlew`.
+
+Run `:core:test --tests 'io.astrolabe.<pkg>.*' --console=plain` for focused checks. After public API changes, run `:core:updateKotlinAbi` and/or `:provider-api:updateKotlinAbi` in a separate invocation before `build`; inspect and retain the API dumps. Finish an integrated slice with `build`.
+
+Historical local session-2 reports had 773 tests, zero failures and six skips. The 2026-09-20 audit freshly ran 59 selected tests (31 + 28), all passed, including isolated reruns of the three CI failures; it did not rerun the whole suite. [CI run 35514932596](https://github.com/korvin2000/ASTROLABE/actions/runs/35514932596) on `468f5b0` failed: Linux could not execute `gradlew` (mode `100644`, exit 126); Windows core had 758 tests, three failures and 130 skips (TS JUnit filename assertion, repository-index protection, deadline/grandchild log assertion). See TODO §1.1 for reproducible commands and evidence. Local passes do not resolve the remote failures; Linux remains unvalidated. Distinguish `IMPLEMENTED`, platform-qualified `FIXTURE_VALIDATED` and `PROMOTED`; all live gates remain `UNMEASURED`.
+
+Mark `DONE` only when the task's criteria are satisfied. Append a concise dated `Log:` with changes, checks, limitations and any deferred integration owner; update §1 with the next dependency-ready task and blockers. At session end, leave the code and plan consistent and report completed task IDs, validation results, remaining limitations and the exact resume point.
+
+**Keep the next session resumable**
+
+P2.1.1's final local Windows build passed: core executed 777 tests, zero failures/errors, six existing platform skips; provider-api reused its 15 green test results. Focused checks passed 44 tests; 19 tests were added. ABI dump checked. The first full run's intermittent FX-22 poll/terminal-status failure is retained in the implementation log, despite isolated and later full passes. This does not close the existing remote CI/Linux findings.
+
+When P2 is reached normally, use the completed graph component. P2.1.2 validates sanitized proposals; P2.1.4 collects sizing; P2.2.2/P2.2.4 own canonical persistence, admission, current-candidate/lease checks and resume. S1 commits the graph-derived aggregate ledger, not the S0 verifier's per-increment ledger. All live gates remain UNMEASURED.
+
+## Archived 2026-09-24 — `actual_state.md` as of `3681040` (only the parts not identical to the archive above)
+
+**Main-integration paragraph (actual_state variant):**
+
+**Working branch: `main` (owner preference, 2026-09-20).** Ordinary development continues on `main`.
+All four commits from `feature/out-of-order-kernels` were integrated by fast-forward from `3e5c1ce`
+to `6298975`: P6.1.5, P4.5.5, P4.5.4 and P1.11.3. Source content matches the validated checkpoint
+below; this integration changes no task status. Historical branch names describe their original
+checkpoints and are not instructions to switch branches. The owner authorized publishing this integration.
+
+**Previous checkpoints below are historical.**
+
+#### Current checkpoint (2026-09-20)
+
+**P6.1.4 / OOO-02 and P5.1.5 / OOO-05 DONE**, in the requested order. No ACTIVE override remains.
+Scorecard/paired inference: commit `89d10c9`, D-57, [protocol](audit/OUT-OF-ORDER-P6.1.4.md).
+Scope intersection/difference: D-58, [protocol](audit/OUT-OF-ORDER-P5.1.5.md), commit containing this checkpoint.
+Current **64/180 DONE (35.6%), 4 IN_PROGRESS, 112 TODO**. Both reviews clear; ABI/full build pass.
+Final Windows/JDK 26 build freshly executed **core 813 tests, 0 failures/errors, 6 platform skips** and
+**eval 18 tests, 0 failures/errors/skips** (including 7,000 simulations); provider-api reused 15 green results.
+Do not reimplement either kernel. P6.1.1/P6.1.2/P6.1.3 and P5.1.1/P5.1.4 retain their integration;
+CI/Linux findings and live gates remain unchanged/UNMEASURED. S3 stays off.
+Next out-of-order proposal: **OOO-07**, candidate P6.1.5; admission/registration before code.
+Normal return: P0.1.2 + P0.6.1/P0.6.2/P0.6.4 -> P1.8.2.
+
+#### Earlier P6.1.4 checkpoint
+
+**OOO-02 / P6.1.4 DONE**, from `d1689ef`, D-57. No active override at this checkpoint.
+Q/E/cost, paired repository-cluster bounds, diagnostic verdict/repayment and immutable provenance are complete.
+[Journal](audit/OUT-OF-ORDER-P6.1.4.md) and [API guide](eval/README.md). Do not reimplement the kernel.
+Current **63/179 DONE (35.2%), 4 IN_PROGRESS, 112 TODO**. Eighteen focused eval tests, 7,000 fixed
+simulations, independent review, eval ABI and full Windows/JDK 26 offline build pass. Full build freshly
+ran 18 eval tests; core 803 tests/6 skips and provider-api 15 tests were UP-TO-DATE, not new executions.
+P6.1.1/P6.1.2/P6.1.3 remain TODO; live gates UNMEASURED; CI/Linux findings unchanged.
+Next under the continuing out-of-order request: OOO-05 (candidate P5.1.5), admission first.
+Normal return: P0.1.2 + P0.6.1/P0.6.2/P0.6.4 -> P1.8.2.
+
+#### Earlier P2.3.4/P2.6.5 checkpoint
+
+**P2.3.4 / OOO-01 and P2.6.5 / OOO-03 are DONE. No active out-of-order override remains.**
+Resume **P0.1.2 + P0.6.1/P0.6.2/P0.6.4, then P1.8.2**. Do not reimplement either kernel or P2.1.1.
+
+- [Context selection journal](audit/OUT-OF-ORDER-P2.3.4.md): dependency closure, exact budget arithmetic, deterministic marginal greedy policy, omissions and capacity refusal; commit `5ec1e0c`.
+- [Calibration journal](audit/OUT-OF-ORDER-P2.6.5.md): versioned grouping, deduplicated terminal/censored observations, median/ratios and pure warning; completed from `5ec1e0c` in the commit containing this checkpoint.
+- Verification: **26 new focused tests**; independent random graph/exhaustive and exact-rational oracles; independent reviews resolved. Final Windows/JDK 26 build: **core 803 tests, zero failures/errors, six existing platform skips**; provider-api UP-TO-DATE (15 green results). ABI checks pass.
+- Current counts: P0 15 DONE + 4 IN_PROGRESS; P1 44 DONE + 19 TODO; P2-P6 3 DONE + 93 TODO. Total **62/178 DONE (34.8%), 4 IN_PROGRESS, 112 TODO**.
+- P2.3.1/P2.6.4 stay TODO: real sources/rendering/manifest/admission and sizing collection/persistence/controller events/optional CAL injection remain with their owners. OOO-02/04 remain proposals.
+- Out-of-order planning refresh at `f6a4feb`: seven unimplemented proposals now follow [descending difficulty, §2](OUT-OF-ORDER-PROPOSAL-TASKS.md#complexity-order), starting with OOO-02 (candidate P6.1.4). [Handoff §9](OUT-OF-ORDER-PROPOSAL-TASKS.md#implementation-handoff) supplies implementation slices, eval setup and progress/verification requirements. All seven remain PROPOSED; no task/module activated, no count change. Apply this order only to a future out-of-order implementation request.
+- Linux/remote CI findings and live gates are unchanged; no promotion claim. Earlier checkpoints below are historical.
+
+#### Earlier P2.1.1 checkpoint (2026-09-20)
+
+- **P2.1.1 is DONE out of order**, from baseline `d0ca86a`: iterative graph algorithms, immutable snapshots, deterministic frontier, requirement dependencies, evidence-derived ledger and FX-42 protection. The existing increment/ledger types retain their ownership. Verifier results bind work/attempt/context/revision/definition, retain check/review references and reject stale review approvals.
+- **No active override remains. Next: P0.1.2 + P0.6.1/P0.6.2/P0.6.4, then P1.8.2.** Do not start P2.1.2 or rebuild this component merely because it was completed ahead of schedule. Plan/controller/storage integration remains with P2.1.2/P2.1.4/P2.2.2/P2.2.4.
+- **Counts at that checkpoint:** P0 15 DONE + 4 IN_PROGRESS; P1 44 DONE + 19 TODO; P2–P6 1 DONE + 93 TODO. Total **60/176 DONE (34.1%), 4 IN_PROGRESS, 112 TODO**; counted from task headings.
+- **Verification:** 44 focused tests passed; final Windows/JDK 26 offline `build` succeeded. Core executed 777 tests: zero failures/errors, six existing platform skips. Provider-api was UP-TO-DATE (15 green test results). Nineteen tests added; Kotlin ABI regenerated and checked. Linux/remote CI and all live gates remain unvalidated/UNMEASURED.
+- **Retained observation:** the first full build once failed RunTest FX-22 when `bg-end` arrived before the terminal status; isolated and later full runs passed. OS/run code and tests were unchanged. Keep this finding with P0.6.1/P0.6.4; a passing rerun is not a diagnosis.
+- **Protocol, design choices, commands and integration owners:** [TODO §1.2](TODO.md#12-owner-authorized-analytical-work-2026-09-20) and [implementation log](audit/OUT-OF-ORDER-P2.1.1.md).
+- **Future analytical work:** [OUT-OF-ORDER-PROPOSAL-TASKS.md](OUT-OF-ORDER-PROPOSAL-TASKS.md) ranks context selection, statistical evaluation, calibration and impact analysis. All four are proposals; none has been activated or added to the task count. Use its activation protocol when the owner requests further out-of-order implementation; the normal resume point above remains current.
+
+#### Session 2 + targeted readiness audit (2026-09-20) — earlier checkpoint
+
+- Audit baseline: branch `main` at `468f5b0`; implementation checkpoint `0b94875`. `TODO.md`, `actual_state.md` and `CONTINUE-TASK.md` are tracked; only `DESCRIPTION_RU.md` was untracked before this documentation correction. Remote CI exists for `468f5b0`; historical "nothing pushed" statements are not current repository state. Leave pushes to the owner.
+- **`TODO.md` is the execution authority; code and executed checks establish readiness.** First resolve reopened P0 validation (P0.1.2, P0.6.1, P0.6.2, P0.6.4); the next P1 implementation task remains **P1.8.2 `Layout` render**. The remaining P1 order is P1.8.2–P1.8.8 → P1.9.1–P1.9.6 → P1.11.1–P1.11.2 → P1.12.1–P1.12.4. See TODO §1 for remaining integration work and §1.1 for the audit evidence and exact test commands.
+
+#### What session 2 finished (all `DONE`, `IMPLEMENTED` + `FIXTURE_VALIDATED` on Windows only)
+
+P1.4.4 Coherence · P1.1.2 S0 auto-derivation · P1.7.8 ScopeGuard/TestIntegrity · P1.6.2 Partition/Dispatcher · P1.6.3 look · P1.6.4 edit · P1.6.5 run · P1.7.2 Checker · P1.7.4 receipts/currency · P1.7.5 Baseline · P1.7.6 Reserve (`CellBudget`) · P1.7.7 ExitGate/Verifier · P1.6.7 verify · P1.6.8 state · P1.6.9 task.ask · P1.6.10 kb contract · P1.8.1 Role.
+
+Historical audit counts before P2.1.1: **15/19 P0 tasks `DONE`, 4 `IN_PROGRESS`; 44/63 P1 tasks `DONE`, 19 `TODO`; P2–P6: 94 tasks `TODO`. Total: 59/176 `DONE` (33.5%), 4 `IN_PROGRESS`, 113 `TODO`.** Current counts are above. Before reopening failed validation, the actual headings counted 19 P0 + 44 P1 `DONE`, not 26 + 45; the previous "17 left" was also a counting error. These are task counts, not a measured fraction of code or remaining effort. The four reopened tasks have implementations, but their completion criteria are not met across the required environments.
+
+All seven tool families exist at their P1 scope, including only a `Kb` interface/tool and `EmptyKb`, not a persistent knowledge base. There is still **no end-to-end agent**: source inspection and `jar tf`/`javap` of the built core JAR confirm that `cell` contains role configuration only, `Astrolabe` exposes constants only, and there is no controller, `AstrolabeJava` or telemetry implementation. The existing Java smoke test reads `Astrolabe.MODULE`; it does not satisfy P1.12.3's campaign smoke criterion.
+
+#### Verification evidence
+
+- Historical local session-2 reports: 773 tests, zero failures/errors, six skips; these were inspected before targeted reruns and are not a fresh full-build result. The earlier 675 figure belongs to session 1.
+- Fresh local audit: **59 selected tests passed, zero failures/errors/skips**, in two real `:core:test` executions (31 + 28; no full-suite rerun). Coverage: skeleton/Java fixture, fake provider, S0 derivation, coherence, roles, dispatcher, KB contract, look/edit/run, and the three individual scenarios that failed remotely. Targeted runs replace the local core test report; do not interpret the latest report directory as the historical full suite.
+- [CI run 35514932596](https://github.com/korvin2000/ASTROLABE/actions/runs/35514932596) for `468f5b0` failed on both platforms. Linux: `./gradlew: Permission denied`, exit 126; Git records `gradlew` as mode `100644`, and tests never started. Windows: core reported 758 tests, 3 failures, 130 skips. Failures: `FixtureReposTest` TS JUnit filename assertion; `GitTest` repository-index rejection; `ProcOwnershipTest` deadline/grandchild log assertion. These three pass locally in isolation; the CI failures remain unresolved, not disproved by local success. The API listed two runs, both failed. Linux/POSIX validation remains unconfirmed.
+- Kotlin ABI dumps (`core/api/core.api`) regenerated and committed after every public-API change.
+
+#### Build commands (Windows)
+
+```bash
+export JAVA_HOME=/c/Users/user/.gradle/jdks/eclipse_adoptium-26-amd64-windows.2
+./gradlew :core:test --tests 'io.astrolabe.<pkg>.*' --console=plain   # focused
+./gradlew :core:updateKotlinAbi                                        # after public-API changes, own invocation
+./gradlew build                                                         # ≈ 2–3 min
+```
+
+Gotchas learned this session: backtick test names may not contain `:` or `;`; a KDoc must not contain the sequence `*/` even inside backticks; the JDK's Windows argument quoting escapes inner quotes for `cmd.exe /c`, so fake commands in tests avoid inner quotes; the blob store enforces artifact-before-row (publish the raw blob before recording a receipt); a second `FixedIdGen()` in one test collides on SQLite primary keys — share one.
+
+#### How to resume
+
+1. Follow `TODO.md` §0.1, then read §1/§1.1 and the reopened P0 task logs. Restore CI validation before continuing P1; do not rewrite implemented components merely because their validation task was reopened.
+2. P1.8.2 `Layout` needs: `docs/runtime/context-layout.md` §5.1, `docs/reference/kernel-contract.md` Appendix A, `context.ContractSlice` (P1.1.4), `atlas.Prime` (P1.3.2), `tool.ToolSchemas`/`Envelope` (P1.6.1), `provider.Segment`/`Request` (P0.3.2), `auth.Boundary.DATA_RULE` + `ExecutionModeLabel` (integration debt), `verify.PreexistingLedger.render()` (P1.7.5) for `[K]`, `tool.task.TaskTool.asked` for pinned user messages.
+3. Keep the discipline: mark `IN_PROGRESS`, implement Build/Done, focused tests, ABI dump, full build, `Log:` line, §1 update, one commit.
+
+## Session log (appended by each session; ≤10 lines each)
+
+- 2026-09-24 — workflow retune (no plan task): `CLAUDE.md` became the only workflow source; handoffs split by role
+  (`CONTINUE-TASK.md` next work, `actual_state.md` implemented state); history moved here; per-task verification =
+  focused tests + local commit, full build/ABI/both-platform CI once per block gate; sandbox JDK-25 bootstrap
+  automated (`.claude/hooks/session-start.sh`, `scripts/sandbox-gradle.sh`); `/next` entry command. Counts unchanged:
+  81/185 DONE, 0 IN_PROGRESS, 104 TODO.
