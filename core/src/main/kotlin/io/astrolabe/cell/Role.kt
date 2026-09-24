@@ -75,7 +75,7 @@ public object Roles {
         contextView = setOf(ContextPart.Kernel, ContextPart.Prime, ContextPart.ContractSlice, ContextPart.Notes, ContextPart.Transcript, ContextPart.Anchor),
         noteScope = setOf("GLOBAL", "CON", "ADR", "LES", "STATUS", "CAL"),
         skillFilter = setOf("*"),
-        toolMask = ToolMask(all - setOf("task.delegate", "task.collect", "verify.review", "kb.propose")),
+        toolMask = ToolMask(all - setOf("task.delegate", "task.collect", "kb.propose")),
         permission = Stage.LocalCommit,
         tierPrior = Tier.High,
         duties = listOf("execute one increment to green acceptance", "maintain STATE through typed ops", "propose notes, never admit them"),

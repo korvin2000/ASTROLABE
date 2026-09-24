@@ -40,6 +40,8 @@ import io.astrolabe.tool.run.ShapeBudget
 import io.astrolabe.tool.run.Shapers
 import io.astrolabe.verify.Applicability
 import io.astrolabe.verify.Baseline
+import io.astrolabe.verify.CampaignReview
+import io.astrolabe.verify.CampaignReviewOutcome
 import io.astrolabe.verify.Check
 import io.astrolabe.verify.CheckKind
 import io.astrolabe.verify.CheckLine
@@ -63,7 +65,8 @@ import java.nio.file.Path
  * The `verify` family (§5.4, TODO P1.6.7): `check(paths?)` runs the end-of-turn checker now; `tests(selection =
  * accept | ids | full)` and `acceptance(ids?)` execute registered checks through the scheduler's exclusive
  * protocol and record receipts with stamps and currency; `baseline()` records the baseline receipt on the
- * captured initial candidate; `review` waits for P3.5.2/P4.4.3 and `blast` for P3.2.5. Every executed check
+ * captured initial candidate; `review(scope=campaign)` is the human review path (P3.5.2, D-23), the review cell
+ * waits for P4.4.3 and `blast` for P3.2.5. Every executed check
  * yields a receipt — a runner that cannot start yields an explicit `unavailable` one (FX-13) — and the result
  * is rendered as the `── Checks ──` block plus each shaped view. Status words are the runner's, never the model's.
  */
@@ -88,6 +91,8 @@ public class Verify(
     private val timeoutSeconds: Long = 600,
     private val checkerTimeBoxSeconds: Long = 20,
     private val envAllowlist: Set<String> = RedactionConfig.DEFAULT_ENV_ALLOWLIST,
+    /** The campaign-scope human review path `review(scope=campaign)` routes to (P3.5.2, D-23); `null` ⇒ unavailable. */
+    private val campaignReview: CampaignReview? = null,
 ) : ToolExecutor {
     init {
         require(ids.context != null) { "verify runs inside a cell: ids.context is its lineage" }
@@ -103,15 +108,47 @@ public class Verify(
     override suspend fun execute(call: ToolCall, context: TurnContext): ToolOutcome {
         require(call.family == ToolFamily.Verify) { "not a verify call: ${call.name}" }
         val args = (call.args as Args.Verify).args
-        if (!mask.allows(call.name)) return refused(args, "masked", "${call.name} is masked in this role; the review path arrives in P3.5.2 (human) and P4.4.3 (cell)")
+        if (!mask.allows(call.name)) return refused(args, "masked", "${call.name} is masked in this role; the review cell arrives in P4.4.3")
         val contract = contracts.current(ids.work) ?: return refused(args, "denied", "no committed contract for ${ids.work}")
         return when (args.what) {
             "check" -> check(args, contract)
             "tests" -> tests(args, contract)
             "acceptance" -> acceptance(args, contract)
             "baseline" -> baselineRun(args, contract)
+            "review" -> review(args, contract)
             else -> refused(args, "masked", "${call.name} is masked in this role")
         }
+    }
+
+    /**
+     * `review(scope=campaign)` in its human form (P3.5.2, D-23): the host authority receives the full diff `s0 → now`,
+     * the contract, the current receipts and the rubric; its signed verdict is recorded and the campaign gate reuses an
+     * approving one at the same stamp. No reviewer ⇒ `unavailable`, never a pass. Increment scope is the review cell (P4.4.3).
+     */
+    private suspend fun review(args: VerifyArgs, contract: Contract): ToolOutcome {
+        val scope = args.scope ?: "campaign"
+        if (scope != "campaign") return refused(args, "masked", "review(scope=$scope) is the review cell (P4.4.3); this build routes review(scope=campaign) to the host authority")
+        val reviewer = campaignReview ?: return refused(args, "unavailable", "no campaign review path is wired for this cell")
+        val base = s0 ?: return refused(args, "unavailable", "no captured initial candidate: the review has no diff base")
+        val stamp = stamper.report().candidateId
+        val currencies = checks.all().filter { it.last != null }.associate { it.id to scheduler.currency(it, stamp) }
+        val equivalence = reviewer.equivalence(stamp, currencies)
+        val current = currencies.values.filter { it.certifies }.mapNotNull { it.receiptId }.distinct()
+        val outcome = reviewer.review(contract, base, current, equivalence, why = "review requested by the cell")
+        val record = outcome.record
+        val head = "── Review ──\ncampaign review ${record.request.id} @${stamp.hash8}: " + when (outcome) {
+            is CampaignReviewOutcome.Approved -> "approve by ${record.verdict!!.signedBy} (confidence ${record.verdict.confidence})" + (if (record.reused) " · reused" else "")
+            is CampaignReviewOutcome.Declined -> outcome.reason
+            is CampaignReviewOutcome.Unavailable -> "unavailable — ${outcome.reason}"
+        }
+        val body = head + "\n  diff: #${record.request.diffRef?.take(8) ?: "-"} · receipts: ${current.ifEmpty { listOf("none current") }.joinToString(", ")}" +
+            (equivalence?.let { "\n" + it.render() } ?: "")
+        val status = when (outcome) {
+            is CampaignReviewOutcome.Approved -> "ok"
+            is CampaignReviewOutcome.Declined -> "declined"
+            is CampaignReviewOutcome.Unavailable -> "unavailable"
+        }
+        return refused(args, status, body)
     }
 
     // ------------------------------------------------------------------ ops

@@ -19,6 +19,7 @@ import io.astrolabe.store.Migrations
 import io.astrolabe.store.Store
 import io.astrolabe.tool.task.ProposalOutcome
 import io.astrolabe.tool.task.Proposals
+import io.astrolabe.verify.RefactorChecklist
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
@@ -88,6 +89,8 @@ public class CampaignProposals(
     private val splits: SplitRequests,
     private val contract: () -> Contract?,
     private val register: () -> Register?,
+    /** The knowledge base's `CON` notes for the §8.9 item 4 check; none by default. */
+    private val conAnchors: () -> Map<String, Set<String>> = { emptyMap() },
 ) : Proposals {
     override fun plan(ids: Identities, proposal: JsonElement): ProposalOutcome {
         val packet = try {
@@ -100,12 +103,15 @@ public class CampaignProposals(
             return ProposalOutcome.Refused(bad.message ?: "malformed plan")
         }
         val stored = plans.record(ids, packet)
-        val gaps = contract()?.let { PlanPacketValidator.gaps(it, packet) }
+        val current = contract()
+        val anchors = conAnchors()
+        val gaps = current?.let { PlanPacketValidator.gaps(it, packet, anchors) }
+        val planning = if (anchors.isEmpty()) current?.let { PlanPacketValidator.planningGaps(it, packet) }.orEmpty() else emptyList()
         val check = when {
             gaps == null -> "not checked (no contract)"
             gaps.isEmpty() -> "passes the controller's checks"
             else -> "gaps: " + gaps.joinToString("; ")
-        }
+        } + (if (planning.isEmpty()) "" else "; " + planning.joinToString("; "))
         return ProposalOutcome.Recorded(stored.id, "${packet.graphProposal.increments.size} increments, ${packet.acceptanceProposals.size} acceptance proposals; $check")
     }
 
@@ -137,6 +143,10 @@ internal data class PlanWire(
     val con: List<CandidateWire> = emptyList(),
     val adr: List<CandidateWire> = emptyList(),
     val shape: Shape? = null,
+    /** Ids of existing `CON` notes the plan changes or supersedes (§8.9 item 4). */
+    @SerialName("con_refs") val conRefs: List<String> = emptyList(),
+    /** The §8.9 checklist in refactor mode (P3.5.1); snake_case keys. */
+    @SerialName("refactor_checklist") val refactorChecklist: RefactorChecklistWire? = null,
 ) {
     fun toPacket(decisions: List<io.astrolabe.register.Decision>): PlanPacket = PlanPacket(
         RequirementGraph(increments.map { it.toIncrement() }, ownership),
@@ -147,6 +157,23 @@ internal data class PlanWire(
             NoteCandidate("ADR", "${d.text} because ${d.because}" + (d.rejected?.let { "; rejected: $it" } ?: ""), "decision ${d.n}", emptyList(), emptyList())
         },
         shape,
+        refactorChecklist?.toChecklist(),
+        conRefs,
+    )
+}
+
+@Serializable
+internal data class RefactorChecklistWire(
+    @SerialName("behaviour_to_preserve") val behaviourToPreserve: String = "",
+    @SerialName("interfaces_to_change") val interfacesToChange: String = "",
+    @SerialName("compatibility_duration") val compatibilityDuration: String = "",
+    @SerialName("callers_consumers") val callersConsumers: String = "",
+    @SerialName("data_configuration_dependencies") val dataConfigurationDependencies: String = "",
+    @SerialName("independent_acceptance_checks") val independentAcceptanceChecks: String = "",
+    @SerialName("shared_decision") val sharedDecision: String = "",
+) {
+    fun toChecklist(): RefactorChecklist = RefactorChecklist(
+        behaviourToPreserve, interfacesToChange, compatibilityDuration, callersConsumers, dataConfigurationDependencies, independentAcceptanceChecks, sharedDecision,
     )
 }
 
