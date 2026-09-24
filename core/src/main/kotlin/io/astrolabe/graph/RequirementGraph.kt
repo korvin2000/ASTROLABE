@@ -146,7 +146,15 @@ public class RequirementGraph(
         check(readyFrontier(contract, increments.size).any { it.id == id }) { "$id has unfinished prerequisites" }
         if (increment.cells.lastOrNull() == cell) return this
         check(increments.none { cell in it.cells }) { "cell $cell was already used" }
-        return replace(increment.copy(status = IncrementStatus.InProgress, cells = increment.cells + cell))
+        val sizing = if (increment.cells.isEmpty()) increment.sizing else increment.sizing.copy(continuations = increment.sizing.continuations + 1)
+        return replace(increment.copy(status = IncrementStatus.InProgress, cells = increment.cells + cell, sizing = sizing))
+    }
+
+    /** Sizing at a cell end (P2.1.4): [cell] must be one of the increment's cells; its status is unchanged. */
+    public fun recordCell(id: String, cell: ContextId, turns: Int, touched: Collection<String>, rebuilds: Int): RequirementGraph {
+        val increment = increments.single { it.id == id }
+        check(cell in increment.cells) { "$cell is not a cell of $id" }
+        return replace(increment.copy(sizing = increment.sizing.afterCell(turns, touched, rebuilds)))
     }
 
     public fun cancel(id: String, reason: String): RequirementGraph {

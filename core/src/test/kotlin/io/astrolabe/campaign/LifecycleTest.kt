@@ -97,8 +97,8 @@ class LifecycleTest {
         PacketCoverage(0, emptyList()), PacketFlags(emptyList(), emptyList()), PacketClaims(), blocked, emptyList(), emptyList(), PacketCost(),
     )
 
-    private fun checkpoint(cell: ContextId, status: CellStatus) =
-        CellCheckpoint(cell, "I1", 1, status, 1, stamp, 0, 0, emptyList(), emptyList(), emptyList(), 0)
+    private fun checkpoint(cell: ContextId, status: CellStatus, touched: List<String> = emptyList()) =
+        CellCheckpoint(cell, "I1", 1, status, 1, stamp, 0, 0, emptyList(), touched, emptyList(), 0)
 
     private fun completed(cell: ContextId = c1) = CellExit.Completed(1, Register.empty(cell, "I1", "Fix it"), checkpoint(cell, CellStatus.Completed), packet(cell, PacketStatus.Done), "done", emptyList())
     private fun blocked(question: String?, cell: ContextId = c1): CellExit.Blocked {
@@ -275,6 +275,30 @@ class LifecycleTest {
     }
 
     @Test
+    fun `sizing counts turns, continuations, pressure rebuilds and the touched union at each cell end`() {
+        val pressured = CellExit.Partial(
+            4, Register.empty(c1, "I1", "Fix it"), checkpoint(c1, CellStatus.Partial, listOf("src/a.py", "src/b.py")),
+            packet(c1, PacketStatus.Partial), PartialReason.Pressure, "replan",
+        )
+        val finished = CellExit.Completed(
+            3, Register.empty(c2, "I1", "Fix it"), checkpoint(c2, CellStatus.Completed, listOf("src/b.py", "src/c.py")),
+            packet(c2, PacketStatus.Done), "done", emptyList(),
+        )
+        val state = dispatched().then(Transition.Returned(pressured), Transition.Dispatched("I1", c2), Transition.Returned(finished))
+        val sizing = state.graph.increments.single().sizing
+        assertEquals(7, sizing.turns)
+        assertEquals(1, sizing.continuations, "the second cell continues the increment")
+        assertEquals(1, sizing.rebuilds, "the pressure stop is a decomposition failure")
+        assertEquals(listOf("src/a.py", "src/b.py", "src/c.py"), sizing.touched)
+        assertEquals(3, sizing.filesTouched)
+
+        val interrupted = dispatched().then(Transition.Interrupted(checkpoint(c1, CellStatus.Cancelled, listOf("src/a.py"))))
+        assertEquals(1, interrupted.graph.increments.single().sizing.turns)
+        val lost = dispatched().then(Transition.Lost(c1, null))
+        assertEquals(0, lost.graph.increments.single().sizing.turns, "a lost cell without a checkpoint adds nothing it cannot show")
+    }
+
+    @Test
     fun `the store keeps the state with its ledger and refuses a save that does not extend it`() {
         val clock = Clock.fixed(Instant.parse("2026-09-24T00:00:00Z"), ZoneOffset.UTC)
         val store = openStore(root, clock)
@@ -294,6 +318,7 @@ class LifecycleTest {
             assertEquals(listOf("I1"), view.increments.map { it.key })
             assertEquals(listOf("R1"), view.entries.map { it.key })
             assertTrue(view.entries.single().body.toString().contains("Verified"))
+            assertTrue(view.sizing.single().body.toString().contains("\"turns\":1"), view.sizing.toString())
         }
         val memory = InMemoryCampaigns()
         memory.save(opened())

@@ -219,20 +219,25 @@ public object Lifecycle {
                 val cell = checkNotNull(exit.packet.ids.context)
                 val running = checkNotNull(s.running) { "no cell is running" }
                 check(running.cell == cell && running.increment == exit.packet.increment) { "packet of $cell is not the running cell ${running.cell}" }
-                val graph = if (exit is CellExit.Blocked) s.graph.block(running.increment, cell) else s.graph
+                // §3.8: a pressure stop is the P1 form of a pressure rebuild, counted as a decomposition failure.
+                val rebuilt = if (exit is CellExit.Partial && exit.reason == PartialReason.Pressure) 1 else 0
+                val sized = s.graph.recordCell(running.increment, cell, exit.turns, exit.checkpoint.touched, rebuilt)
+                val graph = if (exit is CellExit.Blocked) sized.block(running.increment, cell) else sized
                 s.next(graph = graph, cells = s.cells.map { if (it.cell == cell) it.copy(status = exit.status) else it }, contractVersion = v)
             }
             is Transition.Lost -> {
                 expect(s, CampaignPhase.Running)
                 val running = checkNotNull(s.running) { "no cell is running" }
                 check(running.cell == transition.cell) { "${transition.cell} is not the running cell ${running.cell}" }
-                s.next(cells = s.cells.map { if (it.cell == running.cell) it.copy(status = CellStatus.Failed) else it }, contractVersion = v)
+                val graph = transition.checkpoint?.let { s.graph.recordCell(running.increment, running.cell, it.turn, it.touched, 0) } ?: s.graph
+                s.next(graph = graph, cells = s.cells.map { if (it.cell == running.cell) it.copy(status = CellStatus.Failed) else it }, contractVersion = v)
             }
             is Transition.Interrupted -> {
                 expect(s, CampaignPhase.Running)
                 val running = checkNotNull(s.running) { "no cell is running" }
                 check(running.cell == transition.checkpoint.cell) { "checkpoint of ${transition.checkpoint.cell} is not the running cell ${running.cell}" }
-                s.next(cells = s.cells.map { if (it.cell == running.cell) it.copy(status = CellStatus.Cancelled) else it }, contractVersion = v)
+                val graph = s.graph.recordCell(running.increment, running.cell, transition.checkpoint.turn, transition.checkpoint.touched, 0)
+                s.next(graph = graph, cells = s.cells.map { if (it.cell == running.cell) it.copy(status = CellStatus.Cancelled) else it }, contractVersion = v)
             }
             is Transition.Committed -> {
                 expect(s, CampaignPhase.Running)

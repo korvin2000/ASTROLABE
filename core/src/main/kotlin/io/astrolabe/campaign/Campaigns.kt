@@ -2,6 +2,7 @@ package io.astrolabe.campaign
 
 import io.astrolabe.contract.Increment
 import io.astrolabe.contract.LedgerEntry
+import io.astrolabe.graph.Sizing
 import io.astrolabe.id.AttemptId
 import io.astrolabe.id.WorkId
 import io.astrolabe.store.Migrations
@@ -55,6 +56,14 @@ public class SqliteCampaigns(private val store: Store, private val clock: Clock)
             increment.id, state.work, state.attempt, increment.status.name, Migrations.SCHEMA_VERSION, now,
             JSON.encodeToString(Increment.serializer(), increment),
         )
+        // P2.1.4: one sizing row per (increment, cell), holding the increment's sizing as of that cell's end.
+        for (increment in state.graph.increments) increment.cells.lastOrNull()?.let { cell ->
+            tx.execute(
+                "INSERT OR REPLACE INTO sizing (increment_id, cell_id, work_id, attempt_id, candidate_id, context_id, schema_version, created_at, body) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)",
+                increment.id, cell.value, state.work, state.attempt, cell, Migrations.SCHEMA_VERSION, now,
+                JSON.encodeToString(Sizing.serializer(), increment.sizing),
+            )
+        }
         for (entry in state.ledger.entries.values) tx.execute(
             "INSERT OR REPLACE INTO ledger (requirement_id, work_id, attempt_id, candidate_id, context_id, status, schema_version, created_at, body) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?)",
             entry.requirementId, state.work, state.attempt, entry.status.wire, Migrations.SCHEMA_VERSION, now,

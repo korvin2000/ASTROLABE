@@ -1041,10 +1041,11 @@ Goal: [§18.2 Stage B](docs/implementation/roadmap.md#sec-18-2): campaign contro
 - Done: ADR candidates appear in the finish receipt; private reasoning never serialized.
 - Log: 2026-09-24 — `decision.add` (register, P1.5.2) already carries `probe`/`adrCandidate` and renders `(→ candidate ADR)`. `FinishReceipt.adrCandidates` now lists every register decision marked `adrCandidate` (text, because, rejected, probe); the stall nudge names the latest decision probe (`run the pending decision probe (decision n: probe)`). Tests: `ControllerTest` S0 campaign with two decisions ⇒ one ADR candidate in the receipt, the model's private text absent from `finish-receipt.json`; `GatesTest` stall probe. The KB queue for ADR candidates stays P4.1; plan-packet `adrCandidates` are filled by `task.propose(plan)` (P2.1.5).
 
-#### P2.1.4 [M] Sizing telemetry · TODO
+#### P2.1.4 [M] Sizing telemetry · DONE
 - Why: [§6.7](docs/context/continuity.md#sec-6-7) inputs; [§3.8](docs/architecture/components.md#sec-3-8) pressure rebuild counted as decomposition failure.
 - Build: `Sizing(turns, continuations, rebuilds, filesTouched, expectedFiles)` per increment, updated at cell end; persisted in `sizing`.
 - Done: continuation and rebuild counters verified by tests.
+- Log: 2026-09-24 — `graph.Sizing` gains `touched` (sorted union; `filesTouched` = its size) and `afterCell`; `expectedFiles` stays on `Increment`. `RequirementGraph.continueIncrement` counts a continuation for every cell after the first; new `recordCell` adds turns, pressure stops and touched paths; `Lifecycle` records it on `Returned` (a `Partial(Pressure)` exit counts one rebuild — the P1 form of the §3.8 decomposition failure until P2.5.1/P2.5.2 count real rebuilds), `Interrupted` and `Lost` (from the checkpoint, nothing without one). `SqliteCampaigns` writes one `sizing` row per (increment, latest cell). Tests: `LifecycleTest` counters across a pressured and a completed cell, sizing row in the store view; the P2.1.1 continuation test now expects the counted continuation.
 
 #### P2.1.5 [M] `task.propose(plan | increment_split | amendment)` · TODO
 - Why: [§5.4 task](docs/runtime/tools.md#sec-5-4); required by the scope guard (P3.4.1) and by `NEEDS_RESCOPING` handling (P2.2.2); needs no delegation machinery.
