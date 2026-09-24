@@ -75,7 +75,7 @@ public object Roles {
         contextView = setOf(ContextPart.Kernel, ContextPart.Prime, ContextPart.ContractSlice, ContextPart.Notes, ContextPart.Transcript, ContextPart.Anchor),
         noteScope = setOf("GLOBAL", "CON", "ADR", "LES", "STATUS", "CAL"),
         skillFilter = setOf("*"),
-        toolMask = ToolMask(all - setOf("task.delegate", "task.collect", "kb.propose")),
+        toolMask = ToolMask(all - setOf("task.delegate", "task.collect")),
         permission = Stage.LocalCommit,
         tierPrior = Tier.High,
         duties = listOf("execute one increment to green acceptance", "maintain STATE through typed ops", "propose notes, never admit them"),
@@ -187,14 +187,14 @@ public object Roles {
 
     /**
      * What a shape enables (§3.5 collapsibility): S0 = one implementing cell without delegation, proposals or
-     * reviews; S1 adds proposals and note proposals; S2 adds probes, reviews and collection; S3 everything. The
+     * reviews and note proposals (P4.1.3); S1 adds task proposals; S2 adds probes, reviews and collection; S3 everything. The
      * tools, transforms included, are active in every shape (§3.5 table; D-97): the role mask and the capability
      * ceiling still bound them.
      */
     @JvmStatic
     public fun shapeMask(shape: Shape): ToolMask = when (shape) {
         Shape.S0 -> ToolOps.implementingS0
-        Shape.S1 -> ToolMask(ToolOps.implementingS0.allowed + setOf("task.propose", "kb.propose"))
+        Shape.S1 -> ToolMask(ToolOps.implementingS0.allowed + setOf("task.propose"))
         Shape.S2 -> ToolMask(all)
         Shape.S3 -> ToolMask(all)
     }

@@ -188,6 +188,8 @@ public class Cell @JvmOverloads constructor(
         private var atlas = ws.atlas
         private var rebuilds = 0
         private val rebuildNotes = ArrayList<String>()
+        /** The previous turn's edits: what the §6.3 focus notes anchor on beside the register's focus. */
+        private var editedThisTurn: Set<String> = emptySet()
 
         // The packet's runtime-owned fields, collected as the cell runs (§5.9).
         private var base: StampReport? = null
@@ -400,7 +402,9 @@ public class Cell @JvmOverloads constructor(
                 }
             }
             editedPaths.addAll(movedThisTurn(before, after, contract))
+            editedThisTurn = editedPaths.toSet()
             tools.state.fireTrips(editedPaths)
+            ctx.knowledge?.cited(register)
             dropUnseenCoverage(calls, result)
             observeWorkset()
 
@@ -500,9 +504,10 @@ public class Cell @JvmOverloads constructor(
             val currencies = currencies(stampNow)
             val digest = ContractDigest.render(contract, ctx.ledger ?: Ledger.initial(contract), obligations(contract, currencies), estimator, defaults.digestCapTokens)
             val worksetLine = ws.workset.render(estimator) + drops.joinToString("") { "; ${it.text}" }
+            val focusNotes = ctx.knowledge?.focusNotes(register.focus, editedThisTurn)
             return Anchor.render(
                 estimator, digest, RegisterRender.markdown(register), worksetLine, touchedLedger.toList(),
-                ChecksRender.render(stampNow, checkLines(currencies)), null, null, gauge(currencies).line(), nudges,
+                ChecksRender.render(stampNow, checkLines(currencies)), null, focusNotes, gauge(currencies).line(), nudges,
                 RegisterRender.firedTrips(register), defaults,
             )
         }

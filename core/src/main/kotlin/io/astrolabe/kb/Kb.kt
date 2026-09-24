@@ -29,8 +29,8 @@ public data class KbEntry(
 
 /**
  * The knowledge base as the `kb` tool family reads it (§4.5, §12, TODO P1.6.10): retrieval only — relevance is
- * never authorization (L10), and nothing here can amend the contract. P2.6 supplies the note store and the
- * curator; `kb.propose` stays masked until P4.1.
+ * never authorization (L10), and nothing here can amend the contract. P2.6 supplies the note store; the curator
+ * (P4.1) admits what `kb.propose` queues.
  */
 public interface Kb {
     /** Notes matching [query] within [scope]; [why] is the model's stated need, logged for retrieval-miss analysis. */

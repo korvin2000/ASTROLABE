@@ -45,7 +45,7 @@ public sealed interface Compiled {
 public data class CompileInputs @JvmOverloads constructor(
     /** `index/contracts.md`: mandatory; referenced where `[R]` already carries it, never duplicated into `[K]`. */
     val contractsIndex: String? = null,
-    /** Admitted notes available to this compile (CON/GLOBAL until the ranker, P4.1.3). */
+    /** The notes this compile carries: the `Injection` selection (P4.1.3), `CON`/`ADR` in the write scope mandatory. */
     val notes: List<Note> = emptyList(),
     /** The carry-forward of the previous cell: mandatory when present. */
     val carry: Carry? = null,
@@ -162,10 +162,12 @@ public class Compiler(
                 }
             }
         }
+        // P4.1.3: the ranker (Injection) chose `inputs.notes`; the role's note scope and the CAL view still bound them.
+        val calibrationNote = ContextPart.CalibrationPrior in role.contextView && inputs.notes.any { it.kind == NoteKind.CAL && it.status == NoteStatus.Admitted }
         if (ContextPart.Notes in role.contextView) {
             val slice = inputs.notes.filter { n ->
                 n.status == NoteStatus.Admitted && n !in anchored && n.kind != NoteKind.STATUS &&
-                    (n.kind == NoteKind.CON || n.scope == "global") && (n.kind.name in role.noteScope || (n.scope == "global" && "GLOBAL" in role.noteScope))
+                    (n.kind.name in role.noteScope || (n.scope == "global" && "GLOBAL" in role.noteScope) || (n.kind == NoteKind.CAL && calibrationNote))
             }.sortedBy { it.id }
             for (note in slice) {
                 val priority = when (note.kind) {
@@ -176,7 +178,8 @@ public class Compiler(
                 add("note.${note.id}", "${note.kind.name} ${note.id}", note.line + "\n" + note.body, mandatory = false, priority)
             }
         }
-        if (ContextPart.CalibrationPrior in role.contextView) {
+        // D-42: an admitted CAL note replaces the P2 statistics block; never both.
+        if (ContextPart.CalibrationPrior in role.contextView && !calibrationNote) {
             inputs.calibration?.takeIf { it.isNotBlank() }?.let { add("calibration", "Calibration prior", it, mandatory = false, ContextPriority.Background) }
         }
         return out
