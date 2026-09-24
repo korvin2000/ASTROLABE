@@ -41,7 +41,8 @@ public class KbWriter(private val store: Store, private val estimator: TokenEsti
     @Synchronized
     public fun write(note: Note, ids: Identities): Int {
         val bodyTokens = estimator.estimate(note.body).tokens
-        if (bodyTokens > Note.MAX_BODY_TOKENS) throw NoteRefused("${note.id}: body is $bodyTokens tokens > ${Note.MAX_BODY_TOKENS}; link a module")
+        // D-36: a harness STATUS checkpoint is lint-exempt; every other note is a compact unit.
+        if (note.kind != NoteKind.STATUS && bodyTokens > Note.MAX_BODY_TOKENS) throw NoteRefused("${note.id}: body is $bodyTokens tokens > ${Note.MAX_BODY_TOKENS}; link a module")
         val existing = notes.get(note.id)
         if (existing != null) {
             if (existing.kind != note.kind) throw NoteRefused("${note.id}: kind ${existing.kind} cannot become ${note.kind}")
