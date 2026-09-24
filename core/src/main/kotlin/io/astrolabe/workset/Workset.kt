@@ -140,6 +140,14 @@ public class Workset(
     /** Cell-end export (re-served as seeds by the compiler, §6.2). */
     public fun export(): List<Entry> = live.toList()
 
+    /** §5.8 rebuild: the projection is replaced, so KNOWN becomes exactly [seeds] (stale entries and drops are gone). */
+    public fun rebuild(seeds: List<Entry>) {
+        live.clear()
+        stale.clear()
+        drops.clear()
+        seed(seeds)
+    }
+
     /** Seeds re-served by the compiler are KNOWN at the version they were rendered with. */
     public fun seed(entries: List<Entry>) {
         entries.forEach { register(it.copy(source = EntrySource.Seed)) }

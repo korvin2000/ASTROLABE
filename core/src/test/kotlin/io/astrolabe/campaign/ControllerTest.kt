@@ -162,17 +162,30 @@ class ControllerTest {
     }
 
     @Test
-    fun `S1+ work is blocked honestly and a later open resumes the campaign`() {
+    fun `multi-session work selects S1 and opens running`() {
         open(policy.copy(resumeExpected = true)).use { c ->
+            assertEquals(io.astrolabe.contract.Shape.S1, assertIs<ShapeDecision.Selected>(c.shape).shape, "multi-session work is S1 (P2.2.2)")
+            assertEquals(CampaignPhase.Running, c.state!!.phase)
+            assertNull(c.stop)
+        }
+    }
+
+    @Test
+    fun `S2 work without a reviewer is blocked honestly and stays blocked on reopen`() {
+        Store.open(stateRoot, repo.git, clock).use { store ->
+            val contracts = Contracts(SqliteContractRepository(store, clock), idGen, clock)
+            val derived = contracts.deriveS0(request.work, request.attempt, request.text, Atlas.build(repo.root), Config(), policy.tokens).contract
+            contracts.open(derived.copy(acceptance = derived.acceptance + Acceptance.Review("AC-R", "a maintainer approves the API", Origin.User)))
+        }
+        open().use { c ->
             val unavailable = assertIs<ShapeDecision.Unavailable>(c.shape)
-            assertTrue(unavailable.reason.startsWith("shape S1+ unavailable"))
+            assertTrue(unavailable.reason.startsWith("shape S1+ unavailable: capability unavailable: required review"), unavailable.reason)
             assertEquals(CampaignOutcome.BlockedExternal, c.stop?.outcome)
             assertEquals(CampaignPhase.Ended, c.state!!.phase)
         }
         open().use { c ->
-            assertIs<ShapeDecision.Selected>(c.shape)
-            assertEquals(CampaignPhase.Running, c.state!!.phase, "blocked_external resumes: Resumed, then Reconciled")
-            assertNull(c.stop)
+            assertIs<ShapeDecision.Unavailable>(c.shape)
+            assertEquals(CampaignOutcome.BlockedExternal, c.state!!.outcome, "blocked_external resumes, then blocks again on the same missing capability")
         }
     }
 

@@ -91,7 +91,7 @@ public class Astrolabe @JvmOverloads public constructor(
             val model = CellModel(adapter, profile, HeuristicEstimator())
             val job = scope.async {
                 opened.use { c ->
-                    val run = controller.runS0(c, model, authority)
+                    val run = controller.run(c, model, authority)
                     run.outcome ?: c.stop?.outcome ?: CampaignOutcome.Failed
                 }
             }

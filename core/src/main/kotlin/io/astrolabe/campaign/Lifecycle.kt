@@ -138,6 +138,12 @@ public sealed interface Transition {
     /** The verifier accepted a completion and the tree is still [stampNow] (§3.7 `commit_outcome_if_current`). */
     public data class Committed(val result: CompletionResult.Accepted, val stampNow: CandidateId) : Transition
 
+    /**
+     * The controller installs a validated plan (§4.2, P2.2.2): the plan cell's graph, or a replan that keeps every
+     * increment already dispatched, verified or cancelled exactly as it was (authorized coverage preserved).
+     */
+    public data class Planned(val graph: RequirementGraph) : Transition
+
     /** The authority answered or amended; the blocked increment resumes. */
     public data class Unblocked(val increment: String, val authorityRef: String) : Transition {
         init {
@@ -219,8 +225,8 @@ public object Lifecycle {
                 val cell = checkNotNull(exit.packet.ids.context)
                 val running = checkNotNull(s.running) { "no cell is running" }
                 check(running.cell == cell && running.increment == exit.packet.increment) { "packet of $cell is not the running cell ${running.cell}" }
-                // §3.8: a pressure stop is the P1 form of a pressure rebuild, counted as a decomposition failure.
-                val rebuilt = if (exit is CellExit.Partial && exit.reason == PartialReason.Pressure) 1 else 0
+                // §3.8: every pressure rebuild in the cell and a terminating pressure stop are decomposition failures.
+                val rebuilt = exit.checkpoint.rebuilds + if (exit is CellExit.Partial && exit.reason == PartialReason.Pressure) 1 else 0
                 val sized = s.graph.recordCell(running.increment, cell, exit.turns, exit.checkpoint.touched, rebuilt)
                 val graph = if (exit is CellExit.Blocked) sized.block(running.increment, cell) else sized
                 s.next(graph = graph, cells = s.cells.map { if (it.cell == cell) it.copy(status = exit.status) else it }, contractVersion = v)
@@ -249,6 +255,18 @@ public object Lifecycle {
                 }
                 val graph = s.graph.recordAccepted(contract, result)
                 s.next(graph = graph, ledger = graph.ledger(contract, transition.stampNow), contractVersion = v)
+            }
+            is Transition.Planned -> {
+                expect(s, CampaignPhase.Running)
+                check(s.running == null) { "cell ${s.running?.cell} is still running" }
+                val issues = transition.graph.validate(contract)
+                check(issues.isEmpty()) { "an invalid plan is never installed: ${issues.joinToString { it.detail }}" }
+                val next = transition.graph.increments.associateBy { it.id }
+                for (kept in s.graph.increments.filter { it.cells.isNotEmpty() || it.status != IncrementStatus.Pending }) {
+                    check(next[kept.id] == kept) { "a replan keeps ${kept.id} (${kept.status}) as it was" }
+                }
+                val ledger = if (s.graph.increments.any { it.status == IncrementStatus.Verified }) s.ledger else Ledger.initial(contract)
+                s.next(graph = transition.graph, ledger = ledger, contractVersion = v)
             }
             is Transition.Unblocked -> {
                 expect(s, CampaignPhase.Opened, CampaignPhase.Running)

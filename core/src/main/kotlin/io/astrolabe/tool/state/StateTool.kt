@@ -83,6 +83,15 @@ public class StateTool(
         register = register.markStale(change)
     }
 
+    /**
+     * Harness-side (§5.8 rebuild): installs the validated form of the current STATE — stale tags added by the carry,
+     * nothing the model wrote removed. Refused when the cell or increment differs.
+     */
+    public fun validated(next: Register) {
+        require(next.cell == register.cell && next.increment == register.increment) { "a rebuild validates this cell's STATE, not another's" }
+        register = next
+    }
+
     /** Harness-side (P1.5.2): trips whose predicate matches an edited path fire once, rendered by the anchor. */
     public fun fireTrips(editedPaths: Collection<String>) {
         register = register.fireTrips(editedPaths)
