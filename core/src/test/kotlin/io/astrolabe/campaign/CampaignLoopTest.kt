@@ -126,6 +126,22 @@ class CampaignLoopTest {
         request.segments.flatMap { it.items }.filterIsInstance<io.astrolabe.provider.Message>().joinToString("\n") { it.text }
 
     @Test
+    fun `the controller routes every cell through the router and logs verified outcomes with fake profiles`() = runBlocking<Unit> {
+        val ctl = controller()
+        ctl.open(repo.root, request, policy).use { c ->
+            val replies = planning() +
+                implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"") +
+                implement(c, "src/b.py", "    return 2", "    return 20", "\"AC-1\",\"AC-2\"")
+            val run = ctl.run(c, model(replies))
+            assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+            // §11.1: one (function, tier, effort, outcome) quadruple per cell; the untiered fake profile serves every tier (D-130).
+            val entries = ctl.router.calibration.entries()
+            assertEquals(listOf(io.astrolabe.route.RoutingFunction.Plan, io.astrolabe.route.RoutingFunction.Implementing, io.astrolabe.route.RoutingFunction.Implementing), entries.map { it.function })
+            assertTrue(entries.all { it.outcome == io.astrolabe.route.RoutingOutcome.Accepted && it.profile == FakeProfiles.main.id && it.tier == io.astrolabe.route.Tier.High && it.effort == io.astrolabe.provider.Effort.Medium }, entries.toString())
+        }
+    }
+
+    @Test
     fun `a planned two-increment campaign runs one cell per increment and completes on receipts`() = runBlocking<Unit> {
         controller().open(repo.root, request, policy).use { c ->
             assertEquals(Shape.S1, assertIs<ShapeDecision.Selected>(c.shape).shape)
