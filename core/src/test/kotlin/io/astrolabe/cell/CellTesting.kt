@@ -176,11 +176,11 @@ internal class CellFixture(
     lateinit var adapter: FakeAdapter
         private set
 
-    fun context(model: ScriptedModel, profile: Profile = FakeProfiles.main, profiles: Map<String, Profile> = FakeProfiles.all, holdResponses: Boolean = false): CellContext {
+    fun context(model: ScriptedModel, profile: Profile = FakeProfiles.main, profiles: Map<String, Profile> = FakeProfiles.all, holdResponses: Boolean = false, role: Role = Roles.implementing): CellContext {
         adapter = FakeAdapter(model, profiles, holdResponses = holdResponses)
         return CellContext(
             ids = ids,
-            role = Roles.implementing,
+            role = role,
             contracts = contracts,
             model = CellModel(adapter, profile, estimator),
             tools = CellTools(state, look, edit, run, verify, task, kb),
@@ -192,7 +192,7 @@ internal class CellFixture(
 
     fun budget(turns: Int = 12, tokens: Long = 400_000): CellBudget = CellBudget.of(Tokens(tokens), turns, Reserves())
 
-    fun cell(defaults: Defaults = this.defaults, completion: RoleCompletion = RoleCompletion.exitGate(), authority: DispatchAuthority = DispatchAuthority.NONE): Cell =
+    fun cell(defaults: Defaults = this.defaults, completion: RoleCompletion? = null, authority: DispatchAuthority = DispatchAuthority.NONE): Cell =
         Cell(clock, idGen, defaults, Gates.s0(), events, completion, authority)
 
     suspend fun run(
@@ -202,7 +202,9 @@ internal class CellFixture(
         profiles: Map<String, Profile> = FakeProfiles.all,
         defaults: Defaults = this.defaults,
         authority: DispatchAuthority = DispatchAuthority.NONE,
-    ): CellExit = cell(defaults, authority = authority).run(context(model, profile, profiles), increment, budget(turns))
+        role: Role = Roles.implementing,
+        completion: RoleCompletion? = null,
+    ): CellExit = cell(defaults, completion, authority).run(context(model, profile, profiles, role = role), increment, budget(turns))
 
     /** The `[T]` items of the [n]th request the adapter received (1-based). */
     fun transcript(n: Int): List<Item> = request(n).segment(SegmentKind.T)?.items.orEmpty()

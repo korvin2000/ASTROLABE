@@ -11,6 +11,7 @@ import io.astrolabe.evidence.IntentJournal
 import io.astrolabe.evidence.Journal
 import io.astrolabe.evidence.Observations
 import io.astrolabe.evidence.Receipts
+import io.astrolabe.id.ExecutionGeneration
 import io.astrolabe.id.Identities
 import io.astrolabe.provider.Effort
 import io.astrolabe.provider.Profile
@@ -123,6 +124,8 @@ public class CellContext @JvmOverloads constructor(
     public val turnCheckpoint: TurnCheckpoint? = null,
     /** Pinned main-line user messages beyond the contract's requests (invariant 1). */
     public val pinned: List<String> = emptyList(),
+    /** The controller's execution generation (§13.1), carried into the packet and checked before acceptance. */
+    public val generation: ExecutionGeneration = ExecutionGeneration.INITIAL,
 ) {
     init {
         require(ids.context != null) { "a cell runs under its own context id" }
@@ -155,6 +158,8 @@ public data class RoleOutput(
     val certified: List<String>,
     /** Completion proposals already refused in this cell. */
     val refusals: Int,
+    /** The packet the runtime would hand back if this proposal is accepted: its status is `done`, a proposal. */
+    val packet: ResultPacket,
 )
 
 /** What the completion seam decided (§3.7 `assess_role_completion`). */
@@ -169,11 +174,12 @@ public sealed interface CompletionDecision {
 }
 
 /**
- * The named seam for role completion: `validate_role_output` + `assess_role_completion` of §3.7. P1.8.8
- * builds the `ResultPacket` and `Completion.assess` behind it; until then [exitGate] routes the implementing
- * role's no-call turn through the P1.7.7 exit gate as the S0 gate set evaluates it, and refuses more than
- * [Verifier.maxFinalizations] times before directing recovery. `done` stays a proposal: the verifier's
- * acceptance belongs to the controller.
+ * The named seam for role completion: `validate_role_output` + `assess_role_completion` of §3.7. The cell
+ * resolves it per role ([forRole]): the implementing packet goes through the P1.7.7 exit gate as the S0 gate
+ * set evaluated it, refused at most [Verifier.maxFinalizations] times before gap-directed recovery; every
+ * other packet kind needs its declared validator (P2/P4), and without one the cell cannot complete — it never
+ * falls back to the implementing gate, so a reviewer is never asked to review its own verdict. `done` stays a
+ * proposal: the verifier's acceptance belongs to the controller.
  */
 public fun interface RoleCompletion {
     public suspend fun assess(output: RoleOutput, gates: GateReport): CompletionDecision
@@ -192,6 +198,22 @@ public fun interface RoleCompletion {
                 }
             }
         }
+
+        /**
+         * `assess_role_completion` for [role]: a registered validator for its packet kind, else the exit gate for
+         * the implementing `Result` packet, else an explicit incomplete exit naming the missing validator.
+         */
+        @JvmStatic
+        @JvmOverloads
+        public fun forRole(
+            role: Role,
+            validators: Map<PacketKind, RoleCompletion> = emptyMap(),
+            maxFinalizations: Int = Verifier().maxFinalizations,
+        ): RoleCompletion = validators[role.packetKind] ?: when (role.packetKind) {
+            PacketKind.Result -> exitGate(maxFinalizations)
+            else -> RoleCompletion { _, _ ->
+                CompletionDecision.CannotProgress(listOf("no validator for the ${role.packetKind.name} packet of role '${role.name}' (P2/P4)"))
+            }
+        }
     }
 }
-

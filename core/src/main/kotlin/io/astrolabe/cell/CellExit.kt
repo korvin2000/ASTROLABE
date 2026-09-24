@@ -22,23 +22,26 @@ public enum class PartialReason {
 }
 
 /**
- * How a cell ended (§3.7, invariant 11). Every exit carries the register in force and the checkpoint that
- * was persisted for it — there is no exit without one — and the number of turns taken.
+ * How a cell ended (§3.7, invariant 11). Every exit carries the register in force, the checkpoint that was
+ * persisted for it — there is no exit without one — the number of turns taken and the Result Packet (§5.9)
+ * the controller verifies and commits from.
  */
 public sealed interface CellExit {
     public val turns: Int
     public val register: Register
     public val checkpoint: CellCheckpoint
+    public val packet: ResultPacket
 
     /**
      * The completion seam accepted the model's proposal against current evidence. `done` remains a proposal
-     * (L7): the verifier's acceptance and the ledger commit belong to the controller (P1.8.8, P1.9).
+     * (L7): the verifier accepts [packet]'s proposal and the controller commits the ledger (P1.9).
      */
     public data class Completed(
         override val turns: Int,
         override val register: Register,
         override val checkpoint: CellCheckpoint,
-        /** The model's final text, the packet source of P1.8.8. */
+        override val packet: ResultPacket,
+        /** The model's final text; a claim, never a packet field the runtime owns. */
         val text: String,
         val evidenceRefs: List<String>,
     ) : CellExit
@@ -48,6 +51,7 @@ public sealed interface CellExit {
         override val turns: Int,
         override val register: Register,
         override val checkpoint: CellCheckpoint,
+        override val packet: ResultPacket,
         val request: BlockedRequest,
     ) : CellExit
 
@@ -56,6 +60,7 @@ public sealed interface CellExit {
         override val turns: Int,
         override val register: Register,
         override val checkpoint: CellCheckpoint,
+        override val packet: ResultPacket,
         val reason: PartialReason,
         val hint: String,
     ) : CellExit
@@ -65,6 +70,7 @@ public sealed interface CellExit {
         override val turns: Int,
         override val register: Register,
         override val checkpoint: CellCheckpoint,
+        override val packet: ResultPacket,
         val error: String,
     ) : CellExit
 
@@ -73,6 +79,7 @@ public sealed interface CellExit {
         override val turns: Int,
         override val register: Register,
         override val checkpoint: CellCheckpoint,
+        override val packet: ResultPacket,
         val reason: String,
     ) : CellExit
 

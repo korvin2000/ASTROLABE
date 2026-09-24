@@ -72,7 +72,9 @@ import io.astrolabe.verify.TestIntegrity
 import io.astrolabe.verify.TestIntegrityFlag
 import io.astrolabe.workset.StaleDrop
 import io.astrolabe.workspace.ChangeListener
+import io.astrolabe.workspace.PathPattern
 import io.astrolabe.workspace.Preimage
+import io.astrolabe.workspace.Ranges
 import io.astrolabe.workspace.StampReport
 import io.astrolabe.workspace.Stamper
 import kotlinx.coroutines.CancellationException
@@ -102,7 +104,9 @@ import io.astrolabe.provider.ToolCall as NativeCall
  * 7. gates on records, terminal requests honoured, eviction on the `k` cadence, pressure ⇒ `partial`.
  *
  * A P1 cell never summarises and never rebuilds: pressure and turn exhaustion end it `partial` with a hint
- * for the controller. The role-completion path is a seam ([RoleCompletion]); P1.8.8 fills it.
+ * for the controller. A no-call turn is a completion proposal assessed by the role's [RoleCompletion]
+ * (resolved by [RoleCompletion.forRole] unless one is given); refused proposals are recorded as gaps. Every
+ * exit carries the [ResultPacket] the loop collected from records (§5.9), never from the model's text.
  */
 public class Cell @JvmOverloads constructor(
     private val clock: Clock,
@@ -110,7 +114,8 @@ public class Cell @JvmOverloads constructor(
     private val defaults: Defaults = Defaults(),
     private val gates: Gates = Gates.s0(),
     private val events: Events? = null,
-    private val completion: RoleCompletion = RoleCompletion.exitGate(),
+    /** `null`: [RoleCompletion.forRole] for the context's role. */
+    private val completion: RoleCompletion? = null,
     private val authority: DispatchAuthority = DispatchAuthority.NONE,
 ) {
     /** Runs one cell over [increment] under [budget] until an exit; the exit's checkpoint is persisted before it returns. */
@@ -118,8 +123,14 @@ public class Cell @JvmOverloads constructor(
 
     // ------------------------------------------------------------------ loop
 
-    /** One decided exit: the status to persist and the exit record built over the final checkpoint. */
-    private class Exit(val status: CellStatus, val reason: String?, val make: (Int, Register, CellCheckpoint) -> CellExit)
+    /** One decided exit: the status to persist and the exit record built over the final checkpoint and packet. */
+    private class Exit(
+        val status: CellStatus,
+        val reason: String?,
+        val blocked: BlockedRequest? = null,
+        val evidenceRefs: List<String> = emptyList(),
+        val make: (Int, Register, CellCheckpoint, ResultPacket) -> CellExit,
+    )
 
     /** The turn's calls after validation: all of them, or none (§5.4 error policy, fail closed). */
     private sealed interface Validated {
@@ -139,6 +150,7 @@ public class Cell @JvmOverloads constructor(
         private val record = TurnRecord()
         private val dispatcher = Dispatcher(executors(), ws.workset, ids, events, ctx.turnCheckpoint)
         private val subscriptions = ArrayList<AutoCloseable>()
+        private val completion = this@Cell.completion ?: RoleCompletion.forRole(ctx.role)
 
         private var turn = 0
         private var residents: List<Resident> = emptyList()
@@ -157,6 +169,15 @@ public class Cell @JvmOverloads constructor(
         private var occupancy: Occupancy? = null
         private var atlas = ws.atlas
 
+        // The packet's runtime-owned fields, collected as the cell runs (§5.9).
+        private var base: StampReport? = null
+        private var contractVersion = 0
+        private val readVersions = LinkedHashMap<String, FileVersion>()
+        private val displayed = LinkedHashMap<Pair<String, FileVersion>, Ranges>()
+        private val origins = LinkedHashMap<String, ChangeOrigin>()
+        private val gaps = ArrayList<String>()
+        private var cost = PacketCost()
+
         private val register: Register get() = tools.state.register
 
         suspend fun run(): CellExit {
@@ -170,6 +191,8 @@ public class Cell @JvmOverloads constructor(
             tools.verify?.inputs = atlas.rows.map { it.path }
             try {
                 lastReport = ws.stamper.report()
+                base = lastReport
+                observeWorkset()
                 while (true) {
                     val exit = turn() ?: continue
                     return finish(exit)
@@ -181,7 +204,7 @@ public class Cell @JvmOverloads constructor(
             } catch (failure: Exception) {
                 val error = "${failure::class.simpleName}: ${failure.message}"
                 val checkpoint = settle(CellStatus.Failed, error)
-                return CellExit.Failed(budget.turnsTaken, register, checkpoint, error)
+                return CellExit.Failed(budget.turnsTaken, register, checkpoint, persistPacket(packet(PacketStatus.Failed, error)), error)
             } finally {
                 subscriptions.forEach { it.close() }
             }
@@ -209,6 +232,7 @@ public class Cell @JvmOverloads constructor(
 
             // Render: [A] first (rebuilt every turn), then the cached regions, then admission.
             val contract = contract()
+            contractVersion = contract.version
             val mask = maskFor(contract, reserveTurn)
             val schemas = when (val selection = ToolSchemas.forLineage(ctx.model.adapter, ctx.model.profile, mask)) {
                 is SchemaSelection.Supported -> selection.set
@@ -240,9 +264,11 @@ public class Cell @JvmOverloads constructor(
                 ctx.model.adapter.start(request, invocationId).await()
             } catch (error: ProviderError) {
                 admission.release()
+                cost += null
                 return failed("provider ${error::class.simpleName}: ${error.message}")
             }
             val usage = response.usage
+            cost += usage
             admission.reconcile(Tokens(usage?.let { it.totalInput + (it.quantities[BillingDimension.OUTPUT] ?: 0L) } ?: admission.estimate.value))
             events?.emit(AgentEvent.Cell.ModelResponded(ids, invocationId.value, response.stop, usage))
 
@@ -263,7 +289,9 @@ public class Cell @JvmOverloads constructor(
 
             // Partition and dispatch — or refuse the whole turn.
             record.reset()
+            val dispatchedAt = clock.millis()
             val result = if (validated is Validated.Calls) dispatcher.dispatch(turn, calls, Tokens(defaults.rMaxTokens.toLong())) else null
+            cost = cost.plusToolSeconds((clock.millis() - dispatchedAt) / MILLIS_PER_SECOND)
             val after = reconcile("turn $turn")
             val gauge = gauge(currencies(after.candidateId))
             var liveRunOutput = false
@@ -292,6 +320,8 @@ public class Cell @JvmOverloads constructor(
                     val mutated = mutatedPaths(call, outcome)
                     if (mutated.isNotEmpty()) {
                         editedPaths += mutated
+                        val origin = if (call.family == ToolFamily.Edit) ChangeOrigin.Edit else ChangeOrigin.Run
+                        mutated.forEach { path -> origins.merge(path, origin) { old, new -> if (old == ChangeOrigin.External) new else old } }
                         // §8.6 run-side collection: every mutation, by edit or by run, is checked against the acceptance surface.
                         TestIntegrity.baseline(mutated, "${call.family.wire} ${alias ?: "op ${call.opId}"}", contract, ws.checks).forEach { flags.putIfAbsent(it.path, it) }
                     }
@@ -301,6 +331,7 @@ public class Cell @JvmOverloads constructor(
             editedPaths.addAll(movedThisTurn(before, after, contract))
             tools.state.fireTrips(editedPaths)
             dropUnseenCoverage(calls, result)
+            observeWorkset()
 
             // End-of-turn checker on the paths the horizons scheduled; the atlas follows the same set.
             val stampNow = drainScheduled(contract) ?: after
@@ -338,10 +369,17 @@ public class Cell @JvmOverloads constructor(
             // Terminal requests, the completion path, pressure.
             (tools.state.pendingBlock ?: tools.task?.pendingBlock)?.let { return blocked(it) }
             if (proposal) {
-                when (val decision = completion.assess(RoleOutput(turn, response.text, register, certifiedAfter.mapNotNull { currenciesNow.certifiedReceipt(it) }, refusals), report)) {
+                val output = RoleOutput(turn, response.text, register, certifiedAfter.mapNotNull { currenciesNow.certifiedReceipt(it) }, refusals, packet(PacketStatus.Done, null))
+                when (val decision = completion.assess(output, report)) {
                     is CompletionDecision.Accepted -> return completed(response.text, decision.evidenceRefs)
-                    is CompletionDecision.CannotProgress -> return partial(PartialReason.CompletionStalled, "gaps this cell cannot close: ${decision.gaps.joinToString("; ")}")
-                    is CompletionDecision.Continue -> refusals += 1
+                    is CompletionDecision.CannotProgress -> {
+                        recordGaps(decision.gaps)
+                        return partial(PartialReason.CompletionStalled, "gaps this cell cannot close: ${decision.gaps.joinToString("; ")}")
+                    }
+                    is CompletionDecision.Continue -> {
+                        recordGaps(decision.gaps)
+                        refusals += 1
+                    }
                 }
             }
             report.nudges.firstOrNull { it.key.gate == Gates.PRESSURE }?.let {
@@ -493,6 +531,7 @@ public class Cell @JvmOverloads constructor(
                 val unannounced = Stamper.diff(before, after).filter { path -> ws.registry.recorded(path) != after.members[path]?.digest?.let(::FileVersion) }
                 announceMoved(ws.registry, before, after, cause)
                 if (unannounced.isNotEmpty()) {
+                    unannounced.forEach { origins.putIfAbsent(it, ChangeOrigin.External) }
                     ev.journal.append(JournalEvent(idGen.next("ev"), ids, turn, JournalKind.Reconcile, refs = unannounced, text = "$cause: ${unannounced.size} paths moved unannounced · reconciled @${after.candidateId.hash8}", at = clock.instant()))
                 }
             }
@@ -604,14 +643,89 @@ public class Cell @JvmOverloads constructor(
         /** The exit reports the turns the budget actually admitted; a turn refused before dispatch was never taken. */
         private fun finish(exit: Exit): CellExit {
             val checkpoint = settle(exit.status, exit.reason)
-            return exit.make(budget.turnsTaken, register, checkpoint)
+            val packet = persistPacket(packet(PacketStatus.of(exit.status), exit.reason, exit.blocked, exit.evidenceRefs))
+            return exit.make(budget.turnsTaken, register, checkpoint, packet)
         }
 
-        private fun failed(error: String) = Exit(CellStatus.Failed, error) { t, r, cp -> CellExit.Failed(t, r, cp, error) }
-        private fun cancelled(reason: String) = Exit(CellStatus.Cancelled, reason) { t, r, cp -> CellExit.Cancelled(t, r, cp, reason) }
-        private fun partial(reason: PartialReason, hint: String) = Exit(CellStatus.Partial, "${reason.name}: $hint") { t, r, cp -> CellExit.Partial(t, r, cp, reason, hint) }
-        private fun blocked(request: BlockedRequest) = Exit(CellStatus.Blocked, request.reason) { t, r, cp -> CellExit.Blocked(t, r, cp, request) }
-        private fun completed(text: String, refs: List<String>) = Exit(CellStatus.Completed, null) { t, r, cp -> CellExit.Completed(t, r, cp, text, refs) }
+        private fun failed(error: String) = Exit(CellStatus.Failed, error) { t, r, cp, p -> CellExit.Failed(t, r, cp, p, error) }
+        private fun cancelled(reason: String) = Exit(CellStatus.Cancelled, reason) { t, r, cp, p -> CellExit.Cancelled(t, r, cp, p, reason) }
+        private fun partial(reason: PartialReason, hint: String) = Exit(CellStatus.Partial, "${reason.name}: $hint") { t, r, cp, p -> CellExit.Partial(t, r, cp, p, reason, hint) }
+        private fun blocked(request: BlockedRequest) = Exit(CellStatus.Blocked, request.reason, blocked = request) { t, r, cp, p -> CellExit.Blocked(t, r, cp, p, request) }
+        private fun completed(text: String, refs: List<String>) = Exit(CellStatus.Completed, null, evidenceRefs = refs) { t, r, cp, p -> CellExit.Completed(t, r, cp, p, text, refs) }
+
+        // ----------------------------------------------------------- packet
+
+        /**
+         * §5.9 from records: the dispatch base, the Workset's displayed versions, the registry's transitions with
+         * the runtime's attribution, the scheduler's receipts, the collected flags and usage. The status comes
+         * from the exit; the model's text is not consulted.
+         */
+        private fun packet(status: PacketStatus, reason: String?, blocked: BlockedRequest? = null, evidenceRefs: List<String> = emptyList()): ResultPacket {
+            val report = lastReport
+            val changes = changes()
+            val shown = displayed.keys.map { it.first }.toSet()
+            val own = changes.filter { it.origin != ChangeOrigin.External }
+            return ResultPacket(
+                ids = ids.withCandidate(report?.candidateId), increment = increment.id, role = ctx.role.name,
+                contractVersion = contractVersion, executionGeneration = ctx.generation,
+                base = base?.let { PacketBase(it.candidateId, ws.workspace.id) }, readVersions = readVersions.toMap(),
+                status = status, reason = reason, waiting = null, register = register, worksetExport = ws.workset.export(),
+                changes = changes, transforms = emptyList(), receipts = ws.checks.all().mapNotNull { it.last?.receiptId },
+                stamp = report?.candidateId, envId = report?.env?.envId,
+                coverage = PacketCoverage(displayed.values.sumOf { it.ranges.size }, own.filter { it.path !in shown }.map { it.path }),
+                flags = PacketFlags(own.filter { c -> increment.writeScope.none { PathPattern.matches(it, c.path) } }.map { it.path }, flags.values.toList()),
+                claims = PacketClaims(openQuestions = register.open.filter { !it.closed }.map { it.text } + tools.task?.asked.orEmpty().filter { it.answer == null }.map { it.question.text }),
+                blocked = blocked, gaps = gaps.toList(), evidenceRefs = evidenceRefs, cost = cost,
+            )
+        }
+
+        /** Net changes of the cell: each path's first and last registry transition, attributed to whoever the runtime saw move it. */
+        private fun changes(): List<Change> {
+            val first = LinkedHashMap<String, FileVersion?>()
+            val last = HashMap<String, FileVersion?>()
+            for (t in touchedLedger) {
+                if (!first.containsKey(t.path)) first[t.path] = t.from
+                last[t.path] = t.to
+            }
+            return first.mapNotNull { (path, before) ->
+                val after = last[path]
+                if (before == after) return@mapNotNull null
+                val kind = when {
+                    after == null -> TouchKind.Deleted
+                    before == null -> TouchKind.Added
+                    else -> TouchKind.Modified
+                }
+                Change(path, kind, before, after, origins[path] ?: ChangeOrigin.External)
+            }
+        }
+
+        /** Coverage the model was shown; redacted lines grant none (D-49), so a fully redacted view is not a read. */
+        private fun observeWorkset() {
+            for (entry in ws.workset.entries) {
+                if (entry.coverage.isEmpty) continue
+                displayed.merge(entry.path to entry.version, entry.coverage) { a, b -> a + b }
+                readVersions[entry.path] = entry.version
+            }
+        }
+
+        /** §3.7 `record_completion_gaps`: journaled and carried into the packet; `[A]` shows them through the exit gate's line. */
+        private fun recordGaps(found: List<String>) {
+            gaps += found
+            ev.journal.append(JournalEvent(idGen.next("ev"), ids, turn, JournalKind.Nudge, text = "completion refused at turn $turn: ${found.joinToString("; ")}", at = clock.instant()))
+        }
+
+        /** The packet is durable before the exit returns (§3.7 `persist_role_packet`): one boundary event with its references. */
+        private fun persistPacket(packet: ResultPacket): ResultPacket {
+            ev.journal.append(
+                JournalEvent(
+                    idGen.next("ev"), ids.withCandidate(packet.stamp), turn, JournalKind.Boundary, refs = packet.receipts + packet.evidenceRefs,
+                    text = "packet ${packet.status.wire} · ${packet.changes.size} changes · ${packet.receipts.size} receipts · stamp @${packet.stamp?.hash8 ?: "none"}" +
+                        (packet.reason?.let { " · $it" } ?: ""),
+                    at = clock.instant(),
+                ),
+            )
+            return packet
+        }
 
         // ------------------------------------------------------------ checks
 
@@ -750,6 +864,8 @@ public class Cell @JvmOverloads constructor(
 
         /** How many of a rejection's details ride on its line. */
         const val DETAILS_IN_LINE = 2
+
+        const val MILLIS_PER_SECOND = 1000.0
 
         val JSON = Json { encodeDefaults = true }
         val ITEMS = ListSerializer(Item.serializer())

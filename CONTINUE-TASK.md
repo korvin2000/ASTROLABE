@@ -1,5 +1,50 @@
 # Continue ASTROLABE implementation
 
+**Current checkpoint — P1.8.8 DONE, the P1 cell runtime is complete (2026-09-24).**
+On `main`; this record's commit.
+
+## What is true now
+
+**Every cell exit hands back a Result Packet.** `CellExit.packet` is a §5.9 `ResultPacket` collected by
+the loop from records — status from the exit, dispatch base, displayed read versions, net changes with
+their runtime-observed origin (Edit | Run | External), latest receipts, final stamp and environment,
+coverage, scope and test-integrity flags, usage by billable dimension — and journaled before the exit
+returns. The model reaches only `claims` (S0: open questions). `packet.proposal()` is the verifier's
+`CompletionProposal`; `done` stays a proposal until `Verifier.accept` (tested both ways). Role completion
+resolves per packet kind via `RoleCompletion.forRole`: the implementing exit gate, a registered validator,
+or an explicit `CannotProgress` — never the implementing gate for another role. Refused proposals are
+recorded gaps. Do not reimplement any of P1.8.1–P1.8.8.
+
+**Counts: 80/185 DONE, 0 IN_PROGRESS, 105 TODO.** P0 19/19; P1 52/64; P2–P6 9/102.
+Verification this session (Linux cloud sandbox, JDK 25 scratch copy — JDK 26 is unreachable there, see
+TODO §1 resume notes): cell **65/65** (6 new `ResultPacketTest`); full core **941 tests, 3 failures,
+6 skips**, all three outside the change and reproduced on the unmodified baseline or passing in isolation.
+**CI on `main` (JDK 26, both platforms) is the authority for this commit and has not been observed yet.**
+
+## Resume here
+
+1. **Confirm CI on this commit** (both jobs). If `checkKotlinAbi` or a JDK 26-only difference fails,
+   fix from the run's own log before anything else.
+2. **Next task: P1.9.1 `Lifecycle` state machines**, then P1.9.2–P1.9.6 (campaign open, S0 run +
+   `Compiler`, lifecycle controls, `FinishReceipt`, `Astrolabe`/`AstrolabeJava`), P1.11.1–P1.11.2,
+   P1.12.1–P1.12.4. `Deps` and §2.4 producer readiness govern. The controller consumes
+   `CellExit.packet`: `packet.proposal()` → `Verifier.accept` → commit; `ChangeOrigin` feeds P1.9.5's
+   `agent | by_run | pre_existing` split; `CellContext.generation` takes P1.9.4's execution generation.
+
+## Carried forward — read before touching these
+
+1. **P1.9.2 audit debt (unchanged):** open the derived contract after workspace capture, bind
+   `ProtectedPaths`, pass `Sniff` commands into `Checks.seed` and approved rules into `Prime`.
+2. **Exit-gate refinement (TODO §3.1):** red = a `failed` receipt; inconclusive is missing evidence.
+3. **Open finding for P1.12.2:** recall pointers exist only for `look` results (run/edit bodies stub as losses).
+4. **Recorded, not diagnosed:** the transient `StamperTest` `git exited -1` under load (`TempRepo.runGit`).
+5. **ABI (P1.8.8, non-additive, reviewed):** `CellExit` subclasses gain `packet`; `CellContext` gains
+   `generation` (older overloads kept); `Cell.completion` is nullable; `RoleOutput` gains `packet`.
+6. **Packet gaps by design:** no `diffstat` (P1.9.5 derives it from preimages), `transforms` empty until
+   P3.3, `waiting` null until P2 handles, `not_tested`/notes/self-assessment have no S0 producer.
+
+**Historical checkpoints below; their former next-step instructions are superseded.**
+
 **Current checkpoint — P0 CLOSED, P1.8.2–P1.8.7 DONE, the S0 cell runs (2026-09-21).**
 On `main`; this record's commit. Session ended at a complete, pushed, green checkpoint.
 
