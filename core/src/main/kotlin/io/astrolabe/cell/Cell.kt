@@ -9,6 +9,8 @@ import io.astrolabe.budget.Admission
 import io.astrolabe.budget.CellBudget
 import io.astrolabe.budget.Spend
 import io.astrolabe.budget.Tokens
+import io.astrolabe.context.AdmissionDecision
+import io.astrolabe.context.ContextAdmission
 import io.astrolabe.context.ContractSlice
 import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Contract
@@ -145,6 +147,7 @@ public class Cell @JvmOverloads constructor(
         private val ws = ctx.workspace
         private val ev = ctx.evidence
         private val estimator = ctx.model.estimator
+        private val contextAdmission = ctx.admission ?: ContextAdmission()
         private val capabilities = ctx.model.adapter.capabilities(ctx.model.profile)
         private val residency = Residency.of(defaults, estimator)
         private val record = TurnRecord()
@@ -246,10 +249,16 @@ public class Cell @JvmOverloads constructor(
                 Validation.Ok -> Unit
                 is Validation.Rejected -> {
                     val problems = validation.problems.joinToString("; ") { "${it.kind}: ${it.detail}" }
+                    if (validation.problems.any { it.kind == ProblemKind.ContextOverflow }) contextAdmission.rejected(estimate)
                     // next_request_exceeds_usable_context: a P1 cell checkpoints and stops rather than rebuilds.
                     if (validation.problems.any { it.kind == ProblemKind.ContextOverflow }) return partial(PartialReason.Pressure, "replan: the next request does not fit the window ($problems); a P1 cell never summarises — narrow the increment or resume with a fresh lineage")
                     return failed("request refused by ${ctx.model.adapter.id}: $problems")
                 }
+            }
+            // §6.1: the hard admission check — never an oversize request, never a fit claimed on unknown history.
+            when (val decision = contextAdmission.check(request, estimate)) {
+                is AdmissionDecision.Admitted -> Unit
+                is AdmissionDecision.Capacity -> return partial(PartialReason.Pressure, "replan: capacity ${decision.condition.name.lowercase()} — ${decision.detail}; a P1 cell never summarises")
             }
             val spend = if (reserveTurn) Spend.Check else Spend.Generation
             val admission = when (val admitted = budget.admit(spend, Tokens(estimate.upperBoundTokens + ctx.model.maxOutputTokens))) {
@@ -269,6 +278,7 @@ public class Cell @JvmOverloads constructor(
                 return failed("provider ${error::class.simpleName}: ${error.message}")
             }
             val usage = response.usage
+            contextAdmission.observed(estimate, usage?.takeIf { it.isComplete }?.totalInput)
             cost += usage
             ctx.accounting?.record(ids, invocationId.value, ctx.model.profile, request, usage)
             admission.reconcile(Tokens(usage?.let { it.totalInput + (it.quantities[BillingDimension.OUTPUT] ?: 0L) } ?: admission.estimate.value))
