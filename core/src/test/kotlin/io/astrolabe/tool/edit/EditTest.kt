@@ -8,6 +8,7 @@ import io.astrolabe.budget.HeuristicEstimator
 import io.astrolabe.budget.Reservations
 import io.astrolabe.budget.Tokens
 import io.astrolabe.contract.Contracts
+import io.astrolabe.contract.Increment
 import io.astrolabe.contract.InMemoryContractRepository
 import io.astrolabe.evidence.Coherence
 import io.astrolabe.evidence.SqliteAliases
@@ -273,6 +274,36 @@ class EditTest {
         val mixed = run("""{"ops":[{"create":"src/new.py","content":"x = 1\n"},{"create":"docs/new.md","content":"#"}],"why":"w"}""")
         assertEquals("refused", status(mixed))
         assertFalse(Files.exists(repo.resolve("src/new.py")), "one refused path refuses the batch before any write")
+    }
+
+    @Test
+    fun `crossing the increment's write scope warns once, then each crossing names its paths in why`() = runTest {
+        val editor = edit().also { it.increment = Increment("inc-1", listOf("R1"), accept = emptyList(), writeScope = listOf("src/"), expectedFiles = 1, title = "t") }
+        val first = run("""{"ops":[{"create":"tests/test_b.py","content":"x = 1\n"}],"why":"w"}""", editor)
+        assertEquals("ok", status(first), first.body)
+        assertTrue(first.body.contains("outside the increment's write scope (inside the contract): tests/test_b.py"), first.body)
+
+        val second = run("""{"ops":[{"create":"tests/test_c.py","content":"x = 1\n"}],"why":"w"}""", editor)
+        assertEquals("refused", status(second))
+        assertTrue(second.body.contains("outside the increment's write scope again: tests/test_c.py"), second.body)
+        assertFalse(Files.exists(repo.resolve("tests/test_c.py")))
+
+        assertEquals("ok", status(run("""{"ops":[{"create":"tests/test_c.py","content":"x = 1\n"}],"why":"test_c.py pins the new branch of a"}""", editor)))
+        assertEquals("ok", status(run("""{"ops":[{"create":"src/d.py","content":"x = 1\n"}],"why":"w"}""", editor)), "inside the increment needs nothing")
+    }
+
+    @Test
+    fun `a pending amendment dispatches nothing out of scope until the amendment is committed (FX-52)`() = runTest {
+        val editor = edit()
+        contracts.propose(ids.work, null, "also write docs/", "docs must change", weakening = false)
+        val pending = run("""{"ops":[{"create":"docs/new.md","content":"# new\n"}],"why":"docs/new.md documents a"}""", editor)
+        assertEquals("refused", status(pending))
+        assertTrue(pending.body.contains("scope: docs/new.md: outsidecontract"), pending.body)
+        assertFalse(Files.exists(repo.resolve("docs/new.md")), "a pending proposal grants nothing")
+
+        contracts.amendByUser(ids.work, "also update docs/") { it.copy(scope = it.scope.copy(writePaths = it.scope.writePaths + "docs/")) }
+        assertEquals("ok", status(run("""{"ops":[{"create":"docs/new.md","content":"# new\n"}],"why":"docs/new.md documents a"}""", editor)), "revalidated against the committed version at dispatch")
+        assertTrue(Files.exists(repo.resolve("docs/new.md")))
     }
 
     @Test

@@ -149,6 +149,11 @@ public class Edit(
 
     public var generation: Generation = Generation.INITIAL
 
+    /** Whether this cell was already warned for crossing the increment's write scope (§8.6: warning once). */
+    private var warnedOutsideIncrement = false
+
+    private fun justified(path: String, why: String): Boolean = path in why || path.substringAfterLast('/') in why
+
     override suspend fun execute(call: ToolCall, context: TurnContext): ToolOutcome {
         require(call.family == ToolFamily.Edit) { "not an edit call: ${call.name}" }
         val args = (call.args as Args.Edit).args
@@ -198,6 +203,15 @@ public class Edit(
             return none.copy(error = EditError("scope", null, first.path, verdict.refusals.joinToString("; ") { "${it.path}: ${it.kind.name.lowercase()} — ${it.detail}" }))
         }
         val outside = (verdict as ScopeVerdict.Allowed).outsideIncrement
+        // §8.6: the first crossing of the increment's write scope warns; every later one names its paths in `why` (D-74).
+        val unjustified = if (warnedOutsideIncrement) outside.filterNot { justified(it, args.why) } else emptyList()
+        if (unjustified.isNotEmpty()) {
+            return none.copy(
+                error = EditError("scope", null, unjustified.first(), "outside the increment's write scope again: ${unjustified.joinToString(", ")} — name each path in `why` with the reason, or task.propose(increment_split)"),
+                touchedOutsideScope = outside,
+            )
+        }
+        if (outside.isNotEmpty()) warnedOutsideIncrement = true
         val plans = try {
             args.ops.mapIndexed { i, op -> preflight(i + 1, op, context) }
         } catch (refusal: Refusal) {
