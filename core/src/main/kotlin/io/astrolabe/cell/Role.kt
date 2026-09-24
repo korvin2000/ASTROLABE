@@ -75,7 +75,8 @@ public object Roles {
         contextView = setOf(ContextPart.Kernel, ContextPart.Prime, ContextPart.ContractSlice, ContextPart.Notes, ContextPart.Transcript, ContextPart.Anchor),
         noteScope = setOf("GLOBAL", "CON", "ADR", "LES", "STATUS", "CAL"),
         skillFilter = setOf("*"),
-        toolMask = ToolMask(all - setOf("task.delegate", "task.collect")),
+        // §3.4: `task.delegate(writer)` only in S3 — the shape mask (S2+) and the Delegator's kind rule bound it (P4.4.1).
+        toolMask = ToolMask(all),
         permission = Stage.LocalCommit,
         tierPrior = Tier.High,
         duties = listOf("execute one increment to green acceptance", "maintain STATE through typed ops", "propose notes, never admit them"),
@@ -89,7 +90,7 @@ public object Roles {
         contextView = setOf(ContextPart.Kernel, ContextPart.ContractSlice, ContextPart.Prime, ContextPart.Notes, ContextPart.BehaviourMaps, ContextPart.CalibrationPrior, ContextPart.Transcript, ContextPart.Anchor),
         noteScope = setOf("GLOBAL", "CON", "ADR"),
         skillFilter = setOf("*"),
-        toolMask = ToolMask(ToolOps.look.map { ToolOps.name(io.astrolabe.tool.ToolFamily.Look, it) }.toSet() + ToolOps.kb.filter { it != "propose" }.map { "kb.$it" } + ToolOps.state.map { "state.$it" } + setOf("task.ask", "task.delegate", "task.propose", "verify.baseline")),
+        toolMask = ToolMask(ToolOps.look.map { ToolOps.name(io.astrolabe.tool.ToolFamily.Look, it) }.toSet() + ToolOps.kb.filter { it != "propose" }.map { "kb.$it" } + ToolOps.state.map { "state.$it" } + setOf("task.ask", "task.delegate", "task.collect", "task.propose", "verify.baseline")),
         permission = Stage.Patch,
         tierPrior = Tier.High,
         duties = listOf("requirement graph and acceptance proposals", "increments with write scopes and an ownership map", "decision packets, CON/ADR candidates, shape suggestion"),
@@ -149,7 +150,8 @@ public object Roles {
         name = "writer",
         contextView = setOf(ContextPart.Kernel, ContextPart.ChildContract, ContextPart.Transcript, ContextPart.Anchor),
         noteScope = setOf("GLOBAL", "CON", "ADR", "LES"),
-        toolMask = ToolMask(implementing.toolMask.allowed - setOf("task.propose")),
+        // A writer is a leaf (writers depth 1, §10.1): it never delegates.
+        toolMask = ToolMask(implementing.toolMask.allowed - setOf("task.propose", "task.delegate", "task.collect")),
         duties = listOf("one packet to green acceptance", "never decides interfaces; CON/ADR writes stay with the main line"),
         tierPrior = Tier.Medium,
     )
