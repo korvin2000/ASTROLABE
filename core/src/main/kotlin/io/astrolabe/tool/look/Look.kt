@@ -2,7 +2,10 @@ package io.astrolabe.tool.look
 
 import io.astrolabe.atlas.Atlas
 import io.astrolabe.atlas.DeclarationKind
+import io.astrolabe.atlas.EditSet
 import io.astrolabe.atlas.Focus
+import io.astrolabe.atlas.ImpactAssembly
+import io.astrolabe.atlas.ImportGraph
 import io.astrolabe.atlas.Outline
 import io.astrolabe.atlas.SymbolIndex
 import io.astrolabe.atlas.decodeLines
@@ -41,6 +44,7 @@ import io.astrolabe.tool.ToolFamily
 import io.astrolabe.tool.ToolOps
 import io.astrolabe.tool.ToolOutcome
 import io.astrolabe.tool.TurnContext
+import io.astrolabe.verify.Checks
 import io.astrolabe.workset.Entry
 import io.astrolabe.workset.EntrySource
 import io.astrolabe.workset.Workset
@@ -76,7 +80,8 @@ public sealed interface LookTarget {
 }
 
 /**
- * The `look` family (§5.4, TODO P1.6.3): `tree`, `outline`, `read`, `find`, `def`, `recall`, `catalog`.
+ * The `look` family (§5.4, TODO P1.6.3): `tree`, `outline`, `read`, `find`, `def`, `recall`, `catalog`;
+ * `refs`, `importers` and `impact` over the tier-0 import graph (P3.2.3, §7.3–7.4).
  * Every result is an [Observation] with a content blob; only rendered source bytes (reads, find hits,
  * recalls) register coverage in the version registry and the Workset, at the exact version they were read
  * from and minus every redacted line (D-49). Outlines, symbol locations and trees never make a body KNOWN.
@@ -105,6 +110,8 @@ public class Look(
     private val mask: ToolMask = ToolOps.implementingS0,
     private val findMaxHits: Int = 200,
     private val findCaptureBytes: Long = 256L * 1024 * 1024,
+    /** The registered checks `look(impact)` joins against; null renders no affected checks. */
+    private val checks: Checks? = null,
 ) : ToolExecutor {
     init {
         require(ids.context != null) { "look runs inside a cell: ids.context is its lineage" }
@@ -130,6 +137,9 @@ public class Look(
             "tree" -> tree(args)
             "outline" -> outline(args)
             "def" -> def(args)
+            "refs" -> refs(args)
+            "importers" -> importers(args)
+            "impact" -> impact(args)
             "catalog" -> catalog(args)
             else -> refused(args, "masked", "${call.name} is masked in this role; see look(catalog)")
         }
@@ -388,6 +398,68 @@ public class Look(
         return textResult(args, lines.joinToString("\n"), scope = "def $name", complete = false)
     }
 
+    // §7.4/§7.7: every answer carries tier and complete; tier 0 never claims completeness, dispatch is never guessed.
+    private fun refs(args: LookArgs): ToolOutcome {
+        val raw = args.target?.trim()?.takeIf { it.isNotEmpty() } ?: return refused(args, "refused", "refs needs a symbol: name | Owner.name | path::name")
+        val home = raw.substringBefore("::", "").takeIf { raw.contains("::") }
+        val qualified = raw.substringAfter("::")
+        val name = qualified.substringAfterLast('.').takeIf { it.isNotEmpty() } ?: return refused(args, "refused", "refs needs a symbol name")
+        val owner = qualified.substringBeforeLast('.', "").takeIf { it.isNotEmpty() }
+        val index = SymbolIndex(atlas, search)
+        val found = index.refs(name)
+        val graph = importGraph()
+        val first = (home ?: index.def(name).firstOrNull()?.path)?.let { graph.packageOf(it) }
+        val grouped = found.references.groupBy { graph.packageOf(it.path) }.toList()
+            .sortedWith(compareBy({ it.first != first }, { it.first ?: "\uFFFF" }))
+        val lines = ArrayList<String>()
+        lines += "${found.references.size} reference${if (found.references.size == 1) "" else "s"} to '$name' · tier ${found.tier.name.lowercase()} · complete: no" +
+            (if (found.truncated) " · truncated" else "")
+        owner?.let { lines += "dispatch unresolved: matched by name; receiver '$it' is not resolved at tier ${found.tier.level}, so calls through other receivers are listed too and dynamic calls may be missing" }
+        for ((pkg, refs) in grouped) {
+            lines += "package ${pkg ?: "(unknown)"}${if (pkg == first) " (first)" else ""}: ${refs.size}"
+            refs.forEach { lines += "  ${it.path}:${it.line} ${it.text}" }
+        }
+        return textResult(args, lines.joinToString("\n"), scope = "refs $raw", complete = false)
+    }
+
+    private fun importers(args: LookArgs): ToolOutcome {
+        val path = args.target?.trim()?.takeIf { it.isNotEmpty() } ?: return refused(args, "refused", "importers needs a path")
+        if (atlas.row(path) == null) return refused(args, "refused", refusalFor(path))
+        val graph = importGraph()
+        val pkg = graph.packageOf(path)
+        val importers = graph.importers(path).sortedWith(compareBy({ it.scope.packageId != pkg }, { it.path }))
+        val dynamic = graph.graph.unresolved.map { it.importer.path }.distinct()
+        val lines = ArrayList<String>()
+        lines += "${importers.size} importer${if (importers.size == 1) "" else "s"} of $path · package ${pkg ?: "(unknown)"} · tier ${graph.graph.tier.name.lowercase()} · complete: no"
+        importers.forEach { lines += "  ${it.path}${if (it.scope.packageId != pkg) " (package ${it.scope.packageId ?: "(unknown)"})" else ""}" }
+        if (dynamic.isNotEmpty()) lines += "unresolved: ${dynamic.size} file${if (dynamic.size == 1) "" else "s"} with dynamic or unresolved imports may also import it: " + dynamic.take(UNRESOLVED_SHOWN).joinToString(", ") + if (dynamic.size > UNRESOLVED_SHOWN) " …" else ""
+        return textResult(args, lines.joinToString("\n"), scope = "importers $path", complete = false)
+    }
+
+    private fun impact(args: LookArgs): ToolOutcome {
+        val paths = args.target?.split(',', ' ')?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet().orEmpty()
+        if (paths.isEmpty()) return refused(args, "refused", "impact needs paths: a.py[,b.py]")
+        paths.firstOrNull { atlas.row(it) == null }?.let { return refused(args, "refused", refusalFor(it)) }
+        val graph = importGraph()
+        val projection = ImpactAssembly(graph, SymbolIndex(atlas, search)).analyze(EditSet(paths), checks?.all().orEmpty(), contracts = null)
+        val analysis = projection.analysis
+        val lines = ArrayList<String>()
+        lines += "impact of ${paths.sorted().joinToString(", ")} · tier ${projection.tier.name.lowercase()} · complete: ${if (projection.complete) "yes" else "no"}"
+        lines += "blast ${analysis.blast.size}: " + analysis.blast.joinToString(", ") { it.path }
+        lines += "checks in blast: " + projection.blastChecks.joinToString(", ").ifEmpty { "(none)" } +
+            " · affected (with widening): " + projection.affectedTests.joinToString(", ").ifEmpty { "(none)" }
+        lines += "verify scopes: " + analysis.verificationScopes.joinToString(", ") { it.packageId?.let { p -> "package $p" } ?: "workspace" }.ifEmpty { "blast only" }
+        lines += "contracts touched: " + analysis.contractsTouched.joinToString(", ").ifEmpty { "(none found)" } + if (analysis.contractsComplete) "" else " · inventory incomplete"
+        lines += "risk: " + (analysis.risk.estimate?.let { "%.1f".format(java.util.Locale.ROOT, it) } ?: "unknown (no diff)") + " · θ ${analysis.risk.threshold}"
+        analysis.issues.forEach { lines += "unresolved: $it" }
+        return textResult(args, lines.joinToString("\n"), scope = "impact ${paths.sorted().joinToString(",")}", complete = projection.complete)
+    }
+
+    private var graphOf: Pair<Atlas, ImportGraph>? = null
+
+    private fun importGraph(): ImportGraph = graphOf?.takeIf { it.first === atlas }?.second
+        ?: ImportGraph.of(atlas, workspace.id).also { graphOf = atlas to it }
+
     private fun catalog(args: LookArgs): ToolOutcome {
         val lines = ToolFamily.entries.map { family ->
             val ops = ToolOps.of(family)
@@ -491,3 +563,6 @@ public class Look(
         return ToolOutcome(body, header, tokens = tokens)
     }
 }
+
+/** How many files with unresolved imports `look(importers)` names before eliding. */
+private const val UNRESOLVED_SHOWN = 5

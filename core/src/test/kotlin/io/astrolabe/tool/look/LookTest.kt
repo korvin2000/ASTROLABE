@@ -252,6 +252,45 @@ class LookTest {
     }
 
     @Test
+    fun `refs, importers and impact carry tier and complete, report dispatch unresolved, and invent nothing`() = runTest {
+        repo.write("pay/pyproject.toml", "[project]\nname = 'pay'\n")
+        repo.write("pay/pay/router.py", "def dispatch(req):\n    return req\n")
+        repo.write("pay/pay/api.py", "from pay.router import dispatch\n\n\ndef handle(r):\n    return dispatch(r)\n")
+        repo.write("pay/pay/plugins.py", "import importlib\n\n\ndef load(name):\n    return importlib.import_module(name)\n")
+        repo.write("tools/cli.py", "def main(x):\n    return x.dispatch(1)\n")
+        repo.commit("pay")
+        look = Look(
+            workspace, registry, workset, Atlas.build(repo.root), Searches.jvm(), journal,
+            SqliteObservations(store, clock), SqliteAliases(store, clock), store.blobs, Redaction(), estimator, idGen, ids,
+        )
+
+        val refs = look("""{"what":"refs","target":"Router.dispatch"}""")
+        assertEquals("ok", status(refs))
+        assertEquals("incomplete", refs.header!!.runtime.completeness)
+        val lines = refs.body.lines()
+        assertEquals("3 references to 'dispatch' · tier lexical · complete: no", lines[0], refs.body)
+        assertTrue(lines[1].startsWith("dispatch unresolved: matched by name; receiver 'Router' is not resolved at tier 0"), refs.body)
+        assertEquals("package pay (first): 2", lines[2], "the defining package comes first: " + refs.body)
+        val listed = lines.filter { it.startsWith("  ") }.map { it.trim().substringBefore(' ') }
+        assertEquals(listOf("pay/pay/api.py:1", "pay/pay/api.py:5", "tools/cli.py:2"), listed, "only atlas files, no definition lines, nothing invented")
+        assertEquals("0 references to 'nowhere' · tier lexical · complete: no", look("""{"what":"refs","target":"nowhere"}""").body)
+
+        val importers = look("""{"what":"importers","target":"pay/pay/router.py"}""")
+        assertEquals("incomplete", importers.header!!.runtime.completeness)
+        assertTrue(importers.body.startsWith("1 importer of pay/pay/router.py · package pay · tier lexical · complete: no\n  pay/pay/api.py"), importers.body)
+        assertTrue(importers.body.contains("unresolved: 1 file with dynamic or unresolved imports may also import it: pay/pay/plugins.py"), importers.body)
+        assertEquals("refused", status(look("""{"what":"importers","target":"pay/nope.py"}""")))
+
+        val impact = look("""{"what":"impact","target":"pay/pay/router.py"}""")
+        assertEquals("ok", status(impact))
+        assertEquals("incomplete", impact.header!!.runtime.completeness)
+        assertTrue(impact.body.startsWith("impact of pay/pay/router.py · tier lexical · complete: no\nblast 2: pay/pay/api.py, pay/pay/router.py"), impact.body)
+        assertTrue(impact.body.contains("contracts touched: (none found) · inventory incomplete"), impact.body)
+        assertTrue(impact.body.contains("risk: unknown (no diff)"), impact.body)
+        assertTrue(impact.body.contains("unresolved: lexical graph is incomplete"), impact.body)
+    }
+
+    @Test
     fun `tree, outline, def and catalog observe without coverage and masked ops say so`() = runTest {
         val tree = look("""{"what":"tree"}""")
         assertEquals("ok", status(tree))
@@ -270,8 +309,8 @@ class LookTest {
         assertEquals("incomplete", def.header!!.runtime.completeness)
 
         val catalog = look("""{"what":"catalog"}""")
-        assertTrue(catalog.body.contains("look: tree outline read find def recall catalog · masked: refs importers impact bmap"), catalog.body)
-        assertEquals("masked", status(look("""{"what":"refs","target":"b"}""")))
+        assertTrue(catalog.body.contains("look: tree outline read find def refs importers impact recall catalog · masked: bmap"), catalog.body)
+        assertEquals("masked", status(look("""{"what":"bmap"}""")))
         assertTrue(workset.entries.isEmpty(), "none of these make a body KNOWN")
         assertNotNull(SqliteObservations(store, clock).get("obs-1"))
         assertNull(SqliteObservations(store, clock).get("obs-9"))

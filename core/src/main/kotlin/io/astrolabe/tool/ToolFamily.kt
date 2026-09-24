@@ -67,10 +67,10 @@ public object ToolOps {
     public val all: Set<String> = ToolFamily.entries.flatMap { f -> of(f).map { name(f, it) } }.toSet()
 
     /**
-     * Everything an S0 implementing cell may call in Stage A (refs/importers/impact/bmap, transform, delegate/collect/propose,
-     * kb.propose arrive later). `verify.review` is the campaign-scope human review path (P3.5.2, D-23); the review cell is P4.4.3.
+     * Everything an S0 implementing cell may call in Stage A (refs/importers/impact since P3.2.3; bmap, transform,
+     * delegate/collect/propose, kb.propose arrive later). `verify.review` is the campaign-scope human review path (P3.5.2, D-23); the review cell is P4.4.3.
      */
     public val implementingS0: ToolMask = ToolMask(
-        all - setOf("look.refs", "look.importers", "look.impact", "look.bmap", "edit.transform", "task.delegate", "task.collect", "task.propose", "kb.propose"),
+        all - setOf("look.bmap", "edit.transform", "task.delegate", "task.collect", "task.propose", "kb.propose"),
     )
 }
