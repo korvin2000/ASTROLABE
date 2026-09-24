@@ -186,7 +186,9 @@ class RefactorCampaignTest {
             assertNull(review.unavailable)
             val equivalence = assertNotNull(finish.equivalence)
             assertTrue(equivalence.equivalent, equivalence.render())
-            assertEquals(2, equivalence.preserved)
+            // POSIX snapshots the declared full suite; Windows declares none (no make), so each acceptance check is a suite (D-76).
+            assertEquals(if (WINDOWS) 2 else 1, equivalence.suites.size, equivalence.render())
+            assertEquals(2 * equivalence.suites.size, equivalence.preserved, equivalence.render())
             assertEquals(c.s0.stampId, equivalence.s0)
             assertEquals(finish.stamp, equivalence.sn)
             val boundary = c.journal.events(JournalScope(request.ids.work, kinds = setOf(JournalKind.Boundary))).map { it.text }
