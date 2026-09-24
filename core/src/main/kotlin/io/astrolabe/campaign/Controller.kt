@@ -31,6 +31,7 @@ import io.astrolabe.cell.Roles
 import io.astrolabe.cell.SqliteCheckpoints
 import io.astrolabe.cell.TouchKind
 import io.astrolabe.cell.Touched
+import io.astrolabe.context.BoundaryReason
 import io.astrolabe.context.CarriedReceipt
 import io.astrolabe.context.Carry
 import io.astrolabe.context.CarryForward
@@ -43,6 +44,7 @@ import io.astrolabe.context.Seeds
 import io.astrolabe.context.SqliteManifests
 import io.astrolabe.context.StatusBoundary
 import io.astrolabe.context.StatusNotes
+import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Contract
 import io.astrolabe.contract.Contracts
 import io.astrolabe.contract.Increment
@@ -499,10 +501,16 @@ public class Controller @JvmOverloads public constructor(
             val carry = ready.cells.lastOrNull()?.let { previous -> carryFrom(c, previous, packets.lastOrNull { it.ids.context == previous }) }
             val seeds = carry?.let { Seeds.render(it.seeds, c.registry::read) }
             val resume = resumeNote(c, ready, carry)
+            val inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) })
             val compiled = Compiler(model.estimator, c.attempt.config).compile(
-                ready, contract, model.profile, Roles.implementing, c.prime, maxOutputTokens = model.maxOutputTokens,
-                inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) }),
+                ready, contract, model.profile, Roles.implementing, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = inputs,
             )
+            // §6.5: why this context is built — a new increment after a closed one, a partial's continuation, or a resume.
+            val boundaryReason = when (ready.cells.lastOrNull()?.let { previous -> state.cells.firstOrNull { it.cell == previous }?.status }) {
+                null, CellStatus.Completed -> BoundaryReason.Done
+                CellStatus.Partial, CellStatus.Blocked -> BoundaryReason.Partial
+                CellStatus.Running, CellStatus.Failed, CellStatus.Cancelled -> BoundaryReason.Resume
+            }
             when (compiled) {
                 is Compiled.Ready -> Unit
                 is Compiled.NeedsRescoping -> return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "NEEDS_RESCOPING_OR_LARGER_PROFILE for ${ready.id}: ${compiled.reason} — ask the plan role for an increment_split")), compiled = compiled)
@@ -513,7 +521,7 @@ public class Controller @JvmOverloads public constructor(
             val dispatched = c.advance(Transition.Dispatched(ready.id, cellId))
             val increment = dispatched.graph.increments.first { it.id == ready.id }
             val register = carry?.register?.copy(cell = cellId, increment = increment.id, incrementTitle = increment.title)
-            val run = runCell(c, cellId, increment, Roles.implementing, model, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = listOfNotNull(resume))
+            val run = runCell(c, cellId, increment, Roles.implementing, model, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = listOfNotNull(resume), boundary = boundaryReason, inputs = inputs)
             val exit = run.exit
             if (exit == null) {
                 snapshot(c)
@@ -554,9 +562,24 @@ public class Controller @JvmOverloads public constructor(
 
     /**
      * Regression obligations (§4.2, FX-42): a verified increment whose evidence no longer holds at the current stamp is
-     * re-accepted from the receipts current now — never re-executed; one without current receipts stays unfinished.
+     * re-accepted from the receipts current now — never re-executed. Its green `run:` acceptances are regression
+     * obligations the harness re-runs at campaign end (§4.1); one still without current receipts stays unfinished.
      */
-    private fun refreshRegressions(c: OpenedCampaign, scheduler: Scheduler) {
+    private suspend fun refreshRegressions(c: OpenedCampaign, scheduler: Scheduler) {
+        reaccept(c, scheduler)
+        val state = checkNotNull(c.state)
+        val stale = state.ledger.unfinished().toSet()
+        val runs = c.contract.acceptance.filterIsInstance<Acceptance.Run>().map { it.id }.toSet()
+        val obligations = state.graph.increments.filter { it.status == IncrementStatus.Verified && it.requirementIds.any { r -> r in stale } }
+            .flatMap { it.accept }.filter { it in runs }.distinct()
+        if (obligations.isEmpty()) return
+        val ids = c.ids.copy(context = ContextId(idGen.next("finish")))
+        val outcome = harnessVerify(c, ids, "regression", """{"what":"acceptance","ids":[${obligations.joinToString(",") { "\"$it\"" }}]}""")
+        c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, text = "regression obligations re-run (campaign end): ${obligations.joinToString(", ")} · ${outcome.body.lineSequence().joinToString(" ")}", at = clock.instant()))
+        reaccept(c, scheduler)
+    }
+
+    private fun reaccept(c: OpenedCampaign, scheduler: Scheduler) {
         val report = c.stamper.report()
         val state = checkNotNull(c.state)
         val stale = state.ledger.unfinished().toSet()
@@ -750,6 +773,8 @@ public class Controller @JvmOverloads public constructor(
         proposals: io.astrolabe.tool.task.Proposals? = null,
         completion: io.astrolabe.cell.RoleCompletion? = null,
         pinned: List<String> = emptyList(),
+        boundary: BoundaryReason? = null,
+        inputs: CompileInputs = CompileInputs(),
     ): CellRun {
         val ids = c.ids.copy(context = cellId)
         val config = c.attempt.config
@@ -783,7 +808,7 @@ public class Controller @JvmOverloads public constructor(
         val accounting = Accounting(c.store, clock)
         // §6.5: every compiled context leaves a manifest; the cell's end event links it.
         val manifests = SqliteManifests(c.store, clock)
-        val manifest = Manifest.of(idGen.next("manifest"), compiled, increment, contract, ids, model.profile, effort = model.effort.name.lowercase()).also { manifests.save(ids, it) }
+        val manifest = Manifest.of(idGen.next("manifest"), compiled, increment, contract, ids, model.profile, inputs, register?.version, boundary, model.effort.name.lowercase()).also { manifests.save(ids, it) }
         val ctx = CellContext(
             ids = ids, role = role, contracts = c.contracts, model = model, tools = tools,
             workspace = CellWorkspace(c.workspace, c.registry, coherence, c.stamper, workset, c.checks, scheduler, c.atlas, checker),
@@ -883,15 +908,7 @@ public class Controller @JvmOverloads public constructor(
             c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, text = "full suite ($why): none declared by the repository — an explicit gap, acceptance runs stand", at = clock.instant()))
             return FullSuite.Undeclared
         }
-        val config = c.attempt.config
-        val redaction = Redaction(config.redaction)
-        val logs = c.store.layout.root.resolve("logs")
-        val runner = TrustedLocalRunner(c.os)
-        val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, ids, clock)
-        val checker = Checker(c.checks, runner, c.os, c.stamper, c.registry, c.workspace, c.store.blobs, redaction, idGen, ids, logs)
-        val verify = Verify(checks = c.checks, scheduler = scheduler, checker = checker, baseline = null, s0 = c.s0.stampId, workspace = c.workspace, runner = runner, os = c.os, stamper = c.stamper, blobs = c.store.blobs, redaction = redaction, estimator = HeuristicEstimator(), idGen = idGen, ids = ids, contracts = c.contracts, logsDir = logs)
-        val call = (ToolCalls.parse(listOf(io.astrolabe.provider.ToolCall("full", "verify", """{"what":"tests","selection":"full"}"""))) as ParsedCalls.Valid).calls.single()
-        verify.execute(call, TurnContext(0, Workset().snapshot(), Reservations(Tokens(config.defaults.runBudgetTokens.toLong()))))
+        harnessVerify(c, ids, "full", """{"what":"tests","selection":"full"}""")
         val last = c.checks[Checks.FULL]?.last
         val stamp = c.stamper.report().candidateId
         // The full suite's closure is unknown (every file), so its evidence is a pass recorded at this very stamp.
@@ -902,6 +919,21 @@ public class Controller @JvmOverloads public constructor(
         }
         c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, refs = listOfNotNull(last?.receiptId), text = "full suite ($why): ${result::class.simpleName!!.lowercase()}", at = clock.instant()))
         return result
+    }
+
+    /** One `verify` call the harness makes on its own authority (full suite, regression obligations), outside any cell. */
+    private suspend fun harnessVerify(c: OpenedCampaign, ids: Identities, callId: String, args: String): io.astrolabe.tool.ToolOutcome {
+        val config = c.attempt.config
+        val redaction = Redaction(config.redaction)
+        val logs = c.store.layout.root.resolve("logs")
+        val runner = TrustedLocalRunner(c.os)
+        val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, ids, clock)
+        val checker = Checker(c.checks, runner, c.os, c.stamper, c.registry, c.workspace, c.store.blobs, redaction, idGen, ids, logs)
+        val verify = Verify(checks = c.checks, scheduler = scheduler, checker = checker, baseline = null, s0 = c.s0.stampId, workspace = c.workspace, runner = runner, os = c.os, stamper = c.stamper, blobs = c.store.blobs, redaction = redaction, estimator = HeuristicEstimator(), idGen = idGen, ids = ids, contracts = c.contracts, logsDir = logs)
+        // An unknown closure is rescanned over the atlas rows, as in a cell; without them no receipt can certify the tree.
+        verify.inputs = c.atlas.rows.map { it.path }
+        val call = (ToolCalls.parse(listOf(io.astrolabe.provider.ToolCall(callId, "verify", args))) as ParsedCalls.Valid).calls.single()
+        return verify.execute(call, TurnContext(0, Workset().snapshot(), Reservations(Tokens(config.defaults.runBudgetTokens.toLong()))))
     }
 
     /** The outcome of a refused dispatch or publication: `cancelled` for a cancellation, else the lost lease blocks. */
