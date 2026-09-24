@@ -335,6 +335,12 @@ public class Controller @JvmOverloads public constructor(
             journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Reconcile, refs = external.map { it.path }, text = "open: ${external.size} paths moved while closed (external) · reconciled @${stamp.hash8}", at = clock.instant()))
         }
         val reconciliation = Reconciliation(unknown.map { it.intentId }, external, stamp)
+        // A cell still running in the stored state belonged to a controller that stopped mid-cell: it is lost.
+        state?.running?.takeIf { state.phase == CampaignPhase.Running }?.let { running ->
+            val checkpoint = SqliteCheckpoints(store, clock).latest(running.cell)
+            journal.append(JournalEvent(idGen.next("ev"), ids, checkpoint?.turn, JournalKind.Reconcile, refs = listOf(running.cell.value), text = "open: cell ${running.cell.value} was running when its controller stopped; last checkpoint turn ${checkpoint?.turn ?: "none"} · lost", at = clock.instant()))
+            state = Lifecycle.apply(state, contract, Transition.Lost(running.cell, checkpoint)).also(campaigns::save)
+        }
         if (state?.phase == CampaignPhase.Opened) {
             state = Lifecycle.apply(state, contract, Transition.Reconciled(reconciliation.unknownOutcomes)).also(campaigns::save)
         }

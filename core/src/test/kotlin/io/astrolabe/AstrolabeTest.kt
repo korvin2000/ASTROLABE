@@ -60,7 +60,7 @@ class AstrolabeTest {
     private val config get() = Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all)
 
     @Test
-    fun `a campaign opens in a project, runs, reports its events and ends with an honest outcome`() = runBlocking {
+    fun `a campaign opens in a project, runs, reports its events and ends with an honest outcome`() = runBlocking<Unit> {
         Astrolabe(config, FakeAdapter(ScriptedModel.of(Scripted.Reply(listOf(Message.text(Role.Assistant, "done, trust me"))))), AutonomousAuthority()).use { sdk ->
             sdk.open(repo.root).use { project ->
                 val handle = sdk.campaign(project, "make a return 10")
@@ -77,7 +77,7 @@ class AstrolabeTest {
     }
 
     @Test
-    fun `cancel ends the campaign cancelled and a project runs one campaign at a time`() = runBlocking {
+    fun `cancel ends the campaign cancelled and a project runs one campaign at a time`() = runBlocking<Unit> {
         val adapter = FakeAdapter(ScriptedModel.of(Scripted.Reply(listOf(Message.text(Role.Assistant, "thinking")))), holdResponses = true)
         Astrolabe(config, adapter, AutonomousAuthority()).use { sdk ->
             sdk.open(repo.root).use { project ->

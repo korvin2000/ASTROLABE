@@ -124,6 +124,17 @@ public sealed interface Transition {
         }
     }
 
+    /**
+     * The controller that ran [cell] stopped while it ran (a process death): a reopen records the cell as failed
+     * from its last persisted [checkpoint] (or none), after reconciling the tree and the open intents (§13.1). The
+     * increment stays open for a new cell; nothing of the lost cell is verified.
+     */
+    public data class Lost(val cell: ContextId, val checkpoint: CellCheckpoint?) : Transition {
+        init {
+            require(checkpoint == null || checkpoint.cell == cell) { "the checkpoint belongs to ${checkpoint?.cell}, not $cell" }
+        }
+    }
+
     /** The verifier accepted a completion and the tree is still [stampNow] (§3.7 `commit_outcome_if_current`). */
     public data class Committed(val result: CompletionResult.Accepted, val stampNow: CandidateId) : Transition
 
@@ -210,6 +221,12 @@ public object Lifecycle {
                 check(running.cell == cell && running.increment == exit.packet.increment) { "packet of $cell is not the running cell ${running.cell}" }
                 val graph = if (exit is CellExit.Blocked) s.graph.block(running.increment, cell) else s.graph
                 s.next(graph = graph, cells = s.cells.map { if (it.cell == cell) it.copy(status = exit.status) else it }, contractVersion = v)
+            }
+            is Transition.Lost -> {
+                expect(s, CampaignPhase.Running)
+                val running = checkNotNull(s.running) { "no cell is running" }
+                check(running.cell == transition.cell) { "${transition.cell} is not the running cell ${running.cell}" }
+                s.next(cells = s.cells.map { if (it.cell == running.cell) it.copy(status = CellStatus.Failed) else it }, contractVersion = v)
             }
             is Transition.Interrupted -> {
                 expect(s, CampaignPhase.Running)

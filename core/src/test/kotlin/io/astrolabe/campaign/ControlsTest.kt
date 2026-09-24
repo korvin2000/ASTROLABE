@@ -134,7 +134,7 @@ class ControlsTest {
     }
 
     @Test
-    fun `cancellation before dispatch stops the campaign cancelled without a model call`() = runBlocking {
+    fun `cancellation before dispatch stops the campaign cancelled without a model call`() = runBlocking<Unit> {
         open().use { c ->
             c.cancellation.cancel("host stop")
             val adapter = FakeAdapter(edits(c))
@@ -145,7 +145,7 @@ class ControlsTest {
     }
 
     @Test
-    fun `cancellation mid call interrupts the cell, which settles a cancelled checkpoint`() = runBlocking {
+    fun `cancellation mid call interrupts the cell, which settles a cancelled checkpoint`() = runBlocking<Unit> {
         open().use { c ->
             val adapter = FakeAdapter(ScriptedModel.of(Scripted.Reply(listOf(Message.text(Role.Assistant, "thinking")))), holdResponses = true)
             val started = CompletableDeferred<Unit>()
@@ -167,7 +167,7 @@ class ControlsTest {
     }
 
     @Test
-    fun `FX-26 single-cell - a completion that arrives after cancellation is archived, never published`() = runBlocking {
+    fun `FX-26 single-cell - a completion that arrives after cancellation is archived, never published`() = runBlocking<Unit> {
         open().use { c ->
             val run = controller().runS0(c, model(FakeAdapter(edits(c) { c.cancellation.cancel("superseded by the host") })))
             assertIs<CellExit.Completed>(run.exit)
@@ -180,7 +180,7 @@ class ControlsTest {
     }
 
     @Test
-    fun `a lease is single writer and its expiry revokes publication only`() = runBlocking {
+    fun `a lease is single writer and its expiry revokes publication only`() = runBlocking<Unit> {
         open(controller(lease = Duration.ofMinutes(5))).use { c ->
             val lease = assertNotNull(c.lease)
             assertFailsWith<LeaseHeld> { Leases(c.store, clock).acquire(Controller.WORKSPACE, c.ids, "someone-else", Duration.ofMinutes(5)) }
@@ -193,7 +193,7 @@ class ControlsTest {
     }
 
     @Test
-    fun `FX-25 S0 form - admission refuses what the budget cannot cover and spend stays within it`() = runBlocking {
+    fun `FX-25 S0 form - admission refuses what the budget cannot cover and spend stays within it`() = runBlocking<Unit> {
         val budget = Tokens(4_000)
         open(policy = CampaignPolicy(budget)).use { c ->
             val run = controller().runS0(c, model(FakeAdapter(edits(c))))
@@ -206,7 +206,7 @@ class ControlsTest {
     }
 
     @Test
-    fun `FX-48 FX-49 S0 - a tiny task runs S0 with every mandatory control on and its overhead measured`() = runBlocking {
+    fun `FX-48 FX-49 S0 - a tiny task runs S0 with every mandatory control on and its overhead measured`() = runBlocking<Unit> {
         open().use { c ->
             assertEquals(Shape.S0, assertIs<ShapeDecision.Selected>(c.shape).shape)
             assertTrue(c.attempt.controls.allEnabled && c.lease != null && !c.cancellation.cancelled)
