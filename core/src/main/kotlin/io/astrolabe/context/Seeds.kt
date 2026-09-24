@@ -10,7 +10,7 @@ import io.astrolabe.workset.Entry
 import io.astrolabe.workspace.FileContent
 
 /** Seeds as rendered into `[K]`: [shown] at their recorded hash, [notSeen] when the bytes moved in between. */
-public data class SeedRender(val text: String, val shown: List<Entry>, val notSeen: List<NotSeen>)
+public data class SeedRender(val text: String, val shown: List<Entry>, val notSeen: List<NotSeen>, val blocks: List<String> = emptyList())
 
 /**
  * The Workset export/seed round trip (§6.2, P2.4.4). A cell's end export is the one checkpointed with its last turn;
@@ -30,14 +30,15 @@ public object Seeds {
     public fun render(seeds: List<Entry>, read: (String) -> FileContent?): SeedRender {
         val shown = ArrayList<Entry>()
         val notSeen = ArrayList<NotSeen>()
-        val text = buildString {
-            for (seed in seeds) {
-                val content = read(seed.path)
-                if (content == null || content.version != seed.version) {
-                    notSeen += NotSeen(seed.path, seed.range, seed.version, content?.version, "changed")
-                    continue
-                }
-                val lines = decodeLines(content.bytes)
+        val blocks = ArrayList<String>()
+        for (seed in seeds) {
+            val content = read(seed.path)
+            if (content == null || content.version != seed.version) {
+                notSeen += NotSeen(seed.path, seed.range, seed.version, content?.version, "changed")
+                continue
+            }
+            val lines = decodeLines(content.bytes)
+            blocks += buildString {
                 append("SEED ").append(seed.path).append(':').append(seed.range).append(" @").append(seed.version.hash8).append('\n')
                 for (range in seed.range.ranges) {
                     for (n in range.from..minOf(range.to, lines.size)) {
@@ -45,10 +46,10 @@ public object Seeds {
                         append(n).append(" | ").append(if (hidden) "⟨redacted⟩" else lines[n - 1]).append('\n')
                     }
                 }
-                shown += seed
             }
+            shown += seed
         }
-        return SeedRender(text, shown, notSeen)
+        return SeedRender(blocks.joinToString(""), shown, notSeen, blocks)
     }
 
     /**

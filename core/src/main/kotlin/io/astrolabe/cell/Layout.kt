@@ -114,7 +114,12 @@ public object ErrorPolicy {
 public data class CompiledK @JvmOverloads constructor(
     val slice: ContractSlice,
     val ledger: PreexistingLedger? = null,
+    /** The compiled sections after the slice, in selection order (§6.1): contracts, notes, carry-forward, seeds, … */
+    val sections: List<KSection> = emptyList(),
 )
+
+/** One compiled `[K]` section; [id] is its context unit, rendered under [title]. */
+public data class KSection(val id: String, val title: String, val text: String)
 
 /**
  * The `[T]` transcript: the pinned main-line user messages, verbatim and never compacted (invariant 1),
@@ -176,8 +181,9 @@ public object Layout {
     /** The `[K]` text: the contract slice verbatim, then the pre-existing-failure ledger. */
     @JvmStatic
     public fun compiled(k: CompiledK): String {
-        val ledger = k.ledger ?: return k.slice.render()
-        return k.slice.render() + ledger.render() + "\n"
+        val base = k.ledger?.let { k.slice.render() + it.render() + "\n" } ?: k.slice.render()
+        if (k.sections.isEmpty()) return base
+        return base + k.sections.joinToString("") { "## ${it.title}\n${it.text.trimEnd()}\n" }
     }
 
     /**
