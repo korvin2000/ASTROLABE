@@ -48,9 +48,11 @@ import io.astrolabe.provider.UsageItem
 import io.astrolabe.provider.Validation
 import io.astrolabe.provider.estimate
 import io.astrolabe.register.ContractDigest
+import io.astrolabe.register.Mark
 import io.astrolabe.register.ObligationStatus
 import io.astrolabe.register.Register
 import io.astrolabe.register.RegisterRender
+import io.astrolabe.register.Step
 import io.astrolabe.register.ValidationContext
 import io.astrolabe.tool.Disposition
 import io.astrolabe.tool.Dispatcher
@@ -73,6 +75,7 @@ import io.astrolabe.verify.CheckLine
 import io.astrolabe.verify.CheckState
 import io.astrolabe.verify.ChecksRender
 import io.astrolabe.verify.Currency
+import io.astrolabe.verify.Layer
 import io.astrolabe.verify.Selector
 import io.astrolabe.verify.TestIntegrity
 import io.astrolabe.verify.TestIntegrityFlag
@@ -185,6 +188,10 @@ public class Cell @JvmOverloads constructor(
         private val displayed = LinkedHashMap<Pair<String, FileVersion>, Ranges>()
         private val origins = LinkedHashMap<String, ChangeOrigin>()
         private val gaps = ArrayList<String>()
+
+        /** `not_tested` (§8.2): what a layer could not test, and the required checks without a certifying receipt. */
+        private val notTested = LinkedHashSet<String>()
+        private var uncertified: List<String> = emptyList()
         private var cost = PacketCost()
 
         private val register: Register get() = tools.state.register
@@ -364,12 +371,20 @@ public class Cell @JvmOverloads constructor(
             // End-of-turn checker on the paths the horizons scheduled; the atlas follows the same set.
             val proposal = native.isEmpty() && (response.stop == StopReason.EndTurn || response.stop == StopReason.ToolUse)
             val turnEnd = drainScheduled(contract) ?: after
-            // §8.1 verify-on-stop: a completion proposal runs only the missing or stale acceptance checks; reused receipts stand.
-            val stoppedChecks = if (proposal) tools.verify?.onStop(increment.accept).orEmpty() else emptyList()
-            for (receipt in stoppedChecks) {
-                ev.journal.append(JournalEvent(idGen.next("ev"), ids, turn, JournalKind.Check, refs = listOf(receipt.receiptId), text = "verify-on-stop ${receipt.checkId}: ${receipt.outcome.name.lowercase()}", at = clock.instant()))
+            // §8.1 layer table: a `[>]` move runs blast ∪ the left step's accept:, a completion proposal verify-on-stop;
+            // each runs only missing or stale checks, reused receipts stand.
+            val layerRuns = listOfNotNull(
+                stepLeft(registerBefore, register)?.let { step -> tools.verify?.runLayer(Layer.BlastAndStepAccept, listOfNotNull(step.accept)) },
+                if (proposal) tools.verify?.onStop(increment.accept) else null,
+            )
+            for (layerRun in layerRuns) {
+                notTested += layerRun.notTested
+                val what = if (layerRun.layer == Layer.IncrementAcceptance) "verify-on-stop" else "step boundary"
+                for (receipt in layerRun.receipts) {
+                    ev.journal.append(JournalEvent(idGen.next("ev"), ids, turn, JournalKind.Check, refs = listOf(receipt.receiptId), text = "$what ${receipt.checkId}: ${receipt.outcome.name.lowercase()}", at = clock.instant()))
+                }
             }
-            val stampNow = if (stoppedChecks.isEmpty()) turnEnd else ws.stamper.report()
+            val stampNow = if (layerRuns.all { it.receipts.isEmpty() }) turnEnd else ws.stamper.report()
             lastReport = stampNow
             ws.scheduler.refresh(stampNow.candidateId, stampNow.env)
             worksetDrops()
@@ -379,6 +394,7 @@ public class Cell @JvmOverloads constructor(
 
             // Gates on records.
             val currenciesNow = currencies(stampNow.candidateId)
+            uncertified = outstanding(currenciesNow)
             val certifiedAfter = certified(currenciesNow)
             if (Progress.events(registerBefore, register, turn, certifiedBefore, certifiedAfter).isNotEmpty()) lastProgressTurn = turn
             val unresolved = TestIntegrity.unresolved(flags.values.toList())
@@ -731,7 +747,7 @@ public class Cell @JvmOverloads constructor(
                 stamp = report?.candidateId, envId = report?.env?.envId,
                 coverage = PacketCoverage(displayed.values.sumOf { it.ranges.size }, own.filter { it.path !in shown }.map { it.path }),
                 flags = PacketFlags(own.filter { c -> increment.writeScope.none { PathPattern.matches(it, c.path) } }.map { it.path }, flags.values.toList()),
-                claims = PacketClaims(openQuestions = register.open.filter { !it.closed }.map { it.text } + tools.task?.asked.orEmpty().filter { it.answer == null }.map { it.question.text }),
+                claims = PacketClaims(notTested = (notTested + uncertified.map { "$it: no current certifying receipt" }).toList(), openQuestions = register.open.filter { !it.closed }.map { it.text } + tools.task?.asked.orEmpty().filter { it.answer == null }.map { it.question.text }),
                 blocked = blocked, gaps = gaps.toList(), evidenceRefs = evidenceRefs, cost = cost,
             )
         }
@@ -795,6 +811,10 @@ public class Cell @JvmOverloads constructor(
 
         private fun Map<String, Currency>.certifiedReceipt(acceptanceId: String): String? =
             ws.checks.forAcceptance(acceptanceId).firstNotNullOfOrNull { check -> this[check.id]?.takeIf { it.certifies }?.receiptId }
+
+        /** The `[>]` step this turn's patch left (ticked or moved past), when it moved. */
+        private fun stepLeft(before: Register, after: Register): Step? =
+            before.plan.firstOrNull { it.mark == Mark.Cursor }?.takeIf { after.step(it.n)?.mark != Mark.Cursor }
 
         /** Required checks without a certifying receipt: what a reserve exit names as unverified (FX-43). */
         private fun outstanding(currencies: Map<String, Currency>): List<String> =

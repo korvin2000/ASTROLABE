@@ -10,7 +10,9 @@ import io.astrolabe.cell.CellFixture.Companion.resultText
 import io.astrolabe.cell.CellFixture.Companion.runCmd
 import io.astrolabe.cell.CellFixture.Companion.say
 import io.astrolabe.cell.CellFixture.Companion.tree
+import io.astrolabe.contract.Command
 import io.astrolabe.event.AgentEvent
+import io.astrolabe.evidence.Closure
 import io.astrolabe.evidence.IntentStatus
 import io.astrolabe.evidence.JournalKind
 import io.astrolabe.evidence.JournalScope
@@ -27,7 +29,13 @@ import io.astrolabe.provider.Items
 import io.astrolabe.provider.Profile
 import io.astrolabe.provider.ToolResult
 import io.astrolabe.provider.Validation
+import io.astrolabe.verify.Check
+import io.astrolabe.verify.CheckKind
 import io.astrolabe.verify.Checks
+import io.astrolabe.verify.CostClass
+import io.astrolabe.verify.Layers
+import io.astrolabe.verify.Selector
+import io.astrolabe.verify.Trigger
 import io.astrolabe.workspace.LineRange
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
@@ -128,6 +136,30 @@ class CellTest {
             assertEquals(1, f.recorder.ofType<AgentEvent.Cell.Started>().size)
             assertEquals(listOf(1, 2, 3, 4), f.recorder.ofType<AgentEvent.Cell.TurnStarted>().map { it.turn })
             assertEquals("completed", f.recorder.ofType<AgentEvent.Cell.Ended>().single().status)
+        }
+    }
+
+    @Test
+    fun `leaving a step runs its accept check at the step boundary and the packet records what was not tested`() = runTest {
+        val pass = javaClass.getResourceAsStream("/shaper/pytest-pass.txt")!!.use { String(it.readAllBytes(), Charsets.UTF_8) }
+        CellFixture(stateRoot, files = CellFixture.DEFAULT_FILES + ("pytest_pass.txt" to pass)).use { f ->
+            val printing = if (WINDOWS) Command(listOf("cmd.exe", "/d", "/s", "/c", "type pytest_pass.txt")) else Command(listOf("/bin/sh", "-c", "cat pytest_pass.txt"))
+            f.checks.register(Check("CHK-step", CheckKind.Unit, Selector.Named(printing), Closure.Known(setOf("src/a.py")), CostClass.Fast, Trigger.StepBoundary, acceptanceIds = listOf("AC-S"), command = printing))
+            val v = f.version("src/a.py")
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("planning"), patch("c1", """{"plan.add":{"text":"make a return 10","accept":"AC-S"}},{"plan.cursor":1},{"next":"edit a"}"""))),
+                Scripted.Reply(listOf(say("editing"), anchored("c2", "src/a.py", v, "    return 1", "    return 10"))),
+                Scripted.Reply(listOf(say("ticking"), patch("c3", """{"plan.tick":{"n":1,"evidence":"#1"}},{"next":"done"}"""))),
+                Scripted.Reply(listOf(say("done: a returns 10"))),
+            )
+
+            val completed = assertIs<CellExit.Completed>(f.run(model))
+
+            val receipt = f.receipts.forCheck("CHK-step").single()
+            assertEquals(f.version("src/a.py"), receipt.testedInputs.versions["src/a.py"], "it ran on the edited tree, after the step was left")
+            val events = f.journal.events(JournalScope(f.ids.work, kinds = setOf(JournalKind.Check)))
+            assertEquals(listOf(3), events.filter { it.text == "step boundary CHK-step: passed" }.map { it.turn })
+            assertEquals(listOf(Layers.NO_BLAST), completed.packet.claims.notTested)
         }
     }
 

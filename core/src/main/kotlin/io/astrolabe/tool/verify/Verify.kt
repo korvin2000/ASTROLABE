@@ -49,6 +49,8 @@ import io.astrolabe.verify.Checks
 import io.astrolabe.verify.ChecksRender
 import io.astrolabe.verify.Currency
 import io.astrolabe.verify.Executed
+import io.astrolabe.verify.Layer
+import io.astrolabe.verify.Layers
 import io.astrolabe.verify.Scheduler
 import io.astrolabe.verify.Selector
 import io.astrolabe.workspace.Stamper
@@ -165,19 +167,22 @@ public class Verify(
     }
 
     /**
-     * Verify-on-stop (§8.1, P3.1.3): on a completion proposal, runs only the checks of [acceptanceIds] with no
-     * receipt or without a current, eligible one at the tree now; a receipt kept current by a reuse proof stands, a
-     * current red one is evidence too, and the full suite never runs here. Returns the receipts it recorded.
+     * Runs one scheduled row of the §8.1 layer table ([Layers.select]) on the harness's authority: only checks of
+     * [acceptanceIds] (and the layer's own checks) with no receipt or without a current, eligible one at the tree
+     * now; a receipt kept current by a reuse proof stands, and a current red one is evidence too.
      */
-    public suspend fun onStop(acceptanceIds: Collection<String>): List<Receipt> {
-        val contract = contracts.current(ids.work) ?: return emptyList()
+    public suspend fun runLayer(layer: Layer, acceptanceIds: Collection<String> = emptyList()): LayerRun {
+        val contract = contracts.current(ids.work) ?: return LayerRun(layer, emptyList(), listOf("no committed contract for ${ids.work}"))
         val stampNow = stamper.stamp().id
-        val due = acceptanceIds.flatMap { checks.forAcceptance(it) }.distinctBy { it.id }.filter { it.kind != CheckKind.Full }.filter { check ->
+        val selection = Layers.select(layer, checks, acceptanceIds) { check ->
             val currency = scheduler.currency(check, stampNow)
             currency.receiptId == null || currency.applicability != Applicability.Current || !currency.eligible
         }
-        return due.map { runOne(it, contract).first }
+        return LayerRun(layer, selection.run.map { runOne(it, contract).first }, selection.notTested)
     }
+
+    /** Verify-on-stop (§8.1, P3.1.3): the increment's acceptance on a completion proposal; never the full suite. */
+    public suspend fun onStop(acceptanceIds: Collection<String>): LayerRun = runLayer(Layer.IncrementAcceptance, acceptanceIds)
 
     // --------------------------------------------------------------- running
 
@@ -289,3 +294,6 @@ public class Verify(
         val SEVERITY = listOf(Outcome.UnknownOutcome, Outcome.Unavailable, Outcome.Timeout, Outcome.InfraError, Outcome.Failed, Outcome.Denied, Outcome.Inconclusive, Outcome.NotRun)
     }
 }
+
+/** What [Verify.runLayer] recorded: the receipts of the checks it ran, and what the layer could not test. */
+public data class LayerRun(val layer: Layer, val receipts: List<Receipt>, val notTested: List<String>)

@@ -111,6 +111,7 @@ import io.astrolabe.tool.run.TrustedLocalRunner
 import io.astrolabe.tool.state.StateTool
 import io.astrolabe.tool.task.TaskTool
 import io.astrolabe.tool.verify.Verify
+import io.astrolabe.verify.CheckKind
 import io.astrolabe.verify.Checker
 import io.astrolabe.verify.Checks
 import io.astrolabe.verify.CompletionProposal
@@ -909,10 +910,15 @@ public class Controller @JvmOverloads public constructor(
             return FullSuite.Undeclared
         }
         harnessVerify(c, ids, "full", """{"what":"tests","selection":"full"}""")
+        // §8.1: the configured quality gates run with the suite; a red gate is a red result.
+        val gates = c.checks.all().filter { it.kind == CheckKind.Quality }.map { it.id }
+        if (gates.isNotEmpty()) harnessVerify(c, ids, "quality", """{"what":"tests","selection":"ids","ids":[${gates.joinToString(",") { "\"$it\"" }}]}""")
+        val redGate = gates.mapNotNull { c.checks[it]?.last }.firstOrNull { it.outcome == Outcome.Failed }
         val last = c.checks[Checks.FULL]?.last
         val stamp = c.stamper.report().candidateId
         // The full suite's closure is unknown (every file), so its evidence is a pass recorded at this very stamp.
         val result = when {
+            redGate != null -> FullSuite.Red("quality gate ${redGate.receiptId} failed at @${stamp.hash8}")
             last?.outcome == Outcome.Passed && last.stamp == stamp -> FullSuite.Green
             last?.outcome == Outcome.Failed -> FullSuite.Red("${last.receiptId} failed at @${stamp.hash8}")
             else -> FullSuite.NotCertified("${last?.receiptId ?: "no receipt"} ${last?.outcome?.name?.lowercase() ?: "not run"} at @${stamp.hash8}")

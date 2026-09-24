@@ -102,7 +102,8 @@ public data class SelfAssessment(val complexityObserved: String, val confidence:
 /**
  * The packet's model-authored part: claims, labelled as such, that inform later work and decide nothing.
  * In S0 the open questions come from STATE's unclosed `Open` items and the unanswered `task.ask` questions;
- * `not_tested` (P3.1), note candidates (P4.2) and the self-assessment (P2.1.4) have no S0 producer yet.
+ * `not_tested` comes from the layer runs and the uncertified required checks (P3.1.4); note candidates (P4.2) and the
+ * self-assessment (P2.1.4) have no S0 producer yet.
  */
 public data class PacketClaims @JvmOverloads constructor(
     val notTested: List<String> = emptyList(),

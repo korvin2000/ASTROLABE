@@ -160,18 +160,18 @@ class VerifyTest {
         val stopScheduler = Scheduler(known, workspace, registry, stamper, receipts, InMemoryAliases(), idGen, ids, clock)
         val stop = Verify(known, stopScheduler, null, null, null, workspace, TrustedLocalRunner(os), os, stamper, store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, contracts, stateRoot.resolve("logs"))
 
-        val first = stop.onStop(listOf("AC-1"))
+        val first = stop.onStop(listOf("AC-1")).receipts
         assertEquals(listOf("CHK-accept-AC-1"), first.map { it.checkId }, "the missing check runs, the full suite never does")
         assertEquals(Outcome.Passed, first.single().outcome)
 
         repo.write("diag.txt", "unrelated\n")
-        assertEquals(emptyList(), stop.onStop(listOf("AC-1")), "the unchanged complete closure is reused, not rerun")
+        assertEquals(emptyList(), stop.onStop(listOf("AC-1")).receipts, "the unchanged complete closure is reused, not rerun")
         val currency = stopScheduler.currency(known["CHK-accept-AC-1"]!!, stamper.stamp().id)
         assertTrue(currency.certifies, currency.reasons.toString())
         assertEquals(first.single().receiptId, known["CHK-accept-AC-1"]!!.last!!.reuseProof!!.reuseOf)
 
         repo.write("src/a.py", "def a():\n    return 2\n")
-        assertEquals(listOf("CHK-accept-AC-1"), stop.onStop(listOf("AC-1")).map { it.checkId }, "a moved closure path reruns the check")
+        assertEquals(listOf("CHK-accept-AC-1"), stop.onStop(listOf("AC-1")).receipts.map { it.checkId }, "a moved closure path reruns the check")
         assertEquals(2, receipts.forCheck("CHK-accept-AC-1").size)
         assertEquals(emptyList(), receipts.forCheck(Checks.FULL))
     }
