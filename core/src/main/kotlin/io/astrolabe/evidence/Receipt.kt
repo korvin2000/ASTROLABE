@@ -110,6 +110,8 @@ public data class Receipt(
     val reuseOf: String? = null,
     val exitCode: Int? = null,
     @Serializable(with = InstantSerializer::class) val at: Instant,
+    /** The input closure pinned before the run (§8.1 `closure_manifest`); only a complete one can back a reuse proof. */
+    val closureManifest: ClosureManifest? = null,
 ) {
     init {
         require(receiptId.isNotBlank() && checkId.isNotBlank()) { "receipt needs ids" }

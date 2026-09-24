@@ -2,6 +2,7 @@ package io.astrolabe.verify
 
 import io.astrolabe.contract.Command
 import io.astrolabe.evidence.Closure
+import io.astrolabe.evidence.ClosureCompleteness
 import io.astrolabe.evidence.Coherence
 import io.astrolabe.evidence.Counts
 import io.astrolabe.evidence.InMemoryAliases
@@ -111,7 +112,85 @@ class SchedulerTest {
         val moved = scheduler.currency(accept(), stamper.stamp().id)
         assertEquals(Applicability.Stale, moved.applicability)
         assertFalse(moved.certifies)
-        assertTrue(moved.reasons.any { it.contains("no reuse proof") }, moved.reasons.toString())
+        assertTrue(moved.reasons.any { it.contains("closure moved: src/a.py") }, moved.reasons.toString())
+    }
+
+    @Test
+    fun `an unrelated edit keeps a complete unchanged closure current with a reuse proof, one moved closure path makes it stale (FX-54)`() = runTest {
+        val receipt = scheduler.runCheck(accept(), 1) { passed() }
+        assertEquals(ClosureCompleteness.Complete, receipt.closureManifest!!.completeness)
+
+        repo.write("src/pkg/b.py", "x = 3\n")
+        val stampNow = stamper.stamp().id
+        val reused = scheduler.currency(accept(), stampNow)
+        assertTrue(reused.certifies, reused.reasons.toString())
+        val proof = accept().last!!.reuseProof!!
+        assertEquals("rcpt-1", proof.reuseOf)
+        assertEquals("rcpt-1", accept().last!!.reuseOf)
+        assertEquals(stampNow, proof.stamp)
+        assertEquals(mapOf("src/a.py" to registry.version("src/a.py")!!.digest.hex, "tests/test_a.py" to registry.version("tests/test_a.py")!!.digest.hex), proof.closureUnchanged)
+        assertEquals(receipt, receipts.get("rcpt-1"), "reuse never rewrites the historical receipt")
+
+        // One changed file inside a larger closure: a non-empty intersection is enough, containment is not required.
+        repo.write("tests/test_a.py", "def test_a():\n    assert 1\n")
+        val moved = scheduler.currency(accept(), stamper.stamp().id)
+        assertEquals(Applicability.Stale, moved.applicability)
+        assertTrue(moved.reasons.single().endsWith("closure moved: tests/test_a.py"), moved.reasons.toString())
+        assertEquals(null, accept().last!!.reuseProof)
+        assertEquals(Outcome.Passed, receipts.get("rcpt-1")!!.outcome)
+    }
+
+    @Test
+    fun `an old green receipt is stale after the definition, verifier or environment changed, whatever the closure (FX-16)`() = runTest {
+        val receipt = scheduler.runCheck(accept(), 1) { passed() }
+        repo.write("src/pkg/b.py", "x = 3\n")
+        val report = stamper.report()
+        val repinned = scheduler.manifestOf(receipt.inputClosure)
+        val same = CandidateNow(report.candidateId, accept().definitionVersion, receipt.verifierVersion, report.env.envId, report.env.envKnown, repinned)
+        assertEquals(Applicability.Current, Applicability.of(receipt, same).applicability)
+
+        val changedArgv = accept().copy(command = Command(listOf("pytest", "-x"))).definitionVersion
+        val variants = mapOf(
+            "check definition changed" to same.copy(definitionVersion = changedArgv),
+            "verifier version" to same.copy(verifierVersion = "other"),
+            "environment moved" to same.copy(envId = io.astrolabe.id.Digest.ofUtf8("lockfile moved")),
+            "environment unknown" to same.copy(envKnown = false),
+        )
+        for ((reason, now) in variants) {
+            val verdict = Applicability.of(receipt, now)
+            assertEquals(Applicability.Stale, verdict.applicability, reason)
+            assertTrue(verdict.reason!!.contains(reason), verdict.reason)
+            assertEquals(null, verdict.reuse)
+        }
+        assertEquals(Applicability.Unknown, Applicability.of(receipt, same.copy(stamp = null)).applicability)
+    }
+
+    @Test
+    fun `a package closure pins membership, so an added test file invalidates it while scratch output does not`() = runTest {
+        val pkg = checks["CHK-pkg"]!!
+        val receipt = scheduler.runCheck(pkg, 1) { passed() }
+        assertEquals(mapOf("src/pkg" to listOf("src/pkg/b.py", "src/pkg/c.py")), receipt.closureManifest!!.directoryMembership)
+
+        repo.write("src/a.py", "def a():\n    return 2\n")
+        repo.write("src/pkg/__pycache__/b.cpython-312.pyc", "cache")
+        assertTrue(scheduler.currency(pkg, stamper.stamp().id).certifies)
+        assertEquals("rcpt-1", checks["CHK-pkg"]!!.last!!.reuseProof!!.reuseOf)
+
+        // Same paths, same bytes: a path list alone would call this unchanged.
+        repo.write("src/pkg/test_new.py", "def test_new():\n    assert False\n")
+        val grown = scheduler.currency(pkg, stamper.stamp().id)
+        assertEquals(Applicability.Stale, grown.applicability)
+        assertTrue(grown.reasons.single().contains("src/pkg/ (membership)"), grown.reasons.toString())
+    }
+
+    @Test
+    fun `an unknown closure never backs a reuse proof`() = runTest {
+        val full = checks["CHK-full"]!!
+        scheduler.runCheck(full, 1, inputs = listOf("src/a.py", "tests/test_a.py")) { passed() }
+        repo.write("src/pkg/b.py", "x = 3\n")
+        val moved = scheduler.currency(full, stamper.stamp().id)
+        assertEquals(Applicability.Stale, moved.applicability)
+        assertTrue(moved.reasons.single().contains("closure unknown: rerun at the containing scope"), moved.reasons.toString())
     }
 
     @Test

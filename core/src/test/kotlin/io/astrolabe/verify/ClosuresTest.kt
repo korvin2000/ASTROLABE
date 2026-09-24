@@ -9,6 +9,8 @@ import io.astrolabe.atlas.ImpactRequest
 import io.astrolabe.atlas.ImpactScope
 import io.astrolabe.atlas.IndexTier
 import io.astrolabe.evidence.Closure
+import io.astrolabe.evidence.ClosureCompleteness
+import io.astrolabe.evidence.ClosureManifest
 import io.astrolabe.id.Digest
 import io.astrolabe.id.FileVersion
 import io.astrolabe.id.WorkspaceId

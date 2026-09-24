@@ -364,7 +364,7 @@ public class Cell @JvmOverloads constructor(
             // End-of-turn checker on the paths the horizons scheduled; the atlas follows the same set.
             val stampNow = drainScheduled(contract) ?: after
             lastReport = stampNow
-            ws.checks.refresh(stampNow.candidateId)
+            ws.scheduler.refresh(stampNow.candidateId, stampNow.env)
             worksetDrops()
             residency.due(residents, turn)?.let { trigger -> evict(trigger) }
             val current = residency.occupancy(prefix(layout), residents, turn, anchor.tokens, pinnedTokens(contract))
@@ -567,7 +567,7 @@ public class Cell @JvmOverloads constructor(
             }
             lastReport = after
             reconciledTurn = turn
-            ws.checks.refresh(after.candidateId)
+            ws.scheduler.refresh(after.candidateId, after.env)
             return after
         }
 

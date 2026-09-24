@@ -5,8 +5,11 @@ import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Command
 import io.astrolabe.contract.Contract
 import io.astrolabe.evidence.Closure
+import io.astrolabe.evidence.ClosureCompleteness
+import io.astrolabe.evidence.ClosureManifest
 import io.astrolabe.evidence.Counts
 import io.astrolabe.evidence.Outcome
+import io.astrolabe.evidence.Receipt
 import io.astrolabe.id.CandidateId
 import io.astrolabe.id.CanonicalEncoding
 import io.astrolabe.id.Digest
@@ -55,7 +58,85 @@ public enum class Trigger { EveryEdit, EndOfTurn, StepBoundary, RiskAboveTheta, 
 
 /** Applicability of a historical result to the current candidate (§8.4): computed, never stored on the receipt. */
 @Serializable
-public enum class Applicability { Current, Stale, Unknown }
+public enum class Applicability {
+    Current,
+    Stale,
+    Unknown,
+    ;
+
+    public companion object {
+        /**
+         * §8.1/§8.4 applicability of [receipt] to [now]: `unknown` without a current stamp; `stale` when the check
+         * definition (argv/cwd/selector/parser) changed (FX-16); `current` on the tested stamp. On a moved stamp the
+         * result stays `current` only with a [ReuseProof]: the pinned closure manifest is complete and re-pins to the
+         * same digest over the current bytes (so a moved path in the closure, FX-54, or a new package member is
+         * stale), the inputs did not move during the check, and the verifier version and a known environment id
+         * (toolchain, lockfiles, external fixtures) are unchanged. An unknown or partial closure is stale: rerun at the
+         * conservative containing scope. The receipt's outcome is never touched.
+         */
+        @JvmStatic
+        public fun of(receipt: Receipt, now: CandidateNow): ApplicabilityVerdict {
+            val stamp = now.stamp ?: return ApplicabilityVerdict(Unknown, "current stamp unknown")
+            if (receipt.checkDefinitionVersion != now.definitionVersion) {
+                return ApplicabilityVerdict(Stale, "check definition changed since ${receipt.receiptId}")
+            }
+            if (receipt.stampAfter == stamp) return ApplicabilityVerdict(Current)
+            val tested = receipt.closureManifest
+            val repinned = now.manifest
+            val refusal = when {
+                tested == null || receipt.inputClosure == Closure.Unknown || tested.completeness == ClosureCompleteness.Unknown ->
+                    "closure unknown: rerun at the containing scope"
+                tested.completeness != ClosureCompleteness.Complete ->
+                    "closure partial (${tested.exclusions.joinToString("; ")}): a path list alone proves nothing"
+                receipt.testedInputs.mutatedDuringCheck.isNotEmpty() -> "inputs moved during ${receipt.receiptId}"
+                receipt.verifierVersion != now.verifierVersion -> "verifier version ${receipt.verifierVersion} → ${now.verifierVersion}"
+                now.envId == null || !now.envKnown -> "environment unknown"
+                receipt.envId != now.envId -> "environment moved"
+                repinned == null -> "closure could not be re-pinned"
+                repinned.digest != tested.digest -> "closure moved: ${tested.moved(repinned).joinToString(", ")}"
+                else -> null
+            }
+            if (refusal != null) {
+                return ApplicabilityVerdict(Stale, "candidate moved @${receipt.stampAfter.hash8} → @${stamp.hash8}; $refusal")
+            }
+            return ApplicabilityVerdict(Current, reuse = ReuseProof(receipt.receiptId, stamp, tested!!.pathsAtVersions, tested.digest))
+        }
+    }
+}
+
+/**
+ * The candidate a receipt's applicability is computed against (§8.4): the current stamp and what reuse needs
+ * unchanged — the check's current [definitionVersion], the [verifierVersion], the environment id, and the receipt's
+ * closure re-pinned over the current bytes ([manifest]; `null` when it could not be or need not be).
+ */
+public data class CandidateNow @JvmOverloads constructor(
+    val stamp: CandidateId?,
+    val definitionVersion: Digest,
+    val verifierVersion: String,
+    val envId: Digest? = null,
+    val envKnown: Boolean = false,
+    val manifest: ClosureManifest? = null,
+)
+
+/** A computed applicability, with the reason when not current and the reuse proof when current on a moved stamp. */
+public data class ApplicabilityVerdict @JvmOverloads constructor(
+    val applicability: Applicability,
+    val reason: String? = null,
+    val reuse: ReuseProof? = null,
+)
+
+/**
+ * The recorded reuse proof of §8.1 (`reuse_of: rcpt-19, closure_unchanged: [paths@hashes]`): [reuseOf]'s result
+ * applies to [stamp] because its complete closure — [closureUnchanged] at raw-byte hashes, [manifest] the digest of
+ * the whole manifest with membership and lockfiles — is unchanged under the same definition, verifier and environment.
+ */
+@Serializable
+public data class ReuseProof(
+    val reuseOf: String,
+    val stamp: CandidateId,
+    val closureUnchanged: Map<String, String>,
+    val manifest: Digest,
+)
 
 /**
  * The check's last receipt as the registry caches it. [stamp] is the receipt's `stamp_after` and
@@ -72,7 +153,12 @@ public data class LastResult(
     val applicability: Applicability,
     val reuseOf: String? = null,
     val staleReason: String? = null,
-)
+    val reuseProof: ReuseProof? = null,
+) {
+    /** This result with [verdict]'s applicability, reason and reuse proof; the outcome stays. */
+    public fun applied(verdict: ApplicabilityVerdict): LastResult =
+        copy(applicability = verdict.applicability, staleReason = verdict.reason, reuseOf = verdict.reuse?.reuseOf, reuseProof = verdict.reuse)
+}
 
 /**
  * A registered check (§8.1). [definitionVersion] hashes the definition, argv/cwd/selector and parser policy so
@@ -191,24 +277,30 @@ public class Checks private constructor(private val checks: LinkedHashMap<String
     }
 
     /**
-     * §8.4 applicability, recomputed for every check with a result: `current = (stamp_after == stamp_now)` with the
-     * check definition unchanged since the run; a different stamp is `stale` (until P3.1.2 can attach a reuse proof
-     * for an unchanged closure), a changed definition is `stale` whatever the stamp (FX-16), and a missing current
+     * §8.4 applicability, recomputed for every check with a result. [assess] computes it from the receipt
+     * ([Applicability.of], attaching a reuse proof, P3.1.2); without it, or when it has no receipt (`null`):
+     * `current = (stamp_after == stamp_now)` with the check definition unchanged since the run, a different stamp is
+     * `stale` (no reuse proof), a changed definition is `stale` whatever the stamp (FX-16), and a missing current
      * stamp is `unknown`. A stamp that returned to the tested candidate makes the result current again: the
      * receipt is evidence about those exact bytes (L7). Eligibility for the final tree (D-45) stays on the receipt.
      */
-    public fun refresh(stampNow: CandidateId?): List<Check> = checks.values.filter { it.last != null }.map { check ->
+    @JvmOverloads
+    public fun refresh(stampNow: CandidateId?, assess: ((Check, LastResult) -> ApplicabilityVerdict?)? = null): List<Check> = checks.values.filter { it.last != null }.map { check ->
         val last = check.last!!
+        val verdict = stampNow?.let { assess?.invoke(check, last) }
         val next = when {
-            stampNow == null -> last.copy(applicability = Applicability.Unknown, staleReason = "current stamp unknown")
+            stampNow == null -> last.applied(ApplicabilityVerdict(Applicability.Unknown, "current stamp unknown"))
+            verdict != null -> last.applied(verdict)
             last.definitionVersion != check.definitionVersion ->
-                last.copy(applicability = Applicability.Stale, staleReason = "check definition changed since ${last.receiptId}")
-            last.stamp != stampNow -> last.copy(
-                applicability = Applicability.Stale,
-                staleReason = last.staleReason?.takeIf { last.applicability == Applicability.Stale }
-                    ?: "candidate moved @${last.stamp.digest.hash8} → @${stampNow.digest.hash8} (no reuse proof)",
+                last.applied(ApplicabilityVerdict(Applicability.Stale, "check definition changed since ${last.receiptId}"))
+            last.stamp != stampNow -> last.applied(
+                ApplicabilityVerdict(
+                    Applicability.Stale,
+                    last.staleReason?.takeIf { last.applicability == Applicability.Stale }
+                        ?: "candidate moved @${last.stamp.digest.hash8} → @${stampNow.digest.hash8} (no reuse proof)",
+                ),
             )
-            else -> last.copy(applicability = Applicability.Current, staleReason = null)
+            else -> last.applied(ApplicabilityVerdict(Applicability.Current))
         }
         if (next == last) check else check.copy(last = next).also { checks[check.id] = it }
     }

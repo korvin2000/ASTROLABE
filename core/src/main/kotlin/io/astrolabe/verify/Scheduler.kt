@@ -3,6 +3,8 @@ package io.astrolabe.verify
 import io.astrolabe.Astrolabe
 import io.astrolabe.evidence.Aliases
 import io.astrolabe.evidence.Closure
+import io.astrolabe.evidence.ClosureCompleteness
+import io.astrolabe.evidence.ClosureManifest
 import io.astrolabe.evidence.Counts
 import io.astrolabe.evidence.InputStability
 import io.astrolabe.evidence.Limit
@@ -16,6 +18,7 @@ import io.astrolabe.id.FileVersion
 import io.astrolabe.id.IdGen
 import io.astrolabe.id.Identities
 import io.astrolabe.tool.run.announceMoved
+import io.astrolabe.workspace.EnvFingerprint
 import io.astrolabe.workspace.Intent
 import io.astrolabe.workspace.PathResolution
 import io.astrolabe.workspace.Stamper
@@ -114,6 +117,7 @@ public class Scheduler(
         return workspace.mutation.withLock {
             val before = stamper.report()
             val seenBefore = paths.associateWith { snapshot(it) }
+            val manifest = manifestOf(check.inputClosure)
             val executed = execute()
             val after = stamper.report()
             announceMoved(registry, before, after, "check ${check.id}")
@@ -140,7 +144,7 @@ public class Scheduler(
                 verifierVersion = verifierVersion, checkDefinitionVersion = check.definitionVersion, contractVersion = contractVersion,
                 outcome = outcome, parsed = executed.counts, inputClosure = check.inputClosure,
                 testedInputs = TestedInputs(seenBefore.mapNotNull { (path, seen) -> seen.version?.let { path to it } }.toMap(), stability, mutated),
-                raw = executed.raw, limits = limits, exitCode = executed.exit, at = clock.instant(),
+                raw = executed.raw, limits = limits, exitCode = executed.exit, at = clock.instant(), closureManifest = manifest,
             )
             receipts.record(receipt)
             aliasByReceipt[receipt.receiptId] = aliases.allocate(ids.work, receipt.receiptId, "receipt", ids.context, workspace.id).text
@@ -175,11 +179,28 @@ public class Scheduler(
         return receipt
     }
 
+    /**
+     * §8.4 applicability of every check's last receipt against [stampNow] (P3.1.2): [Applicability.of] with the
+     * closure re-pinned over the current bytes, so an unchanged complete closure keeps a moved result current with a
+     * reuse proof. [env] is the current environment when the caller holds the stamp report; otherwise it is taken
+     * once, only if some receipt could be reused.
+     */
+    @JvmOverloads
+    public fun refresh(stampNow: CandidateId?, env: EnvFingerprint? = null): List<Check> {
+        val current = lazy { env ?: stamper.report().env }
+        return checks.refresh(stampNow) { check, last -> receipts.get(last.receiptId)?.let { assess(check, it, stampNow, current) } }
+    }
+
     /** §8.4 applicability plus D-45 eligibility of a check's last receipt against [stampNow]. */
     public fun currency(check: Check, stampNow: CandidateId?): Currency {
         val last = checks[check.id]?.last ?: return Currency(null, Applicability.Unknown, false, false, listOf("no receipt for ${check.id}"))
-        val refreshed = checks.refresh(stampNow).firstOrNull { it.id == check.id }?.last ?: last
         val receipt = receipts.get(last.receiptId)
+        val registered = checks[check.id] ?: check
+        val refreshed = if (receipt == null || stampNow == null) {
+            checks.refresh(stampNow).firstOrNull { it.id == check.id }?.last ?: last
+        } else {
+            last.applied(assess(registered, receipt, stampNow, lazy { stamper.report().env })).also { checks.record(check.id, it) }
+        }
         val reasons = ArrayList<String>()
         refreshed.staleReason?.let { reasons += it }
         if (receipt == null) reasons += "receipt ${last.receiptId} is not in the store"
@@ -190,6 +211,31 @@ public class Scheduler(
         val green = receipt?.outcome?.green ?: false
         if (receipt != null && !green) reasons += "outcome ${receipt.outcome.name.lowercase()}"
         return Currency(last.receiptId, refreshed.applicability, eligible, green, reasons, red = receipt?.outcome == Outcome.Failed)
+    }
+
+    private fun assess(check: Check, receipt: Receipt, stampNow: CandidateId?, env: Lazy<EnvFingerprint>): ApplicabilityVerdict {
+        // Re-pinning hashes the closure: only worth it when a complete closure could back a reuse proof.
+        val reusable = stampNow != null && receipt.stampAfter != stampNow &&
+            receipt.closureManifest?.completeness == ClosureCompleteness.Complete && receipt.checkDefinitionVersion == check.definitionVersion
+        val now = if (reusable) {
+            CandidateNow(stampNow, check.definitionVersion, verifierVersion, env.value.envId, env.value.envKnown, manifestOf(receipt.inputClosure))
+        } else {
+            CandidateNow(stampNow, check.definitionVersion, verifierVersion)
+        }
+        return Applicability.of(receipt, now)
+    }
+
+    /**
+     * The `closure_manifest` of [closure] over the current bytes (§8.1): a package closure walks its directory, so an
+     * added or deleted member moves the membership; declared scratch output is excluded from the tree.
+     */
+    public fun manifestOf(closure: Closure): ClosureManifest {
+        val tree = when (closure) {
+            is Closure.Known -> closure.paths.toList()
+            is Closure.Package -> filesUnder(closure.path)
+            Closure.Unknown -> emptyList()
+        }.map { it.replace('\\', '/') }.filterNot { scratch.isScratch(it) }
+        return ClosureManifest.of(closure, tree, registry::version, excluded = { if (scratch.isScratch(it)) "declared scratch output" else null })
     }
 
     /** The paths whose stability the receipt vouches for: the declared closure minus scratch, or [inputs] for an unknown closure. */
