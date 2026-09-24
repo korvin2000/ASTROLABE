@@ -3,6 +3,7 @@ package io.astrolabe.cell
 import io.astrolabe.DClassPolicy
 import io.astrolabe.Defaults
 import io.astrolabe.Mode
+import io.astrolabe.atlas.DefinitionChanges
 import io.astrolabe.auth.Stage
 import io.astrolabe.budget.Budget
 import io.astrolabe.budget.ReserveVerdict
@@ -253,7 +254,7 @@ class GatesTest {
     @Test
     fun `a later gate registers through the same interface and shares the once-per-condition memory`() {
         val impact = object : Gate {
-            override val name: String get() = "impact"
+            override val name: String get() = "later"
             override fun evaluate(state: GateState): List<GateOutcome> =
                 state.unresolvedImpactNudges.map { GateOutcome.Nudge(GateKey(name, it), "impact: $it") }
         }
@@ -295,5 +296,41 @@ class GatesTest {
         )
         assertTrue(second.outcomes.none { it.key.gate in setOf(Gates.CONTRACT_TOUCH, Gates.REPEATED_FAILURE, Gates.SCOPE, Gates.ACCEPTANCE_SURFACE) }, "once per condition")
         assertTrue(gates.evaluate(state()).outcomes.none { it.key.gate == Gates.CONTRACT_TOUCH }, "no CON note, no contract-touch gate")
+    }
+
+    @Test
+    fun `impact fires once per changed symbol, look refs or a rescoped plan resolves it, and the exit gate refuses while a public one is unresolved`() {
+        val before = "def dispatch(req):\n    return req\n\ndef _helper(x):\n    return x\n".toByteArray()
+        val after = "def dispatch(req, timeout):\n    return req\n\ndef _helper(x, y):\n    return x\n".toByteArray()
+        val changes = DefinitionChanges.of("src/router.py", before, after)
+        val ledger = ImpactNudges()
+        ledger.changed(2, changes) { if (it.symbol == "dispatch") 6 else 1 }
+        ledger.changed(3, changes) { if (it.symbol == "dispatch") 6 else 1 }
+        assertEquals(listOf("dispatch", "_helper"), ledger.unresolved.map { it.definition.symbol })
+        assertEquals(listOf(2, 2), ledger.unresolved.map { it.turn }, "a re-change of a pending symbol keeps its first turn")
+
+        val done = register.copy(plan = listOf(Step(1, Mark.Done, "round half-up", accept = "AC-1", evidence = "rcpt-1")))
+        val green = mapOf("CHK-accept-AC-1" to Currency("rcpt-1", Applicability.Current, eligible = true, green = true, reasons = emptyList()))
+        fun at(turn: Int, proposed: Boolean = false) = state(turn, done).copy(
+            completionProposed = proposed, currencies = green,
+            impactNudges = ledger.unresolved, unresolvedImpactNudges = ledger.unresolvedPublic.map { it.missing },
+        )
+        val reports = turns(at(2), at(3))
+        assertEquals(
+            listOf(
+                "impact: `dispatch` (src/router.py) signature changed; 6 references not inspected → look(refs) or scope the plan",
+                "impact: `_helper` (src/router.py) signature changed; 1 reference not inspected → look(refs) or scope the plan",
+            ),
+            reports[0].nudges.filter { it.key.gate == Gates.IMPACT }.map { it.line },
+        )
+        assertTrue(reports[1].nudges.none { it.key.gate == Gates.IMPACT }, "once per changed symbol")
+
+        val refused = assertIs<GateOutcome.Rejection>(gates.evaluate(at(4, proposed = true)).rejections.single())
+        assertEquals(listOf("unresolved impact nudge: `dispatch` (src/router.py) signature changed; 6 references not inspected"), refused.details, "only a public definition binds the exit gate")
+
+        ledger.inspected("Router.dispatch")
+        ledger.rescoped(done, done.copy(plan = done.plan + Step(2, Mark.Todo, "adapt _helper callers")))
+        assertEquals(emptyList(), ledger.unresolved)
+        assertTrue(gates.evaluate(at(5, proposed = true)).outcomes.isEmpty(), "resolved: the exit gate passes")
     }
 }

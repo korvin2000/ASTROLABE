@@ -48,6 +48,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertIsNot
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -136,6 +137,28 @@ class CellTest {
             assertEquals(1, f.recorder.ofType<AgentEvent.Cell.Started>().size)
             assertEquals(listOf(1, 2, 3, 4), f.recorder.ofType<AgentEvent.Cell.TurnStarted>().map { it.turn })
             assertEquals("completed", f.recorder.ofType<AgentEvent.Cell.Ended>().single().status)
+        }
+    }
+
+    @Test
+    fun `a changed public signature with an uninspected reference nudges once and the exit gate refuses the completion`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val v = f.version("src/a.py")
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("reading a"), read("c1", "src/a.py"), patch("c2", """{"plan.add":"make a return 10"},{"plan.cursor":1},{"next":"edit a"}"""))),
+                Scripted.Reply(listOf(say("editing"), anchored("c3", "src/a.py", v, "def a():", "def a(scale=1):"))),
+                Scripted.Reply(listOf(say("ticking"), patch("c4", """{"plan.tick":{"n":1,"evidence":"#2"}},{"next":"done"}"""))),
+                Scripted.Reply(listOf(say("done"))),
+                Scripted.Reply(listOf(say("done"))),
+            )
+
+            val exit = f.run(model)
+
+            assertIsNot<CellExit.Completed>(exit)
+            val line = "impact: `a` (src/a.py) signature changed; 1 reference not inspected → look(refs) or scope the plan"
+            assertTrue(f.anchorText(3).contains(line), f.anchorText(3))
+            assertFalse(f.anchorText(4).contains(line), "once per changed symbol: " + f.anchorText(4))
+            assertTrue(f.anchorText(5).contains("unresolved impact nudge: `a` (src/a.py) signature changed"), f.anchorText(5))
         }
     }
 

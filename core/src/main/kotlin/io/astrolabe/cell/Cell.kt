@@ -1,6 +1,8 @@
 package io.astrolabe.cell
 
 import io.astrolabe.Defaults
+import io.astrolabe.atlas.DefinitionChanges
+import io.astrolabe.atlas.SymbolIndex
 import io.astrolabe.auth.Boundary
 import io.astrolabe.auth.Ceiling
 import io.astrolabe.auth.ExecutionDecision
@@ -54,6 +56,7 @@ import io.astrolabe.register.Register
 import io.astrolabe.register.RegisterRender
 import io.astrolabe.register.Step
 import io.astrolabe.register.ValidationContext
+import io.astrolabe.tool.Args
 import io.astrolabe.tool.Disposition
 import io.astrolabe.tool.Dispatcher
 import io.astrolabe.tool.ParsedCalls
@@ -168,6 +171,7 @@ public class Cell @JvmOverloads constructor(
         private var turn = 0
         private var residents: List<Resident> = emptyList()
         private var fired: Set<GateKey> = emptySet()
+        private val impact = ImpactNudges()
         private val signatures = ArrayList<CallSignature>()
         private var lastProgressTurn = 0
         private var requiredOp: String? = null
@@ -348,6 +352,9 @@ public class Cell @JvmOverloads constructor(
             val gauge = gauge(currencies(after.candidateId))
             var liveRunOutput = false
             val editedPaths = LinkedHashSet<String>()
+            // §7.4 impact nudge: each edited file's bytes before this turn's batch, and the refs looks emitted after its last edit.
+            val batchBefore = LinkedHashMap<String, ByteArray>()
+            val inspected = ArrayList<String>()
             when (validated) {
                 null -> Unit
                 is Validated.Refused -> for (call in native) {
@@ -380,7 +387,14 @@ public class Cell @JvmOverloads constructor(
                         classified.forEach { flag -> flags.merge(flag.path, flag) { old, new -> if (old.blocksCompletion && !new.blocksCompletion) old else new } }
                         TestIntegrity.baseline(mutated - classified.map { it.path }.toSet(), "${call.family.wire} ${alias ?: "op ${call.opId}"}", contract, ws.checks).forEach { flags.putIfAbsent(it.path, it) }
                     }
-                    if (call.family == ToolFamily.Edit && alias != null) journalPreimages(alias)
+                    if (call.family == ToolFamily.Edit && alias != null) {
+                        journalPreimages(alias)
+                        inspected.clear()
+                        preimagesOf(alias).forEach { p -> batchBefore.getOrPut(p.path) { ev.preimages!!.bytesOf(p) } }
+                    }
+                    if (call.family == ToolFamily.Look && outcome.header?.runtime?.status == "ok") {
+                        (call.args as? Args.Look)?.args?.takeIf { it.what == "refs" }?.target?.let { impact.inspected(it); inspected += it }
+                    }
                 }
             }
             editedPaths.addAll(movedThisTurn(before, after, contract))
@@ -391,6 +405,14 @@ public class Cell @JvmOverloads constructor(
             // End-of-turn checker on the paths the horizons scheduled; the atlas follows the same set.
             val proposal = native.isEmpty() && (response.stop == StopReason.EndTurn || response.stop == StopReason.ToolUse)
             val turnEnd = drainScheduled(contract) ?: after
+            if (batchBefore.isNotEmpty()) {
+                val index = SymbolIndex(atlas)
+                val changes = batchBefore.flatMap { (path, bytes) -> DefinitionChanges.of(path, bytes, ws.registry.read(path)?.bytes) }
+                // Fan-in outside the edited file: tier-0 lexical refs, which is also the no-index literal fallback (§7.4).
+                impact.changed(turn, changes) { c -> index.refs(c.symbol).references.count { it.path != c.path } }
+            }
+            inspected.forEach(impact::inspected)
+            impact.rescoped(registerBefore, register)
             // §6.6: the controller may pre-build the next [K] while verify-on-stop runs, if only slow checks remain.
             if (proposal) ctx.precompile?.completionProposed(turnEnd.candidateId, remainingAcceptance(turnEnd.candidateId))
             // §8.1 layer table: a `[>]` move runs blast ∪ the left step's accept:, a completion proposal verify-on-stop;
@@ -429,6 +451,7 @@ public class Cell @JvmOverloads constructor(
                 contextTokens = current.totalTokens, contextMaxTokens = capabilities.contextLimitTokens.toLong(), rebuilds = rebuilds,
                 reserve = budget.verdict(outstanding(currenciesNow)), turnsMax = budget.turns, completionProposed = proposal,
                 currencies = currenciesNow, flags = unresolved, fired = fired, defaults = defaults,
+                impactNudges = impact.unresolved, unresolvedImpactNudges = impact.unresolvedPublic.map { it.missing },
                 outsideIncrement = editedByEdit.filter { p -> contract.scope.covers(p) && increment.writeScope.none { PathPattern.matches(it, p) } },
                 surfaceFlags = flags.values.filter { it.path in editedPaths }, editedPaths = editedPaths.toSet(),
                 contractAnchors = (tools.kb as? KbTool)?.contractAnchors().orEmpty(), repeatedFailures = repeated,
@@ -586,10 +609,14 @@ public class Cell @JvmOverloads constructor(
         }
 
         /** §9.2 preimage journaling: the preimages an edit saved before writing are indexed under the edit's alias. */
+        private fun preimagesOf(alias: String): List<Preimage> {
+            val preimages = ev.preimages ?: return emptyList()
+            val editId = Aliases.parse(alias)?.let { ev.aliases.resolve(ids.work, it) }?.takeIf { it.kind == "edit" }?.canonicalId ?: return emptyList()
+            return preimages.of(editId)
+        }
+
         private fun journalPreimages(alias: String) {
-            val preimages = ev.preimages ?: return
-            val editId = Aliases.parse(alias)?.let { ev.aliases.resolve(ids.work, it) }?.takeIf { it.kind == "edit" }?.canonicalId ?: return
-            val saved = preimages.of(editId)
+            val saved = preimagesOf(alias)
             if (saved.isEmpty()) return
             ev.journal.append(
                 JournalEvent(

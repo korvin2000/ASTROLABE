@@ -155,6 +155,8 @@ public data class GateState @JvmOverloads constructor(
     val reviews: Map<String, Verdict> = emptyMap(),
     val flags: List<TestIntegrityFlag> = emptyList(),
     val unresolvedImpactNudges: List<String> = emptyList(),
+    /** Changed definitions with `fanin > 0` whose references are not inspected yet (§5.6 Impact, §7.4). */
+    val impactNudges: List<ImpactNudge> = emptyList(),
     val fired: Set<GateKey> = emptySet(),
     val defaults: Defaults = Defaults(),
     /** Paths this turn's edits wrote inside the contract but outside the increment's write scope (§8.6). */
@@ -239,13 +241,23 @@ public class Gates(gates: List<Gate>) {
         public const val REPEATED_FAILURE: String = "repeated-failure"
         public const val SCOPE: String = "scope"
         public const val ACCEPTANCE_SURFACE: String = "acceptance-surface"
+        public const val IMPACT: String = "impact"
 
         /**
          * The S0 set, in the order of the §5.6 table; contract touch, repeated failure, scope and acceptance surface
-         * are registered too (P3.4.3). Impact (P3.2.4) and judge-dependent gates are not.
+         * are registered too (P3.4.3), and impact (P3.2.4). Judge-dependent gates are not.
          */
         @JvmStatic
-        public fun s0(): Gates = Gates(listOf(Entry, Exit, Pressure, Stall, Loop, RegisterInvariants, StaleFact, ContractTouch, RepeatedFailure, Scope, AcceptanceSurfaceGate, Reserve, Turns))
+        public fun s0(): Gates = Gates(listOf(Entry, Exit, Pressure, Stall, Loop, RegisterInvariants, StaleFact, Impact, ContractTouch, RepeatedFailure, Scope, AcceptanceSurfaceGate, Reserve, Turns))
+    }
+
+    // §5.6 Impact: once per changed symbol while its references are not inspected; the key carries the change turn.
+    private object Impact : Gate {
+        override val name: String get() = IMPACT
+
+        override fun evaluate(state: GateState): List<GateOutcome> = state.impactNudges.map {
+            GateOutcome.Nudge(GateKey(name, "${it.definition.path}::${it.definition.symbol}@${it.turn}"), it.line)
+        }
     }
 
     // §5.6 Contract touch: an edit set touches anchors of a CON note; active once any CON note exists.
