@@ -11,6 +11,7 @@ import io.astrolabe.auth.Ceiling
 import io.astrolabe.auth.Redaction
 import io.astrolabe.auth.RulesTrust
 import io.astrolabe.budget.CellBudget
+import io.astrolabe.budget.HeuristicEstimator
 import io.astrolabe.budget.Tokens
 import io.astrolabe.cell.Cell
 import io.astrolabe.cell.CellContext
@@ -28,14 +29,18 @@ import io.astrolabe.cell.Roles
 import io.astrolabe.cell.SqliteCheckpoints
 import io.astrolabe.cell.TouchKind
 import io.astrolabe.cell.Touched
+import io.astrolabe.context.CarriedReceipt
 import io.astrolabe.context.Carry
 import io.astrolabe.context.CarryForward
 import io.astrolabe.context.CompileInputs
 import io.astrolabe.context.Compiled
 import io.astrolabe.context.Compiler
 import io.astrolabe.context.Manifest
+import io.astrolabe.context.RebuildReason
 import io.astrolabe.context.Seeds
 import io.astrolabe.context.SqliteManifests
+import io.astrolabe.context.StatusBoundary
+import io.astrolabe.context.StatusNotes
 import io.astrolabe.contract.Contract
 import io.astrolabe.contract.Contracts
 import io.astrolabe.contract.Increment
@@ -71,6 +76,8 @@ import io.astrolabe.id.WorkId
 import io.astrolabe.id.WorkspaceId
 import io.astrolabe.kb.EmptyKb
 import io.astrolabe.kb.Kb
+import io.astrolabe.kb.KbWriter
+import io.astrolabe.kb.Notes
 import io.astrolabe.os.Git
 import io.astrolabe.os.LocalOs
 import io.astrolabe.os.search.Searches
@@ -491,6 +498,7 @@ public class Controller @JvmOverloads public constructor(
             packets += exit.packet
             snapshot(c)
             c.advance(Transition.Returned(exit))
+            boundary(c, cellId, RebuildReason.CellEnd(if (exit is CellExit.Completed) RebuildReason.CellEnd.Next.NextIncrement else RebuildReason.CellEnd.Next.Continuation))
             val stampNow = c.stamper.report().candidateId
             val completion = if (exit is CellExit.Completed) {
                 val returned = checkNotNull(c.state).graph.increments.first { it.id == increment.id }
@@ -550,10 +558,25 @@ public class Controller @JvmOverloads public constructor(
         return when (val admission = PlanIntake(c.contracts).admit(c.ids.work, stored, authority)) {
             is PlanAdmission.Admitted -> {
                 c.advance(Transition.Planned(admission.graph))
+                boundary(c, cellId, RebuildReason.RoleSwitch(Roles.implementing))
                 null
             }
             is PlanAdmission.Refused -> "plan ${stored.id} refused: ${admission.gaps.joinToString("; ")}"
         }
+    }
+
+    /**
+     * A §5.8 boundary between S1 cells (P2.2.3): the next cell starts a fresh projection — empty tail (m = 0), its role's
+     * mask and knowledge view, a fresh provider lineage — so the boundary records the rebuild and writes the STATUS
+     * revision (role switch, cell end) with the checks' last receipts and the open intents.
+     */
+    private fun boundary(c: OpenedCampaign, cell: ContextId, reason: RebuildReason) {
+        val ids = c.ids.copy(context = cell)
+        val verification = c.checks.all().mapNotNull { check -> check.last?.let { CarriedReceipt(check.id, it.receiptId, it.applicability.name.lowercase()) } }
+        val status = StatusNotes(KbWriter(c.store, HeuristicEstimator(), clock), Notes(c.store), c.store.layout.kb)
+        status.checkpoint(ids, if (reason is RebuildReason.RoleSwitch) StatusBoundary.RoleSwitch else StatusBoundary.CellEnd, emptyList(), verification, c.intents.open().map { it.intentId })
+        val revision = Notes(c.store).revisions(status.id(c.ids.work)).size
+        c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, text = "rebuilt: ${reason.wire} · fresh lineage, empty tail · STATUS revision $revision", at = clock.instant()))
     }
 
     /** The carry-forward of [cell] (§6.2): its latest register, its end export and its packet, re-validated now. */

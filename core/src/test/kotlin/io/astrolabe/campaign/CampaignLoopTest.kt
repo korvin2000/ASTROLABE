@@ -112,9 +112,20 @@ class CampaignLoopTest {
             val replies = planning() +
                 implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"") +
                 implement(c, "src/b.py", "    return 2", "    return 20", "\"AC-1\",\"AC-2\"")
-            val run = controller().run(c, model(replies))
+            val adapter = FakeAdapter(ScriptedModel.of(*replies.toTypedArray()))
+            val run = controller().run(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator()))
 
             assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+            // P2.2.3: plan → implementing is a role switch — empty tail, the new role's mask, a STATUS revision.
+            val planRequest = adapter.calls[0].request
+            val firstImplementing = adapter.calls[2].request
+            assertTrue(planRequest.mask!!.allows("task.propose") && !planRequest.mask!!.allows("edit.anchored"))
+            assertTrue(firstImplementing.mask!!.allows("edit.anchored") && firstImplementing.mask!!.allows("run.run") && !planRequest.mask!!.allows("run.run"), "the implementing mask replaces the plan mask")
+            val tail = firstImplementing.segment(io.astrolabe.provider.SegmentKind.T)!!.items
+            assertTrue(tail.none { it is io.astrolabe.provider.ToolCall || it is io.astrolabe.provider.ToolResult || (it is io.astrolabe.provider.Message && it.role == io.astrolabe.provider.Role.Assistant) }, "nothing of the plan cell's transcript is inherited")
+            assertTrue(adapter.validations.all { it.result == io.astrolabe.provider.Validation.Ok }, "FX-56: every request kept valid call/result pairing")
+            val status = io.astrolabe.kb.Notes(c.store).revisions("STATUS-W-s1")
+            assertEquals(listOf("role_switch", "cell_end", "cell_end"), status.map { it.body.lineSequence().first().substringAfter("boundary: ").substringBefore(" ·") })
             val state = c.campaigns.load(request.work, request.attempt)!!
             assertEquals(listOf("I1", "I2"), state.graph.increments.map { it.id }, "the plan replaced the single-increment placeholder")
             assertTrue(state.graph.increments.all { it.status == IncrementStatus.Verified })
