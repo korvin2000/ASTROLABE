@@ -928,7 +928,7 @@ Goal: [§18.2 Stage A](docs/implementation/roadmap.md#sec-18-2): one implementin
 - Done: P1.12.3 uses only `AstrolabeJava` with Java-authored adapter and authority; ABI dump reviewed.
 - Log: 2026-09-24 — `Astrolabe.kt`: `Astrolabe(config, adapter, authority, clock, idGen)` (validates `Config`, owns `events` and a supervisor scope; constants move to the companion: `MODULE`, `VERSION`, `FIRST_ATTEMPT`), `open(repo): Project` (store + project lock + `LocalOs` + `views` + `EmptyKb`; host-closed), `suspend campaign(project, request, policy?)` → `CampaignHandle` (`workId`, `await()` = outcome or `cancelled`, `cancel()`, `amend(text)`, `events: Flow<AgentEvent>` filtered by work, `views`, `done`); one campaign per project at a time; profile = `config.profiles[profileRoles.main]`; D-67 default budget. `Controller.open(project, …)` overload leaves store/OS to the project (`OpenedCampaign.owned`). `java/AstrolabeJava.kt`: `AstrolabeJava(config, JavaProviderAdapter, JavaAuthority)` via `ProviderAdapters.fromJava`/`Authorities.fromJava`; `campaign` → `CompletableFuture<JavaCampaignHandle>`, `campaignBlocking`, `subscribe(EventSink)`; `JavaCampaignHandle` (`await()` future whose cancellation cancels the campaign, `awaitBlocking`, `cancel`, `amend`, `views`, per-campaign `subscribe`); threading, exception mapping and cancellation documented in KDoc; no `suspend`/`Flow`/value class in `io.astrolabe.java`. `JavaConsumerSmoke` reads `Astrolabe.MODULE`/`VERSION`. 3 `AstrolabeTest` tests (run + events + honest outcome; cancel ⇒ `cancelled`, amend, second campaign refused; Java SPI adapter/authority through futures with a per-campaign sink). ABI dump regenerated at the gate; the Java-source smoke is P1.12.3.
 
-- [ ] **Gate P1.9:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+- [x] **Gate P1.9:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate). — merged into the P1.11 gate: [CI run 35989613165](https://github.com/korvin2000/ASTROLABE/actions/runs/35989613165) green on Ubuntu + Windows at `8a5cbb1` (2026-09-24).
 
 ### P1.10 Authority and integrity baseline
 #### P1.10.1 [M] `Boundary`: delimiters and instruction-shape flag · DONE
@@ -983,7 +983,7 @@ Goal: [§18.2 Stage A](docs/implementation/roadmap.md#sec-18-2): one implementin
 
 - Log: 2026-09-20 — DONE. 15 trace tests/300 seeded oracles, author review correction/regression, ABI and full Windows/JDK 26 build pass in 3m18s. Core 855/0 failures/errors/6 skips and eval 30/0 failures/errors/skips executed; provider-api 15 reused. API/protocol/handoff complete. P1.11.1/P1.11.2/FX-59/CI/Linux/live gates unchanged. Next OOO-04.
 
-- [ ] **Gate P1.11:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+- [x] **Gate P1.11:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate). — [CI run 35989613165](https://github.com/korvin2000/ASTROLABE/actions/runs/35989613165) green on Ubuntu + Windows at `8a5cbb1` (P1.9.2–P1.9.6 + P1.11.1–P1.11.2, 2026-09-24).
 
 ### P1.12 Stage A validation
 #### P1.12.1 [V] Harness fixture tests · TODO

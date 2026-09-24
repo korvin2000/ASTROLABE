@@ -7,7 +7,7 @@ History: `audit/SESSION-HISTORY.md` (never read at startup).
 P1.11.1–P1.11.2, P1.12.2–P1.12.3 DONE; 90/185 DONE. Start the next session from `main` once the gate is merged,
 else from this branch.
 **Last gate:** P1.9 + P1.11 block at `8a5cbb1` — [CI run 35989613165](https://github.com/korvin2000/ASTROLABE/actions/runs/35989613165)
-(see the `Gate P1.11` line in TODO for the result). Ungated since then: P1.12.2, P1.12.3, schema v3 rekey, a
+**green on Ubuntu + Windows**; `main` fast-forwarded to `8a5cbb1`. Ungated since then: P1.12.2, P1.12.3, schema v3 rekey, a
 `CellTest` race fix and the ABI dump (`0c33262`) — they ride the P1.12 phase gate.
 
 ## Next block — P1.12 remainder (phase end, P1 gate)
