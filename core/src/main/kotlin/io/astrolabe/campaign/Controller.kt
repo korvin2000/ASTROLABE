@@ -224,6 +224,8 @@ public data class S0Run(
     val exit: CellExit?,
     val completion: CompletionResult?,
     val compiled: Compiled?,
+    /** The finish receipt, for a campaign this run ended (P1.9.5). */
+    val finish: FinishReceipt? = null,
 ) {
     public val outcome: CampaignOutcome? get() = state?.outcome
 }
@@ -369,8 +371,20 @@ public class Controller @JvmOverloads public constructor(
         authority: Authority = AutonomousAuthority(),
         syntax: SyntaxCheck = CliSyntax(campaign.os, campaign.workspace.root, campaign.store.layout.root.resolve("logs"), python = null, node = null),
     ): S0Run {
-        val run = spans ?: return runS0(campaign, model, authority, syntax, null)
-        return run.span(Phase.Plan, campaign.ids) { span -> runS0(campaign, model, authority, syntax, span) }
+        val result = spans?.span(Phase.Plan, campaign.ids) { span -> runS0(campaign, model, authority, syntax, span) }
+            ?: runS0(campaign, model, authority, syntax, null)
+        return finish(campaign, result)
+    }
+
+    /** Every ended campaign leaves a finish receipt, stored and exported, and says so on the bus (§5.9). */
+    private fun finish(c: OpenedCampaign, result: S0Run): S0Run {
+        val outcome = result.state?.outcome ?: return result
+        val receipts = SqliteReceipts(c.store, clock)
+        val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, receipts, SqliteAliases(c.store, clock), idGen, c.ids, clock)
+        val receipt = FinishReceipts.build(c, listOfNotNull(result.exit?.packet), currencies(c, scheduler, c.stamper.report().candidateId), receipts::get)
+        val (ref, _) = FinishReceipts.export(c, receipt)
+        events?.emit(AgentEvent.Campaign.Finished(c.ids, outcome.wire, ref))
+        return result.copy(finish = receipt)
     }
 
     private suspend fun runS0(campaign: OpenedCampaign, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?): S0Run {
@@ -519,9 +533,7 @@ public class Controller @JvmOverloads public constructor(
             return c.advance(Transition.Stopped(CampaignOutcome.Failed, "final acceptance at @${stamp.hash8} failed: ${gaps.ifEmpty { listOf("no run: receipt") }.joinToString("; ")}"))
         }
         c.advance(Transition.Finishing(stamp))
-        val finished = c.advance(Transition.Finished(stamp, receipts.distinct()))
-        events?.emit(AgentEvent.Campaign.Finished(c.ids, CampaignOutcome.Completed.wire, null))
-        return finished
+        return c.advance(Transition.Finished(stamp, receipts.distinct()))
     }
 
     /** The outcome of a refused dispatch or publication: `cancelled` for a cancellation, else the lost lease blocks. */

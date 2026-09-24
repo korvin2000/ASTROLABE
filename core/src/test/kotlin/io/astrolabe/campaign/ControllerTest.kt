@@ -2,6 +2,7 @@ package io.astrolabe.campaign
 
 import io.astrolabe.Config
 import io.astrolabe.atlas.Atlas
+import io.astrolabe.auth.Stage
 import io.astrolabe.auth.Redaction
 import io.astrolabe.budget.HeuristicEstimator
 import io.astrolabe.budget.Reservations
@@ -207,6 +208,7 @@ class ControllerTest {
     @Test
     fun `S0 end to end - a scripted cell edits, runs acceptance and the campaign completes on receipts`() = runTest {
         seedContract()
+        repo.write("NOTES.md", "the user's own draft\n")
         open().use { c ->
             val v = c.registry.version("src/a.py")!!
             val adapter = FakeAdapter(ScriptedModel.of(
@@ -233,6 +235,19 @@ class ControllerTest {
                 assertEquals(billed.cacheWriteTokens, account.usage!!.totalCacheWrite)
                 assertTrue(!account.money.unknown && account.quantities.bytesTransmitted!! > 0)
             }
+            // P1.9.5: the finish receipt separates the agent's change from the user's pre-existing one.
+            val finish = assertNotNull(run.finish)
+            assertEquals("completed", finish.status)
+            assertEquals(listOf("src/a.py"), finish.changes.agent)
+            assertEquals(listOf("NOTES.md"), finish.changes.preExistingUserChanges)
+            val ac1 = finish.acceptance.single()
+            assertEquals("green", ac1.status)
+            assertTrue(ac1.logIds.isNotEmpty())
+            assertTrue(finish.notVerified.isEmpty())
+            assertEquals(Stage.Patch, finish.highestAuthorizedStage)
+            assertTrue(finish.checksRun.any { it.receiptId.isNotBlank() && it.verifierVersion.isNotBlank() })
+            assertTrue(Files.exists(c.store.layout.exports.resolve(request.work.value).resolve("finish-receipt.json")))
+
             val files = Export(c.store).write(request.work, acceptedTasks = 1, currency = "USD")
             assertEquals(listOf("usage.json", "accounting.json"), files.map { it.fileName.toString() })
             assertTrue("\"costPerAcceptedTask\"" in Files.readString(files[1]))

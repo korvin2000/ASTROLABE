@@ -200,6 +200,8 @@ class ControlsTest {
             assertEquals(CampaignOutcome.BudgetExhausted, run.outcome, run.state?.reason)
             val spent = Accounting(c.store, clock).calls(request.work).sumOf { it.quantities.billedUsage ?: 0 }
             assertTrue(spent <= budget.value, "billed $spent within the $budget budget")
+            assertEquals("partial", run.finish!!.status, "a budget stop reports partial, never verified")
+            assertEquals(listOf("R1", "AC-1"), run.finish!!.notVerified)
         }
     }
 
