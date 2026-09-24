@@ -37,6 +37,13 @@ public data class Config(
      */
     val roles: Map<String, Role> = emptyMap(),
 ) {
+    /** Java hosts (D-07): the fields a host sets most, without the full constructor. */
+    public fun withStateRoot(stateRoot: String?): Config = copy(stateRoot = stateRoot)
+
+    public fun withProfiles(profiles: Map<String, Profile>): Config = copy(profiles = profiles)
+
+    public fun withFlags(flags: Flags): Config = copy(flags = flags)
+
     /** The role [name] as configured, else the SDK default; `null` for a name neither declares. */
     public fun role(name: String): Role? = roles[name] ?: Roles.defaults[name]
 
