@@ -419,6 +419,7 @@ public class Cell @JvmOverloads constructor(
             // Terminal requests, the completion path, pressure.
             (tools.state.pendingBlock ?: tools.task?.pendingBlock)?.let { return blocked(it) }
             if (proposal) {
+                unavailable(currenciesNow)?.let { return blocked(it) }
                 val output = RoleOutput(turn, response.text, register, certifiedAfter.mapNotNull { currenciesNow.certifiedReceipt(it) }, refusals, packet(PacketStatus.Done, null))
                 when (val decision = completion.assess(output, report)) {
                     is CompletionDecision.Accepted -> return completed(response.text, decision.evidenceRefs)
@@ -811,6 +812,21 @@ public class Cell @JvmOverloads constructor(
 
         private fun Map<String, Currency>.certifiedReceipt(acceptanceId: String): String? =
             ws.checks.forAcceptance(acceptanceId).firstNotNullOfOrNull { check -> this[check.id]?.takeIf { it.certifies }?.receiptId }
+
+        /**
+         * FX-13: a required check of the increment whose current receipt is `unavailable` (missing runner or toolchain)
+         * ends the completion as `blocked` with the concrete blocker — never an endless gate the model cannot pass.
+         */
+        private fun unavailable(currencies: Map<String, Currency>): BlockedRequest? {
+            val stuck = increment.accept.flatMap { ws.checks.forAcceptance(it) }.distinctBy { it.id }.mapNotNull { check ->
+                val currency = currencies[check.id]?.takeIf { it.applicability == Applicability.Current } ?: return@mapNotNull null
+                currency.receiptId?.let { ev.receipts.get(it) }?.takeIf { it.outcome == Outcome.Unavailable }
+            }
+            if (stuck.isEmpty()) return null
+            val blockers = stuck.joinToString("; ") { r -> "${r.checkId}: " + (r.limits.firstOrNull { it.kind == "runner" }?.detail ?: "cannot run") }
+            // An external blocker, not a question: the campaign stops `blocked`, the remedy is in the reason.
+            return BlockedRequest("required check unavailable — $blockers (install or configure the runner, or amend the acceptance)", stuck.map { it.receiptId }, null, turn)
+        }
 
         /** The `[>]` step this turn's patch left (ticked or moved past), when it moved. */
         private fun stepLeft(before: Register, after: Register): Step? =

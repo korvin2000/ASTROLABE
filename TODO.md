@@ -1280,9 +1280,10 @@ Goal: [§18.2 Stage C](docs/implementation/roadmap.md#sec-18-2): scheduler with 
 - Done: FX-17; mutation inside an isolated candidate during the check cannot certify the final bytes; allowed scratch output does not invalidate a complete declared closure (IX-04).
 - Log: 2026-09-24 — `Scheduler.runCheck(..., execute: suspend (root: Path) -> Executed)`: `inline|fast` (and all checks without `candidates`) keep the exclusive protocol; `slow|expensive` with `candidates` run `runIsolated`: export + verify under the lock → run in `candidates/cand-n/` → content+mtime rescan (scratch excluded) ⇒ `mutated_during_check` → `input_stability = isolated`, receipt stamps = exported stamp, limits name the isolation and non-isolated external services; shared `recordRun`. `Verify.runOne` runs in the given root. Controller passes `candidates` only with `Flags.s3Writers` (D-73). `unknown` stays ineligible (`TestedInputs.eligible`). Tests: `SchedulerTest` FX-17 (workspace write + restore during an isolated check, scratch output ⇒ eligible) and in-candidate write/restore/new file ⇒ ineligible, outcome kept.
 
-#### P3.1.6 [M] `unavailable` receipts and blocked path · TODO
+#### P3.1.6 [M] `unavailable` receipts and blocked path · DONE
 - Build: required check cannot run (missing runner/toolchain) ⇒ `unavailable` receipt + `blocked` report with the concrete blocker; no endless gating.
 - Done: FX-13 (full).
+- Log: 2026-09-24 — `Cell.unavailable(currencies)`: on a completion proposal (after verify-on-stop), a current `unavailable` receipt of an increment acceptance check ends the cell `blocked` with `required check unavailable — <check>: <runner limit> (install or configure the runner, or amend the acceptance)`, the receipt ids as evidence and no question ⇒ campaign `blocked_external` (Lifecycle), ledger untouched. `Verify.runOne` already records the `unavailable` receipt (P1.6.7). Test: `ControllerTest` FX-13 (missing runner ⇒ 1 turn, unavailable receipt, blocked stop naming the runner, R1 pending).
 
 - [ ] **Gate P3.1:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
 

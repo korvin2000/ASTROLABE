@@ -30,6 +30,7 @@ import io.astrolabe.evidence.Intent
 import io.astrolabe.evidence.IntentStatus
 import io.astrolabe.evidence.JournalKind
 import io.astrolabe.evidence.JournalScope
+import io.astrolabe.evidence.Outcome
 import io.astrolabe.evidence.SqliteAliases
 import io.astrolabe.evidence.SqliteObservations
 import io.astrolabe.evidence.SqliteReceipts
@@ -206,10 +207,10 @@ class ControllerTest {
     private fun recorded(name: String) = javaClass.getResourceAsStream("/shaper/$name")!!.use { String(it.readAllBytes(), Charsets.UTF_8) }
 
     /** Stores the contract before the first open, with a `run:` item whose output the pytest shaper counts (D-50). */
-    private fun seedContract() {
+    private fun seedContract(command: Command? = null) {
         repo.write("pytest_pass.txt", recorded("pytest-pass.txt"))
         repo.commit("fixture output")
-        val printing = if (WINDOWS) Command(listOf("cmd.exe", "/d", "/s", "/c", "type pytest_pass.txt")) else Command(listOf("/bin/sh", "-c", "cat pytest_pass.txt"))
+        val printing = command ?: if (WINDOWS) Command(listOf("cmd.exe", "/d", "/s", "/c", "type pytest_pass.txt")) else Command(listOf("/bin/sh", "-c", "cat pytest_pass.txt"))
         Store.open(stateRoot, repo.git, clock).use { store ->
             val contracts = Contracts(SqliteContractRepository(store, clock), idGen, clock)
             val derived = contracts.deriveS0(request.work, request.attempt, request.text, Atlas.build(repo.root), Config(), policy.tokens).contract
@@ -297,6 +298,22 @@ class ControllerTest {
             val exported = Files.readString(c.store.layout.exports.resolve(request.work.value).resolve("finish-receipt.json"))
             assertTrue("return a constant" in exported)
             assertFalse("haunted" in exported, "the model's private text is never serialized into the receipt")
+        }
+    }
+
+    @Test
+    fun `FX-13 - a required check that cannot run is an unavailable receipt and a blocked stop naming the runner`() = runTest {
+        seedContract(Command(listOf("no-such-runner-xyz", "-q")))
+        open().use { c ->
+            val run = controller().runS0(c, model(Scripted.Reply(listOf(say("done")))))
+            val blocked = assertIs<CellExit.Blocked>(run.exit, run.state?.reason)
+            assertEquals(1, blocked.turns, "blocked at the first completion proposal, no endless gating")
+            assertTrue("CHK-accept-AC-1: cannot start no-such-runner-xyz" in blocked.request.reason, blocked.request.reason)
+            val receipt = SqliteReceipts(c.store, clock).forCheck("CHK-accept-AC-1").single()
+            assertEquals(Outcome.Unavailable, receipt.outcome)
+            assertEquals(listOf(receipt.receiptId), blocked.request.evidence)
+            assertEquals(CampaignOutcome.BlockedExternal, run.outcome, run.state?.reason)
+            assertEquals(RequirementStatus.Pending, c.campaigns.load(request.work, request.attempt)!!.ledger.entries.getValue("R1").status)
         }
     }
 
