@@ -553,3 +553,10 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
   reviewed and merged `--no-ff`; the P3.2.1 agent was lost in a container restart (task stays TODO). Windows-only
   CI fixes: quality gates without a declared suite, no-Makefile test setups. D-72–D-86. Gates P3.1/P3.4/P3.6/P3.5 green;
   `main` fast-forwarded per gate (PR korvin2000/ASTROLABE#6). Counts 133/185 DONE, 0 IN_PROGRESS, 52 TODO.
+- 2026-09-24/25 — local Windows session, branch `claude/p3-2-impact`: P3.2.1–P3.2.6 (import graph, impact assembly,
+  look refs/importers/impact, impact nudge + exit gate, blast selection, pre-scan), P3.3.1–P3.3.2 (transforms + guarded
+  inverse), P3.8.1–P3.8.2 (FX-07 full, Stage C campaigns) ⇒ **P3 complete**; P4.1.1–P4.1.3 (KB), P4.2.1–P4.2.2
+  (extractor, NEG), P4.4.1 (Delegator), P4.5.1 (Router). Ten tasks via Fable worktree agents (run in parallel, reviewed,
+  merged `--no-ff`, D-nn renumbered at merge). Fixes: `DefaultsTest` for a multi-arm flag; controller `Edit` lacked the
+  shadow ref (`revert:turn:N` was unsupported). D-87–D-111. Gates P3.2, P3 phase, P4.1, P4.2 pushed straight to `main`
+  (owner-authorized; no `gh` locally, CI polled via the Actions API). Counts 150/185 DONE, 0 IN_PROGRESS, 35 TODO.
