@@ -86,7 +86,8 @@ class DefaultsTest {
         val on = Flags::class.java.declaredFields
             .filter { !Modifier.isStatic(it.modifiers) && !it.isSynthetic }
             .onEach { it.isAccessible = true }
-            .filter { it.getBoolean(flags) }
+            // A boolean flag is off when false; a multi-arm flag (e.g. `kbInjection`, P4.1.3) when its arm is `Off`.
+            .filter { f -> if (f.type == java.lang.Boolean.TYPE) f.getBoolean(flags) else (f.get(flags) as Enum<*>).name != "Off" }
             .map { it.name }
         assertTrue(on.isEmpty(), "flags on by default: $on")
     }
