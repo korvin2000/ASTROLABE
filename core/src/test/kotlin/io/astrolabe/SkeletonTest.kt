@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Assumptions.assumeTrue
 class SkeletonTest {
     @Test
     fun `java test fixture compiles against core`() {
-        assertEquals("astrolabe-core via Astrolabe", JavaConsumerSmoke.describe())
+        assertEquals("astrolabe-core 0.1.0", JavaConsumerSmoke.describe())
         assertEquals("astrolabe-core-testFixtures", TestKit.NAME)
     }
 

@@ -1,6 +1,7 @@
 package io.astrolabe.campaign
 
 import io.astrolabe.Config
+import io.astrolabe.Project
 import io.astrolabe.atlas.Atlas
 import io.astrolabe.atlas.Prime
 import io.astrolabe.atlas.RulesSnapshot
@@ -156,6 +157,8 @@ public class OpenedCampaign internal constructor(
     public val shape: ShapeDecision,
     state: CampaignState?,
     private val refusal: String?,
+    /** False when a [io.astrolabe.Project] owns the store and the OS; then [close] releases nothing of theirs. */
+    private val owned: Boolean = true,
 ) : AutoCloseable {
     @Volatile
     public var state: CampaignState? = state
@@ -180,6 +183,7 @@ public class OpenedCampaign internal constructor(
     }
 
     override fun close() {
+        if (!owned) return
         try {
             os.close()
         } finally {
@@ -227,7 +231,7 @@ public class Controller @JvmOverloads public constructor(
             throw failure
         }
         try {
-            return open(repo, git, store, os, request, policy)
+            return open(repo, git, store, os, request, policy, owned = true)
         } catch (failure: Throwable) {
             runCatching { os.close() }
             runCatching { store.close() }
@@ -235,7 +239,11 @@ public class Controller @JvmOverloads public constructor(
         }
     }
 
-    private fun open(repo: Path, git: Git, store: Store, os: LocalOs, request: CampaignRequest, policy: CampaignPolicy): OpenedCampaign {
+    /** Opens [request]'s campaign in [project], whose store, lock and OS stay the project's (P1.9.6). */
+    public fun open(project: Project, request: CampaignRequest, policy: CampaignPolicy): OpenedCampaign =
+        open(project.root, project.git, project.store, project.os, request, policy, owned = false)
+
+    private fun open(repo: Path, git: Git, store: Store, os: LocalOs, request: CampaignRequest, policy: CampaignPolicy, owned: Boolean): OpenedCampaign {
         val ids = Identities(request.work, request.attempt)
         val protected = ProtectedPaths()
         val workspace = Workspace(WORKSPACE, repo, git, protected)
@@ -303,7 +311,7 @@ public class Controller @JvmOverloads public constructor(
 
         return OpenedCampaign(
             request, ids, store, os, workspace, registry, stamper, dirty, shadow, s0, atlas, derived.sniffed, commands,
-            contracts, checks, rules, prime, EmptyKb, journal, intents, campaigns, reconciliation, prescan, shape, state, refusal,
+            contracts, checks, rules, prime, EmptyKb, journal, intents, campaigns, reconciliation, prescan, shape, state, refusal, owned,
         )
     }
 
