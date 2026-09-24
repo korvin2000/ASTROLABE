@@ -1288,7 +1288,7 @@ Goal: [§18.2 Stage C](docs/implementation/roadmap.md#sec-18-2): scheduler with 
 - Done: FX-13 (full).
 - Log: 2026-09-24 — `Cell.unavailable(currencies)`: on a completion proposal (after verify-on-stop), a current `unavailable` receipt of an increment acceptance check ends the cell `blocked` with `required check unavailable — <check>: <runner limit> (install or configure the runner, or amend the acceptance)`, the receipt ids as evidence and no question ⇒ campaign `blocked_external` (Lifecycle), ledger untouched. `Verify.runOne` already records the `unavailable` receipt (P1.6.7). Test: `ControllerTest` FX-13 (missing runner ⇒ 1 turn, unavailable receipt, blocked stop naming the runner, R1 pending).
 
-- [ ] **Gate P3.1:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+- [x] **Gate P3.1:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate). — [CI run 36018242027](https://github.com/korvin2000/ASTROLABE/actions/runs/36018242027) green on Ubuntu + Windows at `42e3bed` (P3.1.2–P3.1.6, 2026-09-24).
 
 ### P3.2 Impact engine and index (tier 0/1 heuristics)
 #### P3.2.1 [M] `ImportGraph` and `tests_for` · TODO
