@@ -96,6 +96,13 @@ import io.astrolabe.id.Identities
 import io.astrolabe.id.RandomIdGen
 import io.astrolabe.id.WorkId
 import io.astrolabe.id.WorkspaceId
+import io.astrolabe.evidence.JournalScope
+import io.astrolabe.kb.CalibrationSeries
+import io.astrolabe.kb.CalibrationStats
+import io.astrolabe.kb.Derived
+import io.astrolabe.kb.Extraction
+import io.astrolabe.kb.ExtractionTrace
+import io.astrolabe.kb.Extractor
 import io.astrolabe.kb.Injection
 import io.astrolabe.kb.InjectionExclusion
 import io.astrolabe.kb.InjectionInputs
@@ -148,6 +155,9 @@ import io.astrolabe.verify.Baseline
 import io.astrolabe.verify.BehaviourSnapshots
 import io.astrolabe.verify.CampaignReview
 import io.astrolabe.verify.CampaignReviewOutcome
+import io.astrolabe.verify.CampaignReviewRecord
+import io.astrolabe.verify.Finding
+import kotlinx.serialization.json.Json
 import io.astrolabe.verify.CheckKind
 import io.astrolabe.verify.Checker
 import io.astrolabe.verify.Checks
@@ -328,6 +338,8 @@ public class Controller @JvmOverloads public constructor(
     public val precompiles: PrecompileMetrics = PrecompileMetrics(),
     /** The §11.2 router (P4.5.1) asked once per cell; its calibration log holds the `(function, tier, effort, outcome)` quadruples. */
     public val router: Router = Router(),
+    /** The post-cell extractor's model step (§12.1, P4.2.1), run at finish from the archived traces; `NONE` leaves the harness-derived candidates and the CAL delta. */
+    private val extraction: Extraction = Extraction.NONE,
 ) {
     /**
      * Opens or reopens [request]'s campaign over [repo]. Order (§3.7, §13.1): the store and its project lock, the
@@ -826,7 +838,7 @@ public class Controller @JvmOverloads public constructor(
 
     /** The carry-forward of [cell] (§6.2): its latest register, its end export and its packet, re-validated now. */
     private fun carryFrom(c: OpenedCampaign, cell: ContextId, packet: ResultPacket?): Carry? {
-        val register = SqliteRegisterVersions(c.store, clock).latest(cell) ?: return null
+        val register = withReviewOpenItems(c, SqliteRegisterVersions(c.store, clock).latest(cell) ?: return null)
         val aliases = SqliteAliases(c.store, clock)
         return CarryForward.carry(
             register, Seeds.cellEnd(SqliteCheckpoints(c.store, clock), cell), packet, { c.registry.version(it) },
@@ -842,7 +854,41 @@ public class Controller @JvmOverloads public constructor(
         val receipt = FinishReceipts.build(c, packets, currencies(c, scheduler, c.stamper.report().candidateId), receipts::get)
         val (ref, _) = FinishReceipts.export(c, receipt)
         events?.emit(AgentEvent.Campaign.Finished(c.ids, outcome.wire, ref))
+        extract(c, packets)
         return result.copy(finish = receipt)
+    }
+
+    /**
+     * §12.1 post-cell extraction at finish (P4.2.1): each archived packet with its cell's journal goes to the
+     * extractor under the originating cell's ids (its cost is charged there), then the §6.7 `CAL-<repo>` delta is
+     * aggregated over every stored campaign. The extractor contains its own failures; the receipt is already exported.
+     */
+    private fun extract(c: OpenedCampaign, packets: List<ResultPacket>) {
+        val extractor = Extractor(c.store, HeuristicEstimator(), idGen, clock, extraction, c.journal, events)
+        val stamp = c.stamper.report().candidateId.digest.hex
+        val findings = reviewFindings(c)
+        for ((i, packet) in packets.withIndex()) {
+            val trace = ExtractionTrace(packet, c.journal.events(JournalScope(c.ids.work, packet.ids.context)), packet.stamp?.digest?.hex ?: stamp)
+            // §8.8 findings are the campaign's, derived once: with the last packet; recurring dead ends see the earlier registers.
+            extractor.run(trace, packet.ids, if (i == packets.lastIndex) findings else emptyList(), packets.take(i).map { it.register })
+        }
+        val policy = Calibration.policy(c.attempt.config.defaults.shapePolicy)
+        val series = CalibrationSeries(c.workspace.root.fileName?.toString() ?: "repo", c.attempt.harnessVersion, policy.version)
+        extractor.calibrate({ CalibrationStats.aggregate(Calibration.observations(c.store, series), policy) }, series, c.ids)
+    }
+
+    /** The attempt's latest campaign review findings (§8.8), or none. */
+    private fun reviewFindings(c: OpenedCampaign): List<Finding> = c.store.db.query(
+        "SELECT body FROM packets WHERE work_id = ? AND attempt_id = ? AND kind = ? ORDER BY rowid DESC LIMIT 1",
+        c.ids.work, c.ids.attempt, CampaignReview.KIND,
+    ) { Json.decodeFromString(CampaignReviewRecord.serializer(), it.string("body")) }.firstOrNull()?.verdict?.findings.orEmpty()
+
+    /** §8.8 (P4.2.2): findings at or above major not yet in [register] become its `Open` items, numbered after its last. */
+    private fun withReviewOpenItems(c: OpenedCampaign, register: Register): Register {
+        val findings = reviewFindings(c)
+        if (findings.isEmpty()) return register
+        val fresh = Derived.openItems(findings, (register.open.maxOfOrNull { it.n } ?: 0) + 1).filter { item -> register.open.none { it.text == item.text } }
+        return if (fresh.isEmpty()) register else register.copy(open = register.open + fresh)
     }
 
     private suspend fun runS0(campaign: OpenedCampaign, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?): S0Run {

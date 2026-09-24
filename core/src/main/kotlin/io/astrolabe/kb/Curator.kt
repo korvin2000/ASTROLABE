@@ -205,7 +205,10 @@ public class Curator @JvmOverloads constructor(
             val note = notes.get(entry.noteId) ?: continue
             when (val decision = decide(entry, note)) {
                 is AdmissionDecision.Admit -> {
-                    writer.write(note.copy(status = NoteStatus.Admitted, signedBy = decision.signedBy ?: note.signedBy, origin = note.origin.copy(admittedBy = decision.admittedBy)), ids)
+                    val active = note.copy(status = NoteStatus.Admitted, signedBy = decision.signedBy ?: note.signedBy, origin = note.origin.copy(admittedBy = decision.admittedBy))
+                    // A delta names the note it replaces (§12.1 supersession): admitting it marks that one superseded, never rewrites it.
+                    val replaced = note.supersedes?.takeIf { notes.get(it) != null }
+                    if (replaced != null) writer.supersede(replaced, active, ids) else writer.write(active, ids)
                     queue.save(entry.copy(status = QueueStatus.Admitted, batch = batchId, decidedBy = decision.admittedBy, findings = emptyList(), reason = null), ids)
                     events?.emit(AgentEvent.Kb.Admitted(ids, note.id))
                     admitted += note.id
