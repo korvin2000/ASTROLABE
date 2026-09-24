@@ -1445,9 +1445,10 @@ Goal: [§18.2 Stage C](docs/implementation/roadmap.md#sec-18-2): scheduler with 
 - [x] **Gate P3.7:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate). — [CI run 36031110215](https://github.com/korvin2000/ASTROLABE/actions/runs/36031110215) green on Ubuntu + Windows at `d161251` (P3.7.1, 2026-09-24).
 
 ### P3.8 Stage C validation
-#### P3.8.1 [V] Fixtures · TODO
+#### P3.8.1 [V] Fixtures · DONE
 - Build: FX-07 (full), 12, 13, 14, 16, 17, 37, 40, 44, 52, 54.
 - Done: green on both platforms.
+- Log: 2026-09-24 — FX-07 (full) added: `CoherenceTest` `full closure invalidation …` (new package member, deletion in a known closure, lockfile ⇒ every check stale, untouched package survives, outcomes immutable). Existing: FX-12 `RefactorModeCellTest`, FX-13 `ControllerTest`/`VerifyTest`, FX-14 `TestIntegrityTest`, FX-16 `CoherenceTest`/`ChecksTest`/`SchedulerTest`, FX-17/54 `SchedulerTest`, FX-37 `ImportGraphTest`, FX-40 `TransformTest`, FX-44 `PrecompileTest`/`PrecompileCampaignTest`, FX-52 `ScopeGuardTest`/`EditTest`. Both-platform green is discharged at the P3 phase gate.
 
 #### P3.8.2 [V] Scripted migration and 40-file rename · TODO
 - Build: cross-file migration campaign completes with fewer redundant checks (reuse proofs visible in receipts) and no lost requirement; 40-file rename via transform is reconciled, reviewed (human path), reversible (`revert:turn:N`), and produces no false green.

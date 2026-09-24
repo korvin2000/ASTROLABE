@@ -132,6 +132,37 @@ class CoherenceTest {
     }
 
     @Test
+    fun `full closure invalidation covers package members, new files, deletions and the environment (FX-07 full)`() {
+        val checks = Checks.empty()
+        checks.register(check("CHK-pkg-src", Closure.Package("src"), CheckKind.Unit))
+        checks.register(check("CHK-pkg-docs", Closure.Package("docs"), CheckKind.Unit))
+        checks.register(check("CHK-known-a", Closure.Known(setOf("src/a.py"))))
+        checks.all().forEach { checks.record(it.id, green(it, s1)) }
+        coherence.register(checks)
+        fun stale() = checks.all().filter { it.last!!.applicability == Applicability.Stale }.map { it.id }
+
+        // A new file inside a package closure is a member the old receipt never saw.
+        repo.write("src/c.py", "def c():\n    return 3\n")
+        registry.change("src/c.py", null, registry.version("src/c.py"), "created by edit #3")
+        assertEquals(listOf("CHK-pkg-src"), stale())
+        assertEquals("closure moved: src/c.py (created by edit #3)", checks["CHK-pkg-src"]!!.last!!.staleReason)
+
+        // A deletion inside a known closure moves it, whatever the old version was.
+        val va = registry.version("src/a.py")!!
+        Files.delete(repo.resolve("src/a.py"))
+        registry.change("src/a.py", va, null, "deleted by transform #4")
+        assertEquals(listOf("CHK-pkg-src", "CHK-known-a"), stale())
+        assertEquals(Applicability.Current, checks["CHK-pkg-docs"]!!.last!!.applicability, "a package that did not move survives")
+
+        // A lockfile is an input of every check's environment, whatever the closure says.
+        repo.write("Pipfile.lock", "# lock\n")
+        registry.change("Pipfile.lock", null, registry.version("Pipfile.lock"), "touched by run #5")
+        assertEquals(listOf("CHK-pkg-src", "CHK-pkg-docs", "CHK-known-a"), stale())
+        assertEquals("environment moved: Pipfile.lock (touched by run #5)", checks["CHK-pkg-docs"]!!.last!!.staleReason)
+        assertTrue(checks.all().all { it.last!!.outcome == Outcome.Passed }, "the historical outcomes never change")
+    }
+
+    @Test
     fun `serve never says current for a moved, deleted, externally rewritten or refused anchor`() {
         val va = registry.version("src/a.py")!!
         val readme = registry.version("README.md")!!
