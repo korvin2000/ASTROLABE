@@ -9,8 +9,7 @@ Recount: `rg -c '^#### P\d+\.\d+\.\d+ .*· DONE' TODO.md` (per phase: `'^#### P3
 
 ## Completion levels
 - **P0, P1:** complete, `FIXTURE_VALIDATED` on Windows + Linux CI (JDK 26). P1 gate: CI run 35995814928.
-- **P2:** complete. The P2 phase gate (P2.2 remainder + P2.7) runs in korvin2000/ASTROLABE#5; P2 becomes
-  `FIXTURE_VALIDATED` when that run is green on both platforms.
+- **P2:** complete, `FIXTURE_VALIDATED`: P2 phase gate (P2.2 remainder + P2.7) CI run 36008104604, merged via korvin2000/ASTROLABE#5.
   - The S1 campaign runs as follows:
     - `Controller.run` starts the plan cell: `task.propose(plan)`, then `PlanPacketValidator`, `PlanIntake` and `Transition.Planned`.
     - It then runs one cell per ready increment, each compiled with carry-forward and hash-checked seeds.
@@ -63,8 +62,7 @@ Schema **v4**:
   | P2.4 | 35999628531 |
   | P2.3 + P2.6 | 36001412845 |
   | P2.5 | 36003465907 |
-
-  P2.2 + P2.7 are in korvin2000/ASTROLABE#5.
+  | P2.2 + P2.7 (P2 phase) | 36008104604 |
 - Local (Linux sandbox, JDK 25 scratch copy): full build of 1066 tests; only the 2 known environmental failures, with 6 skips.
 
 ## Recorded deviations (details in task `Log:` lines)

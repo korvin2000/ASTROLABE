@@ -3,9 +3,9 @@
 Rewritten every session (≤40 lines). Workflow: `CLAUDE.md` § Workflow. State snapshot: `actual_state.md`.
 History: `audit/SESSION-HISTORY.md` (never read at startup).
 
-**Checkpoint:** branch `claude/compassionate-cerf-j4qunn`. **P2 is complete** (30/30): the P2.2 remainder and P2.7 gate
-together in korvin2000/ASTROLABE#5 (see TODO `Gate P2.2`/`Gate P2.7` for the run link and merge commit). P3.1.1 DONE
-after the gate commit. 120/185 DONE overall. Start the next session from `main` once #5 is merged, else from this branch.
+**Checkpoint:** branch `claude/compassionate-cerf-j4qunn`. **P2 is complete and `FIXTURE_VALIDATED`** (30/30): P2 phase gate
+[CI run 36008104604](https://github.com/korvin2000/ASTROLABE/actions/runs/36008104604) green on both platforms, merged via korvin2000/ASTROLABE#5. P3.1.1 DONE
+(merged with the gate). 120/185 DONE overall. Start the next session from `main`.
 
 ## Next block — P3.1 scheduler (then P3.2 impact runtime)
 1. **P3.1.2** validity/applicability/reuse proofs.
