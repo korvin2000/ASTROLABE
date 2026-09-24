@@ -484,7 +484,7 @@ public class Controller @JvmOverloads public constructor(
             c.refusal()?.let { return last.copy(state = c.advance(Transition.Stopped(stopOutcome(c), "dispatch refused: $it"))) }
             val state = checkNotNull(c.state)
             val contract = c.contract
-            val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock)
+            val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = candidates(c))
             val unverified = state.ledger.unfinished()
             if (unverified.isEmpty()) return last.copy(state = stopOrFinish(c, "requirements remain unverified", scheduler, campaign = true))
             val ready = state.graph.readyFrontier(contract, 1).firstOrNull()
@@ -672,7 +672,7 @@ public class Controller @JvmOverloads public constructor(
     private fun finish(c: OpenedCampaign, result: S0Run, packets: List<ResultPacket> = listOfNotNull(result.exit?.packet)): S0Run {
         val outcome = result.state?.outcome ?: return result
         val receipts = SqliteReceipts(c.store, clock)
-        val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, receipts, SqliteAliases(c.store, clock), idGen, c.ids, clock)
+        val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, receipts, SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = candidates(c))
         val receipt = FinishReceipts.build(c, packets, currencies(c, scheduler, c.stamper.report().candidateId), receipts::get)
         val (ref, _) = FinishReceipts.export(c, receipt)
         events?.emit(AgentEvent.Campaign.Finished(c.ids, outcome.wire, ref))
@@ -791,7 +791,7 @@ public class Controller @JvmOverloads public constructor(
         val registerVersions = SqliteRegisterVersions(c.store, clock)
         val checkpoints = SqliteCheckpoints(c.store, clock)
         val preimages = Preimages(c.workspace, c.store.blobs, ids, clock)
-        val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, receipts, aliases, idGen, ids, clock)
+        val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, receipts, aliases, idGen, ids, clock, candidates = candidates(c))
         val checker = Checker(c.checks, runner, c.os, c.stamper, c.registry, c.workspace, c.store.blobs, redaction, idGen, ids, logs)
         val verify = Verify(checks = c.checks, scheduler = scheduler, checker = checker, baseline = null, s0 = c.s0.stampId, workspace = c.workspace, runner = runner, os = c.os, stamper = c.stamper, blobs = c.store.blobs, redaction = redaction, estimator = estimator, idGen = idGen, ids = ids, contracts = c.contracts, logsDir = logs)
         verify.inputs = c.atlas.rows.map { it.path }
@@ -933,7 +933,7 @@ public class Controller @JvmOverloads public constructor(
         val redaction = Redaction(config.redaction)
         val logs = c.store.layout.root.resolve("logs")
         val runner = TrustedLocalRunner(c.os)
-        val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, ids, clock)
+        val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, ids, clock, candidates = candidates(c))
         val checker = Checker(c.checks, runner, c.os, c.stamper, c.registry, c.workspace, c.store.blobs, redaction, idGen, ids, logs)
         val verify = Verify(checks = c.checks, scheduler = scheduler, checker = checker, baseline = null, s0 = c.s0.stampId, workspace = c.workspace, runner = runner, os = c.os, stamper = c.stamper, blobs = c.store.blobs, redaction = redaction, estimator = HeuristicEstimator(), idGen = idGen, ids = ids, contracts = c.contracts, logsDir = logs)
         // An unknown closure is rescanned over the atlas rows, as in a cell; without them no receipt can certify the tree.
@@ -945,6 +945,9 @@ public class Controller @JvmOverloads public constructor(
     /** The outcome of a refused dispatch or publication: `cancelled` for a cancellation, else the lost lease blocks. */
     private fun stopOutcome(c: OpenedCampaign): CampaignOutcome =
         if (c.cancellation.cancelled) CampaignOutcome.Cancelled else CampaignOutcome.BlockedExternal
+
+    /** D-73: isolated candidates for `slow|expensive` checks only once concurrent writers exist (S3); until then every check runs exclusively. */
+    private fun candidates(c: OpenedCampaign): java.nio.file.Path? = c.store.layout.candidates.takeIf { c.attempt.config.flags.s3Writers }
 
     private fun currencies(c: OpenedCampaign, scheduler: Scheduler, stamp: CandidateId): Map<String, Currency> =
         c.checks.all().filter { it.last != null }.associate { it.id to scheduler.currency(it, stamp) }

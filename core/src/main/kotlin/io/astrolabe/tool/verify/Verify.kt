@@ -207,9 +207,9 @@ public class Verify(
             Executed(listOf(check.id), null, false, null, Outcome.Unavailable, null, null, listOf("check ${check.id} declares no command"))
         } to "  ${check.id}: unavailable (no command)"
         var view = ""
-        val receipt = scheduler.runCheck(check, contract.version, inputs) {
+        val receipt = scheduler.runCheck(check, contract.version, inputs) { root ->
             val actionId = idGen.next("act")
-            val cwd = command.cwd?.let { workspace.root.resolve(it) } ?: workspace.root
+            val cwd = command.cwd?.let { root.resolve(it) } ?: root
             val proc = try {
                 runner.start(SpawnSpec(Command.Argv(command.argv), cwd, logPath(check.id, actionId), EnvPolicy(inheritedNames = envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")), timeoutSeconds))
             } catch (failure: IOException) {

@@ -21,12 +21,15 @@ import io.astrolabe.tool.run.announceMoved
 import io.astrolabe.workspace.EnvFingerprint
 import io.astrolabe.workspace.Intent
 import io.astrolabe.workspace.PathResolution
+import io.astrolabe.workspace.StampReport
 import io.astrolabe.workspace.Stamper
 import io.astrolabe.workspace.VersionRegistry
 import io.astrolabe.workspace.Workspace
 import kotlinx.coroutines.sync.withLock
 import java.io.IOException
 import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.Path
 import java.nio.file.attribute.BasicFileAttributes
 import java.time.Clock
 import kotlin.io.path.relativeTo
@@ -100,6 +103,8 @@ public class Scheduler(
     private val clock: Clock,
     private val verifierVersion: String = Astrolabe.VERSION,
     private val scratch: ScratchPolicy = ScratchPolicy(),
+    /** Where `slow|expensive` checks get isolated candidates (`candidates/` of the store layout); `null` runs every check exclusively. */
+    private val candidates: Path? = null,
 ) {
     private val aliasByReceipt = HashMap<String, String>()
 
@@ -107,18 +112,22 @@ public class Scheduler(
     public fun aliasOf(receiptId: String): String? = aliasByReceipt[receiptId]
 
     /**
-     * Runs [execute] for [check] under the exclusive protocol and records the receipt. [inputs] is the
-     * caller's enumeration of the tree for an unknown closure (the atlas rows, typically); without it an
-     * unknown closure yields `input_stability = unknown` and the receipt can never be eligible.
+     * Runs [execute] for [check] and records the receipt (D-45). `inline|fast` checks — and every check when no
+     * [candidates] directory is configured — run under the exclusive protocol in the workspace; `slow|expensive`
+     * checks run on an exported isolated candidate ([execute] receives the root to run in). [inputs] is the
+     * caller's enumeration of the tree for an unknown closure (the atlas rows, typically); without it an unknown
+     * closure run exclusively yields `input_stability = unknown` and the receipt can never be eligible.
      */
-    public suspend fun runCheck(check: Check, contractVersion: Int, inputs: Collection<String> = emptyList(), execute: suspend () -> Executed): Receipt {
+    public suspend fun runCheck(check: Check, contractVersion: Int, inputs: Collection<String> = emptyList(), execute: suspend (root: Path) -> Executed): Receipt {
+        val isolatedRoot = candidates?.takeIf { check.costClass == CostClass.Slow || check.costClass == CostClass.Expensive }
+        if (isolatedRoot != null) runIsolated(check, contractVersion, inputs, isolatedRoot, execute)?.let { return it }
         val paths = testedInputsFor(check, inputs)
         val limits = ArrayList<Limit>()
         return workspace.mutation.withLock {
             val before = stamper.report()
             val seenBefore = paths.associateWith { snapshot(it) }
             val manifest = manifestOf(check.inputClosure)
-            val executed = execute()
+            val executed = execute(workspace.root)
             val after = stamper.report()
             announceMoved(registry, before, after, "check ${check.id}")
             val mutated = paths.filter { snapshot(it) != seenBefore.getValue(it) }.toSet()
@@ -129,28 +138,110 @@ public class Scheduler(
                 }
                 else -> InputStability.Exclusive
             }
-            if (mutated.isNotEmpty()) limits += Limit("input_mutation", "inputs moved during the check: ${mutated.sorted().joinToString(", ")}; the receipt is ineligible for the final tree — rerun")
-            executed.limits.forEach { limits += Limit("runner", it) }
-            val outcome = if (executed.outcome == Outcome.Passed && (executed.counts == null || (executed.counts.executed == 0 && executed.counts.discovered == 0))) {
-                limits += Limit("evidence", "a pass without parsed counts is inconclusive, never green (D-50)")
-                Outcome.Inconclusive
-            } else {
-                executed.outcome
-            }
-            val receipt = Receipt(
-                receiptId = idGen.next("rcpt"), ids = ids, checkId = check.id, acceptanceIds = check.acceptanceIds,
-                command = executed.command, cwd = executed.cwd, shell = executed.shell,
-                stampBefore = before.candidateId, stampAfter = after.candidateId, envId = before.env.envId,
-                verifierVersion = verifierVersion, checkDefinitionVersion = check.definitionVersion, contractVersion = contractVersion,
-                outcome = outcome, parsed = executed.counts, inputClosure = check.inputClosure,
-                testedInputs = TestedInputs(seenBefore.mapNotNull { (path, seen) -> seen.version?.let { path to it } }.toMap(), stability, mutated),
-                raw = executed.raw, limits = limits, exitCode = executed.exit, at = clock.instant(), closureManifest = manifest,
-            )
-            receipts.record(receipt)
-            aliasByReceipt[receipt.receiptId] = aliases.allocate(ids.work, receipt.receiptId, "receipt", ids.context, workspace.id).text
-            checks.record(check.id, LastResult(receipt.receiptId, receipt.stampAfter, check.definitionVersion, outcome, executed.counts, Applicability.Current))
-            receipt
+            val versions = seenBefore.mapNotNull { (path, seen) -> seen.version?.let { path to it } }.toMap()
+            recordRun(check, contractVersion, executed, before, after.candidateId, TestedInputs(versions, stability, mutated), manifest, limits)
         }
+    }
+
+    /**
+     * §8.4/D-45 `isolated`: under the mutation lock the stamped tree (tracked ∪ untracked, raw bytes, scratch
+     * excluded) is copied into `candidates/<id>/` and every copy is verified against the bytes read; the check then
+     * runs there without the lock, and the copy is verified again afterwards — any change of content or metadata
+     * outside declared scratch output is a mutation during the check, so a write inside the candidate can never
+     * certify it. The receipt describes the exported stamp. `null` when the export could not be verified: the
+     * check then runs exclusively.
+     */
+    private suspend fun runIsolated(check: Check, contractVersion: Int, inputs: Collection<String>, root: Path, execute: suspend (root: Path) -> Executed): Receipt? {
+        val dir = root.resolve(idGen.next("cand"))
+        val (report, manifest, exported) = workspace.mutation.withLock {
+            val report = stamper.report()
+            Triple(report, manifestOf(check.inputClosure), export(report, dir))
+        }
+        if (exported == null) {
+            deleteTree(dir)
+            return null
+        }
+        try {
+            val executed = execute(dir)
+            val after = scan(dir)
+            val mutated = (exported.keys + after.keys).filter { exported[it] != after[it] }.toSet()
+            val limits = arrayListOf(
+                Limit("input_stability", "isolated candidate @${report.candidateId.hash8}, verified before and after the check"),
+                Limit("external_services", "mutable external services (network, databases, caches outside the candidate) are not isolated"),
+            )
+            val paths = testedInputsFor(check, inputs).toSet()
+            val tested = exported.filterKeys { check.inputClosure == Closure.Unknown && paths.isEmpty() || it in paths }
+            return recordRun(check, contractVersion, executed, report, report.candidateId, TestedInputs(tested.mapNotNull { (path, seen) -> seen.version?.let { path to it } }.toMap(), InputStability.Isolated, mutated), manifest, limits)
+        } finally {
+            deleteTree(dir)
+        }
+    }
+
+    private fun recordRun(
+        check: Check,
+        contractVersion: Int,
+        executed: Executed,
+        before: StampReport,
+        stampAfter: CandidateId,
+        testedInputs: TestedInputs,
+        manifest: ClosureManifest,
+        limits: MutableList<Limit>,
+    ): Receipt {
+        if (testedInputs.mutatedDuringCheck.isNotEmpty()) {
+            limits += Limit("input_mutation", "inputs moved during the check: ${testedInputs.mutatedDuringCheck.sorted().joinToString(", ")}; the receipt is ineligible for the final tree — rerun")
+        }
+        executed.limits.forEach { limits += Limit("runner", it) }
+        val outcome = if (executed.outcome == Outcome.Passed && (executed.counts == null || (executed.counts.executed == 0 && executed.counts.discovered == 0))) {
+            limits += Limit("evidence", "a pass without parsed counts is inconclusive, never green (D-50)")
+            Outcome.Inconclusive
+        } else {
+            executed.outcome
+        }
+        val receipt = Receipt(
+            receiptId = idGen.next("rcpt"), ids = ids, checkId = check.id, acceptanceIds = check.acceptanceIds,
+            command = executed.command, cwd = executed.cwd, shell = executed.shell,
+            stampBefore = before.candidateId, stampAfter = stampAfter, envId = before.env.envId,
+            verifierVersion = verifierVersion, checkDefinitionVersion = check.definitionVersion, contractVersion = contractVersion,
+            outcome = outcome, parsed = executed.counts, inputClosure = check.inputClosure, testedInputs = testedInputs,
+            raw = executed.raw, limits = limits, exitCode = executed.exit, at = clock.instant(), closureManifest = manifest,
+        )
+        receipts.record(receipt)
+        aliasByReceipt[receipt.receiptId] = aliases.allocate(ids.work, receipt.receiptId, "receipt", ids.context, workspace.id).text
+        checks.record(check.id, LastResult(receipt.receiptId, receipt.stampAfter, check.definitionVersion, outcome, executed.counts, Applicability.Current))
+        return receipt
+    }
+
+    /** Copies the stamped tree into [dir]; `null` when a member could not be read or a copy does not verify. */
+    private fun export(report: StampReport, dir: Path): Map<String, Seen>? {
+        val members = (workspace.git.lsFiles().filter { it.stage == 0 }.map { it.path } + report.untracked.map { it.path })
+            .distinct().filterNot { scratch.isScratch(it) }
+        val copied = HashMap<String, FileVersion>()
+        for (path in members) {
+            val resolved = workspace.resolve(path, Intent.Read) as? PathResolution.Resolved ?: return null
+            if (!Files.exists(resolved.real, LinkOption.NOFOLLOW_LINKS)) continue // deleted in the working tree
+            val content = registry.read(path) ?: return null
+            val target = dir.resolve(path)
+            Files.createDirectories(target.parent)
+            Files.write(target, content.bytes)
+            copied[path] = content.version
+        }
+        val seen = scan(dir)
+        return seen.takeIf { it.keys == copied.keys && copied.all { (path, version) -> seen.getValue(path).version == version } }
+    }
+
+    /** Content and metadata of every non-scratch file under [dir], by workspace-relative path. */
+    private fun scan(dir: Path): Map<String, Seen> = Files.walk(dir).use { stream ->
+        stream.filter { Files.isRegularFile(it, LinkOption.NOFOLLOW_LINKS) }.toList()
+    }.map { it.relativeTo(dir).joinToString("/") { part -> part.toString() } to it }
+        .filterNot { (path, _) -> scratch.isScratch(path) }
+        .associate { (path, file) ->
+            val attributes = Files.readAttributes(file, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
+            path to Seen(FileVersion.of(Files.readAllBytes(file)), attributes.size(), attributes.lastModifiedTime().toMillis())
+        }
+
+    private fun deleteTree(dir: Path) {
+        if (!Files.exists(dir)) return
+        runCatching { Files.walk(dir).use { stream -> stream.sorted(Comparator.reverseOrder()).forEach { Files.deleteIfExists(it) } } }
     }
 
     /**

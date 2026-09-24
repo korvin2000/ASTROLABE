@@ -29,6 +29,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.attribute.FileTime
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -52,6 +53,7 @@ class SchedulerTest {
     private lateinit var receipts: SqliteReceipts
     private val clock = FakeClock.at("2026-09-20T10:00:00Z")
     private val ids = Identities(WorkId("W-1"), AttemptId("a1"), context = ContextId("cell-1"))
+    private val idGen = FixedIdGen()
 
     @BeforeTest
     fun setUp() {
@@ -71,7 +73,7 @@ class SchedulerTest {
         checks.register(Check("CHK-full", CheckKind.Full, Selector.All, Closure.Unknown, CostClass.Expensive, Trigger.CampaignEnd, command = Command(listOf("pytest"))))
         checks.register(Check("CHK-pkg", CheckKind.Unit, Selector.Touched, Closure.Package("src/pkg"), CostClass.Fast, Trigger.EndOfTurn, command = Command(listOf("pytest", "src/pkg"))))
         receipts = SqliteReceipts(store, clock)
-        scheduler = Scheduler(checks, workspace, registry, stamper, receipts, InMemoryAliases(), FixedIdGen(), ids, clock)
+        scheduler = Scheduler(checks, workspace, registry, stamper, receipts, InMemoryAliases(), idGen, ids, clock)
         coherence.register(checks)
     }
 
@@ -191,6 +193,48 @@ class SchedulerTest {
         val moved = scheduler.currency(full, stamper.stamp().id)
         assertEquals(Applicability.Stale, moved.applicability)
         assertTrue(moved.reasons.single().contains("closure unknown: rerun at the containing scope"), moved.reasons.toString())
+    }
+
+    private fun isolated() = Scheduler(checks, workspace, registry, stamper, receipts, InMemoryAliases(), idGen, ids, clock, candidates = stateRoot.resolve("candidates"))
+
+    @Test
+    fun `a slow check runs on an isolated candidate that a concurrent workspace writer cannot touch, scratch output allowed (FX-17)`() = runTest {
+        val exported = stamper.stamp().id
+        var root: Path? = null
+        val receipt = isolated().runCheck(accept(), 1) { dir ->
+            root = dir
+            assertEquals("def a():\n    return 1\n", Files.readString(dir.resolve("src/a.py")))
+            repo.write("src/a.py", "def a():\n    return 5\n")
+            repo.write("src/a.py", "def a():\n    return 1\n")
+            Files.createDirectories(dir.resolve(".pytest_cache"))
+            Files.writeString(dir.resolve(".pytest_cache/lastfailed"), "{}")
+            passed()
+        }
+        assertTrue(root != repo.root && !Files.exists(root!!), "the candidate is a disposable copy: $root")
+        assertEquals(InputStability.Isolated, receipt.testedInputs.stability)
+        assertTrue(receipt.greenForFinalTree, receipt.limits.toString())
+        assertEquals(exported, receipt.stampBefore)
+        assertEquals(exported, receipt.stampAfter)
+        assertEquals(setOf("src/a.py", "tests/test_a.py"), receipt.testedInputs.versions.keys)
+        assertTrue(receipt.limits.any { it.kind == "external_services" }, receipt.limits.toString())
+        assertTrue(scheduler.currency(accept(), stamper.stamp().id).certifies)
+    }
+
+    @Test
+    fun `a write inside the isolated candidate, even restored to the old bytes, cannot certify it`() = runTest {
+        val receipt = isolated().runCheck(accept(), 1) { dir ->
+            val file = dir.resolve("src/a.py")
+            val old = Files.readAllBytes(file)
+            Files.writeString(file, "def a():\n    return 7\n")
+            Files.write(file, old)
+            Files.setLastModifiedTime(file, FileTime.fromMillis(0))
+            Files.writeString(dir.resolve("src/generated.py"), "x = 1\n")
+            passed()
+        }
+        assertEquals(Outcome.Passed, receipt.outcome, "the factual outcome stands")
+        assertEquals(setOf("src/a.py", "src/generated.py"), receipt.testedInputs.mutatedDuringCheck)
+        assertFalse(receipt.greenForFinalTree)
+        assertFalse(scheduler.currency(accept(), stamper.stamp().id).certifies)
     }
 
     @Test
