@@ -22,7 +22,7 @@ class LayersTest {
 
         val selection = Layers.select(Layer.BlastAndStepAccept, checks, listOf("AC-1", "run: make lint")) { true }
         assertEquals(listOf("CHK-accept-AC-1"), selection.run.map { it.id }, "the full suite never runs at a step boundary")
-        assertEquals(listOf("accept run: make lint: no registered check", Layers.NO_BLAST), selection.notTested)
+        assertEquals(listOf("accept run: make lint: no registered check", "blast radius: not selected"), selection.notTested)
 
         assertEquals(emptyList(), Layers.select(Layer.BlastAndStepAccept, checks, listOf("AC-1")) { false }.run, "a current receipt stands")
 

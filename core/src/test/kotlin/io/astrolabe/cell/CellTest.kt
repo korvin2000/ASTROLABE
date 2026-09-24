@@ -33,7 +33,7 @@ import io.astrolabe.verify.Check
 import io.astrolabe.verify.CheckKind
 import io.astrolabe.verify.Checks
 import io.astrolabe.verify.CostClass
-import io.astrolabe.verify.Layers
+import io.astrolabe.evidence.Outcome
 import io.astrolabe.verify.Selector
 import io.astrolabe.verify.Trigger
 import io.astrolabe.workspace.LineRange
@@ -182,7 +182,30 @@ class CellTest {
             assertEquals(f.version("src/a.py"), receipt.testedInputs.versions["src/a.py"], "it ran on the edited tree, after the step was left")
             val events = f.journal.events(JournalScope(f.ids.work, kinds = setOf(JournalKind.Check)))
             assertEquals(listOf(3), events.filter { it.text == "step boundary CHK-step: passed" }.map { it.turn })
-            assertEquals(listOf(Layers.NO_BLAST), completed.packet.claims.notTested)
+            assertEquals(listOf("blast radius: no test command declared by the repository"), completed.packet.claims.notTested)
+        }
+    }
+
+    @Test
+    fun `leaving a step runs the blast-selected tests, widened to the workspace suite by the tier-0 graph, and the verify line says so`() = runTest {
+        val pass = javaClass.getResourceAsStream("/shaper/pytest-pass.txt")!!.use { String(it.readAllBytes(), Charsets.UTF_8) }
+        CellFixture(stateRoot, files = CellFixture.DEFAULT_FILES + ("pytest_pass.txt" to pass)).use { f ->
+            val printing = if (WINDOWS) Command(listOf("cmd.exe", "/d", "/s", "/c", "type pytest_pass.txt")) else Command(listOf("/bin/sh", "-c", "cat pytest_pass.txt"))
+            f.checks.register(Check(Checks.FULL, CheckKind.Full, Selector.All, Closure.Unknown, CostClass.Expensive, Trigger.CampaignEnd, command = printing))
+            val v = f.version("src/a.py")
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("planning"), read("c0", "src/a.py"), patch("c1", """{"plan.add":{"text":"make a return 10","accept":"AC-1"}},{"plan.cursor":1},{"next":"edit a"}"""))),
+                Scripted.Reply(listOf(say("editing"), anchored("c2", "src/a.py", v, "    return 1", "    return 10"))),
+                Scripted.Reply(listOf(say("ticking"), patch("c3", """{"plan.tick":{"n":1,"evidence":"#2"}},{"next":"done"}"""))),
+                Scripted.Reply(listOf(say("done: a returns 10"))),
+            )
+
+            f.run(model)
+
+            val receipt = f.receipts.forCheck(Checks.TESTS_BLAST).single()
+            assertEquals(Outcome.Passed, receipt.outcome)
+            assertEquals(Closure.Unknown, f.checks[Checks.TESTS_BLAST]!!.inputClosure, "no manifest: the package is unknown, the workspace suite runs")
+            assertTrue(f.anchorText(4).contains("tests(workspace)"), f.anchorText(4))
         }
     }
 

@@ -305,6 +305,13 @@ public class Checks private constructor(private val checks: LinkedHashMap<String
         if (next == last) check else check.copy(last = next).also { checks[check.id] = it }
     }
 
+    /** Registers [check] or replaces the one with its id, keeping the last result (its applicability is recomputed). */
+    public fun replace(check: Check): Check {
+        val next = check.copy(last = checks[check.id]?.last)
+        checks[check.id] = next
+        return next
+    }
+
     public fun register(check: Check): Check {
         require(check.id !in checks) { "check ${check.id} already registered" }
         checks[check.id] = check

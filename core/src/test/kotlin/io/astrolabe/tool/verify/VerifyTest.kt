@@ -237,7 +237,7 @@ class VerifyTest {
     fun `unsupported selections, unknown ids, masked ops and a missing baseline are explicit`() = runTest {
         val blast = run("""{"what":"tests","selection":"blast"}""")
         assertEquals("unavailable", status(blast))
-        assertTrue(blast.body.contains("P3.2.5"), blast.body)
+        assertTrue(blast.body.contains("blast radius: no atlas for this candidate"), blast.body)
         assertEquals("denied", status(run("""{"what":"tests","selection":"ids","ids":["CHK-nope"]}""")))
         assertEquals("denied", status(run("""{"what":"acceptance","ids":["AC-9"]}""")))
         // P3.5.2: review(scope=campaign) is the human path; without a wired reviewer it is unavailable, never a pass. The review cell (increment scope) stays masked.

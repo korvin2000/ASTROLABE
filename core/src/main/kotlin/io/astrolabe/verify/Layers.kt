@@ -23,18 +23,23 @@ public data class LayerSelection(val layer: Layer, val run: List<Check>, val not
 
 /** Check selection per layer (§8.1): only checks that [LayerSelection.run] needs are selected; valid receipts stand. */
 public object Layers {
-    /** Why the blast-radius tests cannot be selected until the runtime impact engine exists. */
-    public const val NO_BLAST: String = "blast radius: no impact analysis for this candidate (P3.2.5)"
-
     /**
      * The checks [layer] runs for [acceptanceIds], keeping those [due] says have no current, eligible receipt. A step
-     * `accept:` without a registered check and a missing blast, full-suite or quality-gate check are `not_tested`.
+     * `accept:` without a registered check and a missing blast, full-suite or quality-gate check are `not_tested`;
+     * [blastUnselected] is why `CHK-tests-blast` is absent ([BlastSelection.NotSelected]).
      */
     @JvmStatic
-    public fun select(layer: Layer, checks: Checks, acceptanceIds: Collection<String>, due: (Check) -> Boolean): LayerSelection {
+    @JvmOverloads
+    public fun select(
+        layer: Layer,
+        checks: Checks,
+        acceptanceIds: Collection<String>,
+        blastUnselected: String = "blast radius: not selected",
+        due: (Check) -> Boolean,
+    ): LayerSelection {
         val notTested = ArrayList<String>()
         fun accepted(): List<Check> = acceptanceIds.flatMap { checks.forAcceptance(it) }.filter { it.kind != CheckKind.Full }
-        fun blast(): List<Check> = listOfNotNull(checks[Checks.TESTS_BLAST]).also { if (it.isEmpty()) notTested += NO_BLAST }
+        fun blast(): List<Check> = listOfNotNull(checks[Checks.TESTS_BLAST]).also { if (it.isEmpty()) notTested += blastUnselected }
         val candidates = when (layer) {
             Layer.BlastAndStepAccept, Layer.IntegrationReverification -> {
                 acceptanceIds.filter { checks.forAcceptance(it).isEmpty() }.forEach { notTested += "accept $it: no registered check" }

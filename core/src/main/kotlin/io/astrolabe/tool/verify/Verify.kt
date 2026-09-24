@@ -1,5 +1,12 @@
 package io.astrolabe.tool.verify
 
+import io.astrolabe.atlas.Atlas
+import io.astrolabe.atlas.EditSet
+import io.astrolabe.atlas.ImpactAssembly
+import io.astrolabe.atlas.ImportGraph
+import io.astrolabe.atlas.SymbolIndex
+import io.astrolabe.verify.Blast
+import io.astrolabe.verify.BlastSelection
 import io.astrolabe.auth.ContentClass
 import io.astrolabe.auth.InstructionShape
 import io.astrolabe.auth.Redaction
@@ -66,7 +73,7 @@ import java.nio.file.Path
  * accept | ids | full)` and `acceptance(ids?)` execute registered checks through the scheduler's exclusive
  * protocol and record receipts with stamps and currency; `baseline()` records the baseline receipt on the
  * captured initial candidate; `review(scope=campaign)` is the human review path (P3.5.2, D-23), the review cell
- * waits for P4.4.3 and `blast` for P3.2.5. Every executed check
+ * waits for P4.4.3; `blast` runs `CHK-tests-blast` from the impact analysis of the touched paths (P3.2.5). Every executed check
  * yields a receipt — a runner that cannot start yields an explicit `unavailable` one (FX-13) — and the result
  * is rendered as the `── Checks ──` block plus each shaped view. Status words are the runner's, never the model's.
  */
@@ -104,6 +111,29 @@ public class Verify(
 
     /** The enumerated tree for checks with an unknown closure (the atlas rows); the cell keeps it current. */
     public var inputs: Collection<String> = emptyList()
+
+    /** The campaign's current atlas; the blast selection builds its import graph from it (P3.2.5). */
+    public var atlas: Atlas? = null
+
+    private var graphOf: Pair<Atlas, ImportGraph>? = null
+
+    /**
+     * §7.3 blast radius of [touched]: registers (or replaces) `CHK-tests-blast`, the test command of `CHK-full` narrowed
+     * to the blast's tests, or widened to the package or workspace suite when the graph is incomplete.
+     */
+    public fun selectBlast(): BlastSelection {
+        val atlas = atlas ?: return BlastSelection.NotSelected("blast radius: no atlas for this candidate")
+        val test = checks[Checks.FULL]?.command ?: return BlastSelection.NotSelected("blast radius: no test command declared by the repository")
+        if (touched.isEmpty()) return BlastSelection.NotSelected("blast radius: nothing touched")
+        val graph = graphOf?.takeIf { it.first === atlas }?.second ?: ImportGraph.of(atlas, workspace.id).also { graphOf = atlas to it }
+        val others = checks.all().filter { it.id != Checks.TESTS_BLAST }
+        val analysis = ImpactAssembly(graph, SymbolIndex(atlas)).analyze(EditSet(touched.toSet()), others, contracts = null).analysis
+        val selection = Blast.select(analysis, test, { files -> graph.testsFor(files.map { it.path }) }) { scope ->
+            scope.packageId?.takeIf { graph.scopeOfDirectory(it) == scope && graph.filesUnder(it).isNotEmpty() }
+        }
+        if (selection is BlastSelection.Selected) checks.replace(selection.check)
+        return selection
+    }
 
     override suspend fun execute(call: ToolCall, context: TurnContext): ToolOutcome {
         require(call.family == ToolFamily.Verify) { "not a verify call: ${call.name}" }
@@ -176,7 +206,10 @@ public class Verify(
                 if (unknown.isNotEmpty()) return refused(args, "denied", "unknown check ids: ${unknown.joinToString(", ")}")
                 wanted.map { checks[it]!! }
             }
-            "blast" -> return refused(args, "unavailable", "tests(selection=blast) needs the impact engine (P3.2.5); name ids or run accept/full")
+            "blast" -> when (val blast = selectBlast()) {
+                is BlastSelection.Selected -> listOf(checks[Checks.TESTS_BLAST]!!)
+                is BlastSelection.NotSelected -> return refused(args, "unavailable", "${blast.reason}; name ids or run accept/full")
+            }
             else -> return refused(args, "denied", "unknown tests selection '${args.selection}'")
         }
         if (selected.isEmpty()) return refused(args, "unavailable", "no check matches selection '${args.selection ?: "accept"}'")
@@ -211,7 +244,8 @@ public class Verify(
     public suspend fun runLayer(layer: Layer, acceptanceIds: Collection<String> = emptyList()): LayerRun {
         val contract = contracts.current(ids.work) ?: return LayerRun(layer, emptyList(), listOf("no committed contract for ${ids.work}"))
         val stampNow = stamper.stamp().id
-        val selection = Layers.select(layer, checks, acceptanceIds) { check ->
+        val blast = if (layer == Layer.BlastAndStepAccept || layer == Layer.IntegrationReverification) selectBlast() else null
+        val selection = Layers.select(layer, checks, acceptanceIds, (blast as? BlastSelection.NotSelected)?.reason ?: "blast radius: not selected") { check ->
             val currency = scheduler.currency(check, stampNow)
             currency.receiptId == null || currency.applicability != Applicability.Current || !currency.eligible
         }
@@ -298,13 +332,14 @@ public class Verify(
             Outcome.UnknownOutcome -> CheckState.Unavailable("unknown outcome; reconcile before retry")
             else -> CheckState.Inconclusive(receipt.limits.firstOrNull()?.detail ?: receipt.outcome.name.lowercase())
         }
-        val label = when (check.kind) {
-            CheckKind.Acceptance -> "accept ${check.acceptanceIds.joinToString("+")}"
-            CheckKind.Type -> "types"
-            CheckKind.Full -> "full"
+        val label = when {
+            check.selector == Selector.Blast -> "tests"
+            check.kind == CheckKind.Acceptance -> "accept ${check.acceptanceIds.joinToString("+")}"
+            check.kind == CheckKind.Type -> "types"
+            check.kind == CheckKind.Full -> "full"
             else -> check.kind.name.lowercase()
         }
-        return CheckLine(label, if (check.selector == Selector.Touched) "touched" else null, null, state, receipt.stampAfter.hash8, alias)
+        return CheckLine(label, Blast.scope(check), null, state, receipt.stampAfter.hash8, alias)
     }
 
     private fun outcome(args: VerifyArgs, status: String, body: String, receipts: List<Receipt>, stamp: CandidateId?): ToolOutcome {

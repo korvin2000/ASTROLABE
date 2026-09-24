@@ -73,6 +73,7 @@ import io.astrolabe.tool.run.announceMoved
 import io.astrolabe.tool.kb.KbTool
 import io.astrolabe.tool.state.BlockedRequest
 import io.astrolabe.verify.Applicability
+import io.astrolabe.verify.Blast
 import io.astrolabe.verify.Check
 import io.astrolabe.verify.CheckKind
 import io.astrolabe.verify.CheckLine
@@ -219,6 +220,7 @@ public class Cell @JvmOverloads constructor(
             subscriptions += ws.coherence.register(ChangeListener { touchedLedger += Touched.of(it) })
             tools.edit?.increment = increment
             tools.verify?.inputs = atlas.rows.map { it.path }
+            tools.verify?.atlas = atlas
             try {
                 lastReport = ws.stamper.report()
                 base = lastReport
@@ -675,6 +677,7 @@ public class Cell @JvmOverloads constructor(
             tools.look?.atlas = atlas
             tools.verify?.touched = touched.toList()
             tools.verify?.inputs = atlas.rows.map { it.path }
+            tools.verify?.atlas = atlas
             val checker = ws.checker ?: return null
             val results = checker.run(scheduled, defaults.checkerTimeBoxSeconds.toLong())
             if (results.isEmpty()) return null
@@ -945,7 +948,7 @@ public class Cell @JvmOverloads constructor(
                 Outcome.UnknownOutcome -> CheckState.Unavailable("unknown outcome; reconcile before retry")
                 else -> CheckState.Inconclusive(last.outcome.name.lowercase())
             }
-            CheckLine(labelOf(check), if (check.selector == Selector.Touched) "touched" else null, null, state, last.stamp.hash8, ws.scheduler.aliasOf(last.receiptId))
+            CheckLine(labelOf(check), Blast.scope(check), null, state, last.stamp.hash8, ws.scheduler.aliasOf(last.receiptId))
         }
 
         private fun checksSummary(currencies: Map<String, Currency>): String = checkLines(currencies).joinToString(" · ") { line ->
@@ -960,9 +963,10 @@ public class Cell @JvmOverloads constructor(
             }
         }
 
-        private fun labelOf(check: Check): String = when (check.kind) {
-            CheckKind.Acceptance -> "accept ${check.acceptanceIds.joinToString("+")}"
-            CheckKind.Type -> "types"
+        private fun labelOf(check: Check): String = when {
+            check.selector == Selector.Blast -> "tests"
+            check.kind == CheckKind.Acceptance -> "accept ${check.acceptanceIds.joinToString("+")}"
+            check.kind == CheckKind.Type -> "types"
             else -> check.kind.name.lowercase()
         }
 
