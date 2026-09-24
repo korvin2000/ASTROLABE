@@ -87,7 +87,16 @@ class CadenceTest {
     }
 
     @Test
-    fun `a scripted seven-increment campaign runs the suite and quality gates after five verified increments and at the end`() = runBlocking<Unit> {
+    fun `a scripted seven-increment campaign runs the suite and quality gates after five verified increments and at the end`() = cadence()
+
+    @Test
+    fun `the configured quality gates run on the cadence even when the repository declares no full suite`() {
+        java.nio.file.Files.deleteIfExists(repo.root.resolve("Makefile"))
+        repo.commit("no declared suite")
+        cadence()
+    }
+
+    private fun cadence() = runBlocking<Unit> {
         Controller(config, clock, idGen).open(repo.root, request, policy).use { c ->
             val replies = listOf<Scripted>(
                 Scripted.Reply(listOf(say("planning seven increments"), call("p1", "task", """{"op":"propose","kind":"plan","proposal":$plan}"""))),

@@ -924,15 +924,16 @@ public class Controller @JvmOverloads public constructor(
     private suspend fun fullSuite(c: OpenedCampaign, why: String): FullSuite {
         val check = c.checks[Checks.FULL]
         val ids = c.ids.copy(context = ContextId(idGen.next("finish")))
-        if (check == null) {
-            c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, text = "full suite ($why): none declared by the repository — an explicit gap, acceptance runs stand", at = clock.instant()))
-            return FullSuite.Undeclared
-        }
-        harnessVerify(c, ids, "full", """{"what":"tests","selection":"full"}""")
-        // §8.1: the configured quality gates run with the suite; a red gate is a red result.
+        // §8.1: the configured quality gates run with the suite, declared or not; a red gate is a red result.
         val gates = c.checks.all().filter { it.kind == CheckKind.Quality }.map { it.id }
         if (gates.isNotEmpty()) harnessVerify(c, ids, "quality", """{"what":"tests","selection":"ids","ids":[${gates.joinToString(",") { "\"$it\"" }}]}""")
         val redGate = gates.mapNotNull { c.checks[it]?.last }.firstOrNull { it.outcome == Outcome.Failed }
+        if (check == null) {
+            val red = redGate?.let { FullSuite.Red("quality gate ${it.receiptId} failed") }
+            c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, text = "full suite ($why): none declared by the repository — an explicit gap, acceptance runs stand" + (red?.let { " · ${it.detail}" } ?: ""), at = clock.instant()))
+            return red ?: FullSuite.Undeclared
+        }
+        harnessVerify(c, ids, "full", """{"what":"tests","selection":"full"}""")
         val last = c.checks[Checks.FULL]?.last
         val stamp = c.stamper.report().candidateId
         // The full suite's closure is unknown (every file), so its evidence is a pass recorded at this very stamp.
