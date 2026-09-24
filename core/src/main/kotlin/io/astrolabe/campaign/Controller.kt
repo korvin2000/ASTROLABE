@@ -470,7 +470,10 @@ public class Controller @JvmOverloads public constructor(
         check(opened.phase == CampaignPhase.Running && opened.running == null) { "run needs a reconciled campaign with no running cell; it is ${opened.phase}" }
         // §4.2: the first cell of S1 is the plan cell; the placeholder graph is replaced once, before any dispatch.
         if (opened.graph.increments.none { it.cells.isNotEmpty() || it.status != IncrementStatus.Pending }) {
-            plan(c, model, authority, syntax, span, packets)?.let { reason -> return S0Run(c.advance(Transition.Stopped(stopOutcome(c).takeIf { c.refusal() != null } ?: CampaignOutcome.BlockedExternal, reason)), null, null, null) }
+            plan(c, model, authority, syntax, span, packets)?.let { stop ->
+                val outcome = if (c.refusal() != null) stopOutcome(c) else stop.outcome
+                return S0Run(c.advance(Transition.Stopped(outcome, stop.reason)), null, null, null)
+            }
         }
         var last = S0Run(c.state, null, null, null)
         var cells = 0
@@ -565,28 +568,39 @@ public class Controller @JvmOverloads public constructor(
         }
     }
 
-    /** The plan cell (§3.4, P2.1.2): `null` once a plan is admitted and installed, else why none could be. */
-    private suspend fun plan(c: OpenedCampaign, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?, packets: MutableList<ResultPacket>): String? {
+    /**
+     * The plan cell (§3.4, P2.1.2): `null` once a plan is admitted and installed, else the stop — a budget partial is
+     * `budget_exhausted` (FX-49 S1), every other failure to plan blocks.
+     */
+    private suspend fun plan(c: OpenedCampaign, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?, packets: MutableList<ResultPacket>): Transition.Stopped? {
+        fun blocked(reason: String) = Transition.Stopped(CampaignOutcome.BlockedExternal, reason)
         val contract = c.contract
         val planning = Increment(PLAN, contract.requirements.map { it.id }, contract.acceptance.map { it.id }, emptyList(), 0, title = "plan ${c.ids.work.value}")
         val compiled = Compiler(model.estimator, c.attempt.config).compile(planning, contract, model.profile, Roles.plan, c.prime, maxOutputTokens = model.maxOutputTokens)
-        if (compiled !is Compiled.Ready) return "the plan cell cannot be compiled: $compiled"
+        if (compiled !is Compiled.Ready) return blocked("the plan cell cannot be compiled: $compiled")
         val cellId = ContextId(idGen.next("cell"))
         val proposals = SqlitePlanProposals(c.store, idGen, clock)
         val intake = CampaignProposals(proposals, SqliteSplitRequests(c.store, idGen, clock), { c.contracts.current(c.ids.work) }, { null })
         val completion = io.astrolabe.cell.RoleCompletion.forRole(Roles.plan, mapOf(io.astrolabe.cell.PacketKind.PlanArtifacts to PlanPacketValidator.completion({ c.contract }, proposals)))
         val run = runCell(c, cellId, planning, Roles.plan, model, authority, syntax, compiled, span, null, proposals = intake, completion = completion)
-        val exit = run.exit ?: return "cancelled while planning"
+        val exit = run.exit ?: return Transition.Stopped(CampaignOutcome.Cancelled, "cancelled while planning")
         packets += exit.packet
-        if (exit !is CellExit.Completed) return "the plan cell ended ${exit.packet.status.wire}: ${exit.packet.reason}"
-        val stored = proposals.latest(c.ids.work, cellId) ?: return "the plan cell proposed no plan"
+        if (exit !is CellExit.Completed) {
+            val outcome = when (val d = Lifecycle.disposition(exit, null)) {
+                is Disposition.Stop -> d.outcome
+                is Disposition.Continue -> d.fallback.takeIf { it == CampaignOutcome.BudgetExhausted } ?: CampaignOutcome.BlockedExternal
+                is Disposition.Close -> CampaignOutcome.BlockedExternal
+            }
+            return Transition.Stopped(outcome, "the plan cell ended ${exit.packet.status.wire}: ${exit.packet.reason}")
+        }
+        val stored = proposals.latest(c.ids.work, cellId) ?: return blocked("the plan cell proposed no plan")
         return when (val admission = PlanIntake(c.contracts).admit(c.ids.work, stored, authority)) {
             is PlanAdmission.Admitted -> {
                 c.advance(Transition.Planned(admission.graph))
                 boundary(c, cellId, RebuildReason.RoleSwitch(Roles.implementing))
                 null
             }
-            is PlanAdmission.Refused -> "plan ${stored.id} refused: ${admission.gaps.joinToString("; ")}"
+            is PlanAdmission.Refused -> blocked("plan ${stored.id} refused: ${admission.gaps.joinToString("; ")}")
         }
     }
 
