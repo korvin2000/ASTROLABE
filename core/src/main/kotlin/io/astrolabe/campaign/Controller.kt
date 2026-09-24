@@ -19,6 +19,16 @@ import io.astrolabe.cell.CellContext
 import io.astrolabe.cell.CellEvidence
 import io.astrolabe.cell.CellExit
 import io.astrolabe.cell.CellModel
+import io.astrolabe.atlas.RiskFloorInput
+import io.astrolabe.route.Routed
+import io.astrolabe.route.Router
+import io.astrolabe.route.RoutingBudget
+import io.astrolabe.route.RoutingFunction
+import io.astrolabe.route.RoutingOutcome
+import io.astrolabe.route.RoutingPacket
+import io.astrolabe.route.RoutingPolicy
+import io.astrolabe.route.Tier
+import io.astrolabe.route.TierTable
 import io.astrolabe.cell.CellStatus
 import io.astrolabe.cell.CellTools
 import io.astrolabe.cell.CellWorkspace
@@ -316,6 +326,8 @@ public class Controller @JvmOverloads public constructor(
     private val leaseDuration: Duration = Duration.ofHours(1),
     /** Boundary pre-compilation telemetry (§6.6, §19.5): hits, misses and boundary latency, recorded with the flag on. */
     public val precompiles: PrecompileMetrics = PrecompileMetrics(),
+    /** The §11.2 router (P4.5.1) asked once per cell; its calibration log holds the `(function, tier, effort, outcome)` quadruples. */
+    public val router: Router = Router(),
 ) {
     /**
      * Opens or reopens [request]'s campaign over [repo]. Order (§3.7, §13.1): the store and its project lock, the
@@ -543,6 +555,8 @@ public class Controller @JvmOverloads public constructor(
         // §6.6 `[O]`: boundary pre-compilation only under the frozen `precompile` flag; off, nothing below runs.
         val precompile = if (c.attempt.config.flags.precompile) Precompile(c.journal, idGen, clock) else null
         var closed: Pair<ContextId, Long>? = null
+        // A continuation of a red increment never drops below the tier its failing cell ran at (§11.1).
+        val tiers = HashMap<String, Tier>()
         while (true) {
             c.refusal()?.let { return last.copy(state = c.advance(Transition.Stopped(stopOutcome(c), "dispatch refused: $it"))) }
             val state = checkNotNull(c.state)
@@ -580,9 +594,11 @@ public class Controller @JvmOverloads public constructor(
                     }
                 }
             }
-            val compiled = take?.compiled ?: compiler.compile(
+            val routing = route(c, if (ready.cells.isEmpty()) RoutingFunction.Implementing else RoutingFunction.Continuation, ready, model, tiers[ready.id], take?.compiled ?: compiler.compile(
                 ready, contract, model.profile, Roles.implementing, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = inputs,
-            )
+            )) { profile -> compiler.compile(ready, contract, profile, Roles.implementing, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = inputs) }
+            val compiled = routing.compiled
+            val cellModel = routing.model
             closed?.let { (cell, at) -> precompiles.record(PrecompileSample(cell, ready.id, take?.outcome ?: PrecompileOutcome.None, take?.reason, (precompiles.now() - at).coerceAtLeast(0))) }
             closed = null
             // §6.5: why this context is built — a new increment after a closed one, a partial's continuation, or a resume.
@@ -596,6 +612,9 @@ public class Controller @JvmOverloads public constructor(
                 is Compiled.NeedsRescoping -> return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "NEEDS_RESCOPING_OR_LARGER_PROFILE for ${ready.id}: ${compiled.reason} — ask the plan role for an increment_split")), compiled = compiled)
                 is Compiled.NeedsEvidence -> return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, "NEEDS_MORE_EVIDENCE for ${ready.id}: ${compiled.missing}")), compiled = compiled)
             }
+            // FX-32: an unaffordable tier is refused, never clamped; the campaign stops on the router's options.
+            routing.refused?.let { return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.BudgetExhausted, it.reason)), compiled = compiled) }
+            routing.selected?.let { tiers[ready.id] = it.tier }
             val cellId = ContextId(idGen.next("cell"))
             events?.emit(AgentEvent.Campaign.IncrementSelected(c.ids, ready.id))
             val dispatched = c.advance(Transition.Dispatched(ready.id, cellId))
@@ -603,13 +622,14 @@ public class Controller @JvmOverloads public constructor(
             val register = carry?.register?.copy(cell = cellId, increment = increment.id, incrementTitle = increment.title)
             // The pre-compile job lives in this scope: joined at cell close, cancelled with the cell (§6.6).
             val run = coroutineScope {
-                val trigger = precompile?.let { p -> trigger(c, this, p, cellId, increment, model) }
-                runCell(c, cellId, increment, Roles.implementing, model, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = pinned, boundary = boundaryReason, inputs = inputs, precompile = trigger).also { run ->
+                val trigger = precompile?.let { p -> trigger(c, this, p, cellId, increment, cellModel) }
+                runCell(c, cellId, increment, Roles.implementing, cellModel, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = pinned, boundary = boundaryReason, inputs = inputs, precompile = trigger).also { run ->
                     if (run.exit !is CellExit.Completed) precompile?.discard("cell ${cellId.value} ended ${run.exit?.let { it::class.simpleName!!.lowercase() } ?: "cancelled"}: never a continuation of a red increment")
                 }
             }
             if (precompile != null) closed = cellId to precompiles.now()
             val exit = run.exit
+            routing.selected?.let { router.record(it, outcomeOf(exit)) }
             if (exit == null) {
                 snapshot(c)
                 c.advance(Transition.Interrupted(checkNotNull(run.checkpoints.latest(cellId)) { "a cancelled cell settles its checkpoint" }))
@@ -734,13 +754,19 @@ public class Controller @JvmOverloads public constructor(
         val planning = Increment(PLAN, contract.requirements.map { it.id }, contract.acceptance.map { it.id }, emptyList(), 0, title = "plan ${c.ids.work.value}")
         val knowledge = knowledge(c, planning, Roles.plan, model)
         val planInputs = CompileInputs(notes = knowledge.notes, contractsIndex = knowledge.contractsIndex)
-        val compiled = Compiler(model.estimator, c.attempt.config).compile(planning, contract, model.profile, Roles.plan, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = planInputs)
+        val compiler = Compiler(model.estimator, c.attempt.config)
+        val routing = route(c, RoutingFunction.Plan, planning, model, null, compiler.compile(planning, contract, model.profile, Roles.plan, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = planInputs)) { profile ->
+            compiler.compile(planning, contract, profile, Roles.plan, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = planInputs)
+        }
+        val compiled = routing.compiled
         if (compiled !is Compiled.Ready) return blocked("the plan cell cannot be compiled: $compiled")
+        routing.refused?.let { return Transition.Stopped(CampaignOutcome.BudgetExhausted, it.reason) }
         val cellId = ContextId(idGen.next("cell"))
         val proposals = SqlitePlanProposals(c.store, idGen, clock)
         val intake = CampaignProposals(proposals, SqliteSplitRequests(c.store, idGen, clock), { c.contracts.current(c.ids.work) }, { null }, { c.kb.contractAnchors() })
         val completion = io.astrolabe.cell.RoleCompletion.forRole(Roles.plan, mapOf(io.astrolabe.cell.PacketKind.PlanArtifacts to PlanPacketValidator.completion({ c.contract }, proposals, conAnchors = { c.kb.contractAnchors() })))
-        val run = runCell(c, cellId, planning, Roles.plan, model, authority, syntax, compiled, span, null, proposals = intake, completion = completion, inputs = planInputs)
+        val run = runCell(c, cellId, planning, Roles.plan, routing.model, authority, syntax, compiled, span, null, proposals = intake, completion = completion, inputs = planInputs)
+        routing.selected?.let { router.record(it, outcomeOf(run.exit)) }
         val exit = run.exit ?: return Transition.Stopped(CampaignOutcome.Cancelled, "cancelled while planning")
         packets += exit.packet
         if (exit !is CellExit.Completed) {
@@ -837,19 +863,26 @@ public class Controller @JvmOverloads public constructor(
         val resume = resumeNote(c, ready, carry)
         val knowledge = knowledge(c, ready, role, model, touched = carry?.seeds.orEmpty().map { it.path }.toSet())
         val inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) }, notes = knowledge.notes, contractsIndex = knowledge.contractsIndex)
-        val compiled = Compiler(model.estimator, config).compile(ready, contract, model.profile, role, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = inputs)
+        val compiler = Compiler(model.estimator, config)
+        val routing = route(c, if (ready.cells.isEmpty()) RoutingFunction.Implementing else RoutingFunction.Continuation, ready, model, null, compiler.compile(
+            ready, contract, model.profile, role, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = inputs,
+        )) { profile -> compiler.compile(ready, contract, profile, role, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = inputs) }
+        val compiled = routing.compiled
+        val cellModel = routing.model
         when (compiled) {
             is Compiled.Ready -> Unit
             is Compiled.NeedsRescoping -> return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "NEEDS_RESCOPING_OR_LARGER_PROFILE: ${compiled.reason}")), null, null, compiled)
             is Compiled.NeedsEvidence -> return S0Run(c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, "NEEDS_MORE_EVIDENCE: acceptance without definition ${compiled.missing}")), null, null, compiled)
         }
+        routing.refused?.let { return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BudgetExhausted, it.reason)), null, null, compiled) }
 
         val cellId = ContextId(idGen.next("cell"))
         events?.emit(AgentEvent.Campaign.IncrementSelected(c.ids, ready.id))
         val dispatched = c.advance(Transition.Dispatched(ready.id, cellId))
         val increment = dispatched.graph.increments.first { it.id == ready.id }
         val register = carry?.register?.copy(cell = cellId, increment = increment.id, incrementTitle = increment.title)
-        val run = runCell(c, cellId, increment, Roles.implementing, model, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = listOfNotNull(resume), inputs = inputs)
+        val run = runCell(c, cellId, increment, Roles.implementing, cellModel, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = listOfNotNull(resume), inputs = inputs)
+        routing.selected?.let { router.record(it, outcomeOf(run.exit)) }
         val ids = run.ids
         val scheduler = run.scheduler
         val exit = run.exit
@@ -888,6 +921,50 @@ public class Controller @JvmOverloads public constructor(
             is Disposition.Stop -> c.advance(Transition.Stopped(disposition.outcome, disposition.reason))
         }
         return S0Run(state, exit, completion, compiled)
+    }
+
+    /** One cell's routing: the model to run it with, the selection to record, or the refusal that stops the campaign. */
+    private class Routing(val model: CellModel, val compiled: Compiled, val selected: Routed.Selected?, val refused: Routed.Refused?)
+
+    /**
+     * The P2.2.2 routing hook (§11.2, P4.5.1): asked once per cell, never inside its loop. The candidates are the
+     * attempt's configured profiles under its tier table; untiered, the supplied cell model serves every tier, so
+     * a fake-profile campaign routes to the profile it was given (D-108). The risk floor reads the increment's (else
+     * the contract's) declared risk and the open-time impact pre-scan; tokens are admitted by the cell itself (D-06),
+     * so only a monetary budget caps affordability here (D-109). A routed profile other than the supplied one recompiles.
+     */
+    private fun route(c: OpenedCampaign, function: RoutingFunction, increment: Increment, model: CellModel, previousTier: Tier?, compiled: Compiled, recompile: (io.astrolabe.provider.Profile) -> Compiled): Routing {
+        if (compiled !is Compiled.Ready) return Routing(model, compiled, null, null)
+        val config = c.attempt.config
+        val contract = c.contract
+        val tiered = config.tierTable.profiles.isNotEmpty() && config.tierTable.profileIds.all { it in config.profiles }
+        val table = if (tiered) config.tierTable else TierTable.single(model.profile.id)
+        val candidates = if (tiered) config.profiles else mapOf(model.profile.id to model.profile)
+        val arithmetic = compiled.selection.arithmetic
+        val contextTokens = (arithmetic.totalTokens ?: arithmetic.knownFixedTokens + arithmetic.selectedTokens).toLong()
+        val reserves = contract.budget.reserves
+        val cost = contract.budget.cost
+        val budget = RoutingBudget(remainingCost = cost, reservedCost = cost?.let { Money(it.currency, it.amount.multiply(java.math.BigDecimal.valueOf(reserves.verification + reserves.recoveryAndPersist)), it.unknown) })
+        val policy = RoutingPolicy(table, candidates, budget, configuredEffort = model.effort)
+        val packet = RoutingPacket(increment.risk ?: contract.risk, contextTokens, model.maxOutputTokens, previousTier = previousTier, featureClass = "${contract.shape.name.lowercase()}:${increment.expectedFiles}")
+        val prescan = c.impactPrescan
+        val impact = RiskFloorInput(prescan.contractsTouched.size, prescan.complete, prescan.prescan.fanIn, prescan.complete)
+        return when (val routed = router.selectProfile(function, packet, impact, policy)) {
+            is Routed.Deterministic -> Routing(model, compiled, null, null)
+            is Routed.Refused -> Routing(model, compiled, null, routed)
+            is Routed.Selected -> {
+                if (routed.profile.id == model.profile.id && routed.effort == model.effort) return Routing(model, compiled, routed, null)
+                val cellModel = CellModel(model.adapter, routed.profile, model.estimator, routed.effort, model.maxOutputTokens)
+                Routing(cellModel, if (routed.profile.id == model.profile.id) compiled else recompile(routed.profile), routed, null)
+            }
+        }
+    }
+
+    /** The verified outcome of a cell for the calibration log: the harness's exit, never the model's claim. */
+    private fun outcomeOf(exit: CellExit?): RoutingOutcome = when (exit) {
+        is CellExit.Completed -> RoutingOutcome.Accepted
+        is CellExit.Failed -> RoutingOutcome.VerifiedFailure
+        is CellExit.Blocked, is CellExit.Partial, is CellExit.Cancelled, null -> RoutingOutcome.Unverified
     }
 
     /** A cell's outcome as [runCell] hands it back: `null` [exit] when a cancellation interrupted it. */

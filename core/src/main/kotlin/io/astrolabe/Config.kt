@@ -8,6 +8,7 @@ import io.astrolabe.cell.Roles
 import io.astrolabe.id.Digest
 import io.astrolabe.kb.KbInjection
 import io.astrolabe.provider.Profile
+import io.astrolabe.route.TierTable
 import kotlinx.serialization.Serializable
 
 /**
@@ -57,6 +58,8 @@ public data class Config(
      * check run with the full suite (§8.1, P3.6.2). Never invented: none unless the host configures them.
      */
     val qualityGates: List<io.astrolabe.contract.Command> = emptyList(),
+    /** The §11.1 tier table (P4.5.1): profiles per tier with its calibration date; untiered, the router serves every tier with the cell's profile (D-108). */
+    val tierTable: TierTable = TierTable.UNTIERED,
 ) {
     /** Java hosts (D-07): the fields a host sets most, without the full constructor. */
     public fun withStateRoot(stateRoot: String?): Config = copy(stateRoot = stateRoot)
@@ -64,6 +67,8 @@ public data class Config(
     public fun withProfiles(profiles: Map<String, Profile>): Config = copy(profiles = profiles)
 
     public fun withFlags(flags: Flags): Config = copy(flags = flags)
+
+    public fun withTierTable(tierTable: TierTable): Config = copy(tierTable = tierTable)
 
     /** The role [name] as configured, else the SDK default; `null` for a name neither declares. */
     public fun role(name: String): Role? = roles[name] ?: Roles.defaults[name]
@@ -89,6 +94,7 @@ public data class Config(
             profileRoles.escalation?.let { if (it !in profiles) add(ConfigViolation("profileRoles.escalation", "profile '$it' is not configured")) }
         }
         profiles.forEach { (id, profile) -> if (id != profile.id) add(ConfigViolation("profiles.$id", "key differs from profile id '${profile.id}'")) }
+        tierTable.profiles.forEach { (tier, ids) -> ids.filter { it !in profiles }.forEach { add(ConfigViolation("tierTable.$tier", "profile '$it' is not configured")) } }
     }
 
     public val mainProfile: Profile? get() = profiles[profileRoles.main]
