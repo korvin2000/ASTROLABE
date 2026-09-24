@@ -19,6 +19,8 @@ import io.astrolabe.id.WorkId
 import io.astrolabe.register.Decision
 import io.astrolabe.store.Migrations
 import io.astrolabe.store.Store
+import io.astrolabe.verify.RefactorChecklist
+import io.astrolabe.verify.RefactorMode
 import io.astrolabe.verify.Verifier
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -47,6 +49,8 @@ public data class PlanPacket @JvmOverloads constructor(
     val conCandidates: List<NoteCandidate> = emptyList(),
     val adrCandidates: List<NoteCandidate> = emptyList(),
     val shapeSuggestion: Shape? = null,
+    /** The §8.9 checklist, recorded before the first increment when refactor mode is active (P3.5.1). */
+    val refactorChecklist: RefactorChecklist? = null,
 )
 
 /** A plan proposal as stored: [id] is the evidence the completion seam cites. */
@@ -125,6 +129,7 @@ public object PlanPacketValidator {
             if (item is Acceptance.Review && item.text.isBlank()) gaps += "review ${item.id} must name the judgment it needs"
             if (item is Acceptance.Check && item.text.isBlank()) gaps += "check ${item.id} must state its claim"
         }
+        gaps += refactorGaps(contract, packet)
         if (gaps.isNotEmpty()) return gaps
         val preview = contract.copy(acceptance = contract.acceptance + proposed)
         gaps += graph.validate(preview).map { issue ->
@@ -133,6 +138,26 @@ public object PlanPacketValidator {
         gaps += unjudged(preview)
         for (candidate in packet.conCandidates) if (candidate.kind != "CON") gaps += "CON candidate of kind ${candidate.kind}"
         for (candidate in packet.adrCandidates) if (candidate.kind != "ADR") gaps += "ADR candidate of kind ${candidate.kind}"
+        return gaps
+    }
+
+    /**
+     * §8.9: in refactor mode the plan records the checklist before the first increment, and the shared decision is
+     * separated from the mechanical edits — it travels as a CON/ADR candidate or a decision packet.
+     */
+    internal fun refactorGaps(contract: Contract, packet: PlanPacket): List<String> {
+        val detection = RefactorMode.detect(contract)
+        if (!detection.active) return emptyList()
+        val checklist = packet.refactorChecklist
+            ?: return listOf(
+                "refactor mode (${detection.reasons.first()}): record the §8.9 checklist — behaviour to preserve, interfaces to change, " +
+                    "compatibility duration, callers/consumers, data/configuration dependencies, independent acceptance checks, " +
+                    "and the shared decision separated from the mechanical edits",
+            )
+        val gaps = ArrayList(checklist.gaps())
+        if (checklist.sharedDecision.isNotBlank() && packet.conCandidates.isEmpty() && packet.adrCandidates.isEmpty() && packet.decisionPackets.isEmpty()) {
+            gaps += "refactor mode: the shared decision '${checklist.sharedDecision}' is a CON/ADR candidate or a decision packet, separate from the mechanical edits"
+        }
         return gaps
     }
 

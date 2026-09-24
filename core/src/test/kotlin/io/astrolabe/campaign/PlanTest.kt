@@ -35,6 +35,7 @@ import io.astrolabe.event.Decision
 import io.astrolabe.event.Question
 import io.astrolabe.event.Resolution
 import io.astrolabe.event.ResolutionOutcome
+import io.astrolabe.verify.RefactorChecklist
 import io.astrolabe.verify.ReviewRequest
 import io.astrolabe.verify.Verdict
 import io.astrolabe.fixtures.FakeClock
@@ -144,6 +145,21 @@ class PlanTest {
         assertTrue(PlanPacketValidator.gaps(c, edits).any { it.startsWith("acceptance AC1 already exists") })
         val blank = plan(AcceptanceProposal(Acceptance.Review("AC-R2", " ", Origin.Model("R2"))))
         assertTrue(PlanPacketValidator.gaps(c, blank).contains("review AC-R2 must name the judgment it needs"))
+    }
+
+    @Test
+    fun `in refactor mode the validator requires the §8-9 checklist and a separated shared decision`() {
+        val refactor = contract(Mode.Autonomous).let { c -> c.copy(requirements = c.requirements.map { r -> if (r.id == "R1") r.copy(text = "refactor the parser without changing what it accepts") else r }) }
+        assertEquals(emptyList(), PlanPacketValidator.gaps(contract(Mode.Autonomous), plan()), "outside refactor mode nothing is asked")
+        val missing = PlanPacketValidator.gaps(refactor, plan())
+        assertEquals(1, missing.size, missing.toString())
+        assertTrue(missing.single().startsWith("refactor mode (R1: behaviour-preserving requirement ('refactor')): record the §8.9 checklist"), missing.single())
+
+        val checklist = RefactorChecklist("accepted inputs and error messages", "Parser.parse", "one release", "cli, api", "none", "golden CLI outputs", "CON parser contract")
+        assertEquals(emptyList(), PlanPacketValidator.gaps(refactor, plan().copy(refactorChecklist = checklist)))
+        assertEquals(listOf("refactor checklist: callers/consumers is blank"), PlanPacketValidator.gaps(refactor, plan().copy(refactorChecklist = checklist.copy(callersConsumers = ""))))
+        val mechanicalOnly = plan().copy(refactorChecklist = checklist, conCandidates = emptyList())
+        assertEquals(listOf("refactor mode: the shared decision 'CON parser contract' is a CON/ADR candidate or a decision packet, separate from the mechanical edits"), PlanPacketValidator.gaps(refactor, mechanicalOnly))
     }
 
     @Test

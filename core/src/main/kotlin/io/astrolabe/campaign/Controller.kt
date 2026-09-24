@@ -111,12 +111,15 @@ import io.astrolabe.tool.run.TrustedLocalRunner
 import io.astrolabe.tool.state.StateTool
 import io.astrolabe.tool.task.TaskTool
 import io.astrolabe.tool.verify.Verify
+import io.astrolabe.verify.Baseline
+import io.astrolabe.verify.BehaviourSnapshots
 import io.astrolabe.verify.CheckKind
 import io.astrolabe.verify.Checker
 import io.astrolabe.verify.Checks
 import io.astrolabe.verify.CompletionProposal
 import io.astrolabe.verify.CompletionResult
 import io.astrolabe.verify.Currency
+import io.astrolabe.verify.RefactorMode
 import io.astrolabe.verify.RunnerCommands
 import io.astrolabe.verify.Scheduler
 import io.astrolabe.verify.ScopeGuard
@@ -438,9 +441,24 @@ public class Controller @JvmOverloads public constructor(
         authority: Authority = AutonomousAuthority(),
         syntax: SyntaxCheck = CliSyntax(campaign.os, campaign.workspace.root, campaign.store.layout.root.resolve("logs"), python = null, node = null),
     ): S0Run {
+        behaviourSnapshot(campaign)
         val result = spans?.span(Phase.Plan, campaign.ids) { span -> runS0(campaign, model, authority, syntax, span) }
             ?: runS0(campaign, model, authority, syntax, null)
         return finish(campaign, result)
+    }
+
+    /**
+     * §8.9 item 1 (P3.5.1): in refactor mode the behaviour snapshot — baseline receipts over the affected suites and
+     * the characterization outputs as blobs at `s0` — is captured once per attempt before the first cell runs.
+     */
+    private suspend fun behaviourSnapshot(c: OpenedCampaign) {
+        if (c.stop != null || !RefactorMode.isActive(c.contract)) return
+        val redaction = Redaction(c.attempt.config.redaction)
+        val receipts = SqliteReceipts(c.store, clock)
+        val baseline = Baseline(c.shadow, c.store.layout, TrustedLocalRunner(c.os), c.os, receipts, SqliteAliases(c.store, clock), c.store.blobs, redaction, HeuristicEstimator(), idGen, c.ids, clock, EnvFingerprint.compute(env))
+        val snapshots = BehaviourSnapshots(baseline, c.shadow, c.store.layout, c.store.blobs, c.store, c.journal, c.ids, idGen, clock)
+        if (snapshots.latest() != null) return
+        snapshots.capture(c.contract, c.checks, c.s0.stampId)
     }
 
     /**
@@ -460,6 +478,7 @@ public class Controller @JvmOverloads public constructor(
     ): S0Run {
         require(maxCells >= 1) { "maxCells must be ≥ 1" }
         if ((campaign.shape as? ShapeDecision.Selected)?.shape != Shape.S1) return runS0(campaign, model, authority, syntax)
+        behaviourSnapshot(campaign)
         val packets = ArrayList<ResultPacket>()
         val result = spans?.span(Phase.Plan, campaign.ids) { span -> runS1(campaign, model, authority, syntax, span, maxCells, packets) }
             ?: runS1(campaign, model, authority, syntax, null, maxCells, packets)
