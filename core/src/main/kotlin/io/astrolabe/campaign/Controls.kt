@@ -11,6 +11,7 @@ import io.astrolabe.store.Migrations
 import io.astrolabe.store.Store
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.nio.file.Files
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -129,12 +130,30 @@ public class Attempts(private val store: Store, private val clock: Clock) {
         "SELECT body FROM attempts WHERE work_id = ? AND attempt_id = ?", work, attempt,
     ) { JSON.decodeFromString(AttemptConfig.serializer(), it.string("body")) }.firstOrNull()
 
-    public fun save(work: WorkId, attempt: AttemptId, frozen: AttemptConfig): Unit = store.db.tx { tx ->
-        tx.execute(
-            "INSERT INTO attempts (work_id, attempt_id, candidate_id, context_id, fingerprint, schema_version, created_at, body) VALUES (?, ?, NULL, NULL, ?, ?, ?, ?)",
-            work, attempt, frozen.fingerprint.hex, Migrations.SCHEMA_VERSION, clock.instant(), JSON.encodeToString(AttemptConfig.serializer(), frozen),
-        )
+    /**
+     * Stores [frozen] for [attempt] — once: an attempt's snapshot never changes (invariant 12) — and writes its derived
+     * view `campaigns/<work>/<attempt>/attempt-config.json` (P2.2.5); SQLite stays canonical.
+     */
+    public fun save(work: WorkId, attempt: AttemptId, frozen: AttemptConfig) {
+        val body = JSON.encodeToString(AttemptConfig.serializer(), frozen)
+        store.db.tx { tx ->
+            tx.execute(
+                "INSERT INTO attempts (work_id, attempt_id, candidate_id, context_id, fingerprint, schema_version, created_at, body) VALUES (?, ?, NULL, NULL, ?, ?, ?, ?)",
+                work, attempt, frozen.fingerprint.hex, Migrations.SCHEMA_VERSION, clock.instant(), body,
+            )
+        }
+        val dir = store.layout.campaigns.resolve(work.value).resolve(attempt.value)
+        Files.createDirectories(dir)
+        Files.write(dir.resolve("attempt-config.json"), body.toByteArray(Charsets.UTF_8))
     }
+
+    /** Every attempt of [work] with its frozen snapshot, in creation order. */
+    public fun all(work: WorkId): List<Pair<AttemptId, AttemptConfig>> = store.db.query(
+        "SELECT attempt_id, body FROM attempts WHERE work_id = ? ORDER BY rowid", work,
+    ) { AttemptId(it.string("attempt_id")) to JSON.decodeFromString(AttemptConfig.serializer(), it.string("body")) }
+
+    /** The controller-assigned id of [work]'s next attempt (`a1`, `a2`, …); alternative attempts use it (P4.6.4). */
+    public fun next(work: WorkId): AttemptId = AttemptId("a${all(work).size + 1}")
 
     private companion object {
         val JSON = Json { encodeDefaults = true }
