@@ -6,7 +6,31 @@ import io.astrolabe.budget.HeuristicEstimator
 import io.astrolabe.budget.Reservations
 import io.astrolabe.budget.Tokens
 import io.astrolabe.contract.Contracts
+import io.astrolabe.auth.CapabilitySet
+import io.astrolabe.auth.Ceiling
+import io.astrolabe.auth.ExecutionMode
+import io.astrolabe.auth.Stage
+import io.astrolabe.campaign.Cancellation
+import io.astrolabe.cell.PacketCost
 import io.astrolabe.contract.InMemoryContractRepository
+import io.astrolabe.contract.Shape
+import io.astrolabe.delegate.ChildOutcome
+import io.astrolabe.delegate.ChildPacket
+import io.astrolabe.delegate.ChildRunner
+import io.astrolabe.delegate.DelegationLimits
+import io.astrolabe.delegate.Delegator
+import io.astrolabe.delegate.Finding
+import io.astrolabe.delegate.ClaimKind
+import io.astrolabe.delegate.InvestigationPacket
+import io.astrolabe.delegate.Searched
+import io.astrolabe.delegate.TaskPacket
+import io.astrolabe.delegate.TaskPackets
+import io.astrolabe.id.CandidateId
+import io.astrolabe.id.Digest
+import io.astrolabe.id.ExecutionGeneration
+import io.astrolabe.id.WorkspaceId
+import io.astrolabe.provider.ToolMask
+import io.astrolabe.tool.ToolOps
 import io.astrolabe.event.AgentEvent
 import io.astrolabe.event.AmendmentProposal
 import io.astrolabe.event.Answer
@@ -89,6 +113,64 @@ class TaskToolTest {
         tool.execute(call(json), TurnContext(turn, Workset().snapshot(), Reservations(Tokens(1_000))))
 
     private fun status(o: ToolOutcome) = o.header!!.runtime.status
+
+    private val stamp = CandidateId(Digest.ofUtf8("s0"))
+
+    /** A scripted probe child: it records the packet it got and answers with one finding over nothing it was shown. */
+    private class ScriptedProbe : ChildRunner {
+        val packets = ArrayList<TaskPacket>()
+        override suspend fun run(child: io.astrolabe.delegate.ChildRun): ChildOutcome {
+            packets += child.packet
+            val packet = InvestigationPacket(child.ids, child.packet.incrementId, child.packet.contractVersion, child.packet.executionGeneration, child.packet.base, emptyMap(), listOf(Finding("nothing rounds yet", ClaimKind.Inferred, emptyList())), Searched(listOf("src/"), true, null), emptyList(), PacketCost())
+            return ChildOutcome.Published(ChildPacket.Investigation(packet), Tokens(120))
+        }
+    }
+
+    private fun delegating(runner: ChildRunner, scope: kotlinx.coroutines.CoroutineScope): TaskTool {
+        val idGen = FixedIdGen()
+        val delegator = Delegator(runner, { null }, Cancellation(), DelegationLimits(Tokens(10_000)), Shape.S2, scope, idGen, clock)
+        val packets = TaskPackets(WorkspaceId("ws-main"), Ceiling(CapabilitySet.WORKSPACE_READ_ONLY, Stage.Patch, ExecutionMode.TrustedLocal), ExecutionGeneration.INITIAL)
+        return TaskTool(AutonomousAuthority(), contracts, Journal(store, clock), HeuristicEstimator(), idGen, ids.withCandidate(stamp), clock, null, ToolMask(ToolOps.all), null, delegator, packets)
+    }
+
+    @Test
+    fun `delegate assembles exact contract excerpts into the packet and collect reports the child's packet`() = runTest {
+        val probe = ScriptedProbe()
+        val tool = delegating(probe, this)
+        val out = ask(tool, """{"op":"delegate","kind":"probe","mode":"sync","packet":{"increment":"I1","requirements":["R1"],"uncertainties":["where is rounding applied?"],"readScope":["src/"],"budgetTokens":800}}""")
+        assertEquals("collected", status(out), out.body)
+        assertTrue(out.body.startsWith("dispatched probe child-1 (sync, 1 excerpts, 800 tokens reserved); child-1 published a probe packet (120 tokens)"), out.body)
+        val packet = probe.packets.single()
+        val requirement = contracts.current(ids.work)!!.requirements.single()
+        assertEquals(requirement.text, packet.requirements.single().text, "the child gets the contract's exact text, never the model's words")
+        assertEquals(requirement.authorityRef, packet.requirements.single().authorityRef)
+        assertEquals(1, packet.contractVersion)
+        assertEquals(stamp, packet.dispatchCandidate)
+        assertEquals(listOf("where is rounding applied?"), packet.uncertainties)
+        assertTrue(packet.writeScope.isEmpty())
+
+        val unknown = ask(tool, """{"op":"delegate","kind":"probe","packet":{"increment":"I1","requirements":["R9"],"budgetTokens":800}}""")
+        assertEquals("rejected", status(unknown))
+        assertTrue(unknown.body.contains("unknown requirement 'R9' in contract v1"), unknown.body)
+        val writing = ask(tool, """{"op":"delegate","kind":"probe","packet":{"increment":"I1","requirements":["R1"],"writeScope":["src/a.kt"],"budgetTokens":800}}""")
+        assertTrue(writing.body.contains("a probe is read-only"), writing.body)
+        val writer = ask(tool, """{"op":"delegate","kind":"writer","packet":{"increment":"I1","requirements":["R1"],"writeScope":["src/a.kt"],"budgetTokens":800}}""")
+        assertEquals("rejected", status(writer))
+        assertTrue(writer.body.contains("refused (shape): writers are dispatched in S3 only"), writer.body)
+        val collected = ask(tool, """{"op":"collect","handle":"child-1"}""")
+        assertEquals("collected", status(collected), collected.body)
+        val foreign = ask(tool, """{"op":"collect","handle":"child-7"}""")
+        assertEquals("rejected", status(foreign), foreign.body)
+    }
+
+    @Test
+    fun `without a delegator, delegate and collect are masked`() = runTest {
+        val tool = TaskTool(AutonomousAuthority(), contracts, null, HeuristicEstimator(), FixedIdGen(), ids, clock, null, ToolMask(ToolOps.all))
+        assertEquals("masked", status(ask(tool, """{"op":"delegate","kind":"probe","packet":{"increment":"I1","requirements":["R1"],"budgetTokens":10}}""")))
+        assertEquals("masked", status(ask(tool, """{"op":"collect","handle":"child-1"}""")))
+        val s0 = TaskTool(AutonomousAuthority(), contracts, null, HeuristicEstimator(), FixedIdGen(), ids, clock)
+        assertEquals("masked", status(ask(s0, """{"op":"delegate","kind":"probe","packet":{"increment":"I1","requirements":["R1"],"budgetTokens":10}}""")))
+    }
 
     @Test
     fun `a factual answer is recorded as evidence and pinned without a version bump`() = runTest {

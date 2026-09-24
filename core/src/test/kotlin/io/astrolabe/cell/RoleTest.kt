@@ -26,7 +26,9 @@ class RoleTest {
     fun `the declared table has every role of §3_4 with its mask and packet`() {
         assertEquals(setOf("implementing", "plan", "probe", "review", "qa", "writer", "repair", "extractor"), Roles.defaults.keys)
         assertTrue(Roles.implementing.toolMask.allows("edit.anchored") && Roles.implementing.toolMask.allows("run.run"))
-        assertFalse(Roles.implementing.toolMask.allows("task.delegate"), "delegation is an S3 writer matter, not the mask's")
+        assertTrue(Roles.implementing.toolMask.allows("task.delegate") && Roles.implementing.toolMask.allows("task.collect"), "delegation is unmasked per role (P4.4.1); the shape mask and the Delegator bound it")
+        assertFalse(Roles.writer.toolMask.allows("task.delegate") || Roles.writer.toolMask.allows("task.collect"), "a writer is a leaf: writers depth 1")
+        assertTrue(Roles.plan.toolMask.allows("task.delegate") && Roles.plan.toolMask.allows("task.collect"))
         assertTrue(Roles.probe.toolMask.allows("look.read") && Roles.probe.toolMask.allows("run.run") && !Roles.probe.toolMask.allows("edit.anchored"))
         assertTrue(Roles.review.toolMask.allows("verify.tests") && !Roles.review.toolMask.allows("run.run"))
         assertEquals(ToolMask(ToolOps.kb.map { "kb.$it" }.toSet()), Roles.extractor.toolMask)
@@ -48,7 +50,9 @@ class RoleTest {
         assertFalse(s0.allows("look.bmap"), "bmap arrives later")
         assertFalse(s0.allows("task.propose"), "proposals arrive with S1")
         assertTrue(Roles.implementing.effectiveOps(Shape.S1, trusted).allows("task.propose"))
-        assertFalse(Roles.implementing.effectiveOps(Shape.S3, trusted).allows("task.delegate"), "the role mask still bounds S3")
+        assertFalse(Roles.implementing.effectiveOps(Shape.S1, trusted).allows("task.delegate"), "S1 has no children: the shape mask bounds the role")
+        assertTrue(Roles.implementing.effectiveOps(Shape.S3, trusted).allows("task.delegate") && Roles.implementing.effectiveOps(Shape.S2, trusted).allows("task.collect"))
+        assertFalse(Roles.writer.effectiveOps(Shape.S3, trusted).allows("task.delegate"), "the role mask still bounds S3")
 
         val readOnly = Ceiling(CapabilitySet.WORKSPACE_READ_ONLY, Stage.Patch, ExecutionMode.TrustedLocal)
         val probe = Roles.probe.effectiveOps(Shape.S2, readOnly)
@@ -68,8 +72,8 @@ class RoleTest {
         assertTrue(ok.violations().none { it.field.startsWith("roles.") }, ok.violations().toString())
         assertEquals(reworded, ok.role("implementing"))
 
-        val widened = Config(roles = mapOf("implementing" to Roles.implementing.copy(toolMask = ToolMask(Roles.implementing.toolMask.allowed + "task.delegate"))))
-        assertTrue(widened.violations().any { it.field == "roles.implementing" && it.message.contains("widens the tool mask by [task.delegate]") }, widened.violations().toString())
+        val widened = Config(roles = mapOf("writer" to Roles.writer.copy(toolMask = ToolMask(Roles.writer.toolMask.allowed + "task.delegate"))))
+        assertTrue(widened.violations().any { it.field == "roles.writer" && it.message.contains("widens the tool mask by [task.delegate]") }, widened.violations().toString())
         val raised = Config(roles = mapOf("probe" to Roles.probe.copy(permission = Stage.Push)))
         assertTrue(raised.violations().any { it.message.contains("raises the permission to Push") }, raised.violations().toString())
         val repacked = Config(roles = mapOf("qa" to Roles.qa.copy(packetKind = PacketKind.Verdict)))

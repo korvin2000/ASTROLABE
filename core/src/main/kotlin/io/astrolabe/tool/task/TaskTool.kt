@@ -2,6 +2,14 @@ package io.astrolabe.tool.task
 
 import io.astrolabe.auth.InstructionShape
 import io.astrolabe.contract.Contracts
+import io.astrolabe.delegate.Assembled
+import io.astrolabe.delegate.ChildKind
+import io.astrolabe.delegate.Collected
+import io.astrolabe.delegate.Delegator
+import io.astrolabe.delegate.Dispatch
+import io.astrolabe.delegate.DispatchMode
+import io.astrolabe.delegate.Handle
+import io.astrolabe.delegate.TaskPackets
 import io.astrolabe.event.AgentEvent
 import io.astrolabe.event.Answer
 import io.astrolabe.event.Authority
@@ -52,7 +60,9 @@ public data class Asked(
  * autonomous policy, or nobody available) ends the cell `blocked` with the question, which is a success
  * path. A reply for another contract revision is superseded and never used. `propose` (P2.1.5) hands a plan or
  * an increment split to the controller's [Proposals] intake and an amendment to [Contracts.propose]; none of
- * them changes the contract or the graph. `delegate` and `collect` (P4.4.1) are masked.
+ * them changes the contract or the graph. `delegate(kind, packet, mode)` (P4.4.1) assembles a [io.astrolabe.delegate.TaskPacket]
+ * from the contract's exact excerpts through [TaskPackets] and dispatches it through the [Delegator]; `collect(handle)`
+ * reports the child's published packet, a late one, or that it is still running. Both need the controller's delegator (S2+).
  */
 public class TaskTool(
     private val authority: Authority,
@@ -65,12 +75,16 @@ public class TaskTool(
     private val events: Events? = null,
     private val mask: ToolMask = ToolOps.implementingS0,
     private val proposals: Proposals? = null,
+    private val delegator: Delegator? = null,
+    private val packets: TaskPackets? = null,
 ) : ToolExecutor {
     init {
         require(ids.context != null) { "task runs inside a cell: ids.context is its lineage" }
     }
 
     private val exchanges = ArrayList<Asked>()
+
+    private val handles = LinkedHashMap<String, Handle>()
 
     /** Every question of this cell with its outcome, oldest first; the compiler pins them (P1.8.2). */
     public val asked: List<Asked> get() = exchanges.toList()
@@ -82,10 +96,12 @@ public class TaskTool(
     override suspend fun execute(call: ToolCall, context: TurnContext): ToolOutcome {
         require(call.family == ToolFamily.Task) { "not a task call: ${call.name}" }
         val args = (call.args as Args.Task).args
-        if (!mask.allows(call.name)) return result("masked", "${call.name} is masked in this role (propose arrives in P2.1.5, delegate/collect in P4.4.1)")
+        if (!mask.allows(call.name)) return result("masked", "${call.name} is masked in this role")
         return when (args.op) {
             "ask" -> ask(args, context)
             "propose" -> propose(args)
+            "delegate" -> delegate(args)
+            "collect" -> collect(args)
             else -> result("masked", "${call.name} is masked in this role")
         }
     }
@@ -131,6 +147,43 @@ public class TaskTool(
             is ProposalOutcome.Recorded -> result("proposed", "${args.kind} proposal ${outcome.id} recorded: ${outcome.summary}; the controller validates it — the contract and the graph are unchanged")
             is ProposalOutcome.Refused -> result("rejected", "${args.kind} proposal refused: ${outcome.reason}")
         }
+    }
+
+    private suspend fun delegate(args: TaskArgs): ToolOutcome {
+        val delegator = delegator ?: return result("masked", "delegate needs the controller's delegator (S2+)")
+        val packets = packets ?: return result("masked", "delegate needs the controller's delegator (S2+)")
+        val kind = args.kind?.let(ChildKind::of) ?: return result("rejected", "delegate needs kind ${ChildKind.entries.joinToString("|") { it.wire }}, got '${args.kind}'")
+        val mode = args.mode?.let(DispatchMode::of) ?: DispatchMode.Sync
+        val contract = contracts.current(ids.work) ?: return result("denied", "no committed contract for ${ids.work}")
+        val packet = when (val assembled = packets.assemble(contract, ids, kind, args.packet)) {
+            is Assembled.Invalid -> return result("rejected", "delegate(${kind.wire}) refused: ${assembled.reason}")
+            is Assembled.Packet -> assembled.packet
+        }
+        return when (val dispatch = delegator.dispatch(kind, packet, mode)) {
+            is Dispatch.Refused -> result("rejected", "delegate(${kind.wire}) refused (${dispatch.limit.name.lowercase()}): ${dispatch.reason}")
+            is Dispatch.Started -> {
+                handles[dispatch.handle.id] = dispatch.handle
+                val excerpts = packet.requirements.size + packet.constraints.size
+                val dispatched = "dispatched ${kind.wire} ${dispatch.handle.id} (${mode.wire}, $excerpts excerpts, ${packet.reservedBudget.value} tokens reserved)"
+                if (mode == DispatchMode.Sync) collected(delegator.collect(dispatch.handle), "$dispatched; ")
+                else result("dispatched", "$dispatched; collect(handle: ${dispatch.handle.id}) when needed")
+            }
+        }
+    }
+
+    private fun collect(args: TaskArgs): ToolOutcome {
+        val delegator = delegator ?: return result("masked", "collect needs the controller's delegator (S2+)")
+        val handle = args.handle?.let(handles::get) ?: return result("rejected", "collect needs a handle this cell dispatched, got '${args.handle}'")
+        return collected(delegator.collect(handle), "")
+    }
+
+    /** §10.1: a child's packet is reported by status and pointers; the parent owns integration and a late result is never integrated. */
+    private fun collected(collected: Collected, prefix: String): ToolOutcome = when (collected) {
+        is Collected.Pending -> result("pending", "$prefix${collected.handle.id} is still running; collect again later")
+        is Collected.Result -> result("collected", "$prefix${collected.handle.id} published a ${collected.packet.kind.wire} packet (${collected.spend.value} tokens); dependencies: ${collected.dependencies.keys.sorted().joinToString(", ").ifEmpty { "none" }}")
+        is Collected.Late -> result("rejected", "$prefix${collected.handle.id} is superseded: ${collected.reason}; its ${if (collected.observation == null) "outcome" else "observations are archived and"} cannot be integrated (${collected.spend.value} tokens counted)")
+        is Collected.Failed -> result("failed", "$prefix${collected.handle.id} failed: ${collected.reason} (${collected.spend.value} tokens counted)")
+        is Collected.Unknown -> result("rejected", "$prefix${collected.handle.id} is not a child of this cell")
     }
 
     private fun block(question: Question, context: TurnContext, why: String): ToolOutcome {
