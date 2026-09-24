@@ -78,6 +78,8 @@ public data class RebuildRecord(
     val repositoryReused: Boolean,
     val tailTurns: Int,
     val droppedItems: Int,
+    /** Mandatory coverage the new projection lost (§13.2); non-empty ⇒ the previous projection stayed installed. */
+    val lost: List<String> = emptyList(),
 )
 
 /** The side effects of a rebuild, owned by the controller: checkpoint, STATUS note, new attempt id. */
@@ -87,6 +89,9 @@ public interface RebuildHooks {
 
     /** Writes the STATUS note revision (role switch, cell end). */
     public fun status(reason: RebuildReason)
+
+    /** §13.2: the new projection lost [lost]; re-read the contract and authority from the store before any action. */
+    public fun rehydrate(lost: List<String>) {}
 }
 
 /**
@@ -94,10 +99,13 @@ public interface RebuildHooks {
  * reused only when their inputs still match, `[K]` from [compileK] (seeds + carry-forward), `[T]` = pinned messages +
  * previous packet + `rebuilt: <reason>` + the last `m` complete protocol turns, `[A]` = contract digest + validated
  * STATE + the declared KNOWN line — and a new generation. No model summarises anything; no provider continuation is
- * reused, and a kept turn keeps every call with its result and its opaque reasoning items.
+ * reused, and a kept turn keeps every call with its result and its opaque reasoning items. With a [coverage] check
+ * (P2.5.3), a projection that lost a constraint, acceptance definition, amendment or CON reference is never
+ * installed: the old one stays and the authority is rehydrated first.
  */
 public object Rebuild {
     @JvmStatic
+    @JvmOverloads
     public fun run(
         reason: RebuildReason,
         current: Projection,
@@ -106,6 +114,7 @@ public object Rebuild {
         repository: String,
         compileK: (Role, Profile) -> CompiledK,
         hooks: RebuildHooks,
+        coverage: ((Projection) -> List<String>)? = null,
     ): Pair<Projection, RebuildRecord> {
         hooks.checkpoint(current, reason)
         if (reason is RebuildReason.RoleSwitch || reason is RebuildReason.CellEnd) hooks.status(reason)
@@ -131,7 +140,14 @@ public object Rebuild {
             anchor = anchor,
             freshLineage = true,
         )
-        return next to RebuildRecord(reason.wire, current.generation, next.generation, systemReused, repositoryReused, reason.tailTurns, current.transcript.items.size - tail.size)
+        val record = RebuildRecord(reason.wire, current.generation, next.generation, systemReused, repositoryReused, reason.tailTurns, current.transcript.items.size - tail.size)
+        // P2.5.3: compare mandatory coverage before and after installation; a loss keeps the old projection.
+        val lost = coverage?.let { check -> check(next) - check(current).toSet() }.orEmpty()
+        if (lost.isNotEmpty()) {
+            hooks.rehydrate(lost)
+            return current to record.copy(toGeneration = current.generation, lost = lost)
+        }
+        return next to record
     }
 
     /**

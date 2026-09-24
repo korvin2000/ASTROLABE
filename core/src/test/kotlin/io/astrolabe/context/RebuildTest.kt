@@ -96,4 +96,40 @@ class RebuildTest {
             "the old projection is checkpointed before installation; STATUS at role switch and cell end",
         )
     }
+
+    @Test
+    fun `a rebuild that loses a constraint or an amendment is not installed and the authority is rehydrated (FX-19)`() {
+        val contract = io.astrolabe.contract.Contract(
+            io.astrolabe.id.WorkId("W-r"), 2, io.astrolabe.id.AttemptId("a1"), io.astrolabe.Mode.Autonomous, io.astrolabe.contract.Shape.S1,
+            listOf(io.astrolabe.contract.UserRequest("U1", java.time.Instant.EPOCH, "Fix the parser"), io.astrolabe.contract.UserRequest("U2", java.time.Instant.EPOCH, "Keep the old flag")),
+            listOf(io.astrolabe.contract.Requirement("R1", "parser accepts commas", listOf("AC1"), authorityRef = "U1")),
+            listOf(io.astrolabe.contract.Acceptance.Run("AC1", io.astrolabe.contract.Command(listOf("pytest")), io.astrolabe.contract.Origin.User)),
+            listOf(io.astrolabe.contract.Constraint("C1", "never change the CLI flags", "U2")), emptyList(), emptyList(),
+            io.astrolabe.contract.Scope(listOf("src/"), emptyList()),
+            io.astrolabe.budget.Budget.of(io.astrolabe.Defaults(), io.astrolabe.budget.Tokens(10_000)),
+            io.astrolabe.contract.Authorization(io.astrolabe.auth.Stage.Patch, io.astrolabe.DClassPolicy.Ask, "workspace-local-test-only"),
+        )
+        val increment = io.astrolabe.contract.Increment("I1", listOf("R1"), listOf("AC1"), listOf("src/"), 1)
+        val full = CompiledK(ContractSlice.forIncrement(contract, increment))
+        val before = current.copy(k = full, transcript = Transcript(contract.requests.map { it.text }, items))
+        val compiler = Compiler(io.astrolabe.budget.HeuristicEstimator())
+        val coverage = { p: Projection -> compiler.coverage(contract, increment, io.astrolabe.cell.Layout.compiled(p.k), p.repository, p.transcript.pinned, CompileInputs()) }
+        val hooks = object : RebuildHooks {
+            val events = ArrayList<String>()
+            override fun checkpoint(old: Projection, reason: RebuildReason) { events += "checkpoint" }
+            override fun status(reason: RebuildReason) {}
+            override fun rehydrate(lost: List<String>) { events += "rehydrate $lost" }
+        }
+        val lossy = full.copy(slice = full.slice.copy(constraints = emptyList()))
+        val carryWithoutAmendment = carry.copy(pinned = listOf("Fix the parser"))
+        val (kept, record) = Rebuild.run(RebuildReason.Pressure, before, carryWithoutAmendment, "digest", "repo prime\n", { _, _ -> lossy }, hooks, coverage)
+        assertEquals(listOf("constraint C1", "request U2"), record.lost)
+        assertEquals(before, kept, "the previous projection stays installed")
+        assertEquals(3, record.toGeneration)
+        assertEquals(listOf("checkpoint", "rehydrate [constraint C1, request U2]"), hooks.events)
+
+        val (installed, clean) = Rebuild.run(RebuildReason.Pressure, before, carry.copy(pinned = contract.requests.map { it.text }), "digest", "repo prime\n", { _, _ -> full }, hooks, coverage)
+        assertEquals(emptyList(), clean.lost)
+        assertEquals(4, installed.generation)
+    }
 }
