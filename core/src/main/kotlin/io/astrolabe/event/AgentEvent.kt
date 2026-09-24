@@ -264,6 +264,19 @@ public sealed interface AgentEvent {
         @SerialName("kb.invalidated")
         public data class Invalidated(override val ids: Identities, val noteId: String, val reason: String, override val phase: Phase = Phase.Retrieve, override val span: SpanId? = null, override val parent: SpanId? = null) : Kb
     }
+
+    /** Runtime spans (§15.5): one `span.started` and one `span.ended` per span; cost is recorded once, at the end. */
+    @Serializable
+    public sealed interface Telemetry : AgentEvent {
+        @Serializable
+        @SerialName("span.started")
+        public data class SpanStarted(override val ids: Identities, override val phase: Phase, override val span: SpanId?, override val parent: SpanId? = null) : Telemetry
+
+        /** [cost] is the exclusive cost as `<currency> <amount>`, or `null` when it is unknown (never zero). */
+        @Serializable
+        @SerialName("span.ended")
+        public data class SpanEnded(override val ids: Identities, val status: String, val cost: String?, val durationNanos: Long?, override val phase: Phase, override val span: SpanId?, override val parent: SpanId? = null) : Telemetry
+    }
 }
 
 /** An emitted event with its bus-assigned sequence number and time; the bus, never the producer, sets these. */

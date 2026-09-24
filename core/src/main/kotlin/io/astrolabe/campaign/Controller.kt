@@ -28,6 +28,8 @@ import io.astrolabe.contract.Contract
 import io.astrolabe.contract.Contracts
 import io.astrolabe.contract.SqliteContractRepository
 import io.astrolabe.event.AgentEvent
+import io.astrolabe.event.Phase
+import io.astrolabe.event.SpanId
 import io.astrolabe.event.Authority
 import io.astrolabe.event.AutonomousAuthority
 import io.astrolabe.event.Events
@@ -61,6 +63,7 @@ import io.astrolabe.register.SqliteRegisterVersions
 import io.astrolabe.register.Validator
 import io.astrolabe.store.FaultPoints
 import io.astrolabe.store.Store
+import io.astrolabe.telemetry.Spans
 import io.astrolabe.tool.TurnCheckpoint
 import io.astrolabe.tool.edit.CliSyntax
 import io.astrolabe.tool.edit.Edit
@@ -214,6 +217,8 @@ public class Controller @JvmOverloads public constructor(
     private val events: Events? = null,
     private val env: EnvInputs = EnvInputs(runnerPolicyId = "trusted-local/v1"),
     private val faults: FaultPoints = FaultPoints.NONE,
+    /** Runtime spans (P1.11.1): a campaign-run span and one child span per cell; `null` records none. */
+    private val spans: Spans? = null,
 ) {
     /**
      * Opens or reopens [request]'s campaign over [repo]. Order (§3.7, §13.1): the store and its project lock, the
@@ -329,6 +334,11 @@ public class Controller @JvmOverloads public constructor(
         authority: Authority = AutonomousAuthority(),
         syntax: SyntaxCheck = CliSyntax(campaign.os, campaign.workspace.root, campaign.store.layout.root.resolve("logs"), python = null, node = null),
     ): S0Run {
+        val run = spans ?: return runS0(campaign, model, authority, syntax, null)
+        return run.span(Phase.Plan, campaign.ids) { span -> runS0(campaign, model, authority, syntax, span) }
+    }
+
+    private suspend fun runS0(campaign: OpenedCampaign, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?): S0Run {
         val c = campaign
         c.stop?.let { return S0Run(c.state, null, null, null) }
         val opened = checkNotNull(c.state)
@@ -383,7 +393,8 @@ public class Controller @JvmOverloads public constructor(
         )
         val budget = CellBudget.of(contract.budget.tokens, contract.budget.turnsPerCell, contract.budget.reserves)
         val exit = try {
-            Cell(clock, idGen, config.defaults, Gates.s0(), events).run(ctx, increment, budget)
+            val cell = Cell(clock, idGen, config.defaults, Gates.s0(), events)
+            spans?.span(Phase.Edit, ids, span) { cell.run(ctx, increment, budget) } ?: cell.run(ctx, increment, budget)
         } finally {
             coherence.close()
         }

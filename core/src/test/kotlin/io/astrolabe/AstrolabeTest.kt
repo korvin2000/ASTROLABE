@@ -70,6 +70,8 @@ class AstrolabeTest {
                 assertTrue(outcome != CampaignOutcome.Completed, "a done claim without receipts never completes")
                 assertTrue(handle.done)
                 assertEquals(1, project.views.contract(handle.workId).contracts.size)
+                val spans = withTimeout(10_000) { handle.events.first { it is AgentEvent.Telemetry.SpanEnded && it.phase == io.astrolabe.event.Phase.Plan } }
+                assertEquals(handle.workId, spans.ids.work, "the campaign run is a span")
             }
         }
     }

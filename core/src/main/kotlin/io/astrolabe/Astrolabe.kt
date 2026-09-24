@@ -23,6 +23,7 @@ import io.astrolabe.os.Git
 import io.astrolabe.os.LocalOs
 import io.astrolabe.provider.ProviderAdapter
 import io.astrolabe.store.Store
+import io.astrolabe.telemetry.Spans
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -54,7 +55,7 @@ public class Astrolabe @JvmOverloads public constructor(
     public val events: Events = Events(clock)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val controller = Controller(config, clock, idGen, events)
+    private val controller = Controller(config, clock, idGen, events, spans = Spans(idGen, events))
 
     init {
         val violations = config.violations()
