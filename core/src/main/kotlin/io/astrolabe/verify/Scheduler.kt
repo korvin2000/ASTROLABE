@@ -245,6 +245,22 @@ public class Scheduler(
     }
 
     /**
+     * §8.10: [first] failed and its isolated rerun [second] disagreed. Records a third receipt over the rerun's
+     * candidate and inputs whose outcome is `inconclusive`, naming both attempts; it becomes the check's result, so
+     * the favourable attempt can never certify on its own.
+     */
+    public fun flaky(check: Check, contractVersion: Int, first: Receipt, second: Receipt): Receipt {
+        val receipt = second.copy(
+            receiptId = idGen.next("rcpt"), contractVersion = contractVersion, outcome = Outcome.Inconclusive, at = clock.instant(), reuseOf = null,
+            limits = second.limits + Limit("flaky", "${first.receiptId} ${first.outcome.name.lowercase()}, isolated rerun ${second.receiptId} ${second.outcome.name.lowercase()}: two disagreeing outcomes are inconclusive (§8.10)"),
+        )
+        receipts.record(receipt)
+        aliasByReceipt[receipt.receiptId] = aliases.allocate(ids.work, receipt.receiptId, "receipt", ids.context, workspace.id).text
+        checks.record(check.id, LastResult(receipt.receiptId, receipt.stampAfter, check.definitionVersion, Outcome.Inconclusive, receipt.parsed, Applicability.Current))
+        return receipt
+    }
+
+    /**
      * Turns an end-of-turn [CheckerResult] into a receipt and makes it the check's current result: the checker
      * ran outside the exclusive protocol (no rescan of its inputs), so the receipt says `input_stability =
      * unknown` — fine for fast type/lint feedback, never eligible as acceptance evidence (D-45).

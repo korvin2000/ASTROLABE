@@ -1387,10 +1387,11 @@ Goal: [§18.2 Stage C](docs/implementation/roadmap.md#sec-18-2): scheduler with 
 - [ ] **Gate P3.5:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
 
 ### P3.6 Flaky policy, cadence, quality gates
-#### P3.6.1 [M] `Flaky` policy · TODO
+#### P3.6.1 [M] `Flaky` policy · DONE
 - Why: [§8.10](docs/verification/refactoring.md#sec-8-10).
 - Build: one isolated rerun of a failed check; two disagreeing outcomes ⇒ `inconclusive` + `Open` item; all attempts preserved as receipts; nothing reruns until a favourable result appears; "pre-existing" still requires the baseline receipt.
 - Done: fixture with a nondeterministic test yields `inconclusive`, never `passed`.
+- Log: 2026-09-24 — `Verify.runTriaged` (every `verify` tests/acceptance run and layer run): a `failed` check is rerun once alone; the same outcome stands (latest receipt), a different one ⇒ `Scheduler.flaky(check, v, first, second)` records a third `inconclusive` receipt over the rerun's candidate with a `flaky` limit naming both attempts and makes it the check's result; the view asks for an Open item (the harness does not write the register). No further reruns. "Pre-existing" still needs the baseline receipt (unchanged). Tests: `VerifyTest` nondeterministic check ⇒ failed, passed, inconclusive, not certifying; always-red AC-2 ⇒ two agreeing failures; `ControllerTest` red acceptance assertion updated.
 
 #### P3.6.2 [M] Full-suite cadence and quality gates · TODO
 - Build: `K = 5` verified increments + campaign end (P2.2.6 wiring); `CHK-quality-gate` = configured complexity/duplication threshold commands (`[O]` until a project configures them; never invented).

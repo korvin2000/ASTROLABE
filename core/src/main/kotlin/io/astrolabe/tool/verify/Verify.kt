@@ -178,7 +178,7 @@ public class Verify(
             val currency = scheduler.currency(check, stampNow)
             currency.receiptId == null || currency.applicability != Applicability.Current || !currency.eligible
         }
-        return LayerRun(layer, selection.run.map { runOne(it, contract).first }, selection.notTested)
+        return LayerRun(layer, selection.run.map { runTriaged(it, contract).first }, selection.notTested)
     }
 
     /** Verify-on-stop (§8.1, P3.1.3): the increment's acceptance on a completion proposal; never the full suite. */
@@ -190,7 +190,7 @@ public class Verify(
         val receipts = ArrayList<Receipt>()
         val views = ArrayList<String>()
         for (check in selected) {
-            val (receipt, view) = runOne(check, contract)
+            val (receipt, view) = runTriaged(check, contract)
             receipts += receipt
             views += view
         }
@@ -200,6 +200,19 @@ public class Verify(
         // The status is the worst runner outcome of the batch, in the §8.4 vocabulary; never "ok" over a red check.
         val worst = SEVERITY.firstOrNull { severity -> receipts.any { it.outcome == severity } } ?: Outcome.Passed
         return outcome(args, wire(worst), body, receipts, stampNow)
+    }
+
+    /**
+     * §8.10 flaky policy: a failed check is rerun once, alone; two disagreeing outcomes are `inconclusive` (a third
+     * receipt citing both), never the favourable one, and nothing reruns again. Every attempt stays a receipt.
+     */
+    private suspend fun runTriaged(check: Check, contract: Contract): Pair<Receipt, String> {
+        val (first, view) = runOne(check, contract)
+        if (first.outcome != Outcome.Failed) return first to view
+        val (second, again) = runOne(check, contract)
+        if (second.outcome == first.outcome) return second to "$view\n$again"
+        val flaky = scheduler.flaky(check, contract.version, first, second)
+        return flaky to "$view\n$again\n  ${check.id}: flaky — ${first.outcome.name.lowercase()} then ${second.outcome.name.lowercase()} ⇒ inconclusive; record an Open item (state patch open.add) before relying on it"
     }
 
     private suspend fun runOne(check: Check, contract: Contract): Pair<Receipt, String> {

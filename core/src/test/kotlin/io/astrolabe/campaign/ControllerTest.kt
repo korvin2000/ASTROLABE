@@ -325,7 +325,7 @@ class ControllerTest {
         open().use { c ->
             val run = controller().runS0(c, model(Scripted.Reply(listOf(say("done, trust me")))))
             assertTrue(run.exit !is CellExit.Completed, "a done claim without a current green receipt is not a completion")
-            assertFalse(SqliteReceipts(c.store, clock).forCheck("CHK-accept-AC-1").single().outcome.green)
+            assertTrue(SqliteReceipts(c.store, clock).forCheck("CHK-accept-AC-1").none { it.outcome.green })
             assertTrue(run.completion !is CompletionResult.Accepted)
             val outcome = assertNotNull(run.outcome)
             assertTrue(outcome != CampaignOutcome.Completed, run.state?.reason)

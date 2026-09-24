@@ -177,12 +177,30 @@ class VerifyTest {
     }
 
     @Test
+    fun `a check that fails and then passes on its isolated rerun is inconclusive, never passed, with every attempt kept`() = runTest {
+        val flaky = if (windows) {
+            Command(listOf("cmd.exe", "/d", "/s", "/c", "if exist flaky.flag (type pytest_pass.txt) else (type nul > flaky.flag & type pytest_fail.txt & exit /b 1)"))
+        } else {
+            Command(listOf("/bin/sh", "-c", "if [ -f flaky.flag ]; then cat pytest_pass.txt; else touch flaky.flag; cat pytest_fail.txt; exit 1; fi"))
+        }
+        checks.register(Check("CHK-flaky", CheckKind.Unit, Selector.Named(flaky), Closure.Known(setOf("src/a.py")), CostClass.Fast, Trigger.OnDemand, command = flaky))
+        val out = run("""{"what":"tests","selection":"ids","ids":["CHK-flaky"]}""")
+        assertEquals("inconclusive", status(out), out.body)
+        assertTrue(out.body.contains("CHK-flaky: flaky — failed then passed ⇒ inconclusive"), out.body)
+        val attempts = SqliteReceipts(store, clock).forCheck("CHK-flaky")
+        assertEquals(listOf(Outcome.Failed, Outcome.Passed, Outcome.Inconclusive), attempts.map { it.outcome })
+        assertTrue(attempts.last().limits.any { it.kind == "flaky" && it.detail.contains(attempts[0].receiptId) && it.detail.contains(attempts[1].receiptId) })
+        assertEquals(attempts.last().receiptId, checks["CHK-flaky"]!!.last!!.receiptId)
+        assertFalse(scheduler.currency(checks["CHK-flaky"]!!, stamper.stamp().id).certifies)
+    }
+
+    @Test
     fun `a failed suite is red with parsed counts and a missing runner is an explicit unavailable receipt (FX-13 partial)`() = runTest {
         val failed = run("""{"what":"tests","selection":"ids","ids":["CHK-accept-AC-2"]}""")
         assertEquals("failed", status(failed), failed.body)
         assertFalse(failed.green)
         assertTrue(failed.body.contains("accept AC-2: now 1 5 pass 1 fail 1 skip @"), failed.body)
-        assertEquals(Outcome.Failed, SqliteReceipts(store, clock).forCheck("CHK-accept-AC-2").single().outcome)
+        assertEquals(listOf(Outcome.Failed, Outcome.Failed), SqliteReceipts(store, clock).forCheck("CHK-accept-AC-2").map { it.outcome }, "one isolated rerun; agreeing failures stay red (§8.10)")
 
         val missing = run("""{"what":"acceptance","ids":["AC-3"]}""")
         assertEquals("unavailable", status(missing), missing.body)
