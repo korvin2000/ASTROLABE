@@ -236,6 +236,13 @@ class ControllerTest {
                 assertEquals(billed.cacheWriteTokens, account.usage!!.totalCacheWrite)
                 assertTrue(!account.money.unknown && account.quantities.bytesTransmitted!! > 0)
             }
+            // P2.3.2: the compiled context left a manifest, and the first response filled its actual usage.
+            val manifestIds = c.store.db.query("SELECT id FROM manifests") { it.string("id") }
+            val manifest = io.astrolabe.context.SqliteManifests(c.store, clock).get(manifestIds.single())!!
+            assertEquals("ready", manifest.outcome)
+            assertEquals(listOf("k-mandatory"), manifest.selectedUnits)
+            assertEquals(Accounting(c.store, clock).calls(request.work).first().usage!!.totalInput, manifest.actualUsage)
+            assertTrue(manifest.estimatedTokens > 0 && manifest.arithmetic.available!! >= manifest.arithmetic.selected)
             // P1.9.5: the finish receipt separates the agent's change from the user's pre-existing one.
             val finish = assertNotNull(run.finish)
             assertEquals("completed", finish.status)

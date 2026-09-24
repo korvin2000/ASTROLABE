@@ -179,6 +179,14 @@ class ResultPacketTest {
         assertFailsWith<IllegalStateException> { failed.packet.proposal() }
     }
 
+    @Test
+    fun `the cell end event links the manifest the cell was compiled under (P2-3-2)`() = runTestIn { f ->
+        f.run(ScriptedModel.of(Scripted.Reply(listOf(say("nothing to do")))), manifest = "manifest-7")
+        assertTrue(f.recorder.awaitCount(1))
+        val ended = f.recorder.ofType<io.astrolabe.event.AgentEvent.Cell.Ended>().single()
+        assertEquals("manifest-7", ended.manifestRef)
+    }
+
     private fun runTestIn(body: suspend (CellFixture) -> Unit) = kotlinx.coroutines.test.runTest {
         CellFixture(stateRoot).use { body(it) }
     }

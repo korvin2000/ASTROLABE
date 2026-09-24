@@ -27,6 +27,8 @@ import io.astrolabe.cell.TouchKind
 import io.astrolabe.cell.Touched
 import io.astrolabe.context.Compiled
 import io.astrolabe.context.Compiler
+import io.astrolabe.context.Manifest
+import io.astrolabe.context.SqliteManifests
 import io.astrolabe.contract.Contract
 import io.astrolabe.contract.Contracts
 import io.astrolabe.contract.Shape
@@ -455,6 +457,9 @@ public class Controller @JvmOverloads public constructor(
         )
         val coherence = Coherence(c.registry)
         val accounting = Accounting(c.store, clock)
+        // §6.5: every compiled context leaves a manifest; the cell's end event links it.
+        val manifests = SqliteManifests(c.store, clock)
+        val manifest = Manifest.of(idGen.next("manifest"), compiled, increment, contract, ids, model.profile, effort = model.effort.name.lowercase()).also { manifests.save(ids, it) }
         val ctx = CellContext(
             ids = ids, role = role, contracts = c.contracts, model = model, tools = tools,
             workspace = CellWorkspace(c.workspace, c.registry, coherence, c.stamper, workset, c.checks, scheduler, c.atlas, checker),
@@ -462,6 +467,7 @@ public class Controller @JvmOverloads public constructor(
             prime = c.prime, ledger = dispatched.ledger, preexisting = compiled.k.ledger, config = config,
             turnCheckpoint = TurnCheckpoint { snapshot(c) },
             accounting = accounting,
+            manifest = manifest.id,
         )
         val budget = CellBudget.of(contract.budget.tokens, contract.budget.turnsPerCell, contract.budget.reserves)
         val cellSpan = spans?.start(Phase.Edit, ids, span)
@@ -486,6 +492,7 @@ public class Controller @JvmOverloads public constructor(
         } finally {
             coherence.close()
         }
+        accounting.calls(c.ids.work).firstOrNull { it.ids.context == cellId }?.usage?.takeIf { it.isComplete }?.let { manifests.recordFirstUsage(ids, manifest.id, it.totalInput) }
         if (exit == null) {
             cellSpan?.let { spans?.end(it, status = TraceSpanStatus.Cancelled) }
             snapshot(c)

@@ -638,7 +638,7 @@ public class Cell @JvmOverloads constructor(
             if (reconciledTurn != turn) runCatching { reconcile("exit at turn $turn") }
             val checkpoint = checkpoint(status, lastReport?.candidateId, reason)
             persist(checkpoint)
-            events?.emit(AgentEvent.Cell.Ended(ids, status.name.lowercase(), null))
+            events?.emit(AgentEvent.Cell.Ended(ids, status.name.lowercase(), null, ctx.manifest))
             return checkpoint
         }
 

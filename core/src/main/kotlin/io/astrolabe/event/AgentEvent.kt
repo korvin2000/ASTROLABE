@@ -119,7 +119,7 @@ public sealed interface AgentEvent {
 
         @Serializable
         @SerialName("cell.ended")
-        public data class Ended(override val ids: Identities, val status: String, val packetRef: String?, override val phase: Phase = Phase.Verify, override val span: SpanId? = null, override val parent: SpanId? = null) : Cell
+        public data class Ended(override val ids: Identities, val status: String, val packetRef: String?, val manifestRef: String? = null, override val phase: Phase = Phase.Verify, override val span: SpanId? = null, override val parent: SpanId? = null) : Cell
     }
 
     @Serializable

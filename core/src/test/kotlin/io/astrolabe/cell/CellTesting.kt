@@ -176,7 +176,7 @@ internal class CellFixture(
     lateinit var adapter: FakeAdapter
         private set
 
-    fun context(model: ScriptedModel, profile: Profile = FakeProfiles.main, profiles: Map<String, Profile> = FakeProfiles.all, holdResponses: Boolean = false, role: Role = Roles.implementing): CellContext {
+    fun context(model: ScriptedModel, profile: Profile = FakeProfiles.main, profiles: Map<String, Profile> = FakeProfiles.all, holdResponses: Boolean = false, role: Role = Roles.implementing, manifest: String? = null): CellContext {
         adapter = FakeAdapter(model, profiles, holdResponses = holdResponses)
         return CellContext(
             ids = ids,
@@ -187,6 +187,7 @@ internal class CellFixture(
             workspace = CellWorkspace(workspace, registry, coherence, stamper, workset, checks, scheduler, atlas, checker),
             evidence = CellEvidence(journal, observations, aliases, receipts, intents, registerVersions, checkpoints, preimages),
             prime = Prime.render(atlas, Sniff.commands(atlas)),
+            manifest = manifest,
         )
     }
 
@@ -204,7 +205,8 @@ internal class CellFixture(
         authority: DispatchAuthority = DispatchAuthority.NONE,
         role: Role = Roles.implementing,
         completion: RoleCompletion? = null,
-    ): CellExit = cell(defaults, completion, authority).run(context(model, profile, profiles, role = role), increment, budget(turns))
+        manifest: String? = null,
+    ): CellExit = cell(defaults, completion, authority).run(context(model, profile, profiles, role = role, manifest = manifest), increment, budget(turns))
 
     /** The `[T]` items of the [n]th request the adapter received (1-based). */
     fun transcript(n: Int): List<Item> = request(n).segment(SegmentKind.T)?.items.orEmpty()
