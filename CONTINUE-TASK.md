@@ -3,34 +3,32 @@
 Rewritten every session (≤40 lines). Workflow: `CLAUDE.md` § Workflow. State snapshot: `actual_state.md`.
 History: `audit/SESSION-HISTORY.md` (never read at startup).
 
-**Checkpoint:** branch `claude/compassionate-cerf-j4qunn`. **P2 is complete and `FIXTURE_VALIDATED`** (30/30): P2 phase gate
-[CI run 36008104604](https://github.com/korvin2000/ASTROLABE/actions/runs/36008104604) green on both platforms, merged via korvin2000/ASTROLABE#5. P3.1.1 DONE
-(merged with the gate). 120/185 DONE overall. Start the next session from `main`.
+**Checkpoint:** branch `claude/dreamy-fermi-tkxyry`, merged into `main` at the session end. **133/185 DONE.**
+P3 is 15/25: P3.1, P3.4, P3.5, P3.6 and P3.7 are complete; the P3.1/P3.4/P3.5/P3.6 gates are green on both platforms.
+The P3.7 gate rides the session-end CI run. Start the next session from `main`.
 
-## Next block — P3.1 scheduler (then P3.2 impact runtime)
-1. **P3.1.2** validity/applicability/reuse proofs.
-   - Attach a `ClosureManifest` (P3.1.1, `verify/Closures.kt`) to each receipt at run time in `Scheduler.runCheck`: tree = atlas rows, `versionOf` = registry.
-   - In `Checks.refresh`, a moved stamp stays `current` with `reuse_of` only when four things hold:
-     - the manifest is `Complete`;
-     - its digest is unchanged;
-     - the definition, argv/cwd/selector and parser are unchanged;
-     - the env id and fixtures are unchanged.
-   - Anything else is `stale`, and an unknown closure reruns. Tests: FX-16, FX-54, and an added test file invalidating a package closure.
-2. **P3.1.3** verify-on-stop reusing proven receipts.
-3. **P3.1.4** layer wiring and shapers.
-4. **P3.1.5** D-45 isolation.
-5. **P3.1.6** `unavailable` receipts.
-6. Then the **P3.1 gate**.
+## Next block: P3.2 impact engine, then P3.3 transforms, then P3.8 Stage C validation
+1. **P3.2.1** `ImportGraph` and `tests_for`. It was delegated this session, but the worktree agent was lost in a container
+   restart before it reported. Start it fresh. Produce into the P3.2.7 kernel types (`atlas/Impact.kt`,
+   `ImpactSnapshot.kt`), never parallel types. Mark dynamic imports `complete=false`. FX-37.
+2. **P3.2.2–P3.2.6**: `Impact.analyze(E)`, `look(refs|importers|impact)`, the impact nudge and exit-gate binding,
+   blast selection (unmask `verify(tests(blast))`, register `CHK-tests-blast`; `Layers.NO_BLAST` then disappears),
+   and the pre-scan at open. Then run the **P3.2 gate**.
+3. **P3.3.1–P3.3.2** transform path (Deps include P3.2.5). **P3.8.1–P3.8.2** Stage C fixtures, then the **P3 phase gate**.
 
 ## Carried-forward debts (owner task in bold)
-1. S1 compiles pass no KB notes/contracts index (`EmptyKb` in `Controller`): a host note store is **P4.1**.
-2. Plan packets carry no register decisions (intake register supplier is `null`): **P4.2**.
-3. Replan / `increment_split` routing back to the plan role is not wired (D-70); manifests never say `replan` (D-71): **P3/P4**.
-4. Opening a new attempt of an existing work (new contract attempt id): **P4.6.4**.
-5. A red full suite is not compared with a pre-existing-failure ledger in S1: **P3.1**/P3.6.2.
-6. S0 finish runs no full suite (D-66); `Views` has no finish-receipt projection (export + blob only).
-7. `Economics` takes ρ from the caller (default 0.1), not the profile price table; B2 ≥ B1 `UNMEASURED` (D-28).
-8. Recorded, not diagnosed: transient `StamperTest` `git exited -1` under load (`TempRepo.runGit`, no timeout).
+1. S1 compiles pass no KB notes or contracts index (`EmptyKb`), so the CON and precompile note fields stay empty: **P4.1**.
+2. Plan packets carry no register decisions (the intake register supplier is `null`): **P4.2**.
+3. Replan and `increment_split` routing back to the plan role are not wired (D-70), and manifests never say `replan` (D-71): **P3/P4**.
+4. Opening a new attempt of existing work: **P4.6.4**.
+5. A red full suite is not compared with a pre-existing-failure ledger in S1: **P3.8**/P4.
+6. S0 finish runs no full suite and no campaign gate, so an S0 refactor campaign gets no review or equivalence (D-66).
+7. `Economics` takes ρ from the caller. B2 ≥ B1 is `UNMEASURED` (D-28).
+8. `RequirementGraph.ledger` still requires stamp equality; reuse proofs reach it only through re-acceptance.
+9. Blast and `risk > θ` layer triggers wait for P3.2.2/P3.2.5. Isolated candidates run only with `Flags.s3Writers` (D-73).
+10. Transient and recorded:
+    - `StamperTest` `git exited -1`;
+    - Windows `ProcOwnershipTest` launcher READY timeout (one re-run passed, CI 36026485370).
 
 ## Blockers
-None. No owner decision pending (D-68–D-71 local choices). No ACTIVE out-of-order card.
+None. D-72–D-86 are local choices. No owner decision is pending and no out-of-order card is ACTIVE.

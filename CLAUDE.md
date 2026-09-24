@@ -74,6 +74,7 @@ It triggers on **push to `main`** and on **pull requests**, so a session branch 
 - **Environmental; never block a gate and are never re-proved:** in the Linux sandbox, `FixtureReposTest` gradle-small
   (nested offline Gradle) and `SearchBackendParityTest` case-insensitive `café` (rg/locale).
 - **Transient, recorded, not diagnosed:** `StamperTest` `git exited -1` under suite load (`TempRepo.runGit` has no timeout).
+  Windows CI: `ProcOwnershipTest` "execution deadline kills a grandchild" timed out waiting for the launcher's READY line (CI 36026485370; one re-run passed).
   Also RunTest FX-22 `bg-end` arriving before the terminal status. Re-run once; a repeat means a real failure to investigate.
 - In the sandbox JDK 26 cannot be provisioned (foojay/Adoptium/GitHub downloads refused). `rsync` is absent.
   `apt-get install openjdk-25-jdk-headless` works. Maven Central answers 429 in bursts: the wrapper retries.

@@ -546,3 +546,10 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
   S1 manifests lacked boundary reason/seeds; stale `run:` acceptances were never re-run at campaign end (§4.1);
   harness verify passed no unknown-closure inputs; racy `EventsTest` slow listener (PR #5 Ubuntu red). D-71. P2 phase
   gate in korvin2000/ASTROLABE#5. Counts 120/185 DONE, 0 IN_PROGRESS, 65 TODO.
+- 2026-09-24 — session `claude/dreamy-fermi-tkxyry` (cloud): P3.1.2–P3.1.6 (reuse proofs, verify-on-stop, layers +
+  `DiagnosticsParser`, isolated candidates, unavailable ⇒ blocked), P3.4.1–P3.4.3 (scope repeat, test-integrity
+  classifier, four gates), P3.5.1–P3.5.2 (refactor mode, snapshot, equivalence, signed campaign review), P3.6.1–P3.6.2
+  (flaky policy, cadence + configured quality gates), P3.7.1 (`Precompile`). Five tasks via Fable worktree agents,
+  reviewed and merged `--no-ff`; the P3.2.1 agent was lost in a container restart (task stays TODO). Windows-only
+  CI fixes: quality gates without a declared suite, no-Makefile test setups. D-72–D-86. Gates P3.1/P3.4/P3.6/P3.5 green;
+  `main` fast-forwarded per gate (PR korvin2000/ASTROLABE#6). Counts 133/185 DONE, 0 IN_PROGRESS, 52 TODO.

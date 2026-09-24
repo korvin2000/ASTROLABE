@@ -4,70 +4,56 @@ Snapshot, rewritten each session (≤60 lines). Progress truth is the TODO task 
 next work is `CONTINUE-TASK.md`; history is `audit/SESSION-HISTORY.md`.
 
 ## Counts (2026-09-24, from `#### P… · STATUS` headings)
-**120/185 DONE, 0 IN_PROGRESS, 65 TODO.** P0 19/19 · P1 64/64 · P2 30/30 · P3 2/25 · P4 2/25 · P5 1/15 · P6 2/7.
+**133/185 DONE, 0 IN_PROGRESS, 52 TODO.** P0 19/19 · P1 64/64 · P2 30/30 · P3 15/25 · P4 2/25 · P5 1/15 · P6 2/7.
 Recount: `rg -c '^#### P\d+\.\d+\.\d+ .*· DONE' TODO.md` (per phase: `'^#### P3\.\d+\.\d+ .*· DONE'`).
 
 ## Completion levels
-- **P0, P1:** complete, `FIXTURE_VALIDATED` on Windows + Linux CI (JDK 26). P1 gate: CI run 35995814928.
-- **P2:** complete, `FIXTURE_VALIDATED`: P2 phase gate (P2.2 remainder + P2.7) CI run 36008104604, merged via korvin2000/ASTROLABE#5.
-  - The S1 campaign runs as follows:
-    - `Controller.run` starts the plan cell: `task.propose(plan)`, then `PlanPacketValidator`, `PlanIntake` and `Transition.Planned`.
-    - It then runs one cell per ready increment, each compiled with carry-forward and hash-checked seeds.
-    - After each cell: verify/commit, then a regression refresh.
-    - At the end, the harness re-runs stale `run:` acceptances (§4.1), then finish: review predicate, full suite, cadence.
-  - Pressure rebuilds in place; a second pressure ends the cell partial and a continuation cell carries it forward.
-  - Manifests name the boundary reason (D-71).
-  - `Economics.report/export` → `exports/<work>/economics.md`.
-- **P3:** P3.1.1 (closure manifests, blast closures from impact) and the out-of-order P3.2.7 kernel.
+- **P0, P1, P2:** complete, `FIXTURE_VALIDATED` on Windows + Linux CI (JDK 26). The P2 phase gate is CI 36008104604.
+- **P3:** these groups are complete (details in the task `Log:` lines):
+  - **P3.1 scheduler:** closure manifests pinned on receipts; `Applicability.of` with reuse proofs; verify-on-stop;
+    `Layers` (step boundary, increment end, full suite + quality gates, integration row); `DiagnosticsParser` for the
+    checkers; isolated candidates; `unavailable` ⇒ blocked.
+  - **P3.4 guards:** scope warn-once/justify (D-74); test-integrity classifier with kinds and original obligations;
+    contract-touch, repeated-failure, scope and acceptance-surface gates.
+  - **P3.5 refactor mode:** detection (D-75), behaviour snapshot at `s0`, `red_ok_until`, equivalence report,
+    CON references and the mandatory signed campaign review (D-23 human path).
+  - **P3.6:** flaky policy (one isolated rerun; disagreement ⇒ inconclusive); configured cadence K and quality gates.
+  - **P3.7:** `Precompile` behind `Flags.precompile`, with a full-input fingerprint.
+- **P3 open:** P3.2.1–P3.2.6 (runtime impact engine; the P3.2.7 kernel is DONE), P3.3 transforms, P3.8 validation.
 - **Out of order, DONE as kernels:** P3.2.7, P4.5.4, P4.5.5, P5.1.5, P6.1.4, P6.1.5.
-- Every live gate is `UNMEASURED` (P7), including B2 ≥ B1 (D-28).
-- Optional layers are off: `calibrationPrior` and `otelExport` exist but are disabled.
+- Every live gate is `UNMEASURED` (P7). Optional layers are off by default (`precompile`, `calibrationPrior`, `otelExport`).
 - S2/S3 are blocked.
 
 ## Key types by package (entry points only)
-- **root:** `Astrolabe` (`campaign` → `Controller.run`), `Config` (supported-modes KDoc), `AttemptConfig`.
-- **`java`:** `AstrolabeJava`, `JavaCampaignHandle`, `JavaAuthority`.
+- **root:** `Astrolabe`, `Config` (+ `qualityGates`), `Flags`. **`java`:** `AstrolabeJava`. **`evidence`:** `Receipt`, `ClosureManifest`.
 - **`campaign`:**
-  - `Controller` (`open`, `run`, `runS0`, harness verify for full suite and regressions);
-  - `ShapeSelector`, `Lifecycle`;
-  - `Plan.kt`, `Proposals.kt`, `Calibration`;
-  - `CampaignFinish`, `FinishReceipts`, `Attempts`;
-  - `Economics`.
-- **`context`:**
-  - `Compiler`, `ContextCover`, `ContractSlice`;
-  - `CarryForward`, `FactCoherence`, `Seeds`, `StatusNotes`;
-  - `Manifest` (+ `boundaryReason`), `ContextAdmission`, `Rebuild`.
-- **`kb`:** `Note`, `KbWriter`, `Notes`, `KbIndex`, `KbExport`, `StoreKb`, `NoteHorizon`, `CalibrationStats`.
-- **`cell`:** `Cell.run` (admission, in-cell pressure rebuild); `Cell.ModelRequested` carries `anchorTokens`.
-- **`verify`:** `Checks` (registry ids incl. `CHK-tests-blast`/`-review-*`/`-quality-gate`), `Scheduler`, `Checker`,
-  `ClosureManifest`, `Closures.blast`, `ExitGate`, `ScopeGuard`, `TestIntegrity`.
-- **`atlas`:** `Impact.analyze` (P3.2.7 kernel).
+  - `Controller` (`open`, `run`, `runS0`, finish gate: full suite → acceptance → equivalence → review);
+  - `Plan.kt` (`PlanPacket.refactorChecklist`/`conReferences`), `CampaignFinish`, `FinishReceipt` (+ equivalence, review), `Economics`.
+- **`verify`:**
+  - `Checks`, `Scheduler` (`runCheck` exclusive or isolated, `refresh`, `currency`, `flaky`);
+  - `Applicability.of`/`ReuseProof`, `Layers`;
+  - `Checker` (+ `tool/run/DiagnosticsParser`), `ExitGate`, `ScopeGuard`, `TestIntegrity.classify`;
+  - `RefactorMode`, `BehaviourSnapshots`, `Equivalence`, `CampaignReview`.
+- **`context`:** `Compiler`, `CarryForward`, `Manifest`, `Rebuild`, `Precompile`/`Fingerprint`.
+- **`cell`:**
+  - `Cell.run`: verify-on-stop, step-boundary layer, `not_tested`, unavailable ⇒ blocked, refactor `red_ok_until`,
+    precompile trigger;
+  - `Gates.s0()` with 13 gates.
+- **`tool`:** `Verify` (`runLayer`, `onStop`, `review(scope=campaign)`), `Edit` (classified flags, `flagsOf`).
+- **`kb`:** `Kb.contractAnchors()` (`StoreKb`). **`telemetry`:** `PrecompileMetrics`. **`atlas`:** `Impact.analyze` (kernel).
 
 ## Store
-Schema **v4**:
-- `note_revisions` is append-only.
-- `packets` holds plan proposals and split requests.
-- `manifests` has one row per compiled context.
-- `sizing` has one row per (increment, latest cell).
-- `attempts` has JSON views under `campaigns/`.
-- `exports/<work>/` holds `finish-receipt.json` and `economics.md`.
+Schema **v4**. `packets` also holds `behaviour-snapshot`/`campaign-review` rows; receipt JSON carries the closure manifest.
 
 ## Last verification
-- Gates green on Ubuntu + Windows:
+| Gate (Ubuntu + Windows green) | CI run |
+|---|---|
+| P3.1 | 36018242027 |
+| P3.4 | 36019777002 |
+| P3.6 | 36023934566 |
+| P3.5 | 36026485370 |
+- The session-end run (P3.7.1 + handoff) is recorded in TODO's P3.7 gate line.
+- Local (Linux sandbox, JDK 25): the full build runs about 1130 tests; only the 2 known environmental failures fail.
 
-  | Gate | CI run |
-  |---|---|
-  | P1.12 | 35995814928 |
-  | P2.1 | 35998105732 |
-  | P2.4 | 35999628531 |
-  | P2.3 + P2.6 | 36001412845 |
-  | P2.5 | 36003465907 |
-  | P2.2 + P2.7 (P2 phase) | 36008104604 |
-- Local (Linux sandbox, JDK 25 scratch copy): full build of 1066 tests; only the 2 known environmental failures, with 6 skips.
-
-## Recorded deviations (details in task `Log:` lines)
-- Gradle 9.7.1 · JUnit Jupiter 6.1.3 · no `kotlinx-coroutines-jdk8`.
-- `Identities.candidate` is a `CandidateId`.
-- Generic shapers return `Inconclusive` without counts; a counted log is needed for a green full suite.
-- `Astrolabe` is a class.
-- Local choices D-65–D-71: plan intake origins, model amendments are weakening, S1 loop, manifest boundaries.
+## Recorded deviations
+Local choices D-72–D-86 (TODO §3): checker counts, isolation, scope repeat, refactor mode, review/equivalence, precompile.
