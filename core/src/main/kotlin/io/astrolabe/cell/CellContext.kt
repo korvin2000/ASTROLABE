@@ -134,6 +134,8 @@ public class CellContext @JvmOverloads constructor(
     public val manifest: String? = null,
     /** The hard admission check (§6.1, P2.3.3); one per lineage, created by the cell when absent. */
     public val admission: ContextAdmission? = null,
+    /** The compiled `[K]` sections after the slice (§6.1: carry-forward, seeds, notes); the slice re-renders every turn. */
+    public val sections: List<KSection> = emptyList(),
 ) {
     init {
         require(ids.context != null) { "a cell runs under its own context id" }

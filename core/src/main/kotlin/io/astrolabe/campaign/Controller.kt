@@ -7,6 +7,7 @@ import io.astrolabe.atlas.Atlas
 import io.astrolabe.atlas.Prime
 import io.astrolabe.atlas.RulesSnapshot
 import io.astrolabe.atlas.Sniffed
+import io.astrolabe.auth.Ceiling
 import io.astrolabe.auth.Redaction
 import io.astrolabe.auth.RulesTrust
 import io.astrolabe.budget.CellBudget
@@ -31,6 +32,8 @@ import io.astrolabe.context.Manifest
 import io.astrolabe.context.SqliteManifests
 import io.astrolabe.contract.Contract
 import io.astrolabe.contract.Contracts
+import io.astrolabe.contract.Increment
+import io.astrolabe.contract.Ledger
 import io.astrolabe.contract.Shape
 import io.astrolabe.contract.SqliteContractRepository
 import io.astrolabe.event.AgentEvent
@@ -430,80 +433,15 @@ public class Controller @JvmOverloads public constructor(
         events?.emit(AgentEvent.Campaign.IncrementSelected(c.ids, ready.id))
         val dispatched = c.advance(Transition.Dispatched(ready.id, cellId))
         val increment = dispatched.graph.increments.first { it.id == ready.id }
-        val ids = c.ids.copy(context = cellId)
-        val redaction = Redaction(config.redaction)
-        val logs = c.store.layout.root.resolve("logs")
-        val estimator = model.estimator
-        val runner = TrustedLocalRunner(c.os)
-        val workset = Workset(immediateStubTokens = config.defaults.immediateStubTokens)
-        val observations = SqliteObservations(c.store, clock)
-        val aliases = SqliteAliases(c.store, clock)
-        val receipts = SqliteReceipts(c.store, clock)
-        val registerVersions = SqliteRegisterVersions(c.store, clock)
-        val checkpoints = SqliteCheckpoints(c.store, clock)
-        val preimages = Preimages(c.workspace, c.store.blobs, ids, clock)
-        val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, receipts, aliases, idGen, ids, clock)
-        val checker = Checker(c.checks, runner, c.os, c.stamper, c.registry, c.workspace, c.store.blobs, redaction, idGen, ids, logs)
-        val verify = Verify(checks = c.checks, scheduler = scheduler, checker = checker, baseline = null, s0 = c.s0.stampId, workspace = c.workspace, runner = runner, os = c.os, stamper = c.stamper, blobs = c.store.blobs, redaction = redaction, estimator = estimator, idGen = idGen, ids = ids, contracts = c.contracts, logsDir = logs)
-        verify.inputs = c.atlas.rows.map { it.path }
-        val tools = CellTools(
-            state = StateTool(Validator(estimator), registerVersions, c.journal, estimator, idGen, ids, clock, Register.empty(cellId, increment.id, increment.title), events),
-            look = Look(c.workspace, c.registry, workset, c.atlas, Searches.jvm(), c.journal, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids),
-            edit = Edit(c.workspace, c.registry, workset, c.os, preimages, ScopeGuard(c.workspace), c.contracts, c.checks, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, syntax),
-            run = Run(c.workspace, c.registry, c.stamper, runner, c.os, c.intents, SqliteHandles(c.store, clock), observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, c.contracts, authority, config, clock, logs),
-            verify = verify,
-            task = TaskTool(authority, c.contracts, c.journal, estimator, idGen, ids, clock, events),
-            kb = KbTool(c.kb, estimator, idGen),
-        )
-        val coherence = Coherence(c.registry)
-        val accounting = Accounting(c.store, clock)
-        // §6.5: every compiled context leaves a manifest; the cell's end event links it.
-        val manifests = SqliteManifests(c.store, clock)
-        val manifest = Manifest.of(idGen.next("manifest"), compiled, increment, contract, ids, model.profile, effort = model.effort.name.lowercase()).also { manifests.save(ids, it) }
-        val ctx = CellContext(
-            ids = ids, role = role, contracts = c.contracts, model = model, tools = tools,
-            workspace = CellWorkspace(c.workspace, c.registry, coherence, c.stamper, workset, c.checks, scheduler, c.atlas, checker),
-            evidence = CellEvidence(c.journal, observations, aliases, receipts, c.intents, registerVersions, checkpoints, preimages),
-            prime = c.prime, ledger = dispatched.ledger, preexisting = compiled.k.ledger, config = config,
-            turnCheckpoint = TurnCheckpoint { snapshot(c) },
-            accounting = accounting,
-            manifest = manifest.id,
-        )
-        val budget = CellBudget.of(contract.budget.tokens, contract.budget.turnsPerCell, contract.budget.reserves)
-        val cellSpan = spans?.start(Phase.Edit, ids, span)
-        val dispatch = DispatchAuthority { c.refusal()?.let { DispatchRefusal(it, cancelled = c.cancellation.cancelled) } }
-        // A cell that finished before the cancellation reached it keeps its exit: a late completion, archived below.
-        val finished = AtomicReference<CellExit?>(null)
-        val exit = try {
-            coroutineScope {
-                val job = async { Cell(clock, idGen, config.defaults, Gates.s0(), events, authority = dispatch).run(ctx, increment, budget).also(finished::set) }
-                // A cancellation mid-call interrupts the in-flight request; the cell settles its checkpoint first.
-                c.cancellation.onCancel { job.cancel(CancellationException("cancelled: $it")) }.use { job.await() }
-            }
-        } catch (cancelled: CancellationException) {
-            if (!c.cancellation.cancelled || !currentCoroutineContext().isActive) {
-                cellSpan?.let { spans?.end(it, status = TraceSpanStatus.Cancelled) }
-                throw cancelled
-            }
-            finished.get()
-        } catch (failure: Throwable) {
-            cellSpan?.let { spans?.end(it, status = TraceSpanStatus.Cancelled) }
-            throw failure
-        } finally {
-            coherence.close()
-        }
-        accounting.calls(c.ids.work).firstOrNull { it.ids.context == cellId }?.usage?.takeIf { it.isComplete }?.let { manifests.recordFirstUsage(ids, manifest.id, it.totalInput) }
+        val run = runCell(c, cellId, increment, Roles.implementing, model, authority, syntax, compiled, span, dispatched.ledger)
+        val ids = run.ids
+        val scheduler = run.scheduler
+        val exit = run.exit
         if (exit == null) {
-            cellSpan?.let { spans?.end(it, status = TraceSpanStatus.Cancelled) }
             snapshot(c)
-            val checkpoint = checkNotNull(checkpoints.latest(cellId)) { "a cancelled cell settles its checkpoint" }
+            val checkpoint = checkNotNull(run.checkpoints.latest(cellId)) { "a cancelled cell settles its checkpoint" }
             c.advance(Transition.Interrupted(checkpoint))
             return S0Run(c.advance(Transition.Stopped(CampaignOutcome.Cancelled, checkNotNull(c.cancellation.reason))), null, null, compiled)
-        }
-        if (cellSpan != null && spans != null) {
-            // The cell's exclusive cost is its own model calls, priced once here and never again by a parent.
-            val cost = Accounting.totals(accounting.calls(c.ids.work).filter { it.ids.context == cellId }, 0, spans.currency).money
-            spans.end(cellSpan, cost)
         }
         // The tree after the cell is the base the next open reconciles against: only moves after this are external.
         snapshot(c)
@@ -533,6 +471,109 @@ public class Controller @JvmOverloads public constructor(
             is Disposition.Stop -> c.advance(Transition.Stopped(disposition.outcome, disposition.reason))
         }
         return S0Run(state, exit, completion, compiled)
+    }
+
+    /** A cell's outcome as [runCell] hands it back: `null` [exit] when a cancellation interrupted it. */
+    private class CellRun(val exit: CellExit?, val ids: Identities, val scheduler: Scheduler, val checkpoints: SqliteCheckpoints)
+
+    /**
+     * Builds the tools and context of one cell over [increment] under [role] and runs it (§3.6): shared by the S0 path,
+     * the S1 loop's increment cells and the plan cell. Every compiled context leaves a manifest; the cell's cost is
+     * priced once for its span.
+     */
+    private suspend fun runCell(
+        c: OpenedCampaign,
+        cellId: ContextId,
+        increment: Increment,
+        role: io.astrolabe.cell.Role,
+        model: CellModel,
+        authority: Authority,
+        syntax: SyntaxCheck,
+        compiled: Compiled.Ready,
+        span: SpanId?,
+        ledger: Ledger?,
+        register: Register? = null,
+        seeds: List<io.astrolabe.workset.Entry> = emptyList(),
+        proposals: io.astrolabe.tool.task.Proposals? = null,
+        completion: io.astrolabe.cell.RoleCompletion? = null,
+    ): CellRun {
+        val ids = c.ids.copy(context = cellId)
+        val config = c.attempt.config
+        val contract = c.contract
+        val redaction = Redaction(config.redaction)
+        val logs = c.store.layout.root.resolve("logs")
+        val estimator = model.estimator
+        val runner = TrustedLocalRunner(c.os)
+        val workset = Workset(immediateStubTokens = config.defaults.immediateStubTokens).also { it.seed(seeds) }
+        val observations = SqliteObservations(c.store, clock)
+        val aliases = SqliteAliases(c.store, clock)
+        val receipts = SqliteReceipts(c.store, clock)
+        val registerVersions = SqliteRegisterVersions(c.store, clock)
+        val checkpoints = SqliteCheckpoints(c.store, clock)
+        val preimages = Preimages(c.workspace, c.store.blobs, ids, clock)
+        val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, receipts, aliases, idGen, ids, clock)
+        val checker = Checker(c.checks, runner, c.os, c.stamper, c.registry, c.workspace, c.store.blobs, redaction, idGen, ids, logs)
+        val verify = Verify(checks = c.checks, scheduler = scheduler, checker = checker, baseline = null, s0 = c.s0.stampId, workspace = c.workspace, runner = runner, os = c.os, stamper = c.stamper, blobs = c.store.blobs, redaction = redaction, estimator = estimator, idGen = idGen, ids = ids, contracts = c.contracts, logsDir = logs)
+        verify.inputs = c.atlas.rows.map { it.path }
+        val tools = CellTools(
+            state = StateTool(Validator(estimator), registerVersions, c.journal, estimator, idGen, ids, clock, register ?: Register.empty(cellId, increment.id, increment.title), events),
+            look = Look(c.workspace, c.registry, workset, c.atlas, Searches.jvm(), c.journal, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids),
+            edit = Edit(c.workspace, c.registry, workset, c.os, preimages, ScopeGuard(c.workspace), c.contracts, c.checks, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, syntax),
+            run = Run(c.workspace, c.registry, c.stamper, runner, c.os, c.intents, SqliteHandles(c.store, clock), observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, c.contracts, authority, config, clock, logs),
+            verify = verify,
+            task = if (proposals == null) TaskTool(authority, c.contracts, c.journal, estimator, idGen, ids, clock, events)
+            else TaskTool(authority, c.contracts, c.journal, estimator, idGen, ids, clock, events, role.effectiveOps(contract.shape, Ceiling.of(contract.authorization, config.executionMode)), proposals),
+            kb = KbTool(c.kb, estimator, idGen),
+        )
+        val coherence = Coherence(c.registry)
+        val accounting = Accounting(c.store, clock)
+        // §6.5: every compiled context leaves a manifest; the cell's end event links it.
+        val manifests = SqliteManifests(c.store, clock)
+        val manifest = Manifest.of(idGen.next("manifest"), compiled, increment, contract, ids, model.profile, effort = model.effort.name.lowercase()).also { manifests.save(ids, it) }
+        val ctx = CellContext(
+            ids = ids, role = role, contracts = c.contracts, model = model, tools = tools,
+            workspace = CellWorkspace(c.workspace, c.registry, coherence, c.stamper, workset, c.checks, scheduler, c.atlas, checker),
+            evidence = CellEvidence(c.journal, observations, aliases, receipts, c.intents, registerVersions, checkpoints, preimages),
+            prime = c.prime, ledger = ledger, preexisting = compiled.k.ledger, config = config,
+            turnCheckpoint = TurnCheckpoint { snapshot(c) },
+            accounting = accounting,
+            manifest = manifest.id,
+            sections = compiled.k.sections,
+        )
+        val budget = CellBudget.of(contract.budget.tokens, contract.budget.turnsPerCell, contract.budget.reserves)
+        val cellSpan = spans?.start(Phase.Edit, ids, span)
+        val dispatch = DispatchAuthority { c.refusal()?.let { DispatchRefusal(it, cancelled = c.cancellation.cancelled) } }
+        // A cell that finished before the cancellation reached it keeps its exit: a late completion, archived below.
+        val finished = AtomicReference<CellExit?>(null)
+        val exit = try {
+            coroutineScope {
+                val job = async { Cell(clock, idGen, config.defaults, Gates.s0(), events, completion, authority = dispatch).run(ctx, increment, budget).also(finished::set) }
+                // A cancellation mid-call interrupts the in-flight request; the cell settles its checkpoint first.
+                c.cancellation.onCancel { job.cancel(CancellationException("cancelled: $it")) }.use { job.await() }
+            }
+        } catch (cancelled: CancellationException) {
+            if (!c.cancellation.cancelled || !currentCoroutineContext().isActive) {
+                cellSpan?.let { spans?.end(it, status = TraceSpanStatus.Cancelled) }
+                throw cancelled
+            }
+            finished.get()
+        } catch (failure: Throwable) {
+            cellSpan?.let { spans?.end(it, status = TraceSpanStatus.Cancelled) }
+            throw failure
+        } finally {
+            coherence.close()
+        }
+        accounting.calls(c.ids.work).firstOrNull { it.ids.context == cellId }?.usage?.takeIf { it.isComplete }?.let { manifests.recordFirstUsage(ids, manifest.id, it.totalInput) }
+        if (exit == null) {
+            cellSpan?.let { spans?.end(it, status = TraceSpanStatus.Cancelled) }
+            return CellRun(null, ids, scheduler, checkpoints)
+        }
+        if (cellSpan != null && spans != null) {
+            // The cell's exclusive cost is its own model calls, priced once here and never again by a parent.
+            val cost = Accounting.totals(accounting.calls(c.ids.work).filter { it.ids.context == cellId }, 0, spans.currency).money
+            spans.end(cellSpan, cost)
+        }
+        return CellRun(exit, ids, scheduler, checkpoints)
     }
 
     /**

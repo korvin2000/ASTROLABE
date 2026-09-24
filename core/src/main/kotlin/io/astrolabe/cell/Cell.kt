@@ -248,7 +248,7 @@ public class Cell @JvmOverloads constructor(
                 is SchemaSelection.Unsupported -> return failed("tool schemas unsupported for ${selection.profileId}: ${selection.reason}")
             }
             val anchor = renderAnchor(contract)
-            val layout = Layout.render(ctx.role, mask, ctx.config.executionMode, ctx.prime, CompiledK(ContractSlice.forIncrement(contract, increment), ctx.preexisting), transcript(contract))
+            val layout = Layout.render(ctx.role, mask, ctx.config.executionMode, ctx.prime, CompiledK(ContractSlice.forIncrement(contract, increment), ctx.preexisting, ctx.sections), transcript(contract))
             val request = Request(layout + anchor.segment(), schemas.schemas, ctx.model.profile, ctx.model.effort, ctx.model.maxOutputTokens, mask)
             val estimate = request.estimate(estimator)
             when (val validation = ctx.model.adapter.validate(request, estimate)) {

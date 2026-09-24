@@ -138,6 +138,12 @@ public sealed interface Transition {
     /** The verifier accepted a completion and the tree is still [stampNow] (§3.7 `commit_outcome_if_current`). */
     public data class Committed(val result: CompletionResult.Accepted, val stampNow: CandidateId) : Transition
 
+    /**
+     * The controller installs a validated plan (§4.2, P2.2.2): the plan cell's graph, or a replan that keeps every
+     * increment already dispatched, verified or cancelled exactly as it was (authorized coverage preserved).
+     */
+    public data class Planned(val graph: RequirementGraph) : Transition
+
     /** The authority answered or amended; the blocked increment resumes. */
     public data class Unblocked(val increment: String, val authorityRef: String) : Transition {
         init {
@@ -249,6 +255,18 @@ public object Lifecycle {
                 }
                 val graph = s.graph.recordAccepted(contract, result)
                 s.next(graph = graph, ledger = graph.ledger(contract, transition.stampNow), contractVersion = v)
+            }
+            is Transition.Planned -> {
+                expect(s, CampaignPhase.Running)
+                check(s.running == null) { "cell ${s.running?.cell} is still running" }
+                val issues = transition.graph.validate(contract)
+                check(issues.isEmpty()) { "an invalid plan is never installed: ${issues.joinToString { it.detail }}" }
+                val next = transition.graph.increments.associateBy { it.id }
+                for (kept in s.graph.increments.filter { it.cells.isNotEmpty() || it.status != IncrementStatus.Pending }) {
+                    check(next[kept.id] == kept) { "a replan keeps ${kept.id} (${kept.status}) as it was" }
+                }
+                val ledger = if (s.graph.increments.any { it.status == IncrementStatus.Verified }) s.ledger else Ledger.initial(contract)
+                s.next(graph = transition.graph, ledger = ledger, contractVersion = v)
             }
             is Transition.Unblocked -> {
                 expect(s, CampaignPhase.Opened, CampaignPhase.Running)
