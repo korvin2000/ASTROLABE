@@ -359,7 +359,7 @@ class EditTest {
         val vt = seen("tests/test_a.py", 1, 2)
         val out = run(anchored("tests/test_a.py", vt, hunk("assert a() == 1", "assert a()")))
         assertEquals("ok", status(out))
-        assertTrue(out.body.contains("acceptance surface: tests/test_a.py (test file) modified by edit #1 · unclassified-weakening-risk · required: CHK-accept-AC-1 · review: pending"), out.body)
+        assertTrue(out.body.contains("acceptance surface: tests/test_a.py (test file) modified by edit #1 · weakened-assertion · required: CHK-accept-AC-1 · reason: w · review: pending"), out.body)
 
         val va = seen("src/a.py", 1, 10)
         val broken = run(anchored("src/a.py", va, hunk("def a():", "def broken(")))

@@ -19,6 +19,7 @@ import io.astrolabe.verify.Currency
 import io.astrolabe.verify.Verifier
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Path
+import io.astrolabe.verify.TestIntegrity
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -118,7 +119,10 @@ class ResultPacketTest {
         assertEquals(ChangeOrigin.Edit, byPath.getValue("tests/test_a.py").origin)
         assertEquals(ChangeOrigin.External, byPath.getValue("src/b.py").origin)
         assertEquals(listOf("tests/test_a.py"), packet.flags.outsideScope, "inside the contract, outside the increment's write scope")
-        assertTrue(packet.flags.testIntegrity.any { it.path == "tests/test_a.py" }, packet.flags.toString())
+        val flag = packet.flags.testIntegrity.single { it.path == "tests/test_a.py" }
+        assertEquals("w", flag.reason, "the edit's why is the recorded justification the exit gate needs")
+        assertEquals(TestIntegrity.UNCLASSIFIED, flag.kind, "a changed expected value is neither an addition nor a recognised weakening")
+        assertEquals("    assert a() == 1", flag.originalObligation)
         assertEquals(emptyList(), packet.coverage.filesTouchedUnread, "an external change is not the cell's unread write")
         assertTrue(packet.claims.openQuestions.any { it.contains("does b.y matter?") }, packet.claims.toString())
         assertEquals("blocked", packet.proposal().claimedStatus)

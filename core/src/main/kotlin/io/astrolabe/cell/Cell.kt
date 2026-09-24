@@ -358,7 +358,10 @@ public class Cell @JvmOverloads constructor(
                         val origin = if (call.family == ToolFamily.Edit) ChangeOrigin.Edit else ChangeOrigin.Run
                         mutated.forEach { path -> origins.merge(path, origin) { old, new -> if (old == ChangeOrigin.External) new else old } }
                         // §8.6 run-side collection: every mutation, by edit or by run, is checked against the acceptance surface.
-                        TestIntegrity.baseline(mutated, "${call.family.wire} ${alias ?: "op ${call.opId}"}", contract, ws.checks).forEach { flags.putIfAbsent(it.path, it) }
+                        // An edit's own classified flags (P3.4.2) carry its `why`; a later pure addition never clears an earlier weakening.
+                        val classified = if (call.family == ToolFamily.Edit && alias != null) tools.edit?.flagsOf(alias).orEmpty() else emptyList()
+                        classified.forEach { flag -> flags.merge(flag.path, flag) { old, new -> if (old.blocksCompletion && !new.blocksCompletion) old else new } }
+                        TestIntegrity.baseline(mutated - classified.map { it.path }.toSet(), "${call.family.wire} ${alias ?: "op ${call.opId}"}", contract, ws.checks).forEach { flags.putIfAbsent(it.path, it) }
                     }
                     if (call.family == ToolFamily.Edit && alias != null) journalPreimages(alias)
                 }

@@ -135,4 +135,49 @@ class TestIntegrityTest {
         assertTrue(flag.line.endsWith("review: not required"), flag.line)
         assertEquals(listOf("CHK-accept-AC-1"), TestIntegrity.baseline(listOf("tests/test_pay.py"), "edit #5", contract, checks).single().requiredChecks)
     }
+
+    @Test
+    fun `the classifier names weakened assertions, skips, deleted tests and snapshot updates with the original obligation (FX-14)`() = runTest {
+        val (contract, checks) = s0()
+        val before = "def test_total():\n    assert total([1, 2]) == 3\n\n\ndef test_empty():\n    assert total([]) == 0\n"
+        val changes = listOf(
+            SurfaceChange("tests/test_total.py", before, "def test_total():\n    assert total([1, 2])\n\n\ndef test_empty():\n    assert total([]) == 0\n"),
+            SurfaceChange("tests/test_skip.py", before, "import pytest\n\n@pytest.mark.skip\n$before"),
+            SurfaceChange("tests/test_gone.py", before, "def test_total():\n    assert total([1, 2]) == 3\n"),
+            SurfaceChange("tests/__snapshots__/total.snap", "3\n", "4\n"),
+            SurfaceChange("tests/test_tol.py", "def test_pi():\n    assert pi() == approx(3.14, rel=1e-6)\n", "def test_pi():\n    assert pi() == approx(3.14, rel=1e-1)\n"),
+            SurfaceChange("tests/test_more.py", before, before + "\n\ndef test_two():\n    assert total([2]) == 2\n"),
+            SurfaceChange("pyproject.toml", "[tool.pytest.ini_options]\n", "[tool.pytest.ini_options]\naddopts = \"-k not slow\"\n"),
+            SurfaceChange("tests/test_unknown.py", null, null),
+            SurfaceChange("src/total.py", "a\n", "b\n"),
+        )
+        val kinds = TestIntegrity.classify(changes, "edit #4", contract, checks).associate { it.path to it.kind }
+        assertEquals(
+            mapOf(
+                "tests/test_total.py" to TestIntegrity.WEAKENED_ASSERTION,
+                "tests/test_skip.py" to TestIntegrity.SKIP_MARKER,
+                "tests/test_gone.py" to "${TestIntegrity.DELETED_TEST},${TestIntegrity.WEAKENED_ASSERTION}",
+                "tests/__snapshots__/total.snap" to TestIntegrity.SNAPSHOT_UPDATE,
+                "tests/test_tol.py" to TestIntegrity.WEAKENED_ASSERTION,
+                "tests/test_more.py" to TestIntegrity.ADDITIONS_ONLY,
+                "pyproject.toml" to TestIntegrity.CHECK_CONFIG,
+                "tests/test_unknown.py" to TestIntegrity.UNCLASSIFIED,
+            ),
+            kinds,
+        )
+        assertEquals(kinds, TestIntegrity.classify(changes, "edit #4", contract, checks).associate { it.path to it.kind }, "deterministic")
+
+        val flags = TestIntegrity.classify(changes, "edit #4", contract, checks)
+        val weakened = flags.first { it.path == "tests/test_total.py" }
+        assertEquals("    assert total([1, 2]) == 3", weakened.originalObligation)
+        assertTrue(weakened.line.contains("· weakened-assertion · required:"), weakened.line)
+        assertTrue(weakened.blocksCompletion)
+        assertFalse(flags.first { it.path == "tests/test_more.py" }.blocksCompletion, "a pure addition is rendered, not blocking")
+
+        val reviewer = RecordingReviewer(VerdictOutcome.Approve)
+        val request = TestIntegrity.reviewRequest("rv-1", TestIntegrity.unresolved(flags), contract, checks, ids, candidate, "packet-1")
+        assertTrue(request.originalObligations.any { it == "original tests/test_total.py:     assert total([1, 2]) == 3" }, request.originalObligations.toString())
+        TestIntegrity.resolve(request, flags, reviewer)
+        assertEquals(contract.acceptance, contracts.current(ids.work)?.acceptance ?: contract.acceptance, "the contract's acceptance is unchanged")
+    }
 }

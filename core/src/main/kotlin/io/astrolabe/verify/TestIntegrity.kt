@@ -18,11 +18,12 @@ public enum class AcceptanceSurface(public val wire: String) {
 }
 
 /**
- * One acceptance-surface detection (§8.6). The P1 baseline never classifies *how* a change weakens a check:
- * [kind] stays [TestIntegrity.UNCLASSIFIED] (P3.4.2 adds deleted tests, weakened assertions, skip markers,
- * snapshot updates). [requiredChecks] are the required checks the path can affect; while any exist and no
- * approving [verdict] is attached, the increment cannot complete. [reason] is the worker's recorded
- * justification, rendered with the line and in the finish receipt (`acceptance_surface_modified`).
+ * One acceptance-surface detection (§8.6). [kind] is what the classifier found ([TestIntegrity.classify], P3.4.2:
+ * comma-joined kinds, or [TestIntegrity.UNCLASSIFIED] when it saw no bytes or could not tell). [requiredChecks]
+ * are the required checks the path can affect; while any exist, the kind is not [TestIntegrity.ADDITIONS_ONLY]
+ * and no approving [verdict] is attached, the increment cannot complete. [originalObligation] is the pre-change
+ * text the change removed (the deleted test, the original assertion) for the reviewer. [reason] is the worker's
+ * recorded justification, rendered with the line and in the finish receipt (`acceptance_surface_modified`).
  */
 public data class TestIntegrityFlag(
     val path: String,
@@ -32,9 +33,13 @@ public data class TestIntegrityFlag(
     val kind: String = TestIntegrity.UNCLASSIFIED,
     val reason: String? = null,
     val verdict: Verdict? = null,
+    val originalObligation: String? = null,
 ) {
-    /** Unknown classification is never proof of no weakening: a touched required check needs an approving review. */
-    val blocksCompletion: Boolean get() = requiredChecks.isNotEmpty() && verdict?.approved != true
+    /**
+     * Unknown classification is never proof of no weakening: a touched required check needs an approving review.
+     * Only a pure addition (nothing removed, no skip marker) is let through, still rendered.
+     */
+    val blocksCompletion: Boolean get() = requiredChecks.isNotEmpty() && kind != TestIntegrity.ADDITIONS_ONLY && verdict?.approved != true
 
     /** The acceptance-surface line of the edit result and the anchor (§8.6). */
     val line: String
@@ -67,6 +72,27 @@ public data class TestIntegrityFlag(
 public object TestIntegrity {
     public const val UNCLASSIFIED: String = "unclassified-weakening-risk"
 
+    /** (a) a test function or test file deleted or renamed. */
+    public const val DELETED_TEST: String = "deleted-test"
+
+    /** (b) an assertion removed or loosened (`assert x == y` → `assert x`, a widened tolerance). */
+    public const val WEAKENED_ASSERTION: String = "weakened-assertion"
+
+    /** (c) a skip, xfail, only or disabled marker added. */
+    public const val SKIP_MARKER: String = "skip-marker"
+
+    /** (d) a snapshot or golden file changed. */
+    public const val SNAPSHOT_UPDATE: String = "snapshot-update"
+
+    /** (e) CI or check configuration changed: which checks run may differ. */
+    public const val CHECK_CONFIG: String = "check-config"
+
+    /** (f) an input named by an acceptance command changed. */
+    public const val ACCEPTANCE_COMMAND: String = "acceptance-command"
+
+    /** A test file change that only added lines and no marker: rendered, never blocking. */
+    public const val ADDITIONS_ONLY: String = "additions-only"
+
     /** File names that decide which checks run or how they are collected (§8.6 e). */
     @JvmField
     public val CHECK_DEFINITION_NAMES: Set<String> = Manifest.entries.map { it.fileName }.toSet() + setOf(
@@ -96,6 +122,71 @@ public object TestIntegrity {
             val surface = surfaceOf(path, contract) ?: return@mapNotNull null
             TestIntegrityFlag(path, surface, cause, requiredChecksFor(path, surface, checks))
         }
+
+    /**
+     * The §8.6 classifier (P3.4.2, heuristic and labelled as such): flags for every changed path on the acceptance
+     * surface, each with the kinds found by a line diff of [SurfaceChange.before] and [SurfaceChange.after] and
+     * the removed text as its original obligation. Deterministic: the same bytes always give the same kinds.
+     */
+    @JvmStatic
+    public fun classify(changes: Collection<SurfaceChange>, cause: String, contract: Contract, checks: Checks): List<TestIntegrityFlag> =
+        changes.distinctBy { normalize(it.path) }.mapNotNull { change ->
+            val path = normalize(change.path)
+            val surface = surfaceOf(path, contract) ?: return@mapNotNull null
+            val removed = multisetMinus(lines(change.before), lines(change.after))
+            val added = multisetMinus(lines(change.after), lines(change.before))
+            val kinds = kindsOf(path, surface, change, removed, added)
+            val original = removed.filter { it.isNotBlank() }.take(MAX_ORIGINAL_LINES).joinToString("\n").ifEmpty { null }
+            TestIntegrityFlag(path, surface, cause, requiredChecksFor(path, surface, checks), kinds.joinToString(","), originalObligation = original)
+        }
+
+    private fun kindsOf(path: String, surface: AcceptanceSurface, change: SurfaceChange, removed: List<String>, added: List<String>): List<String> {
+        when (surface) {
+            AcceptanceSurface.CiConfig, AcceptanceSurface.CheckDefinition -> return listOf(CHECK_CONFIG)
+            AcceptanceSurface.AcceptanceCommand -> return listOf(ACCEPTANCE_COMMAND)
+            AcceptanceSurface.TestFile -> Unit
+        }
+        if (change.before == null && change.after == null) return listOf(UNCLASSIFIED)
+        if (SNAPSHOT.containsMatchIn(path)) return listOf(SNAPSHOT_UPDATE)
+        if (change.after == null) return listOf(DELETED_TEST)
+        val kinds = ArrayList<String>()
+        if (change.before != null && (testNames(change.before) - testNames(change.after).toSet()).isNotEmpty()) kinds += DELETED_TEST
+        if (added.any { SKIP.containsMatchIn(it) }) kinds += SKIP_MARKER
+        if (weakened(removed, added)) kinds += WEAKENED_ASSERTION
+        return when {
+            kinds.isNotEmpty() -> kinds
+            removed.all { it.isBlank() } -> listOf(ADDITIONS_ONLY)
+            else -> listOf(UNCLASSIFIED)
+        }
+    }
+
+    /** Fewer assertions than before, a removed comparison, or a changed tolerance argument. */
+    private fun weakened(removed: List<String>, added: List<String>): Boolean {
+        val removedAsserts = removed.filter { ASSERTION.containsMatchIn(it) }
+        val addedAsserts = added.filter { ASSERTION.containsMatchIn(it) }
+        if (removedAsserts.isEmpty()) return false
+        if (addedAsserts.size < removedAsserts.size) return true
+        if (removedAsserts.sumOf { COMPARISON.findAll(it).count() } > addedAsserts.sumOf { COMPARISON.findAll(it).count() }) return true
+        return removedAsserts.any { TOLERANCE.containsMatchIn(it) } || addedAsserts.any { TOLERANCE.containsMatchIn(it) }
+    }
+
+    private fun testNames(text: String): List<String> = TEST_NAME.findAll(text).map { m -> m.groupValues.drop(1).first { it.isNotEmpty() } }.toList()
+
+    private fun lines(text: String?): List<String> = text?.lines()?.map { it.trimEnd() } ?: emptyList()
+
+    private fun multisetMinus(a: List<String>, b: List<String>): List<String> {
+        val left = b.groupingBy { it }.eachCount().toMutableMap()
+        return a.filter { line -> (left[line] ?: 0).let { n -> if (n > 0) { left[line] = n - 1; false } else true } }
+    }
+
+    private const val MAX_ORIGINAL_LINES = 40
+
+    private val SNAPSHOT = Regex("""(^|/)(__snapshots__|snapshots|golden|goldens|testdata/golden)/|\.snap$|\.approved\.|\.golden$""")
+    private val SKIP = Regex("""@pytest\.mark\.(skip|skipif|xfail)\b|pytest\.(skip|xfail)\(|@unittest\.skip|\bself\.skipTest\(|\b(it|test|describe)\.(skip|only|todo)\(|\b(xit|xdescribe|xtest|fit|fdescribe)\(|@(Disabled|Ignore)\b|@DisabledIf|\bt\.Skip\(|#\[ignore\]""")
+    private val ASSERTION = Regex("""\bassert\w*\b|\bexpect\(|\bassertThat\(|\bself\.assert\w+\(|\bshould\w*\b|\bt\.(Error|Fatal)f?\(|\brequire\.\w+\(""")
+    private val COMPARISON = Regex("""==|!=|<=|>=|\bis not\b|\bin\b|\.to(Be|Equal|StrictEqual|Match|Throw|Contain)\w*\(|assert(Equals|NotEquals|Same|Throws|True|False|Null|Contains)\w*\(|\bisEqualTo\(""")
+    private val TOLERANCE = Regex("""\bapprox\(|\b(rel|abs|rtol|atol|places|delta|tolerance|epsilon)\s*=|toBeCloseTo\(|assertAlmostEqual|isCloseTo\(|\bwithin\(|offset\(""")
+    private val TEST_NAME = Regex("""(?m)^\s*(?:async\s+)?def\s+(test\w*)\s*\(|\b(?:it|test)\s*\(\s*['"`]([^'"`]+)['"`]|@Test[^\n]*\n\s*(?:public\s+|internal\s+|private\s+)?(?:fun|void)\s+(`[^`]+`|\w+)|^\s*func\s+(Test\w+)\(|#\[test\]\s*\n\s*(?:pub\s+)?fn\s+(\w+)""")
 
     /** The surface [path] belongs to, or `null` when it is ordinary source. CI and check definitions outrank the test-file convention. */
     @JvmStatic
@@ -138,7 +229,7 @@ public object TestIntegrity {
             .flatMap { checks[it]?.acceptanceIds.orEmpty() }.distinct()
             .mapNotNull { contract.acceptance(it) }
         val obligations = acceptance.map { "${it.id} (${it.origin}, v${it.obligationVersion}): ${it.criterion}" } +
-            flags.mapNotNull { flag -> originals[flag.path]?.let { "original ${flag.path}: $it" } }
+            flags.mapNotNull { flag -> (originals[flag.path] ?: flag.originalObligation)?.let { "original ${flag.path}: $it" } }
         return ReviewRequest(
             id = id,
             contractRevision = contract.version,
@@ -183,3 +274,6 @@ public object TestIntegrity {
 
     private fun normalize(path: String): String = path.replace('\\', '/').removePrefix("./").trimEnd('/')
 }
+
+/** One changed path for [TestIntegrity.classify]: its text before and after (`null` = absent, or bytes not captured). */
+public data class SurfaceChange(val path: String, val before: String?, val after: String?)

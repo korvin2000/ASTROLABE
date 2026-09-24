@@ -37,6 +37,7 @@ import io.astrolabe.tool.TurnContext
 import io.astrolabe.verify.Checks
 import io.astrolabe.verify.ScopeGuard
 import io.astrolabe.verify.ScopeVerdict
+import io.astrolabe.verify.SurfaceChange
 import io.astrolabe.verify.TestIntegrity
 import io.astrolabe.verify.TestIntegrityFlag
 import io.astrolabe.workset.Entry
@@ -149,6 +150,11 @@ public class Edit(
 
     public var generation: Generation = Generation.INITIAL
 
+    private val flagsByAlias = java.util.concurrent.ConcurrentHashMap<String, List<TestIntegrityFlag>>()
+
+    /** The classified acceptance-surface flags of the edit with [alias] (§8.6), its `why` as the recorded reason. */
+    public fun flagsOf(alias: String): List<TestIntegrityFlag> = flagsByAlias[alias].orEmpty()
+
     /** Whether this cell was already warned for crossing the increment's write scope (§8.6: warning once). */
     private var warnedOutsideIncrement = false
 
@@ -217,7 +223,7 @@ public class Edit(
         } catch (refusal: Refusal) {
             return none.copy(error = refusal.error, touchedOutsideScope = outside)
         }
-        return apply(plans, contract, context, editId, alias, outside)
+        return apply(plans, contract, context, editId, alias, outside, args.why)
     }
 
     private fun revertPaths(op: EditOpArgs): List<String> {
@@ -334,7 +340,7 @@ public class Edit(
 
     // ----------------------------------------------------------------- apply
 
-    private fun apply(plans: List<Plan>, contract: Contract, context: TurnContext, editId: String, alias: String, outside: List<String>): EditResult {
+    private fun apply(plans: List<Plan>, contract: Contract, context: TurnContext, editId: String, alias: String, outside: List<String>, why: String): EditResult {
         val applied = ArrayList<AppliedOp>()
         val views = ArrayList<View>()
         val versions = LinkedHashMap<String, FileVersion?>()
@@ -457,9 +463,28 @@ public class Edit(
         }
         val syntaxResults = written.filter { (path, _) -> versions[path] != null }
             .mapValues { (path, resolved) -> syntax.check(path, resolved.real, Language.of(path)) }
-        val flags = TestIntegrity.baseline(applied.map { it.path }, cause, contract, checks)
+        val flags = TestIntegrity.classify(surfaceChanges(plans, applied), cause, contract, checks).map { it.copy(reason = why) }
+        flagsByAlias[alias] = flags
         for (view in views) show(view, alias, context.turn)
         return EditResult(error == null, editId, applied, views, versions, syntaxResults, diffstat, outside, flags, error)
+    }
+
+    /** Each applied path's text before and after, for the §8.6 classifier; an unknown before-text stays unknown. */
+    private fun surfaceChanges(plans: List<Plan>, applied: List<AppliedOp>): List<SurfaceChange> {
+        val oldBytes = HashMap<String, ByteArray>()
+        for (plan in plans) {
+            when (plan) {
+                is AnchoredPlan -> oldBytes[plan.path] = plan.oldBytes
+                is DeletePlan -> oldBytes[plan.path] = plan.oldBytes
+                is RenamePlan -> oldBytes[plan.path] = plan.oldBytes
+                else -> Unit
+            }
+        }
+        return applied.map { op ->
+            val before = oldBytes[op.path] ?: op.versionBefore?.let { v -> runCatching { blobs.get(v.digest) }.getOrNull() ?: return@map SurfaceChange(op.path, null, null) }
+            val after = op.versionAfter?.let { registry.read(op.path)?.bytes ?: return@map SurfaceChange(op.path, null, null) }
+            SurfaceChange(op.path, before?.toString(Charsets.UTF_8), after?.toString(Charsets.UTF_8))
+        }
     }
 
     private fun ioError(plan: Plan, failure: Exception, applied: List<AppliedOp>): EditError = EditError(
