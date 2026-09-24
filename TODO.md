@@ -1365,7 +1365,7 @@ Goal: [§18.2 Stage C](docs/implementation/roadmap.md#sec-18-2): scheduler with 
 - Log: 2026-09-20 — admission/model before code; implementation and author review complete; 20 impact tests, 500 seed-327 graph and 300 seed-3271 hunk oracles, atlas package green. Review regression RED then fixed for unknown packages. Next ABI/full build. [Protocol](audit/OUT-OF-ORDER-P3.2.7.md).
 - Log: 2026-09-20 — DONE after additive ABI and final full build: core 875/0 failures/errors/6 platform skips; eval 30/provider-api 15 reused. First-run FX-22 failure and isolated pass retained in protocol. API guide, D-63, producer mapping and handoffs synchronized; P3.2.1–P3.2.6 retain their original runtime gates.
 
-- [ ] **Gate P3.2:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+- [x] **Gate P3.2:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate). — [CI run 36054813717](https://github.com/korvin2000/ASTROLABE/actions/runs/36054813717) green on Ubuntu + Windows at `19dbba3` (P3.2.1–P3.2.6, 2026-09-24).
 
 ### P3.3 Scripted transform path
 #### P3.3.1 [M] `edit(transform)` with diff receipt · DONE
@@ -1381,7 +1381,7 @@ Goal: [§18.2 Stage C](docs/implementation/roadmap.md#sec-18-2): scheduler with 
 - Done: FX-40.
 - Log: 2026-09-24 — rejection and guarded inverse in `TransformRun.apply` (`tool/edit/Transform.kt`): out-of-scope writes, a match count outside `expected_matches`, a non-zero exit, the deadline or a lost observation reject the transform; the inverse rewrites each in-scope preimage (deletes a created file) only where the current bytes are still the transform's own postimage, announces the move back, and the receipt reports `restored | partial | unknown_outcome` with `restored`/`notRestored` per path; the result status is `rejected`. FX-40 in `TransformTest` (out-of-scope write ⇒ `partial` with the out-of-scope path named as not restorable; count miss ⇒ `restored`). Limits: no isolated candidate exists to discard (D-96); `unknown_outcome` is not exercised by a fixture (it needs a lost process observation); effects outside the workspace are never claimed undone.
 
-- [ ] **Gate P3.3:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+- [ ] **Gate P3.3:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate). — merged into the P3.8 / P3 phase gate (2 tasks).
 
 ### P3.4 Scope guard and test-integrity guard
 #### P3.4.1 [M] `ScopeGuard` · DONE
