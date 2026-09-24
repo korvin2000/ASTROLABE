@@ -157,6 +157,16 @@ public data class GateState @JvmOverloads constructor(
     val unresolvedImpactNudges: List<String> = emptyList(),
     val fired: Set<GateKey> = emptySet(),
     val defaults: Defaults = Defaults(),
+    /** Paths this turn's edits wrote inside the contract but outside the increment's write scope (§8.6). */
+    val outsideIncrement: List<String> = emptyList(),
+    /** Acceptance-surface flags raised this turn, with the classifier's kind (§8.6). */
+    val surfaceFlags: List<TestIntegrityFlag> = emptyList(),
+    /** Paths this turn's edits and runs moved. */
+    val editedPaths: Set<String> = emptySet(),
+    /** Active `CON` notes as `id@revision` → anchored paths; empty while no CON note exists (the gate stays inactive). */
+    val contractAnchors: Map<String, Set<String>> = emptyMap(),
+    /** Normalized failure signatures still red after two repairs (§5.6; fingerprints proper arrive with P4.6.2). */
+    val repeatedFailures: List<String> = emptyList(),
 ) {
     init {
         require(turn >= 1) { "turn is 1-based, got $turn" }
@@ -225,10 +235,61 @@ public class Gates(gates: List<Gate>) {
         public const val REGISTER: String = "register"
         public const val RESERVE: String = "reserve"
         public const val TURNS: String = "turns"
+        public const val CONTRACT_TOUCH: String = "contract-touch"
+        public const val REPEATED_FAILURE: String = "repeated-failure"
+        public const val SCOPE: String = "scope"
+        public const val ACCEPTANCE_SURFACE: String = "acceptance-surface"
 
-        /** The S0 set, in the order of the §5.6 table. */
+        /**
+         * The S0 set, in the order of the §5.6 table; contract touch, repeated failure, scope and acceptance surface
+         * are registered too (P3.4.3). Impact (P3.2.4) and judge-dependent gates are not.
+         */
         @JvmStatic
-        public fun s0(): Gates = Gates(listOf(Entry, Exit, Pressure, Stall, Loop, RegisterInvariants, StaleFact, Reserve, Turns))
+        public fun s0(): Gates = Gates(listOf(Entry, Exit, Pressure, Stall, Loop, RegisterInvariants, StaleFact, ContractTouch, RepeatedFailure, Scope, AcceptanceSurfaceGate, Reserve, Turns))
+    }
+
+    // §5.6 Contract touch: an edit set touches anchors of a CON note; active once any CON note exists.
+    private object ContractTouch : Gate {
+        override val name: String get() = CONTRACT_TOUCH
+
+        override fun evaluate(state: GateState): List<GateOutcome> = state.contractAnchors.mapNotNull { (note, anchors) ->
+            val touched = state.editedPaths.filter { it in anchors }.sorted()
+            if (touched.isEmpty()) return@mapNotNull null
+            GateOutcome.Nudge(GateKey(name, note), "contract $note touched (${touched.joinToString(", ")}): an ADR in the main line is required before this lands")
+        }
+    }
+
+    // §5.6 Repeated failure signature: the same normalized error after 2 repairs.
+    private object RepeatedFailure : Gate {
+        override val name: String get() = REPEATED_FAILURE
+
+        override fun evaluate(state: GateState): List<GateOutcome> = state.repeatedFailures.map { signature ->
+            GateOutcome.Nudge(GateKey(name, signature), "same failure twice ($signature): change the hypothesis, record a dead end, or request an alternative attempt")
+        }
+    }
+
+    // §5.6 Scope: outside the increment, inside the contract — warned once; the edit tool refuses an unjustified repeat (D-74).
+    private object Scope : Gate {
+        override val name: String get() = SCOPE
+
+        override fun evaluate(state: GateState): List<GateOutcome> {
+            if (state.outsideIncrement.isEmpty()) return emptyList()
+            return listOf(
+                GateOutcome.Nudge(
+                    GateKey(name, "outside-increment"),
+                    "scope: ${state.outsideIncrement.sorted().joinToString(", ")} outside the increment's write scope — the next crossing needs task.propose(increment_split) or the path justified in why",
+                ),
+            )
+        }
+    }
+
+    // §5.6 Acceptance surface: a flagged line with the classifier's kind; justified in the packet; review when it weakens a required check.
+    private object AcceptanceSurfaceGate : Gate {
+        override val name: String get() = ACCEPTANCE_SURFACE
+
+        override fun evaluate(state: GateState): List<GateOutcome> = state.surfaceFlags.filter { it.blocksCompletion }.map { flag ->
+            GateOutcome.Nudge(GateKey(name, "${flag.path}:${flag.kind}"), "acceptance surface: ${flag.path} · ${flag.kind} — justify it in the packet; a weakened required check needs review")
+        }
     }
 
     // §5.6 Entry: first non-register edit while no plan step carries an `accept:` or the increment's acceptance is unresolved.

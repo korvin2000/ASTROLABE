@@ -38,8 +38,11 @@ import io.astrolabe.tool.LookArgs
 import io.astrolabe.tool.ToolCall
 import io.astrolabe.tool.ToolFamily
 import io.astrolabe.tool.ToolOutcome
+import io.astrolabe.verify.AcceptanceSurface
 import io.astrolabe.verify.Applicability
 import io.astrolabe.verify.Currency
+import io.astrolabe.verify.TestIntegrity
+import io.astrolabe.verify.TestIntegrityFlag
 import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -266,5 +269,31 @@ class GatesTest {
             override fun evaluate(state: GateState) = listOf(GateOutcome.Nudge(GateKey("stall", "x"), "not mine"))
         }
         assertTrue(runCatching { gates.with(liar).evaluate(state(2)) }.isFailure, "a gate may only fire under its own name")
+    }
+
+    @Test
+    fun `contract touch, repeated failure, scope and acceptance surface gates each fire once per condition`() {
+        val flag = TestIntegrityFlag("tests/test_a.py", AcceptanceSurface.TestFile, "edit #2", listOf("CHK-accept-AC-1"), TestIntegrity.WEAKENED_ASSERTION)
+        val added = flag.copy(path = "tests/test_b.py", kind = TestIntegrity.ADDITIONS_ONLY)
+        val busy = state(turn = 2).copy(
+            editedPaths = setOf("src/api.py", "src/a.py"),
+            contractAnchors = mapOf("CON-payments-api" to setOf("src/api.py"), "CON-other" to setOf("src/other.py")),
+            repeatedFailures = listOf("CHK-types-touched: src/a.py:#:#: error: bad"),
+            outsideIncrement = listOf("tests/test_a.py"),
+            surfaceFlags = listOf(flag, added),
+        )
+        val (first, second) = turns(busy, busy.copy(turn = 3, lastProgressTurn = 2))
+        val lines = first.outcomes.map { it.key.gate to it.line }
+        assertEquals(
+            listOf(
+                Gates.CONTRACT_TOUCH to "contract CON-payments-api touched (src/api.py): an ADR in the main line is required before this lands",
+                Gates.REPEATED_FAILURE to "same failure twice (CHK-types-touched: src/a.py:#:#: error: bad): change the hypothesis, record a dead end, or request an alternative attempt",
+                Gates.SCOPE to "scope: tests/test_a.py outside the increment's write scope — the next crossing needs task.propose(increment_split) or the path justified in why",
+                Gates.ACCEPTANCE_SURFACE to "acceptance surface: tests/test_a.py · weakened-assertion — justify it in the packet; a weakened required check needs review",
+            ),
+            lines.filter { it.first in setOf(Gates.CONTRACT_TOUCH, Gates.REPEATED_FAILURE, Gates.SCOPE, Gates.ACCEPTANCE_SURFACE) },
+        )
+        assertTrue(second.outcomes.none { it.key.gate in setOf(Gates.CONTRACT_TOUCH, Gates.REPEATED_FAILURE, Gates.SCOPE, Gates.ACCEPTANCE_SURFACE) }, "once per condition")
+        assertTrue(gates.evaluate(state()).outcomes.none { it.key.gate == Gates.CONTRACT_TOUCH }, "no CON note, no contract-touch gate")
     }
 }

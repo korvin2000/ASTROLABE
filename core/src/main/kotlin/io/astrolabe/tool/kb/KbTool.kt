@@ -30,6 +30,9 @@ public class KbTool(
     private val mask: ToolMask = ToolOps.implementingS0,
     private val maxHits: Int = 20,
 ) : ToolExecutor {
+    /** The `CON` anchors the contract-touch gate reads (§5.6). */
+    public fun contractAnchors(): Map<String, Set<String>> = kb.contractAnchors()
+
     init {
         require(maxHits > 0) { "maxHits must be positive" }
     }

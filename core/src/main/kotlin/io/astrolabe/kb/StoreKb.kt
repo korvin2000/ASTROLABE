@@ -22,6 +22,10 @@ public class StoreKb @JvmOverloads constructor(
 ) : Kb {
     private val notes = Notes(store)
 
+    override fun contractAnchors(): Map<String, Set<String>> =
+        notes.all().filter { it.kind == NoteKind.CON && (it.status == NoteStatus.Admitted || it.status == NoteStatus.Stale) }
+            .associate { note -> note.id to note.anchors.map { it.path }.toSet() }
+
     override fun search(query: String, kinds: Set<String>?, scope: String?, why: String): KbHits {
         val tokens = TOKEN.findAll(query.lowercase()).map { it.value }.distinct().toList()
         var degradation: String? = null

@@ -67,6 +67,7 @@ import io.astrolabe.tool.ToolOutcome
 import io.astrolabe.tool.ToolSchemas
 import io.astrolabe.tool.TurnResult
 import io.astrolabe.tool.run.announceMoved
+import io.astrolabe.tool.kb.KbTool
 import io.astrolabe.tool.state.BlockedRequest
 import io.astrolabe.verify.Applicability
 import io.astrolabe.verify.Check
@@ -188,6 +189,10 @@ public class Cell @JvmOverloads constructor(
         private val displayed = LinkedHashMap<Pair<String, FileVersion>, Ranges>()
         private val origins = LinkedHashMap<String, ChangeOrigin>()
         private val gaps = ArrayList<String>()
+
+        /** Red check signatures of the previous turn, and how many repairs (turns with edits) each has survived (§5.6). */
+        private var redSeen: Set<String> = emptySet()
+        private val repairs = HashMap<String, Int>()
 
         /** `not_tested` (§8.2): what a layer could not test, and the required checks without a certifying receipt. */
         private val notTested = LinkedHashSet<String>()
@@ -401,6 +406,8 @@ public class Cell @JvmOverloads constructor(
             val certifiedAfter = certified(currenciesNow)
             if (Progress.events(registerBefore, register, turn, certifiedBefore, certifiedAfter).isNotEmpty()) lastProgressTurn = turn
             val unresolved = TestIntegrity.unresolved(flags.values.toList())
+            val repeated = repeatedFailures(currenciesNow, repaired = calls.any { it.family == ToolFamily.Edit })
+            val editedByEdit = editedPaths.filter { origins[it] == ChangeOrigin.Edit }
             val state = GateState(
                 turn = turn, register = register, contract = contract, increment = increment, calls = calls, signatures = signatures.toList(),
                 patchRejection = if (calls.any { it.family == ToolFamily.State && it.op == "patch" }) tools.state.lastRejection else null,
@@ -408,6 +415,9 @@ public class Cell @JvmOverloads constructor(
                 contextTokens = current.totalTokens, contextMaxTokens = capabilities.contextLimitTokens.toLong(), rebuilds = rebuilds,
                 reserve = budget.verdict(outstanding(currenciesNow)), turnsMax = budget.turns, completionProposed = proposal,
                 currencies = currenciesNow, flags = unresolved, fired = fired, defaults = defaults,
+                outsideIncrement = editedByEdit.filter { p -> contract.scope.covers(p) && increment.writeScope.none { PathPattern.matches(it, p) } },
+                surfaceFlags = flags.values.filter { it.path in editedPaths }, editedPaths = editedPaths.toSet(),
+                contractAnchors = (tools.kb as? KbTool)?.contractAnchors().orEmpty(), repeatedFailures = repeated,
             )
             val report = gates.evaluate(state)
             fired = report.fired
@@ -831,6 +841,23 @@ public class Cell @JvmOverloads constructor(
             return BlockedRequest("required check unavailable — $blockers (install or configure the runner, or amend the acceptance)", stuck.map { it.receiptId }, null, turn)
         }
 
+        /**
+         * §5.6 repeated failure signature: a red check's normalized first error line (digits folded, whitespace
+         * collapsed) or its failure counts; a signature still red after two turns with edits is returned.
+         */
+        private fun repeatedFailures(currencies: Map<String, Currency>, repaired: Boolean): List<String> {
+            val latest = ws.checker?.latest().orEmpty().associateBy { it.checkId }
+            val red = currencies.filter { it.value.red }.map { (id, currency) ->
+                val line = latest[id]?.errorLines?.firstOrNull()?.replace(DIGITS, "#")?.replace(SPACES, " ")?.trim()?.take(SIGNATURE_CHARS)
+                val counts = currency.receiptId?.let { ev.receipts.get(it)?.parsed }?.let { "${it.failed} failed ${it.errors} errors" }
+                "$id: ${line ?: counts ?: "red"}"
+            }.toSet()
+            if (repaired) red.filter { it in redSeen }.forEach { repairs.merge(it, 1, Int::plus) }
+            repairs.keys.retainAll(red)
+            redSeen = red
+            return red.filter { (repairs[it] ?: 0) >= 2 }.sorted()
+        }
+
         /** The `[>]` step this turn's patch left (ticked or moved past), when it moved. */
         private fun stepLeft(before: Register, after: Register): Step? =
             before.plan.firstOrNull { it.mark == Mark.Cursor }?.takeIf { after.step(it.n)?.mark != Mark.Cursor }
@@ -957,6 +984,9 @@ public class Cell @JvmOverloads constructor(
 
         /** §5.1 `[A]`: at most two nudge lines per turn. */
         const val MAX_NUDGES = 2
+        const val SIGNATURE_CHARS = 120
+        val DIGITS = Regex("\\d+")
+        val SPACES = Regex("\\s+")
 
         /** How many of a rejection's details ride on its line. */
         const val DETAILS_IN_LINE = 2

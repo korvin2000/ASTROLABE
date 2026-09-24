@@ -39,6 +39,9 @@ public interface Kb {
     public fun get(id: String): KbEntry?
 
     public fun skill(id: String): KbEntry?
+
+    /** Admitted or stale `CON` notes by id → their anchored paths (§5.6 contract-touch gate); none by default. */
+    public fun contractAnchors(): Map<String, Set<String>> = emptyMap()
 }
 
 /**
