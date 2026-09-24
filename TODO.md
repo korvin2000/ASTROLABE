@@ -1370,7 +1370,7 @@ Goal: [§18.2 Stage C](docs/implementation/roadmap.md#sec-18-2): scheduler with 
 - Done: gate table of [§5.6](docs/runtime/gates-termination.md#sec-5-6) fully populated except judge-dependent ones.
 - Log: 2026-09-24 — `Gates.s0()` now registers `contract-touch` (`GateState.contractAnchors` from `Kb.contractAnchors()` — admitted/stale `CON` notes → anchor paths, `StoreKb` implements, `KbTool.contractAnchors()`; inactive while none exist), `repeated-failure` (cell: a red check's normalized first error line or failure counts still red after two turns with edits; P4.6.2 owns real fingerprints), `scope` (edit-origin paths inside the contract, outside the increment; enforcement stays in `Edit`, D-74) and `acceptance-surface` (this turn's blocking flags with the classifier kind), each once per condition. Impact stays with **P3.2.4**. Test: `GatesTest` (four gates, once per condition, no CON ⇒ inactive).
 
-- [ ] **Gate P3.4:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+- [x] **Gate P3.4:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate). — [CI run 36019777002](https://github.com/korvin2000/ASTROLABE/actions/runs/36019777002) green on Ubuntu + Windows at `4dbe4ed` (P3.4.1–P3.4.3, 2026-09-24).
 
 ### P3.5 Refactor mode
 #### P3.5.1 [M] Activation, behaviour snapshot, `red_ok_until` · TODO
