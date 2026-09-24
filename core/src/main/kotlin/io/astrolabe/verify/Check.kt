@@ -221,8 +221,12 @@ public class Checks private constructor(private val checks: LinkedHashMap<String
 
     public companion object {
         public const val TYPES_TOUCHED: String = "CHK-types-touched"
+        public const val TESTS_BLAST: String = "CHK-tests-blast"
         public const val LINT: String = "CHK-lint"
         public const val FULL: String = "CHK-full"
+        public const val REVIEW_INCREMENT: String = "CHK-review-inc"
+        public const val REVIEW_CAMPAIGN: String = "CHK-review-campaign"
+        public const val QUALITY_GATE: String = "CHK-quality-gate"
 
         public fun acceptId(acceptanceId: String): String = "CHK-accept-$acceptanceId"
 

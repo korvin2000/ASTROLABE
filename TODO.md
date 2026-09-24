@@ -1250,11 +1250,12 @@ Goal: [§18.2 Stage C](docs/implementation/roadmap.md#sec-18-2): scheduler with 
 **Fixtures:** FX-07 (full closure invalidation), 12, 13, 14, 16, 17, 37, 40, 44, 52, 54; IX-03 (Stage C migration with human review), IX-04 (isolated candidate), IX-23 (unknown impact) · **Unsupported until later:** review cells (P4), CON notes from the curator (P4.1; P3 reads whatever CON notes exist), tier-1/2 index (P5.4), async checkers (P5.7), a real jail for transforms (P7 confined backends; until then D-41 applies and the residual risk is recorded in transform receipts).
 
 ### P3.1 Scheduler (full)
-#### P3.1.1 [M] Check definitions with closures and manifests · TODO
+#### P3.1.1 [M] Check definitions with closures and manifests · DONE
 - Why: [§8.1](docs/verification/scheduler.md#sec-8-1) `input_closure`, `definition_version`, `closure_manifest`, cost classes, triggers.
 - Pkg: `verify`
 - Build: `Closure { Known(paths), Package(p), Unknown }` + `ClosureManifest(pathsAtVersions, directoryMembership, configAndLockfiles, fixtures, completeness, exclusions)`; triggers `every_edit | end_of_turn | step_boundary | risk>θ | increment_end | campaign_end | on_demand`; cost classes `inline | fast | slow | expensive`; registry rows `CHK-types-touched, CHK-tests-blast, CHK-accept-<AC>, CHK-full, CHK-review-inc, CHK-review-campaign, CHK-lint, CHK-quality-gate`.
 - Done: closure computed for blast-selected checks from the impact engine (P3.2); package/glob closures include membership.
+- Log: 2026-09-24 — `Closure`, `CostClass`, `Trigger`, `Check.definitionVersion` already existed (P1.7); added `verify/Closures.kt`: `ClosureManifest.of(closure, tree, versionOf, fixtures, excluded)` (paths@raw-byte versions, package membership, tree lockfiles, fixtures, `Complete|Partial|Unknown`, named exclusions, length-prefixed canonical `digest`) and `Closures.blast(ImpactAnalysis, packagePath)` (exact `known` over the selected checks' test files + closures only when blast and every selected closure are complete in one workspace; else the single package scope the caller maps, else `unknown` — no guessed package, D-63); registry ids `CHK-tests-blast`, `CHK-review-inc`, `CHK-review-campaign`, `CHK-quality-gate`. `ClosuresTest` (4). Manifests are not yet attached to receipts: **P3.1.2** (reuse proofs) owns that.
 
 #### P3.1.2 [M] Validity, applicability, reuse proofs · TODO
 - Why: [§8.1 validity](docs/verification/scheduler.md#sec-8-1), [§8.4](docs/verification/scheduler.md#sec-8-4); F04 (intersection, not subset); D5 in [§20.2](docs/reference/decisions.md#sec-20-2).
