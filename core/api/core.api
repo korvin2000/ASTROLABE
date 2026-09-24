@@ -110,6 +110,9 @@ public final class io/astrolabe/Config {
 	public final fun role (Ljava/lang/String;)Lio/astrolabe/cell/Role;
 	public fun toString ()Ljava/lang/String;
 	public final fun violations ()Ljava/util/List;
+	public final fun withFlags (Lio/astrolabe/Flags;)Lio/astrolabe/Config;
+	public final fun withProfiles (Ljava/util/Map;)Lio/astrolabe/Config;
+	public final fun withStateRoot (Ljava/lang/String;)Lio/astrolabe/Config;
 }
 
 public final synthetic class io/astrolabe/Config$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
@@ -3257,6 +3260,19 @@ public final class io/astrolabe/campaign/Transition$Interrupted : io/astrolabe/c
 	public final fun copy (Lio/astrolabe/cell/CellCheckpoint;)Lio/astrolabe/campaign/Transition$Interrupted;
 	public static synthetic fun copy$default (Lio/astrolabe/campaign/Transition$Interrupted;Lio/astrolabe/cell/CellCheckpoint;ILjava/lang/Object;)Lio/astrolabe/campaign/Transition$Interrupted;
 	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCheckpoint ()Lio/astrolabe/cell/CellCheckpoint;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/campaign/Transition$Lost : io/astrolabe/campaign/Transition {
+	public fun <init> (Lio/astrolabe/id/ContextId;Lio/astrolabe/cell/CellCheckpoint;)V
+	public final fun component1 ()Lio/astrolabe/id/ContextId;
+	public final fun component2 ()Lio/astrolabe/cell/CellCheckpoint;
+	public final fun copy (Lio/astrolabe/id/ContextId;Lio/astrolabe/cell/CellCheckpoint;)Lio/astrolabe/campaign/Transition$Lost;
+	public static synthetic fun copy$default (Lio/astrolabe/campaign/Transition$Lost;Lio/astrolabe/id/ContextId;Lio/astrolabe/cell/CellCheckpoint;ILjava/lang/Object;)Lio/astrolabe/campaign/Transition$Lost;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCell ()Lio/astrolabe/id/ContextId;
 	public final fun getCheckpoint ()Lio/astrolabe/cell/CellCheckpoint;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;

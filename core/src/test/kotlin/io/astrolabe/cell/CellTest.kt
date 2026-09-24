@@ -376,6 +376,9 @@ class CellTest {
             val latest = assertNotNull(f.checkpoints.latest(f.ids.context!!))
             assertEquals(CellStatus.Cancelled, latest.status)
             assertEquals(1, latest.turn)
+            // The bus delivers on its own dispatcher: wait for the event rather than race it.
+            val deadline = System.nanoTime() + 5_000_000_000L
+            while (f.recorder.ofType<AgentEvent.Cell.Ended>().isEmpty() && System.nanoTime() < deadline) Thread.sleep(5)
             assertEquals("cancelled", f.recorder.ofType<AgentEvent.Cell.Ended>().single().status)
         }
     }
