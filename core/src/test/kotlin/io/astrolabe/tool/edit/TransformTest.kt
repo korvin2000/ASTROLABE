@@ -211,6 +211,51 @@ class TransformTest {
     }
 
     @Test
+    fun `an out-of-scope write rejects the transform with a guarded inverse and an honest partial effect (FX-40)`() = runTest {
+        val before = versions()
+        val readme = registry.version("docs/readme.md")!!
+        val editor = edit()
+        val out = run(transform(renameArgv(if (windows) "; Add-Content docs/readme.md x" else "; echo x >> docs/readme.md")), editor)
+        assertFalse(out.applied, out.body)
+        assertEquals("rejected", out.header!!.runtime.status)
+        val receipt = editor.transforms.single()
+        assertFalse(receipt.accepted)
+        assertEquals(listOf("docs/readme.md"), receipt.touchedOutsideScope)
+        assertEquals(40, receipt.filesChanged)
+        assertTrue(receipt.rejection!!.startsWith("touched outside scope_glob src/**/*.py: docs/readme.md"), receipt.rejection)
+        assertEquals(TransformEffect.Partial, receipt.effect)
+        assertEquals(files, receipt.restored)
+        assertEquals(listOf("docs/readme.md: outside scope_glob, no preimage recorded"), receipt.notRestored)
+        // In-scope files are back at their preimages; the out-of-scope effect stands and is reported, never claimed undone.
+        assertEquals(before, versions())
+        assertContentEquals(module(7).toByteArray(), Files.readAllBytes(repo.root.resolve("src/m07.py")))
+        assertTrue(registry.version("docs/readme.md") != readme)
+        assertTrue(out.body.contains("rejected: touched outside scope_glob") && out.body.contains("effect: partial · restored 40 · not restored: docs/readme.md: outside scope_glob"), out.body)
+        assertTrue(out.body.contains("no unit rollback and no undo of external effects is claimed"), out.body)
+        assertEquals(41, out.header!!.runtime.effectsObserved.size, "every path that moved is an observed effect, restored or not")
+        assertTrue(workset.entries.none { it.source == EntrySource.Transform }, "a rejected transform registers nothing as touched")
+    }
+
+    @Test
+    fun `a match count outside expected_matches rejects the transform and restores every file (FX-40)`() = runTest {
+        val before = versions()
+        val editor = edit()
+        val out = run(transform(renameArgv(), expected = """{"min":50,"max":60}"""), editor)
+        assertFalse(out.applied, out.body)
+        val receipt = editor.transforms.single()
+        assertFalse(receipt.accepted)
+        assertEquals(40, receipt.matchCount)
+        assertEquals("match count 40 outside expected 50–60", receipt.rejection)
+        assertEquals(TransformEffect.Restored, receipt.effect)
+        assertEquals(40, receipt.restored.size)
+        assertEquals(emptyList(), receipt.notRestored)
+        assertEquals(before, versions())
+        assertTrue(out.body.contains("effect: restored · restored 40"), out.body)
+        // The receipt still carries the counts and the diff, so the retry can fix the policy rather than re-run blind.
+        assertTrue(out.body.contains("match_count 40 (expected 50–60)"), out.body)
+    }
+
+    @Test
     fun `an inventory is compared, not assumed, and a transform is its own batch`() = runTest {
         val editor = edit()
         val out = run(transform(renameArgv(), inventory = """["src/m01.py","src/m02.py"]"""), editor)
