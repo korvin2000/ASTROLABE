@@ -1422,7 +1422,7 @@ Goal: [§18.2 Stage C](docs/implementation/roadmap.md#sec-18-2): scheduler with 
 - Done: FX-44; no stale seed ever served (invariant test).
 - Log: 2026-09-24 — worktree agent, reviewed and merged, behind `Flags.precompile` (off ⇒ unchanged): `context/Precompile.kt` (`Fingerprint.of(…)`/`digest`/`differences`, `Precompile.start/take/discard`, `PrecompileTrigger`), `telemetry/PrecompileMetrics.kt` (hit/miss, p50/p95), `Controller(precompiles)` takes a precompiled `[K]` at the next boundary iff the fingerprint and coverage match, else discards + recompiles (journaled); `Cell` calls the trigger at the completion proposal; `RequirementGraph.peekNext`, `Compiler.coverage(…, k)`, `CellMetrics.of(…, precompilationHit)`. D-83–D-86. Tests: `PrecompileTest` (6), `PrecompileCampaignTest` (4: FX-44 hit, stamp-moved miss, flag off, on/off identical manifests), `PrecompileMetricsTest` (4). Provider pre-warm not implemented (off-by-default option, P7); manifests do not record the fingerprint (journal does).
 
-- [ ] **Gate P3.7:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+- [x] **Gate P3.7:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate). — [CI run 36031110215](https://github.com/korvin2000/ASTROLABE/actions/runs/36031110215) green on Ubuntu + Windows at `d161251` (P3.7.1, 2026-09-24).
 
 ### P3.8 Stage C validation
 #### P3.8.1 [V] Fixtures · TODO

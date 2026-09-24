@@ -52,7 +52,7 @@ Schema **v4**. `packets` also holds `behaviour-snapshot`/`campaign-review` rows;
 | P3.4 | 36019777002 |
 | P3.6 | 36023934566 |
 | P3.5 | 36026485370 |
-- The session-end run (P3.7.1 + handoff) is recorded in TODO's P3.7 gate line.
+- P3.7 (session end, with the handoff): 36031110215.
 - Local (Linux sandbox, JDK 25): the full build runs about 1130 tests; only the 2 known environmental failures fail.
 
 ## Recorded deviations

@@ -4,8 +4,8 @@ Rewritten every session (≤40 lines). Workflow: `CLAUDE.md` § Workflow. State 
 History: `audit/SESSION-HISTORY.md` (never read at startup).
 
 **Checkpoint:** branch `claude/dreamy-fermi-tkxyry`, merged into `main` at the session end. **133/185 DONE.**
-P3 is 15/25: P3.1, P3.4, P3.5, P3.6 and P3.7 are complete; the P3.1/P3.4/P3.5/P3.6 gates are green on both platforms.
-The P3.7 gate rides the session-end CI run. Start the next session from `main`.
+P3 is 15/25: P3.1, P3.4, P3.5, P3.6 and P3.7 are complete, all five gates green on both platforms (last: P3.7,
+CI 36031110215 via korvin2000/ASTROLABE#7). Start the next session from `main`.
 
 ## Next block: P3.2 impact engine, then P3.3 transforms, then P3.8 Stage C validation
 1. **P3.2.1** `ImportGraph` and `tests_for`. It was delegated this session, but the worktree agent was lost in a container
