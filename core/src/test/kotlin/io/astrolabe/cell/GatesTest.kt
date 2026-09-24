@@ -24,6 +24,7 @@ import io.astrolabe.id.Digest
 import io.astrolabe.id.FileVersion
 import io.astrolabe.id.WorkId
 import io.astrolabe.register.DeadEnd
+import io.astrolabe.register.Decision
 import io.astrolabe.register.Fact
 import io.astrolabe.register.Mark
 import io.astrolabe.register.Register
@@ -134,6 +135,17 @@ class GatesTest {
         assertEquals(listOf(0, 1, 0, 0, 0, 1), reports.map { it.nudges.count { n -> n.key.gate == Gates.STALL } })
         assertEquals("stall: 3 turns without progress — re-read the plan · zoom out · run the pending decision probe · surface the blocker · or request a probe cell", reports[1].nudges.single().line)
         assertEquals(1, gates.evaluate(state(3).copy(lastProgressTurn = 0)).nudges.size, "no progress since cell start counts from turn 0")
+    }
+
+    @Test
+    fun `a stall suggests the latest decision probe by name`() {
+        val decisions = listOf(
+            Decision(1, "parse eagerly", "one pass", "lazy parse", probe = "pytest -k eager"),
+            Decision(2, "keep the cache", "cheap", null, probe = "pytest -k cache", adrCandidate = true),
+            Decision(3, "rename helper", "clarity", null),
+        )
+        val line = gates.evaluate(state(4, register.copy(decisions = decisions)).copy(lastProgressTurn = 1)).nudges.single().line
+        assertTrue(line.contains("run the pending decision probe (decision 2: pytest -k cache) · surface the blocker"), line)
     }
 
     @Test

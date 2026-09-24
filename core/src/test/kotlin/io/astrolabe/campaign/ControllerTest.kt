@@ -64,6 +64,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -253,6 +254,29 @@ class ControllerTest {
             assertTrue("\"costPerAcceptedTask\"" in Files.readString(files[1]))
         }
         open().use { c -> assertTrue(c.reconciliation.external.isEmpty(), "the cell's own edit is snapshotted, not external at reopen") }
+    }
+
+    @Test
+    fun `decision packets reach the finish receipt as ADR candidates and private reasoning does not`() = runTest {
+        seedContract()
+        open().use { c ->
+            val v = c.registry.version("src/a.py")!!
+            val decisions = """[{"decision.add":{"text":"return a constant","because":"the contract names 10","rejected":"read it from config","probe":"grep -n CONFIG src","adrCandidate":true}},""" +
+                """{"decision.add":{"text":"keep the name a","because":"callers use it","rejected":null}},{"next":"edit a"}]"""
+            val run = controller().runS0(c, model(
+                Scripted.Reply(listOf(say("private musing: maybe the config loader is haunted"), read("c1", "src/a.py"), call("c2", "state", """{"op":"patch","patch":$decisions}"""))),
+                Scripted.Reply(listOf(say("editing"), anchored("c3", "src/a.py", v, "    return 1", "    return 10"))),
+                Scripted.Reply(listOf(say("verifying"), call("c4", "verify", """{"what":"acceptance","ids":["AC-1"]}"""))),
+                Scripted.Reply(listOf(say("done: a returns 10"))),
+            ))
+            assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+            val finish = assertNotNull(run.finish)
+            assertEquals(listOf("return a constant because the contract names 10; rejected: read it from config; probe: grep -n CONFIG src"), finish.adrCandidates)
+            assertEquals(2, finish.decisions.size)
+            val exported = Files.readString(c.store.layout.exports.resolve(request.work.value).resolve("finish-receipt.json"))
+            assertTrue("return a constant" in exported)
+            assertFalse("haunted" in exported, "the model's private text is never serialized into the receipt")
+        }
     }
 
     @Test

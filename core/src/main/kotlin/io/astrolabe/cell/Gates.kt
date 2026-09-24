@@ -286,10 +286,12 @@ public class Gates(gates: List<Gate>) {
         override fun evaluate(state: GateState): List<GateOutcome> {
             val idle = state.turn - state.lastProgressTurn
             if (state.liveRunOutput || idle < state.defaults.stallTurns) return emptyList()
+            // §4.2 decision packets: the latest decision that names a cheap falsifying check is suggested by name.
+            val probe = state.register.decisions.lastOrNull { !it.probe.isNullOrBlank() }?.let { " (decision ${it.n}: ${it.probe})" }.orEmpty()
             return listOf(
                 GateOutcome.Nudge(
                     GateKey(name, "since-${state.lastProgressTurn}"),
-                    "stall: $idle turns without progress — re-read the plan · zoom out · run the pending decision probe · surface the blocker · or request a probe cell",
+                    "stall: $idle turns without progress — re-read the plan · zoom out · run the pending decision probe$probe · surface the blocker · or request a probe cell",
                 ),
             )
         }
