@@ -5585,20 +5585,28 @@ public final class io/astrolabe/cell/Transcript {
 }
 
 public final class io/astrolabe/cell/TransformRecord {
-	public fun <init> (Lio/astrolabe/id/Digest;ILjava/lang/String;Z)V
+	public static final field Companion Lio/astrolabe/cell/TransformRecord$Companion;
+	public fun <init> (Lio/astrolabe/id/Digest;ILjava/lang/String;Lio/astrolabe/tool/edit/InventoryVerdict;Z)V
 	public final fun component1 ()Lio/astrolabe/id/Digest;
 	public final fun component2 ()I
 	public final fun component3 ()Ljava/lang/String;
-	public final fun component4 ()Z
-	public final fun copy (Lio/astrolabe/id/Digest;ILjava/lang/String;Z)Lio/astrolabe/cell/TransformRecord;
-	public static synthetic fun copy$default (Lio/astrolabe/cell/TransformRecord;Lio/astrolabe/id/Digest;ILjava/lang/String;ZILjava/lang/Object;)Lio/astrolabe/cell/TransformRecord;
+	public final fun component4 ()Lio/astrolabe/tool/edit/InventoryVerdict;
+	public final fun component5 ()Z
+	public final fun copy (Lio/astrolabe/id/Digest;ILjava/lang/String;Lio/astrolabe/tool/edit/InventoryVerdict;Z)Lio/astrolabe/cell/TransformRecord;
+	public static synthetic fun copy$default (Lio/astrolabe/cell/TransformRecord;Lio/astrolabe/id/Digest;ILjava/lang/String;Lio/astrolabe/tool/edit/InventoryVerdict;ZILjava/lang/Object;)Lio/astrolabe/cell/TransformRecord;
 	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAccepted ()Z
 	public final fun getDiffRef ()Ljava/lang/String;
 	public final fun getFiles ()I
-	public final fun getInventoryOk ()Z
+	public final fun getInventoryOk ()Lio/astrolabe/tool/edit/InventoryVerdict;
 	public final fun getScriptHash ()Lio/astrolabe/id/Digest;
 	public fun hashCode ()I
+	public static final fun of (Lio/astrolabe/tool/edit/TransformReceipt;)Lio/astrolabe/cell/TransformRecord;
 	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/cell/TransformRecord$Companion {
+	public final fun of (Lio/astrolabe/tool/edit/TransformReceipt;)Lio/astrolabe/cell/TransformRecord;
 }
 
 public final class io/astrolabe/cell/Waiting {
@@ -16637,12 +16645,13 @@ public final class io/astrolabe/tool/edit/DiffStat {
 }
 
 public final class io/astrolabe/tool/edit/Edit : io/astrolabe/tool/ToolExecutor {
-	public fun <init> (Lio/astrolabe/workspace/Workspace;Lio/astrolabe/workspace/VersionRegistry;Lio/astrolabe/workset/Workset;Lio/astrolabe/os/Os;Lio/astrolabe/workspace/Preimages;Lio/astrolabe/verify/ScopeGuard;Lio/astrolabe/contract/Contracts;Lio/astrolabe/verify/Checks;Lio/astrolabe/evidence/Observations;Lio/astrolabe/evidence/Aliases;Lio/astrolabe/store/BlobStore;Lio/astrolabe/auth/Redaction;Lio/astrolabe/provider/TokenEstimator;Lio/astrolabe/id/IdGen;Lio/astrolabe/id/Identities;Lio/astrolabe/tool/edit/SyntaxCheck;Lio/astrolabe/workspace/ShadowRef;Lio/astrolabe/provider/ToolMask;I)V
-	public synthetic fun <init> (Lio/astrolabe/workspace/Workspace;Lio/astrolabe/workspace/VersionRegistry;Lio/astrolabe/workset/Workset;Lio/astrolabe/os/Os;Lio/astrolabe/workspace/Preimages;Lio/astrolabe/verify/ScopeGuard;Lio/astrolabe/contract/Contracts;Lio/astrolabe/verify/Checks;Lio/astrolabe/evidence/Observations;Lio/astrolabe/evidence/Aliases;Lio/astrolabe/store/BlobStore;Lio/astrolabe/auth/Redaction;Lio/astrolabe/provider/TokenEstimator;Lio/astrolabe/id/IdGen;Lio/astrolabe/id/Identities;Lio/astrolabe/tool/edit/SyntaxCheck;Lio/astrolabe/workspace/ShadowRef;Lio/astrolabe/provider/ToolMask;IILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Lio/astrolabe/workspace/Workspace;Lio/astrolabe/workspace/VersionRegistry;Lio/astrolabe/workset/Workset;Lio/astrolabe/os/Os;Lio/astrolabe/workspace/Preimages;Lio/astrolabe/verify/ScopeGuard;Lio/astrolabe/contract/Contracts;Lio/astrolabe/verify/Checks;Lio/astrolabe/evidence/Observations;Lio/astrolabe/evidence/Aliases;Lio/astrolabe/store/BlobStore;Lio/astrolabe/auth/Redaction;Lio/astrolabe/provider/TokenEstimator;Lio/astrolabe/id/IdGen;Lio/astrolabe/id/Identities;Lio/astrolabe/tool/edit/SyntaxCheck;Lio/astrolabe/workspace/ShadowRef;Lio/astrolabe/provider/ToolMask;ILio/astrolabe/tool/edit/TransformExecution;)V
+	public synthetic fun <init> (Lio/astrolabe/workspace/Workspace;Lio/astrolabe/workspace/VersionRegistry;Lio/astrolabe/workset/Workset;Lio/astrolabe/os/Os;Lio/astrolabe/workspace/Preimages;Lio/astrolabe/verify/ScopeGuard;Lio/astrolabe/contract/Contracts;Lio/astrolabe/verify/Checks;Lio/astrolabe/evidence/Observations;Lio/astrolabe/evidence/Aliases;Lio/astrolabe/store/BlobStore;Lio/astrolabe/auth/Redaction;Lio/astrolabe/provider/TokenEstimator;Lio/astrolabe/id/IdGen;Lio/astrolabe/id/Identities;Lio/astrolabe/tool/edit/SyntaxCheck;Lio/astrolabe/workspace/ShadowRef;Lio/astrolabe/provider/ToolMask;ILio/astrolabe/tool/edit/TransformExecution;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun execute (Lio/astrolabe/tool/ToolCall;Lio/astrolabe/tool/TurnContext;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public final fun flagsOf (Ljava/lang/String;)Ljava/util/List;
 	public final fun getGeneration ()Lio/astrolabe/id/Generation;
 	public final fun getIncrement ()Lio/astrolabe/contract/Increment;
+	public final fun getTransforms ()Ljava/util/List;
 	public final fun setGeneration (Lio/astrolabe/id/Generation;)V
 	public final fun setIncrement (Lio/astrolabe/contract/Increment;)V
 }
@@ -16674,10 +16683,11 @@ public final class io/astrolabe/tool/edit/EditError {
 }
 
 public final class io/astrolabe/tool/edit/EditResult {
-	public fun <init> (ZLjava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/util/Map;Ljava/util/Map;Ljava/util/Map;Ljava/util/List;Ljava/util/List;Lio/astrolabe/tool/edit/EditError;)V
-	public synthetic fun <init> (ZLjava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/util/Map;Ljava/util/Map;Ljava/util/Map;Ljava/util/List;Ljava/util/List;Lio/astrolabe/tool/edit/EditError;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (ZLjava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/util/Map;Ljava/util/Map;Ljava/util/Map;Ljava/util/List;Ljava/util/List;Lio/astrolabe/tool/edit/EditError;Lio/astrolabe/tool/edit/TransformReceipt;)V
+	public synthetic fun <init> (ZLjava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/util/Map;Ljava/util/Map;Ljava/util/Map;Ljava/util/List;Ljava/util/List;Lio/astrolabe/tool/edit/EditError;Lio/astrolabe/tool/edit/TransformReceipt;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Z
 	public final fun component10 ()Lio/astrolabe/tool/edit/EditError;
+	public final fun component11 ()Lio/astrolabe/tool/edit/TransformReceipt;
 	public final fun component2 ()Ljava/lang/String;
 	public final fun component3 ()Ljava/util/List;
 	public final fun component4 ()Ljava/util/List;
@@ -16686,8 +16696,8 @@ public final class io/astrolabe/tool/edit/EditResult {
 	public final fun component7 ()Ljava/util/Map;
 	public final fun component8 ()Ljava/util/List;
 	public final fun component9 ()Ljava/util/List;
-	public final fun copy (ZLjava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/util/Map;Ljava/util/Map;Ljava/util/Map;Ljava/util/List;Ljava/util/List;Lio/astrolabe/tool/edit/EditError;)Lio/astrolabe/tool/edit/EditResult;
-	public static synthetic fun copy$default (Lio/astrolabe/tool/edit/EditResult;ZLjava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/util/Map;Ljava/util/Map;Ljava/util/Map;Ljava/util/List;Ljava/util/List;Lio/astrolabe/tool/edit/EditError;ILjava/lang/Object;)Lio/astrolabe/tool/edit/EditResult;
+	public final fun copy (ZLjava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/util/Map;Ljava/util/Map;Ljava/util/Map;Ljava/util/List;Ljava/util/List;Lio/astrolabe/tool/edit/EditError;Lio/astrolabe/tool/edit/TransformReceipt;)Lio/astrolabe/tool/edit/EditResult;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/edit/EditResult;ZLjava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/util/Map;Ljava/util/Map;Ljava/util/Map;Ljava/util/List;Ljava/util/List;Lio/astrolabe/tool/edit/EditError;Lio/astrolabe/tool/edit/TransformReceipt;ILjava/lang/Object;)Lio/astrolabe/tool/edit/EditResult;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getApplied ()Ljava/util/List;
 	public final fun getDiffstat ()Ljava/util/Map;
@@ -16698,17 +16708,46 @@ public final class io/astrolabe/tool/edit/EditResult {
 	public final fun getSyntax ()Ljava/util/Map;
 	public final fun getTestIntegrity ()Ljava/util/List;
 	public final fun getTouchedOutsideScope ()Ljava/util/List;
+	public final fun getTransform ()Lio/astrolabe/tool/edit/TransformReceipt;
 	public final fun getVersions ()Ljava/util/Map;
 	public final fun getViews ()Ljava/util/List;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class io/astrolabe/tool/edit/InventoryVerdict : java/lang/Enum {
+	public static final field Failed Lio/astrolabe/tool/edit/InventoryVerdict;
+	public static final field Ok Lio/astrolabe/tool/edit/InventoryVerdict;
+	public static final field Unspecified Lio/astrolabe/tool/edit/InventoryVerdict;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getWire ()Ljava/lang/String;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/tool/edit/InventoryVerdict;
+	public static fun values ()[Lio/astrolabe/tool/edit/InventoryVerdict;
+}
+
 public final class io/astrolabe/tool/edit/LineDiff {
 	public static final field INSTANCE Lio/astrolabe/tool/edit/LineDiff;
 	public static final field MAX_LINES I
+	public static final fun hunks (Ljava/lang/String;Ljava/lang/String;)Ljava/util/List;
 	public static final fun unified (Ljava/lang/String;Ljava/lang/String;II)Ljava/lang/String;
 	public static synthetic fun unified$default (Ljava/lang/String;Ljava/lang/String;IIILjava/lang/Object;)Ljava/lang/String;
+}
+
+public final class io/astrolabe/tool/edit/LineDiff$Hunk {
+	public fun <init> (IILjava/util/List;Ljava/util/List;)V
+	public final fun component1 ()I
+	public final fun component2 ()I
+	public final fun component3 ()Ljava/util/List;
+	public final fun component4 ()Ljava/util/List;
+	public final fun copy (IILjava/util/List;Ljava/util/List;)Lio/astrolabe/tool/edit/LineDiff$Hunk;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/edit/LineDiff$Hunk;IILjava/util/List;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/tool/edit/LineDiff$Hunk;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAdded ()Ljava/util/List;
+	public final fun getNewFrom ()I
+	public final fun getOldFrom ()I
+	public final fun getRemoved ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class io/astrolabe/tool/edit/Located {
@@ -16797,6 +16836,133 @@ public final class io/astrolabe/tool/edit/SyntaxResult$NotRun : io/astrolabe/too
 
 public final class io/astrolabe/tool/edit/SyntaxResult$Ok : io/astrolabe/tool/edit/SyntaxResult {
 	public static final field INSTANCE Lio/astrolabe/tool/edit/SyntaxResult$Ok;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/tool/edit/TransformEffect : java/lang/Enum {
+	public static final field Partial Lio/astrolabe/tool/edit/TransformEffect;
+	public static final field Restored Lio/astrolabe/tool/edit/TransformEffect;
+	public static final field UnknownOutcome Lio/astrolabe/tool/edit/TransformEffect;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getWire ()Ljava/lang/String;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/tool/edit/TransformEffect;
+	public static fun values ()[Lio/astrolabe/tool/edit/TransformEffect;
+}
+
+public final class io/astrolabe/tool/edit/TransformExecution {
+	public fun <init> (Lio/astrolabe/tool/run/Runner;Lio/astrolabe/workspace/Stamper;Ljava/nio/file/Path;)V
+	public fun <init> (Lio/astrolabe/tool/run/Runner;Lio/astrolabe/workspace/Stamper;Ljava/nio/file/Path;Lio/astrolabe/auth/ExecutionMode;)V
+	public fun <init> (Lio/astrolabe/tool/run/Runner;Lio/astrolabe/workspace/Stamper;Ljava/nio/file/Path;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/os/EnvPolicy;)V
+	public fun <init> (Lio/astrolabe/tool/run/Runner;Lio/astrolabe/workspace/Stamper;Ljava/nio/file/Path;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/os/EnvPolicy;J)V
+	public fun <init> (Lio/astrolabe/tool/run/Runner;Lio/astrolabe/workspace/Stamper;Ljava/nio/file/Path;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/os/EnvPolicy;JLjava/util/Map;)V
+	public synthetic fun <init> (Lio/astrolabe/tool/run/Runner;Lio/astrolabe/workspace/Stamper;Ljava/nio/file/Path;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/os/EnvPolicy;JLjava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lio/astrolabe/tool/run/Runner;
+	public final fun component2 ()Lio/astrolabe/workspace/Stamper;
+	public final fun component3 ()Ljava/nio/file/Path;
+	public final fun component4 ()Lio/astrolabe/auth/ExecutionMode;
+	public final fun component5 ()Lio/astrolabe/os/EnvPolicy;
+	public final fun component6 ()J
+	public final fun component7 ()Ljava/util/Map;
+	public final fun copy (Lio/astrolabe/tool/run/Runner;Lio/astrolabe/workspace/Stamper;Ljava/nio/file/Path;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/os/EnvPolicy;JLjava/util/Map;)Lio/astrolabe/tool/edit/TransformExecution;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/edit/TransformExecution;Lio/astrolabe/tool/run/Runner;Lio/astrolabe/workspace/Stamper;Ljava/nio/file/Path;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/os/EnvPolicy;JLjava/util/Map;ILjava/lang/Object;)Lio/astrolabe/tool/edit/TransformExecution;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEnvironment ()Lio/astrolabe/os/EnvPolicy;
+	public final fun getExecutionMode ()Lio/astrolabe/auth/ExecutionMode;
+	public final fun getHostSets ()Ljava/util/Map;
+	public final fun getLogsDir ()Ljava/nio/file/Path;
+	public final fun getRunner ()Lio/astrolabe/tool/run/Runner;
+	public final fun getStamper ()Lio/astrolabe/workspace/Stamper;
+	public final fun getTimeoutSeconds ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/tool/edit/TransformFile {
+	public fun <init> (Ljava/lang/String;IIILio/astrolabe/id/FileVersion;Lio/astrolabe/id/FileVersion;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()I
+	public final fun component3 ()I
+	public final fun component4 ()I
+	public final fun component5 ()Lio/astrolabe/id/FileVersion;
+	public final fun component6 ()Lio/astrolabe/id/FileVersion;
+	public final fun copy (Ljava/lang/String;IIILio/astrolabe/id/FileVersion;Lio/astrolabe/id/FileVersion;)Lio/astrolabe/tool/edit/TransformFile;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/edit/TransformFile;Ljava/lang/String;IIILio/astrolabe/id/FileVersion;Lio/astrolabe/id/FileVersion;ILjava/lang/Object;)Lio/astrolabe/tool/edit/TransformFile;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAdded ()I
+	public final fun getHunks ()I
+	public final fun getLine ()Ljava/lang/String;
+	public final fun getPath ()Ljava/lang/String;
+	public final fun getRemoved ()I
+	public final fun getVersionAfter ()Lio/astrolabe/id/FileVersion;
+	public final fun getVersionBefore ()Lio/astrolabe/id/FileVersion;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/tool/edit/TransformReceipt {
+	public fun <init> (Ljava/lang/String;Lio/astrolabe/id/Digest;IILjava/util/List;Lio/astrolabe/id/Digest;Ljava/util/Map;Ljava/util/List;Lio/astrolabe/tool/edit/InventoryVerdict;ILio/astrolabe/tool/ExpectedMatches;Ljava/util/List;Ljava/util/List;Ljava/lang/Integer;Lio/astrolabe/auth/ExecutionMode;ZLjava/lang/String;Lio/astrolabe/tool/edit/TransformEffect;Ljava/util/List;Ljava/util/List;Ljava/util/List;)V
+	public synthetic fun <init> (Ljava/lang/String;Lio/astrolabe/id/Digest;IILjava/util/List;Lio/astrolabe/id/Digest;Ljava/util/Map;Ljava/util/List;Lio/astrolabe/tool/edit/InventoryVerdict;ILio/astrolabe/tool/ExpectedMatches;Ljava/util/List;Ljava/util/List;Ljava/lang/Integer;Lio/astrolabe/auth/ExecutionMode;ZLjava/lang/String;Lio/astrolabe/tool/edit/TransformEffect;Ljava/util/List;Ljava/util/List;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component10 ()I
+	public final fun component11 ()Lio/astrolabe/tool/ExpectedMatches;
+	public final fun component12 ()Ljava/util/List;
+	public final fun component13 ()Ljava/util/List;
+	public final fun component14 ()Ljava/lang/Integer;
+	public final fun component15 ()Lio/astrolabe/auth/ExecutionMode;
+	public final fun component16 ()Z
+	public final fun component17 ()Ljava/lang/String;
+	public final fun component18 ()Lio/astrolabe/tool/edit/TransformEffect;
+	public final fun component19 ()Ljava/util/List;
+	public final fun component2 ()Lio/astrolabe/id/Digest;
+	public final fun component20 ()Ljava/util/List;
+	public final fun component21 ()Ljava/util/List;
+	public final fun component3 ()I
+	public final fun component4 ()I
+	public final fun component5 ()Ljava/util/List;
+	public final fun component6 ()Lio/astrolabe/id/Digest;
+	public final fun component7 ()Ljava/util/Map;
+	public final fun component8 ()Ljava/util/List;
+	public final fun component9 ()Lio/astrolabe/tool/edit/InventoryVerdict;
+	public final fun copy (Ljava/lang/String;Lio/astrolabe/id/Digest;IILjava/util/List;Lio/astrolabe/id/Digest;Ljava/util/Map;Ljava/util/List;Lio/astrolabe/tool/edit/InventoryVerdict;ILio/astrolabe/tool/ExpectedMatches;Ljava/util/List;Ljava/util/List;Ljava/lang/Integer;Lio/astrolabe/auth/ExecutionMode;ZLjava/lang/String;Lio/astrolabe/tool/edit/TransformEffect;Ljava/util/List;Ljava/util/List;Ljava/util/List;)Lio/astrolabe/tool/edit/TransformReceipt;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/edit/TransformReceipt;Ljava/lang/String;Lio/astrolabe/id/Digest;IILjava/util/List;Lio/astrolabe/id/Digest;Ljava/util/Map;Ljava/util/List;Lio/astrolabe/tool/edit/InventoryVerdict;ILio/astrolabe/tool/ExpectedMatches;Ljava/util/List;Ljava/util/List;Ljava/lang/Integer;Lio/astrolabe/auth/ExecutionMode;ZLjava/lang/String;Lio/astrolabe/tool/edit/TransformEffect;Ljava/util/List;Ljava/util/List;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/tool/edit/TransformReceipt;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAccepted ()Z
+	public final fun getDiffRef ()Lio/astrolabe/id/Digest;
+	public final fun getEditId ()Ljava/lang/String;
+	public final fun getEffect ()Lio/astrolabe/tool/edit/TransformEffect;
+	public final fun getExecutionMode ()Lio/astrolabe/auth/ExecutionMode;
+	public final fun getExitCode ()Ljava/lang/Integer;
+	public final fun getExpectedMatches ()Lio/astrolabe/tool/ExpectedMatches;
+	public final fun getFilesChanged ()I
+	public final fun getHunks ()I
+	public final fun getInventoryOk ()Lio/astrolabe/tool/edit/InventoryVerdict;
+	public final fun getLimits ()Ljava/util/List;
+	public final fun getMatchCount ()I
+	public final fun getNotRestored ()Ljava/util/List;
+	public final fun getPerFile ()Ljava/util/List;
+	public final fun getRejection ()Ljava/lang/String;
+	public final fun getRepresentativeSites ()Ljava/util/List;
+	public final fun getRestored ()Ljava/util/List;
+	public final fun getScriptHash ()Lio/astrolabe/id/Digest;
+	public final fun getSyntax ()Ljava/util/Map;
+	public final fun getTouchedOutsideScope ()Ljava/util/List;
+	public final fun getUnusualSites ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/tool/edit/TransformSite {
+	public fun <init> (Ljava/lang/String;ILjava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()I
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;ILjava/lang/String;)Lio/astrolabe/tool/edit/TransformSite;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/edit/TransformSite;Ljava/lang/String;ILjava/lang/String;ILjava/lang/Object;)Lio/astrolabe/tool/edit/TransformSite;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getLine ()I
+	public final fun getPath ()Ljava/lang/String;
+	public final fun getText ()Ljava/lang/String;
+	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
 }
 
@@ -19627,6 +19793,7 @@ public final class io/astrolabe/workset/EntrySource : java/lang/Enum {
 	public static final field PostEdit Lio/astrolabe/workset/EntrySource;
 	public static final field Recall Lio/astrolabe/workset/EntrySource;
 	public static final field Seed Lio/astrolabe/workset/EntrySource;
+	public static final field Transform Lio/astrolabe/workset/EntrySource;
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;
 	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/workset/EntrySource;
 	public static fun values ()[Lio/astrolabe/workset/EntrySource;
