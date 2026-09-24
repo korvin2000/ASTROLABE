@@ -1408,7 +1408,7 @@ Goal: [§18.2 Stage C](docs/implementation/roadmap.md#sec-18-2): scheduler with 
 - Done: cadence test over a scripted 7-increment campaign.
 - Log: 2026-09-24 — The controller reads `Defaults.fullSuiteCadence` (K = 5) instead of the constant; `Config.qualityGates: List<Command>` (default empty — never invented) seeds `CHK-quality-gate`, `CHK-quality-gate-2`, … (`Checks.seed(…, qualityGates)`, kind `Quality`, `campaign_end`), which run with the full suite at cadence and campaign end (P3.1.4 wiring; a red gate is a red suite). Test: `CadenceTest` scripted S1 campaign of 7 increments ⇒ `full suite (cadence after 5 verified increments)` then `full suite (campaign end)`, 2 quality-gate receipts, completed.
 
-- [ ] **Gate P3.6:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
+- [x] **Gate P3.6:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate). — [CI run 36023934566](https://github.com/korvin2000/ASTROLABE/actions/runs/36023934566) green on Ubuntu + Windows at `7392853` (P3.6.1–P3.6.2 with P3.5.1, 2026-09-24).
 
 ### P3.7 Boundary pre-compilation `[O gate: ablation §19.5 pre-compilation on/off; miss rate vs latency saved]`
 #### P3.7.1 [O][M] `Precompile` · TODO
