@@ -6,6 +6,8 @@ import io.astrolabe.event.Events
 import io.astrolabe.id.IdGen
 import io.astrolabe.id.Identities
 import io.astrolabe.kb.Kb
+import io.astrolabe.kb.KbHit
+import io.astrolabe.kb.KbHits
 import io.astrolabe.kb.Note
 import io.astrolabe.kb.NoteAnchor
 import io.astrolabe.kb.NoteBasis
@@ -15,6 +17,9 @@ import io.astrolabe.kb.NoteRefused
 import io.astrolabe.kb.NoteStatus
 import io.astrolabe.kb.NoteValidity
 import io.astrolabe.kb.Queue
+import io.astrolabe.kb.RetrievalSource
+import io.astrolabe.kb.Retrieval
+import io.astrolabe.kb.Retriever
 import io.astrolabe.provider.TokenEstimator
 import io.astrolabe.provider.ToolMask
 import io.astrolabe.tool.Args
@@ -64,6 +69,8 @@ public class KbTool @JvmOverloads constructor(
     private val events: Events? = null,
     /** Note kinds this cell's role may not propose ([io.astrolabe.cell.Role.deniedNoteKinds]). */
     private val deniedKinds: Set<String> = emptySet(),
+    /** An optional dense candidate source (`Flags.denseRetrieval`, P5.5.1); unscoped searches only, never a block (FX-46, D-252). */
+    private val dense: Retriever? = null,
 ) : ToolExecutor {
     /** The `CON` anchors the contract-touch gate reads (§5.6). */
     public fun contractAnchors(): Map<String, Set<String>> = kb.contractAnchors()
@@ -85,8 +92,8 @@ public class KbTool @JvmOverloads constructor(
         }
     }
 
-    private fun search(args: KbArgs): ToolOutcome {
-        val hits = kb.search(args.query!!, args.kinds?.toSet(), args.scope, args.why!!)
+    private suspend fun search(args: KbArgs): ToolOutcome {
+        val hits = withDense(args, kb.search(args.query!!, args.kinds?.toSet(), args.scope, args.why!!))
         val shown = hits.hits.take(maxHits)
         val head = "${hits.hits.size} note${if (hits.hits.size == 1) "" else "s"} match '${args.query}' in ${hits.scope}" +
             (if (hits.complete) " · complete" else " · incomplete: the scope was not fully searched") +
@@ -94,6 +101,28 @@ public class KbTool @JvmOverloads constructor(
             (hits.degradation?.let { " · degraded: $it" } ?: "")
         val lines = shown.map { "  ${it.id} [${it.kind}]${if (it.stale) " stale" else ""}: ${it.summary}" }
         return result("ok", (listOf(head) + lines).joinToString("\n"), hits.scope, complete = hits.complete, truncated = hits.truncated || shown.size < hits.hits.size)
+    }
+
+    /**
+     * The lexical hits first, then the dense source's unseen candidates of the asked kinds (§4.5 union by note id,
+     * [Retrieval.merge]); a scoped search stays lexical because a dense index cannot honour the scope. A dense
+     * source that fails degrades the answer, never blocks it; completeness is the lexical scope's (D-252).
+     */
+    private suspend fun withDense(args: KbArgs, lexical: KbHits): KbHits {
+        val source = dense?.takeIf { args.scope == null } ?: return lexical
+        val kinds = args.kinds?.toSet()
+        val fixed = object : Retriever {
+            override val source: RetrievalSource = RetrievalSource.Lexical
+            override suspend fun candidates(query: String, limit: Int): List<KbHit> = lexical.hits
+        }
+        val filtered = object : Retriever {
+            override val source: RetrievalSource = source.source
+            override suspend fun candidates(query: String, limit: Int): List<KbHit> =
+                source.candidates(query, limit).filter { kinds == null || it.kind in kinds }
+        }
+        val merged = Retrieval.merge(listOf(fixed, filtered), args.query!!, lexical.hits.size + maxHits)
+        val degradation = listOfNotNull(lexical.degradation, merged.degradation).joinToString("; ").ifEmpty { null }
+        return lexical.copy(hits = merged.hits, degradation = degradation)
     }
 
     private fun entry(args: KbArgs, what: String, lookup: (String) -> io.astrolabe.kb.KbEntry?): ToolOutcome {

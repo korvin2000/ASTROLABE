@@ -6,6 +6,10 @@ import io.astrolabe.Config
 import io.astrolabe.Project
 import io.astrolabe.campaign.CampaignOutcome
 import io.astrolabe.campaign.CampaignPolicy
+import io.astrolabe.campaign.Deployer
+import io.astrolabe.campaign.OptionalLayers
+import io.astrolabe.campaign.PublicationRequest
+import io.astrolabe.campaign.PublicationRun
 import io.astrolabe.contract.Contract
 import io.astrolabe.event.Authorities
 import io.astrolabe.event.EventSink
@@ -47,22 +51,27 @@ public class AstrolabeJava @JvmOverloads public constructor(
     adapter: JavaProviderAdapter,
     authority: JavaAuthority,
     clock: Clock = Clock.systemUTC(),
+    /** Optional layers (D-251–D-253); a dense source comes from `Retrievers.fromJava(JavaRetriever)`. */
+    layers: OptionalLayers = OptionalLayers(),
+    /** The host's `deploy` stage (§14.2), a synchronous SPI; without one a requested deploy is refused. */
+    deployer: Deployer? = null,
 ) : AutoCloseable {
-    private val core = Astrolabe(config, ProviderAdapters.fromJava(adapter), Authorities.fromJava(authority), clock)
+    private val core = Astrolabe(config, ProviderAdapters.fromJava(adapter), Authorities.fromJava(authority), clock, layers = layers, deployer = deployer)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** Opens [repo] (state root, project lock, store); the host closes the returned project. */
     public fun open(repo: Path): Project = core.open(repo)
 
     /** Opens and starts a campaign; completes once it is open and reconciled. A `null` policy is D-67's default. */
+    /** A [publication] asks for stages beyond `patch` after the campaign finishes (§14.2); none by default. */
     @JvmOverloads
-    public fun campaign(project: Project, request: String, policy: CampaignPolicy? = null): CompletableFuture<JavaCampaignHandle> =
-        scope.future { JavaCampaignHandle(core.campaign(project, request, policy), scope, core.events) }
+    public fun campaign(project: Project, request: String, policy: CampaignPolicy? = null, publication: PublicationRequest? = null): CompletableFuture<JavaCampaignHandle> =
+        scope.future { JavaCampaignHandle(core.campaign(project, request, policy, publication), scope, core.events) }
 
     /** [campaign], blocking the calling thread until the campaign is open. */
     @JvmOverloads
-    public fun campaignBlocking(project: Project, request: String, policy: CampaignPolicy? = null): JavaCampaignHandle =
-        join(campaign(project, request, policy))
+    public fun campaignBlocking(project: Project, request: String, policy: CampaignPolicy? = null, publication: PublicationRequest? = null): JavaCampaignHandle =
+        join(campaign(project, request, policy, publication))
 
     /** Registers [sink] for every campaign's events; close the subscription to stop delivery. */
     public fun subscribe(sink: EventSink): Subscription = core.events.subscribe(sink)
@@ -95,6 +104,9 @@ public class JavaCampaignHandle internal constructor(
     public fun views(): Views = handle.views
 
     public fun isDone(): Boolean = handle.done
+
+    /** The publication run after the campaign finished, when one was requested; `null` before or without one. */
+    public fun publication(): PublicationRun? = handle.publication
 
     /** The outcome; cancelling this future cancels the campaign. */
     public fun await(): CompletableFuture<CampaignOutcome> {

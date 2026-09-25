@@ -197,6 +197,8 @@ import io.astrolabe.workspace.Workspace
 import java.nio.file.Path
 import java.time.Clock
 import java.time.Duration
+import java.util.Collections
+import java.util.WeakHashMap
 import java.util.concurrent.atomic.AtomicReference
 import io.astrolabe.delegate.CellChildRunner
 import io.astrolabe.delegate.CellReviewJudge
@@ -377,7 +379,26 @@ public class Controller @JvmOverloads public constructor(
     public val router: Router = Router(),
     /** The post-cell extractor's model step (§12.1, P4.2.1), run at finish from the archived traces; `NONE` leaves the harness-derived candidates and the CAL delta. */
     private val extraction: Extraction = Extraction.NONE,
+    /** The host's optional layers (tier-1 index, dense retrieval, generated tools, mounts), each read only under its flag. */
+    private val layers: OptionalLayers = OptionalLayers(),
 ) {
+    // Resolved once per campaign at open, its attempt boundary (§12.2).
+    private val plugged = Collections.synchronizedMap(WeakHashMap<OpenedCampaign, PluggedLayers>())
+
+    private fun plugged(c: OpenedCampaign): PluggedLayers = plugged[c] ?: PluggedLayers.of(layers, c.attempt.config.flags, c.journal, c.ids, idGen, clock).also { plugged[c] = it }
+
+    /**
+     * Publishes a finished campaign's candidate beyond `patch` when the host asks for it (§14.2, D-192, D-250): one
+     * [Publisher] for the attempt, each requested stage a separate D-class grant through [authority], journaled before
+     * and after, stopping at the first stage not published. Nothing calls this by default. The returned receipt, also
+     * re-exported, reports the stage actually reached.
+     */
+    @JvmOverloads
+    public suspend fun publish(campaign: OpenedCampaign, run: S0Run, request: PublicationRequest, authority: Authority = AutonomousAuthority(), deployer: Deployer? = null): PublicationRun {
+        val finish = requireNotNull(run.finish) { "publication follows a finished campaign: this run has no finish receipt" }
+        return Publications(idGen, clock).publish(campaign, finish, request, authority, deployer)
+    }
+
     /**
      * Opens or reopens [request]'s campaign over [repo]. Order (§3.7, §13.1): the store and its project lock, the
      * workspace and the dirty-state capture (snapshot 0 on first open), the contract derived and stored after the
@@ -434,8 +455,9 @@ public class Controller @JvmOverloads public constructor(
         val external = if (first) emptyList() else drift(shadow, dirty)
 
         val atlas = Atlas.build(workspace.root)
+        val layered = PluggedLayers.of(layers, effective.flags, journal, ids, idGen, clock)
         // §3.7 impact_prescan (D-40): incomplete discovery over the request's candidate paths; it feeds both shape selections.
-        val impactPrescan = ImpactPrescan.of(atlas, WORKSPACE, ImpactPrescan.inputs(atlas, WORKSPACE, request.text), kb.contractAnchors())
+        val impactPrescan = ImpactPrescan.of(atlas, WORKSPACE, ImpactPrescan.inputs(atlas, WORKSPACE, request.text), kb.contractAnchors(), layered.tiers)
         val derived = contracts.deriveS0(request.work, request.attempt, request.text, atlas, effective, policy.tokens, protected, policy.cost)
         val stored = contracts.current(request.work)
         check(stored == null || stored.attemptId == request.attempt) { "work ${request.work.value} is attempt ${stored?.attemptId?.value}; a new attempt is P2" }
@@ -531,7 +553,7 @@ public class Controller @JvmOverloads public constructor(
             request, ids, store, os, workspace, registry, stamper, dirty, shadow, s0, atlas, derived.sniffed, commands,
             contracts, checks, rules, prime, kb, journal, intents, campaigns, reconciliation, prescan, impactPrescan, shape, state, refusal, owned,
             frozen, lease, leases, frozenNotes = Notes(store).all(),
-        )
+        ).also { plugged[it] = layered }
     }
 
     /**
@@ -753,7 +775,7 @@ public class Controller @JvmOverloads public constructor(
     private fun refreshPrescan(c: OpenedCampaign, ids: Identities, exit: CellExit): String? {
         val touched = exit.checkpoint.touched
         if (touched.isEmpty()) return null
-        val refreshed = ImpactPrescan.of(c.atlas.refresh(touched), WORKSPACE, c.impactPrescan.inputs.copy(touched = touched.sorted()), c.kb.contractAnchors())
+        val refreshed = ImpactPrescan.of(c.atlas.refresh(touched), WORKSPACE, c.impactPrescan.inputs.copy(touched = touched.sorted()), c.kb.contractAnchors(), plugged(c).tiers)
         c.journal.append(JournalEvent(idGen.next("ev"), ids, exit.turns, JournalKind.Boundary, refs = refreshed.contractsTouched, text = "impact pre-scan refreshed: ${refreshed.log}", at = clock.instant()))
         if (refreshed.prescan.contractTouch != true || c.contract.shape !in setOf(Shape.S0, Shape.S1)) return null
         return "impact pre-scan refresh: contract ${refreshed.contractsTouched.joinToString(", ")} touched — S2 with an ADR in the main line is required before this lands (I-23)"
@@ -1158,9 +1180,11 @@ public class Controller @JvmOverloads public constructor(
         val isolated = child?.isolated == true
         val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, receipts, aliases, idGen, ids, clock, candidates = if (isolated) c.store.layout.candidates else candidates(c), isolateAll = isolated)
         val checker = Checker(c.checks, runner, c.os, c.stamper, c.registry, c.workspace, c.store.blobs, redaction, idGen, ids, logs)
+        val layered = plugged(c)
         val verify = Verify(checks = c.checks, scheduler = scheduler, checker = checker, baseline = null, s0 = c.s0.stampId, workspace = c.workspace, runner = runner, os = c.os, stamper = c.stamper, blobs = c.store.blobs, redaction = redaction, estimator = estimator, idGen = idGen, ids = ids, contracts = c.contracts, logsDir = logs, campaignReview = campaignReview(c, authority),
             // §8.8: review(scope=increment) is the review cell for S2+ main-line cells; a review cell never reaches it (no verify.review in its mask).
             incrementReview = if (child == null && contract.shape >= Shape.S2) IncrementReview { why -> reviewCell(c, increment, model, authority, syntax, span).obtain(evidence(c, increment, listOf(why), emptyList(), compiled.k.ledger, authority), Tier.Medium, c.registry::version) } else null,
+            tiers = layered.tiers,
         )
         verify.inputs = c.atlas.rows.map { it.path }
         val ceiling = Ceiling.of(contract.authorization, config.executionMode)
@@ -1182,21 +1206,21 @@ public class Controller @JvmOverloads public constructor(
         }
         val tools = CellTools(
             state = StateTool(Validator(estimator), registerVersions, c.journal, estimator, idGen, ids, clock, register ?: Register.empty(cellId, increment.id, increment.title), events),
-            look = Look(c.workspace, c.registry, workset, c.atlas, Searches.jvm(), c.journal, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, checks = c.checks, bmaps = BmapStore(c.store)),
+            look = Look(c.workspace, c.registry, workset, c.atlas, Searches.jvm(), c.journal, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, checks = c.checks, mounts = layered.mounts, bmaps = BmapStore(c.store), tools = layered.tools, tiers = layered.tiers),
             edit = Edit(
                 c.workspace, c.registry, workset, c.os, preimages, ScopeGuard(c.workspace), c.contracts, c.checks, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, syntax,
                 // D-99: `revert:turn:N` names the campaign's shadow snapshots (the turn checkpoint records them).
                 shadowRef = c.shadow,
                 transforms = TransformExecution(runner, c.stamper, logs, config.executionMode, EnvPolicy(inheritedNames = config.redaction.envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1"))),
             ),
-            run = Run(c.workspace, c.registry, c.stamper, runner, c.os, c.intents, SqliteHandles(c.store, clock), observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, c.contracts, authority, config, clock, logs),
+            run = Run(c.workspace, c.registry, c.stamper, runner, c.os, c.intents, SqliteHandles(c.store, clock), observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, c.contracts, authority, config, clock, logs, catalog = layered.mounts, tools = layered.tools),
             verify = verify,
             task = if (proposals == null && delegator == null) TaskTool(authority, c.contracts, c.journal, estimator, idGen, ids, clock, events)
             else TaskTool(
                 authority, c.contracts, c.journal, estimator, idGen, ids, clock, events, role.effectiveOps(contract.shape, ceiling), proposals,
                 delegator, delegator?.let { TaskPackets(WORKSPACE, ceiling, generation) }, c.registry::version,
             ),
-            kb = KbTool(c.kb, estimator, idGen, queue = Queue(c.store, KbWriter(c.store, estimator, clock), idGen, clock), ids = ids, events = events, deniedKinds = role.deniedNoteKinds),
+            kb = KbTool(c.kb, estimator, idGen, queue = Queue(c.store, KbWriter(c.store, estimator, clock), idGen, clock), ids = ids, events = events, deniedKinds = role.deniedNoteKinds, dense = layered.dense),
         )
         // §6.3: what this cell was given is logged per note; the register-citation hook turns `injected` into `cited`.
         val usage = Usage(c.store, clock)
