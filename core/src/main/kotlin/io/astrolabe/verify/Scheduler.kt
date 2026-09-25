@@ -105,6 +105,8 @@ public class Scheduler(
     private val scratch: ScratchPolicy = ScratchPolicy(),
     /** Where `slow|expensive` checks get isolated candidates (`candidates/` of the store layout); `null` runs every check exclusively. */
     private val candidates: Path? = null,
+    /** Every check, not only `slow|expensive` ones, runs on an isolated candidate (a review cell's `verify(tests)`, §8.8). */
+    private val isolateAll: Boolean = false,
 ) {
     private val aliasByReceipt = HashMap<String, String>()
 
@@ -119,7 +121,7 @@ public class Scheduler(
      * closure run exclusively yields `input_stability = unknown` and the receipt can never be eligible.
      */
     public suspend fun runCheck(check: Check, contractVersion: Int, inputs: Collection<String> = emptyList(), execute: suspend (root: Path) -> Executed): Receipt {
-        val isolatedRoot = candidates?.takeIf { check.costClass == CostClass.Slow || check.costClass == CostClass.Expensive }
+        val isolatedRoot = candidates?.takeIf { isolateAll || check.costClass == CostClass.Slow || check.costClass == CostClass.Expensive }
         if (isolatedRoot != null) runIsolated(check, contractVersion, inputs, isolatedRoot, execute)?.let { return it }
         val paths = testedInputsFor(check, inputs)
         val limits = ArrayList<Limit>()

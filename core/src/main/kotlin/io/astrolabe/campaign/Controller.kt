@@ -187,9 +187,35 @@ import java.nio.file.Path
 import java.time.Clock
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
+import io.astrolabe.delegate.CellChildRunner
+import io.astrolabe.delegate.CellReviewJudge
+import io.astrolabe.delegate.ChildBrief
+import io.astrolabe.delegate.ChildBudget
+import io.astrolabe.delegate.ChildCell
+import io.astrolabe.delegate.DelegationLimits
+import io.astrolabe.delegate.Delegator
+import io.astrolabe.delegate.EvidencePacket
+import io.astrolabe.delegate.Excerpt
+import io.astrolabe.delegate.IncrementReview
+import io.astrolabe.delegate.IncrementReviewInput
+import io.astrolabe.delegate.ReviewCell
+import io.astrolabe.delegate.ReviewCellAuthority
+import io.astrolabe.delegate.ReviewCriterion
+import io.astrolabe.delegate.ReviewOutcome
+import io.astrolabe.delegate.ReviewReceipt
+import io.astrolabe.delegate.ReviewTriggers
+import io.astrolabe.delegate.Probe
+import io.astrolabe.delegate.TaskPackets
+import io.astrolabe.delegate.WorthTest
+import io.astrolabe.route.FunctionTable
+import io.astrolabe.verify.ReviewScope
+import io.astrolabe.id.ExecutionGeneration
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
@@ -576,7 +602,7 @@ public class Controller @JvmOverloads public constructor(
             val contract = c.contract
             val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = candidates(c))
             val unverified = state.ledger.unfinished()
-            if (unverified.isEmpty()) return last.copy(state = stopOrFinish(c, "requirements remain unverified", scheduler, campaign = true, authority = authority))
+            if (unverified.isEmpty()) return last.copy(state = stopOrFinish(c, "requirements remain unverified", scheduler, campaign = true, authority = campaignJudge(c, authority, model, syntax, span)))
             val ready = state.graph.readyFrontier(contract, 1).firstOrNull()
             if (ready == null) {
                 // FX-42: verified work is never re-executed; its regression evidence is refreshed from current receipts.
@@ -654,9 +680,13 @@ public class Controller @JvmOverloads public constructor(
             refreshPrescan(c, run.ids, exit)?.let { return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, it)), exit, null, compiled) }
             boundary(c, cellId, RebuildReason.CellEnd(if (exit is CellExit.Completed) RebuildReason.CellEnd.Next.NextIncrement else RebuildReason.CellEnd.Next.Continuation))
             val stampNow = c.stamper.report().candidateId
+            // §8.7/§8.8: in S2+ a required increment review must approve before the increment closes; none owed ⇒ null.
+            val review = if (exit is CellExit.Completed && c.contract.shape >= Shape.S2) incrementReview(c, increment, exit, routing.selected?.tier, compiled, cellModel, authority, syntax, span) else null
+            if (review is ReviewOutcome.Unavailable) return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "required review of ${increment.id} unavailable: ${review.reason}")), exit, null, compiled)
             val completion = if (exit is CellExit.Completed) {
                 val returned = checkNotNull(c.state).graph.increments.first { it.id == increment.id }
-                Verifier().accept(exit.packet.proposal(), c.contract, returned, exit.register, checkNotNull(c.state).ledger, stampNow, currencies(c, run.scheduler, stampNow))
+                if (review is ReviewOutcome.Declined) CompletionResult.Refused(listOf("required review: ${review.reason}"), 1, recoveryDirected = false)
+                else Verifier().accept(exit.packet.proposal(), c.contract, returned, exit.register, checkNotNull(c.state).ledger, stampNow, currencies(c, run.scheduler, stampNow), reviews = reviewItems(c.contract, returned, review))
             } else {
                 null
             }
@@ -878,11 +908,12 @@ public class Controller @JvmOverloads public constructor(
         extractor.calibrate({ CalibrationStats.aggregate(Calibration.observations(c.store, series), policy) }, series, c.ids)
     }
 
-    /** The attempt's latest campaign review findings (§8.8), or none. */
+    /** The attempt's latest campaign review findings and its latest increment review's (§8.8), or none. */
     private fun reviewFindings(c: OpenedCampaign): List<Finding> = c.store.db.query(
         "SELECT body FROM packets WHERE work_id = ? AND attempt_id = ? AND kind = ? ORDER BY rowid DESC LIMIT 1",
         c.ids.work, c.ids.attempt, CampaignReview.KIND,
-    ) { Json.decodeFromString(CampaignReviewRecord.serializer(), it.string("body")) }.firstOrNull()?.verdict?.findings.orEmpty()
+    ) { Json.decodeFromString(CampaignReviewRecord.serializer(), it.string("body")) }.firstOrNull()?.verdict?.findings.orEmpty() +
+        ReviewCell.latest(c.store, c.ids)?.verdict?.findings.orEmpty()
 
     /** §8.8 (P4.2.2): findings at or above major not yet in [register] become its `Open` items, numbered after its last. */
     private fun withReviewOpenItems(c: OpenedCampaign, register: Register): Register {
@@ -1064,8 +1095,10 @@ public class Controller @JvmOverloads public constructor(
         boundary: BoundaryReason? = null,
         inputs: CompileInputs = CompileInputs(),
         precompile: PrecompileTrigger? = null,
+        child: ChildForm? = null,
     ): CellRun {
         val ids = c.ids.copy(context = cellId)
+        val cancellation = child?.cancellation ?: c.cancellation
         val config = c.attempt.config
         val contract = c.contract
         val redaction = Redaction(config.redaction)
@@ -1079,10 +1112,31 @@ public class Controller @JvmOverloads public constructor(
         val registerVersions = SqliteRegisterVersions(c.store, clock)
         val checkpoints = SqliteCheckpoints(c.store, clock)
         val preimages = Preimages(c.workspace, c.store.blobs, ids, clock)
-        val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, receipts, aliases, idGen, ids, clock, candidates = candidates(c))
+        val isolated = child?.isolated == true
+        val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, receipts, aliases, idGen, ids, clock, candidates = if (isolated) c.store.layout.candidates else candidates(c), isolateAll = isolated)
         val checker = Checker(c.checks, runner, c.os, c.stamper, c.registry, c.workspace, c.store.blobs, redaction, idGen, ids, logs)
-        val verify = Verify(checks = c.checks, scheduler = scheduler, checker = checker, baseline = null, s0 = c.s0.stampId, workspace = c.workspace, runner = runner, os = c.os, stamper = c.stamper, blobs = c.store.blobs, redaction = redaction, estimator = estimator, idGen = idGen, ids = ids, contracts = c.contracts, logsDir = logs, campaignReview = campaignReview(c, authority))
+        val verify = Verify(checks = c.checks, scheduler = scheduler, checker = checker, baseline = null, s0 = c.s0.stampId, workspace = c.workspace, runner = runner, os = c.os, stamper = c.stamper, blobs = c.store.blobs, redaction = redaction, estimator = estimator, idGen = idGen, ids = ids, contracts = c.contracts, logsDir = logs, campaignReview = campaignReview(c, authority),
+            // §8.8: review(scope=increment) is the review cell for S2+ main-line cells; a review cell never reaches it (no verify.review in its mask).
+            incrementReview = if (child == null && contract.shape >= Shape.S2) IncrementReview { why -> reviewCell(c, increment, model, authority, syntax, span).obtain(evidence(c, increment, listOf(why), emptyList(), compiled.k.ledger, authority), Tier.Medium, c.registry::version) } else null,
+        )
         verify.inputs = c.atlas.rows.map { it.path }
+        val ceiling = Ceiling.of(contract.authorization, config.executionMode)
+        val generation = c.lease?.generation ?: ExecutionGeneration.INITIAL
+        // §10.1 (D-121): an S2+ main-line cell whose role unmasks task.delegate delegates to child cells; a child never does.
+        val children = if (child == null && contract.shape >= Shape.S2 && role.effectiveOps(contract.shape, ceiling).allows("task.delegate")) {
+            CoroutineScope(currentCoroutineContext() + SupervisorJob(currentCoroutineContext()[Job]))
+        } else {
+            null
+        }
+        val delegator = children?.let { scope ->
+            val reviews: (io.astrolabe.delegate.TaskPacket) -> EvidencePacket = { evidence(c, increment, listOf("delegated by ${cellId.value}"), emptyList(), compiled.k.ledger, authority) }
+            val arithmetic = compiled.selection.arithmetic
+            val fixed = (arithmetic.totalTokens ?: arithmetic.knownFixedTokens + arithmetic.selectedTokens).toLong()
+            val worth = { kind: io.astrolabe.delegate.ChildKind, packet: io.astrolabe.delegate.TaskPacket ->
+                WorthTest.estimate(kind, packet, estimator.estimate(ChildBrief.render(packet, Probe.OUTPUT)).upperBoundTokens, fixed, config.defaults)
+            }
+            Delegator(CellChildRunner(childCell(c, increment, model, authority, syntax, span), evidence = reviews), PublicationAuthority { c.refusal() }, c.cancellation, DelegationLimits(contract.budget.tokens), contract.shape, scope, idGen, clock, events, worth = worth)
+        }
         val tools = CellTools(
             state = StateTool(Validator(estimator), registerVersions, c.journal, estimator, idGen, ids, clock, register ?: Register.empty(cellId, increment.id, increment.title), events),
             look = Look(c.workspace, c.registry, workset, c.atlas, Searches.jvm(), c.journal, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, checks = c.checks, bmaps = BmapStore(c.store)),
@@ -1094,8 +1148,11 @@ public class Controller @JvmOverloads public constructor(
             ),
             run = Run(c.workspace, c.registry, c.stamper, runner, c.os, c.intents, SqliteHandles(c.store, clock), observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, c.contracts, authority, config, clock, logs),
             verify = verify,
-            task = if (proposals == null) TaskTool(authority, c.contracts, c.journal, estimator, idGen, ids, clock, events)
-            else TaskTool(authority, c.contracts, c.journal, estimator, idGen, ids, clock, events, role.effectiveOps(contract.shape, Ceiling.of(contract.authorization, config.executionMode)), proposals),
+            task = if (proposals == null && delegator == null) TaskTool(authority, c.contracts, c.journal, estimator, idGen, ids, clock, events)
+            else TaskTool(
+                authority, c.contracts, c.journal, estimator, idGen, ids, clock, events, role.effectiveOps(contract.shape, ceiling), proposals,
+                delegator, delegator?.let { TaskPackets(WORKSPACE, ceiling, generation) }, c.registry::version,
+            ),
             kb = KbTool(c.kb, estimator, idGen, queue = Queue(c.store, KbWriter(c.store, estimator, clock), idGen, clock), ids = ids, events = events),
         )
         // §6.3: what this cell was given is logged per note; the register-citation hook turns `injected` into `cited`.
@@ -1128,19 +1185,20 @@ public class Controller @JvmOverloads public constructor(
             precompile = precompile,
             knowledge = knowledge,
         )
-        val budget = CellBudget.of(contract.budget.tokens, contract.budget.turnsPerCell, contract.budget.reserves)
+        val budget = child?.budget?.let { CellBudget.of(it.tokens, it.turns, contract.budget.reserves) }
+            ?: CellBudget.of(contract.budget.tokens, contract.budget.turnsPerCell, contract.budget.reserves)
         val cellSpan = spans?.start(Phase.Edit, ids, span)
-        val dispatch = DispatchAuthority { c.refusal()?.let { DispatchRefusal(it, cancelled = c.cancellation.cancelled) } }
+        val dispatch = DispatchAuthority { (cancellation.reason?.let { "cancelled: $it" } ?: c.refusal())?.let { DispatchRefusal(it, cancelled = cancellation.cancelled || c.cancellation.cancelled) } }
         // A cell that finished before the cancellation reached it keeps its exit: a late completion, archived below.
         val finished = AtomicReference<CellExit?>(null)
         val exit = try {
             coroutineScope {
                 val job = async { Cell(clock, idGen, config.defaults, Gates.s0(), events, completion, authority = dispatch).run(ctx, increment, budget).also(finished::set) }
                 // A cancellation mid-call interrupts the in-flight request; the cell settles its checkpoint first.
-                c.cancellation.onCancel { job.cancel(CancellationException("cancelled: $it")) }.use { job.await() }
+                cancellation.onCancel { job.cancel(CancellationException("cancelled: $it")) }.use { job.await() }
             }
         } catch (cancelled: CancellationException) {
-            if (!c.cancellation.cancelled || !currentCoroutineContext().isActive) {
+            if (!cancellation.cancelled || !currentCoroutineContext().isActive) {
                 cellSpan?.let { spans?.end(it, status = TraceSpanStatus.Cancelled) }
                 throw cancelled
             }
@@ -1150,6 +1208,7 @@ public class Controller @JvmOverloads public constructor(
             throw failure
         } finally {
             coherence.close()
+            children?.cancel()
         }
         accounting.calls(c.ids.work).firstOrNull { it.ids.context == cellId }?.usage?.takeIf { it.isComplete }?.let { manifests.recordFirstUsage(ids, manifest.id, it.totalInput) }
         if (exit == null) {
@@ -1162,6 +1221,104 @@ public class Controller @JvmOverloads public constructor(
             spans.end(cellSpan, cost)
         }
         return CellRun(exit, ids, scheduler, checkpoints)
+    }
+
+    /**
+     * The child-context form of [runCell] (§10.1): the child's own cancellation token and budget; [isolated] runs every
+     * check on an isolated copy of the candidate tree under `candidates/` (a review cell's `verify(tests)`, §8.8).
+     */
+    private class ChildForm(val cancellation: Cancellation, val budget: ChildBudget, val isolated: Boolean = false)
+
+    /**
+     * Runs a delegated child (D-121): a fresh cell under the child's context id, compiled on the parent's increment slice
+     * with the runtime brief pinned in `[T]` — the parent's transcript never reaches it (D13).
+     */
+    private fun childCell(c: OpenedCampaign, increment: Increment, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?): ChildCell =
+        ChildCell { seat, role, completion, budget, brief ->
+            val compiler = Compiler(model.estimator, c.attempt.config)
+            fun compile(profile: io.astrolabe.provider.Profile) = compiler.compile(increment, c.contract, profile, role, c.prime, pinned = listOf(brief), maxOutputTokens = model.maxOutputTokens)
+            // §11.1: a child is routed by its own function row, never by the parent's tier; an escalated tier is its floor.
+            val routing = route(c, seat.function, increment, model, seat.tier, compile(model.profile), ::compile)
+            val compiled = routing.compiled
+            check(compiled is Compiled.Ready) { "the ${role.name} child of ${increment.id} cannot be compiled: $compiled" }
+            routing.refused?.let { error("the ${role.name} child of ${increment.id} is unaffordable: ${it.reason}") }
+            runCell(c, seat.context, increment, role, routing.model, authority, syntax, compiled, span, null, completion = completion, pinned = listOf(brief), child = ChildForm(seat.cancellation, budget, isolated = role.name == Roles.review.name))
+                .exit.also { exit -> routing.selected?.let { router.record(it, outcomeOf(exit)) } }
+        }
+
+    private fun reviewCell(c: OpenedCampaign, increment: Increment, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?): ReviewCell =
+        ReviewCell(CellReviewJudge(childCell(c, increment, model, authority, syntax, span), idGen, c.cancellation), authority, c.store, idGen, clock, c.journal)
+
+    /**
+     * The increment-scope review of a completed cell (§8.8), when a trigger owes one: the review cell at its row's tier,
+     * a current approval reused, the human path as fallback. `null` when no review is owed.
+     */
+    private suspend fun incrementReview(c: OpenedCampaign, increment: Increment, exit: CellExit.Completed, tier: Tier?, compiled: Compiled.Ready, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?): ReviewOutcome? {
+        val prescan = c.impactPrescan
+        val impact = RiskFloorInput(prescan.contractsTouched.size, prescan.complete, prescan.prescan.fanIn, prescan.complete)
+        val flags = exit.packet.flags.testIntegrity
+        val triggers = ReviewTriggers.increment(IncrementReviewInput(c.contract, increment, Roles.implementing, tier, flags, exit.packet.changes.map { it.path }, c.kb.contractAnchors(), impact))
+        if (triggers.isEmpty()) return null
+        val row = FunctionTable.DEFAULT.row(ReviewTriggers.function(triggers))
+        return reviewCell(c, increment, model, authority, syntax, span).obtain(evidence(c, increment, triggers, flags, compiled.k.ledger, authority), row.defaultTier, c.registry::version)
+    }
+
+    /**
+     * Campaign scope (§8.8, D-124): in S2+ the campaign gate's review request is answered by the review cell over the
+     * whole diff, the contract, the receipts and the rubric, with [host] as the human fallback; S0/S1 keep the host.
+     */
+    private fun campaignJudge(c: OpenedCampaign, host: Authority, model: CellModel, syntax: SyntaxCheck, span: SpanId?): Authority {
+        val contract = c.contract
+        if (contract.shape < Shape.S2) return host
+        val whole = Increment(CAMPAIGN_REVIEW, contract.requirements.map { it.id }, contract.acceptance.map { it.id }, emptyList(), 0, title = "campaign review ${c.ids.work.value}")
+        val judge = CellReviewJudge(childCell(c, whole, model, host, syntax, span), idGen, c.cancellation)
+        val receipts = SqliteReceipts(c.store, clock)
+        return ReviewCellAuthority(host, judge, FunctionTable.DEFAULT.row(io.astrolabe.route.RoutingFunction.ReviewCritical).defaultTier) { request ->
+            val text = request.diffRef?.let { ref -> String(c.store.blobs.get(io.astrolabe.id.Digest(ref)), Charsets.UTF_8) } ?: "no diff was published"
+            val changed = text.lineSequence().filter { it.startsWith("+++ b/") }.map { it.removePrefix("+++ b/").substringBefore(" (") }.toList()
+            EvidencePacket(
+                id = request.id, ids = request.ids, scope = ReviewScope.Campaign, incrementId = null, contractVersion = request.contractRevision, candidate = request.candidate,
+                requirements = contract.requirements.map { Excerpt(it.id, it.text, it.authorityRef) }, criteria = contract.acceptance.map(ReviewCriterion::of),
+                diff = if (text.length <= MAX_REVIEW_DIFF_CHARS) text else text.take(MAX_REVIEW_DIFF_CHARS) + "\n… cut at $MAX_REVIEW_DIFF_CHARS chars; the full diff is blob ${request.diffRef}",
+                diffRef = request.diffRef, receipts = request.receipts.mapNotNull(receipts::get).map { ReviewReceipt.of(it, required = true) },
+                notes = emptyList(), testIntegrity = emptyList(), preexisting = emptyList(), coverage = null, rubric = request.rubric + EvidencePacket.RUBRIC,
+                evidenceVersions = changed.mapNotNull { path -> c.registry.version(path)?.let { path to it } }.toMap(), triggers = listOf(ReviewTriggers.CAMPAIGN),
+            )
+        }
+    }
+
+    /** The verdict each `review:` item of [increment] is signed with (§8.7); only an approval is passed on. */
+    private fun reviewItems(contract: Contract, increment: Increment, review: ReviewOutcome?): Map<String, io.astrolabe.verify.Verdict> {
+        val verdict = (review as? ReviewOutcome.Approved)?.record?.verdict ?: return emptyMap()
+        return increment.accept.filter { contract.acceptance(it) is Acceptance.Review }.associateWith { verdict }
+    }
+
+    /**
+     * The §8.8 evidence packet of [increment] at the tree now (D-124): the diff `s0 → now`, the increment's complete
+     * acceptance definitions, the current receipts with parsed counts (required when they certify its items), the
+     * CON/ADR anchors on the changed paths, the test-integrity flags, the pre-existing ledger and the rubric.
+     */
+    private fun evidence(c: OpenedCampaign, increment: Increment, triggers: List<String>, flags: List<io.astrolabe.verify.TestIntegrityFlag>, preexisting: io.astrolabe.verify.PreexistingLedger?, authority: Authority): EvidencePacket {
+        val contract = c.contract
+        val stamp = c.stamper.report().candidateId
+        val (digest, limits) = campaignReview(c, authority).diffBlob(c.s0.stampId, stamp)
+        val text = String(c.store.blobs.get(digest), Charsets.UTF_8)
+        val changed = text.lineSequence().filter { it.startsWith("+++ b/") }.map { it.removePrefix("+++ b/").substringBefore(" (") }.toList()
+        val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock)
+        val receipts = SqliteReceipts(c.store, clock)
+        val required = increment.accept.flatMap { c.checks.forAcceptance(it) }.map { it.id }.toSet()
+        val current = currencies(c, scheduler, stamp).mapNotNull { (checkId, currency) -> currency.receiptId?.let(receipts::get)?.let { ReviewReceipt.of(it, checkId in required) } }
+        val notes = c.kb.contractAnchors().filterValues { anchored -> changed.any { it in anchored } }.map { (id, paths) -> "$id anchors ${paths.sorted().joinToString(", ")}" }
+        return EvidencePacket(
+            id = idGen.next("evidence"), ids = c.ids.withCandidate(stamp), scope = ReviewScope.Increment, incrementId = increment.id, contractVersion = contract.version, candidate = stamp,
+            requirements = increment.requirementIds.mapNotNull { contract.requirement(it) }.map { Excerpt(it.id, it.text, it.authorityRef) },
+            criteria = EvidencePacket.criteria(contract, increment),
+            diff = if (text.length <= MAX_REVIEW_DIFF_CHARS) text else text.take(MAX_REVIEW_DIFF_CHARS) + "\n… cut at $MAX_REVIEW_DIFF_CHARS chars; the full diff is blob ${digest.hex}",
+            diffRef = digest.hex, receipts = current, notes = notes, testIntegrity = flags,
+            preexisting = preexisting?.entries.orEmpty().map { "${it.identity} — ${it.signature}" }, coverage = null,
+            rubric = EvidencePacket.RUBRIC + limits.map { "diff limit: $it" },
+            evidenceVersions = changed.mapNotNull { path -> c.registry.version(path)?.let { path to it } }.toMap(), triggers = triggers,
+        )
     }
 
     /**
@@ -1315,6 +1472,10 @@ public class Controller @JvmOverloads public constructor(
         /** The one workspace of an S0 campaign; worktrees arrive with S3. */
         @JvmField
         public val WORKSPACE: WorkspaceId = WorkspaceId("main")
+
+        /** The review brief carries at most this much of the diff; the full diff stays a blob it names (D-124). */
+        private const val MAX_REVIEW_DIFF_CHARS: Int = 16_000
+        private const val CAMPAIGN_REVIEW: String = "campaign-review"
 
         /** Default cap on an S1 campaign's cells, plan cell excluded (D-70). */
         public const val DEFAULT_MAX_CELLS: Int = 12

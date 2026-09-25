@@ -240,11 +240,11 @@ class VerifyTest {
         assertTrue(blast.body.contains("blast radius: no atlas for this candidate"), blast.body)
         assertEquals("denied", status(run("""{"what":"tests","selection":"ids","ids":["CHK-nope"]}""")))
         assertEquals("denied", status(run("""{"what":"acceptance","ids":["AC-9"]}""")))
-        // P3.5.2: review(scope=campaign) is the human path; without a wired reviewer it is unavailable, never a pass. The review cell (increment scope) stays masked.
+        // P3.5.2: review(scope=campaign) is the human path; without a wired reviewer it is unavailable, never a pass. So is the review cell (increment scope, P4.4.3).
         val review = run("""{"what":"review"}""")
         assertEquals("unavailable", status(review))
         assertTrue(review.body.contains("no campaign review path is wired"), review.body)
-        assertEquals("masked", status(run("""{"what":"review","scope":"increment"}""")))
+        assertEquals("unavailable", status(run("""{"what":"review","scope":"increment"}""")))
         assertEquals("unavailable", status(run("""{"what":"baseline"}""")))
         assertTrue(SqliteReceipts(store, clock).forCheck("CHK-full").isEmpty(), "refusals record no receipt")
     }

@@ -8,6 +8,7 @@ import io.astrolabe.campaign.PublicationAuthority
 import io.astrolabe.cell.ResultPacket
 import io.astrolabe.contract.Shape
 import io.astrolabe.event.AgentEvent
+import io.astrolabe.event.DelegatedCost
 import io.astrolabe.event.Events
 import io.astrolabe.id.ContextId
 import io.astrolabe.id.FileVersion
@@ -145,6 +146,8 @@ public class Delegator @JvmOverloads constructor(
     private val clock: Clock,
     private val events: Events? = null,
     public val depth: Int = 0,
+    /** The §10.1 worth-test estimate of a dispatch (P4.4.5), recorded on its event; advisory only. */
+    private val worth: ((ChildKind, TaskPacket) -> DelegatedCost)? = null,
 ) {
     init {
         require(depth >= 0) { "depth counts from the main line at 0" }
@@ -186,7 +189,7 @@ public class Delegator @JvmOverloads constructor(
             Dispatched(handle, packet, reservation, Cancellation()).also { units[id] = it }
         }
         unit.propagation = cancellation.onCancel { unit.cancellation.cancel(it) }
-        events?.emit(AgentEvent.Delegation.Dispatched(packet.ids, unit.handle.id, kind.wire))
+        events?.emit(AgentEvent.Delegation.Dispatched(packet.ids, unit.handle.id, kind.wire, delegatedCost = worth?.invoke(kind, packet)))
         val run = ChildRun(unit.handle, packet, unit.cancellation)
         when (mode) {
             DispatchMode.Sync -> settle(unit, runChild(run))

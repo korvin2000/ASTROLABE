@@ -224,7 +224,16 @@ public sealed interface AgentEvent {
     public sealed interface Delegation : AgentEvent {
         @Serializable
         @SerialName("delegation.dispatched")
-        public data class Dispatched(override val ids: Identities, val handle: String, val kind: String, override val phase: Phase = Phase.Delegate, override val span: SpanId? = null, override val parent: SpanId? = null) : Delegation
+        public data class Dispatched(
+            override val ids: Identities,
+            val handle: String,
+            val kind: String,
+            override val phase: Phase = Phase.Delegate,
+            override val span: SpanId? = null,
+            override val parent: SpanId? = null,
+            /** The §10.1 worth-test estimate (P4.4.5): advisory, never the reason a dispatch happened. */
+            val delegatedCost: DelegatedCost? = null,
+        ) : Delegation
 
         @Serializable
         @SerialName("delegation.collected")
