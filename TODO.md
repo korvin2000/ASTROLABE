@@ -1778,9 +1778,10 @@ Goal: [§18.2 Stage E](docs/implementation/roadmap.md#sec-18-2): writer cells + 
 - Build: `TreeSitterIndex : SymbolIndex` via `io.github.tree-sitter:ktreesitter` + grammar artifacts for the D-09 languages; incremental syntax trees cached per `(path, version)`; precise outlines, declaration spans, imports; `tier = 1`, no cross-module resolution claimed; `Syntax` provider from ERROR **and** MISSING nodes with declared accepted file types and parser completeness (a syntax receipt concerns the exact file version only, D-10); native-library loading failures degrade to tier 0 with a reported degradation line (FX-46).
 - Done: outlines/spans match tier-0 fixtures or better; module optional at runtime.
 
-#### P5.4.2 [O][C] Language-service adapter contract (tier 2) · TODO
+#### P5.4.2 [O][C] Language-service adapter contract (tier 2) · DONE
 - Build: `interface LanguageService { defs, refs (scope + unresolved dynamic cases), diagnostics, incrementalTypeCheck }` feeding `look(def/refs/impact)` with `tier = 2` and the fast checker; implementation (LSP-backed) deferred to P7.
 - Done: contract + fake implementation in test fixtures.
+- Log: 2026-09-25 — `atlas/LanguageService.kt`: `AdapterScope`, `UnresolvedCase`, `LanguageDefs`, `LanguageRefs` (references + `unresolved` dynamic/reflective sites, never dropped, §7.2 L8), `IncrementalCheck` (reusing `tool.run.Diagnostic`/`DiagnosticSeverity` rather than a new vocabulary), `LanguageService` (`suspend`, `tier` defaults to `IndexTier.LanguageService`). `java/JavaLanguageService.kt` (CompletableFuture form, D-07) + `atlas/LanguageServices.fromJava` bridge (mirrors `event/Authorities`). `fixtures/FakeLanguageService` (scripted answers, empty-not-throwing for an unscripted name/path). Not wired: `Look.def/refs/impact` still construct tier-0 `SymbolIndex` directly and `Config.Flags.languageService` gates nothing yet — both are P5.4's ablation and integration debt, same deferral pattern as P4.4.4 `QaCell`. Test: `LanguageServiceTest` (3, incl. the Java bridge unwrapping an exceptional completion).
 
 - [ ] **Gate P5.4:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
 
