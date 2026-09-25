@@ -1,7 +1,7 @@
 package io.astrolabe.verify
 
 /**
- * The scheduled rows of the §8.1 layer table (L1–L2 of the §8.2 ladder). Inline syntax runs inside `edit` and the
+ * The scheduled rows of the §8.1 layer table (L1–L3 of the §8.2 ladder). Inline syntax runs inside `edit` and the
  * end-of-turn checker in [Checker]; independent review (L5) arrives with P4.
  */
 public enum class Layer {
@@ -16,6 +16,9 @@ public enum class Layer {
 
     /** S3 merge (P5.1.3): blast radius ∪ acceptance over the combined tree. */
     IntegrationReverification,
+
+    /** L3 (§8.2) for user-visible behaviour claims: the declared QA cases, run by `QaDriver` on an isolated candidate. */
+    ProductUse,
 }
 
 /** What one layer runs now, and what it cannot test (`not_tested`, §8.2), each with the concrete reason. */
@@ -53,6 +56,7 @@ public object Layers {
                 if (gates.isEmpty()) notTested += "quality gates: none configured"
                 listOfNotNull(suite) + gates
             }
+            Layer.ProductUse -> checks.all().filter { it.kind == CheckKind.Product }.also { if (it.isEmpty()) notTested += "product use (L3): no QA case declared" }
         }
         return LayerSelection(layer, candidates.distinctBy { it.id }.filter(due), notTested)
     }

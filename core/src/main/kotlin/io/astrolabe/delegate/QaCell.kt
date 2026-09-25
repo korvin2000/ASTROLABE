@@ -15,6 +15,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import java.net.URI
+import java.net.URISyntaxException
 
 /** How the QA cell drives the product (§10.3). */
 public enum class QaSurface(public val wire: String) { Cli("cli"), Http("http"), Browser("browser") }
@@ -123,18 +125,24 @@ public sealed interface QaAdmission {
 }
 
 /**
- * The QA cell's contract (§10.3, L3 of §8.2): packet in, packet out, never deciding interfaces. The implementation is
- * `[O]` in P5.3; until then QA is masked — not a [ChildKind], and [admit] refuses every packet (D-125) — while the
- * packet shapes and [validate], the declared result validator, are fixed here.
+ * The QA cell's contract (§10.3, L3 of §8.2): packet in, packet out, never deciding interfaces. [QaDriver] runs it
+ * (P5.3.1); a host enables it with `Flags.qaCell` and passes the flag as [admit]'s `available`. Browser surfaces are
+ * out of scope and an HTTP entry point must be a loopback address of the disposable environment (D-200).
  */
 public object QaCell {
-    /** Masked until P5.3 implements the cell. */
-    public const val AVAILABLE: Boolean = false
+    /** Implemented since P5.3.1; still an optional layer behind `Flags.qaCell`. */
+    public const val AVAILABLE: Boolean = true
 
     @JvmStatic
     @JvmOverloads
     public fun admit(packet: QaPacket, available: Boolean = AVAILABLE): QaAdmission {
-        if (!available) return QaAdmission.Refused("QA cells are masked until P5.3: L3 product use needs its implementation")
+        if (!available) return QaAdmission.Refused("QA cells are off: Flags.qaCell enables L3 product use")
+        packet.entryPoints.firstOrNull { it.surface == QaSurface.Browser }?.let {
+            return QaAdmission.Refused("browser entry point ${it.target}: browser surfaces are out of scope (D-200)")
+        }
+        packet.entryPoints.firstOrNull { it.surface == QaSurface.Http && !loopback(it.target) }?.let {
+            return QaAdmission.Refused("HTTP entry point ${it.target} is not a loopback address: QA never drives production (D-200)")
+        }
         val env = packet.environment
         if (env is QaEnvironment.IsolatedCandidate && env.candidate != packet.candidate) {
             return QaAdmission.Refused("the isolated copy is @${env.candidate.hash8}, not the candidate under test @${packet.candidate.hash8}")
@@ -163,6 +171,19 @@ public object QaCell {
         }
         return gaps
     }
+
+    /** Whether an HTTP [target] (`[METHOD ]url`) addresses this host's loopback interface; anything else may be production. */
+    @JvmStatic
+    public fun loopback(target: String): Boolean {
+        val host = try {
+            URI(target.trim().substringAfterLast(' ')).host
+        } catch (malformed: URISyntaxException) {
+            null
+        } ?: return false
+        return host == "localhost" || host == "[::1]" || LOOPBACK_V4.matches(host)
+    }
+
+    private val LOOPBACK_V4 = Regex("""127\.\d{1,3}\.\d{1,3}\.\d{1,3}""")
 
     /** The packet form the QA cell is told to end with. */
     public const val OUTPUT: String = "end with the QA packet as JSON: {\"cases\": [{\"id\": …, \"entryPoint\": {\"surface\": \"cli|http|browser\", \"target\": …}, " +
@@ -206,7 +227,7 @@ public object QaCell {
     /**
      * The QA role's [RoleCompletion] (§3.7 `validate_role_output` for the ReceiptsAndCases packet): the text parses and
      * [validate] finds no gap against [packet]; [onResult] receives the result. Gaps continue the cell, at most
-     * [maxFinalizations] times. Bound only once P5.3 admits a QA cell.
+     * [maxFinalizations] times. A model-driven QA cell binds it; [QaDriver] applies [validate] to its own run.
      */
     @JvmStatic
     @JvmOverloads

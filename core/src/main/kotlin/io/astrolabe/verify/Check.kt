@@ -20,7 +20,12 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
-public enum class CheckKind { Syntax, Type, Lint, Unit, Integration, Acceptance, Full, Quality, Review }
+public enum class CheckKind {
+    Syntax, Type, Lint, Unit, Integration, Acceptance, Full, Quality, Review,
+
+    /** L3 of §8.2: one QA case driving the product in a disposable environment (P5.3.1). */
+    Product,
+}
 
 /** What a check runs over (§8.1). */
 @Serializable

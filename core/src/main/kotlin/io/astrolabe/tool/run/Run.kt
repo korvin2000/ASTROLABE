@@ -44,6 +44,7 @@ import io.astrolabe.tool.Catalog
 import io.astrolabe.tool.EffectClass
 import io.astrolabe.tool.Effects
 import io.astrolabe.tool.EnvelopeHeader
+import io.astrolabe.tool.GeneratedTools
 import io.astrolabe.tool.RunArgs
 import io.astrolabe.tool.RuntimeFields
 import io.astrolabe.tool.ToolCall
@@ -51,6 +52,7 @@ import io.astrolabe.tool.ToolExecutor
 import io.astrolabe.tool.ToolFamily
 import io.astrolabe.tool.ToolOps
 import io.astrolabe.tool.ToolOutcome
+import io.astrolabe.tool.ToolSet
 import io.astrolabe.tool.TurnContext
 import io.astrolabe.workspace.Intent as PathIntent
 import io.astrolabe.workspace.PathResolution
@@ -127,6 +129,8 @@ public class Run(
     private val catalog: Catalog = Catalog.EMPTY,
     /** The transport to mounted servers; `null` until P7 wires one (the invocation is then `unavailable`). */
     private val mcp: McpClient? = null,
+    /** The generated tools active at this attempt's boundary (§12.2); `run(["tool:<name>", …])` resolves only against it. */
+    private val tools: ToolSet = ToolSet.EMPTY,
 ) : ToolExecutor {
     init {
         require(ids.context != null) { "run runs inside a cell: ids.context is its lineage" }
@@ -155,10 +159,17 @@ public class Run(
 
     private suspend fun run(args: RunArgs, context: TurnContext): ToolOutcome {
         val contract = contracts.current(ids.work) ?: return refused(args, Outcome.Denied, "no committed contract for ${ids.work}")
-        val argv = args.argv ?: listOf(args.cmd!!)
+        val requested = args.argv ?: listOf(args.cmd!!)
         val shell = args.argv == null
-        val program = argv.first().trim()
-        if (program.startsWith("mcp:")) return mcp(args, argv, shell, contract)
+        val program = requested.first().trim()
+        if (program.startsWith("mcp:")) return mcp(args, requested, shell, contract)
+        val generated = if (program.startsWith("tool:")) {
+            if (shell) return refused(args, Outcome.Denied, "generated tools take argv form: run([\"$program\", …]); nothing was dispatched")
+            tools.resolve(program) ?: return refused(args, Outcome.Denied, "'$program' is not active at this attempt's boundary; see look(catalog); nothing was dispatched")
+        } else {
+            null
+        }
+        val argv = generated?.let { it.script + requested.drop(1) } ?: requested
         val cwd = args.cwd?.let { dir ->
             when (val resolved = workspace.resolve(dir, PathIntent.Read)) {
                 is PathResolution.Resolved -> resolved.real
@@ -167,7 +178,9 @@ public class Run(
         } ?: workspace.root
 
         // Policy label (§4.6), capability ceiling (§14.2) and execution mode (D-11) — all before any effect.
-        val classification = EffectPolicy.classify(args, workspace.root.toString(), contract.scope.protectedPaths)
+        val classified = EffectPolicy.classify(if (generated == null) args else args.copy(argv = argv), workspace.root.toString(), contract.scope.protectedPaths)
+        // §12.2: a generated wrapper's declarations only add to its script's classification; the caller's ceiling decides.
+        val classification = generated?.let { GeneratedTools.inherit(classified, it) } ?: classified
         authorize(args, argv, contract, classification)?.let { return it }
         val replaySafe = classification.effectClass == EffectClass.R && !classification.effectsUnknown
 

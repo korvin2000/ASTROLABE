@@ -5,6 +5,8 @@ import io.astrolabe.cell.ChangeOrigin
 import io.astrolabe.cell.ResultPacket
 import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.RequirementStatus
+import io.astrolabe.delegate.QaRunRecord
+import io.astrolabe.delegate.QaRuns
 import io.astrolabe.id.AttemptId
 import io.astrolabe.id.CandidateId
 import io.astrolabe.id.Identities
@@ -93,6 +95,8 @@ public data class FinishReceipt(
     val equivalence: EquivalenceReport? = null,
     /** The campaign-scope review (§8.8, D-23 human path); `null` when none was owed. */
     val review: ReviewLine? = null,
+    /** L3 product use (§10.3): each QA run with its cases, receipts and log blobs; empty when no QA cell ran. */
+    val qa: List<QaRunRecord> = emptyList(),
 )
 
 /** The campaign review as the receipt reports it: the request, the diff it saw, and the signed verdict or why none arrived. */
@@ -207,6 +211,7 @@ public object FinishReceipts {
                     it.request.id, it.request.diffRef, it.verdict?.outcome?.name?.lowercase(), it.verdict?.signedBy, it.verdict?.confidence, it.unavailable, it.reused,
                 )
             },
+            qa = QaRuns.forAttempt(c.store, state.work, state.attempt),
         )
     }
 
