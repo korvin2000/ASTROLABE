@@ -8,7 +8,8 @@ import java.util.Locale
  * [graph] is the [ImpactGraph] that [Impact.analyze] consumes; there is no parallel graph type.
  *
  * Extraction is the tier-0 regex outline plus the atlas resolver, so [ImpactGraph.tier] is
- * [IndexTier.Lexical] and the kernel never claims a complete blast over it (§7.3 asks for tier 1+).
+ * [IndexTier.Lexical] and the kernel never claims a complete blast over it (§7.3 asks for tier 1+),
+ * unless an [OutlineSource] supplies tier-1 outlines.
  * Per-file completeness is the extraction verdict itself: a dynamic import, reflection, a
  * generated file or an import that is neither resolved nor clearly external ⇒ [isComplete] `false`
  * with the reason in [ImpactGraph.unresolved] (§7.3: reflection, plugins, generated clients).
@@ -96,6 +97,8 @@ public class ImportGraph private constructor(
     public companion object {
         private const val VERSION_PREFIX = "atlas-"
         private const val PROVENANCE = "atlas tier 0 outline + resolver"
+        private const val SYNTAX_PROVENANCE = "tier 1 syntax outline + resolver"
+        private val UNEXTRACTED = setOf(Language.Go, Language.Rust, Language.Shell)
         private const val DESCRIPTION_LIMIT = 120
         private const val GENERATED_PROBE_LINES = 8
 
@@ -125,7 +128,16 @@ public class ImportGraph private constructor(
 
         /** Builds the graph over every parsed row of [atlas], reading each D-09 file once for the dynamic scan. */
         @JvmStatic
-        public fun of(atlas: Atlas, workspace: WorkspaceId): ImportGraph {
+        public fun of(atlas: Atlas, workspace: WorkspaceId): ImportGraph = of(atlas, workspace, OutlineSource(atlas::outline))
+
+        /**
+         * Builds the graph from [source]'s outlines. The graph is [IndexTier.Syntax] only when every
+         * D-09 file's outline is tier 1 or better; then a D-09 file whose parse had errors and a Go,
+         * Rust or shell file (no import extractor) are unresolved, so a narrow blast is never claimed
+         * over imports nobody extracted (D-213).
+         */
+        @JvmStatic
+        public fun of(atlas: Atlas, workspace: WorkspaceId, source: OutlineSource): ImportGraph {
             val known = atlas.rows.mapTo(HashSet()) { it.path }
             val packages = packageIds(atlas)
             fun packageOf(path: String): String? {
@@ -149,7 +161,9 @@ public class ImportGraph private constructor(
             }
 
             val outlines = LinkedHashMap<String, Outline>()
-            for (path in files.keys) outlines[path] = atlas.outline(path)
+            for (path in files.keys) outlines[path] = source.outline(path)
+            val parsed = outlines.values.filter { it.language.hasOutlineParser }
+            val tier = if (parsed.isNotEmpty() && parsed.all { it.tier.level >= IndexTier.Syntax.level }) IndexTier.Syntax else IndexTier.Lexical
             val resolver = ImportResolver(known, outlines)
             val namespaces = HashMap<String, MutableList<String>>()
             for ((path, outline) in outlines) {
@@ -219,6 +233,10 @@ public class ImportGraph private constructor(
                         else -> Unit
                     }
                 }
+                if (tier != IndexTier.Lexical) {
+                    if (language.hasOutlineParser && !outline.complete) reason(path, "syntax errors: imports may be missing")
+                    if (language in UNEXTRACTED) reason(path, "no import extraction for ${language.id}")
+                }
                 if (language.hasOutlineParser) {
                     val text = readRelative(atlas.root, path)?.toString(Charsets.UTF_8) ?: continue
                     scanDynamic(path, language, text, ::reason)
@@ -231,10 +249,10 @@ public class ImportGraph private constructor(
             val unresolved = reasons.flatMap { (path, list) -> list.map { ImpactDependency(files.getValue(path), it) } }
             val graph = ImpactGraph(
                 version = VERSION_PREFIX + atlas.repoKey.hash8,
-                provenance = PROVENANCE,
+                provenance = if (tier == IndexTier.Lexical) PROVENANCE else SYNTAX_PROVENANCE,
                 files = files.values.toSet(),
                 imports = edges,
-                tier = IndexTier.Lexical,
+                tier = tier,
                 complete = reasons.isEmpty() && omitted.isEmpty(),
                 coverage = files.values.mapNotNullTo(LinkedHashSet()) { it.scope.takeIf { scope -> scope.packageId != null } },
                 unresolved = unresolved.toSet(),
