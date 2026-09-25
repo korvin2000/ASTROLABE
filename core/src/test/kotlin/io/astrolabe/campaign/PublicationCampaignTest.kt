@@ -202,6 +202,12 @@ class PublicationCampaignTest {
             assertEquals(RefusalReason.UnverifiedCandidate, assertIs<PublicationResult.Refused>(stale.results.single()).refusal.reason)
             assertEquals(Stage.Patch, stale.reached)
             assertNull(repo.git.readRef(harness), "no harness commit of an unverified tree")
+
+            repo.write("src/a.py", "def a():\n    return 10\n")
+            c.cancellation.cancel("the host stopped the campaign")
+            val fenced = ctl.publish(c, run, PublicationRequest(Stage.LocalCommit), AutonomousAuthority())
+            assertTrue(assertIs<PublicationResult.Refused>(fenced.results.single()).refusal.detail.startsWith("publication fenced: cancelled"))
+            assertNull(repo.git.readRef(harness), "a cancelled campaign publishes nothing")
         }
     }
 

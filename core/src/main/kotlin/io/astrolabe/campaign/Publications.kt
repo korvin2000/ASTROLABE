@@ -2,6 +2,8 @@ package io.astrolabe.campaign
 
 import io.astrolabe.auth.PublicationEvidence
 import io.astrolabe.auth.PublicationPolicy
+import io.astrolabe.auth.Refusal
+import io.astrolabe.auth.RefusalReason
 import io.astrolabe.auth.Stage
 import io.astrolabe.delegate.ReviewCell
 import io.astrolabe.event.Authority
@@ -65,8 +67,14 @@ public data class PublicationRun(
  */
 internal class Publications(private val idGen: IdGen, private val clock: Clock) {
     suspend fun publish(c: OpenedCampaign, finish: FinishReceipt, request: PublicationRequest, authority: Authority, deployer: Deployer?): PublicationRun {
+        // §13.1 publication fence: a cancelled campaign or a lost lease publishes nothing.
+        c.refusal()?.let { fenced ->
+            val stage = request.stages.first()
+            journal(c, "publication ${PublicationPolicy.wire(stage)}: refused (fenced): $fenced", buildJsonObject { put("type", OUTCOME); put("stage", PublicationPolicy.wire(stage)); put("result", "refused") })
+            return PublicationRun(request, listOf(PublicationResult.Refused(stage, Refusal(PublicationPolicy.wire(stage), RefusalReason.NotApproved, "publication fenced: $fenced"))), finish)
+        }
         val contract = c.contract
-        val publisher = Publisher(c.workspace.git, c.ids, contract.authorization, contract.version, authority, idGen, deployer, request.knownRemotes)
+        val publisher =Publisher(c.workspace.git, c.ids, contract.authorization, contract.version, authority, idGen, deployer, request.knownRemotes)
         val current = c.stamper.report().candidateId
         // D-250: L0–L2 are green at the final stamp only for a completed campaign with nothing left unverified.
         val green = finish.stamp.takeIf { finish.status == "completed" && finish.notVerified.isEmpty() }
