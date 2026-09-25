@@ -6,7 +6,11 @@ import io.astrolabe.campaign.CampaignOutcome
 import io.astrolabe.campaign.CampaignPolicy
 import io.astrolabe.campaign.CampaignRequest
 import io.astrolabe.campaign.Controller
+import io.astrolabe.campaign.Deployer
 import io.astrolabe.campaign.OpenedCampaign
+import io.astrolabe.campaign.OptionalLayers
+import io.astrolabe.campaign.PublicationRequest
+import io.astrolabe.campaign.PublicationRun
 import io.astrolabe.cell.CellModel
 import io.astrolabe.contract.Contract
 import io.astrolabe.event.AgentEvent
@@ -35,6 +39,7 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import java.nio.file.Path
 import java.time.Clock
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * The SDK entry point for Kotlin hosts (D-07); nothing sits above the controller. Java hosts use
@@ -50,12 +55,16 @@ public class Astrolabe @JvmOverloads public constructor(
     private val authority: Authority,
     private val clock: Clock = Clock.systemUTC(),
     private val idGen: IdGen = RandomIdGen(),
+    /** The host's optional layers, each read only while its `Flags` entry is on (D-251–D-253). */
+    layers: OptionalLayers = OptionalLayers(),
+    /** The host's `deploy` stage (§14.2); without one a requested deploy is refused. */
+    private val deployer: Deployer? = null,
 ) : AutoCloseable {
     /** Every campaign's events, in emission order per bus; filter by work id or use [CampaignHandle.events]. */
     public val events: Events = Events(clock)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val controller = Controller(config, clock, idGen, events, spans = Spans(idGen, events))
+    private val controller = Controller(config, clock, idGen, events, spans = Spans(idGen, events), layers = layers)
 
     init {
         val violations = config.violations()
@@ -78,10 +87,11 @@ public class Astrolabe @JvmOverloads public constructor(
     /**
      * Opens a campaign for [request] in [project] and starts it; returns once the campaign is open and
      * reconciled. One campaign runs per project at a time (S0 single writer). A `null` [policy] budgets one
-     * full window of the main profile per allowed cell (D-67).
+     * full window of the main profile per allowed cell (D-67). A [publication] asks for stages beyond `patch` once the
+     * campaign has finished (§14.2): each is a separate grant through the authority; without one nothing is published.
      */
     @JvmOverloads
-    public suspend fun campaign(project: Project, request: String, policy: CampaignPolicy? = null): CampaignHandle {
+    public suspend fun campaign(project: Project, request: String, policy: CampaignPolicy? = null, publication: PublicationRequest? = null): CampaignHandle {
         val profile = config.profiles[config.profileRoles.main]
             ?: throw IllegalStateException("no profile '${config.profileRoles.main}' is configured for the main routing function")
         val chosen = policy ?: CampaignPolicy(Tokens(profile.capabilities.contextLimitTokens.toLong() * config.defaults.campaignCells))
@@ -89,13 +99,15 @@ public class Astrolabe @JvmOverloads public constructor(
             check(project.active?.done != false) { "project already runs campaign ${project.active?.workId?.value}" }
             val opened = controller.open(project, CampaignRequest(WorkId(idGen.next("W")), AttemptId(FIRST_ATTEMPT), request), chosen)
             val model = CellModel(adapter, profile, HeuristicEstimator())
+            val published = AtomicReference<PublicationRun?>(null)
             val job = scope.async {
                 opened.use { c ->
                     val run = controller.run(c, model, authority)
+                    if (publication != null && run.finish != null) published.set(controller.publish(c, run, publication, authority, deployer))
                     run.outcome ?: c.stop?.outcome ?: CampaignOutcome.Failed
                 }
             }
-            return CampaignHandle(opened.ids.work, job, opened, events, project.views).also { project.active = it }
+            return CampaignHandle(opened.ids.work, job, opened, events, project.views, published).also { project.active = it }
         }
     }
 
@@ -152,8 +164,12 @@ public class CampaignHandle internal constructor(
     private val opened: OpenedCampaign,
     private val bus: Events,
     public val views: Views,
+    private val published: AtomicReference<PublicationRun?> = AtomicReference(null),
 ) {
     public val done: Boolean get() = job.isCompleted
+
+    /** The stages published after finish when the campaign was started with a publication request; `null` until then or without one. */
+    public val publication: PublicationRun? get() = published.get()
 
     public val events: Flow<AgentEvent> get() = bus.records().filter { it.event.ids.work == workId }.map { it.event }
 

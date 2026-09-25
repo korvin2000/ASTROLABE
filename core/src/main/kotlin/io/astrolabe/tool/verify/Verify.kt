@@ -5,6 +5,7 @@ import io.astrolabe.atlas.EditHunk
 import io.astrolabe.atlas.EditSet
 import io.astrolabe.atlas.ImpactAssembly
 import io.astrolabe.atlas.ImportGraph
+import io.astrolabe.atlas.IndexTiers
 import io.astrolabe.atlas.SymbolIndex
 import io.astrolabe.verify.Blast
 import io.astrolabe.verify.BlastSelection
@@ -105,6 +106,8 @@ public class Verify(
     private val campaignReview: CampaignReview? = null,
     /** `review(scope=increment)`: the review cell (P4.4.3, S2+); `null` ⇒ unavailable. */
     private val incrementReview: IncrementReview? = null,
+    /** Where the blast selection's import graph takes its outlines: tier 0, or a host tier-1 index (D-251). */
+    private val tiers: IndexTiers = IndexTiers.TIER_0,
 ) : ToolExecutor {
     init {
         require(ids.context != null) { "verify runs inside a cell: ids.context is its lineage" }
@@ -130,7 +133,7 @@ public class Verify(
         val atlas = atlas ?: return BlastSelection.NotSelected("blast radius: no atlas for this candidate")
         val test = checks[Checks.FULL]?.command ?: return BlastSelection.NotSelected("blast radius: no test command declared by the repository")
         if (touched.isEmpty()) return BlastSelection.NotSelected("blast radius: nothing touched")
-        val graph = graphOf?.takeIf { it.first === atlas }?.second ?: ImportGraph.of(atlas, workspace.id).also { graphOf = atlas to it }
+        val graph = graphOf?.takeIf { it.first === atlas }?.second ?: tiers.graph(atlas, workspace.id).also { graphOf = atlas to it }
         val others = checks.all().filter { it.id != Checks.TESTS_BLAST }
         val analysis = ImpactAssembly(graph, SymbolIndex(atlas)).analyze(EditSet(touched.toSet()), others, contracts = null).analysis
         val selection = Blast.select(analysis, test, { files -> graph.testsFor(files.map { it.path }) }) { scope ->
@@ -280,7 +283,7 @@ public class Verify(
     public suspend fun riskAboveTheta(hunks: List<EditHunk>): LayerRun? {
         val atlas = atlas ?: return null
         if (hunks.isEmpty()) return null
-        val graph = graphOf?.takeIf { it.first === atlas }?.second ?: ImportGraph.of(atlas, workspace.id).also { graphOf = atlas to it }
+        val graph = graphOf?.takeIf { it.first === atlas }?.second ?: tiers.graph(atlas, workspace.id).also { graphOf = atlas to it }
         val edits = EditSet(hunks.mapTo(LinkedHashSet()) { it.path }, hunks)
         val risk = ImpactAssembly(graph, SymbolIndex(atlas)).analyze(edits, checks.all(), contracts = null).analysis.risk
         val above = risk.exceedsThreshold == true || (risk.estimate ?: 0.0) > risk.threshold

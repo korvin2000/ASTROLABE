@@ -6,6 +6,7 @@ import io.astrolabe.atlas.EditSet
 import io.astrolabe.atlas.Focus
 import io.astrolabe.atlas.ImpactAssembly
 import io.astrolabe.atlas.ImportGraph
+import io.astrolabe.atlas.IndexTiers
 import io.astrolabe.atlas.Outline
 import io.astrolabe.atlas.SymbolIndex
 import io.astrolabe.atlas.decodeLines
@@ -122,6 +123,8 @@ public class Look(
     private val bmaps: BmapSource? = null,
     /** The generated tools active at this attempt's boundary, listed by `look(catalog)` as `tool:<name>` one-liners (§12.2). */
     private val tools: ToolSet = ToolSet.EMPTY,
+    /** Where `look(impact)`'s import graph takes its outlines: tier 0, or a host tier-1 index (D-251). */
+    private val tiers: IndexTiers = IndexTiers.TIER_0,
 ) : ToolExecutor {
     init {
         require(ids.context != null) { "look runs inside a cell: ids.context is its lineage" }
@@ -469,7 +472,7 @@ public class Look(
     private var graphOf: Pair<Atlas, ImportGraph>? = null
 
     private fun importGraph(): ImportGraph = graphOf?.takeIf { it.first === atlas }?.second
-        ?: ImportGraph.of(atlas, workspace.id).also { graphOf = atlas to it }
+        ?: tiers.graph(atlas, workspace.id).also { graphOf = atlas to it }
 
     // §7.5: a map is validated against the current atlas and rendered without versions, so it never grants coverage.
     private fun bmap(args: LookArgs): ToolOutcome {

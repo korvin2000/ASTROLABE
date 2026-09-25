@@ -56,7 +56,7 @@ internal class IncrementAttempts(private val journal: Journal, private val idGen
      * The completion of [increment] was refused by the verifier: record the attempt that ran at [selected] and decide.
      * An [EscalationStep.Escalate] is remembered as the stated change of the increment's next attempt.
      */
-    fun refused(ids: Identities, increment: String, budget: Int, selected: Routed.Selected?, register: Register, missing: List<String>, evidenceRefs: List<String>): EscalationStep {
+    fun refused(ids: Identities, increment: String, budget: Int, selected: Routed.Selected?, register: Register, missing: List<String>, evidenceRefs: List<String>, failureClass: FailureClass = FailureClass.BehaviouralTestFailure): EscalationStep {
         val before = allowance(ids.work, increment, budget)
         val attempt = SubstantiveAttempt(
             ids.attempt,
@@ -68,7 +68,7 @@ internal class IncrementAttempts(private val journal: Journal, private val idGen
         )
         if (before.remaining > 0) record(ids, increment, before.used + 1, attempt)
         val after = allowance(ids.work, increment, budget)
-        val failure = VerifiedFailure(FailureClass.BehaviouralTestFailure, "completion refused: ${missing.joinToString("; ")}", evidenceRefs.ifEmpty { listOf(increment) })
+        val failure = VerifiedFailure(failureClass, "completion refused: ${missing.joinToString("; ")}", evidenceRefs.ifEmpty { listOf(increment) })
         return Escalation.next(after, failure).also { step ->
             if (step is EscalationStep.Escalate) {
                 changes[increment] = step.change

@@ -5,6 +5,7 @@ import io.astrolabe.atlas.ContractAnchors
 import io.astrolabe.atlas.EditSet
 import io.astrolabe.atlas.ImpactAssembly
 import io.astrolabe.atlas.ImportGraph
+import io.astrolabe.atlas.IndexTiers
 import io.astrolabe.atlas.SymbolIndex
 import io.astrolabe.id.WorkspaceId
 
@@ -79,10 +80,17 @@ public data class ImpactPrescan(
         /** Runs the pre-scan over [inputs]; [anchors] are the known `CON` anchors (none until the KB has them). */
         @JvmStatic
         @JvmOverloads
-        public fun of(atlas: Atlas, workspace: WorkspaceId, inputs: PrescanInputs, anchors: Map<String, Set<String>> = emptyMap()): ImpactPrescan {
+        public fun of(
+            atlas: Atlas,
+            workspace: WorkspaceId,
+            inputs: PrescanInputs,
+            anchors: Map<String, Set<String>> = emptyMap(),
+            /** Tier 0, or a host tier-1 index whose complete graph lets the blast narrow (D-251). */
+            tiers: IndexTiers = IndexTiers.TIER_0,
+        ): ImpactPrescan {
             val paths = inputs.paths
             if (paths.isEmpty()) return ImpactPrescan(inputs, Prescan.UNKNOWN, emptyList(), emptyList(), false, listOf("no candidate paths: discovery found nothing, which proves nothing"), emptyList())
-            val graph = ImportGraph.of(atlas, workspace)
+            val graph = tiers.graph(atlas, workspace)
             val index = SymbolIndex(atlas)
             val contracts = anchors.map { (id, files) -> ContractAnchors(id, files, complete = false) }
             val analysis = ImpactAssembly(graph, index).analyze(EditSet(paths.toSet()), emptyList(), contracts).analysis
