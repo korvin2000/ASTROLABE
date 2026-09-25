@@ -498,7 +498,9 @@ public class Controller @JvmOverloads public constructor(
 
         // §13.1: the old owner's unknown effects are reconciled above, before this writer is granted the workspace.
         val leases = Leases(store, clock)
-        val lease = leases.acquire(WORKSPACE, ids, "controller:${store.holder.pid}", leaseDuration)
+        // D-171: another work's intents that never committed nor were reconciled fence a new holder (Fence.grant).
+        val unreconciled = intents.open().filter { it.status != IntentStatus.Unknown }.map { it.intentId }
+        val lease = leases.acquire(WORKSPACE, ids, "controller:${store.holder.pid}", leaseDuration, unreconciled)
         val prescan = impactPrescan.prescan
         journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, refs = impactPrescan.blast, text = "open: impact ${impactPrescan.log}", at = clock.instant()))
         val selected = ShapeSelector.select(contract, prescan, effective.defaults.shapePolicy, policy.resumeExpected, capabilities = CAPABILITIES)
