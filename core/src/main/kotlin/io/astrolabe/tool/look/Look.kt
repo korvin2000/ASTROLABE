@@ -45,6 +45,7 @@ import io.astrolabe.tool.ToolCall
 import io.astrolabe.tool.ToolExecutor
 import io.astrolabe.tool.ToolFamily
 import io.astrolabe.tool.ToolOps
+import io.astrolabe.tool.ToolSet
 import io.astrolabe.tool.ToolOutcome
 import io.astrolabe.tool.TurnContext
 import io.astrolabe.verify.Checks
@@ -119,6 +120,8 @@ public class Look(
     private val mounts: io.astrolabe.tool.Catalog = io.astrolabe.tool.Catalog.EMPTY,
     /** The admitted behaviour maps `look(bmap)` discloses (P4.3.2); null answers that none exist. */
     private val bmaps: BmapSource? = null,
+    /** The generated tools active at this attempt's boundary, listed by `look(catalog)` as `tool:<name>` one-liners (§12.2). */
+    private val tools: ToolSet = ToolSet.EMPTY,
 ) : ToolExecutor {
     init {
         require(ids.context != null) { "look runs inside a cell: ids.context is its lineage" }
@@ -489,7 +492,7 @@ public class Look(
             val allowed = ops.filter { mask.allows(ToolOps.name(family, it)) }
             val masked = ops - allowed.toSet()
             "${family.wire}: ${allowed.joinToString(" ").ifEmpty { "(none)" }}" + (if (masked.isEmpty()) "" else " · masked: ${masked.joinToString(" ")}")
-        } + mounts.lines.map { "mounted $it" }
+        } + mounts.lines.map { "mounted $it" } + tools.lines.map { "generated $it" }
         return textResult(args, lines.joinToString("\n"), scope = "catalog")
     }
 
