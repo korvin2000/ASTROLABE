@@ -1,8 +1,9 @@
 # Offline evaluation kernel
 
 P6.1.4 supplies score arithmetic and paired inference over explicit records. It is not a campaign
-runner and does not enable features. The runner, frozen manifests and integrity verification remain
-P6.1.1/P6.1.2/P6.1.3; Accounting remains P1.11.2. Live evaluation remains P7, UNMEASURED.
+runner and does not enable features. The fixture runner (P6.1.1), frozen manifests and integrity (P6.1.2)
+and the accounting/evidence/decision wiring (P6.1.3, `Trials.fromCalls`, `Investments`, `PromotionEvidence`,
+`PromotionDecision`, D-223) sit around it. Live evaluation remains P7, UNMEASURED.
 
 Create a `ScorePolicy` before results: decimal stratum weights, complexity labels, pilot cost ranges,
 acceptance floors, family confidence, minimum cluster count, cost ratio and cost/latency ceilings.
