@@ -33,7 +33,7 @@ class QaCellTest {
         QaResult(ids, "I1", 1, candidate, env, receipts, cases, emptyList())
 
     @Test
-    fun `the QA contract needs a disposable environment and stays masked until P5 3`() {
+    fun `the QA contract needs a disposable environment and sits behind its flag`() {
         val confined = object : ConfinedRunner {
             override val backend: String = "bwrap"
             override val mode: ExecutionMode = ExecutionMode.Confined
@@ -47,11 +47,12 @@ class QaCellTest {
         assertNull(QaEnvironment.of(local, null, null), "trusted-local on the live workspace is never disposable")
         assertEquals(environment, QaEnvironment.of(local, candidate, "candidates/qa-1"))
         assertEquals("trusted-local:candidate@${candidate.hash8}", environment.label, "the isolated copy is labelled trusted-local")
-        assertTrue(assertIs<QaAdmission.Refused>(QaCell.admit(packet)).reason.contains("masked until P5.3"))
-        assertIs<QaAdmission.Ready>(QaCell.admit(packet, available = true))
+        assertTrue(assertIs<QaAdmission.Refused>(QaCell.admit(packet, available = false)).reason.contains("Flags.qaCell"))
+        assertIs<QaAdmission.Ready>(QaCell.admit(packet))
+        assertIs<QaAdmission.Refused>(QaCell.admit(packet.copy(entryPoints = listOf(EntryPoint(QaSurface.Browser, "http://127.0.0.1/app")))), "browser is out of scope")
         val elsewhere = packet.copy(environment = environment.copy(candidate = CandidateId(Digest.ofUtf8("other"))))
         assertIs<QaAdmission.Refused>(QaCell.admit(elsewhere, available = true))
-        assertEquals(null, ChildKind.of("qa"), "QA is not dispatchable before P5.3")
+        assertEquals(null, ChildKind.of("qa"), "QA runs as the L3 row, not as a model-dispatched child (D-200)")
     }
 
     @Test
