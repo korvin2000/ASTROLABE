@@ -138,6 +138,7 @@ import io.astrolabe.os.LocalOs
 import io.astrolabe.os.ProcStatus
 import io.astrolabe.os.search.Searches
 import io.astrolabe.provider.Money
+import io.astrolabe.provider.Profile
 import io.astrolabe.register.Register
 import io.astrolabe.register.SqliteRegisterVersions
 import io.astrolabe.register.Validator
@@ -218,6 +219,8 @@ import io.astrolabe.delegate.ReviewTriggers
 import io.astrolabe.delegate.Probe
 import io.astrolabe.delegate.TaskPackets
 import io.astrolabe.delegate.WorthTest
+import io.astrolabe.delegate.WriterCell
+import java.util.concurrent.ConcurrentHashMap
 import io.astrolabe.verify.ReviewScope
 import io.astrolabe.id.ExecutionGeneration
 import kotlinx.coroutines.CancellationException
@@ -513,10 +516,11 @@ public class Controller @JvmOverloads public constructor(
         val shapeLog = "contract:v${contract.version} ${inputs?.log.orEmpty()} · ${impactPrescan.log}"
         events?.emit(AgentEvent.Campaign.ShapeSelected(ids, (selected as? ShapeDecision.Selected)?.shape?.name ?: "blocked", shapeLog))
         journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, text = "open: shape ${(selected as? ShapeDecision.Selected)?.shape?.name ?: "blocked"} · $shapeLog", at = clock.instant()))
-        // S0, S1 and S2 run here (D-170); S3 needs the parallel writer paths this build lacks: an honest block.
+        // S0, S1 and S2 run here (D-170); S3 runs only behind its switch and the writer flag (D-183) and is never selected on this initial pass.
+        val s3Runtime = effective.defaults.shapePolicy.s3Enabled && effective.flags.s3Writers
         val shape = when {
-            selected is ShapeDecision.Selected && selected.shape == Shape.S3 ->
-                ShapeDecision.Unavailable("shape S1+ unavailable: ${selected.shape} selected (${selected.inputs?.log}); this build runs S0, S1 and S2 (the S3 loop is P5.8.1)", selected.inputs)
+            selected is ShapeDecision.Selected && selected.shape == Shape.S3 && !s3Runtime ->
+                ShapeDecision.Unavailable("shape S1+ unavailable: ${selected.shape} selected (${selected.inputs?.log}); the S3 runtime needs shapePolicy.s3Enabled and flags.s3Writers (D-183)", selected.inputs)
             // The S2 review paths key on the contract's shape: a contract opened below S2 never skips its required review.
             selected is ShapeDecision.Selected && selected.shape == Shape.S2 && contract.shape < Shape.S2 ->
                 ShapeDecision.Unavailable("shape S1+ unavailable: S2 selected (${selected.inputs?.log}) but contract v${contract.version} is ${contract.shape}; amend it to S2 (D-170)", selected.inputs)
@@ -586,7 +590,7 @@ public class Controller @JvmOverloads public constructor(
         require(maxCells >= 1) { "maxCells must be ≥ 1" }
         // D-170: S2 is the S1 loop with the S2+ paths (increment review, delegation, campaign judge) switched on by the contract's shape.
         val shape = (campaign.shape as? ShapeDecision.Selected)?.shape
-        if (shape != Shape.S1 && shape != Shape.S2) return runS0(campaign, model, authority, syntax)
+        if (shape != Shape.S1 && shape != Shape.S2 && shape != Shape.S3) return runS0(campaign, model, authority, syntax)
         behaviourSnapshot(campaign)
         val packets = ArrayList<ResultPacket>()
         val result = spans?.span(Phase.Plan, campaign.ids) { span -> runS1(campaign, model, authority, syntax, span, maxCells, packets) }
@@ -600,14 +604,18 @@ public class Controller @JvmOverloads public constructor(
         val opened = checkNotNull(c.state)
         check(opened.phase == CampaignPhase.Running && opened.running == null) { "run needs a reconciled campaign with no running cell; it is ${opened.phase}" }
         // §4.2: the first cell of S1 is the plan cell; the placeholder graph is replaced once, before any dispatch.
+        var s3: S3Admission? = null
         if (opened.graph.increments.none { it.cells.isNotEmpty() || it.status != IncrementStatus.Pending }) {
             plan(c, model, authority, syntax, span, packets)?.let { stop ->
                 val outcome = if (c.refusal() != null) stopOutcome(c) else stop.outcome
                 return S0Run(c.advance(Transition.Stopped(outcome, stop.reason)), null, null, null)
             }
+            // §3.5 select_shape(contract, impact, plan): the S3 branch reads the admitted plan's records (D-183, P5.8.1).
+            s3 = S3Intake.admit(c, writerEstimates(c, model), CAPABILITIES, events, idGen, clock).takeIf { it.units.isNotEmpty() }
         }
         var last = S0Run(c.state, null, null, null)
         var cells = 0
+        val writerExits = ConcurrentHashMap<String, CellExit>()
         // §6.6 `[O]`: boundary pre-compilation only under the frozen `precompile` flag; off, nothing below runs.
         val precompile = if (c.attempt.config.flags.precompile) Precompile(c.journal, idGen, clock) else null
         var closed: Pair<ContextId, Long>? = null
@@ -623,6 +631,22 @@ public class Controller @JvmOverloads public constructor(
             val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = candidates(c))
             val unverified = state.ledger.unfinished()
             if (unverified.isEmpty()) return last.copy(state = stopOrFinish(c, "requirements remain unverified", scheduler, campaign = true, authority = campaignJudge(c, authority, model, syntax, span)))
+            // §10.4: ready S3 units run as parallel writers and integrate once; a unit that does not integrate turns S3 off.
+            val batch = s3?.batch(state.graph, contract, c.attempt.config.defaults.parallelCells).orEmpty()
+            if (s3 != null && batch.size >= 2 && cells + batch.size <= maxCells) {
+                cells += batch.size
+                val reviews = if (contract.shape >= Shape.S2) { increment: Increment -> reviewCell(c, increment, model, authority, syntax, span) } else null
+                val round = S3Round(c, EnvFingerprint.compute(env), idGen, clock, events, writerCell(c, model, authority, syntax, span, writerExits), writerExits, reviews).run(batch, s3.estimates, packets)
+                snapshot(c)
+                when (round) {
+                    is S3Result.Stopped -> return S0Run(c.advance(Transition.Stopped(round.outcome, round.reason)), round.exit, null, null)
+                    is S3Result.Integrated -> {
+                        if (round.returned.isNotEmpty()) s3 = null
+                        last = S0Run(c.state, round.exit, null, null)
+                        continue
+                    }
+                }
+            }
             // §11.4 ordering hint (P4.5.3): among ready increments, the one sharing the last cell's prefix goes first.
             val ready = CellOrder.next(state.graph.readyFrontier(contract, state.graph.increments.size), lastKey) { inc ->
                 listOfNotNull(tiers[inc.id], attempts.tier(inc.id), FunctionTable.DEFAULT.row(RoutingFunction.Implementing).defaultTier, Router.riskFloor(inc.risk ?: contract.risk, null)).max()
@@ -1139,6 +1163,8 @@ public class Controller @JvmOverloads public constructor(
         inputs: CompileInputs = CompileInputs(),
         precompile: PrecompileTrigger? = null,
         child: ChildForm? = null,
+        /** The tree the cell edits: the main line's unless a writer runs in its worktree (§10.4). */
+        tree: CellTree = CellTree.main(c),
     ): CellRun {
         val ids = c.ids.copy(context = cellId)
         val cancellation = child?.cancellation ?: c.cancellation
@@ -1154,15 +1180,15 @@ public class Controller @JvmOverloads public constructor(
         val receipts = SqliteReceipts(c.store, clock)
         val registerVersions = SqliteRegisterVersions(c.store, clock)
         val checkpoints = SqliteCheckpoints(c.store, clock)
-        val preimages = Preimages(c.workspace, c.store.blobs, ids, clock)
+        val preimages = Preimages(tree.workspace, c.store.blobs, ids, clock)
         val isolated = child?.isolated == true
-        val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, receipts, aliases, idGen, ids, clock, candidates = if (isolated) c.store.layout.candidates else candidates(c), isolateAll = isolated)
-        val checker = Checker(c.checks, runner, c.os, c.stamper, c.registry, c.workspace, c.store.blobs, redaction, idGen, ids, logs)
-        val verify = Verify(checks = c.checks, scheduler = scheduler, checker = checker, baseline = null, s0 = c.s0.stampId, workspace = c.workspace, runner = runner, os = c.os, stamper = c.stamper, blobs = c.store.blobs, redaction = redaction, estimator = estimator, idGen = idGen, ids = ids, contracts = c.contracts, logsDir = logs, campaignReview = campaignReview(c, authority),
+        val scheduler = Scheduler(tree.checks, tree.workspace, tree.registry, tree.stamper, receipts, aliases, idGen, ids, clock, candidates = if (isolated) c.store.layout.candidates else candidates(c), isolateAll = isolated)
+        val checker = Checker(tree.checks, runner, c.os, tree.stamper, tree.registry, tree.workspace, c.store.blobs, redaction, idGen, ids, logs)
+        val verify = Verify(checks = tree.checks, scheduler = scheduler, checker = checker, baseline = null, s0 = tree.s0, workspace = tree.workspace, runner = runner, os = c.os, stamper = tree.stamper, blobs = c.store.blobs, redaction = redaction, estimator = estimator, idGen = idGen, ids = ids, contracts = c.contracts, logsDir = logs, campaignReview = campaignReview(c, authority),
             // §8.8: review(scope=increment) is the review cell for S2+ main-line cells; a review cell never reaches it (no verify.review in its mask).
             incrementReview = if (child == null && contract.shape >= Shape.S2) IncrementReview { why -> reviewCell(c, increment, model, authority, syntax, span).obtain(evidence(c, increment, listOf(why), emptyList(), compiled.k.ledger, authority), Tier.Medium, c.registry::version) } else null,
         )
-        verify.inputs = c.atlas.rows.map { it.path }
+        verify.inputs = tree.atlas.rows.map { it.path }
         val ceiling = Ceiling.of(contract.authorization, config.executionMode)
         val generation = c.lease?.generation ?: ExecutionGeneration.INITIAL
         // §10.1 (D-121): an S2+ main-line cell whose role unmasks task.delegate delegates to child cells; a child never does.
@@ -1182,19 +1208,19 @@ public class Controller @JvmOverloads public constructor(
         }
         val tools = CellTools(
             state = StateTool(Validator(estimator), registerVersions, c.journal, estimator, idGen, ids, clock, register ?: Register.empty(cellId, increment.id, increment.title), events),
-            look = Look(c.workspace, c.registry, workset, c.atlas, Searches.jvm(), c.journal, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, checks = c.checks, bmaps = BmapStore(c.store)),
+            look = Look(tree.workspace, tree.registry, workset, tree.atlas, Searches.jvm(), c.journal, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, checks = tree.checks, bmaps = BmapStore(c.store)),
             edit = Edit(
-                c.workspace, c.registry, workset, c.os, preimages, ScopeGuard(c.workspace), c.contracts, c.checks, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, syntax,
-                // D-99: `revert:turn:N` names the campaign's shadow snapshots (the turn checkpoint records them).
-                shadowRef = c.shadow,
-                transforms = TransformExecution(runner, c.stamper, logs, config.executionMode, EnvPolicy(inheritedNames = config.redaction.envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1"))),
+                tree.workspace, tree.registry, workset, c.os, preimages, ScopeGuard(tree.workspace), c.contracts, tree.checks, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, syntax,
+                // D-99: `revert:turn:N` names the tree's shadow snapshots (the turn checkpoint records them).
+                shadowRef = tree.shadow,
+                transforms = TransformExecution(runner, tree.stamper, logs, config.executionMode, EnvPolicy(inheritedNames = config.redaction.envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1"))),
             ),
-            run = Run(c.workspace, c.registry, c.stamper, runner, c.os, c.intents, SqliteHandles(c.store, clock), observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, c.contracts, authority, config, clock, logs),
+            run = Run(tree.workspace, tree.registry, tree.stamper, runner, c.os, c.intents, SqliteHandles(c.store, clock), observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, c.contracts, authority, config, clock, logs),
             verify = verify,
             task = if (proposals == null && delegator == null) TaskTool(authority, c.contracts, c.journal, estimator, idGen, ids, clock, events)
             else TaskTool(
                 authority, c.contracts, c.journal, estimator, idGen, ids, clock, events, role.effectiveOps(contract.shape, ceiling), proposals,
-                delegator, delegator?.let { TaskPackets(WORKSPACE, ceiling, generation) }, c.registry::version,
+                delegator, delegator?.let { TaskPackets(WORKSPACE, ceiling, generation) }, tree.registry::version,
             ),
             kb = KbTool(c.kb, estimator, idGen, queue = Queue(c.store, KbWriter(c.store, estimator, clock), idGen, clock), ids = ids, events = events, deniedKinds = role.deniedNoteKinds),
         )
@@ -1210,17 +1236,18 @@ public class Controller @JvmOverloads public constructor(
             KbInjection.Live -> Notes(c.store).all()
         }
         val knowledge = KnowledgeUse(focusBase, injected, usage, ids, estimator, config.defaults.focusNotesMaxTokens, KbNegatives(c.journal, idGen, clock))
-        val coherence = Coherence(c.registry)
+        val coherence = Coherence(tree.registry)
         val accounting = Accounting(c.store, clock)
         // §6.5: every compiled context leaves a manifest; the cell's end event links it.
         val manifests = SqliteManifests(c.store, clock)
         val manifest = Manifest.of(idGen.next("manifest"), compiled, increment, contract, ids, model.profile, inputs, register?.version, boundary, model.effort.name.lowercase()).also { manifests.save(ids, it) }
         val ctx = CellContext(
             ids = ids, role = RoleTexts.worded(role, config.role(role.name)), contracts = c.contracts, model = model, tools = tools,
-            workspace = CellWorkspace(c.workspace, c.registry, coherence, c.stamper, workset, c.checks, scheduler, c.atlas, checker),
+            workspace = CellWorkspace(tree.workspace, tree.registry, coherence, tree.stamper, workset, tree.checks, scheduler, tree.atlas, checker),
             evidence = CellEvidence(c.journal, observations, aliases, receipts, c.intents, registerVersions, checkpoints, preimages),
             prime = c.prime, ledger = ledger, preexisting = compiled.k.ledger, config = config,
-            turnCheckpoint = TurnCheckpoint { snapshot(c) },
+            turnCheckpoint = TurnCheckpoint { snapshot(tree) },
+            generation = generation,
             accounting = accounting,
             manifest = manifest.id,
             sections = compiled.k.sections,
@@ -1290,6 +1317,42 @@ public class Controller @JvmOverloads public constructor(
             runCell(c, seat.context, increment, role, routing.model, authority, syntax, compiled, span, null, completion = completion, pinned = listOf(brief), child = ChildForm(seat.cancellation, budget, isolated = role.name == Roles.review.name))
                 .exit.also { exit -> routing.selected?.let { router.record(it, outcomeOf(exit)) } }
         }
+
+    /**
+     * The controller-side writer cell (§10.4, D-181): the child-context form of [runCell] over the writer's worktree —
+     * its own workspace, registry, stamper, shadow ref and checks — with the writer role, the slice brief pinned and
+     * the child's cancellation and budget. Its exit is kept in [exits] for the campaign state (D-243).
+     */
+    private fun writerCell(c: OpenedCampaign, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?, exits: MutableMap<String, CellExit>): WriterCell =
+        WriterCell { seat, dispatch, declared, budget, brief ->
+            val increment = checkNotNull(c.state).graph.increments.first { it.id == dispatch.task.incrementId }
+            val role = RoleTexts.worded(declared, c.attempt.config.role(declared.name))
+            val compiler = Compiler(model.estimator, c.attempt.config)
+            fun compile(profile: Profile) = compiler.compile(increment, c.contract, profile, role, c.prime, pinned = listOf(brief), maxOutputTokens = model.maxOutputTokens)
+            val routing = route(c, seat.function, increment, model, seat.tier, compile(model.profile), ::compile)
+            val compiled = routing.compiled
+            check(compiled is Compiled.Ready) { "the writer of ${increment.id} cannot be compiled: $compiled" }
+            routing.refused?.let { error("the writer of ${increment.id} is unaffordable: ${it.reason}") }
+            val tree = CellTree.writer(c, dispatch.worktree, EnvFingerprint.compute(env), clock)
+            runCell(c, seat.context, increment, role, routing.model, authority, syntax, compiled, span, checkNotNull(c.state).ledger, pinned = listOf(brief), child = ChildForm(seat.cancellation, budget), tree = tree)
+                .exit.also { exit ->
+                    // The writer's final bytes stay in its own shadow ref after the worktree is removed (§10.4).
+                    snapshot(tree)
+                    routing.selected?.let { router.record(it, outcomeOf(exit)) }
+                    exit?.let { exits[dispatch.handle.id] = it }
+                }
+        }
+
+    /** D-242: each pending unit's writer-token estimate from its compiled writer `[K]`; `null` (slack unmeasured) when one cannot compile. */
+    private fun writerEstimates(c: OpenedCampaign, model: CellModel): Map<String, Long>? {
+        val role = RoleTexts.worded(Roles.writer, c.attempt.config.role(Roles.writer.name))
+        val compiler = Compiler(model.estimator, c.attempt.config)
+        return checkNotNull(c.state).graph.increments.filter { it.status == IncrementStatus.Pending }.associate { increment ->
+            val compiled = compiler.compile(increment, c.contract, model.profile, role, c.prime, maxOutputTokens = model.maxOutputTokens) as? Compiled.Ready ?: return null
+            val arithmetic = compiled.selection.arithmetic
+            increment.id to writerEstimate((arithmetic.totalTokens ?: arithmetic.knownFixedTokens + arithmetic.selectedTokens).toLong(), model.maxOutputTokens)
+        }
+    }
 
     private fun reviewCell(c: OpenedCampaign, increment: Increment, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?): ReviewCell =
         ReviewCell(CellReviewJudge(childCell(c, increment, model, authority, syntax, span), idGen, c.cancellation), authority, c.store, idGen, clock, c.journal)
@@ -1485,11 +1548,14 @@ public class Controller @JvmOverloads public constructor(
     private fun currencies(c: OpenedCampaign, scheduler: Scheduler, stamp: CandidateId): Map<String, Currency> =
         c.checks.all().filter { it.last != null }.associate { it.id to scheduler.currency(it, stamp) }
 
-    /** Records the tree as the next shadow snapshot, when it moved since the last one. */
-    private fun snapshot(c: OpenedCampaign) {
-        val last = c.shadow.records().last()
-        val now = c.dirty.capture(last.turn + 1)
-        if (now.manifestDigest != checkNotNull(c.shadow.manifest(last.turn)).manifestDigest) c.shadow.snapshot(now)
+    /** Records the main line as the next shadow snapshot, when it moved since the last one. */
+    private fun snapshot(c: OpenedCampaign) = snapshot(CellTree.main(c))
+
+    /** Records [tree] as the next snapshot of its own shadow ref, when it moved since the last one. */
+    private fun snapshot(tree: CellTree) {
+        val last = tree.shadow.records().last()
+        val now = tree.dirty.capture(last.turn + 1)
+        if (now.manifestDigest != checkNotNull(tree.shadow.manifest(last.turn)).manifestDigest) tree.shadow.snapshot(now)
     }
 
     /**
@@ -1522,7 +1588,7 @@ public class Controller @JvmOverloads public constructor(
         private const val MAX_REVIEW_DIFF_CHARS: Int = 16_000
         private const val CAMPAIGN_REVIEW: String = "campaign-review"
 
-        /** D-170: review and probe cells exist (P4.4), so S2 is selectable; writers (S3) are P5.1. */
+        /** D-170: review and probe cells exist (P4.4), so S2 is selectable; S3 comes from a plan at intake (D-183). */
         private val CAPABILITIES: ShapeCapabilities = ShapeCapabilities(reviewCells = true, probes = true)
 
         /** Default cap on an S1 campaign's cells, plan cell excluded (D-70). */
