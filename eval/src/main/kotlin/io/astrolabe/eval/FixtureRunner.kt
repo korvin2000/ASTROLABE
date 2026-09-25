@@ -252,9 +252,14 @@ public object FixtureRunner {
         private fun tests(identifier: TestIdentifier): List<TestIdentifier> =
             if (identifier.isTest) listOf(identifier) else plan?.getDescendants(identifier)?.filter { it.isTest }.orEmpty()
 
+        // PostDiscoveryFilter only prunes the static discovery tree; a @ParameterizedTest/@TestFactory method
+        // is a container there (always included) and its invocations are generated at execution time, past
+        // the filter's reach. Drop them here so an unrelated dynamic test can never taint counts or green (D-220).
         private fun record(identifier: TestIdentifier, status: FixtureStatus, message: String?) {
+            val ids = fixtureIds(identifier.displayName)
+            if (ids.isEmpty()) return
             val className = (identifier.source.orElse(null) as? MethodSource)?.className ?: identifier.uniqueId
-            results[identifier.uniqueId] = FixtureResult(className, identifier.displayName, fixtureIds(identifier.displayName), status, message)
+            results[identifier.uniqueId] = FixtureResult(className, identifier.displayName, ids, status, message)
         }
     }
 }

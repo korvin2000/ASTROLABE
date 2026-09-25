@@ -1,6 +1,7 @@
 package io.astrolabe.eval
 
 import io.astrolabe.eval.samples.RunnerSampleFixtures
+import io.astrolabe.eval.samples.RunnerSampleParameterized
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
@@ -35,6 +36,14 @@ class FixtureRunnerTest {
         // Adapter fixtures exercise no §19.4 invariant: every metric stays unmeasured, not zero.
         assertTrue(report.metrics.all { it.violations == null && it.tests == 0 })
         assertFalse(report.invariantsZero)
+    }
+
+    @Test
+    fun `a parameterized test whose invocations name no fixture is never selected, though its container passes discovery`() {
+        val report = FixtureRunner.run(FixtureSelection(listOf(RunnerSampleParameterized::class.java.name)), "D-260")
+        assertEquals(emptyList(), report.results, "the invocations run past the discovery filter but must not be counted")
+        assertEquals(0, report.passed + report.failed + report.skipped)
+        assertFalse(report.green, "nothing ran is not green")
     }
 
     @Test
