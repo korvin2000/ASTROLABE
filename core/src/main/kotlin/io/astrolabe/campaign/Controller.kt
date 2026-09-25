@@ -515,7 +515,7 @@ public class Controller @JvmOverloads public constructor(
         // S0, S1 and S2 run here (D-170); S3 needs the parallel writer paths this build lacks: an honest block.
         val shape = when {
             selected is ShapeDecision.Selected && selected.shape == Shape.S3 ->
-                ShapeDecision.Unavailable("shape S1+ unavailable: ${selected.shape} selected (${selected.inputs?.log}); this build runs S0, S1 and S2 (S3 writers P5.1)", selected.inputs)
+                ShapeDecision.Unavailable("shape S1+ unavailable: ${selected.shape} selected (${selected.inputs?.log}); this build runs S0, S1 and S2 (the S3 loop is P5.8.1)", selected.inputs)
             // The S2 review paths key on the contract's shape: a contract opened below S2 never skips its required review.
             selected is ShapeDecision.Selected && selected.shape == Shape.S2 && contract.shape < Shape.S2 ->
                 ShapeDecision.Unavailable("shape S1+ unavailable: S2 selected (${selected.inputs?.log}) but contract v${contract.version} is ${contract.shape}; amend it to S2 (D-170)", selected.inputs)
@@ -1177,7 +1177,7 @@ public class Controller @JvmOverloads public constructor(
             val worth = { kind: io.astrolabe.delegate.ChildKind, packet: io.astrolabe.delegate.TaskPacket ->
                 WorthTest.estimate(kind, packet, estimator.estimate(ChildBrief.render(packet, Probe.OUTPUT)).upperBoundTokens, fixed, config.defaults)
             }
-            Delegator(CellChildRunner(childCell(c, increment, model, authority, syntax, span), evidence = reviews), PublicationAuthority { c.refusal() }, c.cancellation, DelegationLimits(contract.budget.tokens), contract.shape, scope, idGen, clock, events, worth = worth)
+            Delegator(CellChildRunner(childCell(c, increment, model, authority, syntax, span), evidence = reviews), PublicationAuthority { c.refusal() }, c.cancellation, DelegationLimits.of(config.defaults, contract.budget.tokens), contract.shape, scope, idGen, clock, events, worth = worth)
         }
         val tools = CellTools(
             state = StateTool(Validator(estimator), registerVersions, c.journal, estimator, idGen, ids, clock, register ?: Register.empty(cellId, increment.id, increment.title), events),

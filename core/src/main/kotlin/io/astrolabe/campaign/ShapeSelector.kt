@@ -6,8 +6,17 @@ import io.astrolabe.contract.Contract
 import io.astrolabe.contract.Increment
 import io.astrolabe.contract.Reversibility
 import io.astrolabe.contract.Shape
+import io.astrolabe.contract.Scope
 import io.astrolabe.graph.Production
 import io.astrolabe.graph.RequirementGraph
+import io.astrolabe.id.WorkspaceId
+import io.astrolabe.workspace.Intent
+import io.astrolabe.workspace.Ownership
+import io.astrolabe.workspace.OwnershipAdmission
+import io.astrolabe.workspace.OwnershipClaim
+import io.astrolabe.workspace.PathResolution
+import io.astrolabe.workspace.Workspace
+import java.nio.file.Files
 
 /**
  * The §3.7 `impact_prescan` result ([ImpactPrescan], P3.2.6). A `null` field was not assessed: incomplete discovery is
@@ -59,12 +68,67 @@ public data class ShapeInputs(
     val reviewItems: Int,
     val resumeExpected: Boolean,
     val ambiguousBug: Boolean,
+    /** The S3 branch's verdict when a validated plan was given (`admitted` or `refused: …`); `null` on the initial pass. */
+    val s3: String? = null,
 ) {
     /** One deterministic line for the shape log and the `campaign.shape_selected` event. */
     val log: String
         get() = "requirements=$requirements files=${filesEstimated ?: "unknown"} packages=$packages crossPackage=$crossPackage " +
             "size=${size ?: "unknown"} risk=${risk.name.lowercase()} contractTouch=${contractTouch ?: "unknown"} review=$reviewItems " +
-            "resumeExpected=$resumeExpected ambiguousBug=$ambiguousBug"
+            "resumeExpected=$resumeExpected ambiguousBug=$ambiguousBug" + (s3?.let { " s3=$it" } ?: "")
+}
+
+/**
+ * One unit of a validated plan (§3.5 `plan.units`): its increment, its write scope, whether it changes an interface
+ * (`null` = unassessed) and whether it settles a design decision (an increment producing an answer to a question).
+ */
+public data class PlanUnit @JvmOverloads constructor(val increment: String, val writeScope: Scope, val interfaceChange: Boolean? = null, val decision: Boolean = false)
+
+/**
+ * D-39 measured slack in tokens: the remaining budget against the sequential-S1 estimate — reservations, review,
+ * verification, integration and an uncertainty margin included — and the parallel-cell limit.
+ */
+public data class Slack(val remainingTokens: Long, val sequentialEstimateTokens: Long, val cellsInFlight: Int, val maxParallelCells: Int) {
+    init {
+        require(remainingTokens >= 0 && sequentialEstimateTokens > 0 && cellsInFlight >= 0 && maxParallelCells >= 1) { "slack is measured in non-negative tokens against a positive estimate" }
+    }
+}
+
+/**
+ * The records of a validated plan the S3 branch of `select_shape` reads (§3.5, §10.4): its units in one integration
+ * [destination], whether every `CON` they rely on is admitted at a fixed version, the measured [slack] (`null` =
+ * unmeasured) and the physical aliases between the units' scopes ([PhysicalAliases]; `null` = unchecked).
+ */
+public data class PlanShape(
+    val units: List<PlanUnit>,
+    val destination: WorkspaceId,
+    val contractsStable: Boolean,
+    val slack: Slack?,
+    val aliases: List<String>?,
+)
+
+/**
+ * Physical aliases between plan units (§10.4): lexical disjointness ([ScopeAlgebra]) says nothing about a case alias
+ * on a case-insensitive filesystem or a link. Each existing spelling (the given [files] and the units' literal write
+ * paths) is resolved through the path contract; a spelling whose on-disk or real name is owned by another unit is an
+ * alias. Missing paths cannot alias yet.
+ */
+public object PhysicalAliases {
+    @JvmStatic
+    public fun find(workspace: Workspace, units: List<PlanUnit>, files: List<String>): List<String> {
+        val literals = units.flatMap { unit -> unit.writeScope.writePaths.filter { p -> p.none { it == '*' || it == '?' } }.map { it.trimEnd('/') } }
+        val found = sortedSetOf<String>()
+        for (spelling in (files + literals).filter { it.isNotBlank() }.distinct()) {
+            val resolved = workspace.resolve(spelling, Intent.Read) as? PathResolution.Resolved ?: continue
+            if (!Files.exists(resolved.real)) continue
+            val real = workspace.root.relativize(resolved.real).toString().replace('\\', '/').takeUnless { it.startsWith("..") } ?: continue
+            val names = sortedSetOf(spelling, resolved.relative, real)
+            if (names.size < 2) continue
+            val owners = units.filter { unit -> names.any { unit.writeScope.allowsWrite(it) } }.map { it.increment }.distinct()
+            if (owners.size > 1) found += "${owners.joinToString("+")}: ${names.joinToString(" = ")}"
+        }
+        return found.toList()
+    }
 }
 
 /** A logged, deterministic `select_shape` decision (§3.5). */
@@ -89,8 +153,10 @@ public sealed interface ShapeDecision {
  * file count within the small class, no `review:` item, no expected resume — and a risk that is not above low; an
  * unassessed risk or file count does not disqualify S0 but is recorded as a limitation (D-65), so missing coverage
  * never establishes S0 by itself (I-23). Otherwise S2 for `review:` items, high risk, a contract touch or an
- * ambiguous bug (D-39), else S1; the initial pass never chooses S3 (P5.1.4). A required capability this build lacks
- * ends in [ShapeDecision.Unavailable]; required review may be met by the authority, recorded as a substitution.
+ * ambiguous bug (D-39), else S1. S3 comes only from a validated [PlanShape] whose [s3] refusals are empty — never on
+ * the initial pass, which has no plan (P5.1.4); design decisions and interface changes never run in S3 children. A
+ * required capability this build lacks ends in [ShapeDecision.Unavailable]; required review may be met by the
+ * authority, recorded as a substitution.
  */
 public object ShapeSelector {
     @JvmStatic
@@ -102,6 +168,54 @@ public object ShapeSelector {
         resumeExpected: Boolean = false,
         ambiguousBug: Boolean = false,
         capabilities: ShapeCapabilities = ShapeCapabilities(),
+        plan: PlanShape? = null,
+    ): ShapeDecision {
+        val initial = selectInitial(contract, prescan, policy, resumeExpected, ambiguousBug, capabilities)
+        if (plan == null || initial !is ShapeDecision.Selected || initial.shape == Shape.S0) return initial
+        val refusals = s3(plan, policy)
+        val inputs = initial.inputs?.copy(s3 = if (refusals.isEmpty()) "admitted" else "refused: ${refusals.joinToString("; ")}")
+        return if (refusals.isEmpty()) initial.copy(shape = Shape.S3, inputs = inputs) else initial.copy(inputs = inputs)
+    }
+
+    /**
+     * The S3 branch of §3.5 over a validated plan: why S3 may not run now, empty ⇔ admitted. It needs S3 promoted
+     * ([ShapePolicy.s3Enabled]), at least two units, a proved lexical disjointness of their write scopes ([Ownership];
+     * an unproved answer refuses), no physical alias, no interface change (an unassessed one counts) and no design
+     * decision in any unit,
+     * contracts stable at fixed versions, and measured slack (D-39): remaining ≥ `slackFactor` × the sequential
+     * estimate with a parallel cell free.
+     */
+    @JvmStatic
+    public fun s3(plan: PlanShape, policy: ShapePolicy): List<String> = buildList {
+        if (!policy.s3Enabled) add("S3 is not enabled (off until promoted, §10.4)")
+        if (plan.units.size < 2) add("${plan.units.size} unit(s); S3 needs at least 2")
+        plan.units.filter { it.interfaceChange == true }.takeIf { it.isNotEmpty() }?.let { add("interface change in ${it.joinToString(", ") { u -> u.increment }}") }
+        plan.units.filter { it.interfaceChange == null }.takeIf { it.isNotEmpty() }?.let { add("interface change unassessed in ${it.joinToString(", ") { u -> u.increment }}") }
+        plan.units.filter { it.decision }.takeIf { it.isNotEmpty() }?.let { add("design decision in ${it.joinToString(", ") { u -> u.increment }}") }
+        val ownership = Ownership(plan.destination)
+        plan.units.forEach { unit ->
+            (ownership.claim(OwnershipClaim(unit.increment, unit.writeScope)) as? OwnershipAdmission.Serialized)?.let { add("${unit.increment} not disjoint from ${it.behind}: ${it.reason}") }
+        }
+        when {
+            plan.aliases == null -> add("physical aliases unchecked")
+            plan.aliases.isNotEmpty() -> add("physical aliases: ${plan.aliases.joinToString("; ")}")
+        }
+        if (!plan.contractsStable) add("contracts not stable at fixed versions")
+        val slack = plan.slack
+        when {
+            slack == null -> add("slack unmeasured")
+            slack.remainingTokens < policy.slackFactor * slack.sequentialEstimateTokens -> add("slack ${slack.remainingTokens} < ${policy.slackFactor} × ${slack.sequentialEstimateTokens} tokens")
+            slack.cellsInFlight >= slack.maxParallelCells -> add("parallel-cell limit exhausted (${slack.cellsInFlight}/${slack.maxParallelCells})")
+        }
+    }
+
+    private fun selectInitial(
+        contract: Contract,
+        prescan: Prescan,
+        policy: ShapePolicy,
+        resumeExpected: Boolean,
+        ambiguousBug: Boolean,
+        capabilities: ShapeCapabilities,
     ): ShapeDecision {
         val inputs = inputs(contract, prescan, policy, resumeExpected, ambiguousBug)
         val small = inputs.requirements <= policy.smallMaxRequirements && inputs.packages <= 1 && !inputs.crossPackage &&

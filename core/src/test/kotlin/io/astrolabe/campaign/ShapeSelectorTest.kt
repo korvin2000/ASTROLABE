@@ -18,8 +18,14 @@ import io.astrolabe.contract.Risk
 import io.astrolabe.contract.Scope
 import io.astrolabe.contract.Shape
 import io.astrolabe.contract.UserRequest
+import io.astrolabe.fixtures.TempRepo
 import io.astrolabe.id.AttemptId
 import io.astrolabe.id.WorkId
+import io.astrolabe.id.WorkspaceId
+import io.astrolabe.workspace.Workspace
+import org.junit.jupiter.api.io.TempDir
+import java.nio.file.Files
+import java.nio.file.Path
 import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -81,6 +87,62 @@ class ShapeSelectorTest {
         for (row in rows) {
             val decision = ShapeSelector.select(row.contract, row.prescan, policy.copy(s3Enabled = true), row.resumeExpected, row.ambiguousBug, row.capabilities)
             assertEquals(row.expected, outcome(decision), row.name)
+        }
+    }
+
+    @Test
+    fun `S3 comes only from a validated plan meeting every condition of the branch`() {
+        val known = Prescan(filesEstimated = 6, crossPackage = false, contractTouch = false)
+        val enabled = policy.copy(s3Enabled = true)
+        fun scope(vararg writes: String) = Scope(writes.toList(), emptyList())
+        val plan = PlanShape(
+            listOf(PlanUnit("I1", scope("src/billing/"), interfaceChange = false), PlanUnit("I2", scope("src/report/**"), interfaceChange = false)),
+            WorkspaceId("ws-main"), contractsStable = true, slack = Slack(15_000, 10_000, 0, 3), aliases = emptyList(),
+        )
+        data class PlanRow(val name: String, val plan: PlanShape, val expected: String, val refusal: String? = null, val policy: ShapePolicy = enabled, val contract: Contract = contract(requirements = 2))
+        val rows = listOf(
+            PlanRow("S3: disjoint units, stable contracts, measured slack, promoted", plan, "S3"),
+            PlanRow("S3 on top of S2 (review acceptance)", plan, "S3", contract = contract(requirements = 2, review = true)),
+            PlanRow("S0 is never upgraded", plan, "S0", contract = contract()),
+            PlanRow("S3 off by default", plan, "S1", "S3 is not enabled", policy = policy),
+            PlanRow("one unit", plan.copy(units = plan.units.take(1)), "S1", "1 unit(s)"),
+            PlanRow("overlapping write scopes", plan.copy(units = plan.units + PlanUnit("I3", scope("src/**/total.py"), false)), "S1", "I3 not disjoint from I1: write scopes overlap at src/billing/"),
+            PlanRow("interface change", plan.copy(units = plan.units.map { it.copy(interfaceChange = it.increment == "I2") }), "S1", "interface change in I2"),
+            PlanRow("interface change unassessed", plan.copy(units = plan.units.map { it.copy(interfaceChange = null) }), "S1", "interface change unassessed in I1, I2"),
+            PlanRow("design decision", plan.copy(units = plan.units.map { it.copy(decision = it.increment == "I1") }), "S1", "design decision in I1"),
+            PlanRow("physical aliases unchecked", plan.copy(aliases = null), "S1", "physical aliases unchecked"),
+            PlanRow("physical alias", plan.copy(aliases = listOf("I1+I2: src/A.py = src/a.py")), "S1", "physical aliases: I1+I2"),
+            PlanRow("contracts moving", plan.copy(contractsStable = false), "S1", "contracts not stable at fixed versions"),
+            PlanRow("slack unmeasured", plan.copy(slack = null), "S1", "slack unmeasured"),
+            PlanRow("slack below 1.5x the sequential estimate", plan.copy(slack = Slack(14_999, 10_000, 0, 3)), "S1", "slack 14999 < 1.5 × 10000 tokens"),
+            PlanRow("parallel cells exhausted", plan.copy(slack = Slack(15_000, 10_000, 3, 3)), "S1", "parallel-cell limit exhausted (3/3)"),
+        )
+        for (row in rows) {
+            val decision = ShapeSelector.select(row.contract, known.copy(filesEstimated = if (row.expected == "S0") 2 else 6), row.policy, capabilities = ShapeCapabilities(reviewCells = true, probes = true), plan = row.plan)
+            assertEquals(row.expected, outcome(decision), row.name)
+            val s3 = (decision as ShapeDecision.Selected).inputs!!.s3
+            when {
+                row.expected == "S3" -> assertEquals("admitted", s3, row.name)
+                row.refusal != null -> assertTrue(s3!!.startsWith("refused: ") && s3.contains(row.refusal), "${row.name}: $s3")
+            }
+        }
+        assertTrue(assertIs<ShapeDecision.Selected>(ShapeSelector.select(contract(requirements = 2), known, enabled, plan = plan)).inputs!!.log.endsWith(" s3=admitted"), "logged with the inputs")
+    }
+
+    @Test
+    fun `physical aliases between plan units are found through the path contract`(@TempDir root: Path) {
+        val repo = TempRepo.create(root.resolve("repo"))
+        try {
+            repo.write("src/Foo.py", "x = 1\n")
+            repo.commit("initial")
+            val workspace = Workspace(WorkspaceId("ws-main"), repo.root, repo.git)
+            val units = listOf(PlanUnit("I1", Scope(listOf("src/Foo.py"), emptyList()), false), PlanUnit("I2", Scope(listOf("src/foo.py"), emptyList()), false))
+            val aliases = PhysicalAliases.find(workspace, units, listOf("src/Foo.py"))
+            // A case-insensitive filesystem (Windows) makes the two exact-case scopes one file; a case-sensitive one does not.
+            if (Files.exists(repo.root.resolve("src/foo.py"))) assertEquals(listOf("I1+I2: src/Foo.py = src/foo.py"), aliases) else assertEquals(emptyList(), aliases)
+            assertEquals(emptyList(), PhysicalAliases.find(workspace, listOf(units[0], PlanUnit("I2", Scope(listOf("src/bar/"), emptyList()), false)), listOf("src/Foo.py")))
+        } finally {
+            repo.close()
         }
     }
 
