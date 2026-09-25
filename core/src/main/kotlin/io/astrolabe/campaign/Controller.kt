@@ -138,6 +138,13 @@ import io.astrolabe.os.LocalOs
 import io.astrolabe.os.ProcStatus
 import io.astrolabe.os.search.Searches
 import io.astrolabe.provider.Money
+import io.astrolabe.recover.AcceptanceCheck
+import io.astrolabe.recover.CellRepairRunner
+import io.astrolabe.recover.GuardLimits
+import io.astrolabe.recover.GuardVerdict
+import io.astrolabe.recover.OriginalAcceptance
+import io.astrolabe.recover.Recovery
+import io.astrolabe.recover.Repair
 import io.astrolabe.register.Register
 import io.astrolabe.register.SqliteRegisterVersions
 import io.astrolabe.register.Validator
@@ -637,6 +644,8 @@ public class Controller @JvmOverloads public constructor(
         val tiers = HashMap<String, Tier>()
         // §11.3: verified failures escalate with evidence, at most budget.attempts per increment, then blocked (P4.5.2).
         val attempts = IncrementAttempts(c.journal, idGen, clock)
+        // §13.1–§13.3 (D-171, D-254): verified failures go through the ladder and the campaign's guards, rebuilt from the journal.
+        val recovery = CampaignRecovery(c.journal, idGen, clock, c.ids.work, GuardLimits.of(c.attempt.config.defaults))
         var lastKey: CacheKey? = null
         while (true) {
             c.refusal()?.let { return last.copy(state = c.advance(Transition.Stopped(stopOutcome(c), "dispatch refused: $it"))) }
@@ -668,7 +677,7 @@ public class Controller @JvmOverloads public constructor(
             val resume = resumeNote(c, ready, carry)
             val knowledge = knowledge(c, ready, Roles.implementing, model, touched = carry?.seeds.orEmpty().map { it.path }.toSet())
             val inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) }, notes = knowledge.notes, contractsIndex = knowledge.contractsIndex, skills = knowledge.skills, skillConflicts = knowledge.skillConflicts)
-            val pinned = listOfNotNull(resume, attempts.line(ready.id))
+            val pinned = listOfNotNull(resume, attempts.line(ready.id)) + recovery.lines(ready.id)
             val compiler = Compiler(model.estimator, c.attempt.config)
             // §6.6: a pre-compiled [K] is served for cell_end(next_increment) only, on a full-fingerprint and coverage match.
             val take = precompile?.let { p ->
@@ -756,16 +765,45 @@ public class Controller @JvmOverloads public constructor(
                 // S1: a partial continues the same increment from its carry-forward; the cell cap bounds it (D-70).
                 // §11.3: a refused or stalled completion is a verified failure of the increment's attempt.
                 is Disposition.Continue -> IncrementAttempts.verifiedFailure(exit, completion)?.let { missing ->
-                    when (val step = attempts.refused(run.ids, increment.id, contract.budget.attempts, routing.selected, exit.register, missing, exit.packet.receipts)) {
+                    val kind = CampaignRecovery.classify(increment.accept.flatMap { c.checks.forAcceptance(it) }.mapNotNull { it.last?.outcome })
+                    val hypothesis = CampaignRecovery.hypothesis(exit.register)
+                    val routed = recovery.failed(run.ids, increment.id, kind, missing.joinToString("; "), exit.packet.receipts, hypothesis, c.stamper.report().candidateId)
+                    (routed.verdict as? GuardVerdict.Trip)?.let { return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, it.line))) }
+                    if (routed.recovery is Recovery.Repair) repair(c, recovery, run.ids, increment, routed, cellModel, authority, syntax, span)
+                    when (val step = attempts.refused(run.ids, increment.id, contract.budget.attempts, routing.selected, exit.register, missing, exit.packet.receipts, kind)) {
                         is EscalationStep.Ask -> return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, step.question)))
                         is EscalationStep.Blocked -> return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, step.reason)))
                         is EscalationStep.Escalate, is EscalationStep.NotEscalated -> Unit
                     }
+                    recovery.alternative(run.ids, attempts.allowance(c.ids.work, increment.id, contract.budget.attempts), exit.register, exit.packet.receipts, contract.version, hypothesis)
                 }
                 is Disposition.Stop -> return last.copy(state = c.advance(Transition.Stopped(disposition.outcome, disposition.reason)))
             }
             last = last.copy(state = c.state)
         }
+    }
+
+    /**
+     * The scoped capsule repair the ladder granted (§13.2 step 4, D-137): the fresh repair cell behind [CellRepairRunner],
+     * routed by the `RepairHelper` row; its `fixed` claim counts only when the increment's acceptance, re-run by the
+     * harness, is green at the current stamp. Below S2 the helper is not called and the outcome is an escalation.
+     */
+    private suspend fun repair(c: OpenedCampaign, recovery: CampaignRecovery, ids: Identities, increment: Increment, routed: RoutedFailure, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?) {
+        val config = c.attempt.config
+        val acceptance = OriginalAcceptance {
+            harnessVerify(c, ids.copy(context = ContextId(idGen.next("repair-check"))), "repair-check", """{"what":"acceptance","ids":[${increment.accept.joinToString(",") { "\"$it\"" }}]}""")
+            val stamp = c.stamper.report().candidateId
+            val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = candidates(c))
+            val checks = increment.accept.flatMap { c.checks.forAcceptance(it) }
+            val green = checks.isNotEmpty() && checks.all { scheduler.currency(it, stamp).certifies }
+            AcceptanceCheck(green, "acceptance ${increment.accept.joinToString(", ")} ${if (green) "green" else "not green"} at @${stamp.hash8}")
+        }
+        val helper = Repair(router, CellRepairRunner(childCell(c, increment, model, authority, syntax, span), idGen, c.cancellation, model.estimator), acceptance, model.estimator, config.defaults, RoleTexts.worded(Roles.repair, config.role(Roles.repair.name)))
+        val tiered = config.tierTable.profiles.isNotEmpty() && config.tierTable.profileIds.all { it in config.profiles }
+        val policy = RoutingPolicy(if (tiered) config.tierTable else TierTable.single(model.profile.id), if (tiered) config.profiles else mapOf(model.profile.id to model.profile), RoutingBudget(remainingCost = c.contract.budget.cost), configuredEffort = model.effort)
+        val packet = RoutingPacket(increment.risk ?: c.contract.risk, CellRepairRunner.DEFAULT_BUDGET.tokens.value, model.maxOutputTokens, featureClass = "repair:${increment.id}")
+        val versions = c.atlas.rows.map { it.path }.filter { p -> increment.writeScope.any { PathPattern.matches(it, p) } }.mapNotNull { p -> c.registry.version(p)?.let { p to it } }.toMap()
+        recovery.repair(ids, increment.id, routed, increment.accept, versions, c.contract.budget.tokens, c.contract.shape, packet, policy, helper)
     }
 
     /**
