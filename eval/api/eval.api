@@ -1,3 +1,43 @@
+public final class io/astrolabe/eval/ChangeProposal {
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lio/astrolabe/eval/Hypothesis;
+	public final fun component3 ()Lio/astrolabe/eval/HarnessSurface;
+	public final fun component4 ()Lio/astrolabe/id/Digest;
+	public final fun component5 ()Lio/astrolabe/id/Digest;
+	public final fun component6 ()Ljava/lang/String;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBaseline ()Lio/astrolabe/id/Digest;
+	public final fun getCandidate ()Lio/astrolabe/id/Digest;
+	public final fun getDescription ()Ljava/lang/String;
+	public final fun getHypothesis ()Lio/astrolabe/eval/Hypothesis;
+	public final fun getId ()Ljava/lang/String;
+	public final fun getSurface ()Lio/astrolabe/eval/HarnessSurface;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/eval/ChangeProposals {
+	public fun <init> (Lio/astrolabe/id/IdGen;)V
+	public final fun propose (Lio/astrolabe/eval/Hypothesis;Ljava/util/Set;Lio/astrolabe/id/Digest;Lio/astrolabe/id/Digest;Ljava/lang/String;)Lio/astrolabe/eval/ProposalOutcome;
+}
+
+public final class io/astrolabe/eval/CostConcentration {
+	public fun <init> (Lio/astrolabe/event/Phase;Lio/astrolabe/provider/Money;Ljava/math/BigDecimal;Z)V
+	public final fun component1 ()Lio/astrolabe/event/Phase;
+	public final fun component2 ()Lio/astrolabe/provider/Money;
+	public final fun component3 ()Ljava/math/BigDecimal;
+	public final fun component4 ()Z
+	public final fun copy (Lio/astrolabe/event/Phase;Lio/astrolabe/provider/Money;Ljava/math/BigDecimal;Z)Lio/astrolabe/eval/CostConcentration;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/CostConcentration;Lio/astrolabe/event/Phase;Lio/astrolabe/provider/Money;Ljava/math/BigDecimal;ZILjava/lang/Object;)Lio/astrolabe/eval/CostConcentration;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getConcentrated ()Z
+	public final fun getCost ()Lio/astrolabe/provider/Money;
+	public final fun getPhase ()Lio/astrolabe/event/Phase;
+	public final fun getShare ()Ljava/math/BigDecimal;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class io/astrolabe/eval/EvaluationDesign {
 	public fun <init> (Lio/astrolabe/eval/ScorePolicy;Lio/astrolabe/id/Digest;Lio/astrolabe/id/Digest;Ljava/util/Set;Ljava/util/List;)V
 	public final fun getBaseline ()Lio/astrolabe/id/Digest;
@@ -125,6 +165,271 @@ public final class io/astrolabe/eval/EvidenceCheck : java/lang/Enum {
 	public static fun values ()[Lio/astrolabe/eval/EvidenceCheck;
 }
 
+public final class io/astrolabe/eval/ExperimentArm {
+	public fun <init> (Lio/astrolabe/eval/ExperimentArmKind;Lio/astrolabe/id/Digest;Lio/astrolabe/provider/Money;)V
+	public final fun component1 ()Lio/astrolabe/eval/ExperimentArmKind;
+	public final fun component2 ()Lio/astrolabe/id/Digest;
+	public final fun component3 ()Lio/astrolabe/provider/Money;
+	public final fun copy (Lio/astrolabe/eval/ExperimentArmKind;Lio/astrolabe/id/Digest;Lio/astrolabe/provider/Money;)Lio/astrolabe/eval/ExperimentArm;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/ExperimentArm;Lio/astrolabe/eval/ExperimentArmKind;Lio/astrolabe/id/Digest;Lio/astrolabe/provider/Money;ILjava/lang/Object;)Lio/astrolabe/eval/ExperimentArm;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBudget ()Lio/astrolabe/provider/Money;
+	public final fun getConfiguration ()Lio/astrolabe/id/Digest;
+	public final fun getKind ()Lio/astrolabe/eval/ExperimentArmKind;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/eval/ExperimentArmKind : java/lang/Enum {
+	public static final field AnotherAttempt Lio/astrolabe/eval/ExperimentArmKind;
+	public static final field Baseline Lio/astrolabe/eval/ExperimentArmKind;
+	public static final field BetterContext Lio/astrolabe/eval/ExperimentArmKind;
+	public static final field Candidate Lio/astrolabe/eval/ExperimentArmKind;
+	public static final field StrongerReasoning Lio/astrolabe/eval/ExperimentArmKind;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/eval/ExperimentArmKind;
+	public static fun values ()[Lio/astrolabe/eval/ExperimentArmKind;
+}
+
+public final class io/astrolabe/eval/ExperimentEntry {
+	public fun <init> (Lio/astrolabe/eval/ExperimentStage;Lio/astrolabe/eval/ExperimentEvidence;Ljava/lang/String;Ljava/time/Instant;)V
+	public final fun component1 ()Lio/astrolabe/eval/ExperimentStage;
+	public final fun component2 ()Lio/astrolabe/eval/ExperimentEvidence;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/time/Instant;
+	public final fun copy (Lio/astrolabe/eval/ExperimentStage;Lio/astrolabe/eval/ExperimentEvidence;Ljava/lang/String;Ljava/time/Instant;)Lio/astrolabe/eval/ExperimentEntry;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/ExperimentEntry;Lio/astrolabe/eval/ExperimentStage;Lio/astrolabe/eval/ExperimentEvidence;Ljava/lang/String;Ljava/time/Instant;ILjava/lang/Object;)Lio/astrolabe/eval/ExperimentEntry;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAt ()Ljava/time/Instant;
+	public final fun getEvidence ()Lio/astrolabe/eval/ExperimentEvidence;
+	public final fun getReason ()Ljava/lang/String;
+	public final fun getStage ()Lio/astrolabe/eval/ExperimentStage;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/astrolabe/eval/ExperimentEvidence {
+}
+
+public final class io/astrolabe/eval/ExperimentEvidence$Adoption : io/astrolabe/eval/ExperimentEvidence {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;)Lio/astrolabe/eval/ExperimentEvidence$Adoption;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/ExperimentEvidence$Adoption;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/eval/ExperimentEvidence$Adoption;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getApprover ()Ljava/lang/String;
+	public final fun getEffectiveFromAttempt ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/eval/ExperimentEvidence$Checks : io/astrolabe/eval/ExperimentEvidence {
+	public fun <init> (ZZLjava/lang/String;)V
+	public final fun component1 ()Z
+	public final fun component2 ()Z
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (ZZLjava/lang/String;)Lio/astrolabe/eval/ExperimentEvidence$Checks;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/ExperimentEvidence$Checks;ZZLjava/lang/String;ILjava/lang/Object;)Lio/astrolabe/eval/ExperimentEvidence$Checks;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getProvenance ()Ljava/lang/String;
+	public final fun getSmoke ()Z
+	public final fun getStructural ()Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/eval/ExperimentEvidence$Comparison : io/astrolabe/eval/ExperimentEvidence {
+	public fun <init> (Lio/astrolabe/eval/PromotionReport;Ljava/util/Map;)V
+	public final fun getVersusAlternatives ()Ljava/util/Map;
+	public final fun getVersusBaseline ()Lio/astrolabe/eval/PromotionReport;
+}
+
+public final class io/astrolabe/eval/ExperimentEvidence$Integration : io/astrolabe/eval/ExperimentEvidence {
+	public fun <init> (Lio/astrolabe/id/Digest;Ljava/util/Set;Lio/astrolabe/eval/PromotionReport;)V
+	public final fun getCombinedWith ()Ljava/util/Set;
+	public final fun getConfiguration ()Lio/astrolabe/id/Digest;
+	public final fun getReport ()Lio/astrolabe/eval/PromotionReport;
+}
+
+public final class io/astrolabe/eval/ExperimentEvidence$Rejection : io/astrolabe/eval/ExperimentEvidence {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/astrolabe/eval/ExperimentEvidence$Rejection;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/ExperimentEvidence$Rejection;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/eval/ExperimentEvidence$Rejection;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getReason ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/eval/ExperimentEvidence$Rollback : io/astrolabe/eval/ExperimentEvidence {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/astrolabe/eval/ExperimentEvidence$Rollback;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/ExperimentEvidence$Rollback;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/eval/ExperimentEvidence$Rollback;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getReason ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/eval/ExperimentEvidence$Transfer : io/astrolabe/eval/ExperimentEvidence {
+	public fun <init> (Lio/astrolabe/eval/PromotionReport;)V
+	public final fun component1 ()Lio/astrolabe/eval/PromotionReport;
+	public final fun copy (Lio/astrolabe/eval/PromotionReport;)Lio/astrolabe/eval/ExperimentEvidence$Transfer;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/ExperimentEvidence$Transfer;Lio/astrolabe/eval/PromotionReport;ILjava/lang/Object;)Lio/astrolabe/eval/ExperimentEvidence$Transfer;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getReport ()Lio/astrolabe/eval/PromotionReport;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/eval/ExperimentPlan {
+	public fun <init> (Lio/astrolabe/eval/ChangeProposal;Lio/astrolabe/provider/Money;Ljava/util/List;Lio/astrolabe/id/Digest;Lio/astrolabe/id/Digest;)V
+	public final fun arm (Lio/astrolabe/eval/ExperimentArmKind;)Lio/astrolabe/eval/ExperimentArm;
+	public final fun getArms ()Ljava/util/List;
+	public final fun getFingerprint ()Lio/astrolabe/id/Digest;
+	public final fun getProposal ()Lio/astrolabe/eval/ChangeProposal;
+	public final fun getTotalBudget ()Lio/astrolabe/provider/Money;
+	public final fun getTransferSet ()Lio/astrolabe/id/Digest;
+	public final fun getTuningSet ()Lio/astrolabe/id/Digest;
+}
+
+public final class io/astrolabe/eval/ExperimentRecord {
+	public final fun getHarnessForSubsequentAttempts ()Lio/astrolabe/id/Digest;
+	public final fun getHistory ()Ljava/util/List;
+	public final fun getId ()Ljava/lang/String;
+	public final fun getPlan ()Lio/astrolabe/eval/ExperimentPlan;
+	public final fun getStage ()Lio/astrolabe/eval/ExperimentStage;
+}
+
+public final class io/astrolabe/eval/ExperimentStage : java/lang/Enum {
+	public static final field Checked Lio/astrolabe/eval/ExperimentStage;
+	public static final field Compared Lio/astrolabe/eval/ExperimentStage;
+	public static final field Integrated Lio/astrolabe/eval/ExperimentStage;
+	public static final field Planned Lio/astrolabe/eval/ExperimentStage;
+	public static final field Promoted Lio/astrolabe/eval/ExperimentStage;
+	public static final field Rejected Lio/astrolabe/eval/ExperimentStage;
+	public static final field RolledBack Lio/astrolabe/eval/ExperimentStage;
+	public static final field TransferAssessed Lio/astrolabe/eval/ExperimentStage;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/eval/ExperimentStage;
+	public static fun values ()[Lio/astrolabe/eval/ExperimentStage;
+}
+
+public abstract interface class io/astrolabe/eval/ExperimentTransition {
+}
+
+public final class io/astrolabe/eval/ExperimentTransition$Advanced : io/astrolabe/eval/ExperimentTransition {
+	public fun <init> (Lio/astrolabe/eval/ExperimentRecord;)V
+	public final fun component1 ()Lio/astrolabe/eval/ExperimentRecord;
+	public final fun copy (Lio/astrolabe/eval/ExperimentRecord;)Lio/astrolabe/eval/ExperimentTransition$Advanced;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/ExperimentTransition$Advanced;Lio/astrolabe/eval/ExperimentRecord;ILjava/lang/Object;)Lio/astrolabe/eval/ExperimentTransition$Advanced;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getRecord ()Lio/astrolabe/eval/ExperimentRecord;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/eval/ExperimentTransition$Refused : io/astrolabe/eval/ExperimentTransition {
+	public fun <init> (Lio/astrolabe/eval/ExperimentRecord;Ljava/lang/String;)V
+	public final fun component1 ()Lio/astrolabe/eval/ExperimentRecord;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Lio/astrolabe/eval/ExperimentRecord;Ljava/lang/String;)Lio/astrolabe/eval/ExperimentTransition$Refused;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/ExperimentTransition$Refused;Lio/astrolabe/eval/ExperimentRecord;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/eval/ExperimentTransition$Refused;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getReason ()Ljava/lang/String;
+	public final fun getRecord ()Lio/astrolabe/eval/ExperimentRecord;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/eval/Experiments {
+	public fun <init> (Ljava/time/Clock;Lio/astrolabe/id/IdGen;)V
+	public final fun advance (Lio/astrolabe/eval/ExperimentRecord;Lio/astrolabe/eval/ExperimentEvidence;)Lio/astrolabe/eval/ExperimentTransition;
+	public final fun open (Lio/astrolabe/eval/ExperimentPlan;)Lio/astrolabe/eval/ExperimentRecord;
+}
+
+public final class io/astrolabe/eval/HarnessSurface : java/lang/Enum {
+	public static final field AcceptanceCriteria Lio/astrolabe/eval/HarnessSurface;
+	public static final field AdoptionRules Lio/astrolabe/eval/HarnessSurface;
+	public static final field BudgetAccounting Lio/astrolabe/eval/HarnessSurface;
+	public static final field CompletionDetection Lio/astrolabe/eval/HarnessSurface;
+	public static final field ContextPolicy Lio/astrolabe/eval/HarnessSurface;
+	public static final field EvaluatorAccess Lio/astrolabe/eval/HarnessSurface;
+	public static final field ObservationRendering Lio/astrolabe/eval/HarnessSurface;
+	public static final field Recovery Lio/astrolabe/eval/HarnessSurface;
+	public static final field StateValidation Lio/astrolabe/eval/HarnessSurface;
+	public static final field ToolBehaviour Lio/astrolabe/eval/HarnessSurface;
+	public final fun getEditable ()Z
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/eval/HarnessSurface;
+	public static fun values ()[Lio/astrolabe/eval/HarnessSurface;
+}
+
+public final class io/astrolabe/eval/Hypothesis {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/math/BigDecimal;
+	public final fun component4 ()Ljava/math/BigDecimal;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/lang/String;)Lio/astrolabe/eval/Hypothesis;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/Hypothesis;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/eval/Hypothesis;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEvidence ()Ljava/lang/String;
+	public final fun getMechanism ()Ljava/lang/String;
+	public final fun getModule ()Ljava/lang/String;
+	public final fun getPredictedEconomy ()Ljava/math/BigDecimal;
+	public final fun getPredictedQuality ()Ljava/math/BigDecimal;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/eval/MastCategory : java/lang/Enum {
+	public static final field InterAgentMisalignment Lio/astrolabe/eval/MastCategory;
+	public static final field SpecificationIssues Lio/astrolabe/eval/MastCategory;
+	public static final field TaskVerification Lio/astrolabe/eval/MastCategory;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/eval/MastCategory;
+	public static fun values ()[Lio/astrolabe/eval/MastCategory;
+}
+
+public final class io/astrolabe/eval/MinedTrace {
+	public fun <init> (Lio/astrolabe/id/Digest;Lio/astrolabe/eval/TrialKey;Lio/astrolabe/telemetry/TraceSnapshot;Ljava/util/List;)V
+	public final fun getFailures ()Ljava/util/List;
+	public final fun getHarness ()Lio/astrolabe/id/Digest;
+	public final fun getKey ()Lio/astrolabe/eval/TrialKey;
+	public final fun getSnapshot ()Lio/astrolabe/telemetry/TraceSnapshot;
+}
+
+public final class io/astrolabe/eval/MiningPolicy {
+	public fun <init> (ILjava/math/BigDecimal;)V
+	public final fun component1 ()I
+	public final fun component2 ()Ljava/math/BigDecimal;
+	public final fun copy (ILjava/math/BigDecimal;)Lio/astrolabe/eval/MiningPolicy;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/MiningPolicy;ILjava/math/BigDecimal;ILjava/lang/Object;)Lio/astrolabe/eval/MiningPolicy;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCostShareFloor ()Ljava/math/BigDecimal;
+	public final fun getMinTasks ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/eval/MiningReport {
+	public final fun getClasses ()Ljava/util/Map;
+	public final fun getCosts ()Ljava/util/List;
+	public final fun getExcluded ()Ljava/util/List;
+	public final fun getHarness ()Lio/astrolabe/id/Digest;
+	public final fun getMast ()Ljava/util/Map;
+	public final fun getPolicy ()Lio/astrolabe/eval/MiningPolicy;
+	public final fun getRepeated ()Ljava/util/List;
+	public final fun getTotalCost ()Lio/astrolabe/provider/Money;
+	public final fun getTraces ()I
+	public final fun getUntagged ()I
+}
+
 public final class io/astrolabe/eval/PairedBound {
 	public static final field Companion Lio/astrolabe/eval/PairedBound$Companion;
 	public static final fun calculate (Lio/astrolabe/eval/Scorecard;Lio/astrolabe/eval/Scorecard;Z)Lio/astrolabe/eval/PairedBound;
@@ -189,6 +494,52 @@ public final class io/astrolabe/eval/PromotionVerdict : java/lang/Enum {
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;
 	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/eval/PromotionVerdict;
 	public static fun values ()[Lio/astrolabe/eval/PromotionVerdict;
+}
+
+public abstract interface class io/astrolabe/eval/ProposalOutcome {
+}
+
+public final class io/astrolabe/eval/ProposalOutcome$Admitted : io/astrolabe/eval/ProposalOutcome {
+	public fun <init> (Lio/astrolabe/eval/ChangeProposal;)V
+	public final fun component1 ()Lio/astrolabe/eval/ChangeProposal;
+	public final fun copy (Lio/astrolabe/eval/ChangeProposal;)Lio/astrolabe/eval/ProposalOutcome$Admitted;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/ProposalOutcome$Admitted;Lio/astrolabe/eval/ChangeProposal;ILjava/lang/Object;)Lio/astrolabe/eval/ProposalOutcome$Admitted;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getProposal ()Lio/astrolabe/eval/ChangeProposal;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/eval/ProposalOutcome$Refused : io/astrolabe/eval/ProposalOutcome {
+	public fun <init> (Ljava/util/List;)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun copy (Ljava/util/List;)Lio/astrolabe/eval/ProposalOutcome$Refused;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/ProposalOutcome$Refused;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/eval/ProposalOutcome$Refused;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getReasons ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/eval/RepeatedFailure {
+	public fun <init> (Lio/astrolabe/recover/FailureClass;Lio/astrolabe/recover/ErrorSignature;Ljava/util/Set;Ljava/util/Set;II)V
+	public final fun component1 ()Lio/astrolabe/recover/FailureClass;
+	public final fun component2 ()Lio/astrolabe/recover/ErrorSignature;
+	public final fun component3 ()Ljava/util/Set;
+	public final fun component4 ()Ljava/util/Set;
+	public final fun component5 ()I
+	public final fun component6 ()I
+	public final fun copy (Lio/astrolabe/recover/FailureClass;Lio/astrolabe/recover/ErrorSignature;Ljava/util/Set;Ljava/util/Set;II)Lio/astrolabe/eval/RepeatedFailure;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/RepeatedFailure;Lio/astrolabe/recover/FailureClass;Lio/astrolabe/recover/ErrorSignature;Ljava/util/Set;Ljava/util/Set;IIILjava/lang/Object;)Lio/astrolabe/eval/RepeatedFailure;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFailureClass ()Lio/astrolabe/recover/FailureClass;
+	public final fun getMast ()Ljava/util/Set;
+	public final fun getModules ()Ljava/util/Set;
+	public final fun getOccurrences ()I
+	public final fun getSignature ()Lio/astrolabe/recover/ErrorSignature;
+	public final fun getTasks ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class io/astrolabe/eval/ScorePolicy {
@@ -262,6 +613,28 @@ public final class io/astrolabe/eval/StratumScore {
 	public final fun getTrials ()I
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/eval/TraceFailure {
+	public fun <init> (Lio/astrolabe/recover/FailureClass;Lio/astrolabe/recover/ErrorSignature;Lio/astrolabe/eval/MastCategory;Ljava/lang/String;)V
+	public final fun component1 ()Lio/astrolabe/recover/FailureClass;
+	public final fun component2 ()Lio/astrolabe/recover/ErrorSignature;
+	public final fun component3 ()Lio/astrolabe/eval/MastCategory;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun copy (Lio/astrolabe/recover/FailureClass;Lio/astrolabe/recover/ErrorSignature;Lio/astrolabe/eval/MastCategory;Ljava/lang/String;)Lio/astrolabe/eval/TraceFailure;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/TraceFailure;Lio/astrolabe/recover/FailureClass;Lio/astrolabe/recover/ErrorSignature;Lio/astrolabe/eval/MastCategory;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/eval/TraceFailure;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFailureClass ()Lio/astrolabe/recover/FailureClass;
+	public final fun getMast ()Lio/astrolabe/eval/MastCategory;
+	public final fun getModule ()Ljava/lang/String;
+	public final fun getSignature ()Lio/astrolabe/recover/ErrorSignature;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/eval/TraceMining {
+	public static final field INSTANCE Lio/astrolabe/eval/TraceMining;
+	public static final fun mine (Lio/astrolabe/id/Digest;Ljava/lang/String;Lio/astrolabe/eval/MiningPolicy;Ljava/util/List;)Lio/astrolabe/eval/MiningReport;
 }
 
 public final class io/astrolabe/eval/TrialKey {
