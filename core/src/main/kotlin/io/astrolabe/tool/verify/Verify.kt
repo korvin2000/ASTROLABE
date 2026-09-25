@@ -64,6 +64,8 @@ import io.astrolabe.verify.Scheduler
 import io.astrolabe.verify.Selector
 import io.astrolabe.workspace.Stamper
 import io.astrolabe.workspace.Workspace
+import io.astrolabe.delegate.IncrementReview
+import io.astrolabe.delegate.ReviewOutcome
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
@@ -72,8 +74,8 @@ import java.nio.file.Path
  * The `verify` family (§5.4, TODO P1.6.7): `check(paths?)` runs the end-of-turn checker now; `tests(selection =
  * accept | ids | full)` and `acceptance(ids?)` execute registered checks through the scheduler's exclusive
  * protocol and record receipts with stamps and currency; `baseline()` records the baseline receipt on the
- * captured initial candidate; `review(scope=campaign)` is the human review path (P3.5.2, D-23), the review cell
- * waits for P4.4.3; `blast` runs `CHK-tests-blast` from the impact analysis of the touched paths (P3.2.5). Every executed check
+ * captured initial candidate; `review(scope=campaign)` is the human review path (P3.5.2, D-23), `review(scope=increment)`
+ * the review cell (P4.4.3); `blast` runs `CHK-tests-blast` from the impact analysis of the touched paths (P3.2.5). Every executed check
  * yields a receipt — a runner that cannot start yields an explicit `unavailable` one (FX-13) — and the result
  * is rendered as the `── Checks ──` block plus each shaped view. Status words are the runner's, never the model's.
  */
@@ -100,6 +102,8 @@ public class Verify(
     private val envAllowlist: Set<String> = RedactionConfig.DEFAULT_ENV_ALLOWLIST,
     /** The campaign-scope human review path `review(scope=campaign)` routes to (P3.5.2, D-23); `null` ⇒ unavailable. */
     private val campaignReview: CampaignReview? = null,
+    /** `review(scope=increment)`: the review cell (P4.4.3, S2+); `null` ⇒ unavailable. */
+    private val incrementReview: IncrementReview? = null,
 ) : ToolExecutor {
     init {
         require(ids.context != null) { "verify runs inside a cell: ids.context is its lineage" }
@@ -138,7 +142,7 @@ public class Verify(
     override suspend fun execute(call: ToolCall, context: TurnContext): ToolOutcome {
         require(call.family == ToolFamily.Verify) { "not a verify call: ${call.name}" }
         val args = (call.args as Args.Verify).args
-        if (!mask.allows(call.name)) return refused(args, "masked", "${call.name} is masked in this role; the review cell arrives in P4.4.3")
+        if (!mask.allows(call.name)) return refused(args, "masked", "${call.name} is masked in this role")
         val contract = contracts.current(ids.work) ?: return refused(args, "denied", "no committed contract for ${ids.work}")
         return when (args.what) {
             "check" -> check(args, contract)
@@ -157,7 +161,8 @@ public class Verify(
      */
     private suspend fun review(args: VerifyArgs, contract: Contract): ToolOutcome {
         val scope = args.scope ?: "campaign"
-        if (scope != "campaign") return refused(args, "masked", "review(scope=$scope) is the review cell (P4.4.3); this build routes review(scope=campaign) to the host authority")
+        if (scope == "increment") return incrementReview(args)
+        if (scope != "campaign") return refused(args, "denied", "review scope is increment or campaign, got '$scope'")
         val reviewer = campaignReview ?: return refused(args, "unavailable", "no campaign review path is wired for this cell")
         val base = s0 ?: return refused(args, "unavailable", "no captured initial candidate: the review has no diff base")
         val stamp = stamper.report().candidateId
@@ -179,6 +184,20 @@ public class Verify(
             is CampaignReviewOutcome.Unavailable -> "unavailable"
         }
         return refused(args, status, body)
+    }
+
+    /** `review(scope=increment)` ⇒ the review cell (§8.8), whose human fallback is `Authority.review`; a current approval is reused. */
+    private suspend fun incrementReview(args: VerifyArgs): ToolOutcome {
+        val reviewer = incrementReview ?: return refused(args, "unavailable", "no increment review cell is wired for this cell (review cells run in S2+)")
+        val outcome = reviewer.review("review requested by the cell")
+        val record = outcome.record
+        val (status, text) = when (outcome) {
+            is ReviewOutcome.Approved -> "ok" to "approve by ${record.verdict!!.signedBy}" + (if (record.reused) " · reused" else "")
+            is ReviewOutcome.Declined -> "declined" to outcome.reason
+            is ReviewOutcome.Unavailable -> "unavailable" to "unavailable — ${outcome.reason}"
+        }
+        val findings = record.verdict?.findings.orEmpty().joinToString("") { "\n  ${it.severity.name.lowercase()} ${it.location}: ${it.issue}" + (it.suggestedFix?.let { fix -> " → $fix" } ?: "") }
+        return refused(args, status, "── Review ──\nincrement review ${record.packetId} @${record.candidate.hash8}: $text$findings")
     }
 
     // ------------------------------------------------------------------ ops

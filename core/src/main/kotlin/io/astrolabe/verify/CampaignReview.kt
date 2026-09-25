@@ -179,7 +179,7 @@ public class CampaignReview(
     }
 
     /** The unified diff of every path that differs between the materialized `s0` and the tree at [stamp], published as one blob. */
-    private fun diffBlob(s0: CandidateId, stamp: CandidateId): Pair<Digest, List<String>> {
+    internal fun diffBlob(s0: CandidateId, stamp: CandidateId): Pair<Digest, List<String>> {
         val limits = ArrayList<String>()
         val base = materialize(limits)
         val paths = java.util.TreeSet(Stamper.PATH_ORDER)
