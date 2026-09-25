@@ -15,6 +15,9 @@ import io.astrolabe.id.FileVersion
 import io.astrolabe.kb.Note
 import io.astrolabe.kb.NoteKind
 import io.astrolabe.kb.NoteStatus
+import io.astrolabe.kb.Skill
+import io.astrolabe.kb.SkillView
+import io.astrolabe.kb.SkillViews
 import io.astrolabe.provider.Message
 import io.astrolabe.provider.Profile
 import io.astrolabe.provider.Segment
@@ -57,6 +60,8 @@ public data class CompileInputs @JvmOverloads constructor(
     val rules: String? = null,
     /** Current file versions, to recheck seeds at compile time; `null` skips the recheck. */
     val currentVersion: ((String) -> FileVersion?)? = null,
+    /** Triggered, resolved skills (P4.3.1): each role view's core joins the mandatory set, its optional modules compete. */
+    val skills: List<Skill> = emptyList(),
 )
 
 /**
@@ -71,6 +76,8 @@ public class Compiler(
     private val estimator: TokenEstimator,
     private val config: Config = Config(),
 ) {
+    private val skillViews = SkillViews(estimator)
+
     @JvmOverloads
     public fun compile(
         increment: Increment,
@@ -177,6 +184,12 @@ public class Compiler(
                 }
                 add("note.${note.id}", "${note.kind.name} ${note.id}", note.line + "\n" + note.body, mandatory = false, priority)
             }
+        }
+        // §6.1, F06: a skill's prerequisites, invariants and mandatory modules are mandatory, charged to the total budget.
+        for (skill in inputs.skills.filter { "*" in role.skillFilter || it.id in role.skillFilter }.distinctBy { it.id }.sortedBy { it.id }) {
+            val view = skillViews.view(skill, role.name)
+            add("skill.${skill.id}", "SKILL ${skill.id}@v${skill.version}", view.core, mandatory = true, ContextPriority.Skills)
+            for (m in view.optional) add("skill.${skill.id}.${m.id}", "SKILL ${skill.id} module ${m.id}", SkillView.moduleText(m), mandatory = false, ContextPriority.Skills)
         }
         // D-42: an admitted CAL note replaces the P2 statistics block; never both.
         if (ContextPart.CalibrationPrior in role.contextView && !calibrationNote) {

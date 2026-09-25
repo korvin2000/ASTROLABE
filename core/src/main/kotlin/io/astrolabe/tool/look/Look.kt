@@ -23,6 +23,9 @@ import io.astrolabe.id.FileVersion
 import io.astrolabe.id.Generation
 import io.astrolabe.id.IdGen
 import io.astrolabe.id.Identities
+import io.astrolabe.kb.BehaviourMaps
+import io.astrolabe.kb.BmapLevel
+import io.astrolabe.kb.BmapSource
 import io.astrolabe.os.search.Search
 import io.astrolabe.os.search.SearchMode
 import io.astrolabe.os.search.SearchOutcome
@@ -81,7 +84,7 @@ public sealed interface LookTarget {
 
 /**
  * The `look` family (§5.4, TODO P1.6.3): `tree`, `outline`, `read`, `find`, `def`, `recall`, `catalog`;
- * `refs`, `importers` and `impact` over the tier-0 import graph (P3.2.3, §7.3–7.4).
+ * `refs`, `importers` and `impact` over the tier-0 import graph (P3.2.3, §7.3–7.4); `bmap` over admitted behaviour maps (P4.3.2, §7.5).
  * Every result is an [Observation] with a content blob; only rendered source bytes (reads, find hits,
  * recalls) register coverage in the version registry and the Workset, at the exact version they were read
  * from and minus every redacted line (D-49). Outlines, symbol locations and trees never make a body KNOWN.
@@ -114,6 +117,8 @@ public class Look(
     private val checks: Checks? = null,
     /** The session's frozen mounts, listed by `look(catalog)` as `mcp:<server>/<tool>` one-liners (§15.3). */
     private val mounts: io.astrolabe.tool.Catalog = io.astrolabe.tool.Catalog.EMPTY,
+    /** The admitted behaviour maps `look(bmap)` discloses (P4.3.2); null answers that none exist. */
+    private val bmaps: BmapSource? = null,
 ) : ToolExecutor {
     init {
         require(ids.context != null) { "look runs inside a cell: ids.context is its lineage" }
@@ -143,6 +148,7 @@ public class Look(
             "importers" -> importers(args)
             "impact" -> impact(args)
             "catalog" -> catalog(args)
+            "bmap" -> bmap(args)
             else -> refused(args, "masked", "${call.name} is masked in this role; see look(catalog)")
         }
     }
@@ -461,6 +467,21 @@ public class Look(
 
     private fun importGraph(): ImportGraph = graphOf?.takeIf { it.first === atlas }?.second
         ?: ImportGraph.of(atlas, workspace.id).also { graphOf = atlas to it }
+
+    // §7.5: a map is validated against the current atlas and rendered without versions, so it never grants coverage.
+    private fun bmap(args: LookArgs): ToolOutcome {
+        val target = args.target?.trim()?.takeIf { it.isNotEmpty() } ?: return refused(args, "refused", "bmap needs a subsystem: subsystem | subsystem#behaviour")
+        val subsystem = target.substringBefore('#')
+        val behaviour = target.substringAfter('#', "").takeIf { it.isNotEmpty() }
+        val map = bmaps?.find(subsystem)
+            ?: return refused(args, "not_found", "no admitted BMAP-$subsystem (complete: the knowledge base was searched); navigate with tree, outline and find", scope = "bmap $subsystem")
+        val validation = BehaviourMaps.validate(map, atlas)
+        return if (behaviour == null) {
+            textResult(args.copy(budget = minOf(args.budget, BehaviourMaps.SUBSYSTEM_MAX_TOKENS)), BehaviourMaps.render(validation, BmapLevel.Subsystem), scope = "bmap $subsystem")
+        } else {
+            textResult(args, BehaviourMaps.render(validation, BmapLevel.Behaviour, behaviour), scope = "bmap $target")
+        }
+    }
 
     private fun catalog(args: LookArgs): ToolOutcome {
         val lines = ToolFamily.entries.map { family ->

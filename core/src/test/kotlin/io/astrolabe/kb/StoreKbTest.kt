@@ -51,7 +51,7 @@ class StoreKbTest {
         repo.close()
     }
 
-    private fun kb() = StoreKb(store, work, { path -> if (path == "src/payments/api.py") api else FileVersion(Digest.ofUtf8("other")) }, logs::add)
+    private fun kb() = StoreKb(store, work, { path -> if (path == "src/payments/api.py") api else FileVersion(Digest.ofUtf8("other")) }, onSearch = logs::add)
 
     @Test
     fun `search answers admitted notes by summary and anchor, labels moved anchors and logs why`() {

@@ -97,6 +97,7 @@ import io.astrolabe.id.RandomIdGen
 import io.astrolabe.id.WorkId
 import io.astrolabe.id.WorkspaceId
 import io.astrolabe.evidence.JournalScope
+import io.astrolabe.kb.BmapStore
 import io.astrolabe.kb.CalibrationSeries
 import io.astrolabe.kb.CalibrationStats
 import io.astrolabe.kb.Derived
@@ -1084,7 +1085,7 @@ public class Controller @JvmOverloads public constructor(
         verify.inputs = c.atlas.rows.map { it.path }
         val tools = CellTools(
             state = StateTool(Validator(estimator), registerVersions, c.journal, estimator, idGen, ids, clock, register ?: Register.empty(cellId, increment.id, increment.title), events),
-            look = Look(c.workspace, c.registry, workset, c.atlas, Searches.jvm(), c.journal, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, checks = c.checks),
+            look = Look(c.workspace, c.registry, workset, c.atlas, Searches.jvm(), c.journal, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, checks = c.checks, bmaps = BmapStore(c.store)),
             edit = Edit(
                 c.workspace, c.registry, workset, c.os, preimages, ScopeGuard(c.workspace), c.contracts, c.checks, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, syntax,
                 // D-99: `revert:turn:N` names the campaign's shadow snapshots (the turn checkpoint records them).
