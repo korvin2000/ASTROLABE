@@ -109,7 +109,41 @@ P6.1.1 `FixtureRunner` runs the JUnit tests whose names carry `FX-nn`/`AX-nn` id
 build: `./gradlew :eval:fixtures` (all of core's fixtures; report in `eval/build/reports/fixtures/report.json`),
 or `FixtureRunner.main` with `--class`/`--package`, `--report FILE`, `--junit-xml DIR` (compare with the build's
 JUnit XML) and `--configuration LABEL`. The report carries per-test status and the seven §19.4 invariant metrics;
-an invariant none of whose fixtures ran is unmeasured, never zero (D-220).
+an invariant none of whose fixtures ran is unmeasured, never zero (D-220). Only tests whose own display name
+carries a fixture id are counted, even when JUnit runs a `@ParameterizedTest`/`@TestFactory` invocation that
+names none: `PostDiscoveryFilter` only prunes the static discovery tree, so such invocations (generated at
+execution time) pass through the container that names them and are dropped at collection instead (D-260).
+
+### `report.json` schema (`FixtureReport.json()`, P6.1.1)
+
+```jsonc
+{
+  "kind": "astrolabe.fixture-report/1",
+  "configuration": "as-written",           // FixtureSelection's --configuration label
+  "counts": { "tests": 95, "passed": 95, "failed": 0, "skipped": 0 },
+  "green": true,                            // passed > 0 && failed == 0
+  "invariantsZero": true,                   // every metric below measured (non-null) and 0
+  "invariants": [
+    // one entry per Invariant (declaration order), §19.4
+    { "invariant": "ordinary anchored edits to unseen content", "tests": 5, "violations": 0 }
+    // "violations" is null, never 0, when no fixture of the invariant ran (unmeasured, D-220)
+  ],
+  "results": [
+    {
+      "class": "io.astrolabe.fixtures.FakeAdapterTest",
+      "name": "AX-01 sample - adapter fixture()",
+      "status": "passed",                   // "passed" | "failed" | "skipped"
+      "fixtures": ["AX-01"],                 // canonical FX-nn/AX-nn ids the name declares; never empty
+      "message": null                        // the failure/abort throwable's toString(), else null
+    }
+  ]
+}
+```
+
+`results` is sorted by (`class`, `name`); `invariants` follows declaration order, always one entry per
+[`Invariant`](src/main/kotlin/io/astrolabe/eval/FixtureRunner.kt). Unknown/absent numeric fields are never
+coerced to `0`: a `null` `violations` means unmeasured, and a report with no `results` has empty `invariants`
+metrics (`tests: 0, violations: null`) rather than a fabricated zero.
 
 ## Campaigns, comparators and arms
 

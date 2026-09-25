@@ -496,6 +496,7 @@ Dispositions follow `ANSWERS.md` (2026-09-20): **CONFIRMED** (owner answer) · *
 | D-231 | Units of `Hypothesis.predictedQuality`/`predictedEconomy` | **LOCAL IMPLEMENTATION CHOICE** (P6.2.1). Quality = predicted change in complete acceptance rate, a fraction in [-1, 1]; economy = predicted relative change in billed cost per accepted task (> -1, negative is cheaper). Predictions are recorded for later calibration, never used as evidence. |
 | D-232 | "Always compare against spending the same on stronger reasoning, better context or another attempt" | **LOCAL IMPLEMENTATION CHOICE** (P6.2.1). An `ExperimentPlan` must carry exactly five arms (baseline, candidate, `StrongerReasoning`, `BetterContext`, `AnotherAttempt`) with the same known total budget and distinct configurations; the `Compared` stage needs a P6.1.4 `PromotionReport` against the baseline and against each alternative, all on the tuning-set manifest, and every one must be `EligibleForReview`, else the record moves to `Rejected` with the reasons. How an alternative arm is configured is the caller's (P6.1.1 runner). |
 | D-233 | Bounded change proposal and promotion bookkeeping | **LOCAL IMPLEMENTATION CHOICE** (P6.2.1). A proposal names exactly one editable `HarnessSurface` (the six §12.3 mutation scopes); naming a protected surface (evaluator access, acceptance criteria, budget accounting, adoption rules), more than one scope or a candidate equal to the baseline is `Refused` with reasons. `Experiments.advance` is an explicit state machine `Planned → Checked → Compared → Integrated → TransferAssessed → Promoted → RolledBack` (any pre-promotion stage → `Rejected`); transfer must use the separate final-set manifest; `Promoted` requires an `Adoption(approver, effectiveFromAttempt)` decided outside the runner and only changes `harnessForSubsequentAttempts`. Records are in memory; persistence and a runner that executes arms are P6.1.1/P6.3. |
+| D-260 | Fixture runner: dynamic (`@ParameterizedTest`/`@TestFactory`) invocations that name no fixture | **LOCAL IMPLEMENTATION CHOICE** (P6.3.1). `PostDiscoveryFilter` (D-220) only prunes the static discovery tree; a template method is itself a container there (`isTest = false`), always included, and its per-invocation children are generated at execution time, past the filter's reach — confirmed against `core`'s full suite, where `PatternSubsetTest`/`FixtureReposTest`/`FixtureReposIndexTest` (unrelated `@ParameterizedTest`s, no FX/AX id anywhere in their names) were executed and recorded by `:eval:fixtures`, inflating `results` from the 95 real fixtures to 327 and turning 4 unrelated assumption failures into false `Skipped` fixture entries. `FixtureRunner`'s `Collector.record` now drops any identifier whose own display name carries no fixture id, so `FixtureReport.results`/`green`/`discrepancies` reflect only the FX-nn/AX-nn tests D-220 defines, regardless of what else a shared package/class selection pulls in at runtime. No fixture in `core` uses parameterized dispatch today, so no real fixture coverage is lost. | P6.3.1 |
 
 ### 3.1 Specification refinements recorded by this plan
 The plan follows the refined reading below; a later documentation-maintenance pass should apply them to the cited sections (they are not silent redesigns — each keeps the section's intent and closes an ambiguity found in review):
@@ -1914,9 +1915,20 @@ Goal: [§18.2 Stage F](docs/implementation/roadmap.md#sec-18-2), [§19](docs/eva
 - [x] **Gate P6.2:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate). — [CI run 36167689819](https://github.com/korvin2000/ASTROLABE/actions/runs/36167689819) green on Ubuntu + Windows at `787bf12` (P6.2.1, 2026-09-25).
 
 ### P6.3 Validation
-#### P6.3.1 [V] Runner and scorecard checks · TODO
+#### P6.3.1 [V] Runner and scorecard checks · DONE
 - Build: fixture suite green through the runner; scorecard tests; contamination fixture; export schema documented.
 - Done: `eval` module publishes its report format; live campaigns listed under P7.
+- Log: 2026-09-25 — Verified, not duplicated: `./gradlew :core:test :eval:fixtures` now reproduces core's JUnit results
+  exactly (95 fixture tests, 0 discrepancies, every §19.4 invariant measured and 0; `:eval:test` green), P6.1.3/P6.1.4's
+  `PromotionDecisionTest`/`CampaignTest` already cover scorecard checks and the FX-47 contamination fixture, and
+  `LiveGates.all()`/TODO §P7 already list live campaigns as `UNMEASURED`. Found and fixed a real gap while confirming
+  the first: `PostDiscoveryFilter` can't reach `@ParameterizedTest`/`@TestFactory` invocations (generated past
+  discovery), so unrelated core tests (`PatternSubsetTest`, `FixtureRepos{,Index}Test`) were leaking into the runner's
+  counts/green (327 tests, 4 false skips, pre-fix) though no real fixture uses parameterized dispatch today; `eval/FixtureRunner.kt`
+  `Collector.record` now drops any identifier whose own name carries no fixture id (D-260). Documented the `report.json`
+  schema in `eval/README.md`. Added `RunnerSampleParameterized` (`eval/src/test/kotlin/io/astrolabe/eval/samples/RunnerSampleFixtures.kt`)
+  and one `FixtureRunnerTest` regression test for the leak. Limits: no full `build`/ABI regen/push (task tier); `core`
+  untouched.
 
 - [ ] **Gate P6.3:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
 
