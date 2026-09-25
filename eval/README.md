@@ -1,8 +1,9 @@
 # Offline evaluation kernel
 
 P6.1.4 supplies score arithmetic and paired inference over explicit records. It is not a campaign
-runner and does not enable features. The runner, frozen manifests and integrity verification remain
-P6.1.1/P6.1.2/P6.1.3; Accounting remains P1.11.2. Live evaluation remains P7, UNMEASURED.
+runner and does not enable features. The fixture runner (P6.1.1), frozen manifests and integrity (P6.1.2)
+and the accounting/evidence/decision wiring (P6.1.3, `Trials.fromCalls`, `Investments`, `PromotionEvidence`,
+`PromotionDecision`, D-223) sit around it. Live evaluation remains P7, UNMEASURED.
 
 Create a `ScorePolicy` before results: decimal stratum weights, complexity labels, pilot cost ranges,
 acceptance floors, family confidence, minimum cluster count, cost ratio and cost/latency ceilings.
@@ -100,5 +101,72 @@ Search is worst-case exponential (three choices per component); `maxNodes` bound
 assignments, not input size or preprocessing. Suffix bounds use O(components × quota cells) memory.
 The [protocol](../audit/OUT-OF-ORDER-P6.1.5.md) records the model, proof and independent oracle.
 This is evidence only about supplied metadata/links. It neither detects unknown answer leakage nor
-restores a repeatedly used holdout. Frozen manifests, contamination cleanup, memory reset/access
-tracking and FX-47 runtime validation remain P6.1.1/P6.1.2.
+restores a repeatedly used holdout: `CampaignManifest` and `CampaignIntegrity` (below) do.
+
+## Fixture runner
+
+P6.1.1 `FixtureRunner` runs the JUnit tests whose names carry `FX-nn`/`AX-nn` ids as a program, outside the
+build: `./gradlew :eval:fixtures` (all of core's fixtures; report in `eval/build/reports/fixtures/report.json`),
+or `FixtureRunner.main` with `--class`/`--package`, `--report FILE`, `--junit-xml DIR` (compare with the build's
+JUnit XML) and `--configuration LABEL`. The report carries per-test status and the seven §19.4 invariant metrics;
+an invariant none of whose fixtures ran is unmeasured, never zero (D-220).
+
+## Campaigns, comparators and arms
+
+P6.1.2 `CampaignManifest` freezes a campaign: harness version, the comparators' (`Variants.configure`, §19.1) and
+arms' (`EvalArms.configure`, §19.5) frozen `AttemptConfig`s with their flags, strata, repositories, memory mode and
+the workload partition validated by `WorkloadSplit`. `CampaignManifests.freeze(dir, manifest)` writes
+`campaigns/<id>.json` once; a different manifest under the same id is refused. B0 and B-HELM are configuration only;
+`LiveGates.all()` lists every live gate as `UNMEASURED` with its prerequisites and required evidence (D-28, I-19).
+`CampaignIntegrity.check` verifies hidden acceptance, answer removal, memory reset/freeze and holdout use (FX-47,
+D-222); its `evidence` feeds `EvaluationEvidence.integrity`.
+
+The arms table below is rendered from `EvalArm` (`EvalArms.table()`); a test keeps it identical. Every production
+`Flags` switch appears exactly once. A level that disables a mandatory control runs only as a research attempt and
+is never promotion-eligible (D-48); research switches that `Config` does not expose are recorded, not runnable (D-221).
+
+<!-- arms-table:start -->
+| Arm | Kind | Levels (first = production) | Flag or control | Promotion-ineligible level | Source |
+|---|---|---|---|---|---|
+| cell boundaries vs HELM pressure rebuild | Research | cell boundaries / HELM pressure rebuild | — | — | §19.5 |
+| workset seeds on/off | Research | on / off | — | — | §19.5 |
+| Δ+absolute vs delta-only | Control | Δ+absolute / delta-only | `Controls.deltaPlusAbsolute` | delta-only | §19.5 |
+| mark-then-stub vs immediate stub | Research | mark-then-stub / immediate stub | — | — | §19.5 |
+| R_max early stubbing | Research | on / off | — | — | §19.5 |
+| batched vs pressure-only eviction inside short cells | Research | batched / pressure-only | — | — | §19.5 |
+| contract/STATE split vs STATE-only | Research | split / STATE-only | — | — | §19.5 |
+| conditional STATE ops | Research | on / off | — | — | §19.5 |
+| gauge | Research | on / off | — | — | §19.5 |
+| impact nudge | Research | on / off | — | — | §19.5 |
+| sync checker vs none vs async watchers | Flag | sync / async | `Flags.asyncChecker` | — | §19.5 |
+| blast radius vs package tests vs full suite | Research | blast radius / package tests / full suite | — | — | §19.5 |
+| closures with reuse proofs vs stamp-coarse invalidation | Research | reuse proofs / stamp-coarse | — | — | §19.5 |
+| reserve on/off | Control | on / off | `Controls.reserve` | off | §19.5 |
+| transform path vs anchored-only on the 40-file refactor | Research | transform path / anchored-only | — | — | §19.5 |
+| test-integrity guard on/off (with injected weakening) | Control | on / off | `Controls.testIntegrityGuard` | off | §19.5 |
+| refactor mode on/off | Research | on / off | — | — | §19.5 |
+| boundary pre-compilation on/off | Flag | off / on | `Flags.precompile` | — | §19.5 |
+| calibration prior on/off | Flag | off / on | `Flags.calibrationPrior` | — | §19.5 |
+| KB injection off / frozen / live | Flag | off / frozen / live | `Flags.kbInjection` | — | §19.5 |
+| notes in [R] vs [A] only | Research | [R] / [A] only | — | — | §19.5 |
+| role-only vs task/dependency-weighted retrieval | Research | role-only / weighted | — | — | §19.5 |
+| behaviour maps on/off | Research | on / off | — | — | §19.5 |
+| skills module filtering vs whole skills | Research | module filtering / whole skills | — | — | §19.5 |
+| probe cells vs in-window exploration | Research | probe cells / in-window exploration | — | — | §19.5 |
+| review at increment scope only vs both scopes vs none | Research | increment scope / both scopes / none | — | — | §19.5 |
+| judge same-context vs fresh vs fresh + symmetric evidence | Research | same-context / fresh / fresh + symmetric evidence | — | — | §19.5 |
+| function routing with refusal vs all-high vs clamped | Control | routing with refusal / all-high / clamped | `Controls.floors` | clamped | §19.5 |
+| capsule repair vs kernel-only vs deterministic-only | Research | capsule repair / kernel-only / deterministic-only | — | — | §19.5 |
+| alternative attempt vs refinement | Research | alternative attempt / refinement | — | — | §19.5 |
+| S0 vs S1 vs S2 on matched strata | Shape | S0 / S1 / S2 | — | — | §19.5 |
+| sequential vs S3 under equal resources | Flag | sequential / S3 | `Flags.s3Writers` | — | §19.5 |
+| language-service adapter on/off | Flag | off / on | `Flags.languageService` | — | §19.5 |
+| dense retrieval on/off after measured lexical misses | Flag | off / on | `Flags.denseRetrieval` | — | §19.5 |
+| tree-sitter index on/off | Flag | off / on | `Flags.treeSitterIndex` | — | [O] flag |
+| generated tools on/off | Flag | off / on | `Flags.generatedTools` | — | [O] flag |
+| skills promotion on/off | Flag | off / on | `Flags.skillsPromotion` | — | [O] flag |
+| QA cell on/off | Flag | off / on | `Flags.qaCell` | — | [O] flag |
+| L4 gates on/off | Flag | off / on | `Flags.l4Gates` | — | [O] flag |
+| OpenTelemetry span export on/off | Flag | off / on | `Flags.otelExport` | — | [O] flag |
+| worth-test estimate on/off | Flag | off / on | `Flags.worthTestEstimate` | — | [O] flag |
+<!-- arms-table:end -->

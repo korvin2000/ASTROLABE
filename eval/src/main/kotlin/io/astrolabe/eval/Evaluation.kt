@@ -118,6 +118,8 @@ public enum class EvaluationIssueCode {
     InsufficientClusters, BoundNotMet, ObservedComplexLoss, EconomicPolicy, CostCeiling,
     UnknownLatency, LatencyCeiling, UnknownInvestment, NoPositiveSaving,
     Integrity, Independence, MandatoryControls, EvidenceMismatch, SyntheticEvidence,
+    // P6.1.3 decision layer: fixture invariants and undeclared frozen candidates.
+    UnmeasuredInvariant, MultipleSelection,
 }
 
 public data class EvaluationIssue(val code: EvaluationIssueCode, val detail: String)
