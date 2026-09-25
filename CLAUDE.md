@@ -24,8 +24,11 @@ Skip at startup: `PREPARE_IMPLEMENTATION_PLAN.md` (historical), `sources/`, `REV
 
 ## Binding conventions (from TODO §2.3 and the implementation discipline)
 - Pinned build: Kotlin 2.4.20, Gradle wrapper 9.7.1, JDK 26. Versions come from `gradle/libs.versions.toml` and the
-  `build-logic` convention plugin. Do not add dependencies. The existing ones are coroutines,
-  kotlinx.serialization, sqlite-jdbc (explicit SQL), SLF4J, JUnit Jupiter 6.1.3 and kotlin-test.
+  `build-logic` convention plugin. The existing dependencies are coroutines, kotlinx.serialization,
+  sqlite-jdbc (explicit SQL), SLF4J, JUnit Jupiter 6.1.3 and kotlin-test. **New dependencies are allowed (owner, D-175)**
+  when a task needs one: declare it in `gradle/libs.versions.toml` (pinned version), add it only to the module that
+  uses it, prefer maintained, permissively licensed libraries that run on Windows and Linux (native artifacts for both),
+  keep tests offline, and name it plus the reason in the task's `Log:`. `provider-api` stays dependency-light.
   Use Git CLI, ripgrep and JDK FFM. `provider-api` never depends on `core`.
 - `explicitApi()`. Use `data class`/`sealed interface` records and outcomes, and `enum` for doc vocabularies.
   No public `value class` and no Kotlin `Result` (D-08). Typed ids are validated at construction.
