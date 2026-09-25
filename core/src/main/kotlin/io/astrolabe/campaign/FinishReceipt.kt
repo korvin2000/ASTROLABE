@@ -61,8 +61,9 @@ public data class BudgetLine(
  * The campaign finish receipt (§5.9) in its S0 form. [status] is `completed` only for a campaign that finished
  * verified; a budget stop is `partial`, never verified; every other outcome keeps its own word. Fields whose
  * producer comes later are present and empty: acceptance-surface reasons (P3.4, `null` = not assessed), routing
- * decisions and memory candidates (P4). ADR candidates are the registers' boundary-crossing decisions (P2.1.3). [highestAuthorizedStage] is `patch` in P1 — never
- * "delivered" for a patch.
+ * decisions and memory candidates (P4). ADR candidates are the registers' boundary-crossing decisions (P2.1.3). [highestAuthorizedStage] is `patch` as built;
+ * `Publisher.report` raises it to the highest stage the attempt's publisher was authorized to reach — never
+ * "delivered" for a patch (§14.2).
  */
 @Serializable
 public data class FinishReceipt(

@@ -21,10 +21,10 @@ public sealed interface StageGrant {
  * contract sets the ceiling. The harness reports the highest **authorized** stage reached — never "delivered"
  * for a patch — and every attempt above the ceiling is refused and recorded.
  *
- * Only [Stage.Patch] is reachable in this release: the autonomous-commit policy (ceiling ≥ commit, low blast
- * radius, easy reversibility, L0–L2 green with current stamps, S2+ judge approval) arrives with P5.2, so a
- * stage inside the ceiling but not yet implemented is refused as [RefusalReason.StageNotImplemented] rather
- * than silently granted.
+ * Without a publication backend only [Stage.Patch] is reachable ([REACHABLE]): a stage inside the ceiling that
+ * nothing can perform is refused as [RefusalReason.StageNotImplemented] rather than silently granted. The
+ * `Publisher` (P5.2) widens [reachable] to [PUBLISHABLE] and moves the ladder only through [record] after a stage
+ * passed `PublicationPolicy` and `Authority.approve`, recording every other outcome with [refuse].
  *
  * Model-generated metadata can never raise any of this: the ceiling comes from the contract, and [request] is
  * the only way to move [highestAuthorizedStage], which is monotone.
@@ -61,7 +61,7 @@ public class PermissionLadder @JvmOverloads constructor(
                 Refusal(
                     stage.name.lowercase(),
                     RefusalReason.StageNotImplemented,
-                    "stage '${stage.name.lowercase()}' is inside the ceiling but not reachable in this release (commit policy P5.2)",
+                    "stage '${stage.name.lowercase()}' is inside the ceiling but no publication backend performs it (P5.2 Publisher)",
                 ),
             )
         }
@@ -82,15 +82,20 @@ public class PermissionLadder @JvmOverloads constructor(
         return "highest authorized stage: $reached (ceiling ${ceiling.name.lowercase()}$refused)"
     }
 
-    private fun refuse(stage: Stage, refusal: Refusal): StageGrant.Refused {
+    /** Records a refusal decided elsewhere (policy, authority, stage order) for the finish receipt. */
+    public fun refuse(stage: Stage, refusal: Refusal): StageGrant.Refused {
         recorded += refusal
         return StageGrant.Refused(stage, refusal)
     }
 
     public companion object {
-        /** Stages P1 can perform (§14.2; commit policy P5.2). */
+        /** Stages reachable without a publication backend (§14.2). */
         @JvmField
         public val REACHABLE: Set<Stage> = setOf(Stage.Patch)
+
+        /** Stages the P5.2 `Publisher` can perform: every stage, each still a separate grant. */
+        @JvmField
+        public val PUBLISHABLE: Set<Stage> = Stage.entries.toSet()
 
         @JvmStatic
         @JvmOverloads
