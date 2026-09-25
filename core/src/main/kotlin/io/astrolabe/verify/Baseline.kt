@@ -110,8 +110,13 @@ public data class PreexistingLedger(
         @JvmStatic
         public fun signatureOf(result: TestResult): String {
             val first = result.message?.lineSequence()?.map { it.trim() }?.firstOrNull { it.isNotEmpty() } ?: result.outcome.name.lowercase()
-            return first.replace(HEX_ADDRESS, "0x…").replace(LONG_HEX, "<hex>").replace(TIMESTAMP, "<time>").replace(TEMP_PATH, "<tmp>")
+            return normalize(first)
         }
+
+        /** D-19: normalizes only identified volatile data (addresses, long hex ids, timestamps, temp paths) in [line]. */
+        @JvmStatic
+        public fun normalize(line: String): String =
+            line.replace(HEX_ADDRESS, "0x…").replace(LONG_HEX, "<hex>").replace(TIMESTAMP, "<time>").replace(TEMP_PATH, "<tmp>")
     }
 }
 

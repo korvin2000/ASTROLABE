@@ -19,6 +19,7 @@ import io.astrolabe.provider.Effort
 import io.astrolabe.provider.Profile
 import io.astrolabe.provider.ProviderAdapter
 import io.astrolabe.provider.TokenEstimator
+import io.astrolabe.recover.Diagnoses
 import io.astrolabe.register.Register
 import io.astrolabe.register.RegisterVersions
 import io.astrolabe.telemetry.Accounting
@@ -142,6 +143,8 @@ public class CellContext @JvmOverloads constructor(
     public val precompile: PrecompileTrigger? = null,
     /** Focus notes and register citations (§6.3, P4.1.3); absent on the empty base. */
     public val knowledge: CellKnowledge? = null,
+    /** Repair-helper diagnosis lines addressed to this cell (§13.2): rendered in every later `[A]` (P4.6.3). */
+    public val diagnoses: Diagnoses? = null,
 ) {
     init {
         require(ids.context != null) { "a cell runs under its own context id" }

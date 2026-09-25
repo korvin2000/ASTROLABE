@@ -47,6 +47,7 @@ import io.astrolabe.provider.Request
 import io.astrolabe.provider.SegmentKind
 import io.astrolabe.provider.Text
 import io.astrolabe.provider.ToolResult
+import io.astrolabe.recover.Diagnoses
 import io.astrolabe.register.Register
 import io.astrolabe.register.SqliteRegisterVersions
 import io.astrolabe.register.Validator
@@ -182,7 +183,7 @@ internal class CellFixture(
     lateinit var adapter: FakeAdapter
         private set
 
-    fun context(model: ScriptedModel, profile: Profile = FakeProfiles.main, profiles: Map<String, Profile> = FakeProfiles.all, holdResponses: Boolean = false, role: Role = Roles.implementing, manifest: String? = null): CellContext {
+    fun context(model: ScriptedModel, profile: Profile = FakeProfiles.main, profiles: Map<String, Profile> = FakeProfiles.all, holdResponses: Boolean = false, role: Role = Roles.implementing, manifest: String? = null, diagnoses: Diagnoses? = null): CellContext {
         adapter = FakeAdapter(model, profiles, holdResponses = holdResponses)
         return CellContext(
             ids = ids,
@@ -194,6 +195,7 @@ internal class CellFixture(
             evidence = CellEvidence(journal, observations, aliases, receipts, intents, registerVersions, checkpoints, preimages),
             prime = Prime.render(atlas, Sniff.commands(atlas)),
             manifest = manifest,
+            diagnoses = diagnoses,
         )
     }
 
