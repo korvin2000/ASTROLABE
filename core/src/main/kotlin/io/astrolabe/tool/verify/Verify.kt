@@ -1,6 +1,7 @@
 package io.astrolabe.tool.verify
 
 import io.astrolabe.atlas.Atlas
+import io.astrolabe.atlas.EditHunk
 import io.astrolabe.atlas.EditSet
 import io.astrolabe.atlas.ImpactAssembly
 import io.astrolabe.atlas.ImportGraph
@@ -250,6 +251,21 @@ public class Verify(
             currency.receiptId == null || currency.applicability != Applicability.Current || !currency.eligible
         }
         return LayerRun(layer, selection.run.map { runTriaged(it, contract).first }, selection.notTested)
+    }
+
+    /**
+     * The `risk > θ` row of the §8.1 layer table (§7.4 verification depth): when this turn's edit [hunks] carry an impact
+     * risk estimate above θ the blast layer runs now instead of at the next step boundary. Only a numeric estimate above
+     * θ fires; an unknown risk waits for the step boundary and verify-on-stop (D-152). `null` when it does not fire.
+     */
+    public suspend fun riskAboveTheta(hunks: List<EditHunk>): LayerRun? {
+        val atlas = atlas ?: return null
+        if (hunks.isEmpty()) return null
+        val graph = graphOf?.takeIf { it.first === atlas }?.second ?: ImportGraph.of(atlas, workspace.id).also { graphOf = atlas to it }
+        val edits = EditSet(hunks.mapTo(LinkedHashSet()) { it.path }, hunks)
+        val risk = ImpactAssembly(graph, SymbolIndex(atlas)).analyze(edits, checks.all(), contracts = null).analysis.risk
+        val above = risk.exceedsThreshold == true || (risk.estimate ?: 0.0) > risk.threshold
+        return if (above) runLayer(Layer.BlastAndStepAccept) else null
     }
 
     /** Verify-on-stop (§8.1, P3.1.3): the increment's acceptance on a completion proposal; never the full suite. */

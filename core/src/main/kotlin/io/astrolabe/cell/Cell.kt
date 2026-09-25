@@ -423,13 +423,13 @@ public class Cell @JvmOverloads constructor(
             if (proposal) ctx.precompile?.completionProposed(turnEnd.candidateId, remainingAcceptance(turnEnd.candidateId))
             // §8.1 layer table: a `[>]` move runs blast ∪ the left step's accept:, a completion proposal verify-on-stop;
             // each runs only missing or stale checks, reused receipts stand.
-            val layerRuns = listOfNotNull(
-                stepLeft(registerBefore, register)?.let { step -> tools.verify?.runLayer(Layer.BlastAndStepAccept, listOfNotNull(step.accept)) },
-                if (proposal) tools.verify?.onStop(increment.accept) else null,
-            )
+            val stepRun = stepLeft(registerBefore, register)?.let { step -> tools.verify?.runLayer(Layer.BlastAndStepAccept, listOfNotNull(step.accept)) }
+            // §7.4: an edit batch whose impact risk exceeds θ runs the blast layer now (P4.5.2, D-152).
+            val riskRun = if (stepRun == null && batchBefore.isNotEmpty()) tools.verify?.riskAboveTheta(EditHunks.of(batchBefore) { ws.registry.read(it)?.bytes }) else null
+            val layerRuns = listOfNotNull(stepRun, riskRun, if (proposal) tools.verify?.onStop(increment.accept) else null)
             for (layerRun in layerRuns) {
                 notTested += layerRun.notTested
-                val what = if (layerRun.layer == Layer.IncrementAcceptance) "verify-on-stop" else "step boundary"
+                val what = if (layerRun.layer == Layer.IncrementAcceptance) "verify-on-stop" else if (layerRun === riskRun) "risk > θ" else "step boundary"
                 for (receipt in layerRun.receipts) {
                     ev.journal.append(JournalEvent(idGen.next("ev"), ids, turn, JournalKind.Check, refs = listOf(receipt.receiptId), text = "$what ${receipt.checkId}: ${receipt.outcome.name.lowercase()}", at = clock.instant()))
                 }
