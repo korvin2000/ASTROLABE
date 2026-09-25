@@ -43,7 +43,7 @@ public data class WriterDispatch(val handle: Handle, val task: TaskPacket, val w
  * `null` when it was cancelled before it produced an exit.
  */
 public fun interface WriterCell {
-    public suspend fun run(seat: ChildSeat, worktree: Worktree, role: Role, budget: ChildBudget, brief: String): CellExit?
+    public suspend fun run(seat: ChildSeat, dispatch: WriterDispatch, role: Role, budget: ChildBudget, brief: String): CellExit?
 }
 
 /**
@@ -72,7 +72,7 @@ public class Writers @JvmOverloads constructor(
         val dispatch = WriterDispatch(child.handle, task, worktree)
         synchronized(dispatches) { dispatches[child.handle.id] = dispatch }
         val seat = ChildSeat(child.handle.child, child.cancellation, RoutingFunction.Implementing)
-        val exit = cell.run(seat, worktree, Roles.writer, ChildBudget(budget.turns, task.reservedBudget), ChildBrief.render(task, OUTPUT))
+        val exit = cell.run(seat, dispatch, Roles.writer, ChildBudget(budget.turns, task.reservedBudget), ChildBrief.render(task, OUTPUT))
             ?: return ChildOutcome.Failed("writer ${child.handle.id} was cancelled before it ended", Tokens.ZERO)
         val spend = CellChildRunner.spendOf(exit.packet.cost)
         val gaps = validate(dispatch, exit.packet)
