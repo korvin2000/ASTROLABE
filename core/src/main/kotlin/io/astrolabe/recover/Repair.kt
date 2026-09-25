@@ -93,6 +93,8 @@ public class Repair @JvmOverloads constructor(
     private val acceptance: OriginalAcceptance,
     private val estimator: TokenEstimator,
     private val defaults: Defaults = Defaults(),
+    /** The repair role as the attempt's configuration words it (`RoleTexts.worded`); the capsule mask replaces its mask. */
+    private val role: Role = Roles.repair,
 ) {
     public suspend fun repair(capsule: Capsule, shape: Shape, packet: RoutingPacket, policy: RoutingPolicy, owner: Diagnoses? = null): RepairOutcome {
         val outcome = run(capsule.frozen(), shape, packet, policy)
@@ -111,7 +113,7 @@ public class Repair @JvmOverloads constructor(
         }
         val maxAttempts = minOf(defaults.repairCalls, policy.functions.row(RoutingFunction.RepairHelper).maxAttempts ?: MAX_ATTEMPTS, MAX_ATTEMPTS)
         val mask = capsule.mask
-        val role = Roles.repair.copy(toolMask = mask)
+        val role = role.copy(toolMask = mask)
         val previous = ArrayList<String>()
         for (attempt in 1..maxAttempts) {
             when (val proposal = runner.attempt(RepairRequest(capsule, attempt, role, mask, profile, previous.toList()))) {

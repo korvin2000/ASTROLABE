@@ -231,7 +231,7 @@ public fun interface RoleCompletion {
         ): RoleCompletion = validators[role.packetKind] ?: when (role.packetKind) {
             PacketKind.Result -> exitGate(maxFinalizations)
             else -> RoleCompletion { _, _ ->
-                CompletionDecision.CannotProgress(listOf("no validator for the ${role.packetKind.name} packet of role '${role.name}' (P2/P4)"))
+                CompletionDecision.CannotProgress(listOf("no validator bound for the ${role.packetKind.name} packet of role '${role.name}' (declared: ${RoleTexts.validators[role.packetKind] ?: "none"}; its dispatcher binds it)"))
             }
         }
     }

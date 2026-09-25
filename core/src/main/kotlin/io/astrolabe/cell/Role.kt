@@ -63,7 +63,7 @@ public data class Role(
 
 /** The declared role table (§3.4) and the shape masks that bound it. */
 public object Roles {
-    public const val POLICY_TEXT_VERSION: String = "roles/2"
+    public const val POLICY_TEXT_VERSION: String = "roles/3"
 
     private fun ops(vararg names: String): ToolMask = ToolMask(names.toSet())
 
@@ -115,6 +115,7 @@ public object Roles {
         duties = listOf("bounded findings with coverage and completeness", "read-only: R-class runs only"),
         askBack = true,
         packetKind = PacketKind.Investigation,
+        personaLines = RoleTexts.probe,
     )
 
     @JvmField
@@ -129,6 +130,7 @@ public object Roles {
         duties = listOf("verdict against acceptance and contracts, never the proposer's transcript", "findings; insufficient_evidence allowed"),
         askBack = false,
         packetKind = PacketKind.Verdict,
+        personaLines = RoleTexts.review,
     )
 
     @JvmField
@@ -143,6 +145,7 @@ public object Roles {
         duties = listOf("independent cases", "exercise the product in a disposable environment"),
         askBack = false,
         packetKind = PacketKind.ReceiptsAndCases,
+        personaLines = RoleTexts.qa,
     )
 
     @JvmField
@@ -168,6 +171,7 @@ public object Roles {
         duties = listOf("at most two attempts: fixed, diagnosis, or escalate", "a diagnosis of at most 100 tokens plus an optional corrected call"),
         askBack = false,
         packetKind = PacketKind.Diagnosis,
+        personaLines = RoleTexts.repair,
     )
 
     @JvmField
@@ -182,6 +186,7 @@ public object Roles {
         duties = listOf("candidate notes with evidence", "dedupe, supersession, lint"),
         askBack = false,
         packetKind = PacketKind.NoteCandidates,
+        personaLines = RoleTexts.extractor,
     )
 
     @JvmField
