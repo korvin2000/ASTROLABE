@@ -1764,9 +1764,10 @@ Goal: [§18.2 Stage E](docs/implementation/roadmap.md#sec-18-2): writer cells + 
 - Build: drives the product (CLI/HTTP; browser out of scope) in a disposable environment, never production; receipts with screenshots/logs as blobs; L3 rows in the ladder wiring (P3.1.4).
 - Done: fixture project exercised end-to-end with artifacts attached to the finish receipt.
 
-#### P5.3.2 [O][C] L4 measurement gate contract · TODO
+#### P5.3.2 [O][C] L4 measurement gate contract · DONE
 - Build: `Check.kind = quality` measurement variant: artifacts with workload, environment and variability; performance/safety claims require it ([§8.2 L4](docs/verification/scheduler.md#sec-8-2)).
 - Done: contract + validator; runner hook for project-defined measurement commands.
+- Log: 2026-09-25 — `verify/Measurement.kt`: `MeasurementClaim` (Performance|AgentBehaviour|Safety), `VarianceBasis`, `Variability(basis, runs, spread?)` (never invents a spread a single run never took), `MeasurementArtifact(checkId, receiptId, workload, environment, variability, blob)`, `MeasurementCommand(command, workload, environment)` — the runner hook: never invented, a gate exists only when a project configures one (mirrors `Config.qualityGates`/P3.6.2). `MeasurementGate.seed(commands, names?)` → one `CheckKind.Quality` check per command, id `CHK-l4-measurement-<name>`, `Trigger.OnDemand` (an L4 gate needs a disposable environment, never automatic before P5.3 wires one); `MeasurementGate.validate(claim, checkId, receiptId, artifact?)` → gaps (missing artifact; artifact bound to a different check or receipt). Wiring into the scheduler's trigger table and a disposable environment is P5.3 (same deferral as P4.4.4 `QaCell`). Test: `MeasurementGateTest` (3).
 
 - [ ] **Gate P5.3:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
 
