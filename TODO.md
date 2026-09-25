@@ -1464,7 +1464,7 @@ Goal: [§18.2 Stage C](docs/implementation/roadmap.md#sec-18-2): scheduler with 
 - Done: FX-40.
 - Log: 2026-09-24 — rejection and guarded inverse in `TransformRun.apply` (`tool/edit/Transform.kt`): out-of-scope writes, a match count outside `expected_matches`, a non-zero exit, the deadline or a lost observation reject the transform; the inverse rewrites each in-scope preimage (deletes a created file) only where the current bytes are still the transform's own postimage, announces the move back, and the receipt reports `restored | partial | unknown_outcome` with `restored`/`notRestored` per path; the result status is `rejected`. FX-40 in `TransformTest` (out-of-scope write ⇒ `partial` with the out-of-scope path named as not restorable; count miss ⇒ `restored`). Limits: no isolated candidate exists to discard (D-96); `unknown_outcome` is not exercised by a fixture (it needs a lost process observation); effects outside the workspace are never claimed undone.
 
-- [ ] **Gate P3.3:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate). — merged into the P3.8 / P3 phase gate (2 tasks).
+- [x] **Gate P3.3:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate). — covered by the P3 phase gate, [CI run 36059635140](https://github.com/korvin2000/ASTROLABE/actions/runs/36059635140) green on Ubuntu + Windows (P3.3.1–P3.3.2 with P3.8). — merged into the P3.8 / P3 phase gate (2 tasks).
 
 ### P3.4 Scope guard and test-integrity guard
 #### P3.4.1 [M] `ScopeGuard` · DONE
