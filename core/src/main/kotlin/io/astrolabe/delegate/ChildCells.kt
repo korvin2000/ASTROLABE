@@ -46,12 +46,13 @@ public class CellChildRunner @JvmOverloads constructor(
     private val probeBudget: ProbeBudget = ProbeBudget.DEFAULT,
     private val reviewBudget: ReviewBudget = ReviewBudget.DEFAULT,
     private val evidence: ((TaskPacket) -> EvidencePacket?)? = null,
+    /** The writer seats (§10.4, P5.1.2); without them a writer child fails. The Delegator refuses writers outside S3. */
+    private val writers: Writers? = null,
 ) : ChildRunner {
     override suspend fun run(child: ChildRun): ChildOutcome = when (child.handle.kind) {
         ChildKind.Probe -> probe(child)
         ChildKind.Review -> review(child)
-        // §10.4: writers integrate through isolated candidates (P5.1); the Delegator already refuses them outside S3.
-        ChildKind.Writer -> ChildOutcome.Failed("writer cells need the S3 integrator (P5.1)", Tokens.ZERO)
+        ChildKind.Writer -> writers?.run(child) ?: ChildOutcome.Failed("writer ${child.handle.id}: no writer worktrees are configured (S3)", Tokens.ZERO)
     }
 
     private suspend fun probe(child: ChildRun): ChildOutcome {

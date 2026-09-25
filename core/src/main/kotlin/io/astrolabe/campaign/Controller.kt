@@ -1195,7 +1195,7 @@ public class Controller @JvmOverloads public constructor(
                 authority, c.contracts, c.journal, estimator, idGen, ids, clock, events, role.effectiveOps(contract.shape, ceiling), proposals,
                 delegator, delegator?.let { TaskPackets(WORKSPACE, ceiling, generation) }, c.registry::version,
             ),
-            kb = KbTool(c.kb, estimator, idGen, queue = Queue(c.store, KbWriter(c.store, estimator, clock), idGen, clock), ids = ids, events = events),
+            kb = KbTool(c.kb, estimator, idGen, queue = Queue(c.store, KbWriter(c.store, estimator, clock), idGen, clock), ids = ids, events = events, deniedKinds = role.deniedNoteKinds),
         )
         // §6.3: what this cell was given is logged per note; the register-citation hook turns `injected` into `cited`.
         val usage = Usage(c.store, clock)

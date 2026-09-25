@@ -43,6 +43,8 @@ public data class Role(
     val personaLines: List<String> = emptyList(),
     /** Version of the role's policy text, recorded in attempt and compile fingerprints (D-38). */
     val policyTextVersion: String = Roles.POLICY_TEXT_VERSION,
+    /** Note kinds the role may never propose (`kb.propose`): a writer's CON/ADR writes stay with the main line (§10.4). */
+    val deniedNoteKinds: Set<String> = emptySet(),
 ) {
     init {
         require(name.isNotBlank()) { "a role needs a name" }
@@ -153,10 +155,11 @@ public object Roles {
         name = "writer",
         contextView = setOf(ContextPart.Kernel, ContextPart.ChildContract, ContextPart.Transcript, ContextPart.Anchor),
         noteScope = setOf("GLOBAL", "CON", "ADR", "LES"),
-        // A writer is a leaf (writers depth 1, §10.1): it never delegates.
+        // §10.4: the implementer mask minus delegation (a leaf, writers depth 1) and minus CON/ADR writes.
         toolMask = ToolMask(implementing.toolMask.allowed - setOf("task.propose", "task.delegate", "task.collect")),
         duties = listOf("one packet to green acceptance", "never decides interfaces; CON/ADR writes stay with the main line"),
         tierPrior = Tier.Medium,
+        deniedNoteKinds = setOf("CON", "ADR"),
     )
 
     @JvmField

@@ -85,6 +85,7 @@ public data class Config(
             } else {
                 val widened = role.toolMask.allowed - default.toolMask.allowed
                 if (widened.isNotEmpty()) add(ConfigViolation("roles.$name", "override widens the tool mask by ${widened.sorted()}; a role is never a security boundary and overrides change wording only (D-38)"))
+                (default.deniedNoteKinds - role.deniedNoteKinds).takeIf { it.isNotEmpty() }?.let { add(ConfigViolation("roles.$name", "override re-grants note proposals ${it.sorted()} (D-38)")) }
                 if (role.permission.ordinal > default.permission.ordinal) add(ConfigViolation("roles.$name", "override raises the permission to ${role.permission}; the default is ${default.permission} (D-38)"))
                 if (role.packetKind != default.packetKind) add(ConfigViolation("roles.$name", "override changes the output packet; duties and packets are the SDK's (D-38)"))
                 RoleTexts.violations(role).forEach { add(ConfigViolation("roles.$name", "override text $it; a role text grants no authority and marks nothing complete (D-161)")) }
