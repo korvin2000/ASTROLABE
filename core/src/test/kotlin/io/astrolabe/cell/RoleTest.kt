@@ -47,7 +47,7 @@ class RoleTest {
         val s0 = Roles.implementing.effectiveOps(Shape.S0, trusted)
         assertTrue(s0.allows("edit.anchored") && s0.allows("run.run") && s0.allows("look.read") && s0.allows("state.patch"))
         assertTrue(s0.allows("edit.transform"), "transforms are a tool, active in every shape (P3.3.1)")
-        assertFalse(s0.allows("look.bmap"), "bmap arrives later")
+        assertTrue(s0.allows("look.bmap"), "behaviour maps since P4.3.2")
         assertFalse(s0.allows("task.propose"), "proposals arrive with S1")
         assertTrue(Roles.implementing.effectiveOps(Shape.S1, trusted).allows("task.propose"))
         assertFalse(Roles.implementing.effectiveOps(Shape.S1, trusted).allows("task.delegate"), "S1 has no children: the shape mask bounds the role")

@@ -29,7 +29,7 @@ class ToolContractsTest {
         assertIs<SchemaSelection.Unsupported>(strict)
         assertTrue(ToolOps.implementingS0.allows("edit.anchored"))
         assertTrue(ToolOps.implementingS0.allows("edit.transform"), "transforms are unmasked since P3.3.1")
-        assertTrue(!ToolOps.implementingS0.allows("look.bmap"))
+        assertTrue(ToolOps.implementingS0.allows("look.bmap"), "behaviour maps are unmasked since P4.3.2")
         assertEquals(7 + 6 + 3 + 5 + 3 + 4 + 4, ToolOps.all.size + 0 - 0 - 0 + 0 - (ToolOps.all.size - 32))
     }
 

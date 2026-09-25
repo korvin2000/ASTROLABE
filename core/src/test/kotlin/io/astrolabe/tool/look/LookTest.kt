@@ -309,8 +309,8 @@ class LookTest {
         assertEquals("incomplete", def.header!!.runtime.completeness)
 
         val catalog = look("""{"what":"catalog"}""")
-        assertTrue(catalog.body.contains("look: tree outline read find def refs importers impact recall catalog · masked: bmap"), catalog.body)
-        assertEquals("masked", status(look("""{"what":"bmap"}""")))
+        assertTrue(catalog.body.contains("look: tree outline read find def refs importers impact recall bmap catalog\n"), catalog.body)
+        assertEquals("not_found", status(look("""{"what":"bmap","target":"payments"}""")), "no map source: none admitted")
         assertTrue(workset.entries.isEmpty(), "none of these make a body KNOWN")
         assertNotNull(SqliteObservations(store, clock).get("obs-1"))
         assertNull(SqliteObservations(store, clock).get("obs-9"))

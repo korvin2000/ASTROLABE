@@ -134,10 +134,10 @@ class BoundaryTest {
     @Test
     fun `a masked op is refused although the frozen schema lists it`() {
         val ceiling = Ceiling(CapabilitySet.WORKSPACE_LOCAL_TEST_ONLY, Stage.Patch, ExecutionMode.TrustedLocal)
-        assertTrue("look.bmap" in ToolOps.all)
-        val refusal = ceiling.allows("look.bmap", ToolOps.implementingS0)
+        assertTrue("task.delegate" in ToolOps.all)
+        val refusal = ceiling.allows("task.delegate", ToolOps.implementingS0)
         assertEquals(RefusalReason.MaskedOp, refusal?.reason)
-        assertNull(ceiling.allows("look.bmap", ToolMask(ToolOps.all)))
+        assertNull(ceiling.allows("task.delegate", ToolMask(ToolOps.all)))
         assertEquals(RefusalReason.UnknownOp, ceiling.allows("edit.rewrite", ToolMask(ToolOps.all))?.reason)
     }
 }
