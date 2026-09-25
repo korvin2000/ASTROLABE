@@ -20,7 +20,9 @@ import io.astrolabe.cell.CellEvidence
 import io.astrolabe.cell.CellExit
 import io.astrolabe.cell.CellModel
 import io.astrolabe.atlas.RiskFloorInput
+import io.astrolabe.route.CacheKey
 import io.astrolabe.route.EscalationStep
+import io.astrolabe.route.FunctionTable
 import io.astrolabe.route.Routed
 import io.astrolabe.route.Router
 import io.astrolabe.route.RoutingBudget
@@ -573,6 +575,7 @@ public class Controller @JvmOverloads public constructor(
         val tiers = HashMap<String, Tier>()
         // §11.3: verified failures escalate with evidence, at most budget.attempts per increment, then blocked (P4.5.2).
         val attempts = IncrementAttempts(c.journal, idGen, clock)
+        var lastKey: CacheKey? = null
         while (true) {
             c.refusal()?.let { return last.copy(state = c.advance(Transition.Stopped(stopOutcome(c), "dispatch refused: $it"))) }
             val state = checkNotNull(c.state)
@@ -580,7 +583,10 @@ public class Controller @JvmOverloads public constructor(
             val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = candidates(c))
             val unverified = state.ledger.unfinished()
             if (unverified.isEmpty()) return last.copy(state = stopOrFinish(c, "requirements remain unverified", scheduler, campaign = true, authority = authority))
-            val ready = state.graph.readyFrontier(contract, 1).firstOrNull()
+            // §11.4 ordering hint (P4.5.3): among ready increments, the one sharing the last cell's prefix goes first.
+            val ready = CellOrder.next(state.graph.readyFrontier(contract, state.graph.increments.size), lastKey) { inc ->
+                listOfNotNull(tiers[inc.id], attempts.tier(inc.id), FunctionTable.DEFAULT.row(RoutingFunction.Implementing).defaultTier, Router.riskFloor(inc.risk ?: contract.risk, null)).max()
+            }
             if (ready == null) {
                 // FX-42: verified work is never re-executed; its regression evidence is refreshed from current receipts.
                 refreshRegressions(c, scheduler)
@@ -634,6 +640,7 @@ public class Controller @JvmOverloads public constructor(
             // FX-32: an unaffordable tier is refused, never clamped; the campaign stops on the router's options.
             routing.refused?.let { return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.BudgetExhausted, it.reason)), compiled = compiled) }
             routing.selected?.let { tiers[ready.id] = it.tier }
+            lastKey = routing.selected?.let { CellOrder.key(it.tier) }
             val cellId = ContextId(idGen.next("cell"))
             events?.emit(AgentEvent.Campaign.IncrementSelected(c.ids, ready.id))
             val dispatched = c.advance(Transition.Dispatched(ready.id, cellId))
