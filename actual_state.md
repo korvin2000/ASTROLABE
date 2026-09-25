@@ -4,54 +4,52 @@ Snapshot, rewritten each session (≤60 lines). Progress truth is the TODO task 
 next work is `CONTINUE-TASK.md`; history is `audit/SESSION-HISTORY.md`.
 
 ## Counts (2026-09-25, from `#### P… · STATUS` headings)
-**150/185 DONE, 0 IN_PROGRESS, 35 TODO.** P0 19/19 · P1 64/64 · P2 30/30 · P3 25/25 · P4 9/25 · P5 1/15 · P6 2/7.
-Recount: `rg -c '^#### P\d+\.\d+\.\d+ .*· DONE' TODO.md` (per phase: `'^#### P4\.\d+\.\d+ .*· DONE'`).
+**185/185 DONE, 0 IN_PROGRESS, 0 TODO.** P0 19/19 · P1 64/64 · P2 30/30 · P3 25/25 · P4 25/25 · P5 15/15 · P6 7/7.
+Recount: `rg -c '^#### P\d+\.\d+\.\d+ .*· DONE' TODO.md`. P7 (live transports, hosts, live evaluation) is out of scope.
 
 ## Completion levels
-- **P0–P3:** complete, `FIXTURE_VALIDATED` on Windows + Linux CI (JDK 26). The P3 phase gate is CI 36059635140.
-  - **P3.2 impact engine:** `ImportGraph` (tier 0, per-package, manifest edges, dynamic imports ⇒ incomplete),
-    `ImpactAssembly` (four consumer projections), `look(refs|importers|impact)`, impact nudge + exit-gate binding,
-    `CHK-tests-blast` blast selection (`tests(blast N | package p | workspace)`), impact pre-scan at open + refresh.
-  - **P3.3 transforms:** `edit(transform)` with `TransformReceipt`, `touched-by-transform (NOT SEEN)`, guarded inverse
-    (`restored | partial | unknown_outcome`). **P3.8:** FX-07 full, Stage C scripted campaigns (`StageCCampaignTest`).
-- **P4 (Stage D) done:** P4.1 KB (queue, curator with lint and versioned batches, invalidation, usage, prune/promote,
-  index regeneration, health telemetry, injection ranking D-37/D-103, focus notes, `kb.propose`, CON compiled in);
-  P4.2 extractor (post-cell candidates in diagnosis shape, `CAL-<repo>` delta, typed `NEG` states, derived PIT
-  candidates, review findings ⇒ `Open`); P4.4.1 packets + `Delegator` (not yet constructed by the controller);
-  P4.5.1 tier/function tables + `Router.selectProfile` (controller routes every cell); kernels P4.5.4/P4.5.5.
-- **Out of order, DONE as kernels:** P3.2.7, P4.5.4, P4.5.5, P5.1.5, P6.1.4, P6.1.5.
-- Every live gate is `UNMEASURED` (P7). Optional layers are off by default (`precompile`, `calibrationPrior`,
-  `otelExport`, `kbInjection = Off`). S3 is blocked; S2 review paths are the human path until P4.4.3.
+- **P0–P6:** `FIXTURE_VALIDATED` on Windows + Linux CI (JDK 26). Every live gate is `UNMEASURED` (P7).
+- **P4 Stage D:** KB (queue, curator, lint, invalidation, injection), extractor + typed `NEG`, skills (module filtering,
+  per-role views, triggers at state changes) and behaviour maps (`look(bmap)`), delegation (probe, review cell + judge
+  protocol at two scopes, QA contract, worth estimate, role texts + packet validators), routing (tier/function tables,
+  escalation ladder + attempt allowance, cache-aware ordering, shadow seam), recovery (failure classes + `Ladder`,
+  fingerprints + guards, capsule repair, alternatives), MCP `Mount` contract + frozen catalog. **S2 campaigns run.**
+- **P5 Stage E:** worktrees + workspace-qualified identities, `Writer` role, `Integrator`/`MergeQueue`, S3 shape branch
+  and S3 run loop (behind the S3 flag, default off), publication stages beyond `patch` (harness branch
+  `refs/heads/astrolabe/<work>/<attempt>`, non-force pushes, host-driven), QA driver (loopback, isolated candidate),
+  L4 measurement contract, tier-1 `index-treesitter` module (optional; host plugs it in), tier-2 `LanguageService`,
+  `Retriever` + dense seam, generated tools, promotion proposals, `Watcher` seam.
+- **P6 Stage F (`eval`):** fixture runner (`./gradlew :eval:fixtures`, reproduces core's JUnit results, report schema in
+  `eval/README.md`), frozen campaigns + comparators + arms table, promotion policy, trace mining + experiment bookkeeping.
+- Optional layers off by default (`precompile`, `calibrationPrior`, `otelExport`, `kbInjection = Off`, `qaCell`, S3,
+  tier-1 index, dense retrieval).
 
 ## Key types by package (entry points only)
-- **root:** `Astrolabe`, `Config` (+ `qualityGates`, `tierTable`), `Flags` (+ `kbInjection`). **`java`:** `AstrolabeJava`.
-- **`campaign`:** `Controller` (`open` with `ImpactPrescan`, `run`, `runS0`, `route`, finish + extraction),
-  `ShapeSelector` (`Prescan.fanIn`), `ImpactPrescan`, `Plan.kt`, `CampaignFinish`, `FinishReceipt`, `Economics`.
-- **`atlas`:** `ImportGraph`, `ImpactAssembly`/`ImpactProjection`, `Impact.analyze` (kernel), `DefinitionChanges`.
-- **`verify`:** `Checks` (+ `replace`), `Scheduler`, `Applicability.of`/`ReuseProof`, `Layers`, `Blast`, `ExitGate`,
-  `ScopeGuard`, `TestIntegrity`, `RefactorMode`, `Equivalence`, `CampaignReview`.
-- **`cell`:** `Cell.run`, `Gates.s0()` (14 gates incl. `impact`), `ImpactNudges`, `Roles`/`shapeMask`, `ResultPacket`.
-- **`tool`:** `Look` (+ refs/importers/impact), `Edit` (+ `TransformExecution`), `Verify` (`selectBlast`, `runLayer`),
-  `TaskTool` (+ delegate/collect), `KbTool` (+ propose).
-- **`kb`:** `StoreKb`, `Queue`, `Curator`, `AdmissionPolicy`/`Lint`, `Usage`, `Injection`, `CellKnowledge`, `Extractor`,
-  `NegativeEvidence`, `Derived`. **`delegate`:** `TaskPacket`, `InvestigationPacket`, `Delegator`.
-- **`route`:** `Tier`, `TierTable`, `FunctionTable`, `Router`, `CalibrationLog`, `AttemptCost` (kernel).
-- **`context`:** `Compiler` (+ notes, contracts index), `CarryForward`, `Manifest`, `Rebuild`, `Precompile`.
-- **`telemetry`:** `PrecompileMetrics`, `KbHealth`.
+- **root:** `Astrolabe`, `Config`, `Flags`, `OptionalLayers`. **`java`:** `AstrolabeJava`, `Java*` SPI forms.
+- **`campaign`:** `Controller` (`open`, `run`, `publish`), `ShapeSelector` (S0–S3), `S3Run`, `Recoveries`,
+  `Escalations`, `CellOrder`, `Publications`/`Publisher`, `CampaignFinish`, `FinishReceipt`.
+- **`delegate`:** `Delegator`, `Probe`, `ReviewCell`/`Judge`/`EvidencePacket`, `QaCell`/`QaDriver`, `Writer`,
+  `Integrator`, `WorthTest`. **`recover`:** `FailureClass`, `Ladder`, `Fence`, `Guards`, `Capsule`, `Repair`, `Alternative`.
+- **`route`:** `Router`, `TierTable`, `FunctionTable`, `Escalation`, `CacheSchedule`, `ShadowRouting`.
+- **`kb`:** `StoreKb`, `Queue`, `Curator`, `Extractor`, `Skill`/`SkillViews`, `BehaviourMaps`, `Retriever`,
+  `PromotionProposals`. **`tool`:** `Look`, `Edit`, `Run`, `Verify`, `TaskTool`, `KbTool`, `Mount`/`Catalog`, `GeneratedTools`.
+- **`workspace`:** `Worktrees`, `Ownership`, `ScopeAlgebra`. **`atlas`:** `ImportGraph`, `OutlineSource`/`OutlineIndex`,
+  `LanguageService`. **`verify`:** `Scheduler`, `Measurement`, `Watcher`, `CampaignReview`.
+- **Modules:** `provider-api`, `core`, `eval`, `index-treesitter` (tree-sitter-ng 0.26.6 + grammar jars, D-175/D-210).
 
 ## Store
-Schema **v4** (P4.1 reuses `note_queue`/`note_usage`; no schema bump). `packets` also holds behaviour-snapshot and
-campaign-review rows; receipt JSON carries the closure manifest.
+Schema **v4** (no bump this session). `packets` also holds behaviour-snapshot, campaign-review, increment-review and
+`integration` rows; skills and behaviour maps are `BlobKind.MODULE` blobs linked as a note's `procedure` module.
 
 ## Last verification
 | Gate (Ubuntu + Windows green) | CI run |
 |---|---|
-| P3.2 | 36054813717 |
-| P3 phase (P3.3 + P3.8) | 36059635140 |
-| P4.1 (+ P4.4.1, P4.5.1) | 36066888792 |
-| P4.2 | 36069237870 |
-- Local (Windows, JDK 26): the full build runs about 1170 core tests (6 platform skips), eval and provider-api.
+| P4.3, P4.5, P4.6, P4.7 | 36159227747 |
+| P4.4, P4.8 (P4 phase) | 36162949349 |
+| P5.1–P5.7, P6.2 | 36167689819 |
+| P5.8, P6.1, P6.3 (final) | 36172349269 |
 
 ## Recorded deviations
-Local choices D-87–D-111 (TODO §3): import graph and impact (D-87–D-94), blast (D-93), transforms (D-95–D-98),
-Stage C fixtures (D-99), KB (D-100–D-104, D-110–D-111), delegation (D-105–D-107), routing (D-108–D-109).
+Local choices D-112–D-113, D-120–D-126, D-135–D-137, D-145–D-155, D-160–D-165, D-170–D-174, D-180–D-183, D-190–D-195,
+D-200–D-202, D-210–D-213, D-220–D-223, D-230–D-233, D-240–D-244, D-250–D-254, D-260 (TODO §3). Owner decision D-175
+(new dependencies allowed under pinned-version rules).

@@ -560,3 +560,11 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
   merged `--no-ff`, D-nn renumbered at merge). Fixes: `DefaultsTest` for a multi-arm flag; controller `Edit` lacked the
   shadow ref (`revert:turn:N` was unsupported). D-87–D-111. Gates P3.2, P3 phase, P4.1, P4.2 pushed straight to `main`
   (owner-authorized; no `gh` locally, CI polled via the Actions API). Counts 150/185 DONE, 0 IN_PROGRESS, 35 TODO.
+- 2026-09-25 — local Windows session on `main`: P4.3.1–P4.3.2, P4.4.2–P4.4.6, P4.5.2–P4.5.3, P4.6.1–P4.6.4, P4.7.1,
+  P4.8.1–P4.8.2 ⇒ **P4 complete**; P5.1.1–P5.1.4, P5.2.1, P5.3.1–P5.3.2, P5.4.1–P5.4.2, P5.5.1, P5.6.1–P5.6.2, P5.7.1,
+  P5.8.1 ⇒ **P5 complete**; P6.1.1–P6.1.3, P6.2.1, P6.3.1 ⇒ **P6 complete: 185/185 DONE**. Owner switched delegation to
+  Opus worktree agents per the global tier table (four Fable agents stopped before any change) and allowed new
+  dependencies (D-175; `index-treesitter` uses tree-sitter-ng). 17 agents in parallel waves, reviewed and merged `--no-ff`;
+  D-nn ranges pre-assigned per agent, D rows sorted at merge; P5.8.1 split into two agents (S3 runtime / wiring) and its
+  controller conflicts combined by hand. Stale owners (P6.1.1/P6.1.2) re-owned as carried debt. D-112–D-260.
+  Gates pushed straight to `main` (owner-authorized): CI 36159227747, 36162949349, 36167689819, 36172349269.
