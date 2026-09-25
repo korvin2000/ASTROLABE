@@ -62,6 +62,8 @@ public class KbTool @JvmOverloads constructor(
     private val queue: Queue? = null,
     private val ids: Identities? = null,
     private val events: Events? = null,
+    /** Note kinds this cell's role may not propose ([io.astrolabe.cell.Role.deniedNoteKinds]). */
+    private val deniedKinds: Set<String> = emptySet(),
 ) : ToolExecutor {
     /** The `CON` anchors the contract-touch gate reads (§5.6). */
     public fun contractAnchors(): Map<String, Set<String>> = kb.contractAnchors()
@@ -110,6 +112,7 @@ public class KbTool @JvmOverloads constructor(
             return result("refused", "kb(propose): malformed note: ${malformed.message}", "kb", complete = true)
         }
         if (proposed.kind == NoteKind.STATUS || proposed.kind == NoteKind.CAL) return result("refused", "kb(propose): ${proposed.kind} notes are harness-written (D-36)", "kb", complete = true)
+        if (proposed.kind.name in deniedKinds) return result("refused", "kb(propose): this role never proposes ${proposed.kind} notes; ask the parent with task.ask (§10.4)", "kb", complete = true)
         val note = try {
             Note(
                 id = "${proposed.kind.name}-${idGen.next("note")}", kind = proposed.kind, status = NoteStatus.Candidate, summary = proposed.summary, body = proposed.body,

@@ -1,5 +1,6 @@
 package io.astrolabe.delegate
 
+import io.astrolabe.Defaults
 import io.astrolabe.budget.Reservations
 import io.astrolabe.budget.Tokens
 import io.astrolabe.campaign.Cancellation
@@ -41,6 +42,13 @@ public data class DelegationLimits @JvmOverloads constructor(
     public fun depthOf(kind: ChildKind): Int = when (kind) {
         ChildKind.Writer, ChildKind.Review -> writersDepth
         ChildKind.Probe -> probesDepth
+    }
+
+    public companion object {
+        /** The §10.4 global limits as the frozen [defaults] set them (writers 1, probes 2, 3 parallel cells), over [treeBudget]. */
+        @JvmStatic
+        public fun of(defaults: Defaults, treeBudget: Tokens): DelegationLimits =
+            DelegationLimits(treeBudget, defaults.writerDepth, defaults.probeDepth, defaults.parallelCells)
     }
 }
 
@@ -201,6 +209,16 @@ public class Delegator @JvmOverloads constructor(
     /** Cancels one child; it may still publish observations, which arrive late (§10.1). */
     public fun cancel(handle: Handle, reason: String) {
         synchronized(lock) { units[handle.id] }?.cancellation?.cancel(reason)
+    }
+
+    /**
+     * Supersedes the unit [incrementId] (§10.4, a replan replaced it): every child of it still running is cancelled with
+     * [reason], so its result arrives late — rejected, its spend counted. Returns the handles it reached.
+     */
+    public fun supersede(incrementId: String, reason: String): List<Handle> {
+        val running = synchronized(lock) { units.values.filter { it.packet.incrementId == incrementId && it.settled == null } }
+        running.forEach { it.cancellation.cancel("superseded: $reason") }
+        return running.map { it.handle }
     }
 
     /** What the parent may take from [handle] now; an async child still running is [Collected.Pending]. */

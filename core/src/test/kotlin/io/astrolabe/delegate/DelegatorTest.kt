@@ -1,5 +1,6 @@
 package io.astrolabe.delegate
 
+import io.astrolabe.Defaults
 import io.astrolabe.auth.CapabilitySet
 import io.astrolabe.auth.Ceiling
 import io.astrolabe.auth.ExecutionMode
@@ -261,5 +262,26 @@ class DelegatorTest {
         val wrongVersion = delegator(scope = this, runner = { child -> ChildOutcome.Published(ChildPacket.Investigation(investigation(child, version = 2)), Tokens(20)) })
         assertEquals("published for contract v2, dispatched under v1", assertIs<Collected.Late>(wrongVersion.collect(started(wrongVersion.dispatch(ChildKind.Probe, packet(ChildKind.Probe), DispatchMode.Sync)))).reason)
         assertEquals(Tokens(20), wrongVersion.budget.spent)
+    }
+
+    @Test
+    fun `late results from superseded units are rejected with their spend counted under the global limits`() = runTest {
+        val limits = DelegationLimits.of(Defaults(), Tokens(10_000))
+        assertEquals(listOf(1, 2, 3), listOf(limits.writersDepth, limits.probesDepth, limits.maxParallelCells))
+        val gate = CompletableDeferred<Unit>()
+        val delegator = delegator(scope = backgroundScope, shape = Shape.S3, limits = limits, runner = { child ->
+            gate.await()
+            ChildOutcome.Published(ChildPacket.Result(result(child)), Tokens(250))
+        })
+        val superseded = started(delegator.dispatch(ChildKind.Writer, packet(ChildKind.Writer, writeScope = listOf("src/a.kt")), DispatchMode.Async))
+        val other = started(delegator.dispatch(ChildKind.Writer, packet(ChildKind.Writer, writeScope = listOf("src/b.kt")).copy(incrementId = "I2"), DispatchMode.Async))
+        assertEquals(listOf(superseded), delegator.supersede("I1", "plan v2 replaced I1"))
+        gate.complete(Unit)
+        val late = assertIs<Collected.Late>(delegator.await(superseded))
+        assertEquals("child cancelled: superseded: plan v2 replaced I1", late.reason)
+        assertIs<ChildPacket.Result>(late.observation, "the late patch stays an observation, never integrable")
+        assertIs<Collected.Result>(delegator.await(other), "the unit that was not superseded publishes")
+        assertEquals(Tokens(500), delegator.budget.spent, "the superseded unit's spend is counted")
+        assertEquals(emptyList(), delegator.supersede("I1", "again"), "a settled unit has nothing left to supersede")
     }
 }

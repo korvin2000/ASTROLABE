@@ -7,6 +7,7 @@ import io.astrolabe.id.Identities
 import io.astrolabe.id.InstantSerializer
 import io.astrolabe.id.WorkId
 import io.astrolabe.id.WorkspaceId
+import io.astrolabe.recover.Fence
 import io.astrolabe.store.Migrations
 import io.astrolabe.store.Store
 import kotlinx.serialization.Serializable
@@ -79,12 +80,20 @@ public class Leases(private val store: Store, private val clock: Clock) {
         "SELECT body FROM leases WHERE workspace_id = ?", workspace.value,
     ) { JSON.decodeFromString(Lease.serializer(), it.string("body")) }.firstOrNull()
 
-    /** Acquires or renews [workspace] for [holder] for [duration]; refuses while another holder's lease is live. */
-    public fun acquire(workspace: WorkspaceId, ids: Identities, holder: String, duration: Duration): Lease = store.db.tx { tx ->
+    /**
+     * Acquires or renews [workspace] for [holder] for [duration]; refuses while another holder's lease is live, and
+     * grants a workspace another writer held only once [unreconciled] — that owner's effects whose outcome is still
+     * unknown — is empty (§13.1 `Fence.grant`, D-171): a lease alone cannot fence an OS process.
+     */
+    @JvmOverloads
+    public fun acquire(workspace: WorkspaceId, ids: Identities, holder: String, duration: Duration, unreconciled: List<String> = emptyList()): Lease = store.db.tx { tx ->
         val now = clock.instant()
         val existing = tx.query("SELECT body FROM leases WHERE workspace_id = ?", workspace.value) { JSON.decodeFromString(Lease.serializer(), it.string("body")) }.firstOrNull()
         if (existing != null && existing.holder != holder && existing.validAt(now)) {
             throw LeaseHeld(existing)
+        }
+        if (existing != null && existing.holder != holder) {
+            Fence.grant(unreconciled)?.let { throw GrantRefused(existing, it) }
         }
         val generation = when {
             existing == null -> ExecutionGeneration.INITIAL
@@ -115,6 +124,10 @@ public class Leases(private val store: Store, private val clock: Clock) {
         val JSON = Json { encodeDefaults = true }
     }
 }
+
+/** Thrown when the previous holder of an expired lease left effects nobody has reconciled (§13.1). */
+public class GrantRefused(public val previous: Lease, reason: String) :
+    IllegalStateException("workspace ${previous.workspace.value} is not granted: $reason")
 
 /** Thrown when another holder's live lease owns the workspace. */
 public class LeaseHeld(public val lease: Lease) :
