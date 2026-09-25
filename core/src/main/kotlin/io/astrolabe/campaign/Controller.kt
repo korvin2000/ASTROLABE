@@ -188,6 +188,7 @@ import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
 import io.astrolabe.delegate.CellChildRunner
 import io.astrolabe.delegate.CellReviewJudge
+import io.astrolabe.delegate.ChildBrief
 import io.astrolabe.delegate.ChildBudget
 import io.astrolabe.delegate.ChildCell
 import io.astrolabe.delegate.DelegationLimits
@@ -202,7 +203,9 @@ import io.astrolabe.delegate.ReviewCriterion
 import io.astrolabe.delegate.ReviewOutcome
 import io.astrolabe.delegate.ReviewReceipt
 import io.astrolabe.delegate.ReviewTriggers
+import io.astrolabe.delegate.Probe
 import io.astrolabe.delegate.TaskPackets
+import io.astrolabe.delegate.WorthTest
 import io.astrolabe.route.FunctionTable
 import io.astrolabe.verify.ReviewScope
 import io.astrolabe.id.ExecutionGeneration
@@ -1126,7 +1129,12 @@ public class Controller @JvmOverloads public constructor(
         }
         val delegator = children?.let { scope ->
             val reviews: (io.astrolabe.delegate.TaskPacket) -> EvidencePacket = { evidence(c, increment, listOf("delegated by ${cellId.value}"), emptyList(), compiled.k.ledger, authority) }
-            Delegator(CellChildRunner(childCell(c, increment, model, authority, syntax, span), evidence = reviews), PublicationAuthority { c.refusal() }, c.cancellation, DelegationLimits(contract.budget.tokens), contract.shape, scope, idGen, clock, events)
+            val arithmetic = compiled.selection.arithmetic
+            val fixed = (arithmetic.totalTokens ?: arithmetic.knownFixedTokens + arithmetic.selectedTokens).toLong()
+            val worth = { kind: io.astrolabe.delegate.ChildKind, packet: io.astrolabe.delegate.TaskPacket ->
+                WorthTest.estimate(kind, packet, estimator.estimate(ChildBrief.render(packet, Probe.OUTPUT)).upperBoundTokens, fixed, config.defaults)
+            }
+            Delegator(CellChildRunner(childCell(c, increment, model, authority, syntax, span), evidence = reviews), PublicationAuthority { c.refusal() }, c.cancellation, DelegationLimits(contract.budget.tokens), contract.shape, scope, idGen, clock, events, worth = worth)
         }
         val tools = CellTools(
             state = StateTool(Validator(estimator), registerVersions, c.journal, estimator, idGen, ids, clock, register ?: Register.empty(cellId, increment.id, increment.title), events),

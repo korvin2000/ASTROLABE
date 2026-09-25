@@ -136,6 +136,30 @@ class DelegatorTest {
     }
 
     @Test
+    fun `the worth test's delegated cost is recorded on the dispatch event as advisory data`() = runTest {
+        Events().use { events ->
+            val recorder = EventRecorder()
+            events.subscribe(recorder)
+            val probe = packet(ChildKind.Probe, budget = 40_000)
+            val expected = WorthTest.estimate(ChildKind.Probe, probe, briefTokens = 300, fixedContextTokens = 9_000)
+            val delegator = Delegator(
+                { child -> ChildOutcome.Published(ChildPacket.Investigation(investigation(child)), Tokens(100)) }, { null }, Cancellation(),
+                DelegationLimits(Tokens(100_000)), Shape.S2, this, FixedIdGen(), clock, events, worth = { kind, p -> WorthTest.estimate(kind, p, 300, 9_000) },
+            )
+            started(delegator.dispatch(ChildKind.Probe, probe, DispatchMode.Sync))
+            recorder.awaitCount(2)
+            val cost = assertNotNull((recorder.events[0] as AgentEvent.Delegation.Dispatched).delegatedCost)
+            assertEquals(expected, cost)
+            assertEquals(9_300, cost.contextDuplicationTokens)
+            assertEquals(30_700, cost.childGenerationTokens, "the rest of the reservation")
+            assertEquals(Probe.MAX_SUMMARY_TOKENS.toLong(), cost.parentInterpretationTokens)
+            assertEquals(cost.contextDuplicationTokens + cost.childGenerationTokens + cost.toolWorkTokens + cost.parentInterpretationTokens + cost.validationTokens + cost.integrationTokens + cost.retriesTokens, cost.totalTokens)
+            val writer = WorthTest.estimate(ChildKind.Writer, packet(ChildKind.Writer, budget = 40_000, writeScope = listOf("src/a.kt")), 300, 9_000)
+            assertTrue(writer.integrationTokens > 0 && cost.integrationTokens == 0L, "only a writer's result is integrated")
+        }
+    }
+
+    @Test
     fun `FX-26 review form - a verdict published under a superseded generation is never accepted`() = runTest {
         var refusal: String? = null
         val delegator = delegator(scope = this, authority = { refusal }, runner = { child ->
