@@ -104,7 +104,9 @@ public data class Manifest(
                 registerVersionIn = registerVersionIn,
                 notesInjected = injected.map(Note::manifestNote),
                 seeds = seeds.map { ManifestSeed(it.path, it.range.toString(), it.version.digest.hex) },
-                skills = emptyList(),
+                skills = inputs.skills.filter { "skill.${it.id}" in selected }.map { skill ->
+                    "${skill.id}@v${skill.version}" + skill.modules.filter { "skill.${skill.id}.${it.id}" in selected }.joinToString("") { "+${it.id}" }
+                }.distinct().sorted(),
                 profile = profile.id,
                 effort = effort,
                 arithmetic = ManifestArithmetic(

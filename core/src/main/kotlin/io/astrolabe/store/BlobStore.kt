@@ -37,6 +37,9 @@ public enum class BlobKind {
 
     /** A delegation or result packet. */
     PACKET,
+
+    /** A knowledge-base module a `SKILL`/`BMAP` note links (P4.3). */
+    MODULE,
 }
 
 /**

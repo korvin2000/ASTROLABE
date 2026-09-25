@@ -117,7 +117,7 @@ public data class Fingerprint(
             },
             notes = inputs.notes.map { "${it.id}@${it.status.wire}:${Digest.ofUtf8(it.summary + "\n" + it.body).hex}" }.sorted(),
             contractsIndex = inputs.contractsIndex?.let { Digest.ofUtf8(it).hex },
-            skills = emptyList(),
+            skills = inputs.skills.map { "${it.id}@v${it.version}:${it.digest}" }.distinct().sorted(),
             role = role.name,
             roleTextVersion = attempt.roleTextVersions[role.name] ?: role.policyTextVersion,
             profile = profile.id,

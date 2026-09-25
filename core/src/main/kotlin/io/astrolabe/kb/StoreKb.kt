@@ -1,5 +1,7 @@
 package io.astrolabe.kb
 
+import io.astrolabe.budget.HeuristicEstimator
+import io.astrolabe.cell.Roles
 import io.astrolabe.id.FileVersion
 import io.astrolabe.id.WorkId
 import io.astrolabe.store.Store
@@ -18,9 +20,13 @@ public class StoreKb @JvmOverloads constructor(
     private val store: Store,
     private val work: WorkId,
     private val currentVersion: (String) -> FileVersion?,
+    /** The role whose skill view `kb.skill` renders (P4.3.1). */
+    private val role: String = Roles.implementing.name,
+    private val skillViews: SkillViews = SkillViews(HeuristicEstimator()),
     private val onSearch: (KbSearchLog) -> Unit = {},
 ) : Kb {
     private val notes = Notes(store)
+    private val skills = SkillStore(store)
 
     override fun contractAnchors(): Map<String, Set<String>> =
         notes.all().filter { it.kind == NoteKind.CON && (it.status == NoteStatus.Admitted || it.status == NoteStatus.Stale) }
@@ -57,7 +63,12 @@ public class StoreKb @JvmOverloads constructor(
         return KbEntry(note.id, note.kind.name, KbExport.markdown(note), stale(note))
     }
 
-    override fun skill(id: String): KbEntry? = get(id)?.takeIf { it.kind == NoteKind.SKILL.name }
+    /** The note's front matter and the role's view of its procedure: mandatory modules always, omissions named. */
+    override fun skill(id: String): KbEntry? {
+        val note = notes.get(id)?.takeIf { visible(it) && it.kind == NoteKind.SKILL } ?: return null
+        val view = skills.load(note)?.let { skillViews.view(it, role).render() }.orEmpty()
+        return KbEntry(note.id, note.kind.name, KbExport.markdown(note) + view, stale(note))
+    }
 
     private fun visible(note: Note): Boolean =
         (note.status == NoteStatus.Admitted || note.status == NoteStatus.Stale) && (note.kind != NoteKind.STATUS || note.scope == "task:${work.value}")
