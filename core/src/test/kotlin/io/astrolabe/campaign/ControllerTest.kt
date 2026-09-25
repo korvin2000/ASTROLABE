@@ -195,7 +195,7 @@ class ControllerTest {
     }
 
     @Test
-    fun `S2 work without a reviewer is blocked honestly and stays blocked on reopen`() {
+    fun `S2 work on a contract opened below S2 is blocked honestly and stays blocked on reopen`() {
         Store.open(stateRoot, repo.git, clock).use { store ->
             val contracts = Contracts(SqliteContractRepository(store, clock), idGen, clock)
             val derived = contracts.deriveS0(request.work, request.attempt, request.text, Atlas.build(repo.root), Config(), policy.tokens).contract
@@ -203,7 +203,8 @@ class ControllerTest {
         }
         open().use { c ->
             val unavailable = assertIs<ShapeDecision.Unavailable>(c.shape)
-            assertTrue(unavailable.reason.startsWith("shape S1+ unavailable: capability unavailable: required review"), unavailable.reason)
+            // D-170: review cells exist, so S2 is selected; the stored S0 contract would skip its review paths.
+            assertTrue(unavailable.reason.startsWith("shape S1+ unavailable: S2 selected") && unavailable.reason.endsWith("is S0; amend it to S2 (D-170)"), unavailable.reason)
             assertEquals(CampaignOutcome.BlockedExternal, c.stop?.outcome)
             assertEquals(CampaignPhase.Ended, c.state!!.phase)
         }

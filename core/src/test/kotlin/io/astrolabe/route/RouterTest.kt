@@ -78,6 +78,20 @@ class RouterTest {
         assertEquals(Tier.High, risky.tier)
     }
 
+    @Test fun `IX-23 high declared risk with zero discovered fan-in keeps its floor and fifty high-tier successes never demote`() {
+        val high = Risk(1, Reversibility.Hard, false)
+        val nothingFound = RiskFloorInput(0, true, 0, true)
+        assertEquals(Tier.High, Router.riskFloor(high, nothingFound), "a complete impact that found no fan-in never lowers a declared floor")
+        val router = Router()
+        repeat(50) { router.calibration.append(CalibrationEntry(RoutingFunction.Curation, Tier.High, Effort.Medium, RoutingOutcome.Accepted, "f", "main")) }
+        val risky = assertIs<Routed.Selected>(router.selectProfile(RoutingFunction.Curation, packet(high, feature = "f"), nothingFound, policy()))
+        assertEquals(RoutingTrace(Tier.High, Tier.High, Tier.High, Tier.High), risky.trace)
+        repeat(50) { router.calibration.append(CalibrationEntry(RoutingFunction.Implementing, Tier.High, Effort.Medium, RoutingOutcome.Accepted, "f", "main")) }
+        val implementing = assertIs<Routed.Selected>(router.selectProfile(RoutingFunction.Implementing, packet(feature = "f"), null, policy()))
+        assertEquals(Tier.High, implementing.tier, "successes at High are no calibration evidence for the uncalibrated Low tier")
+        assertEquals(implementing.trace.requested, implementing.trace.calibrated, "calibration only ever promotes (D-35)")
+    }
+
     @Test fun `FX-32 an unaffordable tier is refused with the function's options never clamped to a cheaper tier`() {
         val router = Router()
         val budget = RoutingBudget(remainingTokens = Tokens(12_000), reservedTokens = Tokens(2_000))

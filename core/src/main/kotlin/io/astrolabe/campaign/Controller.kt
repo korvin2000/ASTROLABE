@@ -433,8 +433,8 @@ public class Controller @JvmOverloads public constructor(
         check(stored == null || stored.attemptId == request.attempt) { "work ${request.work.value} is attempt ${stored?.attemptId?.value}; a new attempt is P2" }
         // §3.5: a new contract carries the shape its campaign runs in; the tool masks derive from it.
         val contract = stored ?: contracts.open(derived.contract.let { d ->
-            val initial = ShapeSelector.select(d, impactPrescan.prescan, effective.defaults.shapePolicy, policy.resumeExpected)
-            if ((initial as? ShapeDecision.Selected)?.shape == Shape.S1) d.copy(shape = Shape.S1) else d
+            val initial = (ShapeSelector.select(d, impactPrescan.prescan, effective.defaults.shapePolicy, policy.resumeExpected, capabilities = CAPABILITIES) as? ShapeDecision.Selected)?.shape
+            if (initial == Shape.S1 || initial == Shape.S2) d.copy(shape = initial) else d
         })
         val commands = derived.primary?.let(RunnerCommands::of) ?: RunnerCommands()
         val checks = Checks.seed(contract, commands, qualityGates = effective.qualityGates)
@@ -494,7 +494,7 @@ public class Controller @JvmOverloads public constructor(
         val lease = leases.acquire(WORKSPACE, ids, "controller:${store.holder.pid}", leaseDuration)
         val prescan = impactPrescan.prescan
         journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, refs = impactPrescan.blast, text = "open: impact ${impactPrescan.log}", at = clock.instant()))
-        val selected = ShapeSelector.select(contract, prescan, effective.defaults.shapePolicy, policy.resumeExpected)
+        val selected = ShapeSelector.select(contract, prescan, effective.defaults.shapePolicy, policy.resumeExpected, capabilities = CAPABILITIES)
         events?.emit(AgentEvent.Campaign.Opened(ids, contract.requests.last().id))
         val inputs = when (selected) {
             is ShapeDecision.Selected -> selected.inputs
@@ -503,10 +503,13 @@ public class Controller @JvmOverloads public constructor(
         val shapeLog = "contract:v${contract.version} ${inputs?.log.orEmpty()} · ${impactPrescan.log}"
         events?.emit(AgentEvent.Campaign.ShapeSelected(ids, (selected as? ShapeDecision.Selected)?.shape?.name ?: "blocked", shapeLog))
         journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, text = "open: shape ${(selected as? ShapeDecision.Selected)?.shape?.name ?: "blocked"} · $shapeLog", at = clock.instant()))
-        // S0 and S1 run here (P2.2.2); S2/S3 need review or parallel paths this build lacks: an honest block.
+        // S0, S1 and S2 run here (D-170); S3 needs the parallel writer paths this build lacks: an honest block.
         val shape = when {
-            selected is ShapeDecision.Selected && selected.shape != Shape.S0 && selected.shape != Shape.S1 ->
-                ShapeDecision.Unavailable("shape S1+ unavailable: ${selected.shape} selected (${selected.inputs?.log}); this build runs S0 and S1 (S2 review paths P3.5.2/P4.4)", selected.inputs)
+            selected is ShapeDecision.Selected && selected.shape == Shape.S3 ->
+                ShapeDecision.Unavailable("shape S1+ unavailable: ${selected.shape} selected (${selected.inputs?.log}); this build runs S0, S1 and S2 (S3 writers P5.1)", selected.inputs)
+            // The S2 review paths key on the contract's shape: a contract opened below S2 never skips its required review.
+            selected is ShapeDecision.Selected && selected.shape == Shape.S2 && contract.shape < Shape.S2 ->
+                ShapeDecision.Unavailable("shape S1+ unavailable: S2 selected (${selected.inputs?.log}) but contract v${contract.version} is ${contract.shape}; amend it to S2 (D-170)", selected.inputs)
             selected is ShapeDecision.Unavailable -> ShapeDecision.Unavailable("shape S1+ unavailable: ${selected.reason}", selected.inputs)
             else -> selected
         }
@@ -571,7 +574,9 @@ public class Controller @JvmOverloads public constructor(
         maxCells: Int = DEFAULT_MAX_CELLS,
     ): S0Run {
         require(maxCells >= 1) { "maxCells must be ≥ 1" }
-        if ((campaign.shape as? ShapeDecision.Selected)?.shape != Shape.S1) return runS0(campaign, model, authority, syntax)
+        // D-170: S2 is the S1 loop with the S2+ paths (increment review, delegation, campaign judge) switched on by the contract's shape.
+        val shape = (campaign.shape as? ShapeDecision.Selected)?.shape
+        if (shape != Shape.S1 && shape != Shape.S2) return runS0(campaign, model, authority, syntax)
         behaviourSnapshot(campaign)
         val packets = ArrayList<ResultPacket>()
         val result = spans?.span(Phase.Plan, campaign.ids) { span -> runS1(campaign, model, authority, syntax, span, maxCells, packets) }
@@ -693,7 +698,8 @@ public class Controller @JvmOverloads public constructor(
             boundary(c, cellId, RebuildReason.CellEnd(if (exit is CellExit.Completed) RebuildReason.CellEnd.Next.NextIncrement else RebuildReason.CellEnd.Next.Continuation))
             val stampNow = c.stamper.report().candidateId
             // §8.7/§8.8: in S2+ a required increment review must approve before the increment closes; none owed ⇒ null.
-            val review = if (exit is CellExit.Completed && c.contract.shape >= Shape.S2) incrementReview(c, increment, exit, routing.selected?.tier, compiled, cellModel, authority, syntax, span) else null
+            // A completion that can no longer publish (cancelled, lease lost) is archived below, never reviewed (D-170).
+            val review = if (exit is CellExit.Completed && c.contract.shape >= Shape.S2 && c.refusal() == null) incrementReview(c, increment, exit, routing.selected?.tier, compiled, cellModel, authority, syntax, span) else null
             if (review is ReviewOutcome.Unavailable) return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "required review of ${increment.id} unavailable: ${review.reason}")), exit, null, compiled)
             val completion = if (exit is CellExit.Completed) {
                 val returned = checkNotNull(c.state).graph.increments.first { it.id == increment.id }
@@ -1495,6 +1501,9 @@ public class Controller @JvmOverloads public constructor(
         /** The review brief carries at most this much of the diff; the full diff stays a blob it names (D-124). */
         private const val MAX_REVIEW_DIFF_CHARS: Int = 16_000
         private const val CAMPAIGN_REVIEW: String = "campaign-review"
+
+        /** D-170: review and probe cells exist (P4.4), so S2 is selectable; writers (S3) are P5.1. */
+        private val CAPABILITIES: ShapeCapabilities = ShapeCapabilities(reviewCells = true, probes = true)
 
         /** Default cap on an S1 campaign's cells, plan cell excluded (D-70). */
         public const val DEFAULT_MAX_CELLS: Int = 12
