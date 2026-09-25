@@ -3,12 +3,14 @@ package io.astrolabe.tool.task
 import io.astrolabe.auth.InstructionShape
 import io.astrolabe.contract.Contracts
 import io.astrolabe.delegate.Assembled
+import io.astrolabe.delegate.ChildPacket
 import io.astrolabe.delegate.ChildKind
 import io.astrolabe.delegate.Collected
 import io.astrolabe.delegate.Delegator
 import io.astrolabe.delegate.Dispatch
 import io.astrolabe.delegate.DispatchMode
 import io.astrolabe.delegate.Handle
+import io.astrolabe.delegate.Probe
 import io.astrolabe.delegate.TaskPackets
 import io.astrolabe.event.AgentEvent
 import io.astrolabe.event.Answer
@@ -20,6 +22,7 @@ import io.astrolabe.event.ReplyValidity
 import io.astrolabe.evidence.Journal
 import io.astrolabe.evidence.JournalEvent
 import io.astrolabe.evidence.JournalKind
+import io.astrolabe.id.FileVersion
 import io.astrolabe.id.IdGen
 import io.astrolabe.id.Identities
 import io.astrolabe.provider.TokenEstimator
@@ -77,6 +80,8 @@ public class TaskTool(
     private val proposals: Proposals? = null,
     private val delegator: Delegator? = null,
     private val packets: TaskPackets? = null,
+    /** Current file versions, so a probe's pointers are shown current or stale when collected (§10.2, FX-41). */
+    private val versions: (String) -> FileVersion? = { null },
 ) : ToolExecutor {
     init {
         require(ids.context != null) { "task runs inside a cell: ids.context is its lineage" }
@@ -180,10 +185,16 @@ public class TaskTool(
     /** §10.1: a child's packet is reported by status and pointers; the parent owns integration and a late result is never integrated. */
     private fun collected(collected: Collected, prefix: String): ToolOutcome = when (collected) {
         is Collected.Pending -> result("pending", "$prefix${collected.handle.id} is still running; collect again later")
-        is Collected.Result -> result("collected", "$prefix${collected.handle.id} published a ${collected.packet.kind.wire} packet (${collected.spend.value} tokens); dependencies: ${collected.dependencies.keys.sorted().joinToString(", ").ifEmpty { "none" }}")
+        is Collected.Result -> result("collected", "$prefix${collected.handle.id} published a ${collected.packet.kind.wire} packet (${collected.spend.value} tokens); dependencies: ${collected.dependencies.keys.sorted().joinToString(", ").ifEmpty { "none" }}" + view(collected))
         is Collected.Late -> result("rejected", "$prefix${collected.handle.id} is superseded: ${collected.reason}; its ${if (collected.observation == null) "outcome" else "observations are archived and"} cannot be integrated (${collected.spend.value} tokens counted)")
         is Collected.Failed -> result("failed", "$prefix${collected.handle.id} failed: ${collected.reason} (${collected.spend.value} tokens counted)")
         is Collected.Unknown -> result("rejected", "$prefix${collected.handle.id} is not a child of this cell")
+    }
+
+    /** §10.2: a probe's findings reach the parent as a bounded summary of pointers, never as KNOWN content. */
+    private fun view(collected: Collected.Result): String = when (val packet = collected.packet) {
+        is ChildPacket.Investigation -> "\n" + Probe.summary(collected.handle.id, packet.packet, versions, estimator)
+        else -> ""
     }
 
     private fun block(question: Question, context: TurnContext, why: String): ToolOutcome {

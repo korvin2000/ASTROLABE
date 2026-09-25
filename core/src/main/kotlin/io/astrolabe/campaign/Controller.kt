@@ -186,9 +186,19 @@ import java.nio.file.Path
 import java.time.Clock
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
+import io.astrolabe.delegate.CellChildRunner
+import io.astrolabe.delegate.ChildBudget
+import io.astrolabe.delegate.ChildCell
+import io.astrolabe.delegate.DelegationLimits
+import io.astrolabe.delegate.Delegator
+import io.astrolabe.delegate.TaskPackets
+import io.astrolabe.id.ExecutionGeneration
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
@@ -1063,8 +1073,10 @@ public class Controller @JvmOverloads public constructor(
         boundary: BoundaryReason? = null,
         inputs: CompileInputs = CompileInputs(),
         precompile: PrecompileTrigger? = null,
+        child: ChildForm? = null,
     ): CellRun {
         val ids = c.ids.copy(context = cellId)
+        val cancellation = child?.cancellation ?: c.cancellation
         val config = c.attempt.config
         val contract = c.contract
         val redaction = Redaction(config.redaction)
@@ -1082,6 +1094,17 @@ public class Controller @JvmOverloads public constructor(
         val checker = Checker(c.checks, runner, c.os, c.stamper, c.registry, c.workspace, c.store.blobs, redaction, idGen, ids, logs)
         val verify = Verify(checks = c.checks, scheduler = scheduler, checker = checker, baseline = null, s0 = c.s0.stampId, workspace = c.workspace, runner = runner, os = c.os, stamper = c.stamper, blobs = c.store.blobs, redaction = redaction, estimator = estimator, idGen = idGen, ids = ids, contracts = c.contracts, logsDir = logs, campaignReview = campaignReview(c, authority))
         verify.inputs = c.atlas.rows.map { it.path }
+        val ceiling = Ceiling.of(contract.authorization, config.executionMode)
+        val generation = c.lease?.generation ?: ExecutionGeneration.INITIAL
+        // §10.1 (D-121): an S2+ main-line cell whose role unmasks task.delegate delegates to child cells; a child never does.
+        val children = if (child == null && contract.shape >= Shape.S2 && role.effectiveOps(contract.shape, ceiling).allows("task.delegate")) {
+            CoroutineScope(currentCoroutineContext() + SupervisorJob(currentCoroutineContext()[Job]))
+        } else {
+            null
+        }
+        val delegator = children?.let { scope ->
+            Delegator(CellChildRunner(childCell(c, increment, model, authority, syntax, span)), PublicationAuthority { c.refusal() }, c.cancellation, DelegationLimits(contract.budget.tokens), contract.shape, scope, idGen, clock, events)
+        }
         val tools = CellTools(
             state = StateTool(Validator(estimator), registerVersions, c.journal, estimator, idGen, ids, clock, register ?: Register.empty(cellId, increment.id, increment.title), events),
             look = Look(c.workspace, c.registry, workset, c.atlas, Searches.jvm(), c.journal, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, checks = c.checks),
@@ -1093,8 +1116,11 @@ public class Controller @JvmOverloads public constructor(
             ),
             run = Run(c.workspace, c.registry, c.stamper, runner, c.os, c.intents, SqliteHandles(c.store, clock), observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, c.contracts, authority, config, clock, logs),
             verify = verify,
-            task = if (proposals == null) TaskTool(authority, c.contracts, c.journal, estimator, idGen, ids, clock, events)
-            else TaskTool(authority, c.contracts, c.journal, estimator, idGen, ids, clock, events, role.effectiveOps(contract.shape, Ceiling.of(contract.authorization, config.executionMode)), proposals),
+            task = if (proposals == null && delegator == null) TaskTool(authority, c.contracts, c.journal, estimator, idGen, ids, clock, events)
+            else TaskTool(
+                authority, c.contracts, c.journal, estimator, idGen, ids, clock, events, role.effectiveOps(contract.shape, ceiling), proposals,
+                delegator, delegator?.let { TaskPackets(WORKSPACE, ceiling, generation) }, c.registry::version,
+            ),
             kb = KbTool(c.kb, estimator, idGen, queue = Queue(c.store, KbWriter(c.store, estimator, clock), idGen, clock), ids = ids, events = events),
         )
         // §6.3: what this cell was given is logged per note; the register-citation hook turns `injected` into `cited`.
@@ -1127,19 +1153,20 @@ public class Controller @JvmOverloads public constructor(
             precompile = precompile,
             knowledge = knowledge,
         )
-        val budget = CellBudget.of(contract.budget.tokens, contract.budget.turnsPerCell, contract.budget.reserves)
+        val budget = child?.budget?.let { CellBudget.of(it.tokens, it.turns, contract.budget.reserves) }
+            ?: CellBudget.of(contract.budget.tokens, contract.budget.turnsPerCell, contract.budget.reserves)
         val cellSpan = spans?.start(Phase.Edit, ids, span)
-        val dispatch = DispatchAuthority { c.refusal()?.let { DispatchRefusal(it, cancelled = c.cancellation.cancelled) } }
+        val dispatch = DispatchAuthority { (cancellation.reason?.let { "cancelled: $it" } ?: c.refusal())?.let { DispatchRefusal(it, cancelled = cancellation.cancelled || c.cancellation.cancelled) } }
         // A cell that finished before the cancellation reached it keeps its exit: a late completion, archived below.
         val finished = AtomicReference<CellExit?>(null)
         val exit = try {
             coroutineScope {
                 val job = async { Cell(clock, idGen, config.defaults, Gates.s0(), events, completion, authority = dispatch).run(ctx, increment, budget).also(finished::set) }
                 // A cancellation mid-call interrupts the in-flight request; the cell settles its checkpoint first.
-                c.cancellation.onCancel { job.cancel(CancellationException("cancelled: $it")) }.use { job.await() }
+                cancellation.onCancel { job.cancel(CancellationException("cancelled: $it")) }.use { job.await() }
             }
         } catch (cancelled: CancellationException) {
-            if (!c.cancellation.cancelled || !currentCoroutineContext().isActive) {
+            if (!cancellation.cancelled || !currentCoroutineContext().isActive) {
                 cellSpan?.let { spans?.end(it, status = TraceSpanStatus.Cancelled) }
                 throw cancelled
             }
@@ -1149,6 +1176,7 @@ public class Controller @JvmOverloads public constructor(
             throw failure
         } finally {
             coherence.close()
+            children?.cancel()
         }
         accounting.calls(c.ids.work).firstOrNull { it.ids.context == cellId }?.usage?.takeIf { it.isComplete }?.let { manifests.recordFirstUsage(ids, manifest.id, it.totalInput) }
         if (exit == null) {
@@ -1162,6 +1190,27 @@ public class Controller @JvmOverloads public constructor(
         }
         return CellRun(exit, ids, scheduler, checkpoints)
     }
+
+    /** The child-context form of [runCell] (§10.1): the child's own cancellation token and budget. */
+    private class ChildForm(val cancellation: Cancellation, val budget: ChildBudget)
+
+    /**
+     * Runs a delegated child (D-121): a fresh cell under the child's context id, compiled on the parent's increment slice
+     * with the runtime brief pinned in `[T]` — the parent's transcript never reaches it (D13).
+     */
+    private fun childCell(c: OpenedCampaign, increment: Increment, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?): ChildCell =
+        ChildCell { run, role, completion, budget, brief ->
+            val compiler = Compiler(model.estimator, c.attempt.config)
+            fun compile(profile: io.astrolabe.provider.Profile) = compiler.compile(increment, c.contract, profile, role, c.prime, pinned = listOf(brief), maxOutputTokens = model.maxOutputTokens)
+            // §11.1: a child is routed by its own function row, never by the parent's tier.
+            val function = if (role.name == Roles.review.name) RoutingFunction.ReviewRoutine else RoutingFunction.Probe
+            val routing = route(c, function, increment, model, null, compile(model.profile), ::compile)
+            val compiled = routing.compiled
+            check(compiled is Compiled.Ready) { "the ${role.name} child of ${increment.id} cannot be compiled: $compiled" }
+            routing.refused?.let { error("the ${role.name} child of ${increment.id} is unaffordable: ${it.reason}") }
+            runCell(c, run.handle.child, increment, role, routing.model, authority, syntax, compiled, span, null, completion = completion, pinned = listOf(brief), child = ChildForm(run.cancellation, budget))
+                .exit.also { exit -> routing.selected?.let { router.record(it, outcomeOf(exit)) } }
+        }
 
     /**
      * `finish` (§3.7) in its S0 form: every requirement verified and every `run:` item re-certified by a current
