@@ -508,7 +508,7 @@ public class Cell @JvmOverloads constructor(
             return Anchor.render(
                 estimator, digest, RegisterRender.markdown(register), worksetLine, touchedLedger.toList(),
                 ChecksRender.render(stampNow, checkLines(currencies)), null, focusNotes, gauge(currencies).line(), nudges,
-                RegisterRender.firedTrips(register), defaults,
+                RegisterRender.firedTrips(register) + ctx.diagnoses?.lines().orEmpty(), defaults,
             )
         }
 
