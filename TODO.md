@@ -1807,10 +1807,11 @@ Goal: [§18.2 Stage E](docs/implementation/roadmap.md#sec-18-2): writer cells + 
 - [ ] **Gate P5.6:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
 
 ### P5.7 Async checker seam `[O gate: only with a tier-2 adapter and an ablation sync vs async]`
-#### P5.7.1 [O][C] `Watcher` interface · TODO
+#### P5.7.1 [O][C] `Watcher` interface · DONE
 - Why: [§8.1 "why synchronous in the baseline"](docs/verification/scheduler.md#sec-8-1); D12 in [§20.2](docs/reference/decisions.md#sec-20-2).
 - Build: watcher results carry supersession + version tags and feed the same `ChecksRender`; off by default; sync checker remains the baseline.
 - Done: contract + fake watcher; superseded results never presented as current.
+- Log: 2026-09-25 — `verify/Watcher.kt`: `WatcherResult(checkId, resultId, version, stamp, outcome, errorLines)` — `version` is a monotonic dispatch counter, never the content stamp (two dispatches share a stamp only by reverting), so out-of-order arrival can be judged; `.line()` renders through the same `CheckLine`/`ChecksRender` the synchronous `Checker` uses. `WatcherSink` (`fun interface`, plain callback — mirrors `event/EventSink`, so no separate `io.astrolabe.java` form is needed, D-07's intent already met without one) and `Watcher.start(checks, version, sink): WatcherSubscription`. `WatcherFeed.record` keeps only the highest `version` per check current, archiving every other arrival — including a lower-version result that arrives later in wall-clock time, which is superseded on arrival and never shown (`render` proven against `Flags().asyncChecker == false`). `fixtures/FakeWatcher` (scripted `push`, a closed subscription receives nothing more). Not wired: no caller constructs a real `Watcher` or reads `Flags.asyncChecker`/the tier-2 adapter gate (D12) — P5.7's integration debt, same deferral pattern as P5.4.2/P5.5.1. Test: `WatcherTest` (4).
 
 - [ ] **Gate P5.7:** full `build` → push → CI green on Ubuntu + Windows, once for the block ([CLAUDE.md](CLAUDE.md) § Verification tiers; a group with ≤2 remaining tasks merges into the next gate).
 
