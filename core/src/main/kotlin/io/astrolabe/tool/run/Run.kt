@@ -3,6 +3,7 @@ package io.astrolabe.tool.run
 import io.astrolabe.Config
 import io.astrolabe.auth.CapabilitySet
 import io.astrolabe.auth.Ceiling
+import io.astrolabe.auth.Classification
 import io.astrolabe.auth.ContentClass
 import io.astrolabe.auth.EffectPolicy
 import io.astrolabe.auth.ExecutionDecision
@@ -39,6 +40,7 @@ import io.astrolabe.provider.ToolMask
 import io.astrolabe.store.BlobKind
 import io.astrolabe.store.BlobStore
 import io.astrolabe.tool.Args
+import io.astrolabe.tool.Catalog
 import io.astrolabe.tool.EffectClass
 import io.astrolabe.tool.Effects
 import io.astrolabe.tool.EnvelopeHeader
@@ -121,6 +123,10 @@ public class Run(
     private val mask: ToolMask = ToolOps.implementingS0,
     private val hostSets: Map<String, CapabilitySet> = emptyMap(),
     private val pollSliceSeconds: Long = 30,
+    /** The session's frozen mounts (§15.3); `run(["mcp:<server>/<tool>", "{…}"])` resolves only against it. */
+    private val catalog: Catalog = Catalog.EMPTY,
+    /** The transport to mounted servers; `null` until P7 wires one (the invocation is then `unavailable`). */
+    private val mcp: McpClient? = null,
 ) : ToolExecutor {
     init {
         require(ids.context != null) { "run runs inside a cell: ids.context is its lineage" }
@@ -152,7 +158,7 @@ public class Run(
         val argv = args.argv ?: listOf(args.cmd!!)
         val shell = args.argv == null
         val program = argv.first().trim()
-        if (program.startsWith("mcp:")) return refused(args, Outcome.Denied, "MCP invocations ('$program') arrive in P4.7; nothing was dispatched")
+        if (program.startsWith("mcp:")) return mcp(args, argv, shell, contract)
         val cwd = args.cwd?.let { dir ->
             when (val resolved = workspace.resolve(dir, PathIntent.Read)) {
                 is PathResolution.Resolved -> resolved.real
@@ -162,26 +168,8 @@ public class Run(
 
         // Policy label (§4.6), capability ceiling (§14.2) and execution mode (D-11) — all before any effect.
         val classification = EffectPolicy.classify(args, workspace.root.toString(), contract.scope.protectedPaths)
-        val ceiling = try {
-            Ceiling.of(contract.authorization, config.executionMode, hostSets)
-        } catch (misconfigured: IllegalArgumentException) {
-            return refused(args, Outcome.Denied, "denied: ${misconfigured.message}")
-        }
-        ceiling.allows(classification)?.let { return refused(args, Outcome.Denied, "denied by the capability ceiling: ${it.detail}") }
-        val decision = Executors.require(config.executionMode)
-        if (decision is ExecutionDecision.Refused) return refused(args, Outcome.Denied, "denied: ${decision.refusal.detail} (D-11)")
-        if (classification.effectClass == EffectClass.D) {
-            val reason = args.intent ?: return refused(args, Outcome.Denied, "D-class effect (${classification.reasons.joinToString("; ")}) needs an explicit intent; nothing was dispatched")
-            val allowlisted = contract.authorization.dClassAllowlist.any { classification.command == it || classification.command.startsWith("$it ") }
-            val request = DClassRequest(idGen.next("dreq"), contract.version, ids, classification.command, argv, args.cwd, classification.reasons.joinToString("; "), reason, allowlisted)
-            val approval = authority.approve(request)
-            if (!approval.approved) return refused(args, Outcome.Denied, "D-class effect denied: ${approval.reason ?: "no approval"} (${classification.reasons.joinToString("; ")})")
-        }
-
+        authorize(args, argv, contract, classification)?.let { return it }
         val replaySafe = classification.effectClass == EffectClass.R && !classification.effectsUnknown
-        if (!replaySafe) intents.open().firstOrNull { it.ids.work == ids.work && it.status == IntentStatus.Unknown && !it.replaySafe && it.argv == argv && it.cwd == args.cwd }?.let {
-            return refused(args, Outcome.UnknownOutcome, "unknown_outcome: intent ${it.intentId} ran this command and its effect is unreconciled; reconcile before any retry (§13.1), never relaunch")
-        }
 
         val actionId = idGen.next("act")
         val alias = aliases.allocate(ids.work, actionId, "result", ids.context, workspace.id)
@@ -229,6 +217,95 @@ public class Run(
             }
             is Launch.Finished -> finish(args, alias.text, actionId, argv, shell, before, launch.proc, launch.output, classification.effectClass, classification.effectsUnknown, logBlob, intent.intentId)
         }
+    }
+
+    /**
+     * Policy label (§4.6), capability ceiling (§14.2), execution mode (D-11), D-class authority and the
+     * unknown-outcome guard (§13.1) — all before any effect, for commands and mounted tools alike (§15.3, FX-39).
+     */
+    private suspend fun authorize(args: RunArgs, argv: List<String>, contract: Contract, classification: Classification): ToolOutcome? {
+        val ceiling = try {
+            Ceiling.of(contract.authorization, config.executionMode, hostSets)
+        } catch (misconfigured: IllegalArgumentException) {
+            return refused(args, Outcome.Denied, "denied: ${misconfigured.message}")
+        }
+        ceiling.allows(classification)?.let { return refused(args, Outcome.Denied, "denied by the capability ceiling: ${it.detail}") }
+        val decision = Executors.require(config.executionMode)
+        if (decision is ExecutionDecision.Refused) return refused(args, Outcome.Denied, "denied: ${decision.refusal.detail} (D-11)")
+        if (classification.effectClass == EffectClass.D) {
+            val reason = args.intent ?: return refused(args, Outcome.Denied, "D-class effect (${classification.reasons.joinToString("; ")}) needs an explicit intent; nothing was dispatched")
+            val allowlisted = contract.authorization.dClassAllowlist.any { classification.command == it || classification.command.startsWith("$it ") }
+            val request = DClassRequest(idGen.next("dreq"), contract.version, ids, classification.command, argv, args.cwd, classification.reasons.joinToString("; "), reason, allowlisted)
+            val approval = authority.approve(request)
+            if (!approval.approved) return refused(args, Outcome.Denied, "D-class effect denied: ${approval.reason ?: "no approval"} (${classification.reasons.joinToString("; ")})")
+        }
+
+        val replaySafe = classification.effectClass == EffectClass.R && !classification.effectsUnknown
+        if (!replaySafe) intents.open().firstOrNull { it.ids.work == ids.work && it.status == IntentStatus.Unknown && !it.replaySafe && it.argv == argv && it.cwd == args.cwd }?.let {
+            return refused(args, Outcome.UnknownOutcome, "unknown_outcome: intent ${it.intentId} ran this command and its effect is unreconciled; reconcile before any retry (§13.1), never relaunch")
+        }
+        return null
+    }
+
+    // ------------------------------------------------------------------- mcp
+
+    /**
+     * A mounted tool (§15.3, D-21): resolved in the frozen catalog, its arguments validated against the frozen
+     * schema, its class decided locally, then the same ceiling, D-class authority, intent order, store, shaping
+     * and envelope as any command. The server's reply is data; a thrown transport error is `unknown_outcome`.
+     */
+    private suspend fun mcp(args: RunArgs, argv: List<String>, shell: Boolean, contract: Contract): ToolOutcome {
+        val program = argv.first().trim()
+        if (shell) return refused(args, Outcome.Denied, "mounted tools take argv form: run([\"$program\", \"{json arguments}\"]); nothing was dispatched")
+        if (args.bg) return refused(args, Outcome.Denied, "mounted tools do not run in the background; nothing was dispatched")
+        if (args.cwd != null) return refused(args, Outcome.Denied, "mounted tools take no cwd; nothing was dispatched")
+        val entry = catalog.resolve(program) ?: return refused(args, Outcome.Denied, "'$program' is not mounted in this session; see look(catalog); nothing was dispatched")
+        if (argv.size > 2) return refused(args, Outcome.Denied, "'$program' takes one JSON object of arguments (D-146); nothing was dispatched")
+        val arguments = argv.getOrNull(1) ?: "{}"
+        entry.validate(arguments)?.let { return refused(args, Outcome.Denied, "'$program' arguments rejected: $it; nothing was dispatched") }
+        val reasons = when {
+            entry.tool.name in entry.mount.effectClassOverride -> listOf("mount ${entry.mount.server}: configured class ${entry.effectClass}")
+            entry.effectClass == EffectClass.R -> listOf("mount ${entry.mount.server}: locally approved read-only")
+            entry.tool.name in entry.mount.localApproval -> listOf("mount ${entry.mount.server}: the server's own hints claim effects, read-only approval withheld (D-145)")
+            else -> listOf("mount ${entry.mount.server}: not locally approved or configured (annotations are hints)")
+        }
+        val classification = Classification(entry.effectClass, reasons, entry.mount.capabilities, program, effectsUnknown = entry.effectClass != EffectClass.R)
+        authorize(args, argv, contract, classification)?.let { return it }
+        val client = mcp ?: return refused(args, Outcome.Unavailable, "no MCP transport is configured (P7); '$program' was not dispatched")
+
+        val actionId = idGen.next("act")
+        val alias = aliases.allocate(ids.work, actionId, "result", ids.context, workspace.id)
+        val before = stamper.report()
+        val intent = Intent(idGen.next("intent"), ids, actionId, argv, null, classification.toString(), at = clock.instant(), replaySafe = entry.effectClass == EffectClass.R)
+        var logBlob: Digest? = null
+        val outcome = Consequential.run(
+            journal = intents,
+            intent = intent,
+            reserve = { true },
+            dispatch = { client.call(entry.mount.server, entry.tool.name, arguments) },
+            persist = { reply ->
+                logBlob = blobs.put(redaction.applyBytes(reply.content.toByteArray(Charsets.UTF_8), ContentClass.ReusableEvidence).text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
+            },
+        )
+        val reply = when (outcome) {
+            is ActionOutcome.Completed -> outcome.value
+            is ActionOutcome.Unknown -> return unknown(args, alias.text, actionId, before, intent.intentId, outcome.cause)
+            is ActionOutcome.NotDispatched -> return refused(args, Outcome.Denied, outcome.reason)
+        }
+        val after = stamper.report()
+        val changed = announce(before, after, "run ${alias.text}")
+        val effectClass = when {
+            entry.effectClass == EffectClass.R && changed.isNotEmpty() -> if (changed.any { workspace.paths.isProtected(it, PathIntent.Mutate) }) EffectClass.D else EffectClass.W
+            else -> entry.effectClass
+        }
+        val capture = RunCapture(actionId = actionId, argv = argv, exitCode = if (reply.isError) 1 else 0, output = reply.content.toByteArray(Charsets.UTF_8))
+        val shaped = Shapers.shape(capture, ShapeBudget(args.budget, estimator, alias.text))
+        val touched = if (changed.isEmpty()) "" else "\ntouched (by run ${alias.text} $program: ${changed.size} path${if (changed.size == 1) "" else "s"}) " + changed.take(10).joinToString(", ")
+        val result = RunResult(
+            alias.text, actionId, capture.exitCode, shaped.status, shaped.view + touched, shaped.viewTruncated, logBlob, effectClass, before.candidateId, after.candidateId,
+            current = true, changedPaths = changed, handle = null, parsed = shaped.counts, shaped = shaped, limits = shaped.limitations, intentId = intent.intentId,
+        )
+        return render(args, result, argv, false, before, after, classification.effectsUnknown)
     }
 
     /** Spawns and, unless backgrounded, observes to the terminal state; the deadline kills the tree, nothing replays. */

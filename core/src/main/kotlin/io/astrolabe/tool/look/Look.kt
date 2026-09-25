@@ -112,6 +112,8 @@ public class Look(
     private val findCaptureBytes: Long = 256L * 1024 * 1024,
     /** The registered checks `look(impact)` joins against; null renders no affected checks. */
     private val checks: Checks? = null,
+    /** The session's frozen mounts, listed by `look(catalog)` as `mcp:<server>/<tool>` one-liners (§15.3). */
+    private val mounts: io.astrolabe.tool.Catalog = io.astrolabe.tool.Catalog.EMPTY,
 ) : ToolExecutor {
     init {
         require(ids.context != null) { "look runs inside a cell: ids.context is its lineage" }
@@ -466,7 +468,7 @@ public class Look(
             val allowed = ops.filter { mask.allows(ToolOps.name(family, it)) }
             val masked = ops - allowed.toSet()
             "${family.wire}: ${allowed.joinToString(" ").ifEmpty { "(none)" }}" + (if (masked.isEmpty()) "" else " · masked: ${masked.joinToString(" ")}")
-        }
+        } + mounts.lines.map { "mounted $it" }
         return textResult(args, lines.joinToString("\n"), scope = "catalog")
     }
 
