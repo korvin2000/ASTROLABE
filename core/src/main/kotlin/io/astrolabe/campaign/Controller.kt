@@ -20,6 +20,9 @@ import io.astrolabe.cell.CellEvidence
 import io.astrolabe.cell.CellExit
 import io.astrolabe.cell.CellModel
 import io.astrolabe.atlas.RiskFloorInput
+import io.astrolabe.route.CacheKey
+import io.astrolabe.route.EscalationStep
+import io.astrolabe.route.FunctionTable
 import io.astrolabe.route.Routed
 import io.astrolabe.route.Router
 import io.astrolabe.route.RoutingBudget
@@ -207,7 +210,6 @@ import io.astrolabe.delegate.ReviewTriggers
 import io.astrolabe.delegate.Probe
 import io.astrolabe.delegate.TaskPackets
 import io.astrolabe.delegate.WorthTest
-import io.astrolabe.route.FunctionTable
 import io.astrolabe.verify.ReviewScope
 import io.astrolabe.id.ExecutionGeneration
 import kotlinx.coroutines.CancellationException
@@ -596,6 +598,9 @@ public class Controller @JvmOverloads public constructor(
         var closed: Pair<ContextId, Long>? = null
         // A continuation of a red increment never drops below the tier its failing cell ran at (§11.1).
         val tiers = HashMap<String, Tier>()
+        // §11.3: verified failures escalate with evidence, at most budget.attempts per increment, then blocked (P4.5.2).
+        val attempts = IncrementAttempts(c.journal, idGen, clock)
+        var lastKey: CacheKey? = null
         while (true) {
             c.refusal()?.let { return last.copy(state = c.advance(Transition.Stopped(stopOutcome(c), "dispatch refused: $it"))) }
             val state = checkNotNull(c.state)
@@ -603,7 +608,10 @@ public class Controller @JvmOverloads public constructor(
             val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = candidates(c))
             val unverified = state.ledger.unfinished()
             if (unverified.isEmpty()) return last.copy(state = stopOrFinish(c, "requirements remain unverified", scheduler, campaign = true, authority = campaignJudge(c, authority, model, syntax, span)))
-            val ready = state.graph.readyFrontier(contract, 1).firstOrNull()
+            // §11.4 ordering hint (P4.5.3): among ready increments, the one sharing the last cell's prefix goes first.
+            val ready = CellOrder.next(state.graph.readyFrontier(contract, state.graph.increments.size), lastKey) { inc ->
+                listOfNotNull(tiers[inc.id], attempts.tier(inc.id), FunctionTable.DEFAULT.row(RoutingFunction.Implementing).defaultTier, Router.riskFloor(inc.risk ?: contract.risk, null)).max()
+            }
             if (ready == null) {
                 // FX-42: verified work is never re-executed; its regression evidence is refreshed from current receipts.
                 refreshRegressions(c, scheduler)
@@ -613,6 +621,9 @@ public class Controller @JvmOverloads public constructor(
             if (cells >= maxCells) {
                 return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.BudgetExhausted, "the campaign's $maxCells cells are spent with ${unverified.size} requirements unverified")))
             }
+            attempts.exhausted(c.ids.work, ready.id, contract.budget.attempts)?.let {
+                return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, it)))
+            }
             cells += 1
             // §6.2: a continuation starts from the previous cell's validated register, seeds and packet — never its transcript.
             val carry = ready.cells.lastOrNull()?.let { previous -> carryFrom(c, previous, packets.lastOrNull { it.ids.context == previous }) }
@@ -620,7 +631,7 @@ public class Controller @JvmOverloads public constructor(
             val resume = resumeNote(c, ready, carry)
             val knowledge = knowledge(c, ready, Roles.implementing, model, touched = carry?.seeds.orEmpty().map { it.path }.toSet())
             val inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) }, notes = knowledge.notes, contractsIndex = knowledge.contractsIndex)
-            val pinned = listOfNotNull(resume)
+            val pinned = listOfNotNull(resume, attempts.line(ready.id))
             val compiler = Compiler(model.estimator, c.attempt.config)
             // §6.6: a pre-compiled [K] is served for cell_end(next_increment) only, on a full-fingerprint and coverage match.
             val take = precompile?.let { p ->
@@ -633,7 +644,7 @@ public class Controller @JvmOverloads public constructor(
                     }
                 }
             }
-            val routing = route(c, if (ready.cells.isEmpty()) RoutingFunction.Implementing else RoutingFunction.Continuation, ready, model, tiers[ready.id], take?.compiled ?: compiler.compile(
+            val routing = route(c, if (ready.cells.isEmpty()) RoutingFunction.Implementing else RoutingFunction.Continuation, ready, model, listOfNotNull(tiers[ready.id], attempts.tier(ready.id)).maxOrNull(), take?.compiled ?: compiler.compile(
                 ready, contract, model.profile, Roles.implementing, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = inputs,
             )) { profile -> compiler.compile(ready, contract, profile, Roles.implementing, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = inputs) }
             val compiled = routing.compiled
@@ -654,6 +665,7 @@ public class Controller @JvmOverloads public constructor(
             // FX-32: an unaffordable tier is refused, never clamped; the campaign stops on the router's options.
             routing.refused?.let { return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.BudgetExhausted, it.reason)), compiled = compiled) }
             routing.selected?.let { tiers[ready.id] = it.tier }
+            lastKey = routing.selected?.let { CellOrder.key(it.tier) }
             val cellId = ContextId(idGen.next("cell"))
             events?.emit(AgentEvent.Campaign.IncrementSelected(c.ids, ready.id))
             val dispatched = c.advance(Transition.Dispatched(ready.id, cellId))
@@ -704,7 +716,14 @@ public class Controller @JvmOverloads public constructor(
                     if (verified % c.attempt.config.defaults.fullSuiteCadence == 0 && checkNotNull(c.state).ledger.unfinished().isNotEmpty()) fullSuite(c, "cadence after $verified verified increments")
                 }
                 // S1: a partial continues the same increment from its carry-forward; the cell cap bounds it (D-70).
-                is Disposition.Continue -> Unit
+                // §11.3: a refused or stalled completion is a verified failure of the increment's attempt.
+                is Disposition.Continue -> IncrementAttempts.verifiedFailure(exit, completion)?.let { missing ->
+                    when (val step = attempts.refused(run.ids, increment.id, contract.budget.attempts, routing.selected, exit.register, missing, exit.packet.receipts)) {
+                        is EscalationStep.Ask -> return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, step.question)))
+                        is EscalationStep.Blocked -> return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, step.reason)))
+                        is EscalationStep.Escalate, is EscalationStep.NotEscalated -> Unit
+                    }
+                }
                 is Disposition.Stop -> return last.copy(state = c.advance(Transition.Stopped(disposition.outcome, disposition.reason)))
             }
             last = last.copy(state = c.state)
