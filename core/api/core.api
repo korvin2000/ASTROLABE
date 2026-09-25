@@ -5463,6 +5463,23 @@ public final class io/astrolabe/cell/RoleOutput {
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class io/astrolabe/cell/RoleTexts {
+	public static final field INSTANCE Lio/astrolabe/cell/RoleTexts;
+	public static final field VERSION Ljava/lang/String;
+	public static final field defaults Ljava/util/Map;
+	public static final field extractor Ljava/util/List;
+	public static final field probe Ljava/util/List;
+	public static final field qa Ljava/util/List;
+	public static final field repair Ljava/util/List;
+	public static final field review Ljava/util/List;
+	public static final field shared Ljava/util/List;
+	public static final field validators Ljava/util/Map;
+	public static final fun version (Lio/astrolabe/cell/Role;)Ljava/lang/String;
+	public static final fun versions (Lio/astrolabe/Config;)Ljava/util/Map;
+	public static final fun violations (Lio/astrolabe/cell/Role;)Ljava/util/List;
+	public static final fun worded (Lio/astrolabe/cell/Role;Lio/astrolabe/cell/Role;)Lio/astrolabe/cell/Role;
+}
+
 public final class io/astrolabe/cell/Roles {
 	public static final field INSTANCE Lio/astrolabe/cell/Roles;
 	public static final field POLICY_TEXT_VERSION Ljava/lang/String;
@@ -8367,9 +8384,14 @@ public final class io/astrolabe/delegate/QaCase {
 public final class io/astrolabe/delegate/QaCell {
 	public static final field AVAILABLE Z
 	public static final field INSTANCE Lio/astrolabe/delegate/QaCell;
+	public static final field OUTPUT Ljava/lang/String;
 	public static final fun admit (Lio/astrolabe/delegate/QaPacket;)Lio/astrolabe/delegate/QaAdmission;
 	public static final fun admit (Lio/astrolabe/delegate/QaPacket;Z)Lio/astrolabe/delegate/QaAdmission;
 	public static synthetic fun admit$default (Lio/astrolabe/delegate/QaPacket;ZILjava/lang/Object;)Lio/astrolabe/delegate/QaAdmission;
+	public static final fun completion (Lio/astrolabe/delegate/QaPacket;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;)Lio/astrolabe/cell/RoleCompletion;
+	public static final fun completion (Lio/astrolabe/delegate/QaPacket;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;I)Lio/astrolabe/cell/RoleCompletion;
+	public static synthetic fun completion$default (Lio/astrolabe/delegate/QaPacket;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;IILjava/lang/Object;)Lio/astrolabe/cell/RoleCompletion;
+	public static final fun parse (Ljava/lang/String;Lio/astrolabe/delegate/QaPacket;Ljava/util/List;)Lio/astrolabe/delegate/QaParsed;
 	public static final fun validate (Lio/astrolabe/delegate/QaResult;Lio/astrolabe/delegate/QaPacket;Lkotlin/jvm/functions/Function1;)Ljava/util/List;
 }
 
@@ -8432,6 +8454,31 @@ public final class io/astrolabe/delegate/QaPacket {
 	public final fun getEnvironment ()Lio/astrolabe/delegate/QaEnvironment;
 	public final fun getIds ()Lio/astrolabe/id/Identities;
 	public final fun getIncrementId ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/astrolabe/delegate/QaParsed {
+}
+
+public final class io/astrolabe/delegate/QaParsed$Gaps : io/astrolabe/delegate/QaParsed {
+	public fun <init> (Ljava/util/List;)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun copy (Ljava/util/List;)Lio/astrolabe/delegate/QaParsed$Gaps;
+	public static synthetic fun copy$default (Lio/astrolabe/delegate/QaParsed$Gaps;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/delegate/QaParsed$Gaps;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getGaps ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/delegate/QaParsed$Parsed : io/astrolabe/delegate/QaParsed {
+	public fun <init> (Lio/astrolabe/delegate/QaResult;)V
+	public final fun component1 ()Lio/astrolabe/delegate/QaResult;
+	public final fun copy (Lio/astrolabe/delegate/QaResult;)Lio/astrolabe/delegate/QaParsed$Parsed;
+	public static synthetic fun copy$default (Lio/astrolabe/delegate/QaParsed$Parsed;Lio/astrolabe/delegate/QaResult;ILjava/lang/Object;)Lio/astrolabe/delegate/QaParsed$Parsed;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getResult ()Lio/astrolabe/delegate/QaResult;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
 }
@@ -13533,6 +13580,40 @@ public final class io/astrolabe/kb/CandidateKind : java/lang/Enum {
 	public static fun values ()[Lio/astrolabe/kb/CandidateKind;
 }
 
+public final class io/astrolabe/kb/CandidatePacket {
+	public static final field INSTANCE Lio/astrolabe/kb/CandidatePacket;
+	public static final field OUTPUT Ljava/lang/String;
+	public static final fun completion (Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Lio/astrolabe/cell/RoleCompletion;
+	public static final fun completion (Ljava/lang/String;Lkotlin/jvm/functions/Function1;I)Lio/astrolabe/cell/RoleCompletion;
+	public static synthetic fun completion$default (Ljava/lang/String;Lkotlin/jvm/functions/Function1;IILjava/lang/Object;)Lio/astrolabe/cell/RoleCompletion;
+	public static final fun parse (Ljava/lang/String;Ljava/lang/String;)Lio/astrolabe/kb/CandidatesParsed;
+}
+
+public abstract interface class io/astrolabe/kb/CandidatesParsed {
+}
+
+public final class io/astrolabe/kb/CandidatesParsed$Gaps : io/astrolabe/kb/CandidatesParsed {
+	public fun <init> (Ljava/util/List;)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun copy (Ljava/util/List;)Lio/astrolabe/kb/CandidatesParsed$Gaps;
+	public static synthetic fun copy$default (Lio/astrolabe/kb/CandidatesParsed$Gaps;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/kb/CandidatesParsed$Gaps;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getGaps ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/kb/CandidatesParsed$Parsed : io/astrolabe/kb/CandidatesParsed {
+	public fun <init> (Ljava/util/List;)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun copy (Ljava/util/List;)Lio/astrolabe/kb/CandidatesParsed$Parsed;
+	public static synthetic fun copy$default (Lio/astrolabe/kb/CandidatesParsed$Parsed;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/kb/CandidatesParsed$Parsed;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCandidates ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public abstract interface class io/astrolabe/kb/CellKnowledge {
 	public abstract fun cited (Lio/astrolabe/register/Register;)V
 	public abstract fun focusNotes (Ljava/lang/String;Ljava/util/Set;)Ljava/lang/String;
@@ -16036,6 +16117,18 @@ public final class io/astrolabe/recover/Capsule {
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class io/astrolabe/recover/CellRepairRunner : io/astrolabe/recover/RepairRunner {
+	public static final field Companion Lio/astrolabe/recover/CellRepairRunner$Companion;
+	public static final field DEFAULT_BUDGET Lio/astrolabe/delegate/ChildBudget;
+	public fun <init> (Lio/astrolabe/delegate/ChildCell;Lio/astrolabe/id/IdGen;Lio/astrolabe/campaign/Cancellation;Lio/astrolabe/provider/TokenEstimator;)V
+	public fun <init> (Lio/astrolabe/delegate/ChildCell;Lio/astrolabe/id/IdGen;Lio/astrolabe/campaign/Cancellation;Lio/astrolabe/provider/TokenEstimator;Lio/astrolabe/delegate/ChildBudget;)V
+	public synthetic fun <init> (Lio/astrolabe/delegate/ChildCell;Lio/astrolabe/id/IdGen;Lio/astrolabe/campaign/Cancellation;Lio/astrolabe/provider/TokenEstimator;Lio/astrolabe/delegate/ChildBudget;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun attempt (Lio/astrolabe/recover/RepairRequest;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class io/astrolabe/recover/CellRepairRunner$Companion {
+}
+
 public final class io/astrolabe/recover/CorrectedCall {
 	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
 	public final fun component1 ()Ljava/lang/String;
@@ -16394,7 +16487,8 @@ public final class io/astrolabe/recover/Repair {
 	public static final field MAX_DIAGNOSIS_TOKENS I
 	public fun <init> (Lio/astrolabe/route/Router;Lio/astrolabe/recover/RepairRunner;Lio/astrolabe/recover/OriginalAcceptance;Lio/astrolabe/provider/TokenEstimator;)V
 	public fun <init> (Lio/astrolabe/route/Router;Lio/astrolabe/recover/RepairRunner;Lio/astrolabe/recover/OriginalAcceptance;Lio/astrolabe/provider/TokenEstimator;Lio/astrolabe/Defaults;)V
-	public synthetic fun <init> (Lio/astrolabe/route/Router;Lio/astrolabe/recover/RepairRunner;Lio/astrolabe/recover/OriginalAcceptance;Lio/astrolabe/provider/TokenEstimator;Lio/astrolabe/Defaults;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Lio/astrolabe/route/Router;Lio/astrolabe/recover/RepairRunner;Lio/astrolabe/recover/OriginalAcceptance;Lio/astrolabe/provider/TokenEstimator;Lio/astrolabe/Defaults;Lio/astrolabe/cell/Role;)V
+	public synthetic fun <init> (Lio/astrolabe/route/Router;Lio/astrolabe/recover/RepairRunner;Lio/astrolabe/recover/OriginalAcceptance;Lio/astrolabe/provider/TokenEstimator;Lio/astrolabe/Defaults;Lio/astrolabe/cell/Role;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun repair (Lio/astrolabe/recover/Capsule;Lio/astrolabe/contract/Shape;Lio/astrolabe/route/RoutingPacket;Lio/astrolabe/route/RoutingPolicy;Lio/astrolabe/recover/Diagnoses;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public static synthetic fun repair$default (Lio/astrolabe/recover/Repair;Lio/astrolabe/recover/Capsule;Lio/astrolabe/contract/Shape;Lio/astrolabe/route/RoutingPacket;Lio/astrolabe/route/RoutingPolicy;Lio/astrolabe/recover/Diagnoses;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
 }
@@ -16448,6 +16542,41 @@ public final class io/astrolabe/recover/RepairOutcome$Fixed : io/astrolabe/recov
 	public final fun getCall ()Lio/astrolabe/recover/CorrectedCall;
 	public fun getDiagnosis ()Ljava/lang/String;
 	public final fun getEvidence ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/recover/RepairPacket {
+	public static final field INSTANCE Lio/astrolabe/recover/RepairPacket;
+	public static final field OUTPUT Ljava/lang/String;
+	public static final fun brief (Lio/astrolabe/recover/RepairRequest;)Ljava/lang/String;
+	public static final fun completion (Lio/astrolabe/provider/ToolMask;Lio/astrolabe/provider/TokenEstimator;Lkotlin/jvm/functions/Function1;)Lio/astrolabe/cell/RoleCompletion;
+	public static final fun completion (Lio/astrolabe/provider/ToolMask;Lio/astrolabe/provider/TokenEstimator;Lkotlin/jvm/functions/Function1;I)Lio/astrolabe/cell/RoleCompletion;
+	public static synthetic fun completion$default (Lio/astrolabe/provider/ToolMask;Lio/astrolabe/provider/TokenEstimator;Lkotlin/jvm/functions/Function1;IILjava/lang/Object;)Lio/astrolabe/cell/RoleCompletion;
+	public static final fun parse (Ljava/lang/String;Lio/astrolabe/provider/ToolMask;Lio/astrolabe/provider/TokenEstimator;)Lio/astrolabe/recover/RepairParsed;
+}
+
+public abstract interface class io/astrolabe/recover/RepairParsed {
+}
+
+public final class io/astrolabe/recover/RepairParsed$Gaps : io/astrolabe/recover/RepairParsed {
+	public fun <init> (Ljava/util/List;)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun copy (Ljava/util/List;)Lio/astrolabe/recover/RepairParsed$Gaps;
+	public static synthetic fun copy$default (Lio/astrolabe/recover/RepairParsed$Gaps;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/recover/RepairParsed$Gaps;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getGaps ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/recover/RepairParsed$Proposal : io/astrolabe/recover/RepairParsed {
+	public fun <init> (Lio/astrolabe/recover/RepairProposal;)V
+	public final fun component1 ()Lio/astrolabe/recover/RepairProposal;
+	public final fun copy (Lio/astrolabe/recover/RepairProposal;)Lio/astrolabe/recover/RepairParsed$Proposal;
+	public static synthetic fun copy$default (Lio/astrolabe/recover/RepairParsed$Proposal;Lio/astrolabe/recover/RepairProposal;ILjava/lang/Object;)Lio/astrolabe/recover/RepairParsed$Proposal;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getProposal ()Lio/astrolabe/recover/RepairProposal;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
 }
