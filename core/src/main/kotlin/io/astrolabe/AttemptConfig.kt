@@ -1,5 +1,6 @@
 package io.astrolabe
 
+import io.astrolabe.cell.RoleTexts
 import io.astrolabe.id.Digest
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
@@ -61,9 +62,12 @@ public data class AttemptConfig(
     public companion object {
         private val STABLE_JSON = Json { encodeDefaults = true }
 
-        /** Snapshots [config] for a production attempt; throws [InvalidConfig] when any control would be disabled. */
+        /**
+         * Snapshots [config] for a production attempt; throws [InvalidConfig] when any control would be disabled. The role
+         * texts are frozen with it: by default every declared role's text version as [config] words it (D-38).
+         */
         @JvmStatic
-        public fun freeze(config: Config, harnessVersion: String = Astrolabe.VERSION, roleTextVersions: Map<String, String> = emptyMap()): AttemptConfig {
+        public fun freeze(config: Config, harnessVersion: String = Astrolabe.VERSION, roleTextVersions: Map<String, String> = RoleTexts.versions(config)): AttemptConfig {
             val attempt = AttemptConfig(harnessVersion, config, roleTextVersions)
             val violations = attempt.productionViolations()
             if (violations.isNotEmpty()) throw InvalidConfig(violations)

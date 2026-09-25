@@ -4,6 +4,7 @@ import io.astrolabe.auth.ExecutionMode
 import io.astrolabe.auth.RedactionConfig
 import io.astrolabe.auth.Stage
 import io.astrolabe.cell.Role
+import io.astrolabe.cell.RoleTexts
 import io.astrolabe.cell.Roles
 import io.astrolabe.id.Digest
 import io.astrolabe.kb.KbInjection
@@ -86,6 +87,7 @@ public data class Config(
                 if (widened.isNotEmpty()) add(ConfigViolation("roles.$name", "override widens the tool mask by ${widened.sorted()}; a role is never a security boundary and overrides change wording only (D-38)"))
                 if (role.permission.ordinal > default.permission.ordinal) add(ConfigViolation("roles.$name", "override raises the permission to ${role.permission}; the default is ${default.permission} (D-38)"))
                 if (role.packetKind != default.packetKind) add(ConfigViolation("roles.$name", "override changes the output packet; duties and packets are the SDK's (D-38)"))
+                RoleTexts.violations(role).forEach { add(ConfigViolation("roles.$name", "override text $it; a role text grants no authority and marks nothing complete (D-161)")) }
             }
         }
         if (profiles.isNotEmpty() || profileRoles.main.isNotEmpty()) {

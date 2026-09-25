@@ -135,7 +135,7 @@ class ResultPacketTest {
         val partial = assertIs<CellExit.Partial>(exit)
         assertEquals(PartialReason.CompletionStalled, partial.reason)
         assertEquals(PacketStatus.Partial, partial.packet.status)
-        assertEquals(listOf("no validator for the Investigation packet of role 'probe' (P2/P4)"), partial.packet.gaps)
+        assertEquals(listOf("no validator bound for the Investigation packet of role 'probe' (declared: Probe.completion; its dispatcher binds it)"), partial.packet.gaps)
         assertTrue(f.journal.events(JournalScope(f.ids.work, kinds = setOf(JournalKind.Nudge))).any { it.text.contains("completion refused at turn 1") })
     }
 

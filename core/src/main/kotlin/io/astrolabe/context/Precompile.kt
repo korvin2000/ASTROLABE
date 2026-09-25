@@ -2,6 +2,7 @@ package io.astrolabe.context
 
 import io.astrolabe.AttemptConfig
 import io.astrolabe.cell.Role
+import io.astrolabe.cell.RoleTexts
 import io.astrolabe.contract.Contract
 import io.astrolabe.contract.Increment
 import io.astrolabe.evidence.Journal
@@ -119,7 +120,8 @@ public data class Fingerprint(
             contractsIndex = inputs.contractsIndex?.let { Digest.ofUtf8(it).hex },
             skills = inputs.skills.map { "${it.id}@v${it.version}:${it.digest}" }.distinct().sorted(),
             role = role.name,
-            roleTextVersion = attempt.roleTextVersions[role.name] ?: role.policyTextVersion,
+            // The compiled role's own wording: the frozen attempt map already enters through `policy`.
+            roleTextVersion = RoleTexts.version(role),
             profile = profile.id,
             policy = attempt.fingerprint.hex,
             prime = Digest.ofUtf8(prime).hex,

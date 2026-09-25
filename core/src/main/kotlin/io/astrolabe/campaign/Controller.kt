@@ -41,6 +41,7 @@ import io.astrolabe.cell.Gates
 import io.astrolabe.cell.PacketStatus
 import io.astrolabe.cell.ResultPacket
 import io.astrolabe.cell.Role
+import io.astrolabe.cell.RoleTexts
 import io.astrolabe.cell.Roles
 import io.astrolabe.cell.SqliteCheckpoints
 import io.astrolabe.cell.TouchKind
@@ -120,6 +121,11 @@ import io.astrolabe.kb.KnowledgeUse
 import io.astrolabe.kb.Note
 import io.astrolabe.kb.NoteKind
 import io.astrolabe.kb.NoteStatus
+import io.astrolabe.kb.Skill
+import io.astrolabe.kb.SkillStore
+import io.astrolabe.kb.Skills
+import io.astrolabe.kb.StateChange
+import io.astrolabe.kb.StateChangeKind
 import io.astrolabe.kb.Notes
 import io.astrolabe.kb.Queue
 import io.astrolabe.kb.StoreKb
@@ -178,6 +184,7 @@ import io.astrolabe.workset.Workset
 import io.astrolabe.workspace.DirtyState
 import io.astrolabe.workspace.EnvFingerprint
 import io.astrolabe.workspace.EnvInputs
+import io.astrolabe.workspace.PathPattern
 import io.astrolabe.workspace.Preimages
 import io.astrolabe.workspace.ProtectedPaths
 import io.astrolabe.workspace.ShadowRef
@@ -635,7 +642,7 @@ public class Controller @JvmOverloads public constructor(
             val seeds = carry?.let { Seeds.render(it.seeds, c.registry::read) }
             val resume = resumeNote(c, ready, carry)
             val knowledge = knowledge(c, ready, Roles.implementing, model, touched = carry?.seeds.orEmpty().map { it.path }.toSet())
-            val inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) }, notes = knowledge.notes, contractsIndex = knowledge.contractsIndex)
+            val inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) }, notes = knowledge.notes, contractsIndex = knowledge.contractsIndex, skills = knowledge.skills)
             val pinned = listOfNotNull(resume, attempts.line(ready.id))
             val compiler = Compiler(model.estimator, c.attempt.config)
             // §6.6: a pre-compiled [K] is served for cell_end(next_increment) only, on a full-fingerprint and coverage match.
@@ -774,7 +781,7 @@ public class Controller @JvmOverloads public constructor(
             }
             // The next increment has no previous cell: no carry-forward, no seeds, no resume note (§6.2).
             val knowledge = knowledge(c, next, Roles.implementing, model)
-            val inputs = CompileInputs(currentVersion = { c.registry.version(it) }, notes = knowledge.notes, contractsIndex = knowledge.contractsIndex)
+            val inputs = CompileInputs(currentVersion = { c.registry.version(it) }, notes = knowledge.notes, contractsIndex = knowledge.contractsIndex, skills = knowledge.skills)
             val compiler = Compiler(model.estimator, c.attempt.config)
             precompile.start(scope, ids, fingerprint(c, contract, next, stamp, model, inputs, null, emptyList()), next.id, remaining) {
                 compiler.compile(next, contract, model.profile, Roles.implementing, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = inputs)
@@ -821,7 +828,7 @@ public class Controller @JvmOverloads public constructor(
         val contract = c.contract
         val planning = Increment(PLAN, contract.requirements.map { it.id }, contract.acceptance.map { it.id }, emptyList(), 0, title = "plan ${c.ids.work.value}")
         val knowledge = knowledge(c, planning, Roles.plan, model)
-        val planInputs = CompileInputs(notes = knowledge.notes, contractsIndex = knowledge.contractsIndex)
+        val planInputs = CompileInputs(notes = knowledge.notes, contractsIndex = knowledge.contractsIndex, skills = knowledge.skills)
         val compiler = Compiler(model.estimator, c.attempt.config)
         val routing = route(c, RoutingFunction.Plan, planning, model, null, compiler.compile(planning, contract, model.profile, Roles.plan, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = planInputs)) { profile ->
             compiler.compile(planning, contract, profile, Roles.plan, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = planInputs)
@@ -831,7 +838,8 @@ public class Controller @JvmOverloads public constructor(
         routing.refused?.let { return Transition.Stopped(CampaignOutcome.BudgetExhausted, it.reason) }
         val cellId = ContextId(idGen.next("cell"))
         val proposals = SqlitePlanProposals(c.store, idGen, clock)
-        val intake = CampaignProposals(proposals, SqliteSplitRequests(c.store, idGen, clock), { c.contracts.current(c.ids.work) }, { null }, { c.kb.contractAnchors() })
+        // The plan cell's own decisions travel with its packet: its register as last patched (handoff debt 1).
+        val intake = CampaignProposals(proposals, SqliteSplitRequests(c.store, idGen, clock), { c.contracts.current(c.ids.work) }, { SqliteRegisterVersions(c.store, clock).latest(cellId) }, { c.kb.contractAnchors() })
         val completion = io.astrolabe.cell.RoleCompletion.forRole(Roles.plan, mapOf(io.astrolabe.cell.PacketKind.PlanArtifacts to PlanPacketValidator.completion({ c.contract }, proposals, conAnchors = { c.kb.contractAnchors() })))
         val run = runCell(c, cellId, planning, Roles.plan, routing.model, authority, syntax, compiled, span, null, proposals = intake, completion = completion, inputs = planInputs)
         routing.selected?.let { router.record(it, outcomeOf(run.exit)) }
@@ -965,7 +973,7 @@ public class Controller @JvmOverloads public constructor(
         val seeds = carry?.let { Seeds.render(it.seeds, c.registry::read) }
         val resume = resumeNote(c, ready, carry)
         val knowledge = knowledge(c, ready, role, model, touched = carry?.seeds.orEmpty().map { it.path }.toSet())
-        val inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) }, notes = knowledge.notes, contractsIndex = knowledge.contractsIndex)
+        val inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) }, notes = knowledge.notes, contractsIndex = knowledge.contractsIndex, skills = knowledge.skills)
         val compiler = Compiler(model.estimator, config)
         val routing = route(c, if (ready.cells.isEmpty()) RoutingFunction.Implementing else RoutingFunction.Continuation, ready, model, null, compiler.compile(
             ready, contract, model.profile, role, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = inputs,
@@ -1079,7 +1087,7 @@ public class Controller @JvmOverloads public constructor(
      * priced once for its span.
      */
     /** What one compile carries from the base (§6.3, P4.1.3): the ranked notes under the `kbInjection` arm and the contracts index. */
-    private class Knowledge(val notes: List<Note>, val contractsIndex: String?, val log: String)
+    private class Knowledge(val notes: List<Note>, val contractsIndex: String?, val log: String, val skills: List<Skill> = emptyList())
 
     private fun knowledge(c: OpenedCampaign, increment: Increment, role: Role, model: CellModel, touched: Set<String> = emptySet()): Knowledge {
         val arm = c.attempt.config.flags.kbInjection
@@ -1097,8 +1105,15 @@ public class Controller @JvmOverloads public constructor(
             ranked.excluded + ranked.selected.filter { !it.mandatory }.map { InjectionExclusion(it.note.id, "ranked injection is off (kbInjection arm)") },
         )
         val index = if (contracts.isEmpty()) null else KbIndex.render(all, model.estimator).getValue("contracts.md")
-        c.journal.append(JournalEvent(idGen.next("ev"), c.ids, null, JournalKind.Boundary, refs = result.notes.map { it.id }, text = "kb ${arm.name.lowercase()} for ${increment.id}: ${result.log}", at = clock.instant()))
-        return Knowledge(result.notes, index, result.log)
+        // D-112/D-160: triggers are evaluated at the increment's opening (a StateChange), never per turn; the compiler
+        // applies the role's skill filter. The task's authority is the CON/ADR notes this compile carries.
+        val skillStore = SkillStore(c.store)
+        val admittedSkills = all.filter { it.kind == NoteKind.SKILL && it.status == NoteStatus.Admitted }.mapNotNull { skillStore.load(it) }
+        val opened = StateChange(StateChangeKind.IncrementOpened, (c.atlas.rows.map { it.path }.filter { p -> increment.writeScope.any { PathPattern.matches(it, p) } } + touched).distinct().sorted(), increment.title)
+        val skills = Skills.resolve(admittedSkills, opened, result.notes.filter { it.kind == NoteKind.CON || it.kind == NoteKind.ADR }.map { it.id }.toSet())
+        val skillLog = if (skills.active.isEmpty()) "" else " · skills ${skills.active.joinToString(", ") { it.id }}" + skills.conflicts.joinToString("") { " · ${it.line}" }
+        c.journal.append(JournalEvent(idGen.next("ev"), c.ids, null, JournalKind.Boundary, refs = result.notes.map { it.id }, text = "kb ${arm.name.lowercase()} for ${increment.id}: ${result.log}$skillLog", at = clock.instant()))
+        return Knowledge(result.notes, index, result.log, skills.active)
     }
 
     private suspend fun runCell(
@@ -1198,7 +1213,7 @@ public class Controller @JvmOverloads public constructor(
         val manifests = SqliteManifests(c.store, clock)
         val manifest = Manifest.of(idGen.next("manifest"), compiled, increment, contract, ids, model.profile, inputs, register?.version, boundary, model.effort.name.lowercase()).also { manifests.save(ids, it) }
         val ctx = CellContext(
-            ids = ids, role = role, contracts = c.contracts, model = model, tools = tools,
+            ids = ids, role = RoleTexts.worded(role, config.role(role.name)), contracts = c.contracts, model = model, tools = tools,
             workspace = CellWorkspace(c.workspace, c.registry, coherence, c.stamper, workset, c.checks, scheduler, c.atlas, checker),
             evidence = CellEvidence(c.journal, observations, aliases, receipts, c.intents, registerVersions, checkpoints, preimages),
             prime = c.prime, ledger = ledger, preexisting = compiled.k.ledger, config = config,
@@ -1259,7 +1274,9 @@ public class Controller @JvmOverloads public constructor(
      * with the runtime brief pinned in `[T]` — the parent's transcript never reaches it (D13).
      */
     private fun childCell(c: OpenedCampaign, increment: Increment, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?): ChildCell =
-        ChildCell { seat, role, completion, budget, brief ->
+        ChildCell { seat, declared, completion, budget, brief ->
+            // D-38: the frozen attempt configuration words the child's role; its mask and packet stay the caller's.
+            val role = RoleTexts.worded(declared, c.attempt.config.role(declared.name))
             val compiler = Compiler(model.estimator, c.attempt.config)
             fun compile(profile: io.astrolabe.provider.Profile) = compiler.compile(increment, c.contract, profile, role, c.prime, pinned = listOf(brief), maxOutputTokens = model.maxOutputTokens)
             // §11.1: a child is routed by its own function row, never by the parent's tier; an escalated tier is its floor.

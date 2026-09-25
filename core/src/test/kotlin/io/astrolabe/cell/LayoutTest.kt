@@ -86,7 +86,7 @@ class LayoutTest {
     fun `S carries the kernel contract, the mask, the evidence lines, the error policy, the data rule and the mode`() {
         val system = Layout.system(role, mask, ExecutionMode.TrustedLocal)
 
-        assertTrue(system.startsWith("astrolabe · role implementing · kernel/1 · roles/2 · error-policy/1\n"), system)
+        assertTrue(system.startsWith("astrolabe · role implementing · kernel/1 · roles/3 · error-policy/1\n"), system)
         Kernel.lines.forEachIndexed { index, line ->
             assertTrue(system.contains("${index + 1}. $line"), "kernel line ${index + 1} is missing")
         }

@@ -150,8 +150,9 @@ public data class Transcript @JvmOverloads constructor(
 public object Layout {
 
     /**
-     * The `[S]` text for [role] under [mask] and [mode]. Public because the same bytes are hashed into
-     * the attempt fingerprint and asserted by stability tests.
+     * The `[S]` text for [role] under [mask] and [mode]: the kernel contract for the implementing and writer roles,
+     * the role's own text and the shared kernel lines for every other role (§3.4, P4.4.6). Public because the same
+     * bytes are hashed into the attempt fingerprint and asserted by stability tests.
      */
     @JvmStatic
     public fun system(role: Role, mask: ToolMask, mode: ExecutionMode): String {
@@ -161,7 +162,10 @@ public object Layout {
             .append(" · ").append(role.policyTextVersion)
             .append(" · ").append(ErrorPolicy.VERSION).append('\n')
         for (line in role.personaLines) out.append(line).append('\n')
-        out.append(Kernel.render()).append('\n')
+        // Kernel contract scope note: Appendix A is implementing/writer policy only; every other role gets its own
+        // text (the persona lines above), the shared kernel lines and the shared evidence/error/data lines below.
+        if (role.packetKind == PacketKind.Result) out.append(Kernel.render()).append('\n')
+        else out.append(RoleTexts.shared.withIndex().joinToString("\n") { (index, line) -> "${index + 1}. $line" }).append('\n')
         if (role.duties.isNotEmpty()) out.append("duties: ").append(role.duties.joinToString(" · ")).append('\n')
         out.append("ask-back: ").append(if (role.askBack) "ask the parent" else "no parent to ask").append('\n')
         out.append("packet: ").append(role.packetKind.name).append('\n')

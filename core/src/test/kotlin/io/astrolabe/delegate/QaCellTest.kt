@@ -73,4 +73,16 @@ class QaCellTest {
         assertTrue(gaps.any { "artifact blob-missing is not a published blob" in it }, gaps.toString())
         assertTrue(gaps.any { "case-2: a decided case carries its screenshot or log" in it }, gaps.toString())
     }
+
+    @Test
+    fun `the QA packet parses at the boundary with the packet's binding and the cell's own receipts`() {
+        val text = """{"cases":[{"id":"case-1","entryPoint":{"surface":"cli","target":"app report --total"},"steps":["run it"],"expected":"total 10.05","observed":"total 10.05","passed":true,"artifacts":["blob-log-1"]},""" +
+            """{"id":"case-2","entryPoint":{"surface":"cli","target":"app report --total"},"expected":"no crash","passed":null}],"unresolved":["the browser surface is not reachable"]}"""
+        val parsed = assertIs<QaParsed.Parsed>(QaCell.parse(text, packet, listOf("rcpt-9"))).result
+        assertEquals(result(parsed.cases).copy(unresolved = listOf("the browser surface is not reachable")), parsed, "candidate, version and environment come from the packet")
+        assertNull(parsed.cases[1].passed, "an undecided case is an environment outcome")
+        assertEquals(emptyList(), QaCell.validate(parsed, packet, setOf("blob-log-1")::contains))
+        assertIs<QaParsed.Gaps>(QaCell.parse("""{"cases":[{"id":"x","expected":"y"}]}""", packet, emptyList()))
+        assertIs<QaParsed.Gaps>(QaCell.parse("no packet", packet, emptyList()))
+    }
 }
