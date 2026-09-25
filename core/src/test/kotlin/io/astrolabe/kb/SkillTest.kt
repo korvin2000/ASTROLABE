@@ -149,5 +149,14 @@ class SkillTest {
         val open = Skills.resolve(listOf(seed, migrate), change, authority = setOf("R-1"))
         assertEquals(listOf("SKILL-migrate", "SKILL-seed"), open.active.map { it.id })
         assertTrue("unresolved" in open.conflicts.single().line)
+
+        // P5.6.2 (D-112): the conflict reaches the implementing [K] as a mandatory line beside both skills.
+        val contract = contract()
+        val increment = ShapeSelector.single(contract).increments.single()
+        val ready = assertIs<Compiled.Ready>(
+            Compiler(estimator).compile(increment, contract, FakeProfiles.main, Roles.implementing, "repo: 1 files\n", inputs = CompileInputs(skills = open.active, skillConflicts = open.conflicts)),
+        )
+        assertTrue(ContextUnitId("skill.conflicts") in ready.selection.mandatoryIds)
+        assertTrue(ready.k.sections.any { open.conflicts.single().line in it.text }, ready.k.sections.joinToString("\n") { it.text })
     }
 }

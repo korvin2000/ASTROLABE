@@ -16,6 +16,7 @@ import io.astrolabe.kb.Note
 import io.astrolabe.kb.NoteKind
 import io.astrolabe.kb.NoteStatus
 import io.astrolabe.kb.Skill
+import io.astrolabe.kb.SkillConflict
 import io.astrolabe.kb.SkillView
 import io.astrolabe.kb.SkillViews
 import io.astrolabe.provider.Message
@@ -62,6 +63,8 @@ public data class CompileInputs @JvmOverloads constructor(
     val currentVersion: ((String) -> FileVersion?)? = null,
     /** Triggered, resolved skills (P4.3.1): each role view's core joins the mandatory set, its optional modules compete. */
     val skills: List<Skill> = emptyList(),
+    /** Overlaps [skills] resolution reported (§12.2, D-112): rendered into `[K]` beside the skills, never merged silently. */
+    val skillConflicts: List<SkillConflict> = emptyList(),
 )
 
 /**
@@ -186,10 +189,15 @@ public class Compiler(
             }
         }
         // §6.1, F06: a skill's prerequisites, invariants and mandatory modules are mandatory, charged to the total budget.
-        for (skill in inputs.skills.filter { "*" in role.skillFilter || it.id in role.skillFilter }.distinctBy { it.id }.sortedBy { it.id }) {
+        val allowedSkill = { id: String -> "*" in role.skillFilter || id in role.skillFilter }
+        for (skill in inputs.skills.filter { allowedSkill(it.id) }.distinctBy { it.id }.sortedBy { it.id }) {
             val view = skillViews.view(skill, role.name)
             add("skill.${skill.id}", "SKILL ${skill.id}@v${skill.version}", view.core, mandatory = true, ContextPriority.Skills)
             for (m in view.optional) add("skill.${skill.id}.${m.id}", "SKILL ${skill.id} module ${m.id}", SkillView.moduleText(m), mandatory = false, ContextPriority.Skills)
+        }
+        // D-112: a conflict between skills this role may see is part of the procedure it follows, so it is mandatory.
+        inputs.skillConflicts.filter { allowedSkill(it.first) || allowedSkill(it.second) }.map { it.line }.distinct().sorted().takeIf { it.isNotEmpty() }?.let { lines ->
+            add("skill.conflicts", "SKILL conflicts", lines.joinToString("\n"), mandatory = true, ContextPriority.Skills)
         }
         // D-42: an admitted CAL note replaces the P2 statistics block; never both.
         if (ContextPart.CalibrationPrior in role.contextView && !calibrationNote) {

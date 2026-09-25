@@ -122,6 +122,7 @@ import io.astrolabe.kb.Note
 import io.astrolabe.kb.NoteKind
 import io.astrolabe.kb.NoteStatus
 import io.astrolabe.kb.Skill
+import io.astrolabe.kb.SkillConflict
 import io.astrolabe.kb.SkillStore
 import io.astrolabe.kb.Skills
 import io.astrolabe.kb.StateChange
@@ -642,7 +643,7 @@ public class Controller @JvmOverloads public constructor(
             val seeds = carry?.let { Seeds.render(it.seeds, c.registry::read) }
             val resume = resumeNote(c, ready, carry)
             val knowledge = knowledge(c, ready, Roles.implementing, model, touched = carry?.seeds.orEmpty().map { it.path }.toSet())
-            val inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) }, notes = knowledge.notes, contractsIndex = knowledge.contractsIndex, skills = knowledge.skills)
+            val inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) }, notes = knowledge.notes, contractsIndex = knowledge.contractsIndex, skills = knowledge.skills, skillConflicts = knowledge.skillConflicts)
             val pinned = listOfNotNull(resume, attempts.line(ready.id))
             val compiler = Compiler(model.estimator, c.attempt.config)
             // §6.6: a pre-compiled [K] is served for cell_end(next_increment) only, on a full-fingerprint and coverage match.
@@ -781,7 +782,7 @@ public class Controller @JvmOverloads public constructor(
             }
             // The next increment has no previous cell: no carry-forward, no seeds, no resume note (§6.2).
             val knowledge = knowledge(c, next, Roles.implementing, model)
-            val inputs = CompileInputs(currentVersion = { c.registry.version(it) }, notes = knowledge.notes, contractsIndex = knowledge.contractsIndex, skills = knowledge.skills)
+            val inputs = CompileInputs(currentVersion = { c.registry.version(it) }, notes = knowledge.notes, contractsIndex = knowledge.contractsIndex, skills = knowledge.skills, skillConflicts = knowledge.skillConflicts)
             val compiler = Compiler(model.estimator, c.attempt.config)
             precompile.start(scope, ids, fingerprint(c, contract, next, stamp, model, inputs, null, emptyList()), next.id, remaining) {
                 compiler.compile(next, contract, model.profile, Roles.implementing, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = inputs)
@@ -828,7 +829,7 @@ public class Controller @JvmOverloads public constructor(
         val contract = c.contract
         val planning = Increment(PLAN, contract.requirements.map { it.id }, contract.acceptance.map { it.id }, emptyList(), 0, title = "plan ${c.ids.work.value}")
         val knowledge = knowledge(c, planning, Roles.plan, model)
-        val planInputs = CompileInputs(notes = knowledge.notes, contractsIndex = knowledge.contractsIndex, skills = knowledge.skills)
+        val planInputs = CompileInputs(notes = knowledge.notes, contractsIndex = knowledge.contractsIndex, skills = knowledge.skills, skillConflicts = knowledge.skillConflicts)
         val compiler = Compiler(model.estimator, c.attempt.config)
         val routing = route(c, RoutingFunction.Plan, planning, model, null, compiler.compile(planning, contract, model.profile, Roles.plan, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = planInputs)) { profile ->
             compiler.compile(planning, contract, profile, Roles.plan, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = planInputs)
@@ -973,7 +974,7 @@ public class Controller @JvmOverloads public constructor(
         val seeds = carry?.let { Seeds.render(it.seeds, c.registry::read) }
         val resume = resumeNote(c, ready, carry)
         val knowledge = knowledge(c, ready, role, model, touched = carry?.seeds.orEmpty().map { it.path }.toSet())
-        val inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) }, notes = knowledge.notes, contractsIndex = knowledge.contractsIndex, skills = knowledge.skills)
+        val inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) }, notes = knowledge.notes, contractsIndex = knowledge.contractsIndex, skills = knowledge.skills, skillConflicts = knowledge.skillConflicts)
         val compiler = Compiler(model.estimator, config)
         val routing = route(c, if (ready.cells.isEmpty()) RoutingFunction.Implementing else RoutingFunction.Continuation, ready, model, null, compiler.compile(
             ready, contract, model.profile, role, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = inputs,
@@ -1087,7 +1088,7 @@ public class Controller @JvmOverloads public constructor(
      * priced once for its span.
      */
     /** What one compile carries from the base (§6.3, P4.1.3): the ranked notes under the `kbInjection` arm and the contracts index. */
-    private class Knowledge(val notes: List<Note>, val contractsIndex: String?, val log: String, val skills: List<Skill> = emptyList())
+    private class Knowledge(val notes: List<Note>, val contractsIndex: String?, val log: String, val skills: List<Skill> = emptyList(), val skillConflicts: List<SkillConflict> = emptyList())
 
     private fun knowledge(c: OpenedCampaign, increment: Increment, role: Role, model: CellModel, touched: Set<String> = emptySet()): Knowledge {
         val arm = c.attempt.config.flags.kbInjection
@@ -1113,7 +1114,7 @@ public class Controller @JvmOverloads public constructor(
         val skills = Skills.resolve(admittedSkills, opened, result.notes.filter { it.kind == NoteKind.CON || it.kind == NoteKind.ADR }.map { it.id }.toSet())
         val skillLog = if (skills.active.isEmpty()) "" else " · skills ${skills.active.joinToString(", ") { it.id }}" + skills.conflicts.joinToString("") { " · ${it.line}" }
         c.journal.append(JournalEvent(idGen.next("ev"), c.ids, null, JournalKind.Boundary, refs = result.notes.map { it.id }, text = "kb ${arm.name.lowercase()} for ${increment.id}: ${result.log}$skillLog", at = clock.instant()))
-        return Knowledge(result.notes, index, result.log, skills.active)
+        return Knowledge(result.notes, index, result.log, skills.active, skills.conflicts)
     }
 
     private suspend fun runCell(
