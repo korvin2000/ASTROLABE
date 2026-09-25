@@ -1,0 +1,41 @@
+public final class io/astrolabe/index/treesitter/Grammar : java/lang/Enum {
+	public static final field Companion Lio/astrolabe/index/treesitter/Grammar$Companion;
+	public static final field Java Lio/astrolabe/index/treesitter/Grammar;
+	public static final field JavaScript Lio/astrolabe/index/treesitter/Grammar;
+	public static final field Kotlin Lio/astrolabe/index/treesitter/Grammar;
+	public static final field Python Lio/astrolabe/index/treesitter/Grammar;
+	public static final field Tsx Lio/astrolabe/index/treesitter/Grammar;
+	public static final field TypeScript Lio/astrolabe/index/treesitter/Grammar;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getExtensions ()Ljava/util/Set;
+	public final fun getLanguage ()Lio/astrolabe/atlas/Language;
+	public final fun getSyntaxComplete ()Z
+	public static final fun of (Ljava/lang/String;)Lio/astrolabe/index/treesitter/Grammar;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/index/treesitter/Grammar;
+	public static fun values ()[Lio/astrolabe/index/treesitter/Grammar;
+}
+
+public final class io/astrolabe/index/treesitter/Grammar$Companion {
+	public final fun of (Ljava/lang/String;)Lio/astrolabe/index/treesitter/Grammar;
+}
+
+public final class io/astrolabe/index/treesitter/TreeSitterIndex : io/astrolabe/atlas/OutlineSource, io/astrolabe/tool/edit/SyntaxCheck, java/lang/AutoCloseable {
+	public fun <init> (Lio/astrolabe/atlas/Atlas;)V
+	public fun <init> (Lio/astrolabe/atlas/Atlas;Lio/astrolabe/workspace/WorkspacePath;)V
+	public fun <init> (Lio/astrolabe/atlas/Atlas;Lio/astrolabe/workspace/WorkspacePath;Lio/astrolabe/os/search/Search;)V
+	public synthetic fun <init> (Lio/astrolabe/atlas/Atlas;Lio/astrolabe/workspace/WorkspacePath;Lio/astrolabe/os/search/Search;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun check (Ljava/lang/String;Ljava/nio/file/Path;Lio/astrolabe/atlas/Language;)Lio/astrolabe/tool/edit/SyntaxResult;
+	public fun close ()V
+	public final fun def (Ljava/lang/String;)Ljava/util/List;
+	public final fun getAcceptedExtensions ()Ljava/util/Set;
+	public final fun getAtlas ()Lio/astrolabe/atlas/Atlas;
+	public final fun getDegradation ()Ljava/lang/String;
+	public final fun getTier ()Lio/astrolabe/atlas/IndexTier;
+	public final fun importGraph (Lio/astrolabe/id/WorkspaceId;)Lio/astrolabe/atlas/ImportGraph;
+	public fun outline (Ljava/lang/String;)Lio/astrolabe/atlas/Outline;
+	public final fun refs (Ljava/lang/String;)Lio/astrolabe/atlas/Refs;
+	public final fun refs (Ljava/lang/String;J)Lio/astrolabe/atlas/Refs;
+	public final fun refs (Ljava/lang/String;JI)Lio/astrolabe/atlas/Refs;
+	public static synthetic fun refs$default (Lio/astrolabe/index/treesitter/TreeSitterIndex;Ljava/lang/String;JIILjava/lang/Object;)Lio/astrolabe/atlas/Refs;
+}
+
