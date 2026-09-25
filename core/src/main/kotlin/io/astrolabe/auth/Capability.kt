@@ -76,6 +76,14 @@ public enum class RefusalReason(public val wire: String) {
     StageNotImplemented("stage-not-implemented"),
     ConfinementUnavailable("confinement-unavailable"),
     ProtectedContent("protected-content"),
+    /** A publication of a candidate whose L0–L2 checks are not green at its current stamp (§14.2). */
+    UnverifiedCandidate("unverified-candidate"),
+    /** A publication stage asked for before the stage below it was reached (§14.2). */
+    StageOutOfOrder("stage-out-of-order"),
+    /** The authority did not approve the D-class grant, or its decision answered another request or revision. */
+    NotApproved("not-approved"),
+    /** A harness commit aimed at the branch the user has checked out (§20.1 TRACE rejection). */
+    UserBranch("user-branch"),
     ;
 
     override fun toString(): String = wire
