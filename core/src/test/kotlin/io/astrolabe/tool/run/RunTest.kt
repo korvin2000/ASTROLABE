@@ -33,11 +33,14 @@ import io.astrolabe.id.Identities
 import io.astrolabe.id.WorkId
 import io.astrolabe.id.WorkspaceId
 import io.astrolabe.os.ChildCommands
+import io.astrolabe.os.Command
+import io.astrolabe.os.IdentityKey
 import io.astrolabe.os.LocalOs
 import io.astrolabe.os.Os
 import io.astrolabe.os.OwnerToken
 import io.astrolabe.os.Poll
 import io.astrolabe.os.Proc
+import io.astrolabe.os.ProcStatus
 import io.astrolabe.provider.ToolCall as ProviderCall
 import io.astrolabe.store.Store
 import io.astrolabe.tool.EffectClass
@@ -116,7 +119,7 @@ class RunTest {
         repo.close()
     }
 
-    private fun runner(os: Os = this.os, authority: Authority = AutonomousAuthority(), config: Config = Config(), hostSets: Map<String, CapabilitySet> = emptyMap()) = Run(
+    private fun runner(os: Os = this.os, authority: Authority = AutonomousAuthority(), config: Config = Config(), hostSets: Map<String, CapabilitySet> = emptyMap(), ids: Identities = this.ids, workspace: Workspace = this.workspace) = Run(
         workspace, registry, stamper, TrustedLocalRunner(os), os, intents, SqliteHandles(store, clock), SqliteObservations(store, clock), SqliteAliases(store, clock),
         store.blobs, Redaction(config.redaction), HeuristicEstimator(), idGen, ids, contracts, authority, config, clock, stateRoot.resolve("logs"), hostSets = hostSets,
     )
@@ -280,6 +283,34 @@ class RunTest {
     }
 
     @Test
+    fun `lease expiry during D-class approval prevents process dispatch`() = runTest {
+        contracts.amendByUser(ids.work, "allow git ref mutation") { it.copy(authorization = it.authorization.copy(capabilitySet = "wide")) }
+        var live = true
+        var spawned = 0
+        val chunked = ChunkedLogOs()
+        val tracked = object : Os by chunked {
+            override fun spawn(spec: io.astrolabe.os.SpawnSpec): Proc { spawned++; return chunked.spawn(spec) }
+        }
+        val approving = object : Authority by AutonomousAuthority() {
+            override suspend fun approve(request: DClassRequest): Decision {
+                live = false
+                return Decision(request.id, request.contractRevision, true, "approved after lease expiry")
+            }
+        }
+        val tool = runner(os = tracked, authority = approving, hostSets = mapOf("wide" to CapabilitySet("wide", Capability.entries.toSet())))
+        tool.beforeDispatch = { check(live) { "dispatch lease expired" } }
+
+        try {
+            run("""{"argv":["git","push","origin","main"],"intent":"publish"}""", tool)
+        } catch (refused: IllegalStateException) {
+            assertEquals("dispatch lease expired", refused.message)
+        }
+
+        assertFalse(live, "the authority must have returned its approval")
+        assertEquals(0, spawned, "an approval cannot restore an expired dispatch lease")
+    }
+
+    @Test
     fun `a lost observation is unknown_outcome with an open intent and no relaunch (FX-24)`() = runTest {
         var spawned = 0
         val flaky = object : Os by os {
@@ -293,6 +324,86 @@ class RunTest {
         assertEquals(IntentStatus.Unknown, intents.get("intent-1")!!.status)
         assertEquals(listOf("intent-1"), intents.open().map { it.intentId }, "reconciliation input at resume")
         assertEquals(1, spawned, "never relaunched")
+    }
+
+    @Test
+    fun `foreground run persists all terminal log chunks including the final failure`() = runTest {
+        val chunked = ChunkedLogOs()
+
+        val result = run("""{"cmd":"echo fixture"}""", runner(os = chunked))
+
+        assertEquals("failed", status(result))
+        val log = store.blobs.get(io.astrolabe.id.Digest(result.header!!.runtime.artifactRefs.first()))
+        kotlin.test.assertContentEquals(chunked.output, log)
+        assertTrue(result.body.contains("FINAL FAILURE"), result.body)
+        assertTrue(result.header!!.runtime.captureComplete)
+    }
+
+    @Test
+    fun `poll and cancel deny a handle owned by another work before accessing its process`() = runTest {
+        assertHandleAccessDenied(ids.copy(work = WorkId("W-2")), workspace)
+    }
+
+    @Test
+    fun `poll and cancel deny a handle owned by another workspace before accessing its process`() = runTest {
+        assertHandleAccessDenied(ids, Workspace(WorkspaceId("ws-2"), repo.root, repo.git))
+    }
+
+    private suspend fun assertHandleAccessDenied(caller: Identities, callerWorkspace: Workspace) {
+        val handle = savedHandle()
+        var processAccesses = 0
+        val tracked = object : Os by os {
+            override fun reattach(proc: Proc): Proc { processAccesses++; return proc }
+            override fun poll(proc: Proc, sinceCursorBytes: Long, observationTimeoutSeconds: Long): Poll {
+                processAccesses++
+                return Poll("private campaign output".toByteArray(), sinceCursorBytes + 23, ProcStatus.Running, false)
+            }
+            override fun terminate(proc: Proc): Proc { processAccesses++; return proc.copy(status = ProcStatus.Cancelled) }
+        }
+        val callerRun = runner(os = tracked, ids = caller, workspace = callerWorkspace)
+
+        for (operation in listOf("poll", "cancel")) {
+            val result = run("""{"op":"$operation","handle":"${handle.handleId}"}""", callerRun)
+
+            assertEquals("denied", status(result), operation)
+            assertFalse(result.body.contains("private campaign output"), operation)
+            assertEquals(0, processAccesses, "$operation must authorize before process or log access")
+            assertEquals(handle, SqliteHandles(store, clock).get(handle.handleId), operation)
+        }
+    }
+
+    @Test
+    fun `another attempt of the same work and workspace can poll and cancel a retained handle`() = runTest {
+        val handle = savedHandle()
+        var terminations = 0
+        val resumedOs = object : Os by os {
+            override fun reattach(proc: Proc): Proc = proc
+            override fun poll(proc: Proc, sinceCursorBytes: Long, observationTimeoutSeconds: Long): Poll {
+                val output = "resumed campaign output".toByteArray()
+                return Poll(output, sinceCursorBytes + output.size, ProcStatus.Running, false)
+            }
+            override fun terminate(proc: Proc): Proc { terminations++; return proc.copy(status = ProcStatus.Cancelled) }
+        }
+        val resumed = runner(os = resumedOs, ids = ids.copy(attempt = AttemptId("a2")))
+
+        val polled = run("""{"op":"poll","handle":"${handle.handleId}"}""", resumed)
+        assertEquals("running", status(polled))
+        assertTrue(polled.body.contains("resumed campaign output"))
+        assertTrue(SqliteHandles(store, clock).get(handle.handleId)!!.cursor > handle.cursor)
+
+        val cancelled = run("""{"op":"cancel","handle":"${handle.handleId}"}""", resumed)
+        assertEquals("cancelled", status(cancelled))
+        assertEquals(1, terminations)
+        assertEquals("cancelled", SqliteHandles(store, clock).get(handle.handleId)!!.status)
+    }
+
+    private fun savedHandle(): Handle {
+        val action = "retained-action"
+        val alias = SqliteAliases(store, clock).allocate(ids.work, action, "result", ids.context, workspace.id)
+        val proc = Proc(42, 1000, IdentityKey(42, 1000), token, stateRoot.resolve("retained.log").toString(), 0,
+            ProcStatus.Running, Command.Argv(listOf("echo", "retained")), repo.root.toString())
+        return Handle("retained-handle", ids, action, alias.text, listOf("echo", "retained"), false, null, proc,
+            "running", 0, stamper.report().candidateId.digest.hex).also { SqliteHandles(store, clock).save(it) }
     }
 
     @Test

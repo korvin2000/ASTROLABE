@@ -21,13 +21,14 @@ public object Executions {
         var cursor = 0L
         val output = java.io.ByteArrayOutputStream()
         return try {
-            while (!current.status.isTerminal) {
-                val poll = os.poll(current, cursor, minOf(sliceSeconds, timeoutSeconds))
+            while (true) {
+                val poll = os.poll(current, cursor, if (current.status.isTerminal) 0 else minOf(sliceSeconds, timeoutSeconds))
                 output.write(poll.newBytes)
+                if (poll.newBytes.isNotEmpty() && poll.nextCursorBytes <= cursor) return Observed(current, output.toByteArray(), lost = true)
                 cursor = poll.nextCursorBytes
                 current = current.copy(status = poll.status)
+                if (current.status.isTerminal && poll.newBytes.isEmpty()) break
             }
-            output.write(os.poll(current, cursor, 0).newBytes)
             Observed(current, output.toByteArray(), lost = false)
         } catch (failure: IOException) {
             Observed(current, output.toByteArray(), lost = true)

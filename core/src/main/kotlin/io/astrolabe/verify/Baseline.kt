@@ -153,6 +153,7 @@ public class Baseline(
     private val envAllowlist: Set<String> = RedactionConfig.DEFAULT_ENV_ALLOWLIST,
     private val scratch: ScratchPolicy = ScratchPolicy(),
 ) {
+    internal var beforeDispatch: () -> Unit = {}
     public suspend fun run(check: Check, contractVersion: Int, s0: CandidateId, timeoutSeconds: Long = 600): BaselineResult {
         require(timeoutSeconds > 0) { "timeoutSeconds must be positive" }
         val command = requireNotNull(check.command) { "check ${check.id} declares no command" }
@@ -179,39 +180,29 @@ public class Baseline(
         Files.createDirectories(logsDir)
         val spec = SpawnSpec(Command.Argv(command.argv), cwd, logsDir.resolve("baseline-${check.id}-$actionId.log"), EnvPolicy(inheritedNames = envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")), timeoutSeconds)
         var proc = try {
+            beforeDispatch()
             runner.start(spec)
         } catch (failure: IOException) {
             limits += Limit("runner", "cannot start ${command.argv.first()}: ${failure.message}")
             val receipt = receipt(receiptId, check, contractVersion, s0, command.argv, command.cwd, null, Outcome.Unavailable, null, TestedInputs(inputs, InputStability.Isolated), null, limits)
             return BaselineResult(receipt, null, dir, materialized)
         }
-        val output = java.io.ByteArrayOutputStream()
-        var cursor = 0L
-        var lost = false
-        try {
-            while (!proc.status.isTerminal) {
-                val poll = os.poll(proc, cursor, minOf(POLL_SLICE_SECONDS, timeoutSeconds))
-                output.write(poll.newBytes)
-                cursor = poll.nextCursorBytes
-                proc = proc.copy(status = poll.status)
-            }
-            output.write(os.poll(proc, cursor, 0).newBytes)
-        } catch (failure: IOException) {
-            lost = true
-            limits += Limit("observation", "the observation was lost: ${failure.message}")
-        }
+        val observed = io.astrolabe.tool.run.Executions.observe(os, proc, POLL_SLICE_SECONDS, timeoutSeconds)
+        proc = observed.proc
+        val lost = observed.lost
+        if (lost) limits += Limit("observation", "the process observation was lost; reconcile before retry")
 
         // D-45 `isolated`: the exported candidate is verified against its manifest after the run as well.
         val after = snapshot(dir)
         val mutated = (before.keys + after.keys).filter { before[it] != after[it] }.toSet()
         if (mutated.isNotEmpty()) limits += Limit("input_mutation", "the suite changed its own inputs in the candidate: ${mutated.sorted().joinToString(", ")}; the receipt cannot certify them")
-        val redacted = redaction.applyBytes(output.toByteArray(), ContentClass.ReusableEvidence)
+        val redacted = redaction.applyBytes(observed.output, ContentClass.ReusableEvidence)
         val blob = blobs.put(redacted.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
         val alias = aliases.allocate(ids.work, receiptId, "receipt", ids.context, null).text
         val capture = RunCapture(
             actionId = actionId, argv = command.argv, shell = false, cwd = command.cwd,
             exitCode = (proc.status as? ProcStatus.Exited)?.exitCode, timedOut = proc.status == ProcStatus.DeadlineExceeded,
-            output = output.toByteArray(), captureComplete = !lost && proc.status !is ProcStatus.Lost,
+            output = observed.output, captureComplete = !lost && proc.status !is ProcStatus.Lost,
             reports = reports(dir, started, actionId), checkId = check.id, selector = check.selector.toString(),
         )
         val shaped = Shapers.shape(capture, ShapeBudget(estimator = estimator, recallAlias = alias))

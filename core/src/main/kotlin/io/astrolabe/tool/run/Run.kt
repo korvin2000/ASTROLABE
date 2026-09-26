@@ -134,6 +134,7 @@ public class Run(
     /** The generated tools active at this attempt's boundary (§12.2); `run(["tool:<name>", …])` resolves only against it. */
     private val tools: ToolSet = ToolSet.EMPTY,
 ) : ToolExecutor {
+    internal var beforeDispatch: () -> Unit = {}
     init {
         require(ids.context != null) { "run runs inside a cell: ids.context is its lineage" }
         require(pollSliceSeconds > 0) { "pollSliceSeconds must be positive" }
@@ -202,7 +203,7 @@ public class Run(
             journal = intents,
             intent = intent,
             reserve = { true }, // §8.1 reserve enforcement arrives in P1.7.6; the turn's budgets are the dispatcher's.
-            dispatch = { launch(spec, args) },
+            dispatch = { beforeDispatch(); launch(spec, args) },
             persist = { launch ->
                 val bytes = when (launch) {
                     is Launch.Finished -> launch.output
@@ -302,7 +303,7 @@ public class Run(
             journal = intents,
             intent = intent,
             reserve = { true },
-            dispatch = { client.call(entry.mount.server, entry.tool.name, arguments) },
+            dispatch = { beforeDispatch(); client.call(entry.mount.server, entry.tool.name, arguments) },
             persist = { reply ->
                 logBlob = blobs.put(redaction.applyBytes(reply.content.toByteArray(Charsets.UTF_8), ContentClass.ReusableEvidence).text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
             },
@@ -339,18 +340,9 @@ public class Run(
             val first = os.poll(proc, 0, 0)
             return Launch.Background(proc.copy(status = first.status), first.newBytes, first.nextCursorBytes)
         }
-        var current = proc
-        var cursor = 0L
-        val output = java.io.ByteArrayOutputStream()
-        while (!current.status.isTerminal) {
-            val poll = os.poll(current, cursor, minOf(pollSliceSeconds, args.timeout.toLong() + 5))
-            output.write(poll.newBytes)
-            cursor = poll.nextCursorBytes
-            current = current.copy(status = poll.status)
-        }
-        val tail = os.poll(current, cursor, 0)
-        output.write(tail.newBytes)
-        return Launch.Finished(current, output.toByteArray())
+        val observed = Executions.observe(os, proc, pollSliceSeconds, args.timeout.toLong() + 5)
+        if (observed.lost) throw IOException("process observation lost; reconcile before retry")
+        return Launch.Finished(observed.proc, observed.output)
     }
 
     /** Stamp diff, coherence announcements, reclassification and shaping once a process is terminal (§9.4). */
@@ -410,7 +402,7 @@ public class Run(
     // ------------------------------------------------------------ poll · cancel
 
     private fun poll(args: RunArgs, context: TurnContext): ToolOutcome {
-        val handle = handles.get(args.handle!!) ?: return refused(args, Outcome.Denied, "no handle '${args.handle}' in this campaign")
+        val handle = ownedHandle(args.handle!!) ?: return refused(args, Outcome.Denied, "no handle '${args.handle}' in this campaign workspace")
         val proc = os.reattach(handle.proc)
         val since = args.since ?: handle.cursor
         val poll = try {
@@ -465,7 +457,7 @@ public class Run(
     }
 
     private fun cancel(args: RunArgs): ToolOutcome {
-        val handle = handles.get(args.handle!!) ?: return refused(args, Outcome.Denied, "no handle '${args.handle}' in this campaign")
+        val handle = ownedHandle(args.handle!!) ?: return refused(args, Outcome.Denied, "no handle '${args.handle}' in this campaign workspace")
         val proc = try {
             os.terminate(os.reattach(handle.proc))
         } catch (failure: IOException) {
@@ -478,6 +470,11 @@ public class Run(
     }
 
     // ---------------------------------------------------------------- render
+
+    /** Attempts may resume their campaign's handles; another work or workspace has no authority over them. */
+    private fun ownedHandle(id: String): Handle? = handles.get(id)?.takeIf {
+        it.ids.work == ids.work && aliases.byCanonical(ids.work, it.actionId)?.workspace == workspace.id
+    }
 
     private fun refused(args: RunArgs, status: Outcome, detail: String): ToolOutcome {
         val actionId = idGen.next("act")

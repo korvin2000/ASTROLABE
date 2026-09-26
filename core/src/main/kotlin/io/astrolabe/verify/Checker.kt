@@ -21,6 +21,7 @@ import io.astrolabe.store.BlobStore
 import io.astrolabe.tool.run.DiagnosticsParser
 import io.astrolabe.tool.run.DiagnosticTool
 import io.astrolabe.tool.run.GenericShaper
+import io.astrolabe.tool.run.Executions
 import io.astrolabe.tool.run.Runner
 import io.astrolabe.tool.run.announceMoved
 import io.astrolabe.workspace.Stamper
@@ -184,23 +185,12 @@ public class Checker(
         } catch (failure: IOException) {
             return CheckerResult(check.id, idGen.next("chk"), check.kind, check.selector, Outcome.Unavailable, emptyList(), null, null, before.candidateId, before.candidateId, null, elapsed(started), touched, emptyList(), reason = "cannot start ${argv.first()}: ${failure.message}")
         }
-        val output = java.io.ByteArrayOutputStream()
-        var cursor = 0L
-        val outcomeOverride: Outcome? = try {
-            while (!proc.status.isTerminal) {
-                val poll = os.poll(proc, cursor, minOf(POLL_SLICE_SECONDS, remainingSeconds + 1))
-                output.write(poll.newBytes)
-                cursor = poll.nextCursorBytes
-                proc = proc.copy(status = poll.status)
-            }
-            output.write(os.poll(proc, cursor, 0).newBytes)
-            null
-        } catch (failure: IOException) {
-            Outcome.UnknownOutcome
-        }
+        val observed = Executions.observe(os, proc, POLL_SLICE_SECONDS, remainingSeconds + 1)
+        proc = observed.proc
+        val outcomeOverride = if (observed.lost) Outcome.UnknownOutcome else null
         val after = stamper.report()
         val changed = announceMoved(registry, before, after, "check ${check.id}")
-        val text = redaction.applyBytes(output.toByteArray(), ContentClass.ReusableEvidence).text
+        val text = redaction.applyBytes(observed.output, ContentClass.ReusableEvidence).text
         val blob = blobs.put(text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
         val exit = (proc.status as? ProcStatus.Exited)?.exitCode
         val parsed = DiagnosticsParser.parse(argv, text, exit)
