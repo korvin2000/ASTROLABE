@@ -283,9 +283,12 @@ public class WorkspacePath private constructor(
         if (userPath.startsWith("/") || userPath.startsWith("\\") || DRIVE.containsMatchIn(userPath)) {
             return refuse(RejectionReason.Absolute, "'$userPath' is absolute")
         }
-        if (runCatching { Path.of(userPath).isAbsolute }.getOrDefault(false)) {
-            return refuse(RejectionReason.Absolute, "'$userPath' is absolute")
+        val parsed = try {
+            Path.of(userPath)
+        } catch (_: java.nio.file.InvalidPathException) {
+            return refuse(RejectionReason.IllegalCharacter, "path contains a platform-invalid character")
         }
+        if (parsed.isAbsolute) return refuse(RejectionReason.Absolute, "'$userPath' is absolute")
         val segments = userPath.replace('\\', '/').split('/').filter { it.isNotEmpty() && it != "." }
         if (segments.any { it == ".." }) {
             return refuse(RejectionReason.Traversal, "'$userPath' contains a '..' segment")

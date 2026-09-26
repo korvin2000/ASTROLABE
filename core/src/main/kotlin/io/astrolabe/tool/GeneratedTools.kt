@@ -4,6 +4,7 @@ import io.astrolabe.auth.Capability
 import io.astrolabe.auth.Classification
 import io.astrolabe.id.AttemptId
 import io.astrolabe.id.Digest
+import java.util.Collections
 
 /** The §12.2 lifecycle of a generated tool: an ephemeral script, a project tool, a global tool. */
 public enum class ToolLevel(public val wire: String) {
@@ -125,8 +126,9 @@ public class ToolRegistry {
         val expected = (history.lastOrNull()?.version ?: 0) + 1
         val gaps = GeneratedTools.gaps(tool) + listOfNotNull("${tool.name} is at v${expected - 1}: the next version is v$expected".takeIf { tool.version != expected })
         if (gaps.isNotEmpty()) return ToolRegistration.Refused(gaps)
-        versions.getOrPut(tool.name) { ArrayList() } += tool
-        return ToolRegistration.Registered(tool)
+        val frozen = tool.frozen()
+        versions.getOrPut(tool.name) { ArrayList() } += frozen
+        return ToolRegistration.Registered(frozen)
     }
 
     /** Every recorded version of [name], oldest first. */
@@ -144,11 +146,11 @@ public class ToolRegistry {
 
 /** The generated tools one attempt runs with (§12.2): frozen at its boundary, listed by `look(catalog)`. */
 public class ToolSet(public val attempt: AttemptId?, tools: Collection<GeneratedTool>) {
-    private val byProgram: Map<String, GeneratedTool> = tools.sortedBy { it.name }.associateBy { it.program }
+    private val byProgram: Map<String, GeneratedTool> = tools.map { it.frozen() }.sortedBy { it.name }.associateBy { it.program }
 
-    public val lines: List<String> = byProgram.values.map { it.line }
+    public val lines: List<String> = Collections.unmodifiableList(byProgram.values.map { it.line })
 
-    public val digest: Digest = Digest.ofUtf8(byProgram.values.joinToString("\n") { "${it.program}@v${it.version}\u0000${it.level}\u0000${it.effects}\u0000${it.script}\u0000${it.inputSchema}" })
+    public val digest: Digest = Digest.ofUtf8(byProgram.values.joinToString("\n") { "${it.program}@v${it.version}\u0000${it.level}\u0000${it.effects}\u0000${it.script.joinToString("") { arg -> "${arg.length}:$arg" }}\u0000${it.capabilities.sortedBy { capability -> capability.name }}\u0000${it.inputSchema}" })
 
     /** The active tool `tool:<name>` names, or `null` when none was active at this attempt's boundary. */
     public fun resolve(program: String): GeneratedTool? = byProgram[program.trim()]
@@ -158,3 +160,9 @@ public class ToolSet(public val attempt: AttemptId?, tools: Collection<Generated
         public val EMPTY: ToolSet = ToolSet(null, emptyList())
     }
 }
+
+private fun GeneratedTool.frozen(): GeneratedTool = copy(
+    script = Collections.unmodifiableList(ArrayList(script)),
+    capabilities = Collections.unmodifiableSet(LinkedHashSet(capabilities)),
+    tests = Collections.unmodifiableList(ArrayList(tests)),
+)

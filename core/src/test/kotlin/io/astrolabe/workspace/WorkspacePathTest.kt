@@ -37,6 +37,14 @@ class WorkspacePathTest {
     // ----------------------------------------------------------- lexical form
 
     @Test
+    fun `platform-invalid filenames return typed refusals`() {
+        val invalid = "src/illegal<name>.py"
+        if (runCatching { Path.of(invalid) }.isFailure) {
+            assertReason(RejectionReason.IllegalCharacter, paths.resolve(invalid, Intent.Read))
+        }
+    }
+
+    @Test
     fun `traversal and absolute escapes are refused by name`() {
         assertReason(RejectionReason.Traversal, paths.resolve("../x", Intent.Read))
         assertReason(RejectionReason.Traversal, paths.resolve("src/../../x", Intent.Read))
