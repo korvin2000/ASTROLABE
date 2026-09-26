@@ -59,7 +59,8 @@ public class JestShaper : Shaper {
                 counts = counts,
                 wrapper = wrapper,
                 runnerName = Invocations.runnerName(capture),
-                nothingCollected = terminal.noTestsFound,
+                nothingCollected = terminal.noTestsFound && !useReport,
+                evidenceIncomplete = fromReport?.problems?.isNotEmpty() == true,
             ),
             limitations,
         )
@@ -216,25 +217,33 @@ internal object JestTerminal {
 internal object JestJson {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    fun parse(bytes: ByteArray, checkId: String?): XmlParse {
+    fun parse(bytes: ByteArray, checkId: String?): XmlParse = try {
+        parseReport(bytes, checkId)
+    } catch (_: IllegalArgumentException) {
+        XmlParse(emptyList(), null, listOf("invalid or incomplete report"))
+    } catch (_: IllegalStateException) {
+        XmlParse(emptyList(), null, listOf("invalid or incomplete report"))
+    }
+
+    private fun parseReport(bytes: ByteArray, checkId: String?): XmlParse {
         if (bytes.isEmpty()) return XmlParse(emptyList(), null, listOf("empty report"))
         val root = runCatching { json.parseToJsonElement(bytes.toString(Charsets.UTF_8)).jsonObject }.getOrElse {
             return XmlParse(emptyList(), null, listOf("could not be parsed (malformed JSON)"))
         }
         val out = ArrayList<TestResult>()
-        val files = runCatching { root["testResults"]?.jsonArray }.getOrNull().orEmpty()
+        val files = requireNotNull(root["testResults"]).jsonArray
         for (fileEntry in files) {
-            val fileObj = fileEntry as? JsonObject ?: continue
+            val fileObj = fileEntry.jsonObject
             val file = fileObj["name"]?.jsonPrimitive?.content?.replace('\\', '/')?.substringAfterLast('/')
-            val assertions = runCatching { fileObj["assertionResults"]?.jsonArray }.getOrNull().orEmpty()
+            val assertions = requireNotNull(fileObj["assertionResults"]).jsonArray
             for (entry in assertions) {
-                val obj = entry as? JsonObject ?: continue
-                val title = obj["title"]?.jsonPrimitive?.content ?: continue
+                val obj = entry.jsonObject
+                val title = requireNotNull(obj["title"]).jsonPrimitive.content
                 val status = when (obj["status"]?.jsonPrimitive?.content) {
                     "passed" -> TestOutcome.Passed
                     "failed" -> TestOutcome.Failed
                     "pending", "skipped", "todo", "disabled" -> TestOutcome.Skipped
-                    else -> continue
+                    else -> error("unknown test status")
                 }
                 val suite = runCatching { obj["ancestorTitles"]?.jsonArray?.map { it.jsonPrimitive.content } }
                     .getOrNull().orEmpty().takeIf { it.isNotEmpty() }?.joinToString(" > ")
@@ -250,7 +259,15 @@ internal object JestJson {
                 )
             }
         }
-        return XmlParse(out, intField(root, "numTotalTests"), emptyList())
+        val total = requireNotNull(intField(root, "numTotalTests"))
+        require(total == out.size)
+        val counts = TestResults.counts(out)
+        for ((field, actual) in listOf("numPassedTests" to counts.passed, "numFailedTests" to counts.failed,
+            "numPendingTests" to counts.skipped)) {
+            if (field in root) require(intField(root, field) == actual)
+        }
+        require(root["success"]?.jsonPrimitive?.content != "false" || counts.failed > 0)
+        return XmlParse(out, total, emptyList())
     }
 
     private fun intField(root: JsonObject, key: String): Int? =

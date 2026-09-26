@@ -99,7 +99,7 @@ internal object GenericSummaries {
     private val GO_CASE = Regex("""^\s*---\s+(PASS|FAIL|SKIP):\s+(\S+)""")
     private val GO_PACKAGE = Regex("""^(ok|FAIL|\?)\s+(\S+)\s+(\[no test files\]|\(cached\)|[\d.]+m?s)""")
     private val UNITTEST_RAN = Regex("""^Ran\s+(\d+)\s+tests?\s+in""")
-    private val UNITTEST_FAILED = Regex("""^FAILED\s*\((.*)\)""")
+    private val UNITTEST_FAILED = Regex("""^(?:FAILED|OK)\s*\((.*)\)""")
     private val UNITTEST_COUNT = Regex("""(failures|errors|skipped)=(\d+)""")
     private val UNITTEST_CASE = Regex("""^(FAIL|ERROR):\s+(\S+)\s*\((.+)\)""")
     private val DOTNET = Regex("""Failed:\s*(\d+),\s*Passed:\s*(\d+),\s*Skipped:\s*(\d+),\s*Total:\s*(\d+)""")
@@ -118,10 +118,10 @@ internal object GenericSummaries {
     }
 
     private fun cargo(lines: List<String>, checkId: String?): GenericSummary? {
-        val summary = lines.firstNotNullOfOrNull { CARGO.find(it) } ?: return null
-        val passed = summary.groupValues[2].toInt()
-        val failed = summary.groupValues[3].toInt()
-        val ignored = summary.groupValues[4].toInt()
+        val summaries = lines.mapNotNull { CARGO.find(it) }.ifEmpty { return null }
+        val passed = summaries.sumOf { it.groupValues[2].toInt() }
+        val failed = summaries.sumOf { it.groupValues[3].toInt() }
+        val ignored = summaries.sumOf { it.groupValues[4].toInt() }
         val tests = lines.mapNotNull { line ->
             val m = CARGO_CASE.find(line.trim()) ?: return@mapNotNull null
             val path = m.groupValues[1]

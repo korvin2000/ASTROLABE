@@ -193,22 +193,30 @@ internal object PytestTerminal {
 internal object PytestJson {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    fun parse(bytes: ByteArray, checkId: String?): XmlParse {
+    fun parse(bytes: ByteArray, checkId: String?): XmlParse = try {
+        parseReport(bytes, checkId)
+    } catch (_: IllegalArgumentException) {
+        XmlParse(emptyList(), null, listOf("invalid or incomplete report"))
+    } catch (_: IllegalStateException) {
+        XmlParse(emptyList(), null, listOf("invalid or incomplete report"))
+    }
+
+    private fun parseReport(bytes: ByteArray, checkId: String?): XmlParse {
         if (bytes.isEmpty()) return XmlParse(emptyList(), null, listOf("empty report"))
         val root = runCatching { json.parseToJsonElement(bytes.toString(Charsets.UTF_8)).jsonObject }.getOrElse {
             return XmlParse(emptyList(), null, listOf("could not be parsed (malformed JSON)"))
         }
         val results = ArrayList<TestResult>()
-        val entries = runCatching { root["tests"]?.jsonArray }.getOrNull().orEmpty()
+        val entries = requireNotNull(root["tests"]).jsonArray
         for (entry in entries) {
-            val obj = entry as? JsonObject ?: continue
-            val nodeId = obj["nodeid"]?.jsonPrimitive?.contentOrNullSafe() ?: continue
+            val obj = entry.jsonObject
+            val nodeId = requireNotNull(obj["nodeid"]?.jsonPrimitive?.contentOrNullSafe())
             val outcome = when (obj["outcome"]?.jsonPrimitive?.contentOrNullSafe()) {
                 "passed", "xpassed" -> TestOutcome.Passed
                 "failed" -> TestOutcome.Failed
                 "error" -> TestOutcome.Error
                 "skipped", "xfailed" -> TestOutcome.Skipped
-                else -> continue
+                else -> error("unknown test outcome")
             }
             val message = obj["call"]?.let { it as? JsonObject }?.get("longrepr")?.jsonPrimitive?.contentOrNullSafe()
                 ?.lineSequence()?.lastOrNull { it.isNotBlank() }?.trim()
@@ -216,6 +224,7 @@ internal object PytestJson {
             results += TestResult(PytestTerminal.identityOf(nodeId, checkId), outcome, message, duration)
         }
         val total = runCatching { root["summary"]?.jsonObject?.get("total")?.jsonPrimitive?.contentOrNullSafe()?.toIntOrNull() }.getOrNull()
+        require(total != null && total == results.size)
         return XmlParse(results, total, emptyList())
     }
 
