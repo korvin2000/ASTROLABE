@@ -208,7 +208,7 @@ public class Look(
         val displayed = LineRange(span.from, span.from + view.lines.size - 1)
         val more = if (view.truncated) "… ${span.to - displayed.to} more lines: recall ${alias.text} range ${displayed.to + 1}-${span.to}" else null
         val body = view.lines.joinToString("\n") + (more?.let { "\n$it" } ?: "")
-        val mask = RedactionMask(hidden.intersect(Ranges.of(displayed)), full.mask.limitations)
+        val mask = RedactionMask(hidden, full.mask.limitations)
         val blob = blobs.put(full.text.toByteArray(Charsets.UTF_8), BlobKind.OUTPUT, ids)
         observations.record(
             Observation(
@@ -350,7 +350,6 @@ public class Look(
         var status = "ok"
         var label = "recall of #$number"
         val versions = LinkedHashMap<String, FileVersion>()
-        var known = false
         if (path != null && shown != null) {
             val recorded = observation.sourceVersions.getValue(path)
             val now = registry.version(path)
@@ -358,14 +357,13 @@ public class Look(
             val entry = Entry(path, Ranges.of(shown), recorded, EntrySource.Recall, context.turn, recalled.text, view.tokens, hidden)
             when (val result = workset.recall(entry, now, context.turn)) {
                 is Workset.RecallResult.Known -> {
-                    known = true
                     versions[path] = recorded
                     registry.show(ids.context!!, generation, workspace.id, path, recorded, Ranges.of(shown), RedactionMask(hidden))
                 }
                 is Workset.RecallResult.Historical -> {
                     status = "historical"
-                    label = "recall of #$number · historical v=${recorded.hash8} (now ${result.currentVersion.hash8}); not KNOWN, read again for current bytes"
-                    versions[path] = result.currentVersion
+                    label = "recall of #$number · historical v=${recorded.hash8} (now ${result.currentVersion?.hash8 ?: "missing"}); not KNOWN, read again for current bytes"
+                    result.currentVersion?.let { versions[path] = it }
                 }
             }
             if (now == null) {
@@ -375,11 +373,11 @@ public class Look(
         }
         val more = if (view.truncated) "\n… recall #$number range ${(shown?.to ?: view.lines.size) + 1}-${selectedSource?.to ?: selected.size}" else ""
         val body = label + "\n" + view.lines.joinToString("\n") + more
-        val blob = observation.contentRef
+        val blob = blobs.put(selected.joinToString("\n").toByteArray(Charsets.UTF_8), BlobKind.OUTPUT, ids)
         observations.record(
             Observation(
                 id = recalled.canonicalId, ids = ids, actionId = actionId, candidate = null, contentRef = blob,
-                paths = listOfNotNull(path), ranges = if (known && path != null && shown != null) mapOf(path to Ranges.of(shown)) else emptyMap(),
+                paths = listOfNotNull(path), ranges = if (path != null && shown != null) mapOf(path to Ranges.of(shown)) else emptyMap(),
                 complete = !view.truncated, sourceVersions = if (path != null) mapOf(path to observation.sourceVersions.getValue(path)) else emptyMap(),
                 captureComplete = observation.captureComplete, redaction = observation.redaction, truncated = view.truncated,
             ),

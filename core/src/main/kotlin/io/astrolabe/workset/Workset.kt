@@ -85,12 +85,15 @@ public class Workset(
     private val drops = ArrayList<StaleDrop>()
     private val stubbedIds = HashSet<String>()
 
+    @get:Synchronized
     public val entries: List<Entry> get() = live.toList()
 
     /** Announcements pending for the current turn's anchor; cleared by [takeAnnouncements]. */
+    @get:Synchronized
     public val pendingDrops: List<StaleDrop> get() = drops.toList()
 
     /** Registers rendered source bytes; overlapping coverage at the same version merges. */
+    @Synchronized
     public fun register(entry: Entry) {
         val same = live.indexOfFirst { it.path == entry.path && it.version == entry.version && it.resultId == entry.resultId && it.source == entry.source }
         if (same >= 0) {
@@ -101,8 +104,10 @@ public class Workset(
         }
     }
 
+    @Synchronized
     public fun snapshot(): WorksetView = WorksetView(live.toList())
 
+    @Synchronized
     public fun covers(path: String, version: FileVersion, range: LineRange): Boolean = snapshot().covers(path, version, range)
 
     /**
@@ -110,6 +115,7 @@ public class Workset(
      * leaves KNOWN now and is announced with the cause. The drops wait in [pendingDrops]; the ones flagged
      * [StaleDrop.stubNow] exceed [immediateStubTokens] and are stubbed at once, the rest at the next batch.
      */
+    @Synchronized
     override fun onChange(change: VersionChange) {
         val affected = live.filter { it.path == change.path && !change.current(it.version) }
         if (affected.isEmpty()) return
@@ -119,6 +125,7 @@ public class Workset(
     }
 
     /** Eviction batch (P1.8.6): a stubbed result no longer contributes coverage. */
+    @Synchronized
     public fun stub(resultId: String) {
         stubbedIds += resultId
         live.removeAll { it.resultId == resultId }
@@ -129,10 +136,11 @@ public class Workset(
      * `recall(id)` re-registers the captured bytes at their recorded version; if the file moved on, the entry
      * is `historical` (returned, not KNOWN at the current version).
      */
+    @Synchronized
     public fun recall(entry: Entry, currentVersion: FileVersion?, turn: Int): RecallResult {
         stubbedIds -= entry.resultId ?: ""
         val recalled = entry.copy(source = EntrySource.Recall, turn = turn)
-        return if (currentVersion == null || currentVersion == entry.version) {
+        return if (currentVersion == entry.version) {
             register(recalled)
             RecallResult.Known(recalled)
         } else {
@@ -140,12 +148,15 @@ public class Workset(
         }
     }
 
+    @Synchronized
     public fun takeAnnouncements(): List<StaleDrop> = drops.toList().also { drops.clear() }
 
     /** Cell-end export (re-served as seeds by the compiler, §6.2). */
+    @Synchronized
     public fun export(): List<Entry> = live.toList()
 
     /** §5.8 rebuild: the projection is replaced, so KNOWN becomes exactly [seeds] (stale entries and drops are gone). */
+    @Synchronized
     public fun rebuild(seeds: List<Entry>) {
         live.clear()
         stale.clear()
@@ -154,13 +165,16 @@ public class Workset(
     }
 
     /** Seeds re-served by the compiler are KNOWN at the version they were rendered with. */
+    @Synchronized
     public fun seed(entries: List<Entry>) {
         entries.forEach { register(it.copy(source = EntrySource.Seed)) }
     }
 
+    @get:Synchronized
     public val knownTokens: Long get() = live.sumOf { it.tokens }
 
     /** `KNOWN: … · NOT SEEN: everything else` plus named stale drops, capped at [renderCapTokens]. */
+    @Synchronized
     public fun render(estimator: TokenEstimator): String {
         val known = live.filter { it.source != EntrySource.Transform }.sortedWith(compareBy({ it.path }, { it.range.ranges.first().from }))
             .joinToString(" · ") { "${it.path}:${it.range}@${it.version.hash8.take(4)}" }
@@ -196,6 +210,6 @@ public class Workset(
     public sealed interface RecallResult {
         public data class Known(val entry: Entry) : RecallResult
 
-        public data class Historical(val entry: Entry, val currentVersion: FileVersion) : RecallResult
+        public data class Historical(val entry: Entry, val currentVersion: FileVersion?) : RecallResult
     }
 }

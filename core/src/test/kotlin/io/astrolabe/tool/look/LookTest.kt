@@ -95,6 +95,25 @@ class LookTest {
     private fun status(outcome: ToolOutcome) = outcome.header!!.runtime.status
 
     @Test
+    fun `recalling a narrowed recall keeps source line coordinates`() = runTest {
+        look("""{"what":"read","target":"src/a.py:1-10"}""")
+        val narrow = look("""{"what":"recall","id":"#1","range":"5-6"}""")
+        val again = look("""{"what":"recall","id":"${narrow.resultAlias}","range":"5-6"}""")
+        assertTrue(again.body.contains("5|"), again.body)
+        assertFalse(again.body.contains("1|"), again.body)
+    }
+
+    @Test
+    fun `redacted lines in the undisplayed tail never grant recalled coverage`() = runTest {
+        repo.write("src/secret.py", (1..30).joinToString("\n") {
+            if (it == 30) "token=abcdefghijklmnopqrstuv" else "line $it padding padding padding"
+        })
+        look("""{"what":"read","target":"src/secret.py:1-30","budget":100}""")
+        look("""{"what":"recall","id":"#1","range":"30-30"}""")
+        assertFalse(workset.covers("src/secret.py", registry.version("src/secret.py")!!, LineRange(30, 30)))
+    }
+
+    @Test
     fun `a range read registers coverage at the read version, repeats dedup, and a broader read executes (IX-07)`() = runTest {
         val first = look("""{"what":"read","target":"src/a.py:1-2"}""")
         val v = registry.version("src/a.py")!!

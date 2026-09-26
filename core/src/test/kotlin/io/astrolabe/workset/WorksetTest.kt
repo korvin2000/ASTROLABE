@@ -21,6 +21,32 @@ class WorksetTest {
         Entry(path, Ranges.single(from, to), version, EntrySource.Look, turn = 1, resultId = id, tokens = tokens, hidden = hidden)
 
     @Test
+    fun `missing files recalled from history grant no coverage`() {
+        val ws = Workset()
+        val result = ws.recall(entry("gone.py", 1, 5), null, 2)
+        assertIs<Workset.RecallResult.Historical>(result)
+        assertFalse(ws.covers("gone.py", v1, LineRange(1, 5)))
+    }
+
+    @Test
+    fun `parallel readers preserve all registered entries and stable snapshots`() {
+        val ws = Workset()
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(8)
+        try {
+            val jobs = (1..8).map { worker -> pool.submit {
+                repeat(200) { index ->
+                    ws.register(entry("$worker-$index.py", 1, 2))
+                    ws.snapshot()
+                }
+            } }
+            jobs.forEach { it.get() }
+            assertEquals(1600, ws.entries.size)
+        } finally {
+            pool.shutdownNow()
+        }
+    }
+
+    @Test
     fun `only rendered source bytes make a region known and redacted lines grant nothing (IX-10)`() {
         val ws = Workset()
         assertFalse(ws.covers("src/a.py", v1, LineRange(10, 12)), "an outline never makes a body KNOWN")
