@@ -88,15 +88,17 @@ class QaDriverTest {
         Controller(config, clock, idGen).open(repo.root, request, policy).use { c ->
             val candidate = c.stamper.report().candidateId
             val cli = EntryPoint(QaSurface.Cli, if (WINDOWS) "type report.txt" else "cat report.txt")
+            val negativeCli = EntryPoint(QaSurface.Cli, if (WINDOWS) "exit /b 7" else "exit 7")
             val http = EntryPoint(QaSurface.Http, "GET http://127.0.0.1:${server.address.port}/report")
             val environment = QaEnvironment.IsolatedCandidate(candidate, c.store.layout.candidates.toString(), ExecutionMode.TrustedLocal)
             val packet = QaPacket(
                 c.ids, "I1", c.contract.version, candidate, listOf(ReviewCriterion.of(Acceptance.Check("AC-2", "the report total rounds half-up", Origin.User))),
-                "report totals round half-up", listOf(cli, http), environment,
+                "report totals round half-up", listOf(cli, http, negativeCli), environment,
             )
             val probes = listOf(
                 QaProbe("cli-total", cli, listOf("print the report"), QaExpectation(0, listOf("total 10.05"))),
                 QaProbe("http-total", http, listOf("GET /report"), QaExpectation(200, listOf("total 10.05"))),
+                QaProbe("negative-cli", negativeCli, listOf("exercise expected failure"), QaExpectation(7)),
             )
             val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = c.store.layout.candidates, isolateAll = true)
             val driver = QaDriver(scheduler, c.checks, c.os, TrustedLocalRunner(c.os), c.store.blobs, stateRoot.resolve("qa-logs"))
@@ -107,7 +109,7 @@ class QaDriverTest {
 
             val driven = assertIs<QaDrive.Driven>(driver.drive(packet, probes, c.attempt.config.flags.qaCell))
             assertEquals(emptyList(), driven.gaps)
-            assertEquals(listOf(true, true), driven.result.cases.map { it.passed }, driven.result.cases.toString())
+            assertEquals(listOf(true, true, true), driven.result.cases.map { it.passed }, driven.result.cases.toString())
             val receipts = SqliteReceipts(c.store, clock)
             for (id in driven.result.receipts) {
                 val receipt = receipts.get(id)!!
@@ -116,6 +118,10 @@ class QaDriverTest {
                 assertTrue(c.store.blobs.exists(receipt.raw!!), "the log blob was published before the receipt row")
             }
             assertTrue(String(c.store.blobs.get(Digest(driven.result.cases[1].artifacts.single()))).contains("HTTP 200"))
+            assertEquals(null, receipts.get(driven.result.receipts[1])!!.exitCode, "HTTP status is not a process exit")
+            assertEquals(7, receipts.get(driven.result.receipts[2])!!.exitCode)
+            assertEquals(7, receipts.get(driven.result.receipts[2])!!.expectedExitCode)
+
             QaRuns.record(c.store, idGen, clock, packet, driven.record)
 
             c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "fixture: the implementing cell did not run"))
@@ -123,7 +129,7 @@ class QaDriverTest {
             val (_, file) = FinishReceipts.export(c, finish)
             val qa = finish.qa.single()
             assertEquals(environment.label, qa.environment)
-            assertEquals(listOf("passed", "passed"), qa.cases.map { it.outcome })
+            assertEquals(listOf("passed", "passed", "passed"), qa.cases.map { it.outcome })
             assertTrue(qa.cases.all { case -> case.artifacts.isNotEmpty() && case.artifacts.all { c.store.blobs.exists(Digest(it)) } })
             assertTrue(finish.checksRun.map { it.receiptId }.containsAll(qa.receipts), "QA receipts are L3 check runs")
             val exported = Files.readString(file)

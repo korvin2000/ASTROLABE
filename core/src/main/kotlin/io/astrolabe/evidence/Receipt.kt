@@ -112,12 +112,14 @@ public data class Receipt(
     @Serializable(with = InstantSerializer::class) val at: Instant,
     /** The input closure pinned before the run (§8.1 `closure_manifest`); only a complete one can back a reuse proof. */
     val closureManifest: ClosureManifest? = null,
+    /** The check's expected process exit; null when a product QA case asserts only output. HTTP has no process exit. */
+    val expectedExitCode: Int? = 0,
 ) {
     init {
         require(receiptId.isNotBlank() && checkId.isNotBlank()) { "receipt needs ids" }
         if (outcome == Outcome.Passed) {
             require(parsed == null || (parsed.failed == 0 && parsed.errors == 0)) { "a passed receipt cannot contain failures" }
-            require(exitCode == null || exitCode == 0) { "a passed receipt cannot have a nonzero exit" }
+            require(exitCode == null || expectedExitCode == null || exitCode == expectedExitCode) { "a passed receipt cannot contradict its expected exit" }
         }
         require(!(outcome == Outcome.Passed && parsed == null)) { "a passed receipt needs parsed counts" }
         require(!(outcome == Outcome.Passed && parsed != null && parsed.executed == 0 && parsed.discovered == 0)) {

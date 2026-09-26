@@ -176,7 +176,7 @@ public class QaDriver @JvmOverloads constructor(
             probe.expected.met(exit, output.toString()) -> Outcome.Passed
             else -> Outcome.Failed
         }
-        executed(packet, listOf(target), root.toString(), true, exit, outcome, transcript) to output.toString()
+        executed(packet, listOf(target), root.toString(), true, exit, outcome, transcript, probe.expected.code) to output.toString()
     }
 
     private suspend fun http(packet: QaPacket, probe: QaProbe): Pair<Executed, String> = withContext(Dispatchers.IO) {
@@ -198,10 +198,10 @@ public class QaDriver @JvmOverloads constructor(
             probe.expected.met(code, body) -> Outcome.Passed
             else -> Outcome.Failed
         }
-        executed(packet, listOf(method, url), null, false, code, outcome, transcript) to body
+        executed(packet, listOf(method, url), null, false, null, outcome, transcript) to body
     }
 
-    private fun executed(packet: QaPacket, command: List<String>, cwd: String?, shell: Boolean, exit: Int?, outcome: Outcome, transcript: String): Executed {
+    private fun executed(packet: QaPacket, command: List<String>, cwd: String?, shell: Boolean, exit: Int?, outcome: Outcome, transcript: String, expectedExitCode: Int? = 0): Executed {
         // Artifact before row: the scheduler records the receipt only after this blob is published.
         val raw = blobs.put(transcript.toByteArray(Charsets.UTF_8), BlobKind.LOG, packet.ids)
         val counts = when (outcome) {
@@ -209,7 +209,7 @@ public class QaDriver @JvmOverloads constructor(
             Outcome.Failed -> Counts(failed = 1, discovered = 1)
             else -> null
         }
-        return Executed(command, cwd, shell, exit, outcome, counts, raw)
+        return Executed(command, cwd, shell, exit, outcome, counts, raw, expectedExitCode = expectedExitCode)
     }
 
     private fun passedOf(receipt: Receipt): Boolean? = when (receipt.outcome) {

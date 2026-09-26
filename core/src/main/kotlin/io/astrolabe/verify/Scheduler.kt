@@ -44,6 +44,7 @@ public data class Executed(
     val counts: Counts?,
     val raw: Digest?,
     val limits: List<String> = emptyList(),
+    val expectedExitCode: Int? = 0,
 )
 
 /** Paths a check may write without touching its inputs (declared scratch/output policy, D-45): caches, build output, reports. */
@@ -205,7 +206,7 @@ public class Scheduler(
             stampBefore = before.candidateId, stampAfter = stampAfter, envId = before.env.envId,
             verifierVersion = verifierVersion, checkDefinitionVersion = check.definitionVersion, contractVersion = contractVersion,
             outcome = outcome, parsed = executed.counts, inputClosure = check.inputClosure, testedInputs = testedInputs,
-            raw = executed.raw, limits = limits, exitCode = executed.exit, at = clock.instant(), closureManifest = manifest,
+            raw = executed.raw, limits = limits, exitCode = executed.exit, at = clock.instant(), closureManifest = manifest, expectedExitCode = executed.expectedExitCode,
         )
         receipts.record(receipt)
         aliasByReceipt[receipt.receiptId] = aliases.allocate(ids.work, receipt.receiptId, "receipt", ids.context, workspace.id).text
