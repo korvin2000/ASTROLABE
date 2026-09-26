@@ -88,6 +88,22 @@ class BaselineTest {
 
     private fun baseline() = Baseline(shadowRef, store.layout, TrustedLocalRunner(os), os, SqliteReceipts(store, clock), InMemoryAliases(), store.blobs, Redaction(), HeuristicEstimator(), FixedIdGen(), ids, clock, env)
 
+    @Test
+    fun `changed restored and added baseline inputs cannot establish preexisting failures`() = runTest {
+        val changes = listOf(
+            "echo changed>tests/test_discount.py" to "echo changed > tests/test_discount.py",
+            "copy /y tests\\test_discount.py saved.txt>nul&echo changed>tests/test_discount.py&type saved.txt>tests/test_discount.py&del saved.txt" to "cp tests/test_discount.py saved.txt; echo changed > tests/test_discount.py; cat saved.txt > tests/test_discount.py; rm saved.txt",
+            "echo new>tests/new.py" to "echo new > tests/new.py",
+        )
+        val idGen = FixedIdGen()
+        changes.forEachIndexed { index, (win, posix) ->
+            val runner = Baseline(shadowRef, store.layout, TrustedLocalRunner(os), os, SqliteReceipts(store, clock), InMemoryAliases(), store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, clock, env)
+            val result = runner.run(suite("$win&type pytest_output.txt&exit /b 1", "$posix; cat pytest_output.txt; exit 1"), 1, s0)
+            assertFalse(result.receipt.testedInputs.eligible, "case $index")
+            assertNull(result.ledger, "case $index must not classify failures from a changed tree as preexisting")
+        }
+    }
+
     private fun suite(windowsLine: String, posixLine: String) = Check(
         "CHK-full", CheckKind.Full, Selector.All, Closure.Unknown, CostClass.Expensive, Trigger.CampaignEnd,
         command = Command(if (windows) listOf("cmd.exe", "/d", "/s", "/c", windowsLine) else listOf("/bin/sh", "-c", posixLine)),
@@ -159,7 +175,7 @@ class BaselineTest {
         assertFalse(mutating.receipt.testedInputs.eligible)
         assertTrue(mutating.receipt.limits.any { it.kind == "input_mutation" })
         assertEquals("def test_tier():\n    assert discount(cart, tier) == 5\n", Files.readString(repo.resolve("tests/test_discount.py")), "the working tree is untouched by the candidate run")
-        assertNotNull(mutating.ledger)
+        assertNull(mutating.ledger, "a mutated baseline cannot establish preexisting failures")
 
         val slow = shared.run(suite("ping -n 61 127.0.0.1 >NUL", "sleep 60"), contractVersion = 1, s0 = s0, timeoutSeconds = 1)
         assertEquals(Outcome.Timeout, slow.receipt.outcome)

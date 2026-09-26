@@ -160,10 +160,8 @@ public class Baseline(
         if (Files.exists(dir)) deleteTree(dir)
         val materialized = shadowRef.materialize(0, dir)
         // The candidate is the whole exported tree (HEAD plus the dirty manifest), so every exported file is a tested input.
-        val inputs = materialized.files.filterNot { scratch.isScratch(it) }.sorted().mapNotNull { path ->
-            val file = dir.resolve(path)
-            if (Files.isRegularFile(file)) path to FileVersion.of(Files.readAllBytes(file)) else null
-        }.toMap()
+        val before = snapshot(dir)
+        val inputs = before.mapValues { it.value.version }
         val limits = ArrayList<Limit>()
         materialized.limitations.forEach { limits += Limit("materialize", it) }
         val actionId = idGen.next("act")
@@ -204,10 +202,8 @@ public class Baseline(
         }
 
         // D-45 `isolated`: the exported candidate is verified against its manifest after the run as well.
-        val mutated = inputs.keys.filter { path ->
-            val file = dir.resolve(path)
-            !Files.isRegularFile(file) || FileVersion.of(Files.readAllBytes(file)) != inputs.getValue(path)
-        }.toSet()
+        val after = snapshot(dir)
+        val mutated = (before.keys + after.keys).filter { before[it] != after[it] }.toSet()
         if (mutated.isNotEmpty()) limits += Limit("input_mutation", "the suite changed its own inputs in the candidate: ${mutated.sorted().joinToString(", ")}; the receipt cannot certify them")
         val redacted = redaction.applyBytes(output.toByteArray(), ContentClass.ReusableEvidence)
         val blob = blobs.put(redacted.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
@@ -227,7 +223,7 @@ public class Baseline(
             else -> shaped.status
         }
         val receipt = receipt(receiptId, check, contractVersion, s0, command.argv, command.cwd, capture.exitCode, outcome, shaped.counts, TestedInputs(inputs, InputStability.Isolated, mutated), blob, limits)
-        val ledger = if (outcome == Outcome.Passed || outcome == Outcome.Failed || outcome == Outcome.Inconclusive) {
+        val ledger = if (receipt.testedInputs.eligible && (outcome == Outcome.Passed || outcome == Outcome.Failed || outcome == Outcome.Inconclusive)) {
             val ledgerLimits = ArrayList<String>()
             if (shaped.tests.isEmpty() && outcome != Outcome.Passed) ledgerLimits += "no test identities parsed by ${shaped.shaper}: nothing can be called pre-existing"
             val ambiguous = TestResults.ambiguous(shaped.tests)
@@ -240,6 +236,16 @@ public class Baseline(
             null
         }
         return BaselineResult(receipt, ledger, dir, materialized)
+    }
+
+    private data class Input(val version: FileVersion, val modified: java.nio.file.attribute.FileTime, val executable: Boolean)
+
+    private fun snapshot(dir: Path): Map<String, Input> = Files.walk(dir).use { files ->
+        files.filter { Files.isRegularFile(it) }.toList().associate { file ->
+            dir.relativize(file).toString().replace('\\', '/') to file
+        }.filterKeys { !scratch.isScratch(it) }.mapValues { (_, file) ->
+            Input(FileVersion.of(Files.readAllBytes(file)), Files.getLastModifiedTime(file), Files.isExecutable(file))
+        }
     }
 
     private fun receipt(
