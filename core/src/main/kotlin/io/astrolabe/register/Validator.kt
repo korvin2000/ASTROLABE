@@ -49,6 +49,9 @@ public class Validator(
     private val patchCapTokens: Int = 400,
     private val factLineMaxChars: Int = 240,
 ) {
+    internal fun schemaRejection(register: Register, rawPatch: String, reason: String): Validation.Rejected =
+        Validation.Rejected("schema", reason, Sizes(RegisterRender.tokens(register, estimator), registerCapTokens, estimator.estimate(rawPatch).tokens, patchCapTokens))
+
     public fun check(register: Register, patch: Patch, context: ValidationContext): Validation {
         val patchTokens = estimator.estimate(Json.encodeToString(Patch.serializer(), patch)).tokens
         var sizes = Sizes(RegisterRender.tokens(register, estimator), registerCapTokens, patchTokens, patchCapTokens)

@@ -114,7 +114,10 @@ public class StateTool(
 
     private fun patch(args: StateArgs, context: TurnContext): ToolOutcome {
         val parsed = when (val p = PatchParser.parse(args.patch.orEmpty(), opResults)) {
-            is ParsedPatch.Invalid -> return result("rejected", "STATE v${register.version} unchanged · rejected: schema — ${p.reason}")
+            is ParsedPatch.Invalid -> {
+                lastRejection = validator.schemaRejection(register, kotlinx.serialization.json.JsonArray(args.patch.orEmpty()).toString(), p.reason)
+                return result("rejected", "STATE v${register.version} unchanged · rejected: schema — ${p.reason}")
+            }
             is ParsedPatch.Valid -> p.patch
         }
         return when (val validation = validator.check(register, parsed, validation)) {
@@ -126,10 +129,10 @@ public class StateTool(
                 )
             }
             is Validation.Applied -> {
-                lastRejection = null
                 val next = if (validation.register.version > register.version) validation.register else validation.register.copy(version = register.version + 1)
-                register = next
                 versions.save(ids, next)
+                register = next
+                lastRejection = null
                 events?.emit(AgentEvent.Cell.RegisterPatched(ids, next.version, validation.appliedOps.size))
                 val lines = ArrayList<String>()
                 lines += "STATE v${next.version} · applied ${validation.appliedOps.size} op${if (validation.appliedOps.size == 1) "" else "s"} · register ${validation.sizes.registerTokens}/${validation.sizes.registerCapTokens} tokens"
