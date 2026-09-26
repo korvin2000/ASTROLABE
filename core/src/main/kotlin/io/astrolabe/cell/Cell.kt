@@ -341,7 +341,7 @@ public class Cell @JvmOverloads constructor(
             ctx.accounting?.record(ids, invocationId.value, ctx.model.profile, request, usage)
             admission.reconcile(Tokens(usage?.let { it.totalInput + (it.quantities[BillingDimension.OUTPUT] ?: 0L) } ?: admission.estimate.value))
             events?.emit(AgentEvent.Cell.ModelResponded(ids, invocationId.value, response.stop, usage))
-            authority.check(turn)?.let { return if (it.cancelled) cancelled(it.reason) else failed(it.reason) }
+            if (response.toolCalls.isNotEmpty()) authority.check(turn)?.let { return if (it.cancelled) cancelled(it.reason) else failed(it.reason) }
 
             // §3.7: the native output is durable before any result exists, then appended (calls before results).
             journalOutput(response)
@@ -421,8 +421,10 @@ public class Cell @JvmOverloads constructor(
 
             // End-of-turn checker on the paths the horizons scheduled; the atlas follows the same set.
             val proposal = native.isEmpty() && (response.stop == StopReason.EndTurn || response.stop == StopReason.ToolUse)
-            authority.check(turn)?.let { return if (it.cancelled) cancelled(it.reason) else failed(it.reason) }
-            val turnEnd = drainScheduled(contract) ?: after
+            val dispatchRefusal = authority.check(turn)
+            if (dispatchRefusal != null && !proposal) return if (dispatchRefusal.cancelled) cancelled(dispatchRefusal.reason) else failed(dispatchRefusal.reason)
+            // Late completion may be archived from existing evidence; revoked authority never launches another check.
+            val turnEnd = (if (dispatchRefusal == null) drainScheduled(contract) else null) ?: after
             if (batchBefore.isNotEmpty()) {
                 val index = SymbolIndex(atlas)
                 val changes = batchBefore.flatMap { (path, bytes) -> DefinitionChanges.of(path, bytes, ws.registry.read(path)?.bytes) }
@@ -432,13 +434,13 @@ public class Cell @JvmOverloads constructor(
             inspected.forEach(impact::inspected)
             impact.rescoped(registerBefore, register)
             // §6.6: the controller may pre-build the next [K] while verify-on-stop runs, if only slow checks remain.
-            if (proposal) ctx.precompile?.completionProposed(turnEnd.candidateId, remainingAcceptance(turnEnd.candidateId))
+            if (proposal && dispatchRefusal == null) ctx.precompile?.completionProposed(turnEnd.candidateId, remainingAcceptance(turnEnd.candidateId))
             // §8.1 layer table: a `[>]` move runs blast ∪ the left step's accept:, a completion proposal verify-on-stop;
             // each runs only missing or stale checks, reused receipts stand.
-            val stepRun = stepLeft(registerBefore, register)?.let { step -> tools.verify?.runLayer(Layer.BlastAndStepAccept, listOfNotNull(step.accept)) }
+            val stepRun = if (dispatchRefusal == null) stepLeft(registerBefore, register)?.let { step -> tools.verify?.runLayer(Layer.BlastAndStepAccept, listOfNotNull(step.accept)) } else null
             // §7.4: an edit batch whose impact risk exceeds θ runs the blast layer now (P4.5.2, D-152).
-            val riskRun = if (stepRun == null && batchBefore.isNotEmpty()) tools.verify?.riskAboveTheta(EditHunks.of(batchBefore) { ws.registry.read(it)?.bytes }) else null
-            val layerRuns = listOfNotNull(stepRun, riskRun, if (proposal) tools.verify?.onStop(increment.accept) else null)
+            val riskRun = if (dispatchRefusal == null && stepRun == null && batchBefore.isNotEmpty()) tools.verify?.riskAboveTheta(EditHunks.of(batchBefore) { ws.registry.read(it)?.bytes }) else null
+            val layerRuns = listOfNotNull(stepRun, riskRun, if (proposal && dispatchRefusal == null) tools.verify?.onStop(increment.accept) else null)
             for (layerRun in layerRuns) {
                 notTested += layerRun.notTested
                 val what = if (layerRun.layer == Layer.IncrementAcceptance) "verify-on-stop" else if (layerRun === riskRun) "risk > θ" else "step boundary"
