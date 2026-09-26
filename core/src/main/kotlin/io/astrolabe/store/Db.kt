@@ -41,6 +41,7 @@ public class Db private constructor(
 
     private val monitor = ReentrantLock()
     private var inTransaction = false
+    private var quarantined = false
 
     /**
      * Runs [block] inside `BEGIN IMMEDIATE … COMMIT`, rolling back on any exception. The write lock
@@ -49,6 +50,7 @@ public class Db private constructor(
      * transaction (L9).
      */
     public fun <T> tx(block: (Tx) -> T): T = monitor.withLock {
+        check(!quarantined) { "database connection is quarantined after failed rollback" }
         check(!inTransaction) { "nested transactions are not supported; one writer owns one transaction" }
         inTransaction = true
         var began = false
@@ -63,6 +65,7 @@ public class Db private constructor(
                 try {
                     statement("ROLLBACK")
                 } catch (cleanup: Throwable) {
+                    quarantined = true
                     failure.addSuppressed(cleanup)
                     runCatching { connection.close() }.exceptionOrNull()?.let(failure::addSuppressed)
                 }
@@ -103,6 +106,7 @@ public class Db private constructor(
     }
 
     private fun prepare(sql: String, params: Array<out Any?>): PreparedStatement {
+        check(!quarantined) { "database connection is quarantined after failed rollback" }
         val statement = try {
             connection.prepareStatement(sql)
         } catch (failure: SQLException) {
