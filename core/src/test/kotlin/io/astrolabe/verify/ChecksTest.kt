@@ -40,6 +40,12 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 class ChecksTest {
+    @Test
+    fun `audit verification policy invalidates earlier check definitions`() {
+        val check = Check("CHK-policy", CheckKind.Unit, Selector.All, Closure.Unknown, CostClass.Fast, Trigger.OnDemand)
+        assertNotEquals(check.copy(parserPolicy = "shaper/1").definitionVersion, check.definitionVersion)
+    }
+
     private val estimator = HeuristicEstimator()
 
     private val contract = Contract(
@@ -123,7 +129,7 @@ class ChecksTest {
         assertEquals(listOf("CHK-accept-AC-1", "CHK-accept-AC-4"), checks.required().map { it.id })
         val accept = checks["CHK-accept-AC-4"]!!
         assertNotEquals(accept.definitionVersion, accept.copy(command = Command(listOf("pytest", "-k", "idempot", "-x"))).definitionVersion)
-        assertNotEquals(accept.definitionVersion, accept.copy(parserPolicy = "shaper/2").definitionVersion)
+        assertNotEquals(accept.definitionVersion, accept.copy(parserPolicy = "shaper/future").definitionVersion)
         assertEquals(accept.definitionVersion, accept.copy(last = LastResult("r", CandidateId(Digest.ofUtf8("s")), accept.definitionVersion, Outcome.Passed, Counts(1), Applicability.Current)).definitionVersion)
 
         val stamp = CandidateId(Digest.ofUtf8("s8"))

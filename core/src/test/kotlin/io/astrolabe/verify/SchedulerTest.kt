@@ -228,7 +228,7 @@ class SchedulerTest {
         val receipt = isolated().runCheck(accept(), 1) { dir ->
             val copy = dir.resolve("src/a.py")
             assertTrue(Files.isExecutable(copy))
-            Files.setPosixFilePermissions(copy, Files.getPosixFilePermissions(copy) - java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE)
+            Files.setPosixFilePermissions(copy, Files.getPosixFilePermissions(copy).filterNot { it.name.endsWith("_EXECUTE") }.toSet())
             passed()
         }
         assertFalse(receipt.testedInputs.eligible)

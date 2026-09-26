@@ -133,6 +133,39 @@ class VerifyTest {
     private fun status(o: ToolOutcome) = o.header!!.runtime.status
 
     @Test
+    fun `model acceptance commands and escaping working directories are denied before launch`() = runTest {
+        var launches = 0
+        val recording = object : io.astrolabe.tool.run.Runner {
+            override val mode = io.astrolabe.auth.ExecutionMode.TrustedLocal
+            override fun start(spec: io.astrolabe.os.SpawnSpec): io.astrolabe.os.Proc {
+                launches++
+                throw java.io.IOException("unexpected launch")
+            }
+        }
+        verify = Verify(checks, scheduler, null, null, null, workspace, recording, os, stamper, store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, contracts, stateRoot.resolve("logs"))
+        val command = Command(listOf("git", "push", "origin", "main"))
+        contracts.strengthen(ids.work, Acceptance.Run("AC-model", command, Origin.Model("R1")))
+        checks.register(Check("CHK-model", CheckKind.Acceptance, Selector.Named(command), Closure.Unknown, CostClass.Fast, Trigger.OnDemand, acceptanceIds = listOf("AC-model"), command = command))
+        val model = run("""{"what":"acceptance","ids":["AC-model"]}""")
+        assertEquals("denied", status(model))
+        for (cwd in listOf("../", stateRoot.toString().replace('\\', '/'))) {
+            checks.replace(Check("CHK-outside", CheckKind.Unit, Selector.All, Closure.Unknown, CostClass.Fast, Trigger.OnDemand, command = printing("pytest_pass.txt", 0).copy(cwd = cwd)))
+            assertEquals("denied", status(run("""{"what":"tests","selection":"ids","ids":["CHK-outside"]}""")))
+        }
+        assertEquals(0, launches)
+    }
+
+    @Test
+    fun `model acceptance can reuse an exact command already authorized by the contract`() = runTest {
+        val command = printing("pytest_pass.txt", 0)
+        contracts.strengthen(ids.work, Acceptance.Run("AC-model", command, Origin.Model("R1")))
+        checks.register(Check("CHK-model", CheckKind.Acceptance, Selector.Named(command), Closure.Known(setOf("src/a.py")), CostClass.Fast, Trigger.OnDemand, acceptanceIds = listOf("AC-model"), command = command))
+        val out = run("""{"what":"acceptance","ids":["AC-model"]}""")
+        assertEquals("passed", status(out), out.body)
+        assertTrue(out.green)
+    }
+
+    @Test
     fun `a passing batch cannot certify an earlier check invalidated by a later check`() = runTest {
         val first = Check("CHK-first", CheckKind.Unit, Selector.All, Closure.Known(setOf("src/a.py")), CostClass.Fast, Trigger.OnDemand, command = printing("pytest_pass.txt", 0))
         val change = Command(if (windows) listOf("cmd.exe", "/d", "/s", "/c", "echo changed>src/a.py&type pytest_pass.txt") else listOf("/bin/sh", "-c", "echo changed > src/a.py; cat pytest_pass.txt"))

@@ -16,6 +16,7 @@ import io.astrolabe.auth.RedactionConfig
 import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Contract
 import io.astrolabe.contract.Contracts
+import io.astrolabe.contract.Origin
 import io.astrolabe.evidence.Outcome
 import io.astrolabe.evidence.Receipt
 import io.astrolabe.id.CandidateId
@@ -66,6 +67,9 @@ import io.astrolabe.verify.Scheduler
 import io.astrolabe.verify.Selector
 import io.astrolabe.workspace.Stamper
 import io.astrolabe.workspace.Workspace
+import io.astrolabe.workspace.WorkspacePath
+import io.astrolabe.workspace.PathResolution
+import io.astrolabe.workspace.Intent
 import io.astrolabe.delegate.IncrementReview
 import io.astrolabe.delegate.ReviewOutcome
 import java.io.IOException
@@ -332,8 +336,27 @@ public class Verify(
         } to "  ${check.id}: unavailable (no command)"
         var view = ""
         val receipt = scheduler.runCheck(check, contract.version, inputs) { root ->
+            val modelAdded = check.acceptanceIds.any { contract.acceptance(it)?.origin is Origin.Model }
+            val approvedCommand = contract.acceptance.filterIsInstance<Acceptance.Run>().any { it.origin !is Origin.Model && it.command == command }
+            // D-262: adding an obligation never grants authority to launch a new executable command.
+            val refusal = when {
+                contracts.current(ids.work)?.version != contract.version -> "contract changed before verification dispatch"
+                modelAdded && !approvedCommand -> "model-added verification command needs explicit host/user authorization"
+                else -> null
+            }
+            if (refusal != null) {
+                view = "  ${check.id}: denied — $refusal"
+                return@runCheck Executed(command.argv, command.cwd, false, null, Outcome.Denied, null, null, listOf(refusal))
+            }
             val actionId = idGen.next("act")
-            val cwd = command.cwd?.let { root.resolve(it) } ?: root
+            val cwd = when (val path = command.cwd) {
+                null, ".", "./" -> root
+                else -> (WorkspacePath.of(root).resolve(path, Intent.Read) as? PathResolution.Resolved)?.real
+            }
+            if (cwd == null || !Files.isDirectory(cwd)) {
+                view = "  ${check.id}: denied — working directory must be a directory inside the verification workspace"
+                return@runCheck Executed(command.argv, command.cwd, false, null, Outcome.Denied, null, null, listOf("working directory refused"))
+            }
             val proc = try {
                 runner.start(SpawnSpec(Command.Argv(command.argv), cwd, logPath(check.id, actionId), EnvPolicy(inheritedNames = envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")), timeoutSeconds))
             } catch (failure: IOException) {

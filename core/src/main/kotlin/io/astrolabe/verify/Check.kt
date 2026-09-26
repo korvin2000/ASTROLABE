@@ -183,7 +183,7 @@ public data class Check(
     val trigger: Trigger,
     val acceptanceIds: List<String> = emptyList(),
     val command: Command? = null,
-    val parserPolicy: String = "shaper/1",
+    val parserPolicy: String = "shaper/2",
     val last: LastResult? = null,
 ) {
     init {
