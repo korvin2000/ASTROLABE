@@ -12,6 +12,17 @@ class CacheScheduleTest {
     private val implHelper = CacheKey("implementing", "helper")
     private val review = CacheKey("review", "main")
 
+    @Test fun `cache preferences preserve all deadlines including jointly tight slots`() {
+        val random = kotlin.random.Random(131)
+        repeat(500) {
+            val ready = (0..7).map { CellSlot("$it", if (random.nextBoolean()) implMain else review, random.nextInt(4)) }
+            val order = CacheSchedule.order(ready, implMain)
+            ready.forEachIndexed { index, slot ->
+                assertTrue(order.indexOf(slot) <= index + slot.maxDelay, "$ready -> $order")
+            }
+        }
+    }
+
     @Test fun `the ordering hint puts cells sharing a role and profile next to each other only where latency allows`() {
         val ready = listOf(CellSlot("a", implMain), CellSlot("b", review), CellSlot("c", implMain), CellSlot("d", review))
         // After an implementing/main cell: its twin c moves ahead of b; then the two review cells run adjacently.

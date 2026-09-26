@@ -115,6 +115,10 @@ public data class Receipt(
 ) {
     init {
         require(receiptId.isNotBlank() && checkId.isNotBlank()) { "receipt needs ids" }
+        if (outcome == Outcome.Passed) {
+            require(parsed == null || (parsed.failed == 0 && parsed.errors == 0)) { "a passed receipt cannot contain failures" }
+            require(exitCode == null || exitCode == 0) { "a passed receipt cannot have a nonzero exit" }
+        }
         require(!(outcome == Outcome.Passed && parsed == null)) { "a passed receipt needs parsed counts" }
         require(!(outcome == Outcome.Passed && parsed != null && parsed.executed == 0 && parsed.discovered == 0)) {
             "a passed receipt with nothing executed is inconclusive, not green"

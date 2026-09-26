@@ -20,6 +20,15 @@ class WatcherTest {
         WatcherResult(check.id, "wr-$version", version, stamp(stampSeed), outcome, errors)
 
     @Test
+    fun `watcher results are stale against another or unknown candidate`() {
+        val feed = WatcherFeed()
+        feed.record(result(1, "s1"))
+        assertTrue(feed.render(stamp("s2")).contains("stale"))
+        assertTrue(feed.render(null).contains("stale"))
+        assertFalse(feed.render(stamp("s1")).contains("stale"))
+    }
+
+    @Test
     fun `off by default, the synchronous checker remains the baseline`() {
         assertFalse(Flags().asyncChecker, "async watchers are an ablation, never the default path (D12)")
     }

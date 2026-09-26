@@ -58,8 +58,8 @@ public object CacheSchedule {
 
     /**
      * The ready slots in hint order, starting after [previous] (the key of the cell that just ran): at each position the
-     * slot whose deadline (ready position + max delay) is due goes first, else the first slot sharing the current key,
-     * else the first slot in ready order. Earliest-deadline-first over unit slots meets every deadline the ready order meets.
+     * first slot sharing the current key is preferred, provided the remaining slots can still meet every deadline.
+     * Otherwise the earliest deadline wins. Deadlines use Long arithmetic to avoid overflow for large maxDelay.
      */
     @JvmStatic
     @JvmOverloads
@@ -70,8 +70,12 @@ public object CacheSchedule {
         var current = previous
         while (remaining.isNotEmpty()) {
             val position = ordered.size
-            val due = remaining.filter { it.index + it.value.maxDelay <= position }.minByOrNull { it.index + it.value.maxDelay }
-            val chosen = due ?: remaining.firstOrNull { it.value.key == current } ?: remaining.first()
+            val byDeadline = remaining.sortedBy { it.index.toLong() + it.value.maxDelay }
+            val preferred = remaining.firstOrNull { it.value.key == current } ?: remaining.first()
+            val feasible = byDeadline.filter { it != preferred }.withIndex().all { (offset, slot) ->
+                position.toLong() + 1 + offset <= slot.index.toLong() + slot.value.maxDelay
+            }
+            val chosen = if (feasible) preferred else byDeadline.first()
             remaining.remove(chosen)
             ordered += chosen.value
             current = chosen.value.key

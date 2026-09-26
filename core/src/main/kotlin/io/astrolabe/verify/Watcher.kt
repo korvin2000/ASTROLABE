@@ -103,5 +103,8 @@ public class WatcherFeed {
     /** Superseded results of [checkId], oldest first; never rendered as current. */
     public fun history(checkId: String): List<WatcherResult> = archive[checkId]?.toList() ?: emptyList()
 
-    public fun render(stampNow: CandidateId?): String = ChecksRender.render(stampNow, current.values.map { it.line() })
+    public fun render(stampNow: CandidateId?): String = ChecksRender.render(stampNow, current.values.map {
+        val line = it.line()
+        if (it.stamp == stampNow) line else line.copy(state = CheckState.Stale("watcher candidate differs from current workspace"))
+    })
 }

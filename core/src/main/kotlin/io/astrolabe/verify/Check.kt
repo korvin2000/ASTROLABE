@@ -85,6 +85,10 @@ public enum class Applicability {
             if (receipt.checkDefinitionVersion != now.definitionVersion) {
                 return ApplicabilityVerdict(Stale, "check definition changed since ${receipt.receiptId}")
             }
+            if (receipt.verifierVersion != now.verifierVersion) {
+                return ApplicabilityVerdict(Stale, "verifier version changed since ${receipt.receiptId}")
+            }
+            if (now.envId != null && receipt.envId != now.envId) return ApplicabilityVerdict(Stale, "environment moved")
             if (receipt.stampAfter == stamp) return ApplicabilityVerdict(Current)
             val tested = receipt.closureManifest
             val repinned = now.manifest
