@@ -1,6 +1,6 @@
 # Implementation audit findings
 
-**Remediation:** 24 fixed on `feature/bugfix`; 118 remain open; F-034 was already resolved. See [bugfix progress](audit/BUGFIX-PROGRESS.md). Audit evidence below keeps its original baseline; use `fix_progress` for current repair status.
+**Remediation:** 38 fixed on `feature/bugfix` (14 in this continuation); 104 remain open; F-034 was already resolved. See [bugfix progress](audit/BUGFIX-PROGRESS.md). Original audit evidence remains historical; `fix_progress` is the current repair status.
 
 ```json
 {
@@ -544,36 +544,26 @@
     "date": "2026-09-26",
     "status": "session_complete_remaining_findings_open",
     "fixed_this_session": [
-      "F-003",
-      "F-005",
-      "F-007",
-      "F-008",
-      "F-009",
-      "F-011",
-      "F-012",
-      "F-035",
-      "F-043",
-      "F-047",
-      "F-049",
-      "F-050",
-      "F-051",
-      "F-066",
-      "F-067",
-      "F-068",
-      "F-077",
-      "F-098",
-      "F-116",
-      "F-121",
-      "F-130",
-      "F-131",
-      "F-139",
-      "F-140"
+      "F-053",
+      "F-055",
+      "F-059",
+      "F-060",
+      "F-070",
+      "F-071",
+      "F-072",
+      "F-073",
+      "F-074",
+      "F-078",
+      "F-079",
+      "F-080",
+      "F-081",
+      "F-123"
     ],
-    "fixed_this_session_count": 24,
+    "fixed_this_session_count": 14,
     "previously_resolved": [
       "F-034"
     ],
-    "remaining_open_count": 118,
+    "remaining_open_count": 104,
     "remaining_open_ids": [
       "F-001",
       "F-002",
@@ -613,31 +603,18 @@
       "F-046",
       "F-048",
       "F-052",
-      "F-053",
       "F-054",
-      "F-055",
       "F-056",
       "F-057",
       "F-058",
-      "F-059",
-      "F-060",
       "F-061",
       "F-062",
       "F-063",
       "F-064",
       "F-065",
       "F-069",
-      "F-070",
-      "F-071",
-      "F-072",
-      "F-073",
-      "F-074",
       "F-075",
       "F-076",
-      "F-078",
-      "F-079",
-      "F-080",
-      "F-081",
       "F-082",
       "F-083",
       "F-084",
@@ -676,7 +653,6 @@
       "F-119",
       "F-120",
       "F-122",
-      "F-123",
       "F-124",
       "F-125",
       "F-126",
@@ -695,23 +671,137 @@
       "F-143"
     ],
     "next_priority": [
+      "F-076",
+      "F-022",
+      "F-088",
+      "F-094",
+      "F-054",
+      "F-056",
+      "F-057",
+      "F-058",
+      "F-061",
+      "F-062",
+      "F-064",
+      "F-065"
+    ],
+    "handoff": "CONTINUE-TASK.md",
+    "detail": "audit/BUGFIX-PROGRESS.md",
+    "verification": "Windows JDK 26 full build passed on final source checkpoint ae8fa2a: 1314 core tests: 1307 passed, 7 skipped, zero failures/errors; provider-api 17 passed, eval 49 passed, index-treesitter 17 passed. Compilation, packaging and ABI checks passed. Focused regressions and review corrections passed. POSIX executable-mode regression skipped on Windows; no Linux/remote CI or P7 validation.",
+    "source_changes_allowed": true,
+    "verification_results": {
+      "first_continuation_full_core": {
+        "tests": 1314,
+        "passed": 1305,
+        "failures": 2,
+        "errors": 0,
+        "skipped": 7,
+        "corrections": "CoherenceTest policy marker now shaper/future; PrecompileCampaignTest writes its artifact under declared build scratch. Both classes passed focused rerun."
+      },
+      "full_build_command": "./gradlew.bat build -q --console=plain",
+      "full_build_exit": 0,
+      "modules": {
+        "core": {
+          "tests": 1314,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 7,
+          "passed": 1307
+        },
+        "provider-api": {
+          "tests": 17,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 17
+        },
+        "eval": {
+          "tests": 49,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 49
+        },
+        "index-treesitter": {
+          "tests": 17,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 17
+        }
+      },
+      "full_core_rerun": true,
+      "log": "build/bugfix-continuation-build-verified.log",
+      "linux_or_remote_ci": false
+    },
+    "active_processes": [],
+    "previous_session_fixed": [
+      "F-003",
+      "F-005",
+      "F-007",
+      "F-008",
+      "F-009",
+      "F-011",
+      "F-012",
+      "F-035",
+      "F-043",
+      "F-047",
+      "F-049",
+      "F-050",
+      "F-051",
+      "F-066",
+      "F-067",
+      "F-068",
+      "F-077",
+      "F-098",
+      "F-116",
+      "F-121",
+      "F-130",
+      "F-131",
+      "F-139",
+      "F-140"
+    ],
+    "fixed_on_branch": [
+      "F-003",
+      "F-005",
+      "F-007",
+      "F-008",
+      "F-009",
+      "F-011",
+      "F-012",
+      "F-035",
+      "F-043",
+      "F-047",
+      "F-049",
+      "F-050",
+      "F-051",
       "F-053",
       "F-055",
       "F-059",
-      "F-071",
+      "F-060",
+      "F-066",
+      "F-067",
+      "F-068",
       "F-070",
-      "F-076",
+      "F-071",
+      "F-072",
+      "F-073",
+      "F-074",
+      "F-077",
       "F-078",
       "F-079",
       "F-080",
       "F-081",
-      "F-123"
+      "F-098",
+      "F-116",
+      "F-121",
+      "F-123",
+      "F-130",
+      "F-131",
+      "F-139",
+      "F-140"
     ],
-    "handoff": "CONTINUE-TASK.md",
-    "detail": "audit/BUGFIX-PROGRESS.md",
-    "verification": "Windows JDK 26: all fix groups passed focused tests; full core run had 1293 tests (1286 passed, 1 failed, 6 skipped). Its QaDriverTest failure was corrected and the final 29 focused tests passed. build -x :core:test then passed, including compilation, packaging, ABI checks and the other module tests (17 provider-api, 49 eval, 17 index-treesitter). The full core suite was not rerun after the final correction. No Linux/remote CI or P7 validation.",
-    "source_changes_allowed": true,
-    "verification_results": {
+    "fixed_on_branch_count": 38,
+    "previous_session_verification_results": {
       "initial_full_core": {
         "tests": 1293,
         "passed": 1286,
@@ -750,7 +840,7 @@
       },
       "full_core_rerun": false
     },
-    "active_processes": []
+    "source_checkpoint": "ae8fa2a"
   }
 }
 ```
@@ -1569,7 +1659,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-053 - Multiple operations on one path can overwrite earlier successful edits in the same batch
 
 - Task: [P1.6.4](TODO.md#L843).
-- Severity: high. Confidence: reproduced. Status: open.
+- Severity: high. Confidence: reproduced. Status: fixed (2026-09-26).
 - Locations: [Edit.run preflight list](core/src/main/kotlin/io/astrolabe/tool/edit/Edit.kt#L221), [Edit.apply AnchoredPlan](core/src/main/kotlin/io/astrolabe/tool/edit/Edit.kt#L355).
 - Reproduction: src/b.py starts x=1, y=2. Two anchored operations use the same valid initial expect: first changes x to 3, second changes y to 4. The tool returns applied=true for the batch, but the final file is x=1, y=4.
 - Problem: each plan captures oldText/oldBytes independently before any writes. apply reconstructs each full file from that old snapshot; it does not merge operations for a path or recheck an in-batch postimage. Path conflicts across create/delete/rename targets are similarly not globally preflighted.
@@ -1577,6 +1667,8 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Possible solutions: reject repeated/conflicting canonical paths before effects, or compile all compatible hunks per file into one validated final image with one preimage and coherent post-view. Cross-path rename/create/delete dependencies need explicit semantics.
 - Future regression: disjoint anchored operations on the same file, overlapping aliases/case spellings, duplicate create targets and rename-target conflicts must be combined correctly or rejected atomically.
 - Current-source recheck (2026-09-25, 9a80e117): Edit preflights all operations before mutation (247), applies each complete plan.oldText (379) and revalidate checks path identity only (522), so same-path snapshot clobber remains. Earlier runtime evidence retains its original baseline; this recheck is source inspection.
+- Fix (2026-09-26, `6e4e671`): Canonical edit paths, including rename targets, cannot appear in multiple operations; reverts run alone. Conflict regressions refuse before any write.
+
 
 ### F-054 - Normalized anchor mapping duplicates indentation and trailing newlines on replacement
 
@@ -1593,7 +1685,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-055 - Edit error diagnostics expose raw secrets to the model and reusable storage
 
 - Task: [P1.6.4](TODO.md#L843); related P1.10.3.
-- Severity: high. Confidence: reproduced. Status: open.
+- Severity: high. Confidence: reproduced. Status: fixed (2026-09-26).
 - Locations: [Edit.current stale diff](core/src/main/kotlin/io/astrolabe/tool/edit/Edit.kt#L326), [Anchors.nearest](core/src/main/kotlin/io/astrolabe/tool/edit/Anchors.kt#L135), [Edit.render](core/src/main/kotlin/io/astrolabe/tool/edit/Edit.kt#L546).
 - Reproduction: after observing an old src/b.py version, add a line containing the public synthetic AWS-style fixture token and issue an edit with the stale expect. The refused outcome body contains that token verbatim.
 - Problem: stale diffs and nearest-anchor candidates are built from raw recovery/current bytes, inserted into error.detail, then joined into the body and persisted without a whole-body redaction pass. Only post-edit view text is individually redacted.
@@ -1601,6 +1693,8 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Possible solutions: pass every model-facing/reusable diagnostic through the redaction boundary before output or persistence, while retaining exact raw preimages only in restricted recovery storage. Bound diagnostic captures and carry their limitations/masks honestly.
 - Future regression: stale diffs, no-match candidate lists, syntax errors and partial-write errors containing fixture secrets must be redacted in both returned bodies and stored reusable blobs.
 - Current-source recheck (2026-09-25, 9a80e117): Anchors.nearest returns raw lines; Edit.current builds raw stale diffs; Edit.render joins error.detail and persists body without whole-body redaction (558?600). Earlier runtime evidence retains its original baseline; this recheck is source inspection.
+- Fix (2026-09-26, `6e4e671, da8bc42`): The entire edit report is redacted before return and persistence. Redacted or capped reports grant no new post-edit coverage; composite observations carry no source ranges. Diagnostic and coverage regressions pass.
+
 
 ### F-056 - Turn reverts do not preflight the current contract's write scope
 
@@ -1640,7 +1734,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-059 - Foreground and terminal background run views bypass redaction
 
 - Task: [P1.6.5](TODO.md#L851); related P1.10.3.
-- Severity: high. Confidence: reproduced. Status: open.
+- Severity: high. Confidence: reproduced. Status: fixed (2026-09-26).
 - Locations: [Run.finish](core/src/main/kotlin/io/astrolabe/tool/run/Run.kt#L278), [Run.poll terminal branch](core/src/main/kotlin/io/astrolabe/tool/run/Run.kt#L333), [Run.render](core/src/main/kotlin/io/astrolabe/tool/run/Run.kt#L392).
 - Reproduction: a fixture file contains a synthetic AWS-style token; run executes type emit.txt (the command contains no secret). The returned body contains the token verbatim, although the stored LOG blob was separately redacted.
 - Problem: raw output is passed into Shapers, whose view includes raw head/tail/errors, then rendered without redacting the final view. Redacting only the saved log does not protect the model transcript. Command/scope/error strings are likewise rendered raw, and redactionApplied is hard-coded false.
@@ -1649,17 +1743,21 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Future regression: synthetic secrets in stdout/stderr, parser failures, command arguments and terminal polls must not appear in model-facing text; large redaction-limited logs must not claim fully recallable capture.
 - P1.6.7 follow-up: Verify.runOne repeats the same pattern (redacts only the saved blob, then shapes observed.output and returns the raw shaped view). Include acceptance/baseline verification output in the fix scope, not only Run.
 - Current-source recheck (2026-09-25, 9a80e117): Run.finish and terminal poll shape raw capture; render concatenates result.view unchanged and hard-codes redactionApplied=false (354?511). Earlier runtime evidence retains its original baseline; this recheck is source inspection.
+- Fix (2026-09-26, `b5ae2f3, 2b30ba6`): Run foreground/background/poll/refusal views and Verify output are redacted at their output boundaries. Stored log masks and scan limitations propagate into run capture metadata; secret and bounded-log regressions pass.
+
 
 ### F-060 - D-class approval is accepted without matching identity or rechecking current authority
 
 - Task: [P1.6.5](TODO.md#L851); related P0.4.2/P1.9.4.
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-26).
 - Location: [Run.run approval-to-dispatch path](core/src/main/kotlin/io/astrolabe/tool/run/Run.kt#L172).
 - Problem: after authority.approve suspends, Run checks only approval.approved. requestId and contractRevision are ignored; the pre-await contract/ceiling/classification are used without rereading current authority.
 - Impact: a late or mismatched approval can authorize a different D-class action, or an action whose permission was revoked/narrowed while approval was pending. Replies validation exists but is not used here; an earlier cell-level pre-dispatch guard does not cover the suspension interval.
 - Possible solutions: bind approval to request ID, exact command/effect and revision/generation; revalidate committed authority and cancellation immediately before the consequential dispatch boundary.
 - Future regression: wrong request ID/revision and a contract revocation/cancel during a suspended approval must leave no launched process or external effect.
 - Current-source recheck (2026-09-25, 9a80e117): Run.authorize now shares logic with mounts but still checks only approval.approved, with no request/revision/current-authority validation after await (240?257). Earlier runtime evidence retains its original baseline; this recheck is source inspection.
+- Fix (2026-09-26, `e4e23eb`): D-class replies must match request ID, request revision and current contract after the await; coroutine cancellation is checked before proceeding. Wrong identity/revision and authority-change regressions prevent dispatch.
+
 
 ### F-061 - Run commits its intent before durable handle/result evidence exists
 
@@ -1770,50 +1868,58 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Current-tree recheck (2026-09-25, 9a80e117): still present at [acceptance selection](core/src/main/kotlin/io/astrolabe/tool/verify/Verify.kt#L240) and [aggregate green](core/src/main/kotlin/io/astrolabe/tool/verify/Verify.kt#L383). No new runtime reproduction claimed.
 
 - Task: [P1.6.7](TODO.md#L865).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-26).
 - Locations: [Verify.acceptance](core/src/main/kotlin/io/astrolabe/tool/verify/Verify.kt#L188), [Verify.runAll/outcome](core/src/main/kotlin/io/astrolabe/tool/verify/Verify.kt#L231).
 - Problem: runAll computes current Scheduler.currency for display, but outcome.green uses only receipt.greenForFinalTree (historical Passed + stable inputs), without testing currency at the final batch stamp. acceptance also flatMaps requested acceptance IDs to registered checks and silently drops any requested Run item with no matching registration when another item does have a check.
 - Impact: the text can mark an earlier receipt stale while green(op:N) still succeeds; or a requested acceptance set can return green after only a subset was executed. Conditional STATE facts/ticks then rely on a stronger result than was established.
 - Possible solutions: compute aggregate green from the complete requested obligation/check set and final-stamp Currency.certifies; record explicit unavailable/missing dispositions for unmapped requested obligations. Keep historical outcomes distinct from the aggregate current verdict.
 - Future regression: two passing receipts where an earlier one is stale at the final batch stamp, and a requested set with one missing registered check; neither may yield green=true.
+- Fix (2026-09-26, `2b30ba6, da8bc42`): Both acceptance selections refuse missing registrations. Aggregate green requires final-stamp Scheduler.currency certification; an earlier pass invalidated by a later check is non-green.
+
 
 ### F-071 - Model-added verification commands bypass run execution policy and D-class approval
 
 - Task: [P1.6.7](TODO.md#L865); related P1.1.1/P1.10.2/P2.1.2.
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-26).
 - Locations: [Verify.runOne](core/src/main/kotlin/io/astrolabe/tool/verify/Verify.kt#L254), [PlanIntake autonomous acceptance](core/src/main/kotlin/io/astrolabe/campaign/Plan.kt#L282), [Contract.strengthen](core/src/main/kotlin/io/astrolabe/contract/Contract.kt#L270).
 - Problem: an autonomous plan can add a model-origin Acceptance.Run with arbitrary argv/cwd. Verify runs its command directly through Runner.start; unlike Run, it has no EffectPolicy/ceiling/Authority approval/intent checks for that executable. Command.cwd is resolved with root.resolve without WorkspacePath validation.
 - Impact: a model can route a command which run would deny or require D-class approval for through a nominally strengthening acceptance item. A working directory outside the workspace can also pass this path. Trusted-local explicitly lacks OS confinement, but that does not justify skipping the harness's declared command-authority checks.
 - Possible solutions: make verification dispatch use the same validated command/cwd/capability/approval boundary as ordinary run, with an explicit policy for approved test commands; adding a logical obligation must not itself grant executable authority.
 - Future regression: in autonomous mode propose an acceptance command classified D/denied and an escaping cwd; verifying it must refuse before effects unless committed execution authority explicitly covers it. Ordinary approved test runners remain usable.
 - Current-source recheck (2026-09-25, 9a80e117): PlanIntake still strengthens autonomous model acceptance; Verify.runOne directly starts command.argv with root.resolve(cwd), no Run authority/classification path (327?356). Earlier runtime evidence retains its original baseline; this recheck is source inspection.
+- Fix (2026-09-26, `6e1f2ca`): D-262 conservatively denies new model-origin verification commands unless exact argv/cwd also has non-model contract authorization. Working directories resolve inside the execution root; denied-command, escaping-cwd and approved-command regressions pass.
+
 
 ### F-072 - Failed STATE persistence leaves the patch applied in memory
 
 - Task: [P1.6.8](TODO.md#L873).
-- Severity: high. Confidence: reproduced. Status: open.
+- Severity: high. Confidence: reproduced. Status: fixed (2026-09-26).
 - Location: [StateTool.patch Applied branch](core/src/main/kotlin/io/astrolabe/tool/state/StateTool.kt#L137).
 - Reproduction: RegisterVersions.save throws an injected storage error for a valid Next-only patch. execute throws, but StateTool.register is already version 1 with the new Next value, while persistence failed.
 - Problem: register is assigned and lastRejection cleared before versions.save succeeds.
 - Impact: the dispatcher/cell sees a failed tool but subsequent logic uses the changed STATE; restart sees an older version. A later checkpoint can persist the state of a patch that never reported success, violating atomic commit/failure semantics.
 - Possible solutions: durably save the validated candidate before publishing it as current and emitting events; if a larger transaction is needed, publish only after commit and preserve the previous state on failure.
 - Future regression: fail save before/at commit; memory and persistent latest version must remain aligned or the context must fail closed with an explicit uncertain commit, never silently advance.
+- Fix (2026-09-26, `fb6bffc`): STATE persistence precedes publishing the new in-memory register or clearing its last rejection; injected save failure leaves both unchanged.
+
 
 ### F-073 - Schema-rejected STATE patches do not update the gate's rejection record
 
 - Task: [P1.6.8](TODO.md#L873); related P1.8.5/P1.8.7.
-- Severity: medium. Confidence: confirmed_source. Status: open.
+- Severity: medium. Confidence: confirmed_source. Status: fixed (2026-09-26).
 - Locations: [StateTool.patch parser rejection](core/src/main/kotlin/io/astrolabe/tool/state/StateTool.kt#L121), [Cell GateState.patchRejection](core/src/main/kotlin/io/astrolabe/cell/Cell.kt#L427).
 - Problem: ParsedPatch.Invalid returns a rejected ToolOutcome immediately without setting lastRejection. Only Validator.Rejected updates that field. Cell passes lastRejection to register gates whenever the turn contains a patch.
 - Impact: repeated malformed patches can be invisible to the dedicated rejection guard, or reuse an unrelated previous rejection as the current cause. State itself remains unchanged; the defect is recovery/gate accuracy and wasted turns.
 - Possible solutions: represent parser and invariant failures through one current-patch rejection record, clearing/replacing it deterministically for every attempt; keep rule/index/size diagnostics appropriate to each failure.
 - Future regression: successful patch followed by repeated schema failures, and invariant rejection followed by a different schema failure, must feed the correct current rejection into the gate.
 - Current-source recheck (2026-09-25, 9a80e117): StateTool schema-invalid branch returns before setting lastRejection (116); Cell still feeds that field to the patch rejection gate (455). Earlier runtime evidence retains its original baseline; this recheck is source inspection.
+- Fix (2026-09-26, `fb6bffc`): Schema-invalid STATE patches now record a typed rejection with measured sizes for the loop gate. A subsequently saved valid patch clears it.
+
 
 ### F-074 - Task answers are matched against a stale contract snapshot and not their question ID
 
 - Task: [P1.6.9](TODO.md#L878); related P0.4.2/P1.1.3.
-- Severity: high. Confidence: reproduced. Status: open.
+- Severity: high. Confidence: reproduced. Status: fixed (2026-09-26).
 - Location: [TaskTool.ask](core/src/main/kotlin/io/astrolabe/tool/task/TaskTool.kt#L100).
 - Reproduction: during Authority.ask, amend the contract from v1 to v2, then return Answer(questionId=wrong-question, contractRevision=1). The tool returns answered and pins that mismatched answer despite latest revision=2.
 - Problem: Replies.check compares against the contract read before the suspend, not the current committed revision; questionId is never compared with the pending Question.id.
@@ -1821,6 +1927,8 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Possible solutions: validate question identity and re-read the current contract after the await; preserve superseded replies as historical evidence without applying them. Bind any amendment application transactionally to the still-current pending question/revision.
 - Future regression: wrong question ID, contract update while waiting and stale changesRequirements=true replies must all block/supersede without changing current authority.
 - Current-source recheck (2026-09-25, 9a80e117): TaskTool.ask still compares answer to pre-await contract.version only and omits questionId check (115?130). Earlier runtime evidence retains its original baseline; this recheck is source inspection.
+- Fix (2026-09-26, `e4e23eb`): Task answers must name the pending question and match the current contract after the await; wrong and superseded answers cannot amend it.
+
 
 ### F-075 - Normal Gradle/Maven verification never supplies the reports required to pass
 
@@ -1857,45 +1965,53 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-078 - Exclusive checks certify newly added inputs without detecting their mutation
 
 - Task: [P1.7.4](TODO.md#L910).
-- Severity: high. Confidence: reproduced. Status: open.
+- Severity: high. Confidence: reproduced. Status: fixed (2026-09-26).
 - Locations: [Scheduler.runCheck](core/src/main/kotlin/io/astrolabe/verify/Scheduler.kt#L126), [mutation comparison](core/src/main/kotlin/io/astrolabe/verify/Scheduler.kt#L135).
 - Reproduction: in the existing SchedulerTest package-closure fixture, add src/pkg/new.py inside the execute callback and return a parsed pass. Result: stampBefore != stampAfter, mutatedDuringCheck=[], currency.certifies=true.
 - Problem: paths are enumerated before dispatch (even before acquiring the mutation lock), and only those same paths are rescanned afterwards. New members are absent from the comparison. The receipt then binds stampAfter, which includes the untested member.
 - Impact: a generated/replaced test or source member can join the final tree during verification without invalidating its green receipt. Unknown closures with a caller-supplied old tree list have the same problem.
 - Possible solution: enumerate under the lock and compare before/after membership as well as versions/metadata across the full applicable input scope, excluding only declared scratch outputs.
 - Future regression: add/delete/rename package and unknown-closure inputs during execution, including additions before lock acquisition; every unexplained input change makes the receipt ineligible.
+- Fix (2026-09-26, `2b30ba6`): Exclusive checks enumerate under the mutation lock and compare before/after membership and content/metadata. Enumerated unknown closures rescan the workspace, not only a caller-supplied stale path list.
+
 
 ### F-079 - Isolated export accepts bytes that no longer match its candidate stamp
 
 - Task: [P1.7.4](TODO.md#L910); follow-up P5.1.3.
-- Severity: high. Confidence: reproduced. Status: open.
+- Severity: high. Confidence: reproduced. Status: fixed (2026-09-26).
 - Locations: [Scheduler.runIsolated](core/src/main/kotlin/io/astrolabe/verify/Scheduler.kt#L156), [Scheduler.export](core/src/main/kotlin/io/astrolabe/verify/Scheduler.kt#L217).
 - Reproduction: capture a StampReport, change src/a.py, then invoke the real export helper with that report. Export succeeds and contains the changed bytes although a fresh candidate stamp differs. This deterministically reproduces the stamp-to-copy gap; concurrent end-to-end scheduling was not exercised.
 - Problem: export compares destination hashes only with the bytes just read for copying, not the stamped tree. The harness mutation lock excludes cooperating writers, not external editors/background processes. runIsolated subsequently labels the result with the earlier report.candidateId.
 - Impact: verification can certify one candidate using another candidate's bytes; an external edit followed by restore makes this particularly misleading. Default S0 runs exclusively; isolated callers/S3 are affected.
 - Possible solution: materialize a pinned snapshot tied to the report, or verify copied membership/versions against a complete stamped manifest and reject any intervening change before dispatch.
 - Future regression: inject an edit between stamp acquisition and export reads; no receipt may certify the old stamp from new bytes.
+- Fix (2026-09-26, `2b30ba6`): Isolated export reads unchanged bytes from immutable Git objects, checks dirty bytes against stamped digests, and checks candidate currency before/after export. A stale report is refused; unsupported entry modes fall back to exclusive execution.
+
 
 ### F-080 - Isolated verification drops executable file modes
 
 - Task: [P1.7.4](TODO.md#L910); related snapshot-fidelity finding F-028.
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-26).
 - Locations: [Scheduler.export Files.write](core/src/main/kotlin/io/astrolabe/verify/Scheduler.kt#L227), [Scheduler.scan](core/src/main/kotlin/io/astrolabe/verify/Scheduler.kt#L235).
 - Trigger/problem: export creates every file using Files.write and preserves no source executable permission; scan verifies only bytes, size and mtime. A tracked executable script/launcher is accepted as a faithful isolated candidate although its execution mode changed.
 - Impact: on POSIX, checks invoking ./gradlew or another executable script can fail with permission denied, or exercise different behavior, while the receipt is labelled with the original candidate. This separate exporter does not use ShadowRef's materialization policy. POSIX runtime reproduction was unavailable on this Windows host.
 - Possible solution: preserve and validate required entry modes as part of candidate export, or explicitly reject unsupported materialization before dispatch.
 - Future regression: Linux executable launcher and a mode-only change through the isolated scheduler; copied executable status and reported candidate must agree.
+- Fix (2026-09-26, `2b30ba6, 6e1f2ca`): Isolated exports restore and validate POSIX executable status; post-run snapshots include executable state. The POSIX runtime regression is present but skipped on this Windows host.
+
 
 ### F-081 - A baseline that changed its inputs still publishes pre-existing failures
 
 - Task: [P1.7.5](TODO.md#L916).
-- Severity: medium. Confidence: reproduced. Status: open.
+- Severity: medium. Confidence: reproduced. Status: fixed (2026-09-26).
 - Locations: [Baseline mutation scan](core/src/main/kotlin/io/astrolabe/verify/Baseline.kt#L207), [ledger construction](core/src/main/kotlin/io/astrolabe/verify/Baseline.kt#L230), [PreexistingLedger.classify](core/src/main/kotlin/io/astrolabe/verify/Baseline.kt#L82).
 - Reproduction: existing BaselineTest fixture plus a suite that changes tests/test_discount.py and emits the recorded failing report returns Failed, eligible=false, mutatedDuringCheck=[tests/test_discount.py], but a ledger with one pre-existing-failure entry and no ledger limitations.
 - Problem: ledger creation checks only outcome, not the receipt's input stability. classify can return PreExisting from that ledger without checking whether the baseline execution actually describes s0. Its rescan also compares original file bytes only, missing added members and restored writes.
 - Impact: failure triage and rendered baseline context can mislabel failures from a modified candidate as pre-existing. Required acceptance is not automatically waived; the direct impact is misleading evidence/steering.
 - Possible solution: withhold pre-existing classification when baseline inputs changed or stability is unknown, carry the reason into the ledger view, and use full membership/metadata validation.
 - Future regression: mutate an input before a failure, restore it before exit, or create a new input; none may establish a comparable pre-existing-failure ledger.
+- Fix (2026-09-26, `137b89b`): Baseline snapshots compare membership, versions, timestamps and executable state. Mutated, restored or expanded input trees cannot publish a pre-existing-failure ledger.
+
 
 ### F-082 - Check acceptance assessments have no production path into completion
 
@@ -2238,10 +2354,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-123 - Campaign full-suite and quality gates bypass receipt certification requirements
 
 - Task: [P3.6.2](TODO.md#L1513).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-26).
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/campaign/Controller.kt#L1562).
 - Analysis: fullSuite treats the suite as Green when registry.last is Passed at the current stamp, without checking testedInputs.eligible or Scheduler.currency.certifies. A test that mutates/restores its input can therefore be accepted here despite an ineligible receipt. Configured quality gates are checked only for Outcome.Failed: Unavailable, Timeout, Inconclusive, stale or ineligible results are ignored, and a later suite run can invalidate their earlier passes without another currency check. Require a current eligible pass for every declared final gate at one final candidate, preserving undeclared as a separate case. Regression: passing-but-mutating suite, missing quality runner, timed-out quality gate and gate stale after suite; none may produce final acceptance.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-26, `cf3e80d`): Every declared quality/full-suite gate must have current eligible passing evidence at one final stamp. Missing runners, mutating suites and quality gates stale after the suite remain uncertified.
+
 
 ### F-124 - Admission rollback does not restore the superseded predecessor
 

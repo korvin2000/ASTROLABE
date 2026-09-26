@@ -577,3 +577,11 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - Core ABI updated; D-261 conservatively requires review for additions to existing tests. JVM callers must rebuild.
 - Repair ledger: findings.md fix_progress; handoff: CONTINUE-TASK.md and audit/BUGFIX-PROGRESS.md.
 - Existing CLAUDE.md/ISSUES.md changes and untracked todo_findings.txt preserved. Local commits only; no push/PR.
+
+## 2026-09-26 - feature/bugfix continuation
+- 14 additional findings fixed: 38 fixed across sessions, 104 open, F-034 previously resolved; P0-P6 remains 185/185 implemented, P7 excluded.
+- Repairs cover edit conflicts/redaction/coverage, run exposure, verification authority/currency/stable inputs, baseline ledgers, reply binding, final gates and STATE durability/rejection accounting.
+- Independent review corrections landed in da8bc42. D-262/D-263 document conservative authorization/edit rules; D-264 bumps parser policy to shaper/2.
+- Full final Windows JDK 26 build passed: 1314 core tests: 1307 passed, 7 skipped, zero failures/errors; provider-api 17 passed, eval 49 passed, index-treesitter 17 passed; packaging and ABI passed.
+- POSIX executable-mode test skipped on Windows. No new Linux, CI, live provider or P7 validation. No push/PR.
+- Handoff and complete repair ledger updated. Pre-existing CLAUDE.md/ISSUES.md edits and untracked continue_fixing.md/todo_findings.txt preserved.

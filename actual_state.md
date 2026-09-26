@@ -1,7 +1,6 @@
 # ASTROLABE — implemented state
 
-Snapshot, rewritten each session (≤60 lines). Progress truth is the TODO task statuses and `Log:` lines;
-next work is `CONTINUE-TASK.md`; history is `audit/SESSION-HISTORY.md`.
+Snapshot: TODO owns task status; CONTINUE-TASK.md owns next work; audit/SESSION-HISTORY.md records history.
 
 ## Counts (2026-09-26, from `#### P… · STATUS` headings)
 **185/185 DONE, 0 IN_PROGRESS, 0 TODO.** P0 19/19 · P1 64/64 · P2 30/30 · P3 25/25 · P4 25/25 · P5 15/15 · P6 7/7.
@@ -55,6 +54,7 @@ D-200–D-202, D-210–D-213, D-220–D-223, D-230–D-233, D-240–D-244, D-250
 (new dependencies allowed under pinned-version rules).
 
 ## Audit remediation (2026-09-26)
-Branch `feature/bugfix`: 24 findings fixed, 118 open, F-034 previously resolved.
-See `findings.md` fix_progress and `audit/BUGFIX-PROGRESS.md`; historical phase gates above predate these fixes.
-Full core run: 1,286 pass/1 fail/6 skip; failure fixed, final focused 29 pass. Build -x :core:test passes; no full rerun/Linux/CI.
+Branch `feature/bugfix`: 38 fixed (14 this continuation), 104 open, F-034 previously resolved.
+See `findings.md` fix_progress and `audit/BUGFIX-PROGRESS.md`; historical gates above predate these fixes.
+Full Windows build passes: 1307 core passed, 7 skipped; other modules and ABI pass. No new Linux/CI evidence.
+D-262 denies unapproved model verification commands; D-263 rejects edit path conflicts; D-264 invalidates old receipt definitions.

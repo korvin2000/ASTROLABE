@@ -2,7 +2,7 @@
 
 Branch: `feature/bugfix`. Baseline: `9a80e117445be357285fec2cffffe0fd45290a9a`.
 
-**24 fixed this session; 118 open; F-034 resolved before this session.**
+**38 fixed across two sessions (14 in this continuation); 104 open; F-034 previously resolved.**
 The complete remaining queue is `findings.md` ? JSON `fix_progress.remaining_open_ids`.
 
 ## Fixed findings
@@ -34,7 +34,36 @@ The complete remaining queue is `findings.md` ? JSON `fix_progress.remaining_ope
 | F-139 | `75e3280` | Generated tools deep-copy and freeze script/capability/test collections; capability requirements and unambiguous argv contribute to the digest. |
 | F-140 | `f060c97` | Watcher results render stale when their candidate differs from the current candidate, including unknown current candidates. |
 
-## Verification
+## Continuation fixes
+
+| Finding | Commit | Change and evidence |
+|---|---|---|
+| F-053 | `6e4e671` | Canonical edit paths, including rename targets, cannot appear in multiple operations; reverts run alone. Conflict regressions refuse before any write. |
+| F-055 | `6e4e671, da8bc42` | The entire edit report is redacted before return and persistence. Redacted or capped reports grant no new post-edit coverage; composite observations carry no source ranges. Diagnostic and coverage regressions pass. |
+| F-059 | `b5ae2f3, 2b30ba6` | Run foreground/background/poll/refusal views and Verify output are redacted at their output boundaries. Stored log masks and scan limitations propagate into run capture metadata; secret and bounded-log regressions pass. |
+| F-060 | `e4e23eb` | D-class replies must match request ID, request revision and current contract after the await; coroutine cancellation is checked before proceeding. Wrong identity/revision and authority-change regressions prevent dispatch. |
+| F-070 | `2b30ba6, da8bc42` | Both acceptance selections refuse missing registrations. Aggregate green requires final-stamp Scheduler.currency certification; an earlier pass invalidated by a later check is non-green. |
+| F-071 | `6e1f2ca` | D-262 conservatively denies new model-origin verification commands unless exact argv/cwd also has non-model contract authorization. Working directories resolve inside the execution root; denied-command, escaping-cwd and approved-command regressions pass. |
+| F-072 | `fb6bffc` | STATE persistence precedes publishing the new in-memory register or clearing its last rejection; injected save failure leaves both unchanged. |
+| F-073 | `fb6bffc` | Schema-invalid STATE patches now record a typed rejection with measured sizes for the loop gate. A subsequently saved valid patch clears it. |
+| F-074 | `e4e23eb` | Task answers must name the pending question and match the current contract after the await; wrong and superseded answers cannot amend it. |
+| F-078 | `2b30ba6` | Exclusive checks enumerate under the mutation lock and compare before/after membership and content/metadata. Enumerated unknown closures rescan the workspace, not only a caller-supplied stale path list. |
+| F-079 | `2b30ba6` | Isolated export reads unchanged bytes from immutable Git objects, checks dirty bytes against stamped digests, and checks candidate currency before/after export. A stale report is refused; unsupported entry modes fall back to exclusive execution. |
+| F-080 | `2b30ba6, 6e1f2ca` | Isolated exports restore and validate POSIX executable status; post-run snapshots include executable state. The POSIX runtime regression is present but skipped on this Windows host. |
+| F-081 | `137b89b` | Baseline snapshots compare membership, versions, timestamps and executable state. Mutated, restored or expanded input trees cannot publish a pre-existing-failure ledger. |
+| F-123 | `cf3e80d` | Every declared quality/full-suite gate must have current eligible passing evidence at one final stamp. Missing runners, mutating suites and quality gates stale after the suite remain uncertified. |
+
+## Continuation verification
+
+- Every fix group passed focused Windows JDK 26 tests, including before-fix failures for the new regressions. The POSIX executable-mode test is skipped on Windows.
+- Independent review found two gaps in the first implementation: coverage from hidden edit views and the alternate acceptance selector. Both were corrected and retested (`da8bc42`).
+- The first build was cancelled for review corrections. The next full core run had 1,305 passed, two failed and seven skipped; the two stale test fixtures were corrected and both classes passed focused reruns. Final `./gradlew.bat build -q --console=plain` **passed** on `ae8fa2a`: **1314 core tests: 1307 passed, 7 skipped, zero failures/errors**; provider-api 17 passed, eval 49 passed, index-treesitter 17 passed. Compilation, packaging and ABI checks passed. Log: ignored `build/bugfix-continuation-build-verified.log`.
+- No public signatures changed in this continuation. D-264 changes the default parser policy to `shaper/2`, invalidating older check-definition digests and requiring re-verification.
+- D-262: new model-origin verification commands require exact non-model contract authorization. Interactive approval through Verify is unavailable; a host/user must commit that authorization. D-263: one operation per canonical edit path; multiple hunks stay supported.
+- Isolated export now reads unchanged content from Git's object store, one blob read per file; large-repository export performance was not benchmarked.
+- Local commits only; no push, PR, Linux, CI, live-provider or P7 validation.
+
+## Previous session verification
 
 - Each fix group passed focused tests. Regression tests reproduced the defects before correction, except the short-write loop was verified by inspection and existing storage tests.
 - Initial full Windows JDK 26 core run: **1,293 tests; 1,286 passed, one failed, six skipped**, in 13 minutes. The sole failure was QaDriverTest recording HTTP 200 as a process exit. Fixed in `3f433f6`.
@@ -50,15 +79,16 @@ The complete remaining queue is `findings.md` ? JSON `fix_progress.remaining_ope
 - `Workset.RecallResult.Historical.currentVersion` is nullable when the source file is gone.
 - Generated-tool digests now include capabilities and unambiguous argv; existing digest-based caches may invalidate.
 - D-261: additions to an existing test file require integrity review. New test files without detected skip markers retain the additions-only category. This is a conservative heuristic, not semantic proof.
-- Receipt construction rejects contradictory passed evidence; malformed old persisted receipts may now fail validation. Before releasing these parser changes, bump the harness/verifier version so old receipts cannot retain currency under the old parser policy.
+- Receipt construction rejects contradictory passed evidence; malformed old persisted receipts may now fail validation. D-264 now bumps the default check parser policy to shaper/2, so old receipt definitions cannot retain currency under the old parser policy.
 
 ## Resume order
 
-1. Check branch/status and read `findings.md` fix_progress; preserve pre-existing edits in CLAUDE.md and ISSUES.md and untracked todo_findings.txt.
-2. F-053 same-path edit clobber and F-055/F-059 diagnostic/run secret disclosure; add focused regressions before fixes.
-3. F-071 verification command authorization, then F-070/F-076?F-081/F-123 receipt certification and final-tree correctness.
-4. Authority identity/currency F-022/F-060/F-074/F-088/F-094, then recovery and remaining findings in audit order.
-5. Keep the 185 implemented P0?P6 task statuses intact; audit repair status belongs in findings.md. P7 remains excluded.
+1. Check branch/status and read `findings.md` fix_progress. Preserve pre-existing CLAUDE.md/ISSUES.md changes and untracked continue_fixing.md/todo_findings.txt.
+2. F-076 nested-package checker and blast command paths.
+3. F-022/F-088/F-094 remaining authority identity/currency boundaries.
+4. F-054 normalized anchors; F-056 revert scope; F-057 partial-write reporting; F-058 result recall links.
+5. F-061/F-062/F-064/F-065 run durability, ownership, cancellation and capture drain; then remaining findings in audit order.
+6. Keep the 185 implemented P0-P6 task statuses intact; repair status belongs in findings.md. P7 remains excluded.
 
 ## Existing implementation debts
 
