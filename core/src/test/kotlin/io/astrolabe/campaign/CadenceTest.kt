@@ -39,6 +39,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /** P3.6.2: the full suite and the configured quality gates run every K = 5 verified increments and at campaign end. */
 class CadenceTest {
@@ -88,6 +89,32 @@ class CadenceTest {
 
     @Test
     fun `a scripted seven-increment campaign runs the suite and quality gates after five verified increments and at the end`() = cadence()
+
+    @Test
+    fun `final gates require current eligible evidence including when no suite is declared`() = runBlocking {
+        val controller = Controller(config, clock, idGen)
+        controller.open(repo.root, request, policy).use { c ->
+            val method = Controller::class.java.declaredMethods.single { it.name == "fullSuite" }.also { it.isAccessible = true }
+            suspend fun result(): String {
+                val result = kotlin.coroutines.intrinsics.suspendCoroutineUninterceptedOrReturn<Any> { continuation ->
+                    method.invoke(controller, c, "regression", continuation)
+                }
+                return result::class.simpleName!!
+            }
+            val quality = c.checks[Checks.QUALITY_GATE]!!
+            c.checks.replace(quality.copy(command = Command(listOf("no-such-quality-runner-xyz"))))
+            assertEquals("NotCertified", result(), "a missing quality runner blocks even without a full suite")
+            c.checks.replace(quality)
+            val mutating = Command(if (WINDOWS) listOf("cmd.exe", "/d", "/s", "/c", "echo changed>src/f1.py&type pytest_pass.txt") else listOf("/bin/sh", "-c", "echo changed > src/f1.py; cat pytest_pass.txt"))
+            val full = io.astrolabe.verify.Check(Checks.FULL, io.astrolabe.verify.CheckKind.Full, io.astrolabe.verify.Selector.All, io.astrolabe.evidence.Closure.Unknown, io.astrolabe.verify.CostClass.Expensive, io.astrolabe.verify.Trigger.CampaignEnd, command = mutating)
+            c.checks.replace(full)
+            assertEquals("NotCertified", result(), "a passing suite that changes its inputs is ineligible")
+            val scratch = Command(if (WINDOWS) listOf("cmd.exe", "/d", "/s", "/c", "mkdir build&echo scratch>build/report.txt&type pytest_pass.txt") else listOf("/bin/sh", "-c", "mkdir -p build; echo scratch > build/report.txt; cat pytest_pass.txt"))
+            c.checks.replace(full.copy(command = scratch))
+            assertEquals("NotCertified", result(), "a later suite stamp cannot silently replace the quality gate candidate")
+            assertTrue(SqliteReceipts(c.store, clock).forCheck(Checks.FULL).last().testedInputs.eligible, "declared scratch output leaves the suite eligible")
+        }
+    }
 
     @Test
     fun `the configured quality gates run on the cadence even when the repository declares no full suite`() {

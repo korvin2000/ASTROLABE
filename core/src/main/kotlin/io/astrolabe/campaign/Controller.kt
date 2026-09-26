@@ -1562,25 +1562,27 @@ public class Controller @JvmOverloads public constructor(
     private suspend fun fullSuite(c: OpenedCampaign, why: String): FullSuite {
         val check = c.checks[Checks.FULL]
         val ids = c.ids.copy(context = ContextId(idGen.next("finish")))
-        // §8.1: the configured quality gates run with the suite, declared or not; a red gate is a red result.
+        // §8.1: every declared gate must certify the same final candidate as the suite.
         val gates = c.checks.all().filter { it.kind == CheckKind.Quality }.map { it.id }
         if (gates.isNotEmpty()) harnessVerify(c, ids, "quality", """{"what":"tests","selection":"ids","ids":[${gates.joinToString(",") { "\"$it\"" }}]}""")
-        val redGate = gates.mapNotNull { c.checks[it]?.last }.firstOrNull { it.outcome == Outcome.Failed }
-        if (check == null) {
-            val red = redGate?.let { FullSuite.Red("quality gate ${it.receiptId} failed") }
-            c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, text = "full suite ($why): none declared by the repository — an explicit gap, acceptance runs stand" + (red?.let { " · ${it.detail}" } ?: ""), at = clock.instant()))
-            return red ?: FullSuite.Undeclared
-        }
-        harnessVerify(c, ids, "full", """{"what":"tests","selection":"full"}""")
-        val last = c.checks[Checks.FULL]?.last
+        if (check != null) harnessVerify(c, ids, "full", """{"what":"tests","selection":"full"}""")
         val stamp = c.stamper.report().candidateId
-        // The full suite's closure is unknown (every file), so its evidence is a pass recorded at this very stamp.
-        val result = when {
-            redGate != null -> FullSuite.Red("quality gate ${redGate.receiptId} failed at @${stamp.hash8}")
-            last?.outcome == Outcome.Passed && last.stamp == stamp -> FullSuite.Green
-            last?.outcome == Outcome.Failed -> FullSuite.Red("${last.receiptId} failed at @${stamp.hash8}")
-            else -> FullSuite.NotCertified("${last?.receiptId ?: "no receipt"} ${last?.outcome?.name?.lowercase() ?: "not run"} at @${stamp.hash8}")
+        val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, ids, clock)
+        val required = (gates + listOfNotNull(check?.id)).mapNotNull { c.checks[it] }
+        val currency = required.associate { it.id to scheduler.currency(it, stamp) }
+        val red = required.firstOrNull { currency.getValue(it.id).red }
+        val gap = required.firstOrNull { !currency.getValue(it.id).certifies }
+        val certification = when {
+            red != null -> FullSuite.Red("${red.id} ${red.last?.receiptId} failed at @${stamp.hash8}")
+            gap != null -> FullSuite.NotCertified("${gap.id}: ${currency.getValue(gap.id).reasons.joinToString("; ").ifEmpty { gap.last?.outcome?.name?.lowercase() ?: "not run" }} at @${stamp.hash8}")
+            else -> null
         }
+        if (check == null) {
+            c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, text = "full suite ($why): none declared by the repository — an explicit gap, acceptance runs stand" + (certification?.let { " · $it" } ?: ""), at = clock.instant()))
+            return certification ?: FullSuite.Undeclared
+        }
+        val last = c.checks[Checks.FULL]?.last
+        val result = certification ?: FullSuite.Green
         c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, refs = listOfNotNull(last?.receiptId), text = "full suite ($why): ${result::class.simpleName!!.lowercase()}", at = clock.instant()))
         return result
     }
