@@ -153,6 +153,7 @@ internal class TransformRun(
     private val exec: TransformExecution,
     private val pollSliceSeconds: Long = 5,
 ) {
+    internal var beforeDispatch: () -> Unit = {}
     /** The workspace files the glob names right now, in path order; the scope guard sees this list before dispatch. */
     fun inventory(scopeGlob: String): List<String> {
         val tracked = workspace.git.lsFiles().map { it.path }
@@ -202,10 +203,16 @@ internal class TransformRun(
             environment = exec.environment,
             deadlineSeconds = exec.timeoutSeconds,
         )
-        val proc = try {
-            observe(exec.runner.start(spec))
+        beforeDispatch()
+        val started = try {
+            exec.runner.start(spec)
         } catch (failure: IOException) {
             return refused(EditError("io", index, null, "transform cannot start: ${failure.message ?: failure::class.simpleName}; nothing was written (preimages ${before.size} recorded)"))
+        }
+        val proc = try {
+            observe(started)
+        } catch (failure: IOException) {
+            return refused(EditError("io", index, null, "transform observation lost: ${failure.message}; effects unknown; reconcile before retry (preimages: ${preimages.of(editId).joinToString { it.path + " @" + it.preimageDigest.hash8 }})"))
         }
         val stampAfter = exec.stamper.report()
 
@@ -263,6 +270,7 @@ internal class TransformRun(
         for (path in changedInScope) {
             if (postimages[path] == null) continue
             val resolved = workspace.resolve(path, Intent.Read) as? PathResolution.Resolved ?: continue
+            beforeDispatch()
             syntaxResults[path] = syntax.check(path, resolved.real, Language.of(path))
         }
         val matchCount = hunksByFile.values.sumOf { it.size }

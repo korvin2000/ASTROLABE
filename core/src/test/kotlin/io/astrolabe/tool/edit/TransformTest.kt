@@ -23,10 +23,18 @@ import io.astrolabe.id.WorkId
 import io.astrolabe.id.WorkspaceId
 import io.astrolabe.os.ChildCommands
 import io.astrolabe.os.LocalOs
+import io.astrolabe.os.IdentityKey
+import io.astrolabe.os.Os
+import io.astrolabe.os.OwnerToken
+import io.astrolabe.os.Poll
+import io.astrolabe.os.Proc
+import io.astrolabe.os.ProcStatus
+import io.astrolabe.os.SpawnSpec
 import io.astrolabe.provider.ToolCall as ProviderCall
 import io.astrolabe.store.BlobKind
 import io.astrolabe.store.Store
 import io.astrolabe.tool.ParsedCalls
+import io.astrolabe.tool.Effects
 import io.astrolabe.tool.ToolCalls
 import io.astrolabe.tool.ToolOutcome
 import io.astrolabe.tool.TurnContext
@@ -48,6 +56,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.jupiter.api.io.TempDir
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.AfterTest
@@ -117,7 +126,7 @@ class TransformTest {
         repo.close()
     }
 
-    private fun edit(execution: TransformExecution? = TransformExecution(TrustedLocalRunner(os), stamper, stateRoot.resolve("logs"))) = Edit(
+    private fun edit(os: Os = this.os, execution: TransformExecution? = TransformExecution(TrustedLocalRunner(os), stamper, stateRoot.resolve("logs"))) = Edit(
         workspace, registry, workset, os, preimages, ScopeGuard(workspace), contracts, checks,
         SqliteObservations(store, clock), SqliteAliases(store, clock), store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, syntax,
         transforms = execution,
@@ -143,6 +152,35 @@ class TransformTest {
         """{"ops":[{"transform":{"argv":$argv,"scope_glob":"src/**/*.py"${expected?.let { ""","expected_matches":$it""" } ?: ""}${inventory?.let { ""","inventory":$it""" } ?: ""},"why":"rename Router.dispatch → route"}}],"why":"rename dispatch → route across call sites"}"""
 
     private fun versions(): Map<String, FileVersion> = files.associateWith { registry.version(it)!! }
+
+    @Test
+    fun `a transform observation failure after launch reports unknown effects and preserves recovery`() = runTest {
+        var launches = 0
+        val flaky = object : Os by os {
+            override fun spawn(spec: SpawnSpec): Proc {
+                launches++
+                repo.write("src/m01.py", module(1).replace("dispatch", "route"))
+                return Proc(42, 1000, IdentityKey(42, 1000), OwnerToken("transform-test"), spec.logPath.toString(), 0,
+                    ProcStatus.Running, spec.command, spec.workingDirectory.toString())
+            }
+
+            override fun poll(proc: Proc, sinceCursorBytes: Long, observationTimeoutSeconds: Long): Poll =
+                throw IOException("process observation unavailable")
+        }
+
+        val out = run(transform(renameArgv()), edit(os = flaky))
+
+        assertEquals(1, launches, "a lost observation must never relaunch the mutation")
+        assertEquals(module(1).replace("dispatch", "route"), Files.readString(repo.resolve("src/m01.py")))
+        assertFalse(out.applied)
+        assertTrue(out.header!!.runtime.status in setOf("partial", "unknown_outcome"), out.body)
+        assertEquals(Effects.Unknown, out.header!!.effects)
+        assertTrue(out.header!!.runtime.effectsUnknown)
+        assertFalse(out.body.contains("cannot start"), out.body)
+        assertFalse(out.body.contains("nothing was written"), out.body)
+        assertTrue(out.body.contains("preimages"), out.body)
+        assertEquals(module(1), String(preimages.bytesOf(preimages.of("edit-1", "src/m01.py")!!)))
+    }
 
     @Test
     fun `a 40-file rename produces one diff receipt and the files are touched-by-transform NOT SEEN`() = runTest {

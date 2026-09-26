@@ -179,6 +179,13 @@ public class ShadowRef @JvmOverloads public constructor(
 
     // ------------------------------------------------------------ restoring
 
+    /** The exact write/delete set used by restore, including clean files absent from the dirty manifest. */
+    internal fun restorePaths(turn: Int): List<String> {
+        val target = record(turn) ?: return emptyList()
+        val latest = records().lastOrNull() ?: return emptyList()
+        return changedPaths(treeOf(workspace.git, ObjectId.parse(target.commit)), treeOf(workspace.git, ObjectId.parse(latest.commit)))
+    }
+
     /**
      * Restores the working tree to snapshot [turn], writing only the files that differ from the
      * last snapshot and refusing the whole operation when any of them diverged (FX-05).
@@ -194,9 +201,7 @@ public class ShadowRef @JvmOverloads public constructor(
         val latestTree = treeOf(git, ObjectId.parse(latest.commit))
         val targetManifest = manifest(turn)
 
-        val touched = (targetTree.keys + latestTree.keys)
-            .filter { targetTree[it] != latestTree[it] }
-            .sortedWith(Stamper.PATH_ORDER)
+        val touched = changedPaths(targetTree, latestTree)
 
         // FX-05 guard. The guarded set is wider than the set about to be written: it also covers
         // every path the two manifests name, so restoring the newest turn after a human edit
@@ -248,8 +253,7 @@ public class ShadowRef @JvmOverloads public constructor(
             }
             if (wanted.mode == FileMode.SYMLINK) {
                 if (!writeSymlink(resolved.real, String(bytes, StandardCharsets.UTF_8))) {
-                    limitations.add("'$path' is a symlink this host refuses to create; left unchanged (§9.5)")
-                    continue
+                    throw java.io.IOException("symlink restore failed for '$path'; publication effects unknown")
                 }
             } else {
                 os.replaceFileAtomically(resolved.real, bytes)
@@ -393,6 +397,9 @@ public class ShadowRef @JvmOverloads public constructor(
             )
         }
     }
+
+    private fun changedPaths(target: Map<String, TreeBlob>, latest: Map<String, TreeBlob>): List<String> =
+        (target.keys + latest.keys).filter { target[it] != latest[it] }.sortedWith(Stamper.PATH_ORDER)
 
     private fun treeOf(git: Git, commit: ObjectId): Map<String, TreeBlob> =
         git.lsTree(commit, recursive = true)

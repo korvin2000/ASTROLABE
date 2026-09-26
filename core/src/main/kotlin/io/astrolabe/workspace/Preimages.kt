@@ -166,7 +166,7 @@ public class Preimages(
         // compare-and-replace against an external writer, and never claims to be.
         val after = workspace.paths.revalidate(resolved)
         if (after is PathResolution.Rejected) {
-            return RevertResult.Refused("'$path' changed identity during publication: ${after.detail}", after)
+            throw java.io.IOException("'$path' changed identity after revert publication: ${after.detail}; preimage ${preimage.preimageDigest.hash8}")
         }
         val counts = changedRegion(current, bytes)
         return RevertResult.Reverted(
