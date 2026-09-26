@@ -35,7 +35,8 @@ public object Blast {
             val tests = (testsFor(blast) + blast.filter { isTestPath(it.path) }).map { it.path }.toSortedSet()
             if (tests.isEmpty()) return BlastSelection.NotSelected("blast radius: no tests select ${blast.size} files")
             val closure = Closure.Known((tests + blast.map { it.path }).toSortedSet())
-            return BlastSelection.Selected(check(Command(test.argv + tests, test.cwd), closure))
+            val arguments = tests.map { commandPath(it, test.cwd, insideOnly = false) ?: return BlastSelection.NotSelected("blast radius: invalid command path") }
+            return BlastSelection.Selected(check(Command(test.argv + arguments, test.cwd), closure))
         }
         // §7.3: widen to the package suite of the blast (one package with a directory), else the workspace suite; the
         // kernel's all-coverage scopes (D-63) would make every tier-0 monorepo edit a workspace run (D-93).

@@ -19,12 +19,15 @@ import io.astrolabe.os.SpawnSpec
 import io.astrolabe.store.BlobKind
 import io.astrolabe.store.BlobStore
 import io.astrolabe.tool.run.DiagnosticsParser
+import io.astrolabe.tool.run.DiagnosticTool
 import io.astrolabe.tool.run.GenericShaper
 import io.astrolabe.tool.run.Runner
 import io.astrolabe.tool.run.announceMoved
 import io.astrolabe.workspace.Stamper
 import io.astrolabe.workspace.VersionRegistry
 import io.astrolabe.workspace.Workspace
+import io.astrolabe.workspace.Intent
+import io.astrolabe.workspace.PathResolution
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
@@ -125,6 +128,8 @@ public class Checker(
     private val current = LinkedHashMap<String, CheckerResult>()
     private val archive = LinkedHashMap<String, MutableList<CheckerResult>>()
 
+    internal var beforeDispatch: () -> Unit = {}
+
     /** The latest result of every check that ran at least once, in registry order. */
     public fun latest(): List<CheckerResult> = current.values.toList()
 
@@ -145,11 +150,14 @@ public class Checker(
         val candidates = checks.byTrigger(Trigger.EndOfTurn).filter { it.command != null && it.kind in INLINE_KINDS }
         val deadline = System.nanoTime() + timeBoxSeconds * NANOS_PER_SECOND
         return candidates.map { check ->
+            val selected = paths.filter { commandPath(it, check.command!!.cwd, insideOnly = true) != null }
             val remainingNanos = deadline - System.nanoTime()
-            val result = if (remainingNanos <= 0) {
-                notRun(check, paths, "time box of ${timeBoxSeconds}s exhausted before dispatch")
+            val result = if (selected.isEmpty()) {
+                notRun(check, selected, "no touched files in the command directory")
+            } else if (remainingNanos <= 0) {
+                notRun(check, selected, "time box of ${timeBoxSeconds}s exhausted before dispatch")
             } else {
-                execute(check, paths, (remainingNanos + NANOS_PER_SECOND - 1) / NANOS_PER_SECOND)
+                execute(check, selected, (remainingNanos + NANOS_PER_SECOND - 1) / NANOS_PER_SECOND)
             }
             record(check, result)
         }
@@ -157,15 +165,21 @@ public class Checker(
 
     private fun execute(check: Check, touched: List<String>, remainingSeconds: Long): CheckerResult {
         val argv = argvFor(check, touched)
+        val cwd = when (val path = check.command!!.cwd) {
+            null, ".", "./" -> workspace.root
+            else -> (workspace.resolve(path, Intent.Read) as? PathResolution.Resolved)?.real
+        }
+        if (cwd == null || !Files.isDirectory(cwd)) return notRun(check, touched, "working directory refused")
         val started = System.nanoTime()
         val before = stamper.report()
         events?.emit(AgentEvent.Check.Started(ids, check.id))
         val log = logPath(check.id)
         val spec = SpawnSpec(
-            Command.Argv(argv), check.command!!.cwd?.let { workspace.root.resolve(it) } ?: workspace.root, log,
+            Command.Argv(argv), cwd, log,
             EnvPolicy(inheritedNames = envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")), deadlineSeconds = remainingSeconds,
         )
         var proc = try {
+            beforeDispatch()
             runner.start(spec)
         } catch (failure: IOException) {
             return CheckerResult(check.id, idGen.next("chk"), check.kind, check.selector, Outcome.Unavailable, emptyList(), null, null, before.candidateId, before.candidateId, null, elapsed(started), touched, emptyList(), reason = "cannot start ${argv.first()}: ${failure.message}")
@@ -246,11 +260,15 @@ public class Checker(
         private const val POLL_SLICE_SECONDS = 5L
         private val INLINE_KINDS = setOf(CheckKind.Type, CheckKind.Lint, CheckKind.Syntax)
 
-        /** The runner's argv: a `touched` selector appends the touched paths, sorted; other selectors run as declared. */
+        /** File-oriented checkers receive paths relative to cwd; project and unknown commands run as declared. */
         @JvmStatic
         public fun argvFor(check: Check, touched: Collection<String>): List<String> {
             val command = requireNotNull(check.command) { "check ${check.id} declares no command" }
-            return if (check.selector == Selector.Touched) command.argv + touched.map { it.replace('\\', '/') }.distinct().sorted() else command.argv
+            val takesPaths = DiagnosticsParser.recognise(command.argv) in setOf(DiagnosticTool.Ruff, DiagnosticTool.Eslint, DiagnosticTool.Mypy, DiagnosticTool.Pyright)
+            val shell = command.argv.first().substringAfterLast('/').substringAfterLast('\\').substringBeforeLast('.').lowercase() in setOf("sh", "bash", "cmd", "powershell", "pwsh")
+            return if (check.selector == Selector.Touched && takesPaths && !shell) {
+                command.argv + touched.mapNotNull { commandPath(it, command.cwd, insideOnly = true) }.distinct().sorted()
+            } else command.argv
         }
     }
 }

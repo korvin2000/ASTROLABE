@@ -216,6 +216,31 @@ class CheckerTest {
     }
 
     @Test
+    fun `nested checkers receive package relative paths and project commands retain their arguments`() {
+        val nested = check("nested", Command(listOf("mypy"), "./pkg/"), selector = Selector.Touched)
+        assertEquals(listOf("mypy", "src/a.py"), Checker.argvFor(nested, listOf("pkg/src/a.py", "other/b.py")))
+        for (argv in listOf(listOf("tsc", "--noEmit"), listOf("cargo", "check"), listOf("go", "vet", "./..."), listOf("custom-check"))) {
+            assertEquals(argv, Checker.argvFor(nested.copy(command = Command(argv, "pkg")), listOf("pkg/src/a.py")))
+        }
+    }
+
+    @Test
+    fun `nested checker reads selected file and skips unrelated package edits`() {
+        repo.write("pkg/src/a.py", "nested-file\n")
+        val script = stateRoot.resolve(if (windows) "mypy.cmd" else "mypy")
+        Files.writeString(script, if (windows) "@echo off\r\nset file=%1\r\ntype %file:/=\\%\r\n" else "#!/bin/sh\ncat \"\$1\"\n")
+        if (!windows) Files.setPosixFilePermissions(script, PosixFilePermissions.fromString("rwxr-xr-x"))
+        val checks = Checks.empty()
+        checks.register(check("nested", Command(listOf(script.toString()), "pkg"), selector = Selector.Touched))
+        val checker = checker(checks)
+        val result = checker.run(listOf("pkg/src/a.py", "src/a.py")).single()
+        assertEquals(0, result.exit)
+        assertEquals(listOf("pkg/src/a.py"), result.touched)
+        assertEquals("nested-file", Files.readString(store.blobs.path(result.log!!)).trim())
+        assertEquals(Outcome.NotRun, checker.run(listOf("src/a.py")).single().outcome)
+    }
+
+    @Test
     fun `touched selectors append the touched paths and a check that moves files is announced like a run`() {
         val touched = check("CHK-types-touched", Command(listOf("pyright", "--outputjson")), selector = Selector.Touched)
         assertEquals(listOf("pyright", "--outputjson", "src/a.py", "src/b.py"), Checker.argvFor(touched, listOf("src\\b.py", "src/a.py", "src/a.py")))
