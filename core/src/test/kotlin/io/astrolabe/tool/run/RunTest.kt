@@ -257,6 +257,29 @@ class RunTest {
     }
 
     @Test
+    fun `mismatched and superseded approvals never dispatch a command`() = runTest {
+        contracts.amendByUser(ids.work, "allow git ref mutation") { it.copy(authorization = it.authorization.copy(capabilitySet = "wide")) }
+        val wide = mapOf("wide" to CapabilitySet("wide", Capability.entries.toSet()))
+        var spawned = 0
+        val tracking = object : Os by os {
+            override fun spawn(spec: io.astrolabe.os.SpawnSpec): Proc { spawned++; return os.spawn(spec) }
+        }
+        for (mode in listOf("identity", "revision", "revoked")) {
+            val approving = object : Authority by AutonomousAuthority() {
+                override suspend fun approve(request: DClassRequest): Decision {
+                    if (mode == "revoked") contracts.amendByUser(ids.work, "revoke") { it.copy(authorization = it.authorization.copy(capabilitySet = "workspace-local-test-only")) }
+                    return Decision(if (mode == "identity") "another-request" else request.id,
+                        if (mode == "revision") request.contractRevision - 1 else request.contractRevision, true)
+                }
+            }
+            val out = run("""{"argv":["git","push","origin","main"],"intent":"publish"}""", runner(os = tracking, authority = approving, hostSets = wide))
+            assertEquals("denied", status(out), mode)
+        }
+        assertEquals(0, spawned)
+        assertNull(intents.get("intent-1"))
+    }
+
+    @Test
     fun `a lost observation is unknown_outcome with an open intent and no relaunch (FX-24)`() = runTest {
         var spawned = 0
         val flaky = object : Os by os {

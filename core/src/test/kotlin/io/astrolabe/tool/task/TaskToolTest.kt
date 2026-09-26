@@ -114,6 +114,20 @@ class TaskToolTest {
 
     private fun status(o: ToolOutcome) = o.header!!.runtime.status
 
+    @Test
+    fun `wrong question and superseded answers do not amend the contract`() = runTest {
+        val wrong = tool(Answering { q -> Answer("another-question", q.contractRevision, "new requirement", changesRequirements = true) })
+        assertEquals("blocked", status(ask(wrong)))
+        assertEquals(1, contracts.current(ids.work)!!.version)
+        val late = tool(Answering { q ->
+            contracts.amendByUser(ids.work, "new user requirement")
+            Answer(q.id, q.contractRevision, "old answer", changesRequirements = true)
+        })
+        assertEquals("blocked", status(ask(late)))
+        assertEquals(2, contracts.current(ids.work)!!.version)
+        assertTrue(late.asked.none { it.answer?.text == "old answer" })
+    }
+
     private val stamp = CandidateId(Digest.ofUtf8("s0"))
 
     /** A scripted probe child: it records the packet it got and answers with one finding over nothing it was shown. */

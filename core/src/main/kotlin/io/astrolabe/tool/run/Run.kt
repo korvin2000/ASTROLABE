@@ -64,6 +64,8 @@ import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Clock
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 /** The typed result of one `run` call (§5.4). Status is runner-assigned from exit code **and** parser, never model-authored. */
 public data class RunResult(
@@ -251,6 +253,10 @@ public class Run(
             val allowlisted = contract.authorization.dClassAllowlist.any { classification.command == it || classification.command.startsWith("$it ") }
             val request = DClassRequest(idGen.next("dreq"), contract.version, ids, classification.command, argv, args.cwd, classification.reasons.joinToString("; "), reason, allowlisted)
             val approval = authority.approve(request)
+            currentCoroutineContext().ensureActive()
+            if (approval.requestId != request.id || approval.contractRevision != request.contractRevision ||
+                contracts.current(ids.work)?.version != request.contractRevision
+            ) return refused(args, Outcome.Denied, "D-class approval does not match the pending request and current contract; nothing was dispatched")
             if (!approval.approved) return refused(args, Outcome.Denied, "D-class effect denied: ${approval.reason ?: "no approval"} (${classification.reasons.joinToString("; ")})")
         }
 

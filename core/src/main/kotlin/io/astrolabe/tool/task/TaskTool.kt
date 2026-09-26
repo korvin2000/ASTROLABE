@@ -117,8 +117,10 @@ public class TaskTool(
         events?.emit(AgentEvent.Ask.Question(ids, question.id))
         val answer = authority.ask(question)
         if (answer == null) return block(question, context, "no answer is available")
-        if (Replies.check(answer, contract.version) == ReplyValidity.Superseded) {
-            return block(question, context, "the answer is for contract v${answer.contractRevision}, superseded by v${contract.version}")
+        if (answer.questionId != question.id) return block(question, context, "the answer names a different question")
+        val current = contracts.current(ids.work)
+        if (current == null || current.version != question.contractRevision || Replies.check(answer, current.version) == ReplyValidity.Superseded) {
+            return block(question, context, "the answer is for contract v${answer.contractRevision}, superseded by v${current?.version}")
         }
         val text = answer.text.ifBlank { answer.chosenOption?.let { question.options.getOrNull(it) } ?: "" }
         if (text.isBlank()) return block(question, context, "the answer is empty")
