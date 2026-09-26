@@ -117,9 +117,9 @@ class EditTest {
         repo.close()
     }
 
-    private fun edit(os: Os = this.os, shadow: io.astrolabe.workspace.ShadowRef? = null) = Edit(
+    private fun edit(os: Os = this.os, shadow: io.astrolabe.workspace.ShadowRef? = null, redaction: Redaction = Redaction()) = Edit(
         workspace, registry, workset, os, preimages, ScopeGuard(workspace), contracts, checks,
-        SqliteObservations(store, clock), SqliteAliases(store, clock), store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, syntax, shadow,
+        SqliteObservations(store, clock), SqliteAliases(store, clock), store.blobs, redaction, HeuristicEstimator(), idGen, ids, syntax, shadow,
     )
 
     /** What a `look` leaves behind: the read registered at its version, its raw bytes published under that version. */
@@ -145,6 +145,23 @@ class EditTest {
     private fun quote(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") + "\""
 
     private fun status(o: ToolOutcome) = o.header!!.runtime.status
+
+    @Test
+    fun `redacted and omitted edit views grant no new source coverage`() = runTest {
+        val secret = "AKIA" + "IOSFODNN7EXAMPLE"
+        val created = run("""{"ops":[{"create":"src/secret.py","content":"x = '$secret'\n"}],"why":"create fixture"}""")
+        assertTrue(created.applied)
+        assertFalse(workset.covers("src/secret.py", registry.version("src/secret.py")!!, LineRange(1, 1)))
+        assertTrue(SqliteObservations(store, clock).get("obs-1")!!.coverage("src/secret.py").isEmpty)
+        val capped = edit(redaction = Redaction(io.astrolabe.auth.RedactionConfig(maxBytes = 48)))
+        val out = run("""{"ops":[{"create":"src/first.py","content":"a = 1\n"},{"create":"src/last.py","content":"b = 2\n"}],"why":"w"}""", capped)
+        assertTrue(out.header!!.truncated)
+        val version = registry.version("src/last.py")!!
+        assertFalse(workset.covers("src/last.py", version, LineRange(1, 1)))
+        val refused = run(anchored("src/last.py", version, hunk("b = 2", "b = 3")))
+        assertEquals("refused", status(refused))
+        assertTrue(refused.body.contains("outside_displayed"))
+    }
 
     @Test
     fun `repeated file operations and aliased create targets refuse the entire batch`() = runTest {

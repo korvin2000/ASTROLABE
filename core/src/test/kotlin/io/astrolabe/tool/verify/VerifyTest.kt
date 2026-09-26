@@ -185,6 +185,10 @@ class VerifyTest {
         assertFalse(out.green, out.body)
         assertEquals("unavailable", status(out))
         assertTrue(out.body.contains("AC-4"), out.body)
+        val selected = run("""{"what":"tests","selection":"accept"}""")
+        assertFalse(selected.green, selected.body)
+        assertEquals("unavailable", status(selected))
+        assertTrue(selected.body.contains("AC-4"), selected.body)
     }
 
     @Test

@@ -225,7 +225,7 @@ public class Verify(
 
     private suspend fun tests(args: VerifyArgs, contract: Contract): ToolOutcome {
         val selected: List<Check> = when (args.selection ?: "accept") {
-            "accept" -> checks.required().filter { it.kind == CheckKind.Acceptance }
+            "accept" -> return acceptance(args.copy(ids = null), contract)
             "full" -> listOfNotNull(checks[Checks.FULL])
             "ids" -> {
                 val wanted = args.ids ?: return refused(args, "denied", "tests(selection=ids) needs ids")

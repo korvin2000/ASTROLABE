@@ -505,7 +505,6 @@ public class Edit(
             .mapValues { (path, resolved) -> syntax.check(path, resolved.real, Language.of(path)) }
         val flags = TestIntegrity.classify(surfaceChanges(plans, applied), cause, contract, checks).map { it.copy(reason = why) }
         flagsByAlias[alias] = flags
-        for (view in views) show(view, alias, context.turn)
         return EditResult(error == null, editId, applied, views, versions, syntaxResults, diffstat, outside, flags, error)
     }
 
@@ -601,12 +600,15 @@ public class Edit(
         result.testIntegrity.forEach { lines += it.line }
         val safe = redaction.apply(lines.joinToString("\n"), ContentClass.ReusableEvidence)
         val body = safe.text
+        // Coverage follows the final displayed output; omitted or redacted views grant no new reads.
+        if (!safe.applied && safe.limitations.isEmpty()) result.views.forEach { show(it, alias, context.turn) }
         val blob = blobs.put(body.toByteArray(Charsets.UTF_8), BlobKind.OUTPUT, ids)
         val newVersions = result.versions.filterValues { it != null }.mapValues { it.value!! }
         observations.record(
             Observation(
                 id = idGen.next("obs"), ids = ids, actionId = actionId, candidate = null, contentRef = blob,
-                paths = result.views.map { it.path }.distinct(), ranges = result.views.groupBy { it.path }.mapValues { (_, v) -> Ranges.of(v.map { it.range }) },
+                // This composite report is not a source-aligned capture. Source coverage is registered above.
+                paths = result.views.map { it.path }.distinct(), ranges = emptyMap(), redaction = safe.mask,
                 complete = safe.limitations.isEmpty(), sourceVersions = newVersions, captureComplete = safe.limitations.isEmpty(),
             ),
         )
