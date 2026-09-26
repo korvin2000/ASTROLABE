@@ -215,6 +215,7 @@ public class Edit(
             if (op.kind == "transform" && transformRun == null) return none.copy(error = EditError("unsupported", i + 1, null, "transform unsupported: this cell has no transform runner (D-41)"))
             if (op.kind == "transform" && args.ops.size > 1) return none.copy(error = EditError("unsupported", i + 1, null, "a transform is a batch of its own (D-95); send it alone"))
             if (op.kind == "invalid") return none.copy(error = EditError("unsupported", i + 1, null, "op ${i + 1} names no supported form"))
+            if (op.kind == "revert" && args.ops.size > 1) return none.copy(error = EditError("overlap", i + 1, null, "send a revert alone so its restore paths cannot conflict with another operation"))
         }
         // Scope first (§8.6): every path the batch would touch, against the committed contract only. A transform's
         // allowed inventory is resolved here, before dispatch (§9.2).
@@ -247,6 +248,20 @@ public class Edit(
             args.ops.mapIndexed { i, op -> preflight(i + 1, op, context) }
         } catch (refusal: Refusal) {
             return none.copy(error = refusal.error, touchedOutsideScope = outside)
+        }
+        val claimed = HashSet<java.nio.file.Path>()
+        for (plan in plans) {
+            val targets = when (plan) {
+                is AnchoredPlan -> listOf(plan.resolved.real)
+                is CreatePlan -> listOf(plan.resolved.real)
+                is DeletePlan -> listOf(plan.resolved.real)
+                is RenamePlan -> listOf(plan.resolved.real, plan.target.real)
+                is RevertEditPlan, is RevertTurnPlan -> emptyList()
+            }
+            if (targets.any { !claimed.add(it) }) return none.copy(
+                error = EditError("overlap", plan.index, plan.path, "multiple operations touch the same canonical path; combine hunks in one operation or send separate batches"),
+                touchedOutsideScope = outside,
+            )
         }
         return apply(plans, contract, context, editId, alias, outside, args.why)
     }
@@ -577,30 +592,32 @@ public class Edit(
         }
         for (view in result.views) {
             lines += "  post-edit ${view.path}:${view.range} @${view.version.hash8}"
-            lines += redaction.apply(view.text, ContentClass.ModelFacing).text.lines().map { "  $it" }
+            lines += view.text.lines().map { "  $it" }
         }
         result.error?.let { e ->
             if (receipt == null) lines += "✗ ${e.opIndex?.let { "op $it " } ?: ""}${e.kind}: ${e.detail}"
         }
         if (result.touchedOutsideScope.isNotEmpty()) lines += "outside the increment's write scope (inside the contract): ${result.touchedOutsideScope.joinToString(", ")}"
         result.testIntegrity.forEach { lines += it.line }
-        val body = lines.joinToString("\n")
+        val safe = redaction.apply(lines.joinToString("\n"), ContentClass.ReusableEvidence)
+        val body = safe.text
         val blob = blobs.put(body.toByteArray(Charsets.UTF_8), BlobKind.OUTPUT, ids)
         val newVersions = result.versions.filterValues { it != null }.mapValues { it.value!! }
         observations.record(
             Observation(
                 id = idGen.next("obs"), ids = ids, actionId = actionId, candidate = null, contentRef = blob,
                 paths = result.views.map { it.path }.distinct(), ranges = result.views.groupBy { it.path }.mapValues { (_, v) -> Ranges.of(v.map { it.range }) },
-                complete = true, sourceVersions = newVersions, captureComplete = true,
+                complete = safe.limitations.isEmpty(), sourceVersions = newVersions, captureComplete = safe.limitations.isEmpty(),
             ),
         )
         val header = EnvelopeHeader(
-            resultAlias = alias, tool = "edit", effectClass = EffectClass.W, versions = newVersions, stamp = null, truncated = false,
+            resultAlias = alias, tool = "edit", effectClass = EffectClass.W, versions = newVersions, stamp = null, truncated = safe.limitations.isNotEmpty(),
             effects = if (result.applied.isEmpty()) Effects.None else Effects.Observed, flags = InstructionShape.detect(body).flags,
             runtime = RuntimeFields(
                 actionId = actionId, status = status, candidateBefore = null, candidateAfter = null,
                 scope = result.applied.map { it.path }.distinct().joinToString(", ").ifEmpty { args.ops.mapNotNull { it.path ?: it.create ?: it.delete ?: it.rename ?: it.revert }.joinToString(", ") },
-                completeness = "complete", artifactRefs = listOf(blob.hex) + listOfNotNull(result.transform?.diffRef?.hex), effectsObserved = result.applied.map { "${it.kind} ${it.path}" },
+                completeness = if (safe.limitations.isEmpty()) "complete" else "truncated", artifactRefs = listOf(blob.hex) + listOfNotNull(result.transform?.diffRef?.hex), effectsObserved = result.applied.map { redaction.apply("${it.kind} ${it.path}").text },
+                redactionApplied = safe.applied, captureComplete = safe.limitations.isEmpty(), displayTruncated = safe.limitations.isNotEmpty(),
                 effectsUnknown = result.error?.kind == "io",
             ),
         )

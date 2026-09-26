@@ -147,6 +147,39 @@ class EditTest {
     private fun status(o: ToolOutcome) = o.header!!.runtime.status
 
     @Test
+    fun `repeated file operations and aliased create targets refuse the entire batch`() = runTest {
+        val v = seen("src/b.py", 1, 2)
+        val repeated = run("""{"ops":[{"path":"src/b.py","expect":"${v.digest.hex}","hunks":[${hunk("x = 1", "x = 3")}]},{"path":"src/b.py","expect":"${v.digest.hex}","hunks":[${hunk("y = 2", "y = 4")}]}],"why":"w"}""")
+        assertEquals("refused", status(repeated))
+        assertEquals("x = 1\ny = 2\n", Files.readString(repo.resolve("src/b.py")))
+        assertTrue(preimages.of("edit-1").isEmpty())
+        val created = run("""{"ops":[{"create":"src/new.py","content":"first"},{"create":"src/./new.py","content":"second"}],"why":"w"}""")
+        assertEquals("refused", status(created))
+        assertFalse(Files.exists(repo.resolve("src/new.py")))
+        val renamed = run("""{"ops":[{"rename":"src/b.py","to":"src/new.py","expect":"${v.digest.hex}"},{"create":"src/new.py","content":"second"}],"why":"w"}""")
+        assertEquals("refused", status(renamed))
+        assertFalse(Files.exists(repo.resolve("src/new.py")))
+        assertTrue(Files.exists(repo.resolve("src/b.py")))
+    }
+
+    @Test
+    fun `stale and missing anchor diagnostics redact secrets before returning and storing`() = runTest {
+        val secret = "AKIA" + "IOSFODNN7EXAMPLE"
+        val v = seen("src/b.py", 1, 2)
+        repo.write("src/b.py", "x = '$secret'\ny = 2\n")
+        val stale = run(anchored("src/b.py", v, hunk("x = 1", "x = 3")))
+        assertFalse(stale.body.contains(secret))
+        assertTrue(stale.header!!.runtime.redactionApplied)
+        val current = seen("src/b.py", 1, 2)
+        val missing = run(anchored("src/b.py", current, hunk("x = 'missing'", "x = 3")))
+        assertFalse(missing.body.contains(secret))
+        for (out in listOf(stale, missing)) {
+            val blob = io.astrolabe.id.Digest(out.header!!.runtime.artifactRefs.first())
+            assertFalse(String(store.blobs.get(blob)).contains(secret))
+        }
+    }
+
+    @Test
     fun `an anchored hunk applies under CAS with preimage, postimage, post-edit coverage, syntax and diffstat`() = runTest {
         val v = seen("src/a.py", 1, 10)
         val out = run(anchored("src/a.py", v, hunk("    return 1", "    return 10")))
