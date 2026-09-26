@@ -585,3 +585,12 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - Full final Windows JDK 26 build passed: 1314 core tests: 1307 passed, 7 skipped, zero failures/errors; provider-api 17 passed, eval 49 passed, index-treesitter 17 passed; packaging and ABI passed.
 - POSIX executable-mode test skipped on Windows. No new Linux, CI, live provider or P7 validation. No push/PR.
 - Handoff and complete repair ledger updated. Pre-existing CLAUDE.md/ISSUES.md edits and untracked continue_fixing.md/todo_findings.txt preserved.
+
+## 2026-09-26 - third feature/bugfix session
+- Ten further repairs: F-022/F-054/F-056/F-057/F-058/F-062/F-065/F-076/F-088/F-094; 48 fixed, 94 open.
+- Authority replies/dispatch/completion, anchor spans, revert scope, partial effects, recall aliases, handle ownership and log draining corrected.
+- Regression-first batches plus independent review; review corrections and fixture alignment verified.
+- Full Windows JDK 26 build on b13c18d: 1429 passed, 7 skipped, zero failures/errors; packaging/ABI passed.
+- No public signature/schema changes. D-265 records handle resume policy; historical unassociated edit aliases are not migrated.
+- No new Linux/CI/live/P7 validation. Nothing pushed. Existing user edits preserved.
+- Handoff and repair ledger updated; next: F-061/F-063/F-064/F-023.

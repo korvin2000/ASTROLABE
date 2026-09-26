@@ -1,6 +1,6 @@
 # Implementation audit findings
 
-**Remediation:** 38 fixed on `feature/bugfix` (14 in this continuation); 104 remain open; F-034 was already resolved. See [bugfix progress](audit/BUGFIX-PROGRESS.md). Original audit evidence remains historical; `fix_progress` is the current repair status.
+**Remediation:** 48 fixed on `feature/bugfix` (10 in this continuation); 94 remain open; F-034 was already resolved. See [bugfix progress](audit/BUGFIX-PROGRESS.md). Original audit evidence remains historical; `fix_progress` is the current repair status.
 
 ```json
 {
@@ -544,26 +544,22 @@
     "date": "2026-09-26",
     "status": "session_complete_remaining_findings_open",
     "fixed_this_session": [
-      "F-053",
-      "F-055",
-      "F-059",
-      "F-060",
-      "F-070",
-      "F-071",
-      "F-072",
-      "F-073",
-      "F-074",
-      "F-078",
-      "F-079",
-      "F-080",
-      "F-081",
-      "F-123"
+      "F-022",
+      "F-054",
+      "F-056",
+      "F-057",
+      "F-058",
+      "F-062",
+      "F-065",
+      "F-076",
+      "F-088",
+      "F-094"
     ],
-    "fixed_this_session_count": 14,
+    "fixed_this_session_count": 10,
     "previously_resolved": [
       "F-034"
     ],
-    "remaining_open_count": 104,
+    "remaining_open_count": 94,
     "remaining_open_ids": [
       "F-001",
       "F-002",
@@ -579,7 +575,6 @@
       "F-019",
       "F-020",
       "F-021",
-      "F-022",
       "F-023",
       "F-024",
       "F-025",
@@ -603,31 +598,22 @@
       "F-046",
       "F-048",
       "F-052",
-      "F-054",
-      "F-056",
-      "F-057",
-      "F-058",
       "F-061",
-      "F-062",
       "F-063",
       "F-064",
-      "F-065",
       "F-069",
       "F-075",
-      "F-076",
       "F-082",
       "F-083",
       "F-084",
       "F-085",
       "F-086",
       "F-087",
-      "F-088",
       "F-089",
       "F-090",
       "F-091",
       "F-092",
       "F-093",
-      "F-094",
       "F-095",
       "F-096",
       "F-097",
@@ -671,24 +657,197 @@
       "F-143"
     ],
     "next_priority": [
-      "F-076",
-      "F-022",
-      "F-088",
-      "F-094",
-      "F-054",
-      "F-056",
-      "F-057",
-      "F-058",
       "F-061",
-      "F-062",
+      "F-063",
       "F-064",
-      "F-065"
+      "F-023",
+      "F-001",
+      "F-002",
+      "F-004"
     ],
     "handoff": "CONTINUE-TASK.md",
     "detail": "audit/BUGFIX-PROGRESS.md",
-    "verification": "Windows JDK 26 full build passed on final source checkpoint ae8fa2a: 1314 core tests: 1307 passed, 7 skipped, zero failures/errors; provider-api 17 passed, eval 49 passed, index-treesitter 17 passed. Compilation, packaging and ABI checks passed. Focused regressions and review corrections passed. POSIX executable-mode regression skipped on Windows; no Linux/remote CI or P7 validation.",
+    "verification": "Windows JDK 26 full build passed on b13c18d: 1353 core tests: 1346 passed, 7 skipped, zero failures/errors; provider-api 17, eval 49, index-treesitter 17 passed. Compilation, packaging and ABI checks passed. No new Linux/remote CI or P7 validation.",
     "source_changes_allowed": true,
     "verification_results": {
+      "first_full_core": {
+        "tests": 1353,
+        "passed": 1339,
+        "failures": 7,
+        "errors": 0,
+        "skipped": 7,
+        "correction": "The initial guard also blocked plain late completion. Preserve archival completion from existing evidence while blocking all new effects/checks; the seven existing lifecycle tests remain unchanged."
+      },
+      "full_build_command": "./gradlew.bat build -q --console=plain",
+      "full_build_exit": 0,
+      "modules": {
+        "core": {
+          "tests": 1353,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 7,
+          "passed": 1346
+        },
+        "provider-api": {
+          "tests": 17,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 17
+        },
+        "eval": {
+          "tests": 49,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 49
+        },
+        "index-treesitter": {
+          "tests": 17,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 17
+        }
+      },
+      "full_core_rerun": true,
+      "log": "build/bugfix-third-build-verified.log",
+      "linux_or_remote_ci": false,
+      "focused": "New repro batches failed before correction. Final focused checks passed after three stale observation/crash assertions were updated to verify the new alias/partial-effect behavior. Review corrections added whitespace, dispatch and selective-revert coverage."
+    },
+    "active_processes": [],
+    "previous_session_fixed": [
+      "F-003",
+      "F-005",
+      "F-007",
+      "F-008",
+      "F-009",
+      "F-011",
+      "F-012",
+      "F-035",
+      "F-043",
+      "F-047",
+      "F-049",
+      "F-050",
+      "F-051",
+      "F-053",
+      "F-055",
+      "F-059",
+      "F-060",
+      "F-066",
+      "F-067",
+      "F-068",
+      "F-070",
+      "F-071",
+      "F-072",
+      "F-073",
+      "F-074",
+      "F-077",
+      "F-078",
+      "F-079",
+      "F-080",
+      "F-081",
+      "F-098",
+      "F-116",
+      "F-121",
+      "F-123",
+      "F-130",
+      "F-131",
+      "F-139",
+      "F-140"
+    ],
+    "fixed_on_branch": [
+      "F-003",
+      "F-005",
+      "F-007",
+      "F-008",
+      "F-009",
+      "F-011",
+      "F-012",
+      "F-022",
+      "F-035",
+      "F-043",
+      "F-047",
+      "F-049",
+      "F-050",
+      "F-051",
+      "F-053",
+      "F-054",
+      "F-055",
+      "F-056",
+      "F-057",
+      "F-058",
+      "F-059",
+      "F-060",
+      "F-062",
+      "F-065",
+      "F-066",
+      "F-067",
+      "F-068",
+      "F-070",
+      "F-071",
+      "F-072",
+      "F-073",
+      "F-074",
+      "F-076",
+      "F-077",
+      "F-078",
+      "F-079",
+      "F-080",
+      "F-081",
+      "F-088",
+      "F-094",
+      "F-098",
+      "F-116",
+      "F-121",
+      "F-123",
+      "F-130",
+      "F-131",
+      "F-139",
+      "F-140"
+    ],
+    "fixed_on_branch_count": 48,
+    "previous_session_verification_results": {
+      "initial_full_core": {
+        "tests": 1293,
+        "passed": 1286,
+        "failures": 1,
+        "errors": 0,
+        "skipped": 6,
+        "failed_test": "QaDriverTest HTTP status stored as process exit; fixed in 3f433f6"
+      },
+      "final_focused_core": {
+        "tests": 29,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "final_build_command": "./gradlew.bat build -x :core:test -q --console=plain",
+      "final_build_exit": 0,
+      "other_modules": {
+        "provider-api": {
+          "tests": 17,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "eval": {
+          "tests": 49,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "index-treesitter": {
+          "tests": 17,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "full_core_rerun": false
+    },
+    "source_checkpoint": "ae8fa2a",
+    "previous_continuation_verification_results": {
       "first_continuation_full_core": {
         "tests": 1314,
         "passed": 1305,
@@ -732,115 +891,7 @@
       "full_core_rerun": true,
       "log": "build/bugfix-continuation-build-verified.log",
       "linux_or_remote_ci": false
-    },
-    "active_processes": [],
-    "previous_session_fixed": [
-      "F-003",
-      "F-005",
-      "F-007",
-      "F-008",
-      "F-009",
-      "F-011",
-      "F-012",
-      "F-035",
-      "F-043",
-      "F-047",
-      "F-049",
-      "F-050",
-      "F-051",
-      "F-066",
-      "F-067",
-      "F-068",
-      "F-077",
-      "F-098",
-      "F-116",
-      "F-121",
-      "F-130",
-      "F-131",
-      "F-139",
-      "F-140"
-    ],
-    "fixed_on_branch": [
-      "F-003",
-      "F-005",
-      "F-007",
-      "F-008",
-      "F-009",
-      "F-011",
-      "F-012",
-      "F-035",
-      "F-043",
-      "F-047",
-      "F-049",
-      "F-050",
-      "F-051",
-      "F-053",
-      "F-055",
-      "F-059",
-      "F-060",
-      "F-066",
-      "F-067",
-      "F-068",
-      "F-070",
-      "F-071",
-      "F-072",
-      "F-073",
-      "F-074",
-      "F-077",
-      "F-078",
-      "F-079",
-      "F-080",
-      "F-081",
-      "F-098",
-      "F-116",
-      "F-121",
-      "F-123",
-      "F-130",
-      "F-131",
-      "F-139",
-      "F-140"
-    ],
-    "fixed_on_branch_count": 38,
-    "previous_session_verification_results": {
-      "initial_full_core": {
-        "tests": 1293,
-        "passed": 1286,
-        "failures": 1,
-        "errors": 0,
-        "skipped": 6,
-        "failed_test": "QaDriverTest HTTP status stored as process exit; fixed in 3f433f6"
-      },
-      "final_focused_core": {
-        "tests": 29,
-        "failures": 0,
-        "errors": 0,
-        "skipped": 0
-      },
-      "final_build_command": "./gradlew.bat build -x :core:test -q --console=plain",
-      "final_build_exit": 0,
-      "other_modules": {
-        "provider-api": {
-          "tests": 17,
-          "failures": 0,
-          "errors": 0,
-          "skipped": 0
-        },
-        "eval": {
-          "tests": 49,
-          "failures": 0,
-          "errors": 0,
-          "skipped": 0
-        },
-        "index-treesitter": {
-          "tests": 17,
-          "failures": 0,
-          "errors": 0,
-          "skipped": 0
-        }
-      },
-      "full_core_rerun": false
-    },
-    "source_checkpoint": "ae8fa2a"
+    }
   }
 }
 ```
@@ -1312,13 +1363,15 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-022 - Amendment resolution does not validate reply identity or current revision
 
 - Task: [P1.1.3](TODO.md#L692); related P0.4.2/P2.1.2.
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-26).
 - Location: [Contracts.resolve](core/src/main/kotlin/io/astrolabe/contract/Contracts.kt#L120).
 - Problem: after authority.resolve suspends, the function acts only on resolution.outcome. Neither proposalId nor contractRevision is checked, current(work) is not reloaded, and pending membership is not revalidated. It applies the pre-suspension Contract object.
 - Trigger and impact: an Accepted reply for a different proposal/revision can authorize this change. While a reply is pending, a second same-version proposal/strengthening can be added; replacing/appending from the older snapshot loses that update. A different-version update causes an append/version failure rather than a classified stale reply. A late Rejected reply can overwrite same-version additions as well.
 - Evidence: Replies helpers exist but are never called here; tests use only immediately returned correctly matching replies. The production Plan path calls this method.
 - Possible solutions: bind every decision to proposal ID and revision; after the await re-read authority and require the same still-pending proposal. Use transactional compare-and-swap on a revision/content generation so same-version strengthening cannot be lost. Apply changes only to the current validated snapshot.
 - Future regression: wrong proposal ID, wrong revision, concurrent user amendment and same-version strengthening during a suspended authority reply; no unauthorized change or lost update is allowed.
+- Fix (2026-09-26, `1316839`): Amendment replies must match the proposal, revision and still-pending amendment after suspension. Serialized mutations use the latest contract, preserving concurrent strengthening/proposals; resolution memory follows successful persistence. Seven regressions pass.
+
 
 ### F-023 - Resolved amendments are neither persisted nor restored atomically
 
@@ -1673,7 +1726,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-054 - Normalized anchor mapping duplicates indentation and trailing newlines on replacement
 
 - Task: [P1.6.4](TODO.md#L843).
-- Severity: high. Confidence: reproduced. Status: open.
+- Severity: high. Confidence: reproduced. Status: fixed (2026-09-26).
 - Locations: [Anchors.normalized/normalize](core/src/main/kotlin/io/astrolabe/tool/edit/Anchors.kt#L74), [Edit.replace](core/src/main/kotlin/io/astrolabe/tool/edit/Edit.kt#L504).
 - Reproduction: original is four spaces + return + four spaces + 1 + LF; anchor is four spaces + return 1 + LF; replacement is four spaces + return 2 + LF. The normalized span is start=4,end=15; applying Edit's replacement operation leaves eight leading spaces and two newlines.
 - Problem: normalization drops leading whitespace and trim removes outer whitespace/newlines from the anchor. The origin map only spans the remaining characters, while the replacement still contains its complete intended indentation/newline. Prefix/suffix bytes excluded from the matched span are retained around it.
@@ -1681,6 +1734,8 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Possible solutions: retain start/end boundaries for the complete original span represented by the anchor, including its intended leading/trailing whitespace, or define and apply a consistent replacement normalization contract. Do not merely trim the replacement, which would destroy meaningful indentation.
 - Future regression: tabs/spaces, leading indentation, CRLF/LF and anchors with terminal newlines should replace exactly the intended raw span and preserve surrounding bytes.
 - Current-source recheck (2026-09-25, 9a80e117): Anchors.normalized still trims normalized anchor and maps only retained characters (69); Edit.replace inserts complete replacement text (528). Earlier runtime evidence retains its original baseline; this recheck is source inspection.
+- Fix (2026-09-26, `c2f6989`): Normalized anchor spans include requested boundary indentation and line endings, including whitespace after the final newline. Tabs, CRLF/LF, inline surroundings and end-to-end replacements are covered.
+
 
 ### F-055 - Edit error diagnostics expose raw secrets to the model and reusable storage
 
@@ -1701,28 +1756,32 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Current-tree recheck (2026-09-25): still present; Edit.revertPaths returns an empty list for turn: targets at Edit.kt:256, so current ScopeGuard preflight cannot inspect those paths.
 
 - Task: [P1.6.4](TODO.md#L843).
-- Severity: high. Confidence: potential. Status: open.
+- Severity: high. Confidence: potential. Status: fixed (2026-09-26).
 - Locations: [Edit.revertPaths](core/src/main/kotlin/io/astrolabe/tool/edit/Edit.kt#L229), [Edit RevertTurnPlan application](core/src/main/kotlin/io/astrolabe/tool/edit/Edit.kt#L424), [ShadowRef.restore](core/src/main/kotlin/io/astrolabe/workspace/ShadowRef.kt#L191).
 - Problem: revertPaths returns an empty list for turn:N, so ScopeGuard has no paths to check. ShadowRef.restore uses the workspace's static path protection but knows nothing about the current committed contract/increment scope.
 - Trigger and impact: an embedding host supplies shadowRef to Edit; after an amendment narrows scope, reverting an older turn can write paths no longer authorized by the contract. The default controller currently omits shadowRef (F-034 follow-up), so this path is not reachable through that default wiring yet; wiring the fallback alone would activate this risk.
 - Possible solutions: expose/compute the full canonical restore write/delete set and run current authority/scope checks before any restore publication; revalidate authority generation if resolution can suspend.
 - Future regression: create snapshots under broad scope, narrow committed scope, request turn revert, and assert refusal with zero changes outside the new scope.
+- Fix (2026-09-26, `742d834`): Turn-revert scope preflight uses the exact snapshot tree difference, including clean-at-target files, creations and deletions. Current contract scope and increment warnings/justification apply before restoration.
+
 
 ### F-057 - Post-write failures can be reported as if nothing was written
 
 - Task: [P1.6.4](TODO.md#L843).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-26).
 - Locations: [Edit.apply](core/src/main/kotlin/io/astrolabe/tool/edit/Edit.kt#L355), [Edit.ioError/render](core/src/main/kotlin/io/astrolabe/tool/edit/Edit.kt#L490).
 - Problem: applied bookkeeping is added only after several post-mutation steps. For rename, target publication happens before source deletion and before either AppliedOp is recorded; for anchored/create, postimage/blob/coherence work can fail after bytes are published but before the list is updated.
 - Trigger and impact: source deletion fails after a rename target was written, or revalidation/postimage persistence fails after a file replacement. ioError can say nothing was written and the header can say effects=None even though filesystem effects exist; RuntimeFields.effectsUnknown only partially compensates. Later cell reconciliation may discover changes, but the per-operation recovery evidence and immediate outcome are inaccurate.
 - Possible solutions: record each publication boundary as soon as it occurs, and on failure inspect affected paths against preimages/planned postimages before constructing the result. Distinguish preflight refusal, partial publication and unknown effects consistently; preserve recovery references even if later bookkeeping fails.
 - Future regression: fail after target rename publication/before source deletion, after file replacement/before postimage row and inside coherence; outcomes must name actual or explicitly unknown effects and never claim no writes.
 - Current-source recheck (2026-09-25, 9a80e117): Edit records AppliedOp after publication/postimage/registry work; rename writes target before deleting source. ioError still infers effects from the incomplete applied list (515). Earlier runtime evidence retains its original baseline; this recheck is source inspection.
+- Fix (2026-09-26, `742d834`): Publication bookkeeping precedes postimage persistence and coherence. Partial rename targets retain recovery references; failed post-write revalidation and transform observation report partial/unknown effects. Failed symlink restoration cannot claim unchanged bytes. Fault-injection regressions cover persistence, coherence, rename, transform observation and selective revert.
+
 
 ### F-058 - Run/edit result aliases do not resolve to their stored observations
 
 - Task: [P1.6.4](TODO.md#L843); related [P1.6.5](TODO.md#L851), P1.6.3/P1.8.6.
-- Severity: high. Confidence: reproduced. Status: open.
+- Severity: high. Confidence: reproduced. Status: fixed (2026-09-26).
 - Locations: [Edit.execute/render](core/src/main/kotlin/io/astrolabe/tool/edit/Edit.kt#L164), [Run alias allocation/render](core/src/main/kotlin/io/astrolabe/tool/run/Run.kt#L188), [Look.recall lookup](core/src/main/kotlin/io/astrolabe/tool/look/Look.kt#L293), [Cell.appendResult](core/src/main/kotlin/io/astrolabe/cell/Cell.kt#L546).
 - Problem: run allocates its alias against actionId, edit against editId, but both persist their Observation with a fresh unrelated obs ID. Look.recall and Cell recall-pointer construction resolve alias.canonicalId directly as an observation ID.
 - Reproduction: a completed real fixture run returns #1 -> act-1; SqliteObservations.get(act-1) is null despite a stored obs-1. Its advertised log recall cannot resolve.
@@ -1730,6 +1789,8 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Possible solutions: retain the edit/action alias semantics but add an explicit result-observation association, or align canonical result IDs consistently. Resolve recall by that relationship rather than assume every alias identifies an observation row.
 - Future regression: every run/edit alias with a stored view/log must support recall before/after eviction and across cells; edit aliases must still resolve correctly for selective revert.
 - Current-source recheck (2026-09-25, 9a80e117): Run alias names actionId (186), Edit alias names editId; render stores fresh obs IDs (Run 493, Edit 591), while Look.recall resolves canonicalId directly. Earlier runtime evidence retains its original baseline; this recheck is source inspection.
+- Fix (2026-09-26, `742d834`): New edit observations use their edit alias identity. Observation lookup resolves exact IDs first, then the latest result for an action ID, preserving historical poll observations. Run/edit recall, edit revert and repeated-poll regressions pass for SQL and memory stores.
+
 
 ### F-059 - Foreground and terminal background run views bypass redaction
 
@@ -1773,13 +1834,15 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-062 - Poll and cancel accept handles belonging to another campaign
 
 - Task: [P1.6.5](TODO.md#L851).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-26).
 - Locations: [Run.poll/cancel](core/src/main/kotlin/io/astrolabe/tool/run/Run.kt#L313), [SqliteHandles.get](core/src/main/kotlin/io/astrolabe/tool/run/Handles.kt#L87).
 - Problem: handle lookup is project-global by ID. Neither poll nor cancel compares handle.ids.work/attempt or workspace ownership with the current executor before reading logs, updating rows or terminating the process. The error wording nevertheless calls this campaign-scoped.
 - Impact: a known/retained handle ID can expose another campaign's output or cancel its process in a shared project store. Random IDs make discovery harder but do not enforce the authority boundary.
 - Possible solutions: scope handle resolution by the authorized work/attempt/workspace, with a deliberate cross-attempt resume policy; validate authorization before any observation, update or termination.
 - Future regression: create two works sharing one store, attempt cross-work poll/cancel by exact handle ID, and require denial without reading/updating/terminating the foreign process; same-work resume remains supported.
 - Current-source recheck (2026-09-25, 9a80e117): Run.poll/cancel still use project-global handles.get without checking work/attempt/workspace ownership (403,460). Earlier runtime evidence retains its original baseline; this recheck is source inspection.
+- Fix (2026-09-26, `ff510f7`): Poll/cancel require matching work and workspace alias provenance before accessing the process or log. Same-work, same-workspace resume across attempts remains supported. Foreign work/workspace and resume regressions pass.
+
 
 ### F-063 - Background completion loses effect classification and its actual pre-run path state
 
@@ -1806,13 +1869,15 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-065 - Terminal process status stops log draining before all cursor chunks are read
 
 - Task: [P1.6.5](TODO.md#L851); related P1.7.2/P1.7.5.
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-26).
 - Locations: [Executions.observe](core/src/main/kotlin/io/astrolabe/tool/run/Executions.kt#L24), [Run.launch](core/src/main/kotlin/io/astrolabe/tool/run/Run.kt#L255), [LocalOs.readLog MAX_POLL_BYTES](core/src/main/kotlin/io/astrolabe/os/LocalOs.kt#L277).
 - Problem: each poll returns at most 1 MiB. Observation loops stop when status becomes terminal, then perform exactly one final poll. A terminal result does not imply the log cursor reached EOF. If several MiB are already buffered, only the first one/two chunks are captured, with lost=false/captureComplete=true.
 - Impact: final errors or test summaries can be silently omitted. Parsers can inspect an earlier partial summary and receive falsely complete capture metadata; users cannot recall omitted bytes from the captured blob even though the sidecar log still has them.
 - Possible solutions: after terminal status, keep draining by cursor until no bytes remain, without relaunching or waiting for execution; couple any capture cap to explicit completeness metadata.
 - Future regression: a process exits after writing more than three poll windows with a failure marker in the final window; the complete observer must include it or explicitly report truncation. Cover already-terminal input Proc as well as a transition observed mid-poll.
 - Current-source recheck (2026-09-25, 9a80e117): Run.launch still performs one terminal tail poll (343); Executions.observe/LocalOs bounded chunks retain the earlier incomplete-drain risk. Earlier runtime evidence retains its original baseline; this recheck is source inspection.
+- Fix (2026-09-26, `ff510f7`): The shared observer drains terminal processes until an empty cursor chunk and treats a nonadvancing nonempty cursor as lost. Run, Verify, Checker, Baseline, QA and inline syntax use it. Initially-terminal, terminal-transition and foreground-run regressions preserve the final failure marker.
+
 
 ### F-066 - Successful unittest output with skips is counted as executed passes
 
@@ -1943,12 +2008,14 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-076 - Touched checker paths are resolved twice for nested package commands
 
 - Task: [P1.7.2](TODO.md#L898).
-- Severity: medium. Confidence: reproduced. Status: open.
+- Severity: medium. Confidence: reproduced. Status: fixed (2026-09-26).
 - Locations: [Checker.execute](core/src/main/kotlin/io/astrolabe/verify/Checker.kt#L158), [Checker.argvFor](core/src/main/kotlin/io/astrolabe/verify/Checker.kt#L251), [Cell.drainScheduled](core/src/main/kotlin/io/astrolabe/cell/Cell.kt#L676).
 - Reproduction: a touched check with argv=[mypy], cwd=pkg and workspace path pkg/src/a.py produces argv=[mypy, pkg/src/a.py] while executing inside pkg; the intended file is therefore addressed as pkg/pkg/src/a.py. Coherence supplies workspace-relative paths and Checker does not rebase/filter them.
 - Impact: nested-package checks fail on nonexistent paths or inspect unintended files. All seeded type/lint commands also receive file arguments regardless of their runner's supported selection syntax; that broader compatibility issue needs runner-specific validation.
 - Possible solution: translate selected paths relative to the command cwd, restrict them to the relevant package, and encode runner-specific selection or conservatively run its declared project command.
 - Future regression: nested package edits, edits outside that package, and project-wide checker commands; assert actual files checked, not just the appended argv list.
+- Fix (2026-09-26, `c49ca61`): Checker and blast arguments are relative to command cwd while evidence paths remain workspace-relative. Nested checkers ignore unrelated package paths; known file-oriented commands receive selected files and project/unknown commands run as declared. Actual nested-file reading and argument regressions pass.
+
 
 ### F-077 - Matching candidate stamps bypass verifier-version invalidation
 
@@ -2068,10 +2135,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-088 - Dispatch authority can expire during model generation and still allow tool effects
 
 - Task: [P1.8.7](TODO.md#L986).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-26).
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/cell/Cell.kt#L253).
 - Analysis: DispatchAuthority is checked at turn entry, before awaiting the provider. After await, calls and scheduler-owned checks execute without another authority check; Dispatcher has no authority callback. Controller dispatch reads lease expiry/generation, but expiry itself does not cancel the coroutine. A lease expiring during a long model request can therefore be followed by edits/process effects; later publication refusal cannot undo them. Recheck authority after await and at consequential dispatch boundaries, fencing effects against current generation. Regression: advance the fake clock beyond lease expiry while the provider is held, then release an editing response; no effect may execute. User cancellation does have a controller coroutine hook; this finding specifically covers expiry/supersession without that signal.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-26, `e769511, 742d834, ff510f7, c49ca61, b13c18d`): Cell rechecks authority after accounted provider responses and before each tool/check dispatch. Built-in mutation, transform/syntax, process, baseline and ask-answer boundaries recheck after preparation or suspension. Expired provider-response, approval and ask-reply regressions prevent effects. Late completion may still be archived using existing evidence; all new scheduled work is skipped and publication remains fenced.
+
 
 ### F-089 - Required review and test-integrity approvals cannot reach the cell completion gate
 
@@ -2116,10 +2185,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-094 - Final review can approve an old tree while the controller completes the changed campaign
 
 - Task: [P1.9.3](TODO.md#L1017).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-26).
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/campaign/Controller.kt#L1513).
 - Analysis: stopOrFinish captures stamp, currencies and receipts before suspending in CampaignReview.review. CampaignReview validates the returned verdict against its own pre-await stamp/contract snapshot. On approval, the controller publishes Finishing/Finished using the earlier stamp without rereading the workspace, current contract or publication authority after the await. An external edit, contract amendment or cancellation during host/model review can therefore yield Completed for stale evidence; FinishReceipts later stamps the new tree. Revalidate candidate, obligations and authority after asynchronous review and immediately before committing completion. Regression: a reviewer edits the tree/amends the contract/cancels before returning an otherwise matching approval; completion must be refused or verification repeated.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-26, `e769511`): After final review, completion revalidates the candidate, full contract and live publication authority. Tree edits, amendments, same-version strengthening, cancellation and lease expiry cannot complete the campaign.
+
 
 ### F-095 - Each new cell is funded from the original campaign budget without deducting prior spend
 

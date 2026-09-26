@@ -2,8 +2,34 @@
 
 Branch: `feature/bugfix`. Baseline: `9a80e117445be357285fec2cffffe0fd45290a9a`.
 
-**38 fixed across two sessions (14 in this continuation); 104 open; F-034 previously resolved.**
+**48 fixed across three sessions (10 in the latest continuation); 94 open; F-034 previously resolved.**
 The complete remaining queue is `findings.md` ? JSON `fix_progress.remaining_open_ids`.
+
+## Latest continuation: ten further repairs
+
+| Finding | Commit | Change and evidence |
+|---|---|---|
+| F-022 | `1316839` | Amendment replies must match the proposal, revision and still-pending amendment after suspension. Serialized mutations use the latest contract, preserving concurrent strengthening/proposals; resolution memory follows successful persistence. Seven regressions pass. |
+| F-054 | `c2f6989` | Normalized anchor spans include requested boundary indentation and line endings, including whitespace after the final newline. Tabs, CRLF/LF, inline surroundings and end-to-end replacements are covered. |
+| F-056 | `742d834` | Turn-revert scope preflight uses the exact snapshot tree difference, including clean-at-target files, creations and deletions. Current contract scope and increment warnings/justification apply before restoration. |
+| F-057 | `742d834` | Publication bookkeeping precedes postimage persistence and coherence. Partial rename targets retain recovery references; failed post-write revalidation and transform observation report partial/unknown effects. Failed symlink restoration cannot claim unchanged bytes. Fault-injection regressions cover persistence, coherence, rename, transform observation and selective revert. |
+| F-058 | `742d834` | New edit observations use their edit alias identity. Observation lookup resolves exact IDs first, then the latest result for an action ID, preserving historical poll observations. Run/edit recall, edit revert and repeated-poll regressions pass for SQL and memory stores. |
+| F-062 | `ff510f7` | Poll/cancel require matching work and workspace alias provenance before accessing the process or log. Same-work, same-workspace resume across attempts remains supported. Foreign work/workspace and resume regressions pass. |
+| F-065 | `ff510f7` | The shared observer drains terminal processes until an empty cursor chunk and treats a nonadvancing nonempty cursor as lost. Run, Verify, Checker, Baseline, QA and inline syntax use it. Initially-terminal, terminal-transition and foreground-run regressions preserve the final failure marker. |
+| F-076 | `c49ca61` | Checker and blast arguments are relative to command cwd while evidence paths remain workspace-relative. Nested checkers ignore unrelated package paths; known file-oriented commands receive selected files and project/unknown commands run as declared. Actual nested-file reading and argument regressions pass. |
+| F-088 | `e769511, 742d834, ff510f7, c49ca61, b13c18d` | Cell rechecks authority after accounted provider responses and before each tool/check dispatch. Built-in mutation, transform/syntax, process, baseline and ask-answer boundaries recheck after preparation or suspension. Expired provider-response, approval and ask-reply regressions prevent effects. Late completion may still be archived using existing evidence; all new scheduled work is skipped and publication remains fenced. |
+| F-094 | `e769511` | After final review, completion revalidates the candidate, full contract and live publication authority. Tree edits, amendments, same-version strengthening, cancellation and lease expiry cannot complete the campaign. |
+
+Windows JDK 26 full build passed on b13c18d: 1353 core tests: 1346 passed, 7 skipped, zero failures/errors; provider-api 17, eval 49, index-treesitter 17 passed. Compilation, packaging and ABI checks passed. No new Linux/remote CI or P7 validation.
+Total: **1,429 passed, 7 skipped**, zero failures/errors. Log: ignored `build/bugfix-third-build-verified.log`.
+
+- Focused repro batches failed before correction. Final focused checks passed after stale test assumptions about observation IDs and generic crash reporting were updated; original coverage/reconciliation checks remain.
+- The first full run had 1,339 core passes, seven failures and seven skips. Its seven unchanged lifecycle tests exposed an overly broad guard: plain late completion must remain archivable from existing evidence. That source correction skips new checks/effects and retains the publication veto; focused lifecycle checks and the final full build passed.
+- Independent review corrections cover trailing anchor indentation, transform/syntax/baseline dispatch fences, selective-revert revalidation and failed symlink restoration.
+- No public signatures or schema changed. Exact observation IDs retain old views; action aliases select the latest captured poll. Old edit aliases without a stored observation association are not migrated.
+- D-265: handle ownership is work plus workspace; later attempts may resume earlier handles, while absent/foreign workspace provenance is denied.
+- F-061 durability, F-063 background effect attribution, F-064 cancellation/unbounded capture and F-023 durable amendment resolutions remain open.
+- Local commits only. No push, PR, new Linux/CI, live-provider or P7 validation.
 
 ## Fixed findings
 
@@ -83,12 +109,10 @@ The complete remaining queue is `findings.md` ? JSON `fix_progress.remaining_ope
 
 ## Resume order
 
-1. Check branch/status and read `findings.md` fix_progress. Preserve pre-existing CLAUDE.md/ISSUES.md changes and untracked continue_fixing.md/todo_findings.txt.
-2. F-076 nested-package checker and blast command paths.
-3. F-022/F-088/F-094 remaining authority identity/currency boundaries.
-4. F-054 normalized anchors; F-056 revert scope; F-057 partial-write reporting; F-058 result recall links.
-5. F-061/F-062/F-064/F-065 run durability, ownership, cancellation and capture drain; then remaining findings in audit order.
-6. Keep the 185 implemented P0-P6 task statuses intact; repair status belongs in findings.md. P7 remains excluded.
+1. Read findings.md fix_progress and preserve existing CLAUDE.md/ISSUES.md and untracked continuation files.
+2. F-061 run intent/handle durability; F-063 background effect classification/provenance; F-064 cancellation and bounded output capture.
+3. F-023 durable atomic amendment resolution, then remaining open findings in audit order (F-001/F-002/F-004 first).
+4. Keep P0-P6 at 185/185 implemented; repair status belongs in findings.md. P7 remains excluded.
 
 ## Existing implementation debts
 

@@ -54,7 +54,7 @@ D-200–D-202, D-210–D-213, D-220–D-223, D-230–D-233, D-240–D-244, D-250
 (new dependencies allowed under pinned-version rules).
 
 ## Audit remediation (2026-09-26)
-Branch `feature/bugfix`: 38 fixed (14 this continuation), 104 open, F-034 previously resolved.
-See `findings.md` fix_progress and `audit/BUGFIX-PROGRESS.md`; historical gates above predate these fixes.
-Full Windows build passes: 1307 core passed, 7 skipped; other modules and ABI pass. No new Linux/CI evidence.
-D-262 denies unapproved model verification commands; D-263 rejects edit path conflicts; D-264 invalidates old receipt definitions.
+Branch `feature/bugfix`: 48 fixed (10 latest), 94 open, F-034 previously resolved.
+See `findings.md` and `audit/BUGFIX-PROGRESS.md`; historical gates above predate these fixes.
+Full Windows build passes: 1346 core passed, 7 skipped; other modules and ABI pass. No new Linux/CI.
+D-262/D-263/D-264 remain; D-265 scopes handles to work/workspace and permits cross-attempt resume.
