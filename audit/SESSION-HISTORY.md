@@ -568,3 +568,12 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
   D-nn ranges pre-assigned per agent, D rows sorted at merge; P5.8.1 split into two agents (S3 runtime / wiring) and its
   controller conflicts combined by hand. Stale owners (P6.1.1/P6.1.2) re-owned as carried debt. D-112–D-260.
   Gates pushed straight to `main` (owner-authorized): CI 36159227747, 36162949349, 36167689819, 36172349269.
+
+## 2026-09-26 ? feature/bugfix
+- Owner-authorized findings remediation: 24 fixed, 118 open, F-034 previously resolved; P0?P6 still 185/185 implemented, P7 excluded.
+- Regression fixes cover parsing, receipt/review integrity, recall, event ordering/cancellation, redaction, storage, generated tools and scheduling.
+- Full Windows core suite: 1,286 pass, 1 fail, 6 skip; QA HTTP/exit mismatch fixed and final focused 29 passed.
+- Final build -x :core:test passed (other modules + packaging/ABI); full core suite not rerun; no new Linux/CI.
+- Core ABI updated; D-261 conservatively requires review for additions to existing tests. JVM callers must rebuild.
+- Repair ledger: findings.md fix_progress; handoff: CONTINUE-TASK.md and audit/BUGFIX-PROGRESS.md.
+- Existing CLAUDE.md/ISSUES.md changes and untracked todo_findings.txt preserved. Local commits only; no push/PR.

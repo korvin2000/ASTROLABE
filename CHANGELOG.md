@@ -1,5 +1,10 @@
 # Change record
 
+## Bugfix branch ? 26 September 2026
+
+- Fixed 24 audit findings covering false-green verification, recall coverage, event ordering, cancellation, storage recovery, secret redaction, generated tools and scheduling. Details: [bugfix progress](audit/BUGFIX-PROGRESS.md).
+- Existing test-file additions now require integrity review. `ReviewRecord` adds required-check veto evidence; `Receipt`/`Executed` add expected-exit evidence for QA. JVM consumers must rebuild.
+
 ## Implementation checkpoints — 20 September 2026
 
 - P3.2.7: immutable impact snapshots with cycle-safe reverse reachability, closure/anchor joins and
