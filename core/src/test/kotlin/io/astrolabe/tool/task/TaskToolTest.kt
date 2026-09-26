@@ -115,6 +115,27 @@ class TaskToolTest {
     private fun status(o: ToolOutcome) = o.header!!.runtime.status
 
     @Test
+    fun `lease expiry while awaiting an answer prevents its contract amendment`() = runTest {
+        val before = contracts.current(ids.work)
+        var live = true
+        val tool = tool(Answering { question ->
+            live = false
+            Answer(question.id, question.contractRevision, "Change rounding everywhere.", changesRequirements = true)
+        })
+        tool.beforeDispatch = { check(live) { "dispatch lease expired" } }
+
+        try {
+            ask(tool)
+        } catch (refused: IllegalStateException) {
+            assertEquals("dispatch lease expired", refused.message)
+        }
+
+        assertEquals(false, live, "the authority must have returned its answer")
+        assertEquals(before, contracts.current(ids.work), "the expired cell cannot commit a new contract revision")
+        assertTrue(tool.asked.none { it.amendedToVersion != null })
+    }
+
+    @Test
     fun `wrong question and superseded answers do not amend the contract`() = runTest {
         val wrong = tool(Answering { q -> Answer("another-question", q.contractRevision, "new requirement", changesRequirements = true) })
         assertEquals("blocked", status(ask(wrong)))

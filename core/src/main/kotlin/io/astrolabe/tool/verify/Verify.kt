@@ -113,6 +113,12 @@ public class Verify(
     /** Where the blast selection's import graph takes its outlines: tier 0, or a host tier-1 index (D-251). */
     private val tiers: IndexTiers = IndexTiers.TIER_0,
 ) : ToolExecutor {
+    internal var beforeDispatch: () -> Unit = {}
+        set(value) {
+            field = value
+            checker?.beforeDispatch = value
+            baseline?.beforeDispatch = value
+        }
     init {
         require(ids.context != null) { "verify runs inside a cell: ids.context is its lineage" }
         require(timeoutSeconds > 0 && checkerTimeBoxSeconds > 0) { "timeouts must be positive" }
@@ -358,6 +364,7 @@ public class Verify(
                 return@runCheck Executed(command.argv, command.cwd, false, null, Outcome.Denied, null, null, listOf("working directory refused"))
             }
             val proc = try {
+                beforeDispatch()
                 runner.start(SpawnSpec(Command.Argv(command.argv), cwd, logPath(check.id, actionId), EnvPolicy(inheritedNames = envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")), timeoutSeconds))
             } catch (failure: IOException) {
                 view = "  ${check.id}: unavailable — cannot start ${command.argv.first()}: ${failure.message}"

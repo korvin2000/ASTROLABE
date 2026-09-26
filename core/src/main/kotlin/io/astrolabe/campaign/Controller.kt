@@ -1537,6 +1537,10 @@ public class Controller @JvmOverloads public constructor(
                 is CampaignReviewOutcome.Unavailable -> return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "$reviewOwed; ${review.reason}"))
             }
         }
+        if (c.stamper.report().candidateId != stamp || c.contract != contract) {
+            return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "candidate or contract changed during final review; verification and review must be repeated"))
+        }
+        c.refusal()?.let { return c.advance(Transition.Stopped(stopOutcome(c), "final acceptance not published: $it")) }
         c.advance(Transition.Finishing(stamp))
         return c.advance(Transition.Finished(stamp, receipts.distinct()))
     }

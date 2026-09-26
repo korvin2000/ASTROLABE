@@ -214,6 +214,11 @@ public class Cell @JvmOverloads constructor(
         private val register: Register get() = tools.state.register
 
         suspend fun run(): CellExit {
+            tools.edit?.beforeDispatch = ::enforceAuthority
+            (tools.run as? io.astrolabe.tool.run.Run)?.beforeDispatch = ::enforceAuthority
+            tools.verify?.beforeDispatch = ::enforceAuthority
+            tools.task?.beforeDispatch = ::enforceAuthority
+            ws.checker?.beforeDispatch = ::enforceAuthority
             events?.emit(AgentEvent.Cell.Started(ids, increment.id, ctx.role.name))
             // §4.4: the horizons hear every transition in this order — turn, cell, verification — then the Touched ledger.
             subscriptions += ws.coherence.register(ws.workset)
@@ -240,6 +245,11 @@ public class Cell @JvmOverloads constructor(
                 val checkpoint = settle(CellStatus.Failed, error)
                 return CellExit.Failed(budget.turnsTaken, register, checkpoint, persistPacket(packet(PacketStatus.Failed, error)), error)
             } finally {
+                tools.edit?.beforeDispatch = {}
+                (tools.run as? io.astrolabe.tool.run.Run)?.beforeDispatch = {}
+                tools.verify?.beforeDispatch = {}
+                tools.task?.beforeDispatch = {}
+                ws.checker?.beforeDispatch = {}
                 subscriptions.forEach { it.close() }
             }
         }
@@ -331,6 +341,7 @@ public class Cell @JvmOverloads constructor(
             ctx.accounting?.record(ids, invocationId.value, ctx.model.profile, request, usage)
             admission.reconcile(Tokens(usage?.let { it.totalInput + (it.quantities[BillingDimension.OUTPUT] ?: 0L) } ?: admission.estimate.value))
             events?.emit(AgentEvent.Cell.ModelResponded(ids, invocationId.value, response.stop, usage))
+            authority.check(turn)?.let { return if (it.cancelled) cancelled(it.reason) else failed(it.reason) }
 
             // §3.7: the native output is durable before any result exists, then appended (calls before results).
             journalOutput(response)
@@ -410,6 +421,7 @@ public class Cell @JvmOverloads constructor(
 
             // End-of-turn checker on the paths the horizons scheduled; the atlas follows the same set.
             val proposal = native.isEmpty() && (response.stop == StopReason.EndTurn || response.stop == StopReason.ToolUse)
+            authority.check(turn)?.let { return if (it.cancelled) cancelled(it.reason) else failed(it.reason) }
             val turnEnd = drainScheduled(contract) ?: after
             if (batchBefore.isNotEmpty()) {
                 val index = SymbolIndex(atlas)
@@ -994,7 +1006,12 @@ public class Cell @JvmOverloads constructor(
         }
 
         private fun recording(executor: ToolExecutor): ToolExecutor = ToolExecutor { call, context ->
+            enforceAuthority()
             executor.execute(call, context).also { outcome -> record.record(call, outcome) }
+        }
+
+        private fun enforceAuthority() {
+            authority.check(turn)?.let { error("dispatch refused: ${it.reason}") }
         }
 
         /** What the validator may consult this turn (P1.5.2): store ids, current check status and the turn's own ops. */

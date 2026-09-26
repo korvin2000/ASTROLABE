@@ -38,12 +38,14 @@ import io.astrolabe.verify.Selector
 import io.astrolabe.verify.Trigger
 import io.astrolabe.workspace.LineRange
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
 import org.junit.jupiter.api.io.TempDir
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
+import java.time.Duration
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -395,7 +397,11 @@ class CellTest {
             assertEquals(edited(), Files.readString(f.repo.resolve("src/a.py")), "the mutation happened")
             val after = f.version("src/a.py")
             val result = resultText(f.transcript(3).filterIsInstance<ToolResult>().last())
-            assertTrue(result.contains("failed: InjectedCrash") && result.contains("effects unknown; reconciled at the turn boundary"), result)
+            if (nth == 1) {
+                assertTrue(result.contains("status=partial") && result.contains("already written: src/a.py (preimage"), result)
+            } else {
+                assertTrue(result.contains("failed: InjectedCrash") && result.contains("effects unknown; reconciled at the turn boundary"), result)
+            }
             assertEquals(after, f.registry.recorded("src/a.py"), "the registry knows the new version, announced by the edit or by the boundary reconcile")
             assertTrue(f.workset.entries.none { it.path == "src/a.py" }, "neither the stale read nor an unseen post-edit view stays KNOWN: ${f.workset.entries}")
             val turns = f.checkpoints.turns(f.ids.context!!)
@@ -403,7 +409,8 @@ class CellTest {
             assertEquals(listOf("src/a.py"), turns[1].touched)
             assertEquals(after, f.preimages.of("edit-1").single().versionAfter, "the preimage record survived the crash: the edit is reversible")
             assertEquals(1, f.receipts.forCheck(Checks.TYPES_TOUCHED).size, "the checker ran on the touched path")
-            assertNull(f.observations.get("obs-2"), "no observation was recorded for the crashed edit")
+            if (nth == 1) assertNotNull(f.observations.get("edit-1"), "the partial publication is recorded")
+            else assertNull(f.observations.get("edit-1"), "the rendering crash prevented its observation")
             assertEquals(CellStatus.Completed, f.checkpoints.latest(f.ids.context!!)!!.status)
             val reconciles = f.journal.events(JournalScope(f.ids.work, kinds = setOf(JournalKind.Reconcile)))
             if (nth == 1) assertEquals(listOf("src/a.py"), reconciles.single().refs, "the boundary announced what the crashed edit could not") else assertTrue(reconciles.isEmpty(), "the edit itself announced the move")
@@ -481,6 +488,34 @@ class CellTest {
             assertEquals("execution generation superseded", cancelled.reason)
             assertTrue(f.adapter.calls.isEmpty())
             assertEquals(CellStatus.Cancelled, f.checkpoints.latest(f.ids.context!!)!!.status)
+        }
+    }
+
+    @Test
+    fun `lease expiry while a provider response is held prevents its edit and scheduled checks`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val expiry = f.clock.instant().plusSeconds(30)
+            val authority = DispatchAuthority {
+                if (f.clock.instant().isBefore(expiry)) null else DispatchRefusal("lease expired", cancelled = false)
+            }
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("reading"), read("r1", "src/a.py"))),
+                Scripted.Reply(listOf(say("editing"), anchored("e1", "src/a.py", f.version("src/a.py"), "    return 1", "    return 10"))),
+            )
+            val context = f.context(model, holdResponses = true)
+            val running = async { f.cell(authority = authority).run(context, f.increment, f.budget()) }
+            while (f.adapter.invocation(InvocationId("inv-1")) == null) yield()
+            f.adapter.release(InvocationId("inv-1"))
+            while (f.adapter.invocation(InvocationId("inv-2")) == null) yield()
+
+            f.clock.advance(Duration.ofSeconds(31))
+            f.adapter.release(InvocationId("inv-2"))
+            val exit = running.await()
+
+            assertEquals(CellFixture.A_PY, Files.readString(f.repo.resolve("src/a.py")), "the expired response must not edit the workspace")
+            assertTrue(f.receipts.forCheck(Checks.TYPES_TOUCHED).isEmpty(), "the expired response must not launch end-of-turn checks")
+            assertIs<CellExit.Failed>(exit)
+            assertEquals(CellStatus.Failed, f.checkpoints.latest(f.ids.context!!)!!.status)
         }
     }
 

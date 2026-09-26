@@ -50,6 +50,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 /**
@@ -230,6 +231,62 @@ class RefactorCampaignTest {
             assertEquals(CampaignOutcome.Failed, run.outcome, run.state?.reason)
             assertTrue(run.state!!.reason!!.contains("campaign review reject by bob"), run.state!!.reason)
             assertEquals("reject" to "bob", run.finish!!.review!!.verdict to run.finish!!.review!!.signedBy)
+        }
+    }
+
+    @Test
+    fun `a final reviewer cannot approve a candidate changed during review`() = runBlocking<Unit> {
+        assertFinalReviewInvalidated {
+            repo.write("src/a.py", "def a():\n    return 99\n")
+        }
+    }
+
+    @Test
+    fun `a final reviewer cannot approve a contract amended during review`() = runBlocking<Unit> {
+        assertFinalReviewInvalidated { c ->
+            c.contracts.amendByUser(c.ids.work, "a must return 99 instead of 10")
+        }
+    }
+
+    @Test
+    fun `a final reviewer cannot approve new obligations at the same contract revision`() = runBlocking<Unit> {
+        assertFinalReviewInvalidated { c ->
+            val revision = c.contract.version
+            c.contracts.strengthen(c.ids.work, Acceptance.Run("AC-late", printing, Origin.Model("AC-1")))
+            assertEquals(revision, c.contract.version)
+        }
+    }
+
+    @Test
+    fun `a final reviewer cannot complete a cancelled campaign`() = runBlocking<Unit> {
+        assertFinalReviewInvalidated { c -> c.cancellation.cancel("cancelled during final review") }
+    }
+
+    @Test
+    fun `a final reviewer cannot complete a campaign whose lease expired during review`() = runBlocking<Unit> {
+        assertFinalReviewInvalidated { c -> clock.set(assertNotNull(c.lease).expiry.plusSeconds(1)) }
+    }
+
+    private suspend fun assertFinalReviewInvalidated(duringReview: (OpenedCampaign) -> Unit) {
+        controller().open(repo.root, request, policy).use { c ->
+            var reviews = 0
+            val reviewer = object : Authority by AutonomousAuthority() {
+                override suspend fun review(request: ReviewRequest): Verdict {
+                    reviews += 1
+                    assertTrue(c.state!!.graph.increments.all { it.status == io.astrolabe.contract.IncrementStatus.Verified }, "the mutation must occur at final campaign review")
+                    duringReview(c)
+                    return Verdict(request.id, request.contractRevision, request.candidate, VerdictOutcome.Approve, confidence = 0.9, signedBy = "alice")
+                }
+            }
+            val replies = planning() +
+                implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"") +
+                implement(c, "src/b.py", "    return 2", "    return 20", "\"AC-1\",\"AC-2\"")
+            val run = controller().run(c, CellModel(FakeAdapter(ScriptedModel.of(*replies.toTypedArray())), FakeProfiles.main, HeuristicEstimator()), authority = reviewer)
+
+            assertEquals(1, reviews, "the final review must be reached")
+            assertNotEquals(CampaignOutcome.Completed, run.outcome, "approval only covers the candidate, obligations and authority before review")
+            assertNotEquals(CampaignOutcome.Completed, c.campaigns.load(c.ids.work, c.ids.attempt)!!.outcome)
+            assertNotEquals("completed", assertNotNull(run.finish).status)
         }
     }
 }
