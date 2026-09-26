@@ -10,6 +10,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.launch
 import org.slf4j.LoggerFactory
 import java.time.Clock
@@ -69,9 +70,9 @@ public class Events(
                 if (recent.size == replay) recent.removeFirst()
                 recent.addLast(r)
             }
+            for (s in subscribers) s.offer(r)
             r
         }
-        for (s in subscribers) s.offer(record)
         return record
     }
 
@@ -94,7 +95,7 @@ public class Events(
     public fun records(): Flow<EventRecord> = callbackFlow {
         val subscription = subscribe(EventSink { trySend(it) })
         awaitClose { subscription.close() }
-    }
+    }.buffer(bufferCapacity, BufferOverflow.DROP_OLDEST)
 
     override fun close() {
         subscribers.forEach { it.close() }

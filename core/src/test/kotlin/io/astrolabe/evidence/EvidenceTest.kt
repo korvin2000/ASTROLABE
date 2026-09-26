@@ -34,6 +34,17 @@ class EvidenceTest {
     )
 
     @Test
+    fun `root package spellings pin the same files and detect changed bytes`() {
+        val tree = listOf("src/a.py", "tests/test_a.py")
+        val version = FileVersion(Digest.ofUtf8("v1"))
+        val manifests = listOf(".", "./", "").map { path -> ClosureManifest.of(Closure.Package(path), tree, { version }) }
+        assertTrue(manifests.all { it.pathsAtVersions.keys == tree.toSet() })
+        assertEquals(1, manifests.map { it.digest }.distinct().size)
+        val changed = ClosureManifest.of(Closure.Package("."), tree, { FileVersion(Digest.ofUtf8("v2")) })
+        kotlin.test.assertNotEquals(manifests.first().digest, changed.digest)
+    }
+
+    @Test
     fun `unchanged bytes cannot reuse a receipt from another verifier`() {
         val receipt = receipt(Outcome.Passed, Counts(passed = 1))
         val now = io.astrolabe.verify.CandidateNow(stamp, receipt.checkDefinitionVersion, "different")
