@@ -230,7 +230,8 @@ public class BlobStore internal constructor(
         val token = java.lang.Long.toUnsignedString(ThreadLocalRandom.current().nextLong(), Character.MAX_RADIX)
         val temp = layout.blobsTemp.resolve("put-$token")
         FileChannel.open(temp, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE).use { channel ->
-            channel.write(ByteBuffer.wrap(bytes))
+            val buffer = ByteBuffer.wrap(bytes)
+            while (buffer.hasRemaining()) channel.write(buffer)
             faults.at(BlobPoint.BEFORE_FSYNC)
             channel.force(true)
         }

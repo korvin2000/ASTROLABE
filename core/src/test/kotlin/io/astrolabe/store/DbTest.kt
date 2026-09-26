@@ -22,6 +22,20 @@ class DbTest {
     lateinit var root: Path
 
     @Test
+    fun `failed deferred constraint commit rolls back before connection reuse`() {
+        Db.open(Layout(root).create()).use { db ->
+            db.tx { tx ->
+                tx.execute("CREATE TABLE parent (id INTEGER PRIMARY KEY)")
+                tx.execute("CREATE TABLE child (id INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED)")
+            }
+            assertFailsWith<StoreError> { db.tx { it.execute("INSERT INTO child VALUES (1)") } }
+            assertEquals(0L, db.count("SELECT count(*) FROM child"))
+            db.tx { it.execute("INSERT INTO parent VALUES (1)") }
+            assertEquals(1L, db.count("SELECT count(*) FROM parent"))
+        }
+    }
+
+    @Test
     fun `every durability pragma is set and readable back`() {
         val layout = Layout(root).create()
         Db.open(layout).use { db ->

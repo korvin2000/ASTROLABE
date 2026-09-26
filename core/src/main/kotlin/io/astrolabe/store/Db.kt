@@ -51,16 +51,23 @@ public class Db private constructor(
     public fun <T> tx(block: (Tx) -> T): T = monitor.withLock {
         check(!inTransaction) { "nested transactions are not supported; one writer owns one transaction" }
         inTransaction = true
+        var began = false
         try {
             statement("BEGIN IMMEDIATE")
-            val result = try {
-                block(Tx(this))
-            } catch (failure: Throwable) {
-                runCatching { statement("ROLLBACK") }
-                throw failure
-            }
+            began = true
+            val result = block(Tx(this))
             statement("COMMIT")
             result
+        } catch (failure: Throwable) {
+            if (began) {
+                try {
+                    statement("ROLLBACK")
+                } catch (cleanup: Throwable) {
+                    failure.addSuppressed(cleanup)
+                    runCatching { connection.close() }.exceptionOrNull()?.let(failure::addSuppressed)
+                }
+            }
+            throw failure
         } finally {
             inTransaction = false
         }

@@ -116,7 +116,8 @@ public class ProjectLock private constructor(
                 channel.truncate(0)
                 channel.position(0)
                 val recorded = JSON.encodeToString(LockHolder.serializer(), holder)
-                channel.write(ByteBuffer.wrap(recorded.toByteArray(StandardCharsets.UTF_8)))
+                val buffer = ByteBuffer.wrap(recorded.toByteArray(StandardCharsets.UTF_8))
+                while (buffer.hasRemaining()) channel.write(buffer)
                 channel.force(true)
                 owned = true
                 return ProjectLock(layout, holder, key, channel, lock)

@@ -172,8 +172,16 @@ public class Redaction @JvmOverloads constructor(public val config: RedactionCon
         val hidden = ArrayList<LineRange>()
         val hits = ArrayList<RedactionHit>()
         var cursor = 0
+        val merged = ArrayList<Found>()
         for (match in found) {
-            if (match.start < cursor) continue
+            val last = merged.lastOrNull()
+            if (last != null && match.start < last.end) {
+                merged[merged.lastIndex] = last.copy(end = maxOf(last.end, match.end))
+            } else {
+                merged += match
+            }
+        }
+        for (match in merged) {
             out.append(scanned, cursor, match.start).append("[REDACTED:").append(match.kind).append(']')
             val from = lineOf(lineStarts, match.start)
             val to = lineOf(lineStarts, match.end - 1)
