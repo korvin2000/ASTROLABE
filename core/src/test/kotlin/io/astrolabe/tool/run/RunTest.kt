@@ -118,7 +118,7 @@ class RunTest {
 
     private fun runner(os: Os = this.os, authority: Authority = AutonomousAuthority(), config: Config = Config(), hostSets: Map<String, CapabilitySet> = emptyMap()) = Run(
         workspace, registry, stamper, TrustedLocalRunner(os), os, intents, SqliteHandles(store, clock), SqliteObservations(store, clock), SqliteAliases(store, clock),
-        store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, contracts, authority, config, clock, stateRoot.resolve("logs"), hostSets = hostSets,
+        store.blobs, Redaction(config.redaction), HeuristicEstimator(), idGen, ids, contracts, authority, config, clock, stateRoot.resolve("logs"), hostSets = hostSets,
     )
 
     private fun call(json: String) = (ToolCalls.parse(listOf(ProviderCall("c1", "run", json))) as ParsedCalls.Valid).calls.single()
@@ -130,6 +130,34 @@ class RunTest {
     private fun status(o: ToolOutcome) = o.header!!.runtime.status
 
     private fun shell(windowsLine: String, posixLine: String) = if (windows) windowsLine else posixLine
+
+    @Test
+    fun `foreground output command arguments and terminal polls redact fixture secrets`() = runTest {
+        val secret = "AKIA" + "IOSFODNN7EXAMPLE"
+        repo.write("emit.txt", "$secret\n")
+        val command = shell("type emit.txt", "cat emit.txt")
+        val out = run("""{"cmd":"$command"}""")
+        assertFalse(out.body.contains(secret))
+        assertTrue(out.header!!.runtime.redactionApplied)
+        assertFalse(String(store.blobs.get(io.astrolabe.id.Digest(out.header!!.runtime.artifactRefs.first()))).contains(secret))
+        val echoed = run("""{"cmd":"echo $secret"}""")
+        assertFalse(echoed.body.contains(secret))
+        assertFalse(echoed.header!!.runtime.scope!!.contains(secret))
+        run("""{"cmd":"$command","bg":true}""")
+        val handle = SqliteHandles(store, clock).get("handle-1")!!
+        val terminal = awaitSettled(handle.handleId)
+        assertFalse(terminal.body.contains(secret))
+        assertTrue(terminal.header!!.runtime.redactionApplied)
+    }
+
+    @Test
+    fun `a redaction scan limit marks the stored log capture incomplete`() = runTest {
+        repo.write("emit.txt", "a".repeat(1000))
+        val config = Config(redaction = io.astrolabe.auth.RedactionConfig(maxBytes = 64))
+        val out = run("""{"cmd":"${shell("type emit.txt", "cat emit.txt")}"}""", runner(config = config))
+        assertFalse(out.header!!.runtime.captureComplete)
+        assertFalse(SqliteObservations(store, clock).get("obs-1")!!.captureComplete)
+    }
 
     /** Polls [handle] until it stops reporting `running`; each poll is itself bounded. */
     private suspend fun awaitSettled(handle: String, polls: Int = 5): ToolOutcome {

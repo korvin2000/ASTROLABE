@@ -223,10 +223,11 @@ public class Run(
             is Launch.Background -> {
                 val handle = Handle(idGen.next("handle"), ids, actionId, alias.text, argv, shell, args.cwd, launch.proc, wire(launch.proc.status), launch.cursor, before.candidateId.digest.hex)
                 handles.save(handle)
-                val slice = redaction.applyBytes(launch.firstOutput, ContentClass.ModelFacing).text
+                val safe = redaction.applyBytes(launch.firstOutput, ContentClass.ModelFacing)
+                val slice = safe.text
                 val view = "background run ${alias.text} handle ${handle.handleId} · ${wire(launch.proc.status)} · poll with run(op=poll, handle=\"${handle.handleId}\")" + (if (slice.isBlank()) "" else "\n$slice")
                 val result = RunResult(alias.text, actionId, null, Outcome.NotRun, view, false, logBlob, classification.effectClass, before.candidateId, null, false, emptyList(), handle.handleId, null, null, emptyList(), intent.intentId)
-                render(args, result, argv, shell, before, null, classification.effectsUnknown, statusWire = wire(launch.proc.status))
+                render(args, result, argv, shell, before, null, classification.effectsUnknown, statusWire = wire(launch.proc.status), captureMask = safe.mask)
             }
             is Launch.Finished -> finish(args, alias.text, actionId, argv, shell, before, launch.proc, launch.output, classification.effectClass, classification.effectsUnknown, logBlob, intent.intentId)
         }
@@ -385,7 +386,8 @@ public class Run(
             alias, actionId, capture.exitCode, outcome, view, shaped.viewTruncated, logBlob, effectClass, before.candidateId, after.candidateId,
             current = true, changedPaths = changed, handle = null, parsed = shaped.counts, shaped = shaped, limits = shaped.limitations, intentId = intentId,
         )
-        return render(args, result, argv, shell, before, after, effectsUnknown || status is ProcStatus.Lost)
+        return render(args, result, argv, shell, before, after, effectsUnknown || status is ProcStatus.Lost,
+            captureMask = redaction.applyBytes(output, ContentClass.ReusableEvidence).mask)
     }
 
     /** Announces every stamped member that moved; a path nobody read before has `from = null` (conservative marking). */
@@ -413,12 +415,13 @@ public class Run(
         }
         val updated = handle.copy(proc = proc.copy(status = poll.status), status = wire(poll.status), cursor = poll.nextCursorBytes)
         handles.save(updated)
-        val slice = redaction.applyBytes(poll.newBytes, ContentClass.ModelFacing).text
+        val safeSlice = redaction.applyBytes(poll.newBytes, ContentClass.ModelFacing)
+        val slice = safeSlice.text
         return when (val status = poll.status) {
             ProcStatus.Running -> {
                 val view = "handle ${handle.handleId} running · cursor ${poll.nextCursorBytes}" + (if (poll.timedOut) " · observation timed out after ${args.timeout}s, the process keeps running (no relaunch)" else "") + (if (slice.isBlank()) "" else "\n$slice")
                 val result = RunResult(handle.alias, handle.actionId, null, Outcome.NotRun, view, false, null, EffectClass.R, CandidateId(Digest(handle.stampBefore)), null, false, emptyList(), handle.handleId, null, null, emptyList())
-                render(args, result, handle.argv, handle.shell, null, null, effectsUnknown = false, statusWire = "running")
+                render(args, result, handle.argv, handle.shell, null, null, effectsUnknown = false, statusWire = "running", captureMask = safeSlice.mask)
             }
             else -> {
                 val before = stamper.report().let { now -> now } // the diff is taken against the tree now; the pre-dispatch stamp is in the handle
@@ -427,7 +430,8 @@ public class Run(
                 } catch (missing: IOException) {
                     poll.newBytes
                 }
-                val logBlob = blobs.put(redaction.applyBytes(log, ContentClass.ReusableEvidence).text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
+                val safeLog = redaction.applyBytes(log, ContentClass.ReusableEvidence)
+                val logBlob = blobs.put(safeLog.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
                 val stampBefore = CandidateId(Digest(handle.stampBefore))
                 val changed = if (before.candidateId == stampBefore) emptyList() else announceFromNow(before, "run ${handle.alias}")
                 val capture = RunCapture(handle.actionId, handle.argv, handle.shell, handle.cwd, (status as? ProcStatus.Exited)?.exitCode, status == ProcStatus.DeadlineExceeded, log, status !is ProcStatus.Lost)
@@ -435,7 +439,7 @@ public class Run(
                 val outcome = if (status is ProcStatus.Lost || status is ProcStatus.Cancelled) Outcome.UnknownOutcome else shaped.status
                 val view = "handle ${handle.handleId} ${wire(status)}\n" + shaped.view + (if (changed.isEmpty()) "" else "\ntouched (by run ${handle.alias}: ${changed.size} paths) " + changed.take(10).joinToString(", "))
                 val result = RunResult(handle.alias, handle.actionId, capture.exitCode, outcome, view, shaped.viewTruncated, logBlob, if (changed.isEmpty()) EffectClass.R else EffectClass.W, stampBefore, before.candidateId, true, changed, handle.handleId, shaped.counts, shaped, shaped.limitations)
-                render(args, result, handle.argv, handle.shell, null, before, effectsUnknown = status is ProcStatus.Lost)
+                render(args, result, handle.argv, handle.shell, null, before, effectsUnknown = status is ProcStatus.Lost, captureMask = safeLog.mask)
             }
         }
     }
@@ -471,33 +475,37 @@ public class Run(
 
     private fun refused(args: RunArgs, status: Outcome, detail: String): ToolOutcome {
         val actionId = idGen.next("act")
+        val safe = redaction.apply(detail)
         val header = EnvelopeHeader(
-            resultAlias = "#-", tool = "run", effectClass = null, versions = emptyMap(), stamp = null, truncated = false, effects = Effects.None,
-            runtime = RuntimeFields(actionId, wire(status), null, null, args.argv?.joinToString(" ") ?: args.cmd ?: args.handle, "complete", effectsUnknown = status == Outcome.UnknownOutcome),
+            resultAlias = "#-", tool = "run", effectClass = null, versions = emptyMap(), stamp = null, truncated = safe.limitations.isNotEmpty(), effects = Effects.None,
+            runtime = RuntimeFields(actionId, wire(status), null, null, (args.argv?.joinToString(" ") ?: args.cmd ?: args.handle)?.let { redaction.apply(it).text }, if (safe.limitations.isEmpty()) "complete" else "truncated", redactionApplied = safe.applied, effectsUnknown = status == Outcome.UnknownOutcome),
         )
-        return ToolOutcome(detail, header, tokens = estimator.estimate(detail).tokens)
+        return ToolOutcome(safe.text, header, tokens = estimator.estimate(safe.text).tokens)
     }
 
-    private fun render(args: RunArgs, result: RunResult, argv: List<String>, shell: Boolean, before: StampReport?, after: StampReport?, effectsUnknown: Boolean, statusWire: String = wire(result.status)): ToolOutcome {
+    private fun render(args: RunArgs, result: RunResult, argv: List<String>, shell: Boolean, before: StampReport?, after: StampReport?, effectsUnknown: Boolean, statusWire: String = wire(result.status), captureMask: io.astrolabe.evidence.RedactionMask = io.astrolabe.evidence.RedactionMask.NONE): ToolOutcome {
         val exit = result.exit?.let { "exit $it · " } ?: ""
         val head = "run ${result.alias} $statusWire · class ${result.effectClass}" + (if (shell) " · shell wrapper" else "") + " · $exit${argv.joinToString(" ").take(80)}"
-        val body = head + "\n" + result.view
+        val safe = redaction.apply(head + "\n" + result.view, ContentClass.ReusableEvidence)
+        val body = safe.text
+        val truncated = result.truncated || safe.limitations.isNotEmpty()
+        val captureComplete = result.status != Outcome.UnknownOutcome && result.shaped?.captureTruncated != true && captureMask.limitations.isEmpty()
         observations.record(
             Observation(
                 id = idGen.next("obs"), ids = ids, actionId = result.actionId, candidate = after?.candidateId, contentRef = result.log ?: blobs.put(body.toByteArray(Charsets.UTF_8), BlobKind.OUTPUT, ids),
-                paths = emptyList(), ranges = emptyMap(), complete = !result.truncated, sourceVersions = emptyMap(), captureComplete = result.status != Outcome.UnknownOutcome,
-                truncated = result.truncated,
+                paths = emptyList(), ranges = emptyMap(), complete = !truncated && captureComplete, sourceVersions = emptyMap(), captureComplete = captureComplete,
+                truncated = truncated, redaction = if (result.log != null) captureMask else safe.mask,
             ),
         )
         val header = EnvelopeHeader(
-            resultAlias = result.alias, tool = "run", effectClass = result.effectClass, versions = emptyMap(), stamp = after?.candidateId, truncated = result.truncated,
+            resultAlias = result.alias, tool = "run", effectClass = result.effectClass, versions = emptyMap(), stamp = after?.candidateId, truncated = truncated,
             effects = if (result.changedPaths.isNotEmpty()) Effects.Observed else if (effectsUnknown) Effects.Unknown else Effects.None,
             flags = InstructionShape.detect(body).flags,
             runtime = RuntimeFields(
                 actionId = result.actionId, status = statusWire, candidateBefore = before?.candidateId, candidateAfter = after?.candidateId,
-                scope = argv.joinToString(" ").take(80), completeness = if (result.truncated) "truncated" else "complete",
-                artifactRefs = listOfNotNull(result.log?.hex), captureComplete = result.shaped?.captureTruncated?.not() ?: true, displayTruncated = result.truncated,
-                redactionApplied = false, effectsObserved = result.changedPaths.take(20), effectsUnknown = effectsUnknown,
+                scope = redaction.apply(argv.joinToString(" ")).text.take(80), completeness = if (truncated || !captureComplete) "truncated" else "complete",
+                artifactRefs = listOfNotNull(result.log?.hex), captureComplete = captureComplete, displayTruncated = truncated,
+                redactionApplied = safe.applied || captureMask.applied, effectsObserved = result.changedPaths.take(20).map { redaction.apply(it).text }, effectsUnknown = effectsUnknown,
             ),
         )
         return ToolOutcome(body, header, green = result.status == Outcome.Passed, tokens = estimator.estimate(body).tokens)
