@@ -24,6 +24,14 @@ class ItemsTest {
     )
 
     @Test
+    fun `duplicate calls and reused completed ids are broken`() {
+        val call = ToolCall("a", "look", "{}")
+        val result = ToolResult.text("a", "ok")
+        assertTrue(Items.pairs(listOf(call, call, result)).broken)
+        assertTrue(Items.pairs(listOf(call, result, call, result)).broken)
+    }
+
+    @Test
     fun `every item kind round trips through json with its native passthrough`() {
         val serializer = ListSerializer(Item.serializer())
         val text = json.encodeToString(serializer, items)

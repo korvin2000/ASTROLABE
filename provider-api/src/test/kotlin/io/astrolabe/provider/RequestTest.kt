@@ -14,6 +14,18 @@ class RequestTest {
     private val a = Segment(SegmentKind.A, listOf(Message.text(Role.User, "anchor")))
 
     @Test
+    fun `token arithmetic saturates and admission rejects overflow`() {
+        val huge = Estimate(Long.MAX_VALUE, false, "test", "1", marginTokens = 1)
+        assertEquals(Long.MAX_VALUE, huge.upperBoundTokens)
+        assertEquals(Long.MAX_VALUE, (huge + huge).tokens)
+        for (estimate in listOf(huge, huge.copy(marginTokens = 0))) {
+            val result = Validations.standard(Fixtures.request(t), estimate, Fixtures.capabilities)
+            assertIs<Validation.Rejected>(result)
+            assertTrue(result.problems.any { it.kind == ProblemKind.ContextOverflow })
+        }
+    }
+
+    @Test
     fun `segments must follow the layout order`() {
         Fixtures.request(s, t, a)
         assertFailsWith<IllegalArgumentException> { Fixtures.request(t, s) }

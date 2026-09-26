@@ -127,7 +127,8 @@ public data class Pairing(
     val duplicateResults: List<ToolResult>,
 ) {
     val unmatchedCalls: List<ToolCall> get() = pairs.filter { it.result == null }.map { it.call }
-    val broken: Boolean get() = orphanResults.isNotEmpty() || duplicateResults.isNotEmpty() || pairs.any { it.result == null }
+    val broken: Boolean get() = orphanResults.isNotEmpty() || duplicateResults.isNotEmpty() || pairs.any { it.result == null } ||
+        pairs.map { it.call.id }.distinct().size != pairs.size
 }
 
 public object Items {

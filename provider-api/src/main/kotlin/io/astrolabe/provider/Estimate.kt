@@ -21,16 +21,16 @@ public data class Estimate(
     }
 
     /** Conservative bound used for admission; meaningless while [unknownHistory]. */
-    val upperBoundTokens: Long get() = tokens + marginTokens
+    val upperBoundTokens: Long get() = saturatedAdd(tokens, marginTokens)
 
     public operator fun plus(other: Estimate): Estimate {
         require(estimatorId == other.estimatorId) { "cannot add estimates from $estimatorId and ${other.estimatorId}" }
         return Estimate(
-            tokens = tokens + other.tokens,
+            tokens = saturatedAdd(tokens, other.tokens),
             exact = exact && other.exact,
             estimatorId = estimatorId,
             version = version,
-            marginTokens = marginTokens + other.marginTokens,
+            marginTokens = saturatedAdd(marginTokens, other.marginTokens),
             unknownHistory = unknownHistory || other.unknownHistory,
         )
     }
@@ -95,3 +95,5 @@ public fun ContentPart.estimate(estimator: TokenEstimator): Estimate = when (thi
     is Text -> estimator.estimate(text)
     is Opaque -> estimator.estimate(payload.toString())
 }
+
+internal fun saturatedAdd(a: Long, b: Long): Long = if (a > Long.MAX_VALUE - b) Long.MAX_VALUE else a + b
