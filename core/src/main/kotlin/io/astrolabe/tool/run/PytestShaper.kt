@@ -62,7 +62,7 @@ public class PytestShaper : Shaper {
                 wrapper = wrapper,
                 runnerName = Invocations.runnerName(capture) ?: "pytest",
                 nothingCollected = terminal.noTestsRan && !useReport,
-                evidenceIncomplete = fromReport?.problems?.isNotEmpty() == true,
+                evidenceIncomplete = fromReport?.let { it.problems.isNotEmpty() || (it.declaredTests != null && it.declaredTests != it.tests.size) } == true,
                 infraExitCodes = INFRA_EXITS,
                 inconclusiveExitCodes = INCONCLUSIVE_EXITS,
             ),

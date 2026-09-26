@@ -29,6 +29,7 @@ class AuditShaperTest {
     fun `malformed and incomplete fresh reports cannot fall back to green terminal output`() {
         val cases = listOf(
             Triple("jest", ReportKind.JestJson, "{"),
+            Triple("pytest", ReportKind.JUnitXml, """<testsuite tests="2"><testcase name="ok"/></testsuite>"""),
             Triple("jest", ReportKind.JestJson, """{"numTotalTests":2,"testResults":[{"assertionResults":[{"title":"ok","status":"passed"}]}]}"""),
             Triple("pytest", ReportKind.PytestJson, """{"summary":{"total":2},"tests":[{"nodeid":"a.py::ok","outcome":"passed"}]}"""),
             Triple("pytest", ReportKind.PytestJson, """{"summary":{"total":1},"tests":[{"nodeid":{},"outcome":"passed"}]}"""),
