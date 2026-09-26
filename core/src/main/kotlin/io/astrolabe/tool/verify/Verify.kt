@@ -243,6 +243,8 @@ public class Verify(
         val wanted = args.ids ?: contract.acceptance.filterIsInstance<Acceptance.Run>().map { it.id }
         val unknown = wanted.filter { id -> contract.acceptance(id) !is Acceptance.Run }
         if (unknown.isNotEmpty()) return refused(args, "denied", "not run: acceptance items of contract v${contract.version}: ${unknown.joinToString(", ")}")
+        val missing = wanted.filter { checks.forAcceptance(it).isEmpty() }
+        if (missing.isNotEmpty()) return refused(args, "unavailable", "no registered check executes ${missing.joinToString(", ")}")
         val selected = wanted.flatMap { checks.forAcceptance(it) }.distinctBy { it.id }
         if (selected.isEmpty()) return refused(args, "unavailable", "no registered check executes ${wanted.joinToString(", ")}")
         return runAll(args, contract, selected)
@@ -339,7 +341,8 @@ public class Verify(
                 return@runCheck Executed(command.argv, command.cwd, false, null, Outcome.Unavailable, null, null, listOf("cannot start ${command.argv.first()}: ${failure.message}"))
             }
             val observed = Executions.observe(os, proc, POLL_SLICE_SECONDS, timeoutSeconds)
-            val blob = blobs.put(redaction.applyBytes(observed.output, ContentClass.ReusableEvidence).text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
+            val safeLog = redaction.applyBytes(observed.output, ContentClass.ReusableEvidence)
+            val blob = blobs.put(safeLog.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
             val capture = RunCapture(
                 actionId = actionId, argv = command.argv, shell = false, cwd = command.cwd,
                 exitCode = (observed.proc.status as? ProcStatus.Exited)?.exitCode, timedOut = observed.proc.status == ProcStatus.DeadlineExceeded,
@@ -352,7 +355,7 @@ public class Verify(
                 else -> shaped.status
             }
             view = "  ${check.id}: " + shaped.view.lines().joinToString("\n  ")
-            Executed(command.argv, command.cwd, false, capture.exitCode, outcome, shaped.counts, blob, shaped.limitations)
+            Executed(command.argv, command.cwd, false, capture.exitCode, outcome, shaped.counts, blob, shaped.limitations + safeLog.limitations)
         }
         return receipt to view
     }
@@ -381,26 +384,32 @@ public class Verify(
     }
 
     private fun outcome(args: VerifyArgs, status: String, body: String, receipts: List<Receipt>, stamp: CandidateId?): ToolOutcome {
+        val safe = redaction.apply(body)
         val moved = receipts.any { it.stampBefore != it.stampAfter }
         val header = EnvelopeHeader(
             resultAlias = receipts.lastOrNull()?.let { scheduler.aliasOf(it.receiptId) } ?: "#-", tool = "verify", effectClass = if (moved) EffectClass.W else EffectClass.R,
-            versions = emptyMap(), stamp = stamp, truncated = false, effects = if (moved) Effects.Observed else Effects.None, flags = InstructionShape.detect(body).flags,
+            versions = emptyMap(), stamp = stamp, truncated = safe.limitations.isNotEmpty(), effects = if (moved) Effects.Observed else Effects.None, flags = InstructionShape.detect(safe.text).flags,
             runtime = RuntimeFields(
                 actionId = idGen.next("act"), status = status, candidateBefore = receipts.firstOrNull()?.stampBefore, candidateAfter = stamp,
                 scope = args.what + (args.selection?.let { "($it)" } ?: "") + (args.ids?.let { " " + it.joinToString(",") } ?: ""), completeness = "complete",
                 artifactRefs = receipts.mapNotNull { it.raw?.hex }, effectsObserved = if (moved) listOf("checks moved the tree") else emptyList(),
                 effectsUnknown = receipts.any { it.outcome == Outcome.UnknownOutcome },
+                redactionApplied = safe.applied, displayTruncated = safe.limitations.isNotEmpty(),
             ),
         )
-        return ToolOutcome(body, header, green = receipts.isNotEmpty() && receipts.all { it.greenForFinalTree }, tokens = estimator.estimate(body).tokens)
+        val green = stamp != null && receipts.isNotEmpty() && receipts.all { receipt ->
+            receipt.greenForFinalTree && checks[receipt.checkId]?.let { scheduler.currency(it, stamp).certifies } == true
+        }
+        return ToolOutcome(safe.text, header, green = green, tokens = estimator.estimate(safe.text).tokens)
     }
 
     private fun refused(args: VerifyArgs, status: String, detail: String): ToolOutcome {
+        val safe = redaction.apply(detail)
         val header = EnvelopeHeader(
-            resultAlias = "#-", tool = "verify", effectClass = null, versions = emptyMap(), stamp = null, truncated = false, effects = Effects.None,
-            runtime = RuntimeFields(idGen.next("act"), status, null, null, args.what + (args.selection?.let { "($it)" } ?: ""), "complete"),
+            resultAlias = "#-", tool = "verify", effectClass = null, versions = emptyMap(), stamp = null, truncated = safe.limitations.isNotEmpty(), effects = Effects.None,
+            runtime = RuntimeFields(idGen.next("act"), status, null, null, args.what + (args.selection?.let { "($it)" } ?: ""), if (safe.limitations.isEmpty()) "complete" else "truncated", redactionApplied = safe.applied),
         )
-        return ToolOutcome(detail, header, tokens = estimator.estimate(detail).tokens)
+        return ToolOutcome(safe.text, header, tokens = estimator.estimate(safe.text).tokens)
     }
 
     private fun logPath(checkId: String, actionId: String): Path {

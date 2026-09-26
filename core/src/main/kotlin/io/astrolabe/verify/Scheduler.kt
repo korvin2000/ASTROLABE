@@ -17,6 +17,8 @@ import io.astrolabe.id.Digest
 import io.astrolabe.id.FileVersion
 import io.astrolabe.id.IdGen
 import io.astrolabe.id.Identities
+import io.astrolabe.os.FileMode
+import io.astrolabe.os.ObjectId
 import io.astrolabe.tool.run.announceMoved
 import io.astrolabe.workspace.EnvFingerprint
 import io.astrolabe.workspace.Intent
@@ -25,12 +27,14 @@ import io.astrolabe.workspace.StampReport
 import io.astrolabe.workspace.Stamper
 import io.astrolabe.workspace.VersionRegistry
 import io.astrolabe.workspace.Workspace
+import io.astrolabe.workspace.WorkspacePath
 import kotlinx.coroutines.sync.withLock
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.attribute.BasicFileAttributes
+import java.nio.file.attribute.PosixFilePermission
 import java.time.Clock
 import kotlin.io.path.relativeTo
 
@@ -124,16 +128,17 @@ public class Scheduler(
     public suspend fun runCheck(check: Check, contractVersion: Int, inputs: Collection<String> = emptyList(), execute: suspend (root: Path) -> Executed): Receipt {
         val isolatedRoot = candidates?.takeIf { isolateAll || check.costClass == CostClass.Slow || check.costClass == CostClass.Expensive }
         if (isolatedRoot != null) runIsolated(check, contractVersion, inputs, isolatedRoot, execute)?.let { return it }
-        val paths = testedInputsFor(check, inputs)
         val limits = ArrayList<Limit>()
         return workspace.mutation.withLock {
             val before = stamper.report()
+            val paths = testedInputsFor(check, inputs)
             val seenBefore = paths.associateWith { snapshot(it) }
             val manifest = manifestOf(check.inputClosure)
             val executed = execute(workspace.root)
             val after = stamper.report()
             announceMoved(registry, before, after, "check ${check.id}")
-            val mutated = paths.filter { snapshot(it) != seenBefore.getValue(it) }.toSet()
+            val afterPaths = testedInputsFor(check, inputs)
+            val mutated = (paths + afterPaths).filter { it !in paths || it !in afterPaths || snapshot(it) != seenBefore[it] }.toSet()
             val stability = when {
                 check.inputClosure == Closure.Unknown && paths.isEmpty() -> {
                     limits += Limit("input_stability", "closure unknown and no inputs enumerated: the tested inputs could not be rescanned")
@@ -216,20 +221,36 @@ public class Scheduler(
 
     /** Copies the stamped tree into [dir]; `null` when a member could not be read or a copy does not verify. */
     private fun export(report: StampReport, dir: Path): Map<String, Seen>? {
-        val members = (workspace.git.lsFiles().filter { it.stage == 0 }.map { it.path } + report.untracked.map { it.path })
-            .distinct().filterNot { scratch.isScratch(it) }
+        if (report.unreadable.isNotEmpty() || stamper.stamp().id != report.candidateId) return null
+        val base = workspace.git.lsTree(ObjectId(report.baseCommit), recursive = true).associateBy { it.path }
+        val members = (base.keys + report.members.keys).filterNot { scratch.isScratch(it) }
+        Files.createDirectories(dir)
+        val exportedPaths = WorkspacePath.of(dir)
         val copied = HashMap<String, FileVersion>()
         for (path in members) {
-            val resolved = workspace.resolve(path, Intent.Read) as? PathResolution.Resolved ?: return null
-            if (!Files.exists(resolved.real, LinkOption.NOFOLLOW_LINKS)) continue // deleted in the working tree
-            val content = registry.read(path) ?: return null
-            val target = dir.resolve(path)
+            val delta = report.members[path]
+            if (delta?.type == io.astrolabe.workspace.EntryType.Deleted) continue
+            val mode = delta?.mode ?: base.getValue(path).mode
+            if (mode != FileMode.REGULAR && mode != FileMode.EXECUTABLE) return null
+            // Unchanged files come from the immutable base; dirty bytes must match the stamped digest.
+            val bytes = if (delta == null) workspace.git.catFile(base.getValue(path).id) else {
+                val content = registry.read(path) ?: return null
+                if (content.version.digest != delta.digest) return null
+                content.bytes
+            }
+            val target = (exportedPaths.resolve(path, Intent.Read) as? PathResolution.Resolved)?.real ?: return null
             Files.createDirectories(target.parent)
-            Files.write(target, content.bytes)
-            copied[path] = content.version
+            Files.write(target, bytes)
+            if (Files.getFileStore(target).supportsFileAttributeView("posix")) {
+                val permissions = Files.getPosixFilePermissions(target)
+                val executeBits = setOf(PosixFilePermission.OWNER_EXECUTE, PosixFilePermission.GROUP_EXECUTE, PosixFilePermission.OTHERS_EXECUTE)
+                Files.setPosixFilePermissions(target, if (mode == FileMode.EXECUTABLE) permissions + executeBits else permissions - executeBits)
+                if (Files.isExecutable(target) != (mode == FileMode.EXECUTABLE)) return null
+            }
+            copied[path] = FileVersion.of(bytes)
         }
         val seen = scan(dir)
-        return seen.takeIf { it.keys == copied.keys && copied.all { (path, version) -> seen.getValue(path).version == version } }
+        return seen.takeIf { stamper.stamp().id == report.candidateId && it.keys == copied.keys && copied.all { (path, version) -> seen.getValue(path).version == version } }
     }
 
     /** Content and metadata of every non-scratch file under [dir], by workspace-relative path. */
@@ -239,7 +260,7 @@ public class Scheduler(
         .filterNot { (path, _) -> scratch.isScratch(path) }
         .associate { (path, file) ->
             val attributes = Files.readAttributes(file, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
-            path to Seen(FileVersion.of(Files.readAllBytes(file)), attributes.size(), attributes.lastModifiedTime().toMillis())
+            path to Seen(FileVersion.of(Files.readAllBytes(file)), attributes.size(), attributes.lastModifiedTime(), Files.isExecutable(file))
         }
 
     private fun deleteTree(dir: Path) {
@@ -353,16 +374,19 @@ public class Scheduler(
         val declared: Collection<String> = when (val closure = check.inputClosure) {
             is Closure.Known -> closure.paths
             is Closure.Package -> filesUnder(closure.path) + inputs
-            Closure.Unknown -> inputs
+            Closure.Unknown -> if (inputs.isEmpty()) emptyList() else filesUnder(".") + inputs
         }
         return declared.map { it.replace('\\', '/') }.filterNot { scratch.isScratch(it) }.distinct().sorted()
     }
 
     private fun filesUnder(prefix: String): List<String> {
-        val resolved = workspace.resolve(prefix, Intent.Read) as? PathResolution.Resolved ?: return emptyList()
-        if (!Files.isDirectory(resolved.real)) return listOf(resolved.relative)
+        val root = if (prefix == "." || prefix.isEmpty() || prefix == "/") workspace.root else {
+            val resolved = workspace.resolve(prefix, Intent.Read) as? PathResolution.Resolved ?: return emptyList()
+            if (!Files.isDirectory(resolved.real)) return listOf(resolved.relative)
+            resolved.real
+        }
         return try {
-            Files.walk(resolved.real).use { stream ->
+            Files.walk(root).use { stream ->
                 stream.filter { Files.isRegularFile(it) }
                     .map { it.relativeTo(workspace.root).joinToString("/") { part -> part.toString() } }
                     .filter { !it.startsWith(".git/") }
@@ -374,7 +398,7 @@ public class Scheduler(
     }
 
     /** Content and metadata of one input: a restore-after-write leaves the version equal but moves the metadata. */
-    private data class Seen(val version: FileVersion?, val sizeBytes: Long?, val modifiedEpochMillis: Long?)
+    private data class Seen(val version: FileVersion?, val sizeBytes: Long?, val modified: java.nio.file.attribute.FileTime?, val executable: Boolean? = null)
 
     private fun snapshot(path: String): Seen {
         val resolved = workspace.resolve(path, Intent.Read) as? PathResolution.Resolved ?: return Seen(null, null, null)
@@ -384,6 +408,6 @@ public class Scheduler(
             return Seen(null, null, null)
         }
         if (attributes.isDirectory) return Seen(null, null, null)
-        return Seen(registry.read(path)?.version, attributes.size(), attributes.lastModifiedTime().toMillis())
+        return Seen(registry.read(path)?.version, attributes.size(), attributes.lastModifiedTime(), Files.isExecutable(resolved.real))
     }
 }

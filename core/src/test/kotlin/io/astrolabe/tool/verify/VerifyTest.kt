@@ -133,6 +133,40 @@ class VerifyTest {
     private fun status(o: ToolOutcome) = o.header!!.runtime.status
 
     @Test
+    fun `a passing batch cannot certify an earlier check invalidated by a later check`() = runTest {
+        val first = Check("CHK-first", CheckKind.Unit, Selector.All, Closure.Known(setOf("src/a.py")), CostClass.Fast, Trigger.OnDemand, command = printing("pytest_pass.txt", 0))
+        val change = Command(if (windows) listOf("cmd.exe", "/d", "/s", "/c", "echo changed>src/a.py&type pytest_pass.txt") else listOf("/bin/sh", "-c", "echo changed > src/a.py; cat pytest_pass.txt"))
+        checks.register(first)
+        checks.register(first.copy(id = "CHK-second", inputClosure = Closure.Known(setOf("pytest_pass.txt")), command = change))
+        val out = run("""{"what":"tests","selection":"ids","ids":["CHK-first","CHK-second"]}""")
+        assertFalse(out.green, out.body)
+        assertTrue(out.body.contains("stale"), out.body)
+    }
+
+    @Test
+    fun `a requested acceptance without a registered check cannot disappear from a green result`() = runTest {
+        contracts.amendByUser(ids.work, "add acceptance") { contract ->
+            contract.copy(acceptance = contract.acceptance + Acceptance.Run("AC-4", printing("pytest_pass.txt", 0), Origin.User))
+        }
+        val out = run("""{"what":"acceptance","ids":["AC-1","AC-4"]}""")
+        assertFalse(out.green, out.body)
+        assertEquals("unavailable", status(out))
+        assertTrue(out.body.contains("AC-4"), out.body)
+    }
+
+    @Test
+    fun `verification output redacts fixture secrets`() = runTest {
+        val secret = "AKIA" + "IOSFODNN7EXAMPLE"
+        repo.write("pytest_fail.txt", recorded("pytest-fail-param.txt") + "\nE   $secret\n")
+        val out = run("""{"what":"acceptance","ids":["AC-2"]}""")
+        assertFalse(out.body.contains(secret))
+        assertTrue(out.header!!.runtime.redactionApplied)
+        out.header!!.runtime.artifactRefs.forEach {
+            assertFalse(String(store.blobs.get(io.astrolabe.id.Digest(it))).contains(secret))
+        }
+    }
+
+    @Test
     fun `acceptance runs record receipts with stamps and currency, rendered as the Checks block`() = runTest {
         val out = run("""{"what":"acceptance","ids":["AC-1"]}""")
         assertEquals("passed", status(out), out.body)
