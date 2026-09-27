@@ -147,11 +147,7 @@ public object Sniff {
         val devDependencies = (root?.get("devDependencies") as? JsonObject)?.keys.orEmpty() +
             (root?.get("dependencies") as? JsonObject)?.keys.orEmpty()
 
-        val test = scripts["test"]?.let { script ->
-            // Prefer the direct runner when the script is a bare runner: one less process, and the
-            // argv is what a runner can actually own.
-            if (script.trim() == "node --test") listOf("node", "--test") else listOf("npm", "test")
-        }
+        val test = if ("test" in scripts) listOf("npm", "test") else null
         val build = scripts["build"]?.let { listOf("npm", "run", "build") }
         val lint = scripts["lint"]?.let { listOf("npm", "run", "lint") }
         val typecheckScript = listOf("typecheck", "type-check", "check")

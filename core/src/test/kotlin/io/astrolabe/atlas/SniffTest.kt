@@ -29,16 +29,27 @@ class SniffTest {
     }
 
     @Test
-    fun `package json with a bare node runner yields node --test and no type check`() {
+    fun `package json with a bare node runner keeps npm test and no type check`() {
         FixtureRepos.materialize(Fixture.TsSmall).use { repo ->
             val pkg = sniff(repo).packages.single()
             assertEquals(Manifest.PackageJson, pkg.manifest)
-            assertEquals(listOf("node", "--test"), pkg.test)
+            assertEquals(listOf("npm", "test"), pkg.test)
             // D-09: the fixture's `check` script is `node --check`, which never validates TypeScript,
             // and the fixture declares no typescript dependency — so there is no type check.
             assertNull(pkg.typecheck)
             assertNull(pkg.lint)
             assertNull(pkg.build)
+        }
+    }
+
+    @Test
+    fun `package test discovery preserves npm pretest and posttest hooks`() {
+        TempRepo.create().use { repo ->
+            repo.write(
+                "package.json",
+                """{"scripts":{"pretest":"node prepare.js","test":"node --test","posttest":"node check.js"}}""",
+            )
+            assertEquals(listOf("npm", "test"), sniff(repo).packages.single().test)
         }
     }
 
