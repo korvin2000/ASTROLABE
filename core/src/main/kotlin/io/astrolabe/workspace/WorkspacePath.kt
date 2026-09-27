@@ -238,6 +238,36 @@ public class WorkspacePath private constructor(
         )
     }
 
+    /** Snapshot metadata names the final link object, never its target; link ancestors are refused. */
+    internal fun resolveCapture(userPath: String): PathResolution {
+        val lexical = lexicalSegments(userPath)
+        lexical.rejected?.let { return it }
+        val segments = lexical.segments
+        return try {
+            val ancestors = linkAncestors(segments)
+            if (ancestors.isNotEmpty()) {
+                return PathResolution.Rejected(RejectionReason.LinkAncestor, "capture crosses link ancestor: $userPath")
+            }
+            var candidate = root
+            for (segment in segments) candidate = candidate.resolve(segment)
+            val parent = canonicalise(candidate.parent, segments.size - 1)
+            if (!parent.startsWith(root)) {
+                return PathResolution.Rejected(RejectionReason.OutsideRoot, "capture outside workspace: $userPath")
+            }
+            val real = parent.resolve(candidate.fileName)
+            val relative = root.relativize(real).joinToString("/") { it.toString() }
+            protectedRefusal(relative, Intent.Read)?.let { return it }
+            val kind = kindOf(real)
+            if (kind == PathKind.Junction || kind == PathKind.Special) {
+                PathResolution.Rejected(RejectionReason.LinkTarget, "unsupported capture kind $kind: $userPath")
+            } else {
+                PathResolution.Resolved(relative, real, kind, Intent.Read, emptyList())
+            }
+        } catch (failure: IOException) {
+            PathResolution.Rejected(RejectionReason.Unresolvable, "cannot capture '$userPath': ${failure.message}")
+        }
+    }
+
     /**
      * Re-resolves [resolved] at publication and confirms it still names the same object (D-47).
      *
@@ -410,7 +440,7 @@ public class WorkspacePath private constructor(
                 attributes.isDirectory -> PathKind.Directory
                 else -> PathKind.Regular
             }
-        } catch (missing: IOException) {
+        } catch (missing: java.nio.file.NoSuchFileException) {
             PathKind.Missing
         }
 

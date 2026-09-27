@@ -8,6 +8,7 @@ import io.astrolabe.id.InstantSerializer
 import io.astrolabe.os.ChangeOrigin
 import io.astrolabe.os.FileMode
 import io.astrolabe.os.GitStatus
+import io.astrolabe.os.LsFilesEntry
 import io.astrolabe.os.StatusCode
 import io.astrolabe.os.StatusEntry
 import io.astrolabe.os.UnsupportedRepositoryForm
@@ -215,18 +216,19 @@ public class DirtyState(
             throw UnsupportedRepositoryForm(it, "dirty-state capture")
         }
         val status = workspace.git.status(UntrackedFiles.ALL, includeIgnored = true)
-        val unreadable = ArrayList<String>()
+        val index = workspace.git.lsFiles()
         val entries = LinkedHashMap<String, SnapshotEntry>()
 
         for (entry in status.entries) {
             when (entry) {
-                is StatusEntry.Ordinary -> entries[entry.path] = worktreeEntry(entry.path, entry.worktreeMode, unreadable)
-                is StatusEntry.Unmerged -> entries[entry.path] = worktreeEntry(entry.path, entry.worktreeMode, unreadable)
-                is StatusEntry.Untracked -> entries[entry.path] = worktreeEntry(entry.path, FileMode.ABSENT, unreadable)
+                is StatusEntry.Ordinary -> entries[entry.path] = worktreeEntry(entry.path, entry.worktreeMode)
+                is StatusEntry.Unmerged -> entries[entry.path] = worktreeEntry(entry.path, entry.worktreeMode)
+                is StatusEntry.Untracked -> entries[entry.path] = worktreeEntry(entry.path, FileMode.ABSENT)
                 is StatusEntry.Renamed -> {
-                    entries[entry.path] = worktreeEntry(entry.path, entry.worktreeMode, unreadable)
-                    if (entry.origin == ChangeOrigin.RENAME && !Files.exists(workspace.root.resolve(entry.origPath))) {
-                        entries[entry.origPath] = deleted(entry.origPath)
+                    entries[entry.path] = worktreeEntry(entry.path, entry.worktreeMode)
+                    if (entry.origin == ChangeOrigin.RENAME) {
+                        val origin = worktreeEntry(entry.origPath, FileMode.ABSENT)
+                        if (origin.kind == SnapshotEntryKind.Deleted) entries[entry.origPath] = origin
                     }
                 }
 
@@ -234,15 +236,30 @@ public class DirtyState(
             }
         }
 
+        val staged = stagedEntries(status, index)
         val report = stamper.report()
+        val captured = entries.mapValues { (_, entry) ->
+            val type = when (entry.kind) {
+                SnapshotEntryKind.File -> EntryType.File
+                SnapshotEntryKind.Symlink -> EntryType.Symlink
+                SnapshotEntryKind.Deleted -> EntryType.Deleted
+            }
+            StampEntry(entry.path, type, entry.mode, entry.digest, entry.sizeBytes)
+        }
+        val base = status.branch?.let { it.oid?.hex ?: io.astrolabe.id.Stamp.NO_COMMIT }
+        if (captured != report.members || base != report.baseCommit ||
+            workspace.git.lsFiles() != index ||
+            workspace.git.status(UntrackedFiles.ALL, includeIgnored = true) != status
+        ) {
+            throw SnapshotIntegrityError("workspace or index changed during dirty-state capture; retry acquisition")
+        }
         return Snapshot(
             turn = turn,
             entries = entries.values.sortedWith(compareBy(Stamper.PATH_ORDER) { it.path }),
-            staged = stagedEntries(status),
+            staged = staged,
             baseCommit = report.baseCommit,
             stampId = report.stamp.id,
             ignoredCount = status.entries.count { it is StatusEntry.Ignored },
-            unreadable = unreadable + report.unreadable.filterNot { it in unreadable },
             capturedAt = clock.instant(),
         )
     }
@@ -257,7 +274,7 @@ public class DirtyState(
      * `ls-files` and `cat-file`. Neither command writes the index (D-53): the user's staged state
      * is captured beside the working tree, not merged into it and not disturbed.
      */
-    private fun stagedEntries(status: GitStatus): List<StagedEntry> {
+    private fun stagedEntries(status: GitStatus, index: List<LsFilesEntry>): List<StagedEntry> {
         val wanted = LinkedHashSet<String>()
         for (entry in status.entries) {
             when (entry) {
@@ -269,8 +286,8 @@ public class DirtyState(
         }
         if (wanted.isEmpty()) return emptyList()
         val staged = ArrayList<StagedEntry>()
-        for (row in workspace.git.lsFiles(wanted.toList())) {
-            val bytes = runCatching { workspace.git.catFile(row.id) }.getOrNull() ?: continue
+        for (row in index.filter { it.path in wanted }) {
+            val bytes = workspace.git.catFile(row.id)
             staged.add(
                 StagedEntry(
                     path = row.path,
@@ -285,47 +302,30 @@ public class DirtyState(
         return staged.sortedWith(compareBy(Stamper.PATH_ORDER) { it.path + "" + it.stage })
     }
 
-    private fun worktreeEntry(path: String, reportedMode: FileMode, unreadable: MutableList<String>): SnapshotEntry {
-        val resolved = workspace.resolve(path, Intent.Read)
+    private fun worktreeEntry(path: String, reportedMode: FileMode): SnapshotEntry {
+        val resolved = workspace.paths.resolveCapture(path)
         if (resolved !is PathResolution.Resolved) {
-            unreadable.add(path)
-            return deleted(path)
+            throw SnapshotIntegrityError("cannot capture '$path': $resolved")
         }
-        return when (WorkspacePath.kindOf(resolved.real)) {
+        return when (resolved.kind) {
             PathKind.Missing -> deleted(path)
             PathKind.Symlink -> {
-                val target = runCatching { Files.readSymbolicLink(resolved.real).toString() }.getOrNull()
-                if (target == null) {
-                    unreadable.add(path)
-                    deleted(path)
-                } else {
-                    val bytes = target.replace('\\', '/').toByteArray(StandardCharsets.UTF_8)
-                    SnapshotEntry(
-                        path = path,
-                        kind = SnapshotEntryKind.Symlink,
-                        mode = FileMode.SYMLINK,
-                        digest = blobs.put(bytes, BlobKind.PREIMAGE, ids, recovery = true),
-                        sizeBytes = bytes.size.toLong(),
-                    )
-                }
+                val bytes = Files.readSymbolicLink(resolved.real).toString().toByteArray(StandardCharsets.UTF_8)
+                SnapshotEntry(path, SnapshotEntryKind.Symlink, FileMode.SYMLINK,
+                    blobs.put(bytes, BlobKind.PREIMAGE, ids, recovery = true), bytes.size.toLong())
             }
-
-            PathKind.Directory -> deleted(path)
-            else -> {
+            PathKind.Regular -> {
                 val bytes = workspace.bytes(resolved)
-                if (bytes == null) {
-                    unreadable.add(path)
-                    deleted(path)
-                } else {
-                    SnapshotEntry(
-                        path = path,
-                        kind = SnapshotEntryKind.File,
-                        mode = if (reportedMode == FileMode.EXECUTABLE) FileMode.EXECUTABLE else FileMode.REGULAR,
-                        digest = blobs.put(bytes, BlobKind.PREIMAGE, ids, recovery = true),
-                        sizeBytes = bytes.size.toLong(),
-                    )
+                    ?: throw SnapshotIntegrityError("'$path' disappeared during capture")
+                val mode = when {
+                    reportedMode == FileMode.EXECUTABLE || reportedMode == FileMode.REGULAR -> reportedMode
+                    resolved.real.fileSystem.supportedFileAttributeViews().contains("posix") && Files.isExecutable(resolved.real) -> FileMode.EXECUTABLE
+                    else -> FileMode.REGULAR
                 }
+                SnapshotEntry(path, SnapshotEntryKind.File, mode,
+                    blobs.put(bytes, BlobKind.PREIMAGE, ids, recovery = true), bytes.size.toLong())
             }
+            else -> throw SnapshotIntegrityError("unsupported capture kind ${resolved.kind}: $path")
         }
     }
 

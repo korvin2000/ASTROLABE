@@ -126,10 +126,10 @@ public class Stamper @JvmOverloads public constructor(
     /** [stamp] with the membership and the exclusions that produced it. */
     public fun report(): StampReport {
         val status = workspace.git.status(UntrackedFiles.ALL, includeIgnored = countIgnored)
-        val unreadable = ArrayList<String>()
-        val tracked = trackedDelta(status, unreadable)
-        val untracked = untracked(status, unreadable)
-        val baseCommit = baseCommit()
+        val tracked = trackedDelta(status)
+        val untracked = untracked(status)
+        val baseCommit = status.branch?.let { it.oid?.hex ?: Stamp.NO_COMMIT }
+            ?: throw SnapshotIntegrityError("git status omitted the base commit")
         val stamp = Stamp(
             baseCommit = baseCommit,
             trackedDeltaHash = Digest.ofUtf8(encode("tracked-delta", tracked)),
@@ -143,7 +143,6 @@ public class Stamper @JvmOverloads public constructor(
             untracked = untracked,
             env = env,
             ignoredCount = if (countIgnored) status.entries.count { it is StatusEntry.Ignored } else null,
-            unreadable = unreadable,
         )
     }
 
@@ -218,22 +217,18 @@ public class Stamper @JvmOverloads public constructor(
 
     // ------------------------------------------------------------ internals
 
-    private fun baseCommit(): String =
-        runCatching { workspace.git.revParse("HEAD").hex }.getOrDefault(Stamp.NO_COMMIT)
-
-    private fun trackedDelta(status: GitStatus, unreadable: MutableList<String>): List<StampEntry> {
+    private fun trackedDelta(status: GitStatus): List<StampEntry> {
         val entries = LinkedHashMap<String, StampEntry>()
         for (entry in status.entries) {
             when (entry) {
-                is StatusEntry.Ordinary -> entries[entry.path] = stampEntry(entry.path, entry.worktreeMode, unreadable)
-                is StatusEntry.Unmerged -> entries[entry.path] = stampEntry(entry.path, entry.worktreeMode, unreadable)
+                is StatusEntry.Ordinary -> entries[entry.path] = stampEntry(entry.path, entry.worktreeMode)
+                is StatusEntry.Unmerged -> entries[entry.path] = stampEntry(entry.path, entry.worktreeMode)
                 is StatusEntry.Renamed -> {
-                    entries[entry.path] = stampEntry(entry.path, entry.worktreeMode, unreadable)
+                    entries[entry.path] = stampEntry(entry.path, entry.worktreeMode)
                     // A rename removes its origin from the candidate; a copy leaves it in place.
-                    if (entry.origin == ChangeOrigin.RENAME &&
-                        !Files.exists(workspace.root.resolve(entry.origPath))
-                    ) {
-                        entries[entry.origPath] = deleted(entry.origPath)
+                    if (entry.origin == ChangeOrigin.RENAME) {
+                        val origin = stampEntry(entry.origPath, FileMode.ABSENT)
+                        if (origin.type == EntryType.Deleted) entries[entry.origPath] = origin
                     }
                 }
 
@@ -243,9 +238,9 @@ public class Stamper @JvmOverloads public constructor(
         return entries.values.sortedWith(compareBy(PATH_ORDER) { it.path })
     }
 
-    private fun untracked(status: GitStatus, unreadable: MutableList<String>): List<StampEntry> =
+    private fun untracked(status: GitStatus): List<StampEntry> =
         status.entries.filterIsInstance<StatusEntry.Untracked>()
-            .map { stampEntry(it.path, FileMode.ABSENT, unreadable) }
+            .map { stampEntry(it.path, FileMode.ABSENT) }
             .filter { it.type != EntryType.Deleted }
             .sortedWith(compareBy(PATH_ORDER) { it.path })
 
@@ -254,48 +249,23 @@ public class Stamper @JvmOverloads public constructor(
      * which is the only mode that is meaningful on a platform without a POSIX executable bit;
      * [FileMode.ABSENT] means "git did not say", and the mode is then derived from the file itself.
      */
-    private fun stampEntry(path: String, reportedMode: FileMode, unreadable: MutableList<String>): StampEntry {
-        val resolved = workspace.resolve(path, Intent.Read)
+    private fun stampEntry(path: String, reportedMode: FileMode): StampEntry {
+        val resolved = workspace.paths.resolveCapture(path)
         if (resolved !is PathResolution.Resolved) {
-            unreadable.add(path)
-            return deleted(path)
+            throw SnapshotIntegrityError("cannot stamp '$path': $resolved")
         }
-        return when (WorkspacePath.kindOf(resolved.real)) {
+        return when (resolved.kind) {
             PathKind.Missing -> deleted(path)
             PathKind.Symlink -> {
-                val target = runCatching { Files.readSymbolicLink(resolved.real).toString() }.getOrNull()
-                if (target == null) {
-                    unreadable.add(path)
-                    deleted(path)
-                } else {
-                    val bytes = target.replace('\\', '/').toByteArray(StandardCharsets.UTF_8)
-                    StampEntry(path, EntryType.Symlink, FileMode.SYMLINK, Digest.of(bytes), bytes.size.toLong())
-                }
+                val bytes = Files.readSymbolicLink(resolved.real).toString().toByteArray(StandardCharsets.UTF_8)
+                StampEntry(path, EntryType.Symlink, FileMode.SYMLINK, Digest.of(bytes), bytes.size.toLong())
             }
-
-            PathKind.Directory -> StampEntry(
-                path = path,
-                type = EntryType.Directory,
-                mode = FileMode.TREE,
-                digest = Digest.ofUtf8(""),
-                sizeBytes = 0,
-            )
-
-            else -> {
+            PathKind.Regular -> {
                 val bytes = workspace.bytes(resolved)
-                if (bytes == null) {
-                    unreadable.add(path)
-                    deleted(path)
-                } else {
-                    StampEntry(
-                        path = path,
-                        type = EntryType.File,
-                        mode = fileMode(resolved, reportedMode),
-                        digest = Digest.of(bytes),
-                        sizeBytes = bytes.size.toLong(),
-                    )
-                }
+                    ?: throw SnapshotIntegrityError("'$path' disappeared during stamping")
+                StampEntry(path, EntryType.File, fileMode(resolved, reportedMode), Digest.of(bytes), bytes.size.toLong())
             }
+            else -> throw SnapshotIntegrityError("unsupported capture kind ${resolved.kind}: $path")
         }
     }
 

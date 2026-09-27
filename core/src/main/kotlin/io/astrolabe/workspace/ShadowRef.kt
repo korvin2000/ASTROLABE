@@ -319,7 +319,21 @@ public class ShadowRef @JvmOverloads public constructor(
                 if (Files.exists(file)) mismatches.add(entry.path)
                 continue
             }
-            val actual = runCatching { digestOfFile(file) }.getOrNull()
+            val actual = runCatching {
+                val resolved = exported.resolveCapture(entry.path)
+                check(resolved is PathResolution.Resolved)
+                when (entry.kind) {
+                    SnapshotEntryKind.Symlink -> {
+                        check(resolved.kind == PathKind.Symlink)
+                        Digest.of(Files.readSymbolicLink(resolved.real).toString().toByteArray(StandardCharsets.UTF_8))
+                    }
+                    SnapshotEntryKind.File -> {
+                        check(resolved.kind == PathKind.Regular)
+                        digestOfFile(resolved.real)
+                    }
+                    SnapshotEntryKind.Deleted -> null
+                }
+            }.getOrNull()
             if (actual == entry.digest) verified++ else mismatches.add(entry.path)
         }
         return MaterializeResult(dir, files, verified, mismatches, limitations)
@@ -414,14 +428,13 @@ public class ShadowRef @JvmOverloads public constructor(
 
     /** The digest of the working-tree path now, following the same rule the manifest used. */
     private fun currentDigest(path: String): Digest? {
-        val resolved = workspace.resolve(path, Intent.Read)
+        val resolved = workspace.paths.resolveCapture(path)
         if (resolved !is PathResolution.Resolved) return null
-        return when (WorkspacePath.kindOf(resolved.real)) {
+        return when (resolved.kind) {
             PathKind.Missing, PathKind.Directory -> null
             PathKind.Symlink -> runCatching {
                 Digest.of(
                     Files.readSymbolicLink(resolved.real).toString()
-                        .replace('\\', '/')
                         .toByteArray(StandardCharsets.UTF_8),
                 )
             }.getOrNull()
