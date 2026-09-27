@@ -59,6 +59,25 @@ import kotlin.test.assertTrue
 /** P1.8.7: the cell turn loop of §3.7 — order, fail-closed validation, gates, every exit kind, and a checkpoint on every path out (fault injection). */
 class CellTest {
     @Test
+    fun `role masked edits and runs are refused before dispatch`() = runTest {
+        for (role in listOf(Roles.probe, Roles.plan, Roles.review)) {
+            CellFixture(stateRoot.resolve(role.name)).use { f ->
+                val before = f.version("src/a.py")
+                val masked = if (role == Roles.probe) anchored("c2", "src/a.py", before, "    return 1", "    return 10")
+                    else runCmd("c2", "echo masked > src/forbidden.txt")
+                f.run(ScriptedModel.of(
+                    Scripted.Reply(listOf(read("c1", "src/a.py"))),
+                    Scripted.Reply(listOf(masked)),
+                    Scripted.Reply(listOf(say("done"))),
+                ), role = role)
+                assertEquals(before, f.version("src/a.py"))
+                assertFalse(Files.exists(f.repo.root.resolve("src/forbidden.txt")))
+                assertTrue(f.transcript(3).filterIsInstance<ToolResult>().any { "is masked in this turn" in resultText(it) })
+            }
+        }
+    }
+
+    @Test
     fun `profile request estimator participates in dispatch admission`() = runTest {
         CellFixture(stateRoot).use { f ->
             val base = f.context(ScriptedModel.of())
@@ -174,13 +193,14 @@ class CellTest {
     }
 
     @Test
-    fun `a changed public signature with an uninspected reference nudges once and the exit gate refuses the completion`() = runTest {
+    fun `an incomplete reference lookup leaves the public signature impact nudge unresolved`() = runTest {
         CellFixture(stateRoot).use { f ->
             val v = f.version("src/a.py")
             val model = ScriptedModel.of(
                 Scripted.Reply(listOf(say("reading a"), read("c1", "src/a.py"), patch("c2", """{"plan.add":"make a return 10"},{"plan.cursor":1},{"next":"edit a"}"""))),
                 Scripted.Reply(listOf(say("editing"), anchored("c3", "src/a.py", v, "def a():", "def a(scale=1):"))),
-                Scripted.Reply(listOf(say("ticking"), patch("c4", """{"plan.tick":{"n":1,"evidence":"#2"}},{"next":"done"}"""))),
+                Scripted.Reply(listOf(say("ticking"), patch("c4", """{"plan.tick":{"n":1,"evidence":"#2"}},{"next":"done"}"""),
+                    call("c5", "look", """{"what":"refs","target":"a","budget":100}"""))),
                 Scripted.Reply(listOf(say("done"))),
                 Scripted.Reply(listOf(say("done"))),
             )

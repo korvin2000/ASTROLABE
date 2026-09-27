@@ -361,7 +361,7 @@ public class Cell @JvmOverloads constructor(
             val registerBefore = register
             val certifiedBefore = certified(currencies(before.candidateId))
             val native = response.toolCalls
-            val validated = if (native.isEmpty()) null else validateCalls(native, reserveTurn)
+            val validated = if (native.isEmpty()) null else validateCalls(native, reserveTurn, mask)
             val calls = (validated as? Validated.Calls)?.calls.orEmpty()
 
             // Partition and dispatch — or refuse the whole turn.
@@ -413,7 +413,9 @@ public class Cell @JvmOverloads constructor(
                         inspected.clear()
                         preimagesOf(alias).forEach { p -> batchBefore.getOrPut(p.path) { ev.preimages!!.bytesOf(p) } }
                     }
-                    if (call.family == ToolFamily.Look && outcome.header?.runtime?.status == "ok") {
+                    if (call.family == ToolFamily.Look && outcome.header?.runtime?.status == "ok" &&
+                        outcome.header.runtime.completeness == "complete" && !outcome.header.truncated &&
+                        !outcome.header.runtime.displayTruncated && !outcome.header.runtime.redactionApplied) {
                         (call.args as? Args.Look)?.args?.takeIf { it.what == "refs" }?.target?.let { impact.inspected(it); inspected += it }
                     }
                 }
@@ -572,17 +574,20 @@ public class Cell @JvmOverloads constructor(
          * §3.7 `validate_complete_calls_and_dependencies`: one unparseable call, one forward dependency, a missing
          * required `state` op after the loop gate or an edit on a reserve turn refuses every call of the turn.
          */
-        private fun validateCalls(native: List<NativeCall>, reserveTurn: Boolean): Validated {
+        private fun validateCalls(native: List<NativeCall>, reserveTurn: Boolean, mask: ToolMask): Validated {
             val calls = when (val parsed = ToolCalls.parse(native)) {
                 is ParsedCalls.Invalid -> return Validated.Refused("schema error in call ${parsed.providerCallId}: ${parsed.error}; no call of this turn executed")
                 is ParsedCalls.Valid -> parsed.calls
             }
             (Partition.of(calls) as? Partition.Rejected)?.let { return Validated.Refused("${it.reason}; no call of this turn executed") }
+            if (reserveTurn && calls.any { it.family == ToolFamily.Edit }) return Validated.Refused("${CellBudget.GATE}; the edit refused the whole turn")
+            calls.firstOrNull { !mask.allows(it.name) }?.let {
+                return Validated.Refused("${it.name} is masked in this turn; no call of this turn executed")
+            }
             requiredOp?.let { op ->
                 if (calls.none { it.family.wire == op }) return Validated.Refused("the loop gate ended the last turn: a $op op is required before anything else runs; no call of this turn executed")
                 requiredOp = null
             }
-            if (reserveTurn && calls.any { it.family == ToolFamily.Edit }) return Validated.Refused("${CellBudget.GATE}; the edit refused the whole turn")
             return Validated.Calls(calls)
         }
 
