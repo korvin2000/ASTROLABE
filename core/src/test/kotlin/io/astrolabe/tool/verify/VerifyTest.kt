@@ -133,6 +133,31 @@ class VerifyTest {
     private fun status(o: ToolOutcome) = o.header!!.runtime.status
 
     @Test
+    fun `JVM verification captures new reports and cannot reuse stale success`() = runTest {
+        repo.write(".gitignore", "build/\ntarget/\n")
+        var writeReport = true
+        val runner = object : io.astrolabe.tool.run.Runner {
+            override val mode = io.astrolabe.auth.ExecutionMode.TrustedLocal
+            override fun start(spec: io.astrolabe.os.SpawnSpec): io.astrolabe.os.Proc {
+                if (writeReport) {
+                    val file = spec.workingDirectory.resolve("build/test-results/test/TEST-demo.xml")
+                    java.nio.file.Files.createDirectories(file.parent)
+                    java.nio.file.Files.writeString(file, """<testsuite tests="1"><testcase classname="Demo" name="works"/></testsuite>""")
+                }
+                return os.spawn(spec.copy(command = io.astrolabe.os.Command.Argv(if (windows) listOf("cmd.exe", "/d", "/c", "exit 0") else listOf("/bin/sh", "-c", "exit 0"))))
+            }
+        }
+        checks.register(Check("CHK-jvm", CheckKind.Full, Selector.All, Closure.Known(setOf("src/a.py")), CostClass.Fast, Trigger.OnDemand, command = Command(listOf("gradle", "test"))))
+        verify = Verify(checks, scheduler, null, null, null, workspace, runner, os, stamper, store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, contracts, stateRoot.resolve("logs"))
+        val first = run("""{"what":"tests","selection":"ids","ids":["CHK-jvm"]}""")
+        assertTrue(first.green, first.body)
+        writeReport = false
+        val stale = run("""{"what":"tests","selection":"ids","ids":["CHK-jvm"]}""")
+        assertFalse(stale.green, stale.body)
+        assertTrue(stale.body.contains("no fresh JUnit XML"), stale.body)
+    }
+
+    @Test
     fun `model acceptance commands and escaping working directories are denied before launch`() = runTest {
         var launches = 0
         val recording = object : io.astrolabe.tool.run.Runner {

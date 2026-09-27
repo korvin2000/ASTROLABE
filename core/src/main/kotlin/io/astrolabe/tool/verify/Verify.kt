@@ -43,6 +43,7 @@ import io.astrolabe.tool.ToolOps
 import io.astrolabe.tool.ToolOutcome
 import io.astrolabe.tool.TurnContext
 import io.astrolabe.tool.VerifyArgs
+import io.astrolabe.tool.run.JUnitReports
 import io.astrolabe.tool.run.Executions
 import io.astrolabe.tool.run.RunCapture
 import io.astrolabe.tool.run.Runner
@@ -364,8 +365,10 @@ public class Verify(
                 view = "  ${check.id}: denied — working directory must be a directory inside the verification workspace"
                 return@execution Executed(command.argv, command.cwd, false, null, Outcome.Denied, null, null, listOf("working directory refused"))
             }
+            val reports = JUnitReports.forCommand(cwd, command.argv, actionId)
             val proc = try {
                 beforeDispatch()
+                reports?.prepare(logsDir.resolve("reports-$actionId"))
                 runner.start(SpawnSpec(Command.Argv(command.argv), cwd, logPath(check.id, actionId), EnvPolicy(inheritedNames = envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")), timeoutSeconds))
             } catch (failure: IOException) {
                 view = "  ${check.id}: unavailable — cannot start ${command.argv.first()}: ${failure.message}"
@@ -374,7 +377,12 @@ public class Verify(
             val observed = Executions.observeCancellable(os, proc, POLL_SLICE_SECONDS, timeoutSeconds)
             val safeLog = redaction.applyBytes(observed.output, ContentClass.ReusableEvidence)
             val blob = blobs.put(safeLog.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
+            val collected = try { reports?.collect().orEmpty() } catch (failure: IOException) {
+                view = "  ${check.id}: report capture failed: ${failure.message}"
+                return@execution Executed(command.argv, command.cwd, false, null, Outcome.Inconclusive, null, blob, listOf("report capture failed: ${failure.message}"))
+            }
             val capture = RunCapture(
+                reports = collected,
                 actionId = actionId, argv = command.argv, shell = false, cwd = command.cwd,
                 exitCode = (observed.proc.status as? ProcStatus.Exited)?.exitCode, timedOut = observed.proc.status == ProcStatus.DeadlineExceeded,
                 output = observed.output, captureComplete = !observed.lost && observed.proc.status !is ProcStatus.Lost, checkId = check.id, selector = check.selector.toString(),
