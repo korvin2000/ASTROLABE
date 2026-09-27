@@ -59,6 +59,37 @@ import kotlin.test.assertTrue
 /** P1.8.7: the cell turn loop of §3.7 — order, fail-closed validation, gates, every exit kind, and a checkpoint on every path out (fault injection). */
 class CellTest {
     @Test
+    fun `partial usage retains the generation reservation including known overruns`() = runTest {
+        val input = io.astrolabe.provider.BillingDimension.UNCACHED_INPUT
+        val output = io.astrolabe.provider.BillingDimension.OUTPUT
+        for ((index, quantities) in listOf(mapOf(input to 1L), mapOf(output to 1L), mapOf(output to 100_000L)).withIndex()) {
+            CellFixture(stateRoot.resolve("usage-$index")).use { f ->
+                val base = f.context(ScriptedModel.of(Scripted.Reply(listOf(say("refused")), stop = io.astrolabe.provider.StopReason.Refusal)))
+                val budget = f.budget()
+                var held = 0L
+                val adapter = object : io.astrolabe.provider.ProviderAdapter by base.model.adapter {
+                    override fun start(request: io.astrolabe.provider.Request, id: InvocationId): io.astrolabe.provider.Invocation {
+                        held = budget.working.heldTokens.value
+                        val original = base.model.adapter.start(request, id)
+                        return object : io.astrolabe.provider.Invocation by original {
+                            override suspend fun await(): io.astrolabe.provider.Response = original.await().copy(
+                                usage = io.astrolabe.provider.BillableUsage(quantities,
+                                    io.astrolabe.provider.UsageProvenance("fake", "main", "test"), setOf(input, output) - quantities.keys),
+                            )
+                        }
+                    }
+                }
+                val context = CellContext(base.ids, base.role, base.contracts,
+                    CellModel(adapter, base.model.profile, base.model.estimator), base.tools, base.workspace, base.evidence, base.prime)
+                f.cell().run(context, f.increment, budget)
+                assertTrue(held > 1)
+                assertTrue(budget.working.spent.value >= held, "partial usage released conservative funding")
+                assertTrue(budget.working.spent.value >= quantities.values.sum(), "known overrun was lost")
+            }
+        }
+    }
+
+    @Test
     fun `role masked edits and runs are refused before dispatch`() = runTest {
         for (role in listOf(Roles.probe, Roles.plan, Roles.review)) {
             CellFixture(stateRoot.resolve(role.name)).use { f ->

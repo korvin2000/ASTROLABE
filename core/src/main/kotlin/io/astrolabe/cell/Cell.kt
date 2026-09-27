@@ -345,7 +345,15 @@ public class Cell @JvmOverloads constructor(
             contextAdmission.observed(estimate, usage?.takeIf { it.isComplete }?.totalInput)
             cost += usage
             ctx.accounting?.record(ids, invocationId.value, ctx.model.profile, request, usage)
-            admission.reconcile(Tokens(usage?.let { it.totalInput + (it.quantities[BillingDimension.OUTPUT] ?: 0L) } ?: admission.estimate.value))
+            fun addBounded(a: Long, b: Long): Long = if (b > Long.MAX_VALUE - a) Long.MAX_VALUE else a + b
+            val knownInput = usage?.quantities?.filterKeys { it.isInput }?.values?.fold(0L, ::addBounded) ?: 0L
+            val inputKnown = usage != null && usage.quantities.keys.any { it.isInput } && usage.unknown.none { it.isInput }
+            val inputCharge = if (inputKnown) knownInput else maxOf(knownInput, estimate.upperBoundTokens)
+            val outputCharge = usage?.quantities?.get(BillingDimension.OUTPUT) ?: ctx.model.maxOutputTokens.toLong()
+            val charge = addBounded(inputCharge, outputCharge)
+            // Unknown dimensions retain conservative funding; reported overruns still count.
+            val complete = usage?.isComplete == true && inputKnown && BillingDimension.OUTPUT in usage.quantities
+            admission.reconcile(Tokens(if (complete) charge else maxOf(charge, admission.estimate.value)))
             events?.emit(AgentEvent.Cell.ModelResponded(ids, invocationId.value, response.stop, usage))
             if (response.toolCalls.isNotEmpty()) authority.check(turn)?.let { return if (it.cancelled) cancelled(it.reason) else failed(it.reason) }
 
