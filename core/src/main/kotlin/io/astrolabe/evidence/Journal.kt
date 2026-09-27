@@ -93,11 +93,14 @@ public class Journal(private val store: Store, private val clock: Clock) {
     public fun get(eventId: String): JournalEvent? =
         store.db.query("SELECT body FROM journal WHERE event_id = ?", eventId) { decode(it.string("body")) }.firstOrNull()
 
-    /** Events of a work in sequence order, optionally limited to one context. */
-    public fun events(scope: JournalScope): List<JournalEvent> = store.db.query(
-        "SELECT body FROM journal WHERE work_id = ? ORDER BY seq",
-        scope.work,
-    ) { decode(it.string("body")) }.filter { scope.accepts(it) }
+    /** Events of a work in sequence order, optionally limited to one context and a set of kinds. */
+    public fun events(scope: JournalScope): List<JournalEvent> {
+        if (scope.kinds?.isEmpty() == true) return emptyList()
+        val (where, params) = where(scope)
+        return store.db.query("SELECT body FROM journal WHERE $where ORDER BY seq", *params.toTypedArray()) {
+            decode(it.string("body"))
+        }
+    }
 
     /**
      * Case-insensitive substring search over the text views inside [scope]. The scan is exhaustive over the
@@ -105,20 +108,54 @@ public class Journal(private val store: Store, private val clock: Clock) {
      */
     public fun search(query: String, scope: JournalScope, limit: Int = 50): JournalHits {
         require(limit > 0) { "limit must be positive" }
+        if (scope.kinds?.isEmpty() == true) return JournalHits(emptyList(), scope, complete = true)
         val needle = query.lowercase()
-        val matches = events(scope).filter { it.text.lowercase().contains(needle) || it.refs.any { r -> r.lowercase().contains(needle) } }
-        return JournalHits(matches.take(limit), scope, complete = matches.size <= limit)
+        val (where, params) = where(scope)
+        val stop = lastSeq(scope.work)
+        val matches = ArrayList<JournalEvent>(minOf(limit, PAGE_SIZE))
+        var after = 0L
+        while (after < stop) {
+            val page = store.db.query(
+                "SELECT seq, event_id, json_extract(body, '$.text') AS view_text, json_extract(body, '$.refs') AS view_refs " +
+                    "FROM journal WHERE $where AND seq > ? AND seq <= ? ORDER BY seq LIMIT ?",
+                *(params + listOf(after, stop, PAGE_SIZE)).toTypedArray(),
+            ) { row ->
+                SearchView(row.long("seq"), row.string("event_id"), row.stringOrNull("view_text").orEmpty(),
+                    row.stringOrNull("view_refs")?.let { JSON.decodeFromString<List<String>>(it) }.orEmpty())
+            }
+            if (page.isEmpty()) break
+            for (view in page) {
+                if (view.text.lowercase().contains(needle) || view.refs.any { it.lowercase().contains(needle) }) {
+                    matches += requireNotNull(get(view.eventId))
+                    if (matches.size > limit) return JournalHits(matches.take(limit), scope, complete = false)
+                }
+            }
+            after = page.last().seq
+            if (page.size < PAGE_SIZE) break
+        }
+        return JournalHits(matches, scope, complete = true)
     }
 
     public fun lastSeq(work: WorkId): Long =
         store.db.query("SELECT coalesce(max(seq), 0) AS s FROM journal WHERE work_id = ?", work) { it.long("s") }.first()
 
-    private fun JournalScope.accepts(event: JournalEvent): Boolean =
-        (context == null || event.ids.context == context) && (kinds == null || event.kind in kinds)
+    private fun where(scope: JournalScope): Pair<String, List<Any>> {
+        val terms = arrayListOf("work_id = ?")
+        val params = arrayListOf<Any>(scope.work)
+        scope.context?.let { terms += "context_id = ?"; params += it }
+        scope.kinds?.let { kinds ->
+            terms += "kind IN (${List(kinds.size) { "?" }.joinToString(",")})"
+            params.addAll(kinds.sortedBy { it.ordinal }.map { it.name })
+        }
+        return terms.joinToString(" AND ") to params
+    }
+
+    private data class SearchView(val seq: Long, val eventId: String, val text: String, val refs: List<String>)
 
     private fun decode(body: String): JournalEvent = JSON.decodeFromString(JournalEvent.serializer(), body)
 
     private companion object {
+        const val PAGE_SIZE = 128
         val JSON = Json { encodeDefaults = true }
     }
 }
