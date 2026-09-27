@@ -164,7 +164,14 @@ internal class WindowsOwner(private val beforeAssignment: (Long) -> Unit = {}) :
     }
 
     private fun renderCommandLine(command: Command): String = when (command) {
-        is Command.Argv -> command.argv.joinToString(" ") { quoteArgument(it) }
+        is Command.Argv -> {
+            val batch = command.argv.first().lowercase().let { it.endsWith(".bat") || it.endsWith(".cmd") }
+            if (batch) {
+                // cmd expands percent/exclamation even inside quotes; refuse argv we cannot preserve exactly.
+                if (command.argv.any { arg -> arg.any { it in "\"%!\r\n" } }) throw java.io.IOException("batch arguments contain unsupported command-interpreter characters")
+                renderCommandLine(Command.Shell(command.argv.joinToString(" ") { "\"$it\"" }))
+            } else command.argv.joinToString(" ") { quoteArgument(it) }
+        }
         // `/s` makes cmd.exe strip exactly the outer quotes and run the rest verbatim.
         is Command.Shell -> "${quoteArgument(comspec())} /d /s /c \"${command.commandLine}\""
     }

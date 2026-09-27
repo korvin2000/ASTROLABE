@@ -66,11 +66,23 @@ class SniffTest {
     @Test
     fun `a wrapper in the repository root is preferred over the gradle launcher`() {
         TempRepo.create().use { repo ->
-            repo.write("gradlew", "#!/bin/sh\n")
+            repo.write("gradlew", "#!/bin/sh\npwd\n")
+            repo.root.resolve("gradlew").toFile().setExecutable(true)
+            repo.write("gradlew.bat", "@echo off\r\ncd\r\n")
             repo.write("modules/api/build.gradle.kts", "plugins { kotlin(\"jvm\") }\n")
             val pkg = sniff(repo).packages.single()
             assertEquals("modules/api", pkg.dir)
-            assertEquals(listOf("gradlew", "test"), pkg.test)
+            val name = if (io.astrolabe.os.ChildCommands.isWindows) "gradlew.bat" else "gradlew"
+            assertEquals(listOf("../../$name", "test"), pkg.test)
+            io.astrolabe.os.LocalOs().use { os ->
+                val log = java.nio.file.Files.createTempFile("wrapper-launch", ".log")
+                try {
+                    val proc = os.spawn(io.astrolabe.os.SpawnSpec(io.astrolabe.os.Command.Argv(pkg.test!!), repo.root.resolve(pkg.dir), log, deadlineSeconds = 10))
+                    val observed = io.astrolabe.tool.run.Executions.observe(os, proc, 1, 10)
+                    assertEquals(io.astrolabe.os.ProcStatus.Exited(0), observed.proc.status)
+                    assertTrue(observed.output.toString(Charsets.UTF_8).contains("api"))
+                } finally { java.nio.file.Files.deleteIfExists(log) }
+            }
         }
     }
 
