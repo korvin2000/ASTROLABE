@@ -2,6 +2,7 @@ package io.astrolabe.cell
 
 import io.astrolabe.Defaults
 import io.astrolabe.auth.Boundary
+import io.astrolabe.context.Rebuild
 import io.astrolabe.id.Digest
 import io.astrolabe.provider.Item
 import io.astrolabe.provider.Message
@@ -349,6 +350,18 @@ public class Residency(
         residents.firstOrNull { it.residence == Residence.Stubbed && it.alias == alias }?.pointer
 
     public fun stubs(residents: List<Resident>): List<Resident> = residents.filter { it.residence == Residence.Stubbed }
+
+    internal fun tail(residents: List<Resident>, turns: Int): List<Resident> {
+        val kept = Rebuild.tail(items(residents), turns)
+        val selected = BooleanArray(residents.size)
+        var cursor = residents.lastIndex
+        for (item in kept.asReversed()) {
+            while (cursor >= 0 && residents[cursor].item !== item) cursor--
+            check(cursor >= 0) { "rebuild tail is not a resident subsequence" }
+            selected[cursor--] = true
+        }
+        return residents.filterIndexed { index, _ -> selected[index] }
+    }
 
     /** The `[T]` items in order, for [Transcript]. */
     public fun items(residents: List<Resident>): List<Item> = residents.map { it.item }

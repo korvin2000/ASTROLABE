@@ -765,8 +765,7 @@ public class Cell @JvmOverloads constructor(
          */
         private fun rebuild(why: String) {
             rebuilds += 1
-            val kept = Rebuild.tail(residency.items(residents), RebuildReason.Pressure.tailTurns).toSet()
-            residents = residents.filter { it.item in kept }
+            residents = residency.tail(residents, RebuildReason.Pressure.tailTurns)
             val carry = CarryForward.carry(
                 register, ws.workset.export(), null, { ws.registry.version(it) },
                 { id -> Aliases.parse(id)?.let { ev.aliases.resolve(ids.work, it) } != null }, emptyList(), emptyList(),
