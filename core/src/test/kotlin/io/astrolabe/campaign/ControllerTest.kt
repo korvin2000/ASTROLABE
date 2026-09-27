@@ -74,6 +74,60 @@ import kotlin.test.assertTrue
 
 /** P1.9.2 campaign open and reconciliation: capture, contract, reconcile before dispatch (FX-23 open-time), shape. */
 class ControllerTest {
+    @Test
+    fun `committed scope amendments update path protection immediately and after reopen`() {
+        val target = "package-lock.json"
+        repo.write(target, "{}")
+        open().use { c ->
+            assertIs<io.astrolabe.workspace.PathResolution.Rejected>(c.workspace.resolve(target, io.astrolabe.workspace.Intent.Mutate))
+            c.contracts.propose(request.work, null, "allow lockfile updates", "dependency repair", weakening = true)
+            assertIs<io.astrolabe.workspace.PathResolution.Rejected>(c.workspace.resolve(target, io.astrolabe.workspace.Intent.Mutate))
+            c.contracts.amendByUser(request.work, "allow lockfile updates") {
+                it.copy(scope = it.scope.copy(writePaths = it.scope.writePaths + target, protectedPaths = emptyList()))
+            }
+            assertIs<io.astrolabe.workspace.PathResolution.Resolved>(c.workspace.resolve(target, io.astrolabe.workspace.Intent.Mutate))
+            assertIs<io.astrolabe.workspace.PathResolution.Rejected>(c.workspace.resolve(".git/config", io.astrolabe.workspace.Intent.Mutate))
+        }
+        open().use { c ->
+            assertIs<io.astrolabe.workspace.PathResolution.Resolved>(c.workspace.resolve(target, io.astrolabe.workspace.Intent.Mutate))
+            c.contracts.amendByUser(request.work, "protect lockfile again") { it.copy(scope = it.scope.copy(protectedPaths = listOf(target))) }
+            assertIs<io.astrolabe.workspace.PathResolution.Rejected>(c.workspace.resolve(target, io.astrolabe.workspace.Intent.Mutate))
+        }
+    }
+
+    @Test
+    fun `interrupted finalization rechecks acceptance and completes without another model cell`() = runTest {
+        seedContract()
+        open().use { c ->
+            val completed = controller().runS0(c, model(Scripted.Reply(listOf(say("done")))))
+            assertEquals(CampaignOutcome.Completed, completed.outcome)
+            c.campaigns.save(c.state!!.next(phase = CampaignPhase.Finishing, outcome = null))
+        }
+        open().use { c ->
+            assertEquals(CampaignPhase.Running, c.state!!.phase)
+            assertTrue(c.state!!.ledger.unfinished().isNotEmpty())
+            val cells = c.state!!.cells.size
+            val resumed = controller().runS0(c, model())
+            assertEquals(CampaignOutcome.Completed, resumed.outcome, resumed.state?.reason)
+            assertEquals(cells, c.state!!.cells.size)
+        }
+    }
+
+    @Test
+    fun `expired writer cannot reopen over unknown effects until durable reconciliation`() {
+        open().use { c ->
+            c.intents.record(Intent("old-intent", c.ids, "old-action", listOf("tool"), null, "write", at = clock.instant()))
+        }
+        clock.advance(java.time.Duration.ofDays(1))
+        kotlin.test.assertFailsWith<GrantRefused> { open().close() }
+        Store.open(stateRoot, repo.git, clock).use { store ->
+            val intents = io.astrolabe.evidence.SqliteIntentJournal(store, clock)
+            assertEquals(IntentStatus.Unknown, intents.get("old-intent")!!.status)
+            intents.reconcile("old-intent", "host: confirmed prior process stopped and inspected effects")
+        }
+        open().use { assertEquals(CampaignPhase.Running, it.state!!.phase) }
+    }
+
     @TempDir
     lateinit var stateRoot: Path
 

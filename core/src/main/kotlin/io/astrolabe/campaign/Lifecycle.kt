@@ -294,9 +294,11 @@ public object Lifecycle {
                 s.next(phase = CampaignPhase.Ended, outcome = transition.outcome, reason = transition.reason, contractVersion = v)
             }
             is Transition.Resumed -> {
-                expect(s, CampaignPhase.Ended)
-                check(s.outcome?.resumable == true) { "a ${s.outcome?.wire} campaign does not resume" }
-                s.next(phase = CampaignPhase.Opened, outcome = null, reason = null, contractVersion = v)
+                expect(s, CampaignPhase.Ended, CampaignPhase.Finishing)
+                val interrupted = s.phase == CampaignPhase.Finishing
+                check(interrupted || s.outcome?.resumable == true) { "a ${s.outcome?.wire} campaign does not resume" }
+                s.next(phase = CampaignPhase.Opened, outcome = null, reason = null, contractVersion = v,
+                    ledger = if (interrupted) Ledger.initial(contract) else s.ledger)
             }
         }
     }

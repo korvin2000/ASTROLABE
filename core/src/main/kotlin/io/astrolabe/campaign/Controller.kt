@@ -477,6 +477,7 @@ public class Controller @JvmOverloads public constructor(
             if (initial == Shape.S1 || initial == Shape.S2) d.copy(shape = initial) else d
         })
         val commands = derived.primary?.let(RunnerCommands::of) ?: RunnerCommands()
+        workspace.paths.bindWriteProtection { path -> contracts.current(request.work)?.scope?.protects(path) != false }
         val checks = Checks.seed(contract, commands, qualityGates = effective.qualityGates)
         val rules = RulesTrust(workspace.root).approved(effective.rulesFile)?.let { RulesSnapshot(it.binding.path, it.digest, it.text) }
         val prime = Prime.render(atlas, derived.sniffed, rules)
@@ -491,7 +492,11 @@ public class Controller @JvmOverloads public constructor(
             } else {
                 refusal = "G_single(C) has nothing to accept against: ${issues.joinToString("; ") { it.detail }} — state a run: acceptance or amend the contract"
             }
-        } else if (state.phase == CampaignPhase.Ended && state.outcome?.resumable == true) {
+        }
+        if (state?.phase == CampaignPhase.Finishing) {
+            state = Lifecycle.apply(state, contract, Transition.Resumed("finalization interrupted; revalidate acceptance before completing")).also(campaigns::save)
+        }
+        if (state?.phase == CampaignPhase.Ended && state.outcome?.resumable == true) {
             state = Lifecycle.apply(state, contract, Transition.Resumed("reopened after ${state.outcome?.wire}")).also(campaigns::save)
         }
 
@@ -532,7 +537,7 @@ public class Controller @JvmOverloads public constructor(
         // §13.1: the old owner's unknown effects are reconciled above, before this writer is granted the workspace.
         val leases = Leases(store, clock)
         // D-171: another work's intents that never committed nor were reconciled fence a new holder (Fence.grant).
-        val unreconciled = intents.open().filter { it.status != IntentStatus.Unknown }.map { it.intentId }
+        val unreconciled = intents.open().map { it.intentId } + SqliteHandles(store, clock).open().map { it.handleId }
         val lease = leases.acquire(WORKSPACE, ids, "controller:${store.holder.pid}", leaseDuration, unreconciled)
         val prescan = impactPrescan.prescan
         journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, refs = impactPrescan.blast, text = "open: impact ${impactPrescan.log}", at = clock.instant()))
@@ -943,6 +948,7 @@ public class Controller @JvmOverloads public constructor(
         val stored = proposals.latest(c.ids.work, cellId) ?: return blocked("the plan cell proposed no plan")
         return when (val admission = PlanIntake(c.contracts).admit(c.ids.work, stored, authority)) {
             is PlanAdmission.Admitted -> {
+                c.checks.synchronizeAcceptance(c.contract)
                 c.advance(Transition.Planned(admission.graph))
                 // §8.9 item 4: without CON notes to validate against, a missing CON reference is a recorded planning gap, not a refusal.
                 if (c.kb.contractAnchors().isEmpty()) {
@@ -1053,7 +1059,11 @@ public class Controller @JvmOverloads public constructor(
         check(opened.phase == CampaignPhase.Running && opened.running == null) { "runS0 needs a reconciled campaign with no running cell; it is ${opened.phase}" }
         val contract = c.contract
         val ready = opened.graph.readyFrontier(contract, 1).firstOrNull()
-            ?: return S0Run(stopOrFinish(c, "no ready increment: an empty frontier never means completed"), null, null, null)
+            ?: run {
+                val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = candidates(c))
+                refreshRegressions(c, scheduler)
+                return S0Run(stopOrFinish(c, "no ready increment: an empty frontier never means completed", scheduler, authority = authority), null, null, null)
+            }
         val role = Roles.implementing
         // §13.4 rebuild(resume): a cell that continues a lost or interrupted one starts from its validated carry-forward.
         val carry = ready.cells.lastOrNull()?.let { previous -> carryFrom(c, previous, null) }
@@ -1184,6 +1194,7 @@ public class Controller @JvmOverloads public constructor(
         val inputs = InjectionInputs(
             role, c.ids.work, increment.writeScope, touched, contractsInPlay = contracts.map { it.id }.toSet(),
             stamp = c.stamper.report().candidateId.digest.hex, usage = Usage(c.store, clock).all(), currentVersion = { c.registry.version(it) },
+            dependencyVersions = Notes(c.store).versions(),
         )
         val ranked = Injection.select(all, inputs, model.estimator)
         // `Off` keeps F23 (CON in scope compiled in) and drops the ranked advice; `Frozen`/`Live` differ in the base they rank.
@@ -1231,10 +1242,12 @@ public class Controller @JvmOverloads public constructor(
         val config = c.attempt.config
         val contract = c.contract
         val redaction = Redaction(config.redaction)
+        tree.workspace.paths.bindWriteProtection { path -> c.contracts.current(c.ids.work)?.scope?.protects(path) != false }
         val logs = c.store.layout.root.resolve("logs")
         val estimator = model.estimator
         val runner = TrustedLocalRunner(c.os)
-        val workset = Workset(immediateStubTokens = config.defaults.immediateStubTokens).also { it.seed(seeds) }
+        val visibleSeeds = Seeds.selected(seeds, compiled)
+        val workset = Workset(immediateStubTokens = config.defaults.immediateStubTokens).also { it.seed(visibleSeeds) }
         val observations = SqliteObservations(c.store, clock)
         val aliases = SqliteAliases(c.store, clock)
         val receipts = SqliteReceipts(c.store, clock)
@@ -1284,7 +1297,7 @@ public class Controller @JvmOverloads public constructor(
                 authority, c.contracts, c.journal, estimator, idGen, ids, clock, events, role.effectiveOps(contract.shape, ceiling), proposals,
                 delegator, delegator?.let { TaskPackets(WORKSPACE, ceiling, generation) }, tree.registry::version,
             ),
-            kb = KbTool(c.kb, estimator, idGen, queue = Queue(c.store, KbWriter(c.store, estimator, clock), idGen, clock), ids = ids, events = events, deniedKinds = role.deniedNoteKinds, dense = layered.dense),
+            kb = KbTool(c.kb, estimator, idGen, queue = Queue(c.store, KbWriter(c.store, estimator, clock), idGen, clock), ids = ids, events = events, deniedKinds = role.deniedNoteKinds, dense = layered.dense, redaction = redaction),
         )
         // §6.3: what this cell was given is logged per note; the register-citation hook turns `injected` into `cited`.
         val usage = Usage(c.store, clock)
@@ -1297,7 +1310,13 @@ public class Controller @JvmOverloads public constructor(
             KbInjection.Frozen -> c.frozenNotes
             KbInjection.Live -> Notes(c.store).all()
         }
-        val knowledge = KnowledgeUse(focusBase, injected, usage, ids, estimator, config.defaults.focusNotesMaxTokens, KbNegatives(c.journal, idGen, clock))
+        val knowledge = KnowledgeUse(focusBase, injected, usage, ids, estimator, config.defaults.focusNotesMaxTokens, KbNegatives(c.journal, idGen, clock),
+            inputs = { InjectionInputs(role, ids.work, increment.writeScope, currentVersion = tree.registry::version, dependencyVersions = Notes(c.store).versions()) },
+            currentNotes = {
+                val live = Notes(c.store).all().associateBy { it.id }
+                focusBase.mapNotNull { frozen -> live[frozen.id]?.takeIf { it == frozen } }
+            },
+        )
         val coherence = Coherence(tree.registry)
         val accounting = Accounting(c.store, clock)
         // §6.5: every compiled context leaves a manifest; the cell's end event links it.

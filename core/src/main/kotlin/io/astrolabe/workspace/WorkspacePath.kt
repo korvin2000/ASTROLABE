@@ -183,6 +183,13 @@ public class WorkspacePath private constructor(
     public val protectedPaths: ProtectedPaths,
     public val caseInsensitive: Boolean,
 ) {
+    @Volatile
+    private var committedWriteProtection: ((String) -> Boolean)? = null
+
+    /** The controller binds mutable write restrictions to committed authority; metadata stays unreadable. */
+    internal fun bindWriteProtection(protects: (String) -> Boolean) {
+        committedWriteProtection = protects
+    }
 
     /** Resolves [userPath] under this root for [intent]; see the class documentation for the rules. */
     public fun resolve(userPath: String, intent: Intent): PathResolution {
@@ -354,9 +361,10 @@ public class WorkspacePath private constructor(
     }
 
     private fun protectedRefusal(relative: String, intent: Intent): PathResolution.Rejected? {
+        val committed = committedWriteProtection
         val prefixes = when (intent) {
             Intent.Read -> protectedPaths.readDeniedPrefixes
-            Intent.Mutate -> protectedPaths.readDeniedPrefixes + protectedPaths.writeDeniedPrefixes
+            Intent.Mutate -> protectedPaths.readDeniedPrefixes + if (committed == null) protectedPaths.writeDeniedPrefixes else emptySet()
         }
         val comparable = fold(relative)
         for (prefix in prefixes) {
@@ -366,6 +374,9 @@ public class WorkspacePath private constructor(
             }
         }
         if (intent == Intent.Mutate) {
+            if (committed != null) return if (committed(relative)) {
+                PathResolution.Rejected(RejectionReason.Protected, "'$relative' is protected by the committed contract")
+            } else null
             val name = fold(relative.substringAfterLast('/'))
             for (denied in protectedPaths.writeDeniedNames) {
                 if (name == fold(denied)) {
