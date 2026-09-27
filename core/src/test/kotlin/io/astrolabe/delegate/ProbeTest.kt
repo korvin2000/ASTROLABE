@@ -58,7 +58,7 @@ class ProbeTest {
         val ok = assertIs<ProbeOutput.Parsed>(
             Probe.parse(
                 """here: {"findings":[{"claim":"a returns 1","kind":"observed","evidence":["src/a.py:1-2@${v1.hash8}","#3"]},{"claim":"b looks unused","kind":"inferred","evidence":[]}],"searched":{"scopes":["src/"],"complete":false,"indexCoverage":0.5},"unresolved":["who calls b?"]}""",
-                shown,
+                shown, listOf(io.astrolabe.workset.Entry("src/a.py", io.astrolabe.workspace.Ranges.single(1, 2), v1, io.astrolabe.workset.EntrySource.Look, 1, "#3", 10)), setOf("#3"),
             ),
         )
         assertEquals(listOf(EvidenceRef.Range("src/a.py", "1-2", v1), EvidenceRef.Alias("#3")), ok.findings[0].evidence)
@@ -70,6 +70,9 @@ class ProbeTest {
         assertTrue(gaps.any { "src/a.py@deadbeef is not the version you were shown" in it }, gaps.toString())
         assertTrue(gaps.any { "an observed claim points at evidence" in it }, gaps.toString())
         assertIs<ProbeOutput.Gaps>(Probe.parse("all done", shown))
+        for (pointer in listOf("#does-not-exist", "src/a.py:999999", "src/a.py:2-1")) {
+            assertIs<ProbeOutput.Gaps>(Probe.parse("""{"findings":[{"claim":"observed","kind":"observed","evidence":["$pointer"]}],"searched":{"scopes":["src/"],"complete":false}}""", shown))
+        }
 
         val many = InvestigationPacket(
             io.astrolabe.id.Identities(io.astrolabe.id.WorkId("W-1"), io.astrolabe.id.AttemptId("a1"), context = ContextId("child-1")), "I1", 1, ExecutionGeneration.INITIAL,

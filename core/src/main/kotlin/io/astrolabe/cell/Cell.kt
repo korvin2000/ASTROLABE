@@ -199,6 +199,7 @@ public class Cell @JvmOverloads constructor(
 
         /** §8.9 `red_ok_until: increment_end`: while true, a red check is not required in `Open` before `[>]` advances. */
         private var redOkUntilIncrementEnd = false
+        private val shownAliases = LinkedHashSet<String>()
         private val readVersions = LinkedHashMap<String, FileVersion>()
         private val displayed = LinkedHashMap<Pair<String, FileVersion>, Ranges>()
         private val origins = LinkedHashMap<String, ChangeOrigin>()
@@ -511,7 +512,7 @@ public class Cell @JvmOverloads constructor(
             (tools.state.pendingBlock ?: tools.task?.pendingBlock)?.let { return blocked(it) }
             if (proposal) {
                 if (implementingCompletion) unavailable(currenciesNow)?.let { return blocked(it) }
-                val output = RoleOutput(turn, response.text, register, certifiedAfter.mapNotNull { currenciesNow.certifiedReceipt(it) }, refusals, packet(PacketStatus.Done, null))
+                val output = RoleOutput(turn, response.text, register, certifiedAfter.mapNotNull { currenciesNow.certifiedReceipt(it) }, refusals, packet(PacketStatus.Done, null), shownAliases.toSet())
                 when (val decision = completion.assess(output, report)) {
                     is CompletionDecision.Accepted -> return completed(response.text, decision.evidenceRefs)
                     is CompletionDecision.CannotProgress -> {
@@ -620,6 +621,7 @@ public class Cell @JvmOverloads constructor(
             val pointer = alias?.let(Aliases::parse)?.let { ev.aliases.resolve(ids.work, it) }?.let { resolved ->
                 ev.observations.get(resolved.canonicalId)?.let { RecallPointer(alias, it.id, it.contentRef) }
             }
+            alias?.let(Aliases::parse)?.let { ev.aliases.resolve(ids.work, it) }?.let { shownAliases += alias }
             val item = ToolResult.text(callId, text, isError)
             residents = residents + Resident.result(item, turn, estimator.estimate(text).tokens, resultClass, pointer, label)
         }

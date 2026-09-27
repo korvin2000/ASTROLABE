@@ -179,6 +179,8 @@ public data class RoleOutput(
     val refusals: Int,
     /** The packet the runtime would hand back if this proposal is accepted: its status is `done`, a proposal. */
     val packet: ResultPacket,
+    /** Resolved evidence aliases actually delivered by this cell. */
+    val shownAliases: Set<String> = emptySet(),
 )
 
 /** What the completion seam decided (§3.7 `assess_role_completion`). */
