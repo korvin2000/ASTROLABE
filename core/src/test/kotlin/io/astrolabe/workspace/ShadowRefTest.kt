@@ -23,6 +23,45 @@ import org.junit.jupiter.api.io.TempDir
 class ShadowRefTest {
 
     @Test
+    fun `materialize refuses an omitted clean tree entry`(@TempDir state: Path) {
+        WorkspaceFixture.create(state).use { fixture ->
+            val shadow = fixture.shadowRef()
+            shadow.open(fixture.dirtyState.capture())
+            val output = state.resolve("export")
+            Files.createDirectories(output.resolve("README.md"))
+            val result = shadow.materialize(0, output)
+            assertTrue(!result.ok)
+            assertEquals(listOf("README.md"), result.mismatches)
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX, org.junit.jupiter.api.condition.OS.MAC)
+    fun `snapshot exports and restores executable modes and guards chmod changes`(@TempDir state: Path) {
+        WorkspaceFixture.create(state).use { fixture ->
+            val script = fixture.repo.resolve("check.sh")
+            Files.writeString(script, "#!/bin/sh\nexit 0\n")
+            Files.setPosixFilePermissions(script, java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x"))
+            val initial = fixture.dirtyState.capture()
+            assertEquals(io.astrolabe.os.FileMode.EXECUTABLE, initial.entry("check.sh")!!.mode)
+            val shadow = fixture.shadowRef()
+            shadow.open(initial)
+            val output = state.resolve("export")
+            assertTrue(shadow.materialize(0, output).ok)
+            assertEquals(0, ProcessBuilder(output.resolve("check.sh").toString()).start().waitFor())
+            fixture.os.replaceFileAtomically(script, "#!/bin/sh\nexit 1\n".toByteArray())
+            assertTrue(Files.isExecutable(script))
+            Files.setPosixFilePermissions(script, java.nio.file.attribute.PosixFilePermissions.fromString("rw-r--r--"))
+            shadow.snapshot(1)
+            Files.setPosixFilePermissions(script, java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x"))
+            assertIs<RestoreResult.Divergent>(shadow.restore(0))
+            Files.setPosixFilePermissions(script, java.nio.file.attribute.PosixFilePermissions.fromString("rw-r--r--"))
+            assertIs<RestoreResult.Restored>(shadow.restore(0))
+            assertEquals(0, ProcessBuilder(script.toString()).start().waitFor())
+        }
+    }
+
+    @Test
     fun `reopen finishes an interrupted snapshot index publication including turn zero`(@TempDir state: Path) {
         WorkspaceFixture.create(state).use { fixture ->
             val failingOs = object : io.astrolabe.os.Os by fixture.os {

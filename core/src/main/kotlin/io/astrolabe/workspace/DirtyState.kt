@@ -318,8 +318,9 @@ public class DirtyState(
                 val bytes = workspace.bytes(resolved)
                     ?: throw SnapshotIntegrityError("'$path' disappeared during capture")
                 val mode = when {
+                    Files.getFileStore(resolved.real).supportsFileAttributeView("posix") ->
+                        if (Files.isExecutable(resolved.real)) FileMode.EXECUTABLE else FileMode.REGULAR
                     reportedMode == FileMode.EXECUTABLE || reportedMode == FileMode.REGULAR -> reportedMode
-                    resolved.real.fileSystem.supportedFileAttributeViews().contains("posix") && Files.isExecutable(resolved.real) -> FileMode.EXECUTABLE
                     else -> FileMode.REGULAR
                 }
                 SnapshotEntry(path, SnapshotEntryKind.File, mode,

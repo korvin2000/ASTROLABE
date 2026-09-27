@@ -169,11 +169,15 @@ public class LocalOs @JvmOverloads public constructor(
         val target = path.toAbsolutePath().normalize()
         val directory = target.parent ?: throw OsFailure("replaceFileAtomically", 0, "$target has no parent directory")
         Files.createDirectories(directory)
+        val permissions = if (Files.isRegularFile(target, java.nio.file.LinkOption.NOFOLLOW_LINKS) &&
+            Files.getFileStore(target).supportsFileAttributeView("posix")
+        ) Files.getPosixFilePermissions(target, java.nio.file.LinkOption.NOFOLLOW_LINKS) else null
         val temporary = Files.createTempFile(directory, target.fileName.toString(), TEMPORARY_SUFFIX)
         try {
             FileChannel.open(temporary, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING).use { channel ->
                 val buffer = ByteBuffer.wrap(bytes)
                 while (buffer.hasRemaining()) channel.write(buffer)
+                if (permissions != null) Files.setPosixFilePermissions(temporary, permissions)
                 channel.force(true)
             }
             try {

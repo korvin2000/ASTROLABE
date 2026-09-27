@@ -270,13 +270,12 @@ public class Stamper @JvmOverloads public constructor(
     }
 
     /**
-     * The mode git reports is authoritative where it has one: on Windows there is no executable bit
-     * to read, so deriving it from the filesystem would make the same tree stamp differently on the
-     * two supported platforms.
+     * Read actual executable state on POSIX, even if core.fileMode is disabled. On Windows Git's
+     * reported mode carries the executable bit that the filesystem cannot represent.
      */
     private fun fileMode(resolved: PathResolution.Resolved, reportedMode: FileMode): FileMode = when {
+        POSIX -> if (Files.isExecutable(resolved.real)) FileMode.EXECUTABLE else FileMode.REGULAR
         reportedMode == FileMode.EXECUTABLE || reportedMode == FileMode.REGULAR -> reportedMode
-        POSIX && Files.isExecutable(resolved.real) -> FileMode.EXECUTABLE
         else -> FileMode.REGULAR
     }
 

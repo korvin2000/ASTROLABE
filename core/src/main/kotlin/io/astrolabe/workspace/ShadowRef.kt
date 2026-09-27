@@ -23,6 +23,8 @@ import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.LinkOption.NOFOLLOW_LINKS
+import java.nio.file.attribute.PosixFilePermission
 import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
@@ -67,7 +69,7 @@ public data class MaterializeResult(
     val files: List<String>,
     /** Manifest entries whose exported bytes hashed to the recorded digest. */
     val verified: Int,
-    /** Manifest entries whose exported bytes did **not** match; non-empty means do not check it. */
+    /** Tree or manifest paths whose bytes, type or mode did not match; non-empty means do not check it. */
     val mismatches: List<String>,
     val limitations: List<String> = emptyList(),
 ) {
@@ -214,7 +216,9 @@ public class ShadowRef @JvmOverloads public constructor(
         guarded += targetManifest?.paths.orEmpty()
         guarded += manifest(latest.turn)?.paths.orEmpty()
         val divergent = guarded.sortedWith(Stamper.PATH_ORDER).filter { path ->
-            currentDigest(path) != latestTree[path]?.let { digestOfBlob(git, it.id) }
+            val expected = latestTree[path]
+            currentDigest(path) != expected?.let { digestOfBlob(git, it.id) } ||
+                (expected != null && !matchesMode(workspace.paths, path, expected.mode))
         }
         if (divergent.isNotEmpty()) return RestoreResult.Divergent(divergent)
         if (touched.isEmpty()) return RestoreResult.Restored(emptyList(), emptyList())
@@ -260,6 +264,7 @@ public class ShadowRef @JvmOverloads public constructor(
                 }
             } else {
                 os.replaceFileAtomically(resolved.real, bytes)
+                applyMode(resolved.real, wanted.mode)
             }
             written.add(path)
         }
@@ -283,12 +288,14 @@ public class ShadowRef @JvmOverloads public constructor(
         val exported = WorkspacePath.of(dir, ProtectedPaths(emptySet(), emptySet(), emptySet()))
         val files = ArrayList<String>()
         val limitations = ArrayList<String>()
+        val mismatches = linkedSetOf<String>()
         var fromObjectStore = 0
 
         for ((path, entry) in tree.entries.sortedWith(compareBy(Stamper.PATH_ORDER) { it.key })) {
             val resolved = exported.resolve(path, Intent.Mutate)
             if (resolved !is PathResolution.Resolved) {
                 limitations.add("'$path' refused by the export path contract: $resolved")
+                mismatches.add(path)
                 continue
             }
             val manifestDigest = manifest.entry(path)?.takeIf { it.present }?.digest
@@ -304,8 +311,14 @@ public class ShadowRef @JvmOverloads public constructor(
                 }
             } else {
                 Files.write(resolved.real, bytes)
+                applyMode(resolved.real, entry.mode)
             }
             files.add(path)
+            val digest = runCatching {
+                if (entry.mode == FileMode.SYMLINK) Digest.of(Files.readSymbolicLink(resolved.real).toString().toByteArray(StandardCharsets.UTF_8))
+                else digestOfFile(resolved.real)
+            }.getOrNull()
+            if (digest != Digest.of(bytes) || !matchesMode(exported, path, entry.mode)) mismatches.add(path)
         }
         if (fromObjectStore > 0) {
             limitations.add(
@@ -315,11 +328,10 @@ public class ShadowRef @JvmOverloads public constructor(
         }
 
         var verified = 0
-        val mismatches = ArrayList<String>()
         for (entry in manifest.entries) {
             val file = dir.resolve(entry.path)
             if (!entry.present) {
-                if (Files.exists(file)) mismatches.add(entry.path)
+                if (Files.exists(file, NOFOLLOW_LINKS)) mismatches.add(entry.path)
                 continue
             }
             val actual = runCatching {
@@ -337,9 +349,9 @@ public class ShadowRef @JvmOverloads public constructor(
                     SnapshotEntryKind.Deleted -> null
                 }
             }.getOrNull()
-            if (actual == entry.digest) verified++ else mismatches.add(entry.path)
+            if (actual == entry.digest && matchesMode(exported, entry.path, entry.mode)) verified++ else mismatches.add(entry.path)
         }
-        return MaterializeResult(dir, files, verified, mismatches, limitations)
+        return MaterializeResult(dir, files, verified, mismatches.toList(), limitations)
     }
 
     // ------------------------------------------------------------ internals
@@ -435,6 +447,21 @@ public class ShadowRef @JvmOverloads public constructor(
     private fun digestOfBlob(git: Git, id: ObjectId): Digest = Digest.of(git.catFile(id))
 
     private fun digestOfFile(file: Path): Digest = Digest.of(Files.readAllBytes(file))
+
+    private fun applyMode(path: Path, mode: FileMode) {
+        if (!Files.getFileStore(path).supportsFileAttributeView("posix")) return
+        val permissions = Files.getPosixFilePermissions(path)
+        val execute = setOf(PosixFilePermission.OWNER_EXECUTE, PosixFilePermission.GROUP_EXECUTE, PosixFilePermission.OTHERS_EXECUTE)
+        Files.setPosixFilePermissions(path, if (mode == FileMode.EXECUTABLE) permissions + execute else permissions - execute)
+    }
+
+    private fun matchesMode(paths: WorkspacePath, path: String, mode: FileMode): Boolean {
+        val resolved = paths.resolveCapture(path) as? PathResolution.Resolved ?: return false
+        if (mode == FileMode.SYMLINK) return resolved.kind == PathKind.Symlink
+        if (resolved.kind != PathKind.Regular || mode !in setOf(FileMode.REGULAR, FileMode.EXECUTABLE)) return false
+        return !Files.getFileStore(resolved.real).supportsFileAttributeView("posix") ||
+            Files.isExecutable(resolved.real) == (mode == FileMode.EXECUTABLE)
+    }
 
     /** The digest of the working-tree path now, following the same rule the manifest used. */
     private fun currentDigest(path: String): Digest? {
