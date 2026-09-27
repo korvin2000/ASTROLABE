@@ -151,6 +151,12 @@ public class Scheduler(
         }
     }
 
+    /** A retry must export the original candidate; it never falls back to the live workspace. */
+    internal suspend fun retryIsolated(check: Check, contractVersion: Int, first: Receipt, inputs: Collection<String>, execute: suspend (Path) -> Executed): Receipt? {
+        val root = candidates ?: return null
+        return runIsolated(check, contractVersion, inputs, root, execute, first)
+    }
+
     /**
      * §8.4/D-45 `isolated`: under the mutation lock the stamped tree (tracked ∪ untracked, raw bytes, scratch
      * excluded) is copied into `candidates/<id>/` and every copy is verified against the bytes read; the check then
@@ -159,10 +165,12 @@ public class Scheduler(
      * certify it. The receipt describes the exported stamp. `null` when the export could not be verified: the
      * check then runs exclusively.
      */
-    private suspend fun runIsolated(check: Check, contractVersion: Int, inputs: Collection<String>, root: Path, execute: suspend (root: Path) -> Executed): Receipt? {
+    private suspend fun runIsolated(check: Check, contractVersion: Int, inputs: Collection<String>, root: Path, execute: suspend (root: Path) -> Executed, retryOf: Receipt? = null): Receipt? {
         val dir = root.resolve(idGen.next("cand"))
         val (report, manifest, exported) = workspace.mutation.withLock {
             val report = stamper.report()
+            if (retryOf != null && (report.candidateId != retryOf.stampBefore ||
+                    report.env.envId != retryOf.envId || !report.env.envKnown)) return null
             Triple(report, manifestOf(check.inputClosure), export(report, dir))
         }
         if (exported == null) {

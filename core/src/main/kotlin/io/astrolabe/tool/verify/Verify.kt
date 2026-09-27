@@ -328,20 +328,21 @@ public class Verify(
      * receipt citing both), never the favourable one, and nothing reruns again. Every attempt stays a receipt.
      */
     private suspend fun runTriaged(check: Check, contract: Contract): Pair<Receipt, String> {
-        val (first, view) = runOne(check, contract)
+        val (first, view) = checkNotNull(runOne(check, contract))
         if (first.outcome != Outcome.Failed) return first to view
-        val (second, again) = runOne(check, contract)
+        val (second, again) = runOne(check, contract, first)
+            ?: return first to "$view\n  ${check.id}: isolated retry unavailable for the original candidate and environment; first failure retained"
         if (second.outcome == first.outcome) return second to "$view\n$again"
         val flaky = scheduler.flaky(check, contract.version, first, second)
         return flaky to "$view\n$again\n  ${check.id}: flaky — ${first.outcome.name.lowercase()} then ${second.outcome.name.lowercase()} ⇒ inconclusive; record an Open item (state patch open.add) before relying on it"
     }
 
-    private suspend fun runOne(check: Check, contract: Contract): Pair<Receipt, String> {
+    private suspend fun runOne(check: Check, contract: Contract, retryOf: Receipt? = null): Pair<Receipt, String>? {
         val command = check.command ?: return scheduler.runCheck(check, contract.version, inputs) {
             Executed(listOf(check.id), null, false, null, Outcome.Unavailable, null, null, listOf("check ${check.id} declares no command"))
         } to "  ${check.id}: unavailable (no command)"
         var view = ""
-        val receipt = scheduler.runCheck(check, contract.version, inputs) { root ->
+        val execute: suspend (Path) -> Executed = execution@ { root ->
             val modelAdded = check.acceptanceIds.any { contract.acceptance(it)?.origin is Origin.Model }
             val approvedCommand = contract.acceptance.filterIsInstance<Acceptance.Run>().any { it.origin !is Origin.Model && it.command == command }
             // D-262: adding an obligation never grants authority to launch a new executable command.
@@ -352,7 +353,7 @@ public class Verify(
             }
             if (refusal != null) {
                 view = "  ${check.id}: denied — $refusal"
-                return@runCheck Executed(command.argv, command.cwd, false, null, Outcome.Denied, null, null, listOf(refusal))
+                return@execution Executed(command.argv, command.cwd, false, null, Outcome.Denied, null, null, listOf(refusal))
             }
             val actionId = idGen.next("act")
             val cwd = when (val path = command.cwd) {
@@ -361,14 +362,14 @@ public class Verify(
             }
             if (cwd == null || !Files.isDirectory(cwd)) {
                 view = "  ${check.id}: denied — working directory must be a directory inside the verification workspace"
-                return@runCheck Executed(command.argv, command.cwd, false, null, Outcome.Denied, null, null, listOf("working directory refused"))
+                return@execution Executed(command.argv, command.cwd, false, null, Outcome.Denied, null, null, listOf("working directory refused"))
             }
             val proc = try {
                 beforeDispatch()
                 runner.start(SpawnSpec(Command.Argv(command.argv), cwd, logPath(check.id, actionId), EnvPolicy(inheritedNames = envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")), timeoutSeconds))
             } catch (failure: IOException) {
                 view = "  ${check.id}: unavailable — cannot start ${command.argv.first()}: ${failure.message}"
-                return@runCheck Executed(command.argv, command.cwd, false, null, Outcome.Unavailable, null, null, listOf("cannot start ${command.argv.first()}: ${failure.message}"))
+                return@execution Executed(command.argv, command.cwd, false, null, Outcome.Unavailable, null, null, listOf("cannot start ${command.argv.first()}: ${failure.message}"))
             }
             val observed = Executions.observeCancellable(os, proc, POLL_SLICE_SECONDS, timeoutSeconds)
             val safeLog = redaction.applyBytes(observed.output, ContentClass.ReusableEvidence)
@@ -387,6 +388,8 @@ public class Verify(
             view = "  ${check.id}: " + shaped.view.lines().joinToString("\n  ")
             Executed(command.argv, command.cwd, false, capture.exitCode, outcome, shaped.counts, blob, shaped.limitations + safeLog.limitations)
         }
+        val receipt = if (retryOf == null) scheduler.runCheck(check, contract.version, inputs, execute)
+            else scheduler.retryIsolated(check, contract.version, retryOf, inputs, execute) ?: return null
         return receipt to view
     }
 

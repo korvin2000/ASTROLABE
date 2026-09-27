@@ -248,7 +248,36 @@ class VerifyTest {
     }
 
     @Test
-    fun `a check that fails and then passes on its isolated rerun is inconclusive, never passed, with every attempt kept`() = runTest {
+    fun `a disagreeing retry uses a disposable copy of the original candidate`() = runTest {
+        scheduler = Scheduler(checks, workspace, registry, stamper, SqliteReceipts(store, clock), InMemoryAliases(), idGen, ids, clock, candidates = stateRoot.resolve("candidates"))
+        val roots = ArrayList<Path>()
+        val scripted = object : io.astrolabe.tool.run.Runner {
+            override val mode = io.astrolabe.auth.ExecutionMode.TrustedLocal
+            override fun start(spec: io.astrolabe.os.SpawnSpec): io.astrolabe.os.Proc {
+                roots.add(spec.workingDirectory)
+                val command = if (roots.size == 1) printing("pytest_fail.txt", 1) else printing("pytest_pass.txt", 0)
+                return TrustedLocalRunner(os).start(spec.copy(command = io.astrolabe.os.Command.Argv(command.argv)))
+            }
+        }
+        verify = Verify(checks, scheduler, null, null, null, workspace, scripted, os, stamper, store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, contracts, stateRoot.resolve("logs"))
+        val command = printing("pytest_fail.txt", 1)
+        checks.register(Check("CHK-flaky", CheckKind.Unit, Selector.Named(command), Closure.Known(setOf("src/a.py")), CostClass.Fast, Trigger.OnDemand, command = command))
+        val out = run("""{"what":"tests","selection":"ids","ids":["CHK-flaky"]}""")
+        val attempts = SqliteReceipts(store, clock).forCheck("CHK-flaky")
+        assertEquals("inconclusive", status(out), out.body)
+        assertEquals(listOf(Outcome.Failed, Outcome.Passed, Outcome.Inconclusive), attempts.map { it.outcome })
+        assertEquals(InputStability.Isolated, attempts[1].testedInputs.stability)
+        assertEquals(attempts[0].stampBefore, attempts[1].stampBefore)
+        assertEquals(repo.root, roots[0])
+        assertTrue(roots[1].startsWith(stateRoot.resolve("candidates")))
+        assertFalse(java.nio.file.Files.exists(roots[1]))
+        assertTrue(attempts.last().limits.any { it.kind == "flaky" && it.detail.contains(attempts[0].receiptId) && it.detail.contains(attempts[1].receiptId) })
+    }
+
+    @Test
+    fun `a failed check that changes the original candidate is not rerun`() = runTest {
+        scheduler = Scheduler(checks, workspace, registry, stamper, SqliteReceipts(store, clock), InMemoryAliases(), idGen, ids, clock, candidates = stateRoot.resolve("candidates"))
+        verify = Verify(checks, scheduler, null, null, null, workspace, TrustedLocalRunner(os), os, stamper, store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, contracts, stateRoot.resolve("logs"))
         val flaky = if (windows) {
             Command(listOf("cmd.exe", "/d", "/s", "/c", "if exist flaky.flag (type pytest_pass.txt) else (type nul > flaky.flag & type pytest_fail.txt & exit /b 1)"))
         } else {
@@ -256,11 +285,10 @@ class VerifyTest {
         }
         checks.register(Check("CHK-flaky", CheckKind.Unit, Selector.Named(flaky), Closure.Known(setOf("src/a.py")), CostClass.Fast, Trigger.OnDemand, command = flaky))
         val out = run("""{"what":"tests","selection":"ids","ids":["CHK-flaky"]}""")
-        assertEquals("inconclusive", status(out), out.body)
-        assertTrue(out.body.contains("CHK-flaky: flaky — failed then passed ⇒ inconclusive"), out.body)
+        assertEquals("failed", status(out), out.body)
+        assertTrue(out.body.contains("isolated retry unavailable"), out.body)
         val attempts = SqliteReceipts(store, clock).forCheck("CHK-flaky")
-        assertEquals(listOf(Outcome.Failed, Outcome.Passed, Outcome.Inconclusive), attempts.map { it.outcome })
-        assertTrue(attempts.last().limits.any { it.kind == "flaky" && it.detail.contains(attempts[0].receiptId) && it.detail.contains(attempts[1].receiptId) })
+        assertEquals(listOf(Outcome.Failed), attempts.map { it.outcome })
         assertEquals(attempts.last().receiptId, checks["CHK-flaky"]!!.last!!.receiptId)
         assertFalse(scheduler.currency(checks["CHK-flaky"]!!, stamper.stamp().id).certifies)
     }
@@ -271,7 +299,8 @@ class VerifyTest {
         assertEquals("failed", status(failed), failed.body)
         assertFalse(failed.green)
         assertTrue(failed.body.contains("accept AC-2: now 1 5 pass 1 fail 1 skip @"), failed.body)
-        assertEquals(listOf(Outcome.Failed, Outcome.Failed), SqliteReceipts(store, clock).forCheck("CHK-accept-AC-2").map { it.outcome }, "one isolated rerun; agreeing failures stay red (§8.10)")
+        assertEquals(listOf(Outcome.Failed), SqliteReceipts(store, clock).forCheck("CHK-accept-AC-2").map { it.outcome }, "without candidate isolation the first failure stays red")
+        assertTrue(failed.body.contains("isolated retry unavailable"), failed.body)
 
         val missing = run("""{"what":"acceptance","ids":["AC-3"]}""")
         assertEquals("unavailable", status(missing), missing.body)
