@@ -151,7 +151,7 @@ public class Edit(
         require(viewContextLines >= 0) { "viewContextLines must be ≥ 0" }
     }
 
-    private val transformRun: TransformRun? = transforms?.let { TransformRun(workspace, registry, workset, os, preimages, blobs, syntax, ids, it) }
+    private val transformRun: TransformRun? = transforms?.let { TransformRun(workspace, registry, workset, os, preimages, blobs, syntax, ids, it, redaction) }
 
     private val receipts = ArrayList<TransformReceipt>()
 
@@ -249,7 +249,12 @@ public class Edit(
         if (outside.isNotEmpty()) warnedOutsideIncrement = true
         if (transform != null) {
             if (inScope.isEmpty()) return none.copy(error = EditError("missing", 1, null, "scope_glob '${transform.scopeGlob}' names no workspace file"), touchedOutsideScope = outside)
-            val outcome = transformRun!!.apply(1, transform, editId, alias, actionId, contract, inScope, context.turn)
+            val outcome = transformRun!!.apply(1, transform, editId, alias, actionId, contract, inScope, context.turn) { changed ->
+                val current = contracts.current(ids.work)
+                if (current == null || current.version != contract.version) "contract changed during transform"
+                else (scopeGuard.check(changed, current, increment) as? ScopeVerdict.Refused)?.refusals
+                    ?.joinToString("; ") { "${it.path}: ${it.kind.name.lowercase()} — ${it.detail}" }
+            }
             val flags = TestIntegrity.classify(outcome.surface, "transform $alias", contract, checks).map { it.copy(reason = transform.why) }
             flagsByAlias[alias] = flags
             outcome.receipt?.let { receipts += it }

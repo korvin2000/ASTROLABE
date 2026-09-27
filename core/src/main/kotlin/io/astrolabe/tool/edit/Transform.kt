@@ -1,5 +1,7 @@
 package io.astrolabe.tool.edit
 
+import io.astrolabe.auth.ContentClass
+import io.astrolabe.auth.Redaction
 import io.astrolabe.atlas.Language
 import io.astrolabe.auth.CapabilitySet
 import io.astrolabe.auth.Ceiling
@@ -151,6 +153,7 @@ internal class TransformRun(
     private val syntax: SyntaxCheck,
     private val ids: Identities,
     private val exec: TransformExecution,
+    private val redaction: Redaction,
     private val pollSliceSeconds: Long = 5,
 ) {
     internal var beforeDispatch: () -> Unit = {}
@@ -161,7 +164,7 @@ internal class TransformRun(
         return (tracked + untracked).distinct().filter { PathPattern.matches(scopeGlob, it) && registry.read(it) != null }.sortedWith(Stamper.PATH_ORDER)
     }
 
-    fun apply(index: Int, args: TransformArgs, editId: String, alias: String, actionId: String, contract: Contract, inScope: List<String>, turn: Int): TransformOutcome {
+    fun apply(index: Int, args: TransformArgs, editId: String, alias: String, actionId: String, contract: Contract, inScope: List<String>, turn: Int, validateChanged: (Collection<String>) -> String?): TransformOutcome {
         // Authority before any effect (D-41): the capability ceiling and execution mode of `run`, D-class refused outright.
         val argv = args.argv ?: listOf(args.script!!)
         val runArgs = if (args.argv != null) RunArgs(argv = args.argv) else RunArgs(cmd = args.script)
@@ -225,6 +228,7 @@ internal class TransformRun(
         }
         val changedInScope = changed.filter { PathPattern.matches(args.scopeGlob, it) }.sortedWith(Stamper.PATH_ORDER)
         val outside = changed.filterNot { PathPattern.matches(args.scopeGlob, it) }.sortedWith(Stamper.PATH_ORDER)
+        val scopeRefusal = validateChanged(changed)
         val cause = "transform $alias"
         val postimages = LinkedHashMap<String, FileVersion?>()
         val perFile = ArrayList<TransformFile>()
@@ -265,9 +269,12 @@ internal class TransformRun(
             applied += AppliedOp(index, "transform", path, null, registry.read(path)?.version)
             diffText.append("=== $path outside scope_glob ${args.scopeGlob}: no preimage, no diff\n")
         }
-        val diffRef = blobs.put(diffText.toString().toByteArray(Charsets.UTF_8), BlobKind.DIFF, ids)
+        val safeDiff = redaction.apply(diffText.toString(), ContentClass.ReusableEvidence)
+        limits += safeDiff.limitations
+        val diffRef = blobs.put(safeDiff.text.toByteArray(Charsets.UTF_8), BlobKind.DIFF, ids)
         val syntaxResults = LinkedHashMap<String, SyntaxResult>()
         for (path in changedInScope) {
+            if (scopeRefusal != null) break
             if (postimages[path] == null) continue
             val resolved = workspace.resolve(path, Intent.Read) as? PathResolution.Resolved ?: continue
             beforeDispatch()
@@ -283,6 +290,7 @@ internal class TransformRun(
         val expected = args.expectedMatches
         val rejection = when {
             outside.isNotEmpty() -> "touched outside scope_glob ${args.scopeGlob}: ${outside.joinToString(", ")}"
+            scopeRefusal != null -> "changed paths refused by current scope: $scopeRefusal"
             expected != null && matchCount !in expected.min..expected.max -> "match count $matchCount outside expected ${expected.min}–${expected.max}"
             proc.status == ProcStatus.DeadlineExceeded -> "script exceeded ${exec.timeoutSeconds}s; the process tree was killed"
             proc.status is ProcStatus.Lost || proc.status is ProcStatus.Cancelled -> "script observation lost (${proc.status})"

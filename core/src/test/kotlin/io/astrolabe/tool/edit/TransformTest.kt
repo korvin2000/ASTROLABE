@@ -154,6 +154,43 @@ class TransformTest {
     private fun versions(): Map<String, FileVersion> = files.associateWith { registry.version(it)!! }
 
     @Test
+    fun `new files within the transform glob must satisfy current contract scope and protection`() = runTest {
+        for (protected in listOf(false, true)) {
+            contracts.amendByUser(ids.work, "restrict transform outputs") {
+                it.copy(scope = it.scope.copy(writePaths = if (protected) listOf("src/") else files,
+                    protectedPaths = if (protected) listOf("src/created.py") else emptyList()))
+            }
+            val before = versions()
+            val create = if (windows) "; [IO.File]::WriteAllText('src/created.py', 'unauthorized')"
+                else "; echo unauthorized > src/created.py"
+            val editor = edit()
+            val out = run(transform(renameArgv(create)), editor)
+            assertFalse(out.applied, out.body)
+            val receipt = editor.transforms.single()
+            assertFalse(receipt.accepted)
+            assertTrue(receipt.rejection!!.contains("src/created.py"), receipt.rejection)
+            assertEquals(TransformEffect.Restored, receipt.effect)
+            assertEquals(before, versions())
+            assertFalse(Files.exists(repo.resolve("src/created.py")))
+        }
+    }
+
+    @Test
+    fun `transform diff artifacts redact secrets while inverse bytes remain exact`() = runTest {
+        val raw = module(1).replace("router.dispatch(1)", "router.dispatch(1) # password=transform-fixture-secret")
+        repo.write("src/m01.py", raw)
+        val editor = edit()
+        assertTrue(run(transform(renameArgv()), editor).applied)
+        val receipt = editor.transforms.single()
+        val diff = String(store.blobs.get(receipt.diffRef), Charsets.UTF_8)
+        assertFalse("transform-fixture-secret" in diff)
+        assertTrue("[REDACTED:" in diff)
+        val saved = preimages.of(receipt.editId, "src/m01.py")!!
+        assertEquals(raw, String(preimages.bytesOf(saved), Charsets.UTF_8))
+        assertTrue(Files.exists(store.blobs.path(saved.preimageDigest, recovery = true)))
+    }
+
+    @Test
     fun `a transform observation failure after launch reports unknown effects and preserves recovery`() = runTest {
         var launches = 0
         val flaky = object : Os by os {
