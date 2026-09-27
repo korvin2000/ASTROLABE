@@ -74,10 +74,12 @@ public class Validator(
         val flags = ArrayList<String>()
         var cursorMoved = false
         for (op in eligible) {
-            val text = opText(op)
-            if (text != null) {
+            for (text in opText(op)) {
                 if (text.length > factLineMaxChars) return reject("line ≤ $factLineMaxChars chars", "${op::class.simpleName}: ${text.length} chars")
-                if (text.contains("```")) return reject("no fenced code", "${op::class.simpleName} contains a code fence")
+                if (text.contains("```") || text.contains("~~~")) return reject("no fenced code", "${op::class.simpleName} contains a code fence")
+                if (text.any { it == '\n' || it == '\r' || it == '\u0085' || it == '\u2028' || it == '\u2029' }) {
+                    return reject("single line", "${op::class.simpleName} contains a line break")
+                }
             }
             next = when (op) {
                 is Op.PlanAdd -> next.copy(plan = next.plan + Step(nextN(next.plan.map { it.n }), Mark.Todo, op.text, op.accept, op.after, op.req))
@@ -165,15 +167,20 @@ public class Validator(
         private fun words(text: String): Set<String> = text.lowercase().split(Regex("[^a-z0-9_]+")).filter { it.length >= 5 }.toSet()
     }
 
-    private fun opText(op: Op): String? = when (op) {
-        is Op.PlanAdd -> op.text
-        is Op.FactAdd -> op.text
-        is Op.DeadendAdd -> op.text
-        is Op.DecisionAdd -> op.text
-        is Op.OpenAdd -> op.text
-        is Op.AmendPropose -> op.change
-        is Op.Next -> op.text
-        is Op.PlanCancel -> op.reason
-        else -> null
+    /** Every model-controlled string rendered in STATE is an inline field. */
+    private fun opText(op: Op): List<String> = when (op) {
+        is Op.PlanAdd -> listOfNotNull(op.text, op.accept, op.req)
+        is Op.PlanCursor -> emptyList()
+        is Op.PlanTick -> listOfNotNull(op.evidence)
+        is Op.PlanCancel -> listOf(op.reason)
+        is Op.FactAdd -> listOfNotNull(op.text, op.evidence, op.anchor?.path)
+        is Op.FactRefute -> listOf(op.evidence)
+        is Op.DeadendAdd -> listOfNotNull(op.text, op.evidence, op.scope, op.reopen)
+        is Op.DecisionAdd -> listOfNotNull(op.text, op.because, op.rejected, op.probe)
+        is Op.OpenAdd -> listOfNotNull(op.text, op.trip, op.needs)
+        is Op.OpenClose -> listOf(op.evidence)
+        is Op.FocusSet -> listOf(op.dir)
+        is Op.AmendPropose -> listOf(op.change, op.reason)
+        is Op.Next -> listOf(op.text)
     }
 }
