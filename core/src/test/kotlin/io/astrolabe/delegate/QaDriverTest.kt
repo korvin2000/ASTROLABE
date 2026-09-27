@@ -57,11 +57,11 @@ class QaDriverTest {
     @BeforeTest
     fun setUp() {
         repo = TempRepo.create()
-        repo.write("report.txt", "total 10.05\n")
+        repo.write("report.txt", "total 10.05\npassword=qa-fixture-secret\n")
         repo.commit("fixture product")
         server = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0)
         server.createContext("/report") { exchange ->
-            val body = "total 10.05".toByteArray()
+            val body = "total 10.05\npassword=qa-fixture-secret".toByteArray()
             exchange.sendResponseHeaders(200, body.size.toLong())
             exchange.responseBody.use { it.write(body) }
         }
@@ -116,7 +116,11 @@ class QaDriverTest {
                 assertEquals(InputStability.Isolated, receipt.testedInputs.stability, "QA ran on the exported candidate, never the live workspace")
                 assertEquals(candidate, receipt.stampAfter)
                 assertTrue(c.store.blobs.exists(receipt.raw!!), "the log blob was published before the receipt row")
+                assertTrue("qa-fixture-secret" !in String(c.store.blobs.get(receipt.raw!!)), "reusable QA logs are redacted")
             }
+            assertTrue(driven.result.cases.none { "qa-fixture-secret" in it.observed })
+            assertTrue(driven.record.cases.none { "qa-fixture-secret" in it.observed })
+            assertTrue(driven.result.cases.take(2).all { "[REDACTED:" in it.observed })
             assertTrue(String(c.store.blobs.get(Digest(driven.result.cases[1].artifacts.single()))).contains("HTTP 200"))
             assertEquals(null, receipts.get(driven.result.receipts[1])!!.exitCode, "HTTP status is not a process exit")
             assertEquals(7, receipts.get(driven.result.receipts[2])!!.exitCode)
@@ -133,6 +137,7 @@ class QaDriverTest {
             assertTrue(qa.cases.all { case -> case.artifacts.isNotEmpty() && case.artifacts.all { c.store.blobs.exists(Digest(it)) } })
             assertTrue(finish.checksRun.map { it.receiptId }.containsAll(qa.receipts), "QA receipts are L3 check runs")
             val exported = Files.readString(file)
+            assertTrue("qa-fixture-secret" !in exported, "finish exports contain only redacted QA observations")
             qa.cases.flatMap { it.artifacts }.forEach { assertTrue(it in exported, "artifact $it is attached to the exported receipt") }
         }
     }

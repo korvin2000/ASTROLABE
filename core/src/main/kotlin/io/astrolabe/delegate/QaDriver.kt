@@ -1,5 +1,7 @@
 package io.astrolabe.delegate
 
+import io.astrolabe.auth.ContentClass
+import io.astrolabe.auth.Redaction
 import io.astrolabe.contract.Command
 import io.astrolabe.evidence.Closure
 import io.astrolabe.evidence.Counts
@@ -90,6 +92,7 @@ public class QaDriver @JvmOverloads constructor(
     private val logs: Path,
     private val http: HttpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).connectTimeout(Duration.ofSeconds(5)).build(),
     private val deadlineSeconds: Long = 60,
+    private val redaction: Redaction = Redaction(),
 ) {
     init {
         require(deadlineSeconds > 0) { "a QA case has a positive deadline" }
@@ -119,7 +122,7 @@ public class QaDriver @JvmOverloads constructor(
             var observed = ""
             val receipt = scheduler.runCheck(check, admitted.contractVersion) { root ->
                 val (executed, output) = execute(admitted, probe, root)
-                observed = output
+                observed = redaction.apply(output, ContentClass.ReusableEvidence).text
                 executed
             }
             receipts += receipt.receiptId
@@ -197,13 +200,14 @@ public class QaDriver @JvmOverloads constructor(
 
     private fun executed(packet: QaPacket, command: List<String>, cwd: String?, shell: Boolean, exit: Int?, outcome: Outcome, transcript: String, expectedExitCode: Int? = 0): Executed {
         // Artifact before row: the scheduler records the receipt only after this blob is published.
-        val raw = blobs.put(transcript.toByteArray(Charsets.UTF_8), BlobKind.LOG, packet.ids)
+        val safe = redaction.apply(transcript, ContentClass.ReusableEvidence)
+        val raw = blobs.put(safe.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, packet.ids)
         val counts = when (outcome) {
             Outcome.Passed -> Counts(passed = 1, discovered = 1)
             Outcome.Failed -> Counts(failed = 1, discovered = 1)
             else -> null
         }
-        return Executed(command, cwd, shell, exit, outcome, counts, raw, expectedExitCode = expectedExitCode)
+        return Executed(command, cwd, shell, exit, outcome, counts, raw, safe.limitations, expectedExitCode = expectedExitCode)
     }
 
     private fun passedOf(receipt: Receipt): Boolean? = when (receipt.outcome) {
