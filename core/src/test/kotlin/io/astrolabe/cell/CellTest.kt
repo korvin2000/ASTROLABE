@@ -59,6 +59,26 @@ import kotlin.test.assertTrue
 /** P1.8.7: the cell turn loop of §3.7 — order, fail-closed validation, gates, every exit kind, and a checkpoint on every path out (fault injection). */
 class CellTest {
     @Test
+    fun `profile request estimator participates in dispatch admission`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val base = f.context(ScriptedModel.of())
+            var counted = 0
+            val estimator = object : io.astrolabe.provider.TokenEstimator by f.estimator {
+                override fun estimate(request: io.astrolabe.provider.Request): io.astrolabe.provider.Estimate {
+                    counted++
+                    return io.astrolabe.provider.Estimate(Long.MAX_VALUE, true, id, version)
+                }
+            }
+            val context = CellContext(base.ids, base.role, base.contracts,
+                CellModel(base.model.adapter, base.model.profile, estimator), base.tools, base.workspace, base.evidence, base.prime)
+            val exit = assertIs<CellExit.Partial>(f.cell().run(context, f.increment, f.budget()))
+            assertEquals(PartialReason.Pressure, exit.reason)
+            assertTrue(counted > 0)
+            assertTrue(f.adapter.calls.isEmpty())
+        }
+    }
+
+    @Test
     fun `a digest that cannot fit stops before provider dispatch`() = runTest {
         CellFixture(stateRoot, defaults = Defaults(digestCapTokens = 1)).use { f ->
             val exit = assertIs<CellExit.Partial>(f.run(ScriptedModel.of()))

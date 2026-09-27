@@ -6642,8 +6642,8 @@ public final class io/astrolabe/context/ContextUnitId : java/lang/Comparable {
 
 public final class io/astrolabe/context/ContractSlice {
 	public static final field Companion Lio/astrolabe/context/ContractSlice$Companion;
-	public fun <init> (ILjava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/Map;Ljava/util/List;)V
-	public synthetic fun <init> (ILjava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/Map;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (ILjava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/Map;Ljava/util/List;Ljava/util/Set;)V
+	public synthetic fun <init> (ILjava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/Map;Ljava/util/List;Ljava/util/Set;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()I
 	public final fun component2 ()Ljava/lang/String;
 	public final fun component3 ()Ljava/util/List;
@@ -6652,8 +6652,9 @@ public final class io/astrolabe/context/ContractSlice {
 	public final fun component6 ()Ljava/util/List;
 	public final fun component7 ()Ljava/util/Map;
 	public final fun component8 ()Ljava/util/List;
-	public final fun copy (ILjava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/Map;Ljava/util/List;)Lio/astrolabe/context/ContractSlice;
-	public static synthetic fun copy$default (Lio/astrolabe/context/ContractSlice;ILjava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/Map;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/context/ContractSlice;
+	public final fun component9 ()Ljava/util/Set;
+	public final fun copy (ILjava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/Map;Ljava/util/List;Ljava/util/Set;)Lio/astrolabe/context/ContractSlice;
+	public static synthetic fun copy$default (Lio/astrolabe/context/ContractSlice;ILjava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/Map;Ljava/util/List;Ljava/util/Set;ILjava/lang/Object;)Lio/astrolabe/context/ContractSlice;
 	public final fun coverage ()Lio/astrolabe/context/SliceCoverage;
 	public fun equals (Ljava/lang/Object;)Z
 	public static final fun forIncrement (Lio/astrolabe/contract/Contract;Lio/astrolabe/contract/Increment;Ljava/util/Map;)Lio/astrolabe/context/ContractSlice;
@@ -6662,6 +6663,7 @@ public final class io/astrolabe/context/ContractSlice {
 	public final fun getContractVersion ()I
 	public final fun getContractsTouched ()Ljava/util/List;
 	public final fun getExclusions ()Ljava/util/List;
+	public final fun getIncrementAcceptanceIds ()Ljava/util/Set;
 	public final fun getIncrementId ()Ljava/lang/String;
 	public final fun getOriginalObligations ()Ljava/util/Map;
 	public final fun getRequiredAcceptanceIds ()Ljava/util/Set;
@@ -7608,12 +7610,14 @@ public abstract interface class io/astrolabe/contract/ContractRepository {
 	public abstract fun append (Lio/astrolabe/contract/Contract;)V
 	public abstract fun commitResolution (Lio/astrolabe/contract/Contract;Lio/astrolabe/contract/Amendment;)V
 	public abstract fun history (Lio/astrolabe/id/WorkId;)Ljava/util/List;
+	public fun latest (Lio/astrolabe/id/WorkId;)Lio/astrolabe/contract/Contract;
 	public abstract fun replaceLatest (Lio/astrolabe/contract/Contract;)V
 	public abstract fun resolved (Lio/astrolabe/id/WorkId;)Ljava/util/List;
 	public static synthetic fun resolved$default (Lio/astrolabe/contract/ContractRepository;Lio/astrolabe/id/WorkId;ILjava/lang/Object;)Ljava/util/List;
 }
 
 public final class io/astrolabe/contract/ContractRepository$DefaultImpls {
+	public static fun latest (Lio/astrolabe/contract/ContractRepository;Lio/astrolabe/id/WorkId;)Lio/astrolabe/contract/Contract;
 	public static synthetic fun resolved$default (Lio/astrolabe/contract/ContractRepository;Lio/astrolabe/id/WorkId;ILjava/lang/Object;)Ljava/util/List;
 }
 
@@ -7644,6 +7648,7 @@ public final class io/astrolabe/contract/InMemoryContractRepository : io/astrola
 	public fun append (Lio/astrolabe/contract/Contract;)V
 	public fun commitResolution (Lio/astrolabe/contract/Contract;Lio/astrolabe/contract/Amendment;)V
 	public fun history (Lio/astrolabe/id/WorkId;)Ljava/util/List;
+	public fun latest (Lio/astrolabe/id/WorkId;)Lio/astrolabe/contract/Contract;
 	public fun replaceLatest (Lio/astrolabe/contract/Contract;)V
 	public fun resolved (Lio/astrolabe/id/WorkId;)Ljava/util/List;
 }
@@ -8059,6 +8064,7 @@ public final class io/astrolabe/contract/SqliteContractRepository : io/astrolabe
 	public fun append (Lio/astrolabe/contract/Contract;)V
 	public fun commitResolution (Lio/astrolabe/contract/Contract;Lio/astrolabe/contract/Amendment;)V
 	public fun history (Lio/astrolabe/id/WorkId;)Ljava/util/List;
+	public fun latest (Lio/astrolabe/id/WorkId;)Lio/astrolabe/contract/Contract;
 	public final fun recordResolved (Lio/astrolabe/id/WorkId;Lio/astrolabe/contract/Amendment;)V
 	public fun replaceLatest (Lio/astrolabe/contract/Contract;)V
 	public fun resolved (Lio/astrolabe/id/WorkId;)Ljava/util/List;
@@ -17933,6 +17939,12 @@ public final synthetic class io/astrolabe/register/Decision$$serializer : kotlin
 
 public final class io/astrolabe/register/Decision$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/register/DigestCapacity : java/lang/IllegalArgumentException {
+	public fun <init> (JI)V
+	public final fun getCapTokens ()I
+	public final fun getRequiredTokens ()J
 }
 
 public final class io/astrolabe/register/Fact {
