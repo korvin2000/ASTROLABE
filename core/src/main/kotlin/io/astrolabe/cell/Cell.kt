@@ -508,6 +508,10 @@ public class Cell @JvmOverloads constructor(
                     }
                     is CompletionDecision.Continue -> {
                         recordGaps(decision.gaps)
+                        nudges = (decision.gaps.take(MAX_NUDGES).map {
+                            "packet validation: ${Boundary.escape(it.replace('\r', ' ').replace('\n', ' ')).take(240)}"
+                        } + nudges)
+                            .take(MAX_NUDGES)
                         refusals += 1
                     }
                 }
