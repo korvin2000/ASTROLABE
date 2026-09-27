@@ -2,8 +2,32 @@
 
 Branch: `feature/bugfix`. Baseline: `9a80e117445be357285fec2cffffe0fd45290a9a`.
 
-**64 fixed across five sessions (10 in the latest continuation); 78 open; F-034 previously resolved.**
+**72 fixed across six sessions (8 in the latest continuation); 70 open; F-034 previously resolved.**
 The complete remaining queue is `findings.md` ? JSON `fix_progress.remaining_open_ids`.
+
+## Sixth continuation: eight further repairs
+
+| Finding | Commit | Change and evidence |
+|---|---|---|
+| F-013 | `0126918` | Referenced orphans are repaired directly before deletion. Cleanup uses three continuing directory iterators and keyset pagination, visiting at most 4096 entries/rows per call; Store.close releases iterators. Backlog/adoption and bounded-row regressions pass. Mandatory integrity work remains proportional to references and adopted bytes; cursors restart on Store reopen. |
+| F-015 | `389634d, e74302a` | The supervisor confirms container quiescence and closes native resources before terminal publication. Windows queries active job processes; POSIX checks the original group. Cleanup failure or timeout becomes Lost. Four deterministic settlement regressions and immediate Windows descendant-liveness assertions pass. Detached POSIX groups remain F-016; no new Linux runtime evidence. |
+| F-028 | `527c95b` | Stamper, DirtyState and ShadowRef use a dedicated final-link metadata resolution path. It validates ancestors, captures exact link spelling without following final targets, and verifies exported link objects. Five symlink capture/export regressions are present but skipped on this Windows host because symbolic-link creation is unavailable. The Windows junction-ancestor refusal regression passes. |
+| F-029 | `527c95b` | PathKind.Missing now represents NoSuchFileException only. Protected/refused or unsupported capture inputs abort authoritative stamps/snapshots; failed staged cat-file reads propagate GitError. Protected-path, staged-corruption and junction-ancestor regressions pass. Existing incomplete snapshots are not repaired. |
+| F-030 | `527c95b` | DirtyState compares immutable captured entries with the stamp report and rechecks base commit, Git status and the staged index. Observed movement aborts with SnapshotIntegrityError. Injected changes to file bytes, index membership and HEAD during blob publication are refused. This detects inconsistent acquisition but does not provide an atomic snapshot against external writers; F-027 remains open. |
+| F-037 | `499addd` | Atlas cache loads re-read raw bytes even when size and mtime match; same-size/restored-mtime rewrites and edits between build and save invalidate declarations. Short row hashes remain orientation hints, not authoritative file identities. Both cache regressions pass. |
+| F-038 | `499addd` | Changes under collapsed directories trigger a metadata rescan that recomputes their totals. Add/delete/resize regressions match a fresh build. KDoc now states repository-sized row copying/sorting and metadata scans; only parsing is limited to touched files. No throughput benchmark or O(touched) total-cost claim. |
+| F-046 | `aff4943` | Validator checks every rendered operation string, including evidence IDs, anchor paths and auxiliary fields, for the 240-character limit, embedded line breaks and both Markdown fence styles. A matrix covers 25 fields with five invalid forms plus valid inline commands; focused register checks pass. |
+
+### Verification and compatibility
+
+- Regression-first checks reproduced GC, process settlement, incomplete/mixed snapshot, Atlas cache/aggregate and STATE-field failures. Focused workspace/Atlas batch: 65 passed, 8 skipped. Other focused batches passed; they overlap and are not additive totals.
+- Review corrected the staged-object test to expect the existing GitError, fixed the collapsed-directory test fixture so its files were not ignored, and added index/HEAD mutation and Windows junction checks. Process tests now assert descendant death immediately at terminal status, without a post-terminal grace wait.
+- First full Windows run on aff4943: **1637 passed, 13 skipped**, no test failures/errors. Its ABI gate exposed a missing no-argument LocalOs constructor in the dump. Restored the original public primary constructor in e74302a; focused process and ABI checks pass. Full corrected build on e74302a **passed: 1637 passed, 13 skipped**, zero failures/errors; compilation, packaging and existing ABI passed. Log: ignored `build/bugfix-sixth-build-verified.log`.
+- No schema or public API change. New snapshot captures fail closed; existing incomplete snapshots are not reconstructed. GC cursors last for the Store lifetime. Referenced integrity checks necessarily cost O(references plus adopted bytes).
+- Five new real-symlink capture/export tests skip because this Windows host lacks symlink creation privileges. Windows junction containment and native job-quiescence tests ran. Linux group confirmation is compiled but has no new Linux/CI runtime evidence; detached POSIX groups remain F-016.
+- D-272 through D-276 record the cleanup budgets, process settlement, snapshot acquisition, Atlas costs and STATE field policy. Git clean-filter membership remains F-027; no atomic external-writer snapshot is claimed.
+- Native confirmation references: [Windows job accounting](https://learn.microsoft.com/windows/win32/api/winnt/ns-winnt-jobobject_basic_accounting_information), [QueryInformationJobObject](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-queryinformationjobobject), [Linux kill](https://man7.org/linux/man-pages/man2/kill.2.html), [Linux process state](https://man7.org/linux/man-pages/man5/proc_pid_stat.5.html).
+- Local commits only. Nothing pushed; pre-existing CLAUDE.md/ISSUES.md edits and untracked task files are preserved.
 
 ## Fifth continuation: ten further repairs
 

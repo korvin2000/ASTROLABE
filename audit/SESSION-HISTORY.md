@@ -614,3 +614,9 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - Consumers rebuild for ContractSlice changes. Incomplete historical slices require reconstruction from their authoritative increment.
 - No new Linux/CI/live/P7 evidence. Nothing pushed; pre-existing user edits preserved.
 - Updated handoff/ledger; next F-013, F-015/F-016/F-017, F-019, then raw snapshot findings F-027 onward.
+
+## 2026-09-27 ? bugfix sixth continuation
+- `feature/bugfix`: eight fixes (F-013/F-015/F-028/F-029/F-030/F-037/F-038/F-046); 72 fixed, 70 open, F-034 previously resolved.
+- Bounded GC, confirmed process settlement, safe snapshot capture, Atlas freshness/aggregates and STATE field validation. Decisions D-272 through D-276.
+- First full tests: 1637 passed, 13 skipped; corrected the LocalOs constructor ABI in e74302a. Final full Windows build on e74302a passed: 1637 passed, 13 skipped; packaging/ABI passed.
+- Five new symlink tests skip on this Windows host; junction/process tests ran. No new Linux/CI or P7 evidence. Local commits only; user edits preserved.

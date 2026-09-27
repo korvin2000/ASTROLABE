@@ -1,6 +1,6 @@
 # Implementation audit findings
 
-**Remediation:** 64 fixed on `feature/bugfix` (10 in this continuation); 78 remain open; F-034 was already resolved. See [bugfix progress](audit/BUGFIX-PROGRESS.md). Original audit evidence remains historical; `fix_progress` is the current repair status.
+**Remediation:** 72 fixed on `feature/bugfix` (8 in this continuation); 70 remain open; F-034 was already resolved. See [bugfix progress](audit/BUGFIX-PROGRESS.md). Original audit evidence remains historical; `fix_progress` is the current repair status.
 
 ```json
 {
@@ -544,45 +544,35 @@
     "date": "2026-09-27",
     "status": "session_complete_remaining_findings_open",
     "fixed_this_session": [
-      "F-004",
-      "F-006",
-      "F-010",
-      "F-014",
-      "F-018",
-      "F-020",
-      "F-021",
-      "F-024",
-      "F-025",
-      "F-026"
+      "F-013",
+      "F-015",
+      "F-028",
+      "F-029",
+      "F-030",
+      "F-037",
+      "F-038",
+      "F-046"
     ],
-    "fixed_this_session_count": 10,
+    "fixed_this_session_count": 8,
     "previously_resolved": [
       "F-034"
     ],
-    "remaining_open_count": 78,
+    "remaining_open_count": 70,
     "remaining_open_ids": [
-      "F-013",
-      "F-015",
       "F-016",
       "F-017",
       "F-019",
       "F-027",
-      "F-028",
-      "F-029",
-      "F-030",
       "F-031",
       "F-032",
       "F-033",
       "F-036",
-      "F-037",
-      "F-038",
       "F-039",
       "F-040",
       "F-041",
       "F-042",
       "F-044",
       "F-045",
-      "F-046",
       "F-048",
       "F-052",
       "F-069",
@@ -641,34 +631,49 @@
       "F-143"
     ],
     "next_priority": [
-      "F-013",
-      "F-015",
       "F-016",
       "F-017",
       "F-019",
       "F-027",
-      "F-028",
-      "F-029",
-      "F-030"
+      "F-031",
+      "F-032",
+      "F-033",
+      "F-036"
     ],
     "handoff": "CONTINUE-TASK.md",
     "detail": "audit/BUGFIX-PROGRESS.md",
-    "verification": "Full Windows JDK 26 build passed on eccb010: core 1394 tests, 1386 passed, 8 skipped; provider-api 19, eval 49, index-treesitter 17 passed. Total 1471 passed, 8 skipped, zero failures/errors. Compilation, packaging and ABI passed. No new Linux/CI or P7 evidence.",
+    "verification": "Full Windows JDK 26 build passed on e74302a: 1637 passed, 13 skipped, zero failures/errors. Compilation, packaging and ABI passed. No new Linux/CI or P7 evidence.",
     "source_changes_allowed": true,
     "verification_results": {
       "full_build_command": "./gradlew.bat build -q --console=plain",
       "full_build_exit": 0,
-      "log": "build/bugfix-fifth-build.log",
-      "abi": "core dump regenerated",
+      "log": "build/bugfix-sixth-build-verified.log",
       "linux_ci": "not run",
       "p7": "excluded",
-      "modules": {
+      "first_full_build": {
+        "source_checkpoint": "aff4943",
+        "exit": 1,
         "core": {
-          "tests": 1394,
+          "tests": 1565,
+          "passed": 1552,
           "failures": 0,
           "errors": 0,
-          "skipped": 8,
-          "passed": 1386
+          "skipped": 13
+        },
+        "failure": "checkKotlinAbi no-argument LocalOs constructor missing from ABI snapshot; restoring original public primary constructor"
+      },
+      "abi": "existing core ABI preserved; constructor correction verified",
+      "review_corrections": [
+        "Restore original public primary LocalOs constructor so the no-argument Java constructor remains in the ABI dump.",
+        "Staged corruption asserts the existing GitError; collapsed-directory fixture includes files in enumeration."
+      ],
+      "modules": {
+        "core": {
+          "tests": 1565,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 13,
+          "passed": 1552
         },
         "provider-api": {
           "tests": 19,
@@ -692,73 +697,14 @@
           "passed": 17
         }
       },
-      "total_passed": 1471,
-      "total_skipped": 8,
-      "review_corrections": [
-        "Cell admission must call estimator.estimate(request) to honor provider-specific overrides; regression reproduced before correction."
-      ],
+      "total_passed": 1637,
+      "total_skipped": 13,
       "platform_limits": [
-        "New POSIX directory-permission regression skipped on Windows; Windows junction regressions ran."
+        "Five new real-symlink capture/export regressions skipped on Windows because symlink creation is unavailable. Windows junction and native process-quiescence tests ran. No new Linux group confirmation evidence."
       ]
     },
     "active_processes": [],
     "previous_session_fixed": [
-      "F-001",
-      "F-002",
-      "F-003",
-      "F-005",
-      "F-007",
-      "F-008",
-      "F-009",
-      "F-011",
-      "F-012",
-      "F-022",
-      "F-023",
-      "F-035",
-      "F-043",
-      "F-047",
-      "F-049",
-      "F-050",
-      "F-051",
-      "F-053",
-      "F-054",
-      "F-055",
-      "F-056",
-      "F-057",
-      "F-058",
-      "F-059",
-      "F-060",
-      "F-061",
-      "F-062",
-      "F-063",
-      "F-064",
-      "F-065",
-      "F-066",
-      "F-067",
-      "F-068",
-      "F-070",
-      "F-071",
-      "F-072",
-      "F-073",
-      "F-074",
-      "F-076",
-      "F-077",
-      "F-078",
-      "F-079",
-      "F-080",
-      "F-081",
-      "F-088",
-      "F-094",
-      "F-098",
-      "F-116",
-      "F-121",
-      "F-123",
-      "F-130",
-      "F-131",
-      "F-139",
-      "F-140"
-    ],
-    "fixed_on_branch": [
       "F-001",
       "F-002",
       "F-003",
@@ -824,7 +770,81 @@
       "F-139",
       "F-140"
     ],
-    "fixed_on_branch_count": 64,
+    "fixed_on_branch": [
+      "F-001",
+      "F-002",
+      "F-003",
+      "F-004",
+      "F-005",
+      "F-006",
+      "F-007",
+      "F-008",
+      "F-009",
+      "F-010",
+      "F-011",
+      "F-012",
+      "F-013",
+      "F-014",
+      "F-015",
+      "F-018",
+      "F-020",
+      "F-021",
+      "F-022",
+      "F-023",
+      "F-024",
+      "F-025",
+      "F-026",
+      "F-028",
+      "F-029",
+      "F-030",
+      "F-035",
+      "F-037",
+      "F-038",
+      "F-043",
+      "F-046",
+      "F-047",
+      "F-049",
+      "F-050",
+      "F-051",
+      "F-053",
+      "F-054",
+      "F-055",
+      "F-056",
+      "F-057",
+      "F-058",
+      "F-059",
+      "F-060",
+      "F-061",
+      "F-062",
+      "F-063",
+      "F-064",
+      "F-065",
+      "F-066",
+      "F-067",
+      "F-068",
+      "F-070",
+      "F-071",
+      "F-072",
+      "F-073",
+      "F-074",
+      "F-076",
+      "F-077",
+      "F-078",
+      "F-079",
+      "F-080",
+      "F-081",
+      "F-088",
+      "F-094",
+      "F-098",
+      "F-116",
+      "F-121",
+      "F-123",
+      "F-130",
+      "F-131",
+      "F-139",
+      "F-140"
+    ],
+    "fixed_on_branch_count": 72,
     "previous_session_verification_results": {
       "initial_full_core": {
         "tests": 1293,
@@ -864,7 +884,7 @@
       },
       "full_core_rerun": false
     },
-    "source_checkpoint": "eccb010",
+    "source_checkpoint": "e74302a",
     "previous_continuation_verification_results": {
       "first_continuation_full_core": {
         "tests": 1314,
@@ -1006,6 +1026,52 @@
         "interrupted-I/O termination",
         "clean HEAD background changes",
         "default role snapshot and normalized comparison"
+      ]
+    },
+    "previous_fifth_verification_results": {
+      "full_build_command": "./gradlew.bat build -q --console=plain",
+      "full_build_exit": 0,
+      "log": "build/bugfix-fifth-build.log",
+      "abi": "core dump regenerated",
+      "linux_ci": "not run",
+      "p7": "excluded",
+      "modules": {
+        "core": {
+          "tests": 1394,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 8,
+          "passed": 1386
+        },
+        "provider-api": {
+          "tests": 19,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 19
+        },
+        "eval": {
+          "tests": 49,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 49
+        },
+        "index-treesitter": {
+          "tests": 17,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 17
+        }
+      },
+      "total_passed": 1471,
+      "total_skipped": 8,
+      "review_corrections": [
+        "Cell admission must call estimator.estimate(request) to honor provider-specific overrides; regression reproduced before correction."
+      ],
+      "platform_limits": [
+        "New POSIX directory-permission regression skipped on Windows; Windows junction regressions ran."
       ]
     }
   }
@@ -1392,13 +1458,15 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-013 - Blob GC is unbounded in scan cost and can starve later orphans
 
 - Task: [P0.5.1](TODO.md#L622).
-- Severity: medium. Confidence: confirmed_source. Status: open.
+- Severity: medium. Confidence: confirmed_source. Status: fixed (2026-09-27).
 - Locations: [BlobStore.gc](core/src/main/kotlin/io/astrolabe/store/BlobStore.kt#L169), [BlobStore.listFiles](core/src/main/kotlin/io/astrolabe/store/BlobStore.kt#L295).
 - Problem: every pass eagerly lists/sorts all temp files, reads every blob digest into a set, lists/sorts both blob directories, and loads/deletes all collectable rows. MAX_ORPHANS_PER_PASS only limits part of the post-enumeration processing. More than 4096 young temp files consume that budget on every pass, so no later orphan is reached until aging; there is no continuation cursor despite the next-pass-continues claim.
 - Impact: memory, sorting and delete time grow with total project history, and a backlog can delay referenced-orphan adoption or trigger a false missing-blob failure when the budget prevents reaching it. No throughput benchmark yet; complexity follows directly from eager list/query operations.
 - Possible solutions: paginate DB and directory work with a stable cursor and total work budget; resolve referenced digests directly before opportunistic orphan scanning; prioritize integrity repair independently of cleanup quotas.
 - Future regression: more than one pass of young temp files plus a referenced orphan beyond the cursor; adoption must succeed and repeated bounded passes must make progress. Measure max work per pass, not only its orphan counter.
 - Current-source recheck (2026-09-25, 9a80e117): BlobStore.gc still eagerly enumerates files and all DB digests; young temp entries consume the sole orphan budget (167?224). Earlier runtime evidence retains its original baseline; this recheck is source inspection.
+- Fix (2026-09-27, `0126918`): Referenced orphans are repaired directly before deletion. Cleanup uses three continuing directory iterators and keyset pagination, visiting at most 4096 entries/rows per call; Store.close releases iterators. Backlog/adoption and bounded-row regressions pass. Mandatory integrity work remains proportional to references and adopted bytes; cursors restart on Store reopen.
+
 
 ### F-014 - Configured state root may be inside the workspace
 
@@ -1416,12 +1484,14 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-015 - Terminal process status is published before descendant cleanup
 
 - Task: [P0.6.1](TODO.md#L635).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-27).
 - Locations: [LocalOs.supervise / settle / Supervision.release](core/src/main/kotlin/io/astrolabe/os/LocalOs.kt#L222).
 - Problem: after the root exits, supervise calls settle first (publishes terminal status, writes sidecar, signals waiters), removes supervision, and only then release terminates descendants. Poll's comment relies on terminal status guaranteeing no further process output, but the implementation leaves a window in which children can still write logs or workspace files. terminate() and close() can also return after settle but before release completes.
 - Impact: a caller can start post-run stamping or verification while a child is still mutating files, or miss trailing output after treating terminal as final. This is independent of the already-documented test race where output arrives before root exit.
 - Possible solutions: terminate/drain the owned process container before publishing a terminal outcome; confirm containment cleanup or report a distinct uncertain state when it fails. Do not merely reorder a fire-and-forget kill and claim all writers are gone.
 - Future regression: parent exits with a writing grandchild; block cleanup deterministically and prove no terminal outcome is visible before cleanup is confirmed. Recheck run/check receipt stability in P1.6.5/P3.1.5.
+- Fix (2026-09-27, `389634d, e74302a`): The supervisor confirms container quiescence and closes native resources before terminal publication. Windows queries active job processes; POSIX checks the original group. Cleanup failure or timeout becomes Lost. Four deterministic settlement regressions and immediate Windows descendant-liveness assertions pass. Detached POSIX groups remain F-016; no new Linux runtime evidence.
+
 
 ### F-016 - POSIX process groups do not enforce the advertised no-breakaway guarantee
 
@@ -1570,32 +1640,38 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-028 - Snapshot code follows symlinks before deciding what object to capture
 
 - Task: [P1.2.2](TODO.md#L716); related [P1.2.3](TODO.md#L723), [P1.2.4](TODO.md#L729).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-27).
 - Locations: [Stamper.stampEntry](core/src/main/kotlin/io/astrolabe/workspace/Stamper.kt#L255), [DirtyState.worktreeEntry](core/src/main/kotlin/io/astrolabe/workspace/DirtyState.kt#L285), [WorkspacePath.resolve](core/src/main/kotlin/io/astrolabe/workspace/WorkspacePath.kt#L190), [ShadowRef.currentDigest](core/src/main/kotlin/io/astrolabe/workspace/ShadowRef.kt#L412).
 - Problem: WorkspacePath returns a canonical real path following a valid final symlink, while preserving the original link kind separately as resolved.kind. These consumers instead call kindOf(resolved.real), which now describes the target. A valid in-workspace symlink to a file is captured as a regular file containing target bytes; a link to a directory becomes a directory/deletion case. External links are refused and enter the unreadable/deletion path.
 - Impact: link target/type identity is lost, changing a link between equal-content targets can be missed, and materialization can turn links into ordinary files. Broken-link behavior differs because canonicalization cannot follow that link. No symlink runtime probe executed on Windows.
 - Possible solutions: introduce an explicit no-follow metadata capture path that validates ancestors/containment and reads the final link object/target text; reserve follow-target reads for ordinary content observations. Preserve exact link target spelling on POSIX rather than unconditionally replacing backslashes.
 - Future regression: tracked/untracked valid, dangling, relative and directory symlinks must preserve type and link target through stamping and snapshot export; target contents must not stand in for link identity.
+- Fix (2026-09-27, `527c95b`): Stamper, DirtyState and ShadowRef use a dedicated final-link metadata resolution path. It validates ancestors, captures exact link spelling without following final targets, and verifies exported link objects. Five symlink capture/export regressions are present but skipped on this Windows host because symbolic-link creation is unavailable. The Windows junction-ancestor refusal regression passes.
+
 
 ### F-029 - Unreadable entries can produce ordinary candidate identities indistinguishable from deletion
 
 - Task: [P1.2.2](TODO.md#L716); related [P1.2.3](TODO.md#L723).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-27).
 - Locations: [Stamper.stampEntry / stamp](core/src/main/kotlin/io/astrolabe/workspace/Stamper.kt#L255), [DirtyState.worktreeEntry / stagedEntries](core/src/main/kotlin/io/astrolabe/workspace/DirtyState.kt#L258), [WorkspacePath.kindOf](core/src/main/kotlin/io/astrolabe/workspace/WorkspacePath.kt#L395).
 - Problem: refused/unreadable tracked entries are encoded as Deleted while unreadable untracked entries are dropped. unreadable is report metadata and does not enter Stamp; stamp() discards it entirely. WorkspacePath.kindOf maps every IOException to Missing, and failed staged cat-file reads are silently skipped without adding an unreadable marker.
 - Impact: a capture with unknown bytes can look like a valid absent-file candidate. Consumers using only Stamp cannot distinguish complete identity from incomplete acquisition, and recovery can omit staged content without an explicit failure. No permission-induced full acceptance path was executed here.
 - Possible solutions: distinguish absent from denied/error/unsupported at capture boundaries and refuse issuance of an authoritative complete stamp/snapshot when required inputs are unresolved; propagate typed incompleteness into verification/reuse. Record failed staged reads as explicit limitations or abort capture.
 - Future regression: deny a tracked path, refuse an external link, and inject cat-file failure; no complete candidate or successful recoverable snapshot may result from silently substituted deletions.
+- Fix (2026-09-27, `527c95b`): PathKind.Missing now represents NoSuchFileException only. Protected/refused or unsupported capture inputs abort authoritative stamps/snapshots; failed staged cat-file reads propagate GitError. Protected-path, staged-corruption and junction-ancestor regressions pass. Existing incomplete snapshots are not repaired.
+
 
 ### F-030 - Dirty manifest and its recorded stamp are captured from different reads
 
 - Task: [P1.2.3](TODO.md#L723).
-- Severity: high. Confidence: potential. Status: open.
+- Severity: high. Confidence: potential. Status: fixed (2026-09-27).
 - Location: [DirtyState.capture](core/src/main/kotlin/io/astrolabe/workspace/DirtyState.kt#L216).
 - Problem: capture reads dirty files into recovery blobs, then separately calls stamper.report which rereads status and file bytes, then separately captures the index. No consistency check binds these reads to one candidate or compares captured manifest hashes with the returned report.
 - Trigger and impact: a file changes between its blob read and the stamp read. Snapshot entries describe version A while stampId describes version B; a materialized baseline can execute A while recording B as s0. A snapshot-wide atomic view of external writers is an acknowledged platform limitation, but a known mixed capture must not be certified as one candidate.
 - Possible solutions: derive the stamp from the captured immutable manifest and common base/environment inputs; validate membership/base/index before and after acquisition, retry boundedly and mark unresolved movement as unknown. Use isolated snapshots where required.
 - Future regression: inject a writer between entry capture and stamping; snapshot identity must match exported bytes or acquisition must fail explicitly, never mix the two versions.
+- Fix (2026-09-27, `527c95b`): DirtyState compares immutable captured entries with the stamp report and rechecks base commit, Git status and the staged index. Observed movement aborts with SnapshotIntegrityError. Injected changes to file bytes, index membership and HEAD during blob publication are refused. This detects inconsistent acquisition but does not provide an atomic snapshot against external writers; F-027 remains open.
+
 
 ### F-031 - Crash after shadow-ref update leaves the durable snapshot index behind
 
@@ -1666,24 +1742,28 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-037 - Atlas cache can return stale declarations after a same-size, same-time rewrite
 
 - Task: [P1.3.1](TODO.md#L750).
-- Severity: medium. Confidence: reproduced. Status: open.
+- Severity: medium. Confidence: reproduced. Status: fixed (2026-09-27).
 - Location: [Atlas.load/save](core/src/main/kotlin/io/astrolabe/atlas/Atlas.kt#L311).
 - Reproduction: build/save an atlas for a.py containing def old(); replace old with new (same byte count), restore mtime, then load. The cache returns exports=[old], while a fresh build returns [new].
 - Problem: unchanged size/mtime reuses cached hash8, so comparing the reconstructed repoKey against its cached value does not revalidate content. save also records current mtime separately from when row content was captured. Its documentation claims this cannot yield a stale-content cache hit.
 - Impact: navigation can reference removed symbols or miss new ones until explicit refresh/rebuild. This remains an orientation defect, not proof of an edit-authority bypass; consequential consumers should continue using raw versions.
 - Possible solutions: validate raw hashes before claiming a content-validated cache hit, or explicitly expose a metadata-only freshness hint and revalidate rows on use. Preserve the content acquisition metadata with each row rather than recapturing it when saving.
 - Future regression: equal-size rewrite with restored mtime and an edit between build and save must not silently return old declarations as current.
+- Fix (2026-09-27, `499addd`): Atlas cache loads re-read raw bytes even when size and mtime match; same-size/restored-mtime rewrites and edits between build and save invalidate declarations. Short row hashes remain orientation hints, not authoritative file identities. Both cache regressions pass.
+
 
 ### F-038 - Incremental atlas refresh leaves collapsed totals stale and still scans the whole index
 
 - Task: [P1.3.1](TODO.md#L750).
-- Severity: medium. Confidence: reproduced. Status: open.
+- Severity: medium. Confidence: reproduced. Status: fixed (2026-09-27).
 - Locations: [Atlas.refresh](core/src/main/kotlin/io/astrolabe/atlas/Atlas.kt#L199), [Focus directory rendering](core/src/main/kotlin/io/astrolabe/atlas/Focus.kt#L82).
 - Reproduction: build with build/generated.py, delete that file, refresh only its touched path. The incremental result still says Collapsed(build, files=1, bytes=4); a fresh build has no collapsed entry.
 - Problem: refresh skips paths with a collapsed ancestor and removes collapsed entries only when their own aggregate path exactly matches touched. It never updates the aggregate for a touched descendant. Separately, every refresh filters/copies/sorts all rows, rebuilds byPath and, for JVM changes, consults all JVM outlines. The documented O(touched) claim covers reparsing only, not total cost.
 - Impact: rendered directory existence/size/count can remain stale indefinitely, and repeated small edits have repository-sized update cost. No throughput benchmark was run.
 - Possible solutions: maintain per-directory aggregate deltas and update the affected collapsed ancestor; index rows/imports by path and preserve unchanged structure where worthwhile, or honestly budget/document O(repository size) refresh work.
 - Future regression: add/delete/resize collapsed descendants and compare incremental to fresh aggregates; measure single-path refresh work as repository size grows.
+- Fix (2026-09-27, `499addd`): Changes under collapsed directories trigger a metadata rescan that recomputes their totals. Add/delete/resize regressions match a fresh build. KDoc now states repository-sized row copying/sorting and metadata scans; only parsing is limited to touched files. No throughput benchmark or O(touched) total-cost claim.
+
 
 ### F-039 - Curly-language outline extraction has quadratic span-membership work
 
@@ -1764,13 +1844,15 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-046 - STATE line and code-fence validation omits auxiliary rendered fields
 
 - Task: [P1.5.2](TODO.md#L809).
-- Severity: medium. Confidence: reproduced. Status: open.
+- Severity: medium. Confidence: reproduced. Status: fixed (2026-09-27).
 - Locations: [Validator.opText](core/src/main/kotlin/io/astrolabe/register/Validator.kt#L176), [RegisterRender.markdown](core/src/main/kotlin/io/astrolabe/register/RegisterRender.kt#L45).
 - Reproduction: DecisionAdd with short text and a fenced-code because value, plus Next, returns Validation.Applied. The fenced content is then rendered verbatim in STATE.
 - Problem: per-line/fence validation checks only one selected text field per operation. because/rejected/probe, dead-end scope/reopen, open trip/needs, plan accept/req and focus can inject fences or additional lines without this check. The total patch/register cap still applies; it does not enforce the advertised line/format invariant.
 - Impact: the supposedly harness-shaped STATE can contain arbitrary extra Markdown blocks or oversized lines, obscuring the visible meaning of decisions/open items. This does not directly alter executable acceptance authority.
 - Possible solutions: validate every field rendered as a line according to its own type, including newline/fence handling; render structured values with a consistent escaping policy where multiline content is legitimate.
 - Future regression: put fences/newlines and overlong text in every auxiliary rendered field, not only FactAdd.text; reject or safely render it while preserving ordinary quoted command text.
+- Fix (2026-09-27, `aff4943`): Validator checks every rendered operation string, including evidence IDs, anchor paths and auxiliary fields, for the 240-character limit, embedded line breaks and both Markdown fence styles. A matrix covers 25 fields with five invalid forms plus valid inline commands; focused register checks pass.
+
 
 ### F-047 - Recalling a missing file grants KNOWN coverage despite a historical label
 
