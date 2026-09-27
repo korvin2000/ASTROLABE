@@ -1,7 +1,7 @@
 # Bugfix continuation
 
-Checkpoint: `feature/bugfix`, 2026-09-27. Source checkpoint: `b7b74d0`.
-**54 findings fixed across four sessions (6 latest); 88 open; F-034 previously resolved.**
+Checkpoint: `feature/bugfix`, 2026-09-27. Source checkpoint: `eccb010`.
+**64 findings fixed across five sessions (10 latest); 78 open; F-034 previously resolved.**
 P0-P6 remains 185/185 implemented. P7 excluded. Local commits only; nothing pushed.
 
 ## Read first
@@ -10,23 +10,24 @@ P0-P6 remains 185/185 implemented. P7 excluded. Local commits only; nothing push
 3. Selected finding sections and cited code/tests only. Do not repeat the audit.
 
 ## Next fixes
-1. F-004 generic request estimation and native/protocol context.
-2. Continue remaining findings in audit order: F-006, F-010, F-013, F-014, F-015, F-016.
+1. F-013 bounded blob GC and referenced orphan adoption.
+2. F-015/F-016 process settlement and POSIX containment; F-017 Git deadlines.
+3. F-019 search CPU/memory/process bounds, then F-027 onward (raw snapshot fidelity).
 
 ## Verification
-Full Windows JDK 26 build passed: 1370 core passed, 7 skipped; all modules 1453 passed.
-Zero failures/errors; packaging and ABI passed. Log: `build/bugfix-fourth-build.log`.
-Focused regressions passed. No new Linux/CI or P7 evidence.
+Full Windows JDK 26 build passed on eccb010: 1471 passed, 8 skipped, zero failures/errors.
+Compilation, packaging and ABI passed. Log: `build/bugfix-fifth-build.log`.
+No new Linux/CI or P7 evidence. New POSIX permission test is skipped on Windows.
 
 ## Compatibility and decisions
-F-001/F-002/F-023/F-061/F-063/F-064 repaired; see the ledger for evidence.
-D-266: background changes describe an interval, with unknown exclusive attribution.
-D-267: captures retain at most 8 MiB; capped/missing evidence cannot certify green.
-D-268: immutable config includes default roles; canonical v2 fingerprints invalidate old caches.
-ContractRepository adds atomic resolution/read methods; Handle gains defaulted provenance fields.
-Core consumers must rebuild. Existing JSON decodes; legacy handles default to D/unknown.
-Historical amendment rows lacking signed resolutions are not reconstructed.
-D-262/D-263/D-264/D-265 still apply. No database schema bump.
+F-004/F-006/F-010/F-014/F-018/F-020/F-021/F-024/F-025/F-026 repaired.
+D-269: generic request framing is approximate; unknown native context requires provider accounting.
+D-270: digest capacity exits before dispatch; slices retain independent increment obligations.
+D-271: coherence retries unacknowledged listeners before later transitions; failures block delivery.
+ContractRepository.latest adds a default method. ContractSlice constructor/copy ABI changed.
+Rebuild consumers. Old slice JSON decodes but cannot recover previously omitted obligations.
+Rebuild old slices from their authoritative increment. No database schema bump.
+D-261 through D-268 still apply; see the ledger for earlier compatibility limits.
 
 ## Existing implementation debts
 D-254 recovery wiring; D-70/D-71 replanning; D-241 S3 resume; D-252 retrieval;

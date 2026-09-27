@@ -604,3 +604,13 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - Legacy fingerprints invalidate caches; legacy handles default to D/unknown; lost historical amendment resolutions cannot be reconstructed.
 - No new Linux/CI/live/P7 validation. Nothing pushed. Existing user edits preserved.
 - Handoff and repair ledger updated; next F-004, then remaining findings in audit order.
+
+## 2026-09-27 - fifth feature/bugfix session
+- Ten repairs: F-004/F-006/F-010/F-014/F-018/F-020/F-021/F-024/F-025/F-026; 64 fixed, 78 open, F-034 previously resolved.
+- Request accounting/cancellation, coherent bounded projections, external state, Unicode/search boundaries, contract context and retryable coherence delivery.
+- Focused regressions reproduced defects before repair; review correction ensures Cell honors request-estimator overrides.
+- Full Windows JDK 26 build on eccb010: 1471 passed, 8 skipped, zero failures/errors; packaging and ABI passed.
+- D-269/D-270/D-271 record planning margins, digest/slice compatibility and retry acknowledgements. Core ABI updated; no SQL schema bump.
+- Consumers rebuild for ContractSlice changes. Incomplete historical slices require reconstruction from their authoritative increment.
+- No new Linux/CI/live/P7 evidence. Nothing pushed; pre-existing user edits preserved.
+- Updated handoff/ledger; next F-013, F-015/F-016/F-017, F-019, then raw snapshot findings F-027 onward.

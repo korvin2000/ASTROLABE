@@ -54,7 +54,7 @@ D-200–D-202, D-210–D-213, D-220–D-223, D-230–D-233, D-240–D-244, D-250
 (new dependencies allowed under pinned-version rules).
 
 ## Audit remediation (2026-09-27)
-Branch `feature/bugfix`: 54 fixed (6 latest), 88 open, F-034 previously resolved.
+Branch `feature/bugfix`: 64 fixed (10 latest), 78 open, F-034 previously resolved.
 See `findings.md` and `audit/BUGFIX-PROGRESS.md`; historical gates above predate these fixes.
-Full Windows build passed: 1453 passed, 7 skipped; packaging and ABI passed. No new Linux/CI.
-D-266/D-267/D-268 cover background provenance, bounded capture and immutable config fingerprints.
+Full Windows build passed: 1471 passed, 8 skipped; packaging/ABI passed. No new Linux/CI.
+D-269/D-270/D-271 cover request accounting, contract context integrity and coherence retries.

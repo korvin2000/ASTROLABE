@@ -2,10 +2,38 @@
 
 Branch: `feature/bugfix`. Baseline: `9a80e117445be357285fec2cffffe0fd45290a9a`.
 
-**54 fixed across four sessions (6 in the latest continuation); 88 open; F-034 previously resolved.**
+**64 fixed across five sessions (10 in the latest continuation); 78 open; F-034 previously resolved.**
 The complete remaining queue is `findings.md` ? JSON `fix_progress.remaining_open_ids`.
 
-## Latest continuation: six further repairs
+## Fifth continuation: ten further repairs
+
+| Finding | Commit | Change and evidence |
+|---|---|---|
+| F-004 | `55e86ea, eccb010` | Generic request counts include roles, call/result IDs and explicit planning margins, never claim exactness, and flag native-only replay/non-text content as unknown. Cell dispatch honors profile-specific request-estimator overrides. Exact-text, long-ID, native-context and dispatch regressions pass. Generic framing allowances remain planning estimates, not measured provider limits. |
+| F-006 | `6b7c801` | Cancel and release settle held invocations independently of response waiters; cancellation of await requests provider cancellation and preserves the single terminal usage record. Direct cancellation, cancelled waiter and release-without-waiter regressions pass. |
+| F-010 | `4c99034` | Composed views and all export inputs share one SQLite read transaction. Current register reads use LIMIT 1 plus COUNT; Contracts.current uses repository.latest with a bounded SQL implementation. A commit injected between SELECTs preserves the original snapshot; malformed historical bodies do not affect current reads. |
+| F-014 | `6bb0767` | Store.open canonicalizes existing ancestors of the configured base and final layout, and rejects state inside any registered Git worktree before creating directories. Direct, nested, linked-worktree and Windows junction regressions pass. |
+| F-018 | `c406b7a` | JVM matching uses Unicode character classes and explicit LF/CRLF semantics matching ripgrep, including dot and end anchors. Backend comparisons cover accented words, Arabic digits, Unicode whitespace/boundaries and Unicode/CR line separators. |
+| F-020 | `c406b7a` | Enumeration and binary-probe I/O failures propagate as Failed/Denied. Directory-walk failures are no longer hidden; Git errors inside a detected repository cannot fall back to an unrestricted walk. Corrupt-index regression passes; unreadable-directory regression is present but skipped on Windows. |
+| F-021 | `c406b7a` | Search candidates resolve through WorkspacePath before content probes. Link ancestors and outside-root resolutions are denied for both engines. A tracked directory replaced with an external Windows junction is rejected. Concurrent external-writer races remain the documented best-effort path limitation. |
+| F-024 | `1e3ef70` | Digest reduction terminates by removing optional content, without the 64-step cutoff. Mandatory overflow throws DigestCapacity; Cell checkpoints a pressure exit before provider dispatch. Tiny caps, long exclusions and 100 historical requests are covered. |
+| F-025 | `1e3ef70` | ContractSlice persists incrementAcceptanceIds independently of retained definitions and includes them in coverage. Removing an increment-only acceptance item stays incomplete after copy and JSON round-trip. Legacy slices infer only the IDs still present and should be rebuilt from their authoritative increment. |
+| F-026 | `88ab4f5` | Registry and Coherence retain per-listener delivery progress under serialized transition delivery. Failed callbacks resume before later changes; acknowledged callbacks are skipped; recorded versions advance only after all acknowledgements. Failed listeners must tolerate replay of their own partial effects. Registry/horizon fault regressions and run/edit checks pass. |
+
+### Verification and compatibility
+
+- Focused Windows JDK 26 regressions passed for provider accounting/cancellation, store containment, search, composed projections, current contract reads, context slices/digests and coherence. Failures were reproduced before fixes. Some initial regression attempts required fixture or compilation corrections before reaching the intended behavior.
+- Review found that Cell bypassed the request-estimator override; its dispatch regression failed before the follow-up correction and passed afterward.
+- Full Windows JDK 26 build on `eccb010`: **passed**. Core: 1394 tests, 1386 passed, 8 skipped; provider-api 19, eval 49, index-treesitter 17 passed. Total: **1471 passed, 8 skipped**, zero failures/errors. Compilation, packaging and ABI passed. Log: ignored `build/bugfix-fifth-build.log`.
+- Core ABI regenerated. ContractRepository.latest has a compatible default; SQLite and memory repositories override it. ContractSlice gains a defaulted serialized incrementAcceptanceIds field and changed constructor/copy signatures; consumers must rebuild. DigestCapacity is the explicit failure for an irreducible digest.
+- Existing slice JSON decodes by inferring IDs still present. Missing historical increment-only obligations cannot be reconstructed from an already incomplete slice; rebuild it from the authoritative contract/increment. No database schema bump.
+- Generic framing margins are planning estimates. Native-only replay and non-text content need provider-specific effective accounting; no live provider capacity claim is made. D-269 records the policy.
+- D-270 records contract capacity/serialization compatibility. D-271 records retry semantics: acknowledged listeners are not repeated, failed listeners must tolerate their own partial-effect retry, and an unrecovered failure blocks later transition delivery.
+- Windows junction regressions ran. The new POSIX unreadable-directory regression is skipped on Windows. No new Linux/CI, live-provider or P7 evidence.
+- F-013, F-015/F-016/F-017 and F-019 remain open: bounded GC, process containment/settlement, Git deadlines and search resource limits require further work. Raw snapshot findings F-027 onward also remain open.
+- Local commits only. Nothing pushed; existing CLAUDE.md/ISSUES.md and the two untracked task files are preserved.
+
+## Fourth continuation: six further repairs
 
 | Finding | Commit | Change and evidence |
 |---|---|---|
@@ -133,7 +161,7 @@ Total: **1,429 passed, 7 skipped**, zero failures/errors. Log: ignored `build/bu
 ## Resume order
 
 1. Read findings.md fix_progress; preserve existing CLAUDE.md/ISSUES.md and untracked continuation files.
-2. Continue in audit order: F-004 request estimation, F-006 onward. Exact queue: fix_progress.remaining_open_ids.
+2. Continue F-013, F-015/F-016/F-017, F-019, then F-027 onward. Exact queue: fix_progress.remaining_open_ids.
 3. Keep P0-P6 at 185/185 implemented; repair status belongs in findings.md. P7 remains excluded.
 
 ## Existing implementation debts

@@ -1,6 +1,6 @@
 # Implementation audit findings
 
-**Remediation:** 54 fixed on `feature/bugfix` (6 in this continuation); 88 remain open; F-034 was already resolved. See [bugfix progress](audit/BUGFIX-PROGRESS.md). Original audit evidence remains historical; `fix_progress` is the current repair status.
+**Remediation:** 64 fixed on `feature/bugfix` (10 in this continuation); 78 remain open; F-034 was already resolved. See [bugfix progress](audit/BUGFIX-PROGRESS.md). Original audit evidence remains historical; `fix_progress` is the current repair status.
 
 ```json
 {
@@ -544,34 +544,28 @@
     "date": "2026-09-27",
     "status": "session_complete_remaining_findings_open",
     "fixed_this_session": [
-      "F-001",
-      "F-002",
-      "F-023",
-      "F-061",
-      "F-063",
-      "F-064"
-    ],
-    "fixed_this_session_count": 6,
-    "previously_resolved": [
-      "F-034"
-    ],
-    "remaining_open_count": 88,
-    "remaining_open_ids": [
       "F-004",
       "F-006",
       "F-010",
-      "F-013",
       "F-014",
-      "F-015",
-      "F-016",
-      "F-017",
       "F-018",
-      "F-019",
       "F-020",
       "F-021",
       "F-024",
       "F-025",
-      "F-026",
+      "F-026"
+    ],
+    "fixed_this_session_count": 10,
+    "previously_resolved": [
+      "F-034"
+    ],
+    "remaining_open_count": 78,
+    "remaining_open_ids": [
+      "F-013",
+      "F-015",
+      "F-016",
+      "F-017",
+      "F-019",
       "F-027",
       "F-028",
       "F-029",
@@ -647,39 +641,41 @@
       "F-143"
     ],
     "next_priority": [
-      "F-004",
-      "F-006",
-      "F-010",
       "F-013",
-      "F-014",
       "F-015",
-      "F-016"
+      "F-016",
+      "F-017",
+      "F-019",
+      "F-027",
+      "F-028",
+      "F-029",
+      "F-030"
     ],
     "handoff": "CONTINUE-TASK.md",
     "detail": "audit/BUGFIX-PROGRESS.md",
-    "verification": "Windows JDK 26 full build passed on b7b74d0: 1377 core tests: 1370 passed, 7 skipped, zero failures/errors; provider-api 17, eval 49, index-treesitter 17 passed. All modules: 1453 passed, 7 skipped. Compilation, packaging and ABI checks passed. No new Linux/remote CI or P7 validation.",
+    "verification": "Full Windows JDK 26 build passed on eccb010: core 1394 tests, 1386 passed, 8 skipped; provider-api 19, eval 49, index-treesitter 17 passed. Total 1471 passed, 8 skipped, zero failures/errors. Compilation, packaging and ABI passed. No new Linux/CI or P7 evidence.",
     "source_changes_allowed": true,
     "verification_results": {
       "full_build_command": "./gradlew.bat build -q --console=plain",
       "full_build_exit": 0,
-      "log": "build/bugfix-fourth-build.log",
+      "log": "build/bugfix-fifth-build.log",
       "abi": "core dump regenerated",
       "linux_ci": "not run",
       "p7": "excluded",
       "modules": {
         "core": {
-          "tests": 1377,
+          "tests": 1394,
           "failures": 0,
           "errors": 0,
-          "skipped": 7,
-          "passed": 1370
+          "skipped": 8,
+          "passed": 1386
         },
         "provider-api": {
-          "tests": 17,
+          "tests": 19,
           "failures": 0,
           "errors": 0,
           "skipped": 0,
-          "passed": 17
+          "passed": 19
         },
         "eval": {
           "tests": 49,
@@ -696,73 +692,17 @@
           "passed": 17
         }
       },
-      "total_passed": 1453,
-      "total_skipped": 7,
-      "focused_final": {
-        "tests": 48,
-        "failures": 0,
-        "errors": 0,
-        "skipped": 0
-      },
+      "total_passed": 1471,
+      "total_skipped": 8,
       "review_corrections": [
-        "continuous-output interruption",
-        "interrupted-I/O termination",
-        "clean HEAD background changes",
-        "default role snapshot and normalized comparison"
+        "Cell admission must call estimator.estimate(request) to honor provider-specific overrides; regression reproduced before correction."
+      ],
+      "platform_limits": [
+        "New POSIX directory-permission regression skipped on Windows; Windows junction regressions ran."
       ]
     },
     "active_processes": [],
     "previous_session_fixed": [
-      "F-003",
-      "F-005",
-      "F-007",
-      "F-008",
-      "F-009",
-      "F-011",
-      "F-012",
-      "F-022",
-      "F-035",
-      "F-043",
-      "F-047",
-      "F-049",
-      "F-050",
-      "F-051",
-      "F-053",
-      "F-054",
-      "F-055",
-      "F-056",
-      "F-057",
-      "F-058",
-      "F-059",
-      "F-060",
-      "F-062",
-      "F-065",
-      "F-066",
-      "F-067",
-      "F-068",
-      "F-070",
-      "F-071",
-      "F-072",
-      "F-073",
-      "F-074",
-      "F-076",
-      "F-077",
-      "F-078",
-      "F-079",
-      "F-080",
-      "F-081",
-      "F-088",
-      "F-094",
-      "F-098",
-      "F-116",
-      "F-121",
-      "F-123",
-      "F-130",
-      "F-131",
-      "F-139",
-      "F-140"
-    ],
-    "fixed_on_branch": [
       "F-001",
       "F-002",
       "F-003",
@@ -818,7 +758,73 @@
       "F-139",
       "F-140"
     ],
-    "fixed_on_branch_count": 54,
+    "fixed_on_branch": [
+      "F-001",
+      "F-002",
+      "F-003",
+      "F-004",
+      "F-005",
+      "F-006",
+      "F-007",
+      "F-008",
+      "F-009",
+      "F-010",
+      "F-011",
+      "F-012",
+      "F-014",
+      "F-018",
+      "F-020",
+      "F-021",
+      "F-022",
+      "F-023",
+      "F-024",
+      "F-025",
+      "F-026",
+      "F-035",
+      "F-043",
+      "F-047",
+      "F-049",
+      "F-050",
+      "F-051",
+      "F-053",
+      "F-054",
+      "F-055",
+      "F-056",
+      "F-057",
+      "F-058",
+      "F-059",
+      "F-060",
+      "F-061",
+      "F-062",
+      "F-063",
+      "F-064",
+      "F-065",
+      "F-066",
+      "F-067",
+      "F-068",
+      "F-070",
+      "F-071",
+      "F-072",
+      "F-073",
+      "F-074",
+      "F-076",
+      "F-077",
+      "F-078",
+      "F-079",
+      "F-080",
+      "F-081",
+      "F-088",
+      "F-094",
+      "F-098",
+      "F-116",
+      "F-121",
+      "F-123",
+      "F-130",
+      "F-131",
+      "F-139",
+      "F-140"
+    ],
+    "fixed_on_branch_count": 64,
     "previous_session_verification_results": {
       "initial_full_core": {
         "tests": 1293,
@@ -858,7 +864,7 @@
       },
       "full_core_rerun": false
     },
-    "source_checkpoint": "b7b74d0",
+    "source_checkpoint": "eccb010",
     "previous_continuation_verification_results": {
       "first_continuation_full_core": {
         "tests": 1314,
@@ -949,6 +955,58 @@
       "log": "build/bugfix-third-build-verified.log",
       "linux_or_remote_ci": false,
       "focused": "New repro batches failed before correction. Final focused checks passed after three stale observation/crash assertions were updated to verify the new alias/partial-effect behavior. Review corrections added whitespace, dispatch and selective-revert coverage."
+    },
+    "previous_fourth_verification_results": {
+      "full_build_command": "./gradlew.bat build -q --console=plain",
+      "full_build_exit": 0,
+      "log": "build/bugfix-fourth-build.log",
+      "abi": "core dump regenerated",
+      "linux_ci": "not run",
+      "p7": "excluded",
+      "modules": {
+        "core": {
+          "tests": 1377,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 7,
+          "passed": 1370
+        },
+        "provider-api": {
+          "tests": 17,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 17
+        },
+        "eval": {
+          "tests": 49,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 49
+        },
+        "index-treesitter": {
+          "tests": 17,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 17
+        }
+      },
+      "total_passed": 1453,
+      "total_skipped": 7,
+      "focused_final": {
+        "tests": 48,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "review_corrections": [
+        "continuous-output interruption",
+        "interrupted-I/O termination",
+        "clean HEAD background changes",
+        "default role snapshot and normalized comparison"
+      ]
     }
   }
 }
@@ -1214,13 +1272,15 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-004 - Generic request estimator can claim exactness while omitting protocol/native context
 
 - Task: [P0.3.2](TODO.md#L577).
-- Severity: high. Confidence: potential. Status: open.
+- Severity: high. Confidence: potential. Status: fixed (2026-09-27).
 - Locations: [Request.estimate / Item.estimate](provider-api/src/main/kotlin/io/astrolabe/provider/Estimate.kt#L83), [Item.native](provider-api/src/main/kotlin/io/astrolabe/provider/Item.kt#L15), [TokenEstimator default request method](provider-api/src/main/kotlin/io/astrolabe/provider/Estimate.kt#L75).
 - Problem: request estimation adds text fragments/schema strings but omits roles, call/result IDs, framing and all `native` content. A ReasoningRef with opaque=null contributes zero even if native contains replay material. If the text estimator returns exact=true, the sum remains exact=true with zero margin, despite not counting the effective provider request. Tokenization of fragments separately also does not establish exactness for their serialized composition.
 - Impact: near-limit requests can be admitted despite exceeding the actual effective context. Live transports are intentionally P7, so this is a contract/integration risk rather than a measured provider failure; an adapter overriding request estimation and admission can avoid it.
 - Evidence: exhaustive cases of Item.estimate; RequestTest validates the same fragment sum, not a provider serialization. No external provider behavior claimed.
 - Possible solutions: require profile-specific estimation of the fully serialized/effective request at dispatch; make the generic path explicitly approximate with a defensible framing margin and mark unknown native/history contributions as unknown. Avoid double counting native payload that replaces the normalized form.
 - Future regression: near-limit requests containing many short messages, long call IDs and native-only replay data; an exact text tokenizer alone must never yield an exact whole-request count.
+- Fix (2026-09-27, `55e86ea, eccb010`): Generic request counts include roles, call/result IDs and explicit planning margins, never claim exactness, and flag native-only replay/non-text content as unknown. Cell dispatch honors profile-specific request-estimator overrides. Exact-text, long-ID, native-context and dispatch regressions pass. Generic framing allowances remain planning estimates, not measured provider limits.
+
 
 ### F-005 - Overflow can turn an excessive admission count into a valid request
 
@@ -1241,12 +1301,14 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-006 - Fake invocation terminal reconciliation depends on an active await caller
 
 - Task: [P0.3.5](TODO.md#L594).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-27).
 - Location: [FakeAdapter.FakeInvocation](core/src/testFixtures/kotlin/io/astrolabe/fixtures/FakeAdapter.kt#L198).
 - Problem: only `await()` creates/completes terminalRecord and terminalDeferred. `cancel()` merely sets flags and opens the gate. If the coroutine suspended in gate.await() is cancelled, it exits without invoking cancel or producing a terminal. Calling cancel explicitly and then terminal without another await also never completes.
 - Impact: the fixture violates Invocation's cancellation/accounting contract and cannot faithfully validate a runtime which cancels its response waiter and separately drains terminal usage. Such cancellation tests can hang or leave reservations unresolved; tests explicitly calling await after cancel conceal the gap.
 - Possible solutions: let the fake own completion independently of the waiting coroutine, including provider cancellation acknowledgement and terminal production; response-wait cancellation must request cancellation without cancelling the completion owner.
 - Future regression: start with holdResponses, cancel the await job, then bound terminal() with a test timeout and assert exactly one cancelled terminal with late usage. Also test cancel followed directly by terminal.
+- Fix (2026-09-27, `6b7c801`): Cancel and release settle held invocations independently of response waiters; cancellation of await requests provider cancellation and preserves the single terminal usage record. Direct cancellation, cancelled waiter and release-without-waiter regressions pass.
+
 
 ### F-007 - Concurrent event emission can reorder delivery and duplicate replay
 
@@ -1289,7 +1351,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-010 - UI resynchronization has inconsistent multi-query snapshots and growing history cost
 
 - Task: [P0.4.3](TODO.md#L614).
-- Severity: medium. Confidence: confirmed_source. Status: open.
+- Severity: medium. Confidence: confirmed_source. Status: fixed (2026-09-27).
 - Locations: [Views.contract / register](core/src/main/kotlin/io/astrolabe/event/Views.kt#L114), [Export.write](core/src/main/kotlin/io/astrolabe/event/Export.kt#L40), [Db.query](core/src/main/kotlin/io/astrolabe/store/Db.kt#L75).
 - Problem: a contract projection and a full export consist of independently locked SELECTs. A writer can commit a new revision between them, producing old contracts with new requirements/acceptance in one view. register() also reads/deserializes every historical register body merely to return the newest row and history count; cost grows with history even though the live register is bounded.
 - Impact: gap-repair UI reads can present a state that never existed atomically; long campaigns pay unnecessary full-history reads. The first issue needs concurrent access; sequential unchanged exports remain deterministic as tested.
@@ -1297,6 +1359,8 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Future regression: interleave an amendment transaction with a composite read and require a wholly old or wholly new revision; query/deserialize bounded rows for latest-register reads with large history.
 
 - P1.1.1 follow-up: [Contracts.current](core/src/main/kotlin/io/astrolabe/contract/Contracts.kt#L73) likewise obtains the latest contract by loading/deserializing its entire history through SqliteContractRepository.history. Add a latest-only repository query for frequent current-authority reads.
+- Fix (2026-09-27, `4c99034`): Composed views and all export inputs share one SQLite read transaction. Current register reads use LIMIT 1 plus COUNT; Contracts.current uses repository.latest with a bounded SQL implementation. A commit injected between SELECTs preserves the original snapshot; malformed historical bodies do not affect current reads.
+
 
 ### F-011 - Failed COMMIT does not roll back or quarantine the connection
 
@@ -1339,13 +1403,15 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-014 - Configured state root may be inside the workspace
 
 - Task: [P0.5.1](TODO.md#L622).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-27).
 - Locations: [Layout.resolve](core/src/main/kotlin/io/astrolabe/store/Layout.kt#L121), [Store.open](core/src/main/kotlin/io/astrolabe/store/Store.kt#L91).
 - Trigger: a host supplies Config.stateRoot equal to the repository root or an unignored child directory, including a symlink alias resolving there.
 - Problem: the root is used verbatim and created before any containment check against the working tree. The documented external-state invariant is not validated.
 - Impact: SQLite/WAL, logs, blobs and exports enter repository scans/stamps. Runtime writes can make the candidate perpetually drift; captures may recursively include prior artifacts and expose private state to workspace reads. The exact amplification depends on ignore rules and the later capture paths.
 - Possible solutions: canonicalize both roots and reject durable state under any relevant workspace before creating directories; alternatively require and validate an explicit external-storage policy at Project/Store open.
 - Future regression: direct and symlinked in-workspace state roots must fail before any store file is created; an external root shared by linked worktrees remains valid.
+- Fix (2026-09-27, `6bb0767`): Store.open canonicalizes existing ancestors of the configured base and final layout, and rejects state inside any registered Git worktree before creating directories. Direct, nested, linked-worktree and Windows junction regressions pass.
+
 
 ### F-015 - Terminal process status is published before descendant cleanup
 
@@ -1382,13 +1448,15 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-018 - Supported Unicode regex patterns produce different search results by backend
 
 - Task: [P0.6.3](TODO.md#L655).
-- Severity: high. Confidence: reproduced. Status: open.
+- Severity: high. Confidence: reproduced. Status: fixed (2026-09-27).
 - Locations: [JvmSearch.compile](core/src/main/kotlin/io/astrolabe/os/search/JvmSearch.kt#L60), [PatternSubset accepted escapes](core/src/main/kotlin/io/astrolabe/os/search/Search.kt#L250), [RipgrepSearch.baseCommand](core/src/main/kotlin/io/astrolabe/os/search/RipgrepSearch.kt#L47).
 - Reproduction: one UTF-8 file containing U+00E9 followed by LF, pattern `^\w+$`, Regex mode and caseSensitive=true. Current compiled code on JDK 26: JVM returns Found with no hits; ripgrep returns the line as a hit. Both claim complete=true and filesSearched=1.
 - Problem: Java Pattern is compiled without UNICODE_CHARACTER_CLASS while ripgrep's normal regex semantics use Unicode classes. PatternSubset allows \w/\d/\s and their negations without restricting this difference. This example is Latin-1 and does not fall under the documented beyond-Latin-1 case-folding limitation.
 - Impact: installing or removing rg changes which source lines the agent finds, including false complete zero-match results.
 - Possible solutions: define one precise character-class policy and align both engines or explicitly reject unsupported semantics. Include word boundaries and Unicode line-separator/dot behavior when validating that policy.
 - Future regression: compare both engines on accented letters, non-ASCII digits, spaces, boundaries and line separators; assert actual hit lists, not just that both accept the syntax.
+- Fix (2026-09-27, `c406b7a`): JVM matching uses Unicode character classes and explicit LF/CRLF semantics matching ripgrep, including dot and end anchors. Backend comparisons cover accented words, Arabic digits, Unicode whitespace/boundaries and Unicode/CR line separators.
+
 
 ### F-019 - Search output budgets do not bound regex work or file memory
 
@@ -1403,24 +1471,28 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-020 - Candidate enumeration hides access/I/O failures as complete search
 
 - Task: [P0.6.3](TODO.md#L655).
-- Severity: medium. Confidence: confirmed_source. Status: open.
+- Severity: medium. Confidence: confirmed_source. Status: fixed (2026-09-27).
 - Locations: [Candidates.resolve / isBinary / walk](core/src/main/kotlin/io/astrolabe/os/search/Search.kt#L596).
 - Problem: walk.visitFileFailed always continues; generic IOException during attributes is skipped, and IOException during the binary probe becomes Gone. gitListFiles returns null for every nonzero exit and falls back to a no-ignore tree walk, including failures unrelated to being outside a repository.
 - Impact: an unreadable subtree can disappear from candidate enumeration and still yield Found(empty), complete=true; a broken Git invocation can unexpectedly include ignored files. This violates the explicit distinction between complete zero matches, failure and denial.
 - Evidence: error branches inspected; current permission test covers an unreadable file selected by enumeration, not an unreadable directory skipped during the walk.
 - Possible solutions: propagate denied/failed paths and distinguish true absence from I/O errors. Only use the no-repository fallback after establishing that condition; treat Git failure as failed or explicitly partial.
 - Future regression: inaccessible directory, injected read error and failing git inside a repository must not produce a complete negative result or silently broaden ignore scope.
+- Fix (2026-09-27, `c406b7a`): Enumeration and binary-probe I/O failures propagate as Failed/Denied. Directory-walk failures are no longer hidden; Git errors inside a detected repository cannot fall back to an unrestricted walk. Corrupt-index regression passes; unreadable-directory regression is present but skipped on Windows.
+
 
 ### F-021 - Candidate filtering checks symlinks only at the final file component
 
 - Task: [P0.6.3](TODO.md#L655); related P1.2.6/P1.6.3.
-- Severity: high. Confidence: potential. Status: open.
+- Severity: high. Confidence: potential. Status: fixed (2026-09-27).
 - Location: [Candidates.resolve](core/src/main/kotlin/io/astrolabe/os/search/Search.kt#L622).
 - Trigger: a tracked directory is replaced by a symlink/junction to another directory that contains the same tracked filenames; git's cached file list still supplies those relative paths.
 - Problem: readAttributes(NOFOLLOW_LINKS) applies to the final file only; ancestor links are traversed. isBinary and both backends then read the resolved external file without WorkspacePath validation, contrary to the search no-follow contract.
 - Impact: direct Search API consumers can receive out-of-workspace content and the process reads bytes outside its declared scope. Look.find rereads returned hit lines through its own readFile path, which may mitigate model exposure; that downstream guard is not yet certified here.
 - Possible solutions: resolve each candidate through the canonical WorkspacePath authority and validate all ancestors/containment before opening; retain the documented external-writer race limitation where no handle-based confinement exists.
 - Future regression: tracked ancestor swapped to an external symlink/junction must be denied/skipped with honest completeness on both engines; ordinary internal files remain searchable.
+- Fix (2026-09-27, `c406b7a`): Search candidates resolve through WorkspacePath before content probes. Link ancestors and outside-root resolutions are denied for both engines. A tracked directory replaced with an external Windows junction is rejected. Concurrent external-writer races remain the documented best-effort path limitation.
+
 
 ### F-022 - Amendment resolution does not validate reply identity or current revision
 
@@ -1450,33 +1522,39 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-024 - Contract digest returns over-cap text without a capacity outcome
 
 - Task: [P1.1.4](TODO.md#L699).
-- Severity: medium. Confidence: confirmed_source. Status: open.
+- Severity: medium. Confidence: confirmed_source. Status: fixed (2026-09-27).
 - Location: [ContractDigest.render](core/src/main/kotlin/io/astrolabe/register/ContractDigest.kt#L21).
 - Problem: the reduction loop breaks when the request is short and statuses are exhausted, or after 64 steps, and returns text without a final cap check. Requirement statuses and exclusions are never shortened, so a large valid contract can exceed capTokens even after every allowed reduction. More than 64 historical requests can exhaust the iteration limit before adequate reduction.
 - Impact: the advertised 150-token bound is not enforced. A mandatory anchor region can unexpectedly overflow and consume admission headroom; whether a later anchor reducer catches it must be checked at P1.8.3. Dropping mandatory exclusions silently would be an unsafe remedy.
 - Possible solutions: compute mandatory minimum size and return a typed capacity failure when it cannot fit; otherwise use a terminating reduction strategy that checks its postcondition. Keep complete mandatory definitions in the appropriate region and document any digest reference strategy explicitly.
 - Future regression: many requirements, long exclusions, more than 64 user messages and capTokens=1; result must either satisfy the declared bound or explicitly refuse with an actionable capacity result.
+- Fix (2026-09-27, `1e3ef70`): Digest reduction terminates by removing optional content, without the 64-step cutoff. Mandatory overflow throws DigestCapacity; Cell checkpoints a pressure exit before provider dispatch. Tiny caps, long exclusions and 100 historical requests are covered.
+
 
 ### F-025 - Slice coverage forgets acceptance obligations owned only by the increment
 
 - Task: [P1.1.4](TODO.md#L699).
-- Severity: medium. Confidence: potential. Status: open.
+- Severity: medium. Confidence: potential. Status: fixed (2026-09-27).
 - Location: [ContractSlice.requiredAcceptanceIds / coverage / forIncrement](core/src/main/kotlin/io/astrolabe/context/ContractSlice.kt#L29).
 - Problem: forIncrement correctly unions increment.accept with requirement acceptance IDs, but the resulting slice retains no independent copy of increment.accept. coverage recomputes required IDs only from requirements. Removing an increment-only acceptance definition from a copied/deserialized slice therefore still reports complete=true.
 - Impact: the independent coverage check cannot prove its documented contract. The normal factory currently includes the item, so an actual omission needs a later transformation, reconstruction or caller-supplied slice; audit Compiler/Manifest before claiming an end-to-end false-green path.
 - Possible solutions: carry the full required acceptance ID set in the slice, or validate against the authoritative Increment at the boundary rather than derive expected coverage from partially retained content.
 - Future regression: an increment with an extra acceptance item not listed on its requirements; remove that definition and require coverage to report it missing.
+- Fix (2026-09-27, `1e3ef70`): ContractSlice persists incrementAcceptanceIds independently of retained definitions and includes them in coverage. Removing an increment-only acceptance item stays incomplete after copy and JSON round-trip. Legacy slices infer only the IDs still present and should be rebuilt from their authoritative increment.
+
 
 ### F-026 - Failed coherence notification is permanently suppressed on retry
 
 - Task: [P1.2.1](TODO.md#L707); follow-up P1.4.4.
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-27).
 - Location: [VersionRegistry.change](core/src/main/kotlin/io/astrolabe/workspace/VersionRegistry.kt#L238).
 - Problem: current[path] is advanced before invoking listeners, outside the lock. If an early listener throws, later listeners never receive the change; retrying the same transition immediately returns because the new version is already recorded. Concurrent change calls can also deliver transitions in a different order from their recorded state.
 - Impact: after a recoverable coherence/storage error, some horizons can retain stale evidence while the registry claims the transition was announced. Actual serialized runtime mutation reduces concurrent-call exposure but does not repair the exception path. Recheck how Coherence handles partial propagation in P1.4.4.
 - Possible solutions: make fan-out completion explicit and retryable/idempotent, or fail the context closed and force reconciliation before any further consequential action; serialize transition delivery in order. Do not mark notification complete before required consumers acknowledge it.
 - Future regression: first listener throws once, second tracks staleness; retry/reconciliation must reach every horizon and never certify stale data as current.
 - P1.4.4 follow-up: Coherence.onChange adds the pending path then invokes horizons without error isolation/retry. Its KDoc requires horizons not to throw; that documents the precondition but does not enforce cleanup if a real horizon violates it. Assess the actual failing-horizon path before assigning an end-to-end stale-acceptance consequence.
+- Fix (2026-09-27, `88ab4f5`): Registry and Coherence retain per-listener delivery progress under serialized transition delivery. Failed callbacks resume before later changes; acknowledged callbacks are skipped; recorded versions advance only after all acknowledgements. Failed listeners must tolerate replay of their own partial effects. Registry/horizon fault regressions and run/edit checks pass.
+
 
 ### F-027 - Raw-byte candidate changes can disappear behind Git clean filters
 
