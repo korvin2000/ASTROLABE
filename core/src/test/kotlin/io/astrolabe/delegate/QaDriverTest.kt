@@ -101,13 +101,31 @@ class QaDriverTest {
                 QaProbe("negative-cli", negativeCli, listOf("exercise expected failure"), QaExpectation(7)),
             )
             val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = c.store.layout.candidates, isolateAll = true)
-            val driver = QaDriver(scheduler, c.checks, c.os, TrustedLocalRunner(c.os), c.store.blobs, stateRoot.resolve("qa-logs"))
+            val unbound = QaDriver(scheduler, c.checks, c.os, TrustedLocalRunner(c.os), c.store.blobs, stateRoot.resolve("qa-logs"))
+            assertIs<QaDrive.Refused>(unbound.drive(packet, probes, enabled = true), "an unrelated loopback service cannot certify the candidate")
+            var closed = false
+            val launcher = QaHttpLauncher { root, _ ->
+                assertTrue(root != c.workspace.root)
+                val service = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+                service.createContext("/report") { exchange ->
+                    val body = Files.readAllBytes(root.resolve("report.txt"))
+                    exchange.sendResponseHeaders(200, body.size.toLong())
+                    exchange.responseBody.use { it.write(body) }
+                }
+                service.start()
+                object : QaHttpService {
+                    override val origin = java.net.URI("http://127.0.0.1:${service.address.port}")
+                    override fun close() { service.stop(0); closed = true }
+                }
+            }
+            val driver = QaDriver(scheduler, c.checks, c.os, TrustedLocalRunner(c.os), c.store.blobs, stateRoot.resolve("qa-logs"), httpLauncher = launcher)
 
             assertIs<QaDrive.Refused>(driver.drive(packet, probes, enabled = false), "an optional layer: off unless Flags.qaCell")
             val production = packet.copy(entryPoints = listOf(EntryPoint(QaSurface.Http, "https://prod.example/report")))
             assertTrue(assertIs<QaDrive.Refused>(driver.drive(production, emptyList(), enabled = true)).reason.contains("never drives production"))
 
             val driven = assertIs<QaDrive.Driven>(driver.drive(packet, probes, c.attempt.config.flags.qaCell))
+            assertTrue(closed, "candidate service is stopped after the request")
             assertEquals(emptyList(), driven.gaps)
             assertEquals(listOf(true, true, true), driven.result.cases.map { it.passed }, driven.result.cases.toString())
             val receipts = SqliteReceipts(c.store, clock)
