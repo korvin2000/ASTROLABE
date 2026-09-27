@@ -276,6 +276,7 @@ class CellTest {
                 Scripted.Reply(listOf(say("and again"), tree("c3"))),
                 Scripted.Reply(listOf(say("once more"), tree("c4"))),
                 Scripted.Reply(listOf(say("recording"), patch("c5", """{"next":"move on"}"""), tree("c6"))),
+                Scripted.Reply(listOf(say("a different source"), read("c7", "src/a.py"))),
             )
 
             val exit = f.run(model)
@@ -287,6 +288,8 @@ class CellTest {
             assertTrue(refused.contains("not executed: the loop gate ended the last turn: a state op is required"), refused)
             val recorded = f.transcript(6).filterIsInstance<ToolResult>().map { resultText(it) }
             assertTrue(recorded.any { it.contains("STATE v1 · applied 1 op") }, recorded.toString())
+            val later = f.transcript(7).filterIsInstance<ToolResult>().map { resultText(it) }
+            assertTrue(later.any { it.contains("src/a.py") && !it.contains("state op is required") }, later.toString())
             assertEquals(1, f.recorder.ofType<AgentEvent.Cell.GateFired>().count { it.text.contains("same result 2 times") })
         }
     }

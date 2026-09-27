@@ -462,6 +462,9 @@ public class Cell @JvmOverloads constructor(
             occupancy = current
 
             // Gates on records.
+            if (calls.any { it.family == ToolFamily.State && it.op == "patch" &&
+                    (result?.of(it.opId) as? Disposition.Executed)?.outcome?.applied == true
+                }) signatures.clear()
             val currenciesNow = currencies(stampNow.candidateId)
             uncertified = outstanding(currenciesNow)
             val certifiedAfter = certified(currenciesNow)
