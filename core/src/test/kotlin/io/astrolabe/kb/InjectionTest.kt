@@ -51,7 +51,29 @@ class InjectionTest {
     )
 
     private fun inputs(vararg writeScope: String = arrayOf("src/pay/**"), already: Set<String> = emptySet()) =
-        InjectionInputs(Roles.implementing, work, writeScope.toList(), contractsInPlay = setOf("CON-1"), stamp = "s1", alreadyInjected = already)
+        InjectionInputs(Roles.implementing, work, writeScope.toList(), contractsInPlay = setOf("CON-1"), stamp = "s1", alreadyInjected = already, dependencyVersions = mapOf("CON-1" to "v1"))
+
+    @Test
+    fun `focus notes recheck versions dependencies and role scope on every render`() {
+        val old = io.astrolabe.id.FileVersion(io.astrolabe.id.Digest.ofUtf8("old"))
+        var current = old
+        val note = les("LES-focus").copy(anchors = listOf(NoteAnchor("src/pay/a.py", old.digest.hex)))
+        var live = listOf(note)
+        fun focus(role: io.astrolabe.cell.Role = Roles.implementing) = FocusNotes(live, estimator,
+            inputs = { inputs().copy(role = role, currentVersion = { current }) }, currentNotes = { live })
+        val moved = focus()
+        current = io.astrolabe.id.FileVersion(io.astrolabe.id.Digest.ofUtf8("new"))
+        assertNull(moved.render("src/pay", emptySet()))
+        current = old
+        assertTrue(moved.render("src/pay", emptySet())!!.contains("LES-focus"))
+        val stale = focus()
+        live = listOf(note.copy(status = NoteStatus.Stale))
+        assertNull(stale.render("src/pay", emptySet()))
+        live = listOf(note)
+        assertNull(focus(Roles.implementing.copy(noteScope = emptySet())).render("src/pay", emptySet()))
+        live = listOf(note.copy(validity = NoteValidity(listOf("CON-missing@v1"))))
+        assertNull(focus().render("src/pay", emptySet()))
+    }
 
     @Test
     fun `ranking is deterministic for equal inputs and independent of the input order`() {

@@ -23,6 +23,10 @@ public class Notes(private val store: Store) {
     /** Every note at its latest revision, ordered by id. */
     public fun all(): List<Note> = store.db.query("SELECT body FROM notes ORDER BY note_id") { decode(it.string("body")) }
 
+    public fun versions(): Map<String, String> = store.db.query(
+        "SELECT note_id, max(revision) AS revision FROM note_revisions GROUP BY note_id",
+    ) { it.string("note_id") to "v${it.long("revision")}" }.toMap()
+
     private fun decode(body: String): Note = NOTE_JSON.decodeFromString(Note.serializer(), body)
 }
 

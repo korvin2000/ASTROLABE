@@ -71,6 +71,7 @@ public class KbTool @JvmOverloads constructor(
     private val deniedKinds: Set<String> = emptySet(),
     /** An optional dense candidate source (`Flags.denseRetrieval`, P5.5.1); unscoped searches only, never a block (FX-46, D-252). */
     private val dense: Retriever? = null,
+    private val redaction: io.astrolabe.auth.Redaction = io.astrolabe.auth.Redaction(),
 ) : ToolExecutor {
     /** The `CON` anchors the contract-touch gate reads (§5.6). */
     public fun contractAnchors(): Map<String, Set<String>> = kb.contractAnchors()
@@ -82,14 +83,48 @@ public class KbTool @JvmOverloads constructor(
     override suspend fun execute(call: ToolCall, context: TurnContext): ToolOutcome {
         require(call.family == ToolFamily.Kb) { "not a kb call: ${call.name}" }
         val args = (call.args as Args.Kb).args
-        if (!mask.allows(call.name)) return result("masked", "${call.name} is masked in this role (the curator admits proposals from P4.1)", "kb", complete = true)
-        return when (args.op) {
+        val outcome = if (!mask.allows(call.name)) result("masked", "${call.name} is masked in this role (the curator admits proposals from P4.1)", "kb", complete = true)
+        else when (args.op) {
             "search" -> search(args)
             "get" -> entry(args, "note") { kb.get(it) }
             "skill" -> entry(args, "skill") { kb.skill(it) }
             "propose" -> propose(args)
             else -> result("masked", "${call.name} is masked in this role", "kb", complete = true)
         }
+        return render(outcome, args, context.resultBudgetTokens.coerceAtMost(1_500))
+    }
+
+    private fun render(outcome: ToolOutcome, args: KbArgs, budget: Long): ToolOutcome {
+        val safe = redaction.apply(outcome.body)
+        val version = io.astrolabe.id.Digest.ofUtf8(safe.text).hex
+        val paging = args.op == "get" || args.op == "skill"
+        val mismatch = args.version != null && args.version != version
+        val text = if (mismatch) "kb entry changed; restart at offset 0" else safe.text
+        val start = if (paging && !mismatch) args.offset.coerceAtMost(text.length) else 0
+        var end = text.length
+        fun page(to: Int): String = text.substring(start, to) +
+            if (to < text.length && paging && !mismatch) "\nnext_offset=$to version=$version" else ""
+        if (estimator.estimate(page(end)).tokens > budget) {
+            var low = start
+            var high = end
+            while (low < high) {
+                val mid = low + (high - low + 1) / 2
+                if (estimator.estimate(page(mid)).tokens <= budget) low = mid else high = mid - 1
+            }
+            end = low
+            if (end > start && end < text.length && text[end - 1].isHighSurrogate()) end--
+        }
+        val rendered = page(end).takeIf { estimator.estimate(it).tokens <= budget }.orEmpty()
+        val header = checkNotNull(outcome.header)
+        val truncated = header.truncated || end < text.length || safe.limitations.isNotEmpty()
+        val complete = header.runtime.captureComplete && safe.limitations.isEmpty()
+        return outcome.copy(body = rendered, tokens = estimator.estimate(rendered).tokens, header = header.copy(
+            truncated = truncated, flags = InstructionShape.detect(rendered).flags + safe.limitations,
+            runtime = header.runtime.copy(status = if (mismatch) "changed" else header.runtime.status,
+                scope = header.runtime.scope?.let { redaction.apply(it).text },
+                completeness = if (complete) "complete" else "incomplete", captureComplete = complete,
+                displayTruncated = truncated, redactionApplied = safe.applied),
+        ))
     }
 
     private suspend fun search(args: KbArgs): ToolOutcome {

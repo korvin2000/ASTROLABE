@@ -113,7 +113,8 @@ public class Curator @JvmOverloads constructor(
      * superseded or deprecated note is deprecated; the rest stay stale.
      */
     @Synchronized
-    public fun recheck(ids: Identities, currentVersion: (String) -> FileVersion?, stamp: String?): Recheck {
+    @JvmOverloads
+    public fun recheck(ids: Identities, currentVersion: (String) -> FileVersion?, stamp: String?, dependencyVersions: Map<String, String> = emptyMap()): Recheck {
         val all = notes.all()
         val byId = all.associateBy { it.id }
         val readmitted = ArrayList<String>()
@@ -122,7 +123,7 @@ public class Curator @JvmOverloads constructor(
         for (note in all.filter { it.status == NoteStatus.Stale }) {
             val gone = note.validity.dependsOn.mapNotNull { byId[it.substringBeforeLast('@')] }.filter { it.status == NoteStatus.Superseded || it.status == NoteStatus.Deprecated }
             val anchorsCurrent = note.anchors.all { a -> a.version == null || currentVersion(a.path)?.digest?.hex?.startsWith(a.version) == true }
-            val dependenciesCurrent = note.validity.dependsOn.all { dep -> byId[dep.substringBeforeLast('@')]?.let { it.status == NoteStatus.Admitted } ?: true }
+            val dependenciesCurrent = Injection.dependenciesCurrent(note, byId, currentVersion, dependencyVersions + notes.versions())
             when {
                 gone.isNotEmpty() -> {
                     writer.setStatus(note.id, NoteStatus.Deprecated, ids)

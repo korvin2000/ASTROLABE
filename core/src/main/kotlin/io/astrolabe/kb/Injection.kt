@@ -49,6 +49,8 @@ public data class InjectionInputs @JvmOverloads constructor(
     val currentVersion: ((String) -> FileVersion?)? = null,
     /** Digests of advice already injected in this cell ([Injection.digest]); unchanged advice is never re-injected. */
     val alreadyInjected: Set<String> = emptySet(),
+    /** Exact revisions of named contracts and notes; absent revisions cannot validate pinned dependencies. */
+    val dependencyVersions: Map<String, String> = emptyMap(),
 )
 
 /** The bounded D-37 features of one note, each in [0, 1] except [tokens]. */
@@ -130,6 +132,7 @@ public object Injection {
             val target = all[dep.substringBeforeLast('@')] ?: continue
             if (target.status != NoteStatus.Admitted) return "references ${target.id}, which is ${target.status.wire}"
         }
+        if (!dependenciesCurrent(note, all, inputs.currentVersion, inputs.dependencyVersions)) return "stale or unresolved dependency"
         inputs.currentVersion?.let { current ->
             for (anchor in note.anchors) {
                 val recorded = anchor.version ?: continue
@@ -139,6 +142,23 @@ public object Injection {
         }
         if (digest(note) in inputs.alreadyInjected) return "unchanged advice already injected in this cell"
         return null
+    }
+
+    internal fun dependenciesCurrent(note: Note, all: Map<String, Note>, current: ((String) -> FileVersion?)?, versions: Map<String, String>, seen: Set<String> = emptySet()): Boolean {
+        if (note.id in seen) return false
+        return note.validity.dependsOn.all { dep ->
+            val name = dep.substringBeforeLast('@')
+            val pin = dep.substringAfterLast('@', "")
+            val target = all[name]
+            if (target != null) {
+                target.status == NoteStatus.Admitted && (pin.isEmpty() || versions[name] == pin) &&
+                    target.anchors.all { a -> a.version == null || current?.invoke(a.path)?.digest?.hex?.startsWith(a.version) == true } &&
+                    dependenciesCurrent(target, all, current, versions, seen + note.id)
+            } else {
+                pin.isNotEmpty() && (versions[name]?.let { it == pin }
+                    ?: (pin.matches(Regex("[0-9a-f]{8,64}")) && current?.invoke(name)?.digest?.hex?.startsWith(pin) == true))
+            }
+        }
     }
 
     /**
@@ -199,6 +219,8 @@ public class FocusNotes @JvmOverloads constructor(
     private val estimator: TokenEstimator,
     private val maxTokens: Int = 300,
     compiled: Set<String> = emptySet(),
+    private val inputs: (() -> InjectionInputs)? = null,
+    private val currentNotes: (() -> List<Note>)? = null,
 ) {
     private val shown = LinkedHashSet<String>(compiled)
 
@@ -209,8 +231,12 @@ public class FocusNotes @JvmOverloads constructor(
     @Synchronized
     public fun render(focus: String?, touched: Set<String>): String? {
         val dir = focus?.replace('\\', '/')?.trimEnd('/')?.takeIf { it.isNotEmpty() && it != "." }
-        val eligible = notes.filter { note ->
-            note.status == NoteStatus.Admitted && note.id !in shown && note.kind != NoteKind.STATUS && note.anchors.any { a ->
+        val live = currentNotes?.invoke() ?: notes
+        val all = live.associateBy { it.id }
+        val currentInputs = inputs?.invoke()
+        val eligible = live.filter { note ->
+            (currentInputs?.let { Injection.eligibility(note, all, it) == null } ?: (note.status == NoteStatus.Admitted && note.validity.dependsOn.isEmpty() && note.anchors.none { it.version != null })) &&
+                note.id !in shown && note.kind != NoteKind.STATUS && note.anchors.any { a ->
                 a.path in touched || (dir != null && (a.path == dir || a.path.startsWith("$dir/")))
             }
         }.sortedWith(compareBy({ it.kind.ordinal }, { it.id }))

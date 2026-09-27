@@ -73,7 +73,8 @@ public class StoreKb @JvmOverloads constructor(
     private fun visible(note: Note): Boolean =
         (note.status == NoteStatus.Admitted || note.status == NoteStatus.Stale) && (note.kind != NoteKind.STATUS || note.scope == "task:${work.value}")
 
-    private fun stale(note: Note): Boolean = note.status == NoteStatus.Stale || note.anchors.any { anchor ->
+    private fun stale(note: Note): Boolean = note.status == NoteStatus.Stale ||
+        !Injection.dependenciesCurrent(note, notes.all().associateBy { it.id }, currentVersion, notes.versions()) || note.anchors.any { anchor ->
         val recorded = anchor.version ?: return@any false
         val now = currentVersion(anchor.path) ?: return@any true
         !now.digest.hex.startsWith(recorded)
