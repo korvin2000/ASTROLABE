@@ -148,6 +148,50 @@ class AtlasTest {
     }
 
     @Test
+    fun `same size rewrite with restored mtime invalidates cached declarations`(@TempDir indexes: Path) {
+        FixtureRepos.materialize(Fixture.PythonSmall).use { repo ->
+            repo.write("symbols.py", "def old(): pass\n")
+            val fresh = Atlas.build(repo.root)
+            fresh.save(indexes)
+            val modified = Files.getLastModifiedTime(repo.resolve("symbols.py"))
+            repo.write("symbols.py", "def new(): pass\n")
+            Files.setLastModifiedTime(repo.resolve("symbols.py"), modified)
+            assertNull(Atlas.load(indexes, repo.root))
+        }
+    }
+
+    @Test
+    fun `an edit between build and save cannot bless old declarations with new metadata`(@TempDir indexes: Path) {
+        FixtureRepos.materialize(Fixture.PythonSmall).use { repo ->
+            repo.write("symbols.py", "def old(): pass\n")
+            val fresh = Atlas.build(repo.root)
+            repo.write("symbols.py", "def new(): pass\n")
+            fresh.save(indexes)
+            assertNull(Atlas.load(indexes, repo.root))
+        }
+    }
+
+    @Test
+    fun `refresh keeps collapsed descendant counts and sizes current`() {
+        FixtureRepos.materialize(Fixture.PythonSmall).use { repo ->
+            repo.write(".gitignore", "")
+            repo.write("build/generated.py", "abc\n")
+            var atlas = Atlas.build(repo.root)
+            assertEquals(1, atlas.collapsed.single { it.path == "build" }.files)
+            repo.write("build/generated.py", "longer output\n")
+            atlas = atlas.refresh(listOf("build/generated.py"))
+            assertEquals(Atlas.build(repo.root).collapsed, atlas.collapsed)
+            repo.write("build/another.py", "extra\n")
+            atlas = atlas.refresh(listOf("build/another.py"))
+            assertEquals(Atlas.build(repo.root).collapsed, atlas.collapsed)
+            Files.delete(repo.resolve("build/generated.py"))
+            Files.delete(repo.resolve("build/another.py"))
+            atlas = atlas.refresh(listOf("build/generated.py", "build/another.py"))
+            assertEquals(Atlas.build(repo.root).collapsed, atlas.collapsed)
+        }
+    }
+
+    @Test
     fun `an added and a removed file both invalidate the cache`(@TempDir indexes: Path) {
         FixtureRepos.materialize(Fixture.PythonSmall).use { repo ->
             Atlas.build(repo.root).save(indexes)
