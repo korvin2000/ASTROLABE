@@ -95,6 +95,22 @@ class JUnitXmlShaperTest {
     }
 
     @Test
+    fun `nested modules with equal leaf names keep distinct identities`() {
+        val shaped = Shapers.shape(Recorded.capture(
+            argv = gradle,
+            exitCode = 1,
+            output = "FAILURE: there were failing tests.\n".toByteArray(),
+            reports = listOf(
+                Recorded.report("junit-module-a.xml", path = "services/a/cart/build/test-results/test/TEST-com.acme.CartTest.xml"),
+                Recorded.report("junit-module-b.xml", path = "services/b/cart/build/test-results/test/TEST-com.acme.CartTest.xml"),
+            ),
+        ))
+        val sameName = shaped.tests.filter { it.identity.name == "handlesEmpty" }
+        assertEquals(listOf("services/a/cart", "services/b/cart"), sameName.map { it.identity.module })
+        assertNotEquals(sameName[0].identity.canonical, sameName[1].identity.canonical)
+    }
+
+    @Test
     fun `a repeated identity keeps its multiplicity instead of being overwritten (D-27)`() {
         val shaped = Shapers.shape(
             Recorded.capture(

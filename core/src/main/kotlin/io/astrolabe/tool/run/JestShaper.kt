@@ -14,7 +14,7 @@ import kotlinx.serialization.json.jsonPrimitive
  */
 public class JestShaper : Shaper {
     override val id: String = "jest"
-    override val version: String = "1"
+    override val version: String = "2"
 
     override fun applies(capture: RunCapture): Boolean {
         val tokens = Invocations.runnerTokens(capture)
@@ -30,7 +30,7 @@ public class JestShaper : Shaper {
         capture.rejectedReports.forEach { limitations += "report '${it.path}' ignored: ${it.rejectionReason} (D-50)" }
 
         val report = capture.evidenceReports.firstOrNull { it.kind == ReportKind.JestJson }
-        val fromReport = report?.let { JestJson.parse(it.content ?: ByteArray(0), capture.checkId) }
+        val fromReport = report?.let { JestJson.parse(it.content ?: ByteArray(0), capture.checkId, capture.cwd) }
         fromReport?.problems?.forEach { limitations += "report '${report.path}': $it" }
 
         val terminal = JestTerminal.parse(capture.text(), capture.checkId)
@@ -217,15 +217,15 @@ internal object JestTerminal {
 internal object JestJson {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    fun parse(bytes: ByteArray, checkId: String?): XmlParse = try {
-        parseReport(bytes, checkId)
+    fun parse(bytes: ByteArray, checkId: String?, cwd: String?): XmlParse = try {
+        parseReport(bytes, checkId, cwd)
     } catch (_: IllegalArgumentException) {
         XmlParse(emptyList(), null, listOf("invalid or incomplete report"))
     } catch (_: IllegalStateException) {
         XmlParse(emptyList(), null, listOf("invalid or incomplete report"))
     }
 
-    private fun parseReport(bytes: ByteArray, checkId: String?): XmlParse {
+    private fun parseReport(bytes: ByteArray, checkId: String?, cwd: String?): XmlParse {
         if (bytes.isEmpty()) return XmlParse(emptyList(), null, listOf("empty report"))
         val root = runCatching { json.parseToJsonElement(bytes.toString(Charsets.UTF_8)).jsonObject }.getOrElse {
             return XmlParse(emptyList(), null, listOf("could not be parsed (malformed JSON)"))
@@ -234,7 +234,11 @@ internal object JestJson {
         val files = requireNotNull(root["testResults"]).jsonArray
         for (fileEntry in files) {
             val fileObj = fileEntry.jsonObject
-            val file = fileObj["name"]?.jsonPrimitive?.content?.replace('\\', '/')?.substringAfterLast('/')
+            val file = fileObj["name"]?.jsonPrimitive?.content?.replace('\\', '/')?.let { path ->
+                val root = cwd?.replace('\\', '/')?.trimEnd('/')
+                if (root != null && path.startsWith("$root/", ignoreCase = root.length > 1 && root[1] == ':'))
+                    path.substring(root.length + 1) else path
+            }
             val assertions = requireNotNull(fileObj["assertionResults"]).jsonArray
             for (entry in assertions) {
                 val obj = entry.jsonObject

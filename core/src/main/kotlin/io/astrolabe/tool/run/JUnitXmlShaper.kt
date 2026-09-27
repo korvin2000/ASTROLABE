@@ -13,7 +13,7 @@ import javax.xml.stream.XMLStreamReader
  */
 public class JUnitXmlShaper : Shaper {
     override val id: String = "junit-xml"
-    override val version: String = "1"
+    override val version: String = "2"
 
     override fun applies(capture: RunCapture): Boolean {
         if (capture.evidenceReports.any { it.kind == ReportKind.JUnitXml }) return true

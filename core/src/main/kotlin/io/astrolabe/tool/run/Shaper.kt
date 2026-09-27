@@ -49,7 +49,7 @@ public data class ReportArtifact(
         val parts = path.replace('\\', '/').split('/')
         val at = parts.indexOfFirst { it == "build" || it == "target" }
         if (at <= 0) return null
-        return parts[at - 1].takeIf { it.isNotBlank() && it != "." && it != ".." }
+        return parts.take(at).joinToString("/").takeIf { it.isNotBlank() && it != "." && it != ".." }
     }
 
     override fun equals(other: Any?): Boolean =
