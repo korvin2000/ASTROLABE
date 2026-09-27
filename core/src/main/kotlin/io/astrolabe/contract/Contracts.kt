@@ -35,11 +35,18 @@ public interface ContractRepository {
 
     /** Replaces the latest row at the same version (pending proposals, strengthening). */
     public fun replaceLatest(contract: Contract)
+
+    /** Commits the contract and final amendment provenance in one transaction. */
+    public fun commitResolution(contract: Contract, amendment: Amendment)
+
+    /** Durable resolutions, optionally scoped to one work. */
+    public fun resolved(work: WorkId? = null): List<Amendment>
 }
 
 /** In-memory repository for tests and dry runs. */
 public class InMemoryContractRepository : ContractRepository {
     private val rows = LinkedHashMap<WorkId, MutableList<Contract>>()
+    private val resolutions = LinkedHashMap<Pair<WorkId, String>, Amendment>()
 
     @Synchronized
     override fun history(work: WorkId): List<Contract> = rows[work]?.toList() ?: emptyList()
@@ -58,6 +65,17 @@ public class InMemoryContractRepository : ContractRepository {
         require(list.last().version == contract.version) { "replaceLatest must keep version ${list.last().version}" }
         list[list.lastIndex] = contract
     }
+
+    @Synchronized
+    override fun commitResolution(contract: Contract, amendment: Amendment) {
+        require(amendment.status != AmendmentStatus.Pending) { "resolution must be final" }
+        if (amendment.status == AmendmentStatus.Accepted) append(contract) else replaceLatest(contract)
+        resolutions[contract.workId to amendment.id] = amendment
+    }
+
+    @Synchronized
+    override fun resolved(work: WorkId?): List<Amendment> =
+        resolutions.filterKeys { work == null || it.first == work }.values.toList()
 }
 
 /**
@@ -71,8 +89,6 @@ public class Contracts(
     private val clock: Clock,
     private val events: Events? = null,
 ) {
-    private val resolvedHistory = LinkedHashMap<String, Amendment>()
-
     public fun current(work: WorkId): Contract? = repository.history(work).lastOrNull()
 
     public fun history(work: WorkId): List<Contract> = repository.history(work)
@@ -132,13 +148,13 @@ public class Contracts(
             val remaining = latest.amendmentsPending.filter { it.id != amendmentId }
             when (resolution.outcome) {
                 ResolutionOutcome.Accepted -> {
-                    apply(latest).copy(version = latest.version + 1, amendmentsPending = remaining).also(repository::append).also {
-                        resolvedHistory[amendment.id] = amendment.copy(status = AmendmentStatus.Accepted, resolvedBy = resolution.byAuthority)
+                    apply(latest).copy(version = latest.version + 1, amendmentsPending = remaining).also {
+                        repository.commitResolution(it, amendment.copy(status = AmendmentStatus.Accepted, resolvedBy = resolution.byAuthority))
                     }
                 }
                 ResolutionOutcome.Rejected -> {
-                    latest.copy(amendmentsPending = remaining).also(repository::replaceLatest).also {
-                        resolvedHistory[amendment.id] = amendment.copy(status = AmendmentStatus.Rejected, resolvedBy = resolution.byAuthority)
+                    latest.copy(amendmentsPending = remaining).also {
+                        repository.commitResolution(it, amendment.copy(status = AmendmentStatus.Rejected, resolvedBy = resolution.byAuthority))
                     }
                 }
                 ResolutionOutcome.Pending -> latest
@@ -150,7 +166,9 @@ public class Contracts(
     }
 
     /** Resolved amendments, kept for the finish receipt. */
-    public fun resolved(): List<Amendment> = synchronized(repository) { resolvedHistory.values.toList() }
+    public fun resolved(): List<Amendment> = repository.resolved()
+
+    public fun resolved(work: WorkId): List<Amendment> = repository.resolved(work)
 
     /**
      * §4.1 auto-derivation for S0 (TODO P1.1.2): the request becomes `R1` verbatim, every package whose manifest

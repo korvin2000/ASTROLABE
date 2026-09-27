@@ -14,16 +14,23 @@ import io.astrolabe.event.AutonomousAuthority
 import io.astrolabe.event.DClassRequest
 import io.astrolabe.event.Decision
 import io.astrolabe.event.Events
+import io.astrolabe.event.ContractView
+import io.astrolabe.event.Export
 import io.astrolabe.event.Question
 import io.astrolabe.event.Resolution
 import io.astrolabe.event.ResolutionOutcome
+import io.astrolabe.event.Views
 import io.astrolabe.fixtures.EventRecorder
 import io.astrolabe.fixtures.FakeClock
 import io.astrolabe.fixtures.FixedIdGen
 import io.astrolabe.id.AttemptId
 import io.astrolabe.id.WorkId
+import io.astrolabe.store.StoreError
+import io.astrolabe.store.openStore
 import io.astrolabe.verify.ReviewRequest
 import io.astrolabe.verify.Verdict
+import java.nio.file.Files
+import java.nio.file.Path
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
@@ -34,8 +41,12 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.io.TempDir
 
 class ContractsTest {
+    @TempDir
+    lateinit var root: Path
+
     private val clock = FakeClock.at("2026-09-20T10:00:00Z")
     private val work = WorkId("W-0042")
 
@@ -312,6 +323,113 @@ class ContractsTest {
 
     private fun resolving(resolve: suspend (AmendmentProposal) -> Resolution): Authority = object : Authority by AutonomousAuthority() {
         override suspend fun resolve(proposal: AmendmentProposal): Resolution = resolve.invoke(proposal)
+    }
+
+    @Test
+    fun `accepted and rejected resolutions and provenance survive reopening the store`() = runTest {
+        for (outcome in listOf(ResolutionOutcome.Accepted, ResolutionOutcome.Rejected)) {
+            val path = root.resolve(outcome.name)
+            lateinit var expected: Amendment
+            lateinit var expectedContract: Contract
+            openStore(path, clock).use { store ->
+                val contracts = Contracts(SqliteContractRepository(store, clock), FixedIdGen(), clock)
+                contracts.open(contract())
+                val proposal = contracts.propose(work, null, "exclude billing UI", "out of scope", weakening = false)
+                expected = proposal.copy(status = AmendmentStatus.valueOf(outcome.name), resolvedBy = "human:alice")
+                expectedContract = contracts.resolve(work, proposal.id, resolving {
+                    Resolution(it.id, it.contractRevision, outcome, "human:alice")
+                }) { it.copy(exclusions = it.exclusions + "billing UI") }
+                assertEquals(listOf(expected), contracts.resolved())
+            }
+
+            openStore(path, clock).use { store ->
+                val reopened = Contracts(SqliteContractRepository(store, clock), FixedIdGen(), clock)
+                assertEquals(expectedContract, reopened.current(work), outcome.name)
+                assertEquals(if (outcome == ResolutionOutcome.Accepted) 2 else 1, reopened.history(work).size)
+                assertEquals(listOf(expected), reopened.resolved(), outcome.name)
+            }
+        }
+    }
+
+    @Test
+    fun `amendment projections and exports carry final status and authority after resolution`() = runTest {
+        for (outcome in listOf(ResolutionOutcome.Accepted, ResolutionOutcome.Rejected)) {
+            val path = root.resolve(outcome.name)
+            lateinit var expected: Amendment
+            openStore(path, clock).use { store ->
+                val contracts = Contracts(SqliteContractRepository(store, clock), FixedIdGen(), clock)
+                contracts.open(contract())
+                val proposal = contracts.propose(work, null, "exclude billing UI", "out of scope", weakening = false)
+                expected = proposal.copy(status = AmendmentStatus.valueOf(outcome.name), resolvedBy = "human:alice")
+                contracts.resolve(work, proposal.id, resolving {
+                    Resolution(it.id, it.contractRevision, outcome, "human:alice")
+                }) { it.copy(exclusions = it.exclusions + "billing UI") }
+            }
+
+            openStore(path, clock).use { store ->
+                assertEquals(listOf(outcome.name), store.db.query("SELECT status FROM amendments WHERE work_id = ?", work) {
+                    it.string("status")
+                })
+                val view = Views(store).contract(work)
+                assertEquals(expected, Json.decodeFromJsonElement(Amendment.serializer(), view.amendments.single().body))
+                Export.write(Views(store), work, store.layout.exports)
+                val exported = Json.decodeFromString(ContractView.serializer(), Files.readString(store.layout.exports.resolve("contract.json")))
+                assertEquals(expected, Json.decodeFromJsonElement(Amendment.serializer(), exported.amendments.single().body))
+            }
+        }
+    }
+
+    @Test
+    fun `failure persisting final amendment status rolls back contract and resolution together`() = runTest {
+        for (outcome in listOf(ResolutionOutcome.Accepted, ResolutionOutcome.Rejected)) {
+            val path = root.resolve(outcome.name)
+            lateinit var before: Contract
+            openStore(path, clock).use { store ->
+                val contracts = Contracts(SqliteContractRepository(store, clock), FixedIdGen(), clock)
+                contracts.open(contract())
+                val proposal = contracts.propose(work, null, "exclude billing UI", "out of scope", weakening = false)
+                before = contracts.current(work)!!
+                val beforeView = Views(store).contract(work)
+                store.db.tx { tx ->
+                    for (operation in listOf("INSERT", "UPDATE")) {
+                        tx.execute(
+                            "CREATE TRIGGER fail_resolution_${operation.lowercase()} BEFORE $operation ON amendments " +
+                                "WHEN NEW.status != 'Pending' BEGIN SELECT RAISE(ABORT, 'injected resolution failure'); END",
+                        )
+                    }
+                }
+
+                assertFailsWith<StoreError> {
+                    contracts.resolve(work, proposal.id, resolving {
+                        Resolution(it.id, it.contractRevision, outcome, "human:alice")
+                    }) { it.copy(exclusions = it.exclusions + "billing UI") }
+                }
+
+                assertEquals(before, contracts.current(work), outcome.name)
+                assertEquals(listOf(before), contracts.history(work), outcome.name)
+                assertEquals(beforeView, Views(store).contract(work), outcome.name)
+                assertTrue(contracts.resolved().isEmpty(), outcome.name)
+            }
+
+            openStore(path, clock).use { store ->
+                val reopened = Contracts(SqliteContractRepository(store, clock), FixedIdGen(), clock)
+                assertEquals(before, reopened.current(work), outcome.name)
+                assertTrue(reopened.resolved().isEmpty(), outcome.name)
+            }
+        }
+    }
+
+    @Test
+    fun `resolved amendments belong to the repository across Contracts instances`() = runTest {
+        val repository = InMemoryContractRepository()
+        val contracts = Contracts(repository, FixedIdGen(), clock)
+        contracts.open(contract())
+        val proposal = contracts.propose(work, null, "narrow retry coverage", "slow suite", weakening = true)
+        contracts.resolve(work, proposal.id, AutonomousAuthority()) { error("rejected") }
+
+        val reopened = Contracts(repository, FixedIdGen(), clock)
+        assertEquals(contracts.resolved(), reopened.resolved())
+        assertEquals(AmendmentStatus.Rejected, reopened.resolved().single().status)
     }
 
     @Test

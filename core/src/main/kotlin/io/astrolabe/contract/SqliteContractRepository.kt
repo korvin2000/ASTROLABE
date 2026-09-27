@@ -18,7 +18,9 @@ public class SqliteContractRepository(private val store: Store, private val cloc
         work,
     ) { JSON.decodeFromString(Contract.serializer(), it.string("body")) }
 
-    override fun append(contract: Contract): Unit = store.db.tx { tx ->
+    override fun append(contract: Contract): Unit = store.db.tx { tx -> append(tx, contract) }
+
+    private fun append(tx: Tx, contract: Contract) {
         val latest = tx.query("SELECT coalesce(max(version), 0) AS v FROM contracts WHERE work_id = ?", contract.workId) { it.long("v").toInt() }.first()
         require(contract.version == latest + 1) { "contract version ${contract.version} must be ${latest + 1}" }
         val now = clock.instant()
@@ -29,7 +31,9 @@ public class SqliteContractRepository(private val store: Store, private val cloc
         projection(tx, contract)
     }
 
-    override fun replaceLatest(contract: Contract): Unit = store.db.tx { tx ->
+    override fun replaceLatest(contract: Contract): Unit = store.db.tx { tx -> replaceLatest(tx, contract) }
+
+    private fun replaceLatest(tx: Tx, contract: Contract) {
         val latest = tx.query("SELECT coalesce(max(version), 0) AS v FROM contracts WHERE work_id = ?", contract.workId) { it.long("v").toInt() }.first()
         require(latest == contract.version) { "replaceLatest must keep version $latest, got ${contract.version}" }
         val updated = tx.execute(
@@ -83,12 +87,31 @@ public class SqliteContractRepository(private val store: Store, private val cloc
         }
     }
 
-    /** Records a resolved amendment's final status in the projection. */
+    override fun commitResolution(contract: Contract, amendment: Amendment): Unit = store.db.tx { tx ->
+        require(amendment.status != AmendmentStatus.Pending) { "resolution must be final" }
+        if (amendment.status == AmendmentStatus.Accepted) append(tx, contract) else replaceLatest(tx, contract)
+        recordResolved(tx, contract.workId, amendment)
+    }
+
+    override fun resolved(work: WorkId?): List<Amendment> {
+        val scope = if (work == null) "" else " AND work_id = ?"
+        val params = if (work == null) emptyArray() else arrayOf<Any?>(work)
+        return store.db.query("SELECT body FROM amendments WHERE status != 'Pending'$scope ORDER BY created_at, rowid", *params) {
+            JSON.decodeFromString(Amendment.serializer(), it.string("body"))
+        }
+    }
+
+    /** Legacy projection writer; contract resolutions use [commitResolution] for atomicity. */
     public fun recordResolved(work: WorkId, amendment: Amendment): Unit = store.db.tx { tx ->
-        tx.execute(
+        recordResolved(tx, work, amendment)
+    }
+
+    private fun recordResolved(tx: Tx, work: WorkId, amendment: Amendment) {
+        val updated = tx.execute(
             "UPDATE amendments SET status = ?, body = ? WHERE id = ? AND work_id = ?",
             amendment.status.name, JSON.encodeToString(Amendment.serializer(), amendment), amendment.id, work,
         )
+        check(updated == 1) { "amendment ${amendment.id} missing for $work" }
     }
 
     private companion object {
