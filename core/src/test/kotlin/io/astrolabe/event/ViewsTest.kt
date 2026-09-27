@@ -16,6 +16,59 @@ import org.junit.jupiter.api.io.TempDir
 
 /** P0.4.3: read projections over the P0.5 tables (§4, risk 19). */
 class ViewsTest {
+    @Test
+    fun `latest register does not deserialize historical bodies`() {
+        openStore(root).use { store ->
+            store.seedCampaign()
+            store.db.tx { it.execute("UPDATE register_versions SET body = 'not JSON' WHERE version < 3") }
+            val view = Views(store).register(SEEDED_CONTEXT)
+            assertEquals(3, view.historyCount)
+            assertEquals("3", view.latest?.key)
+        }
+    }
+
+    @Test
+    fun `contract projection keeps one snapshot across a concurrent commit`() {
+        openStore(root).use { store ->
+            store.seedCampaign()
+            val field = io.astrolabe.store.Db::class.java.getDeclaredField("connection").apply { isAccessible = true }
+            val connection = field.get(store.db) as java.sql.Connection
+            var committed = false
+            fun proxy(type: Class<*>, intercept: (java.lang.reflect.Method, Array<out Any?>?) -> Any?): Any =
+                java.lang.reflect.Proxy.newProxyInstance(type.classLoader, arrayOf(type)) { _, method, args ->
+                    try { intercept(method, args) } catch (failure: java.lang.reflect.InvocationTargetException) { throw failure.cause!! }
+                }
+            val wrapped = proxy(java.sql.Connection::class.java) { method, args ->
+                val result = method.invoke(connection, *(args ?: emptyArray()))
+                if (method.name != "prepareStatement" || !(args!![0] as String).contains("FROM contracts ")) result
+                else proxy(java.sql.PreparedStatement::class.java) { queryMethod, queryArgs ->
+                    val queryResult = queryMethod.invoke(result, *(queryArgs ?: emptyArray()))
+                    if (queryMethod.name != "executeQuery") queryResult
+                    else proxy(java.sql.ResultSet::class.java) { rowMethod, rowArgs ->
+                        val rowResult = rowMethod.invoke(queryResult, *(rowArgs ?: emptyArray()))
+                        if (rowMethod.name == "close" && !committed) {
+                            java.sql.DriverManager.getConnection("jdbc:sqlite:${store.db.path}").use { writer ->
+                                writer.createStatement().use { it.executeUpdate("DELETE FROM requirements") }
+                            }
+                            committed = true
+                        }
+                        rowResult
+                    }
+                }
+            }
+            val constructor = io.astrolabe.store.Db::class.java.getDeclaredConstructor(Path::class.java, java.sql.Connection::class.java)
+                .apply { isAccessible = true }
+            val wrappedDb = constructor.newInstance(store.db.path, wrapped)
+            val lock = io.astrolabe.store.Store::class.java.getDeclaredField("lock").apply { isAccessible = true }
+                .get(store) as io.astrolabe.store.ProjectLock
+            val wrappedStore = io.astrolabe.store.Store(store.identity, store.layout, wrappedDb, store.blobs, lock)
+            val view = Views(wrappedStore).contract(SEEDED_WORK)
+            assertTrue(committed)
+            assertEquals(listOf("req-a", "req-b"), view.requirements.map { it.key })
+            assertEquals(0L, store.db.count("SELECT count(*) FROM requirements"))
+        }
+    }
+
 
     @TempDir
     lateinit var root: Path

@@ -89,7 +89,9 @@ public data class FinishReceiptView(
  */
 public class Views(private val store: Store) {
 
-    public fun contract(work: WorkId): ContractView = ContractView(
+    internal fun <T> snapshot(block: () -> T): T = store.db.snapshot(block)
+
+    public fun contract(work: WorkId): ContractView = snapshot { ContractView(
         work = work,
         contracts = rows("contracts", "$COMMON, version", "work_id = ?", "version", work.value) {
             it.long("version").toString()
@@ -105,9 +107,9 @@ public class Views(private val store: Store) {
             "constraints", "$COMMON, id, contract_version", "work_id = ?", "contract_version, id", work.value,
         ) { it.string("id") },
         amendments = rows("amendments", "$COMMON, id, status", "work_id = ?", "id", work.value) { it.string("id") },
-    )
+    ) }
 
-    public fun ledger(work: WorkId): LedgerView = LedgerView(
+    public fun ledger(work: WorkId): LedgerView = snapshot { LedgerView(
         work = work,
         increments = rows("increments", "$COMMON, id, status", "work_id = ?", "id", work.value) { it.string("id") },
         entries = rows(
@@ -116,13 +118,14 @@ public class Views(private val store: Store) {
         sizing = rows(
             "sizing", "$COMMON, increment_id, cell_id", "work_id = ?", "increment_id, cell_id", work.value,
         ) { "${it.string("increment_id")}/${it.string("cell_id")}" },
-    )
+    ) }
 
-    public fun register(context: ContextId): RegisterView {
+    public fun register(context: ContextId): RegisterView = snapshot {
         val versions = rows(
-            "register_versions", "$COMMON, version", "context_id = ?", "version DESC", context.value,
+            "register_versions", "$COMMON, version", "context_id = ?", "version DESC LIMIT 1", context.value,
         ) { it.long("version").toString() }
-        return RegisterView(context = context, latest = versions.firstOrNull(), historyCount = versions.size)
+        val count = store.db.count("SELECT count(*) FROM register_versions WHERE context_id = ?", context.value)
+        RegisterView(context = context, latest = versions.firstOrNull(), historyCount = Math.toIntExact(count))
     }
 
     public fun workset(context: ContextId): WorksetView = WorksetView(

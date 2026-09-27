@@ -44,6 +44,19 @@ import kotlin.test.assertTrue
 import org.junit.jupiter.api.io.TempDir
 
 class ContractsTest {
+    @Test
+    fun `current authority reads only the latest contract body`() {
+        openStore(root).use { store ->
+            val repository = SqliteContractRepository(store, clock)
+            repository.append(contract())
+            val latest = contract().copy(version = 2)
+            repository.append(latest)
+            store.db.tx { it.execute("UPDATE contracts SET body = 'not JSON' WHERE version = 1") }
+            assertEquals(latest, Contracts(repository, FixedIdGen(), clock).current(work))
+            assertFailsWith<kotlinx.serialization.SerializationException> { repository.history(work) }
+        }
+    }
+
     @TempDir
     lateinit var root: Path
 

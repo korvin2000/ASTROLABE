@@ -13,6 +13,10 @@ import java.time.Clock
  * current version's projection for [io.astrolabe.event.Views]. The controller is the only writer (L9).
  */
 public class SqliteContractRepository(private val store: Store, private val clock: Clock) : ContractRepository {
+    override fun latest(work: WorkId): Contract? = store.db.query(
+        "SELECT body FROM contracts WHERE work_id = ? ORDER BY version DESC LIMIT 1", work,
+    ) { JSON.decodeFromString(Contract.serializer(), it.string("body")) }.firstOrNull()
+
     override fun history(work: WorkId): List<Contract> = store.db.query(
         "SELECT body FROM contracts WHERE work_id = ? ORDER BY version",
         work,

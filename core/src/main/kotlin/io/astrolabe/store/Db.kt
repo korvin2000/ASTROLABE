@@ -49,13 +49,20 @@ public class Db private constructor(
      * through. Transactions do not nest: the state machine that owns a table owns the whole
      * transaction (L9).
      */
-    public fun <T> tx(block: (Tx) -> T): T = monitor.withLock {
+    public fun <T> tx(block: (Tx) -> T): T = transaction("BEGIN IMMEDIATE", block)
+
+    /** Composed projections share one SQLite snapshot; nested reads reuse their caller's transaction. */
+    internal fun <T> snapshot(block: () -> T): T = monitor.withLock {
+        if (inTransaction) block() else transaction("BEGIN") { block() }
+    }
+
+    private fun <T> transaction(begin: String, block: (Tx) -> T): T = monitor.withLock {
         check(!quarantined) { "database connection is quarantined after failed rollback" }
         check(!inTransaction) { "nested transactions are not supported; one writer owns one transaction" }
         inTransaction = true
         var began = false
         try {
-            statement("BEGIN IMMEDIATE")
+            statement(begin)
             began = true
             val result = block(Tx(this))
             statement("COMMIT")

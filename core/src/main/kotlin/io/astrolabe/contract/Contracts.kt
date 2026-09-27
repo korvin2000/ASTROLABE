@@ -30,6 +30,9 @@ public interface ContractRepository {
     /** All versions of a work's contract in ascending version order; failed attempts are preserved. */
     public fun history(work: WorkId): List<Contract>
 
+    /** Latest authority only; persistent implementations avoid decoding the historical bodies. */
+    public fun latest(work: WorkId): Contract? = history(work).lastOrNull()
+
     /** Appends a new version; rejects a version that is not `latest + 1` (or 1 for a new work). */
     public fun append(contract: Contract)
 
@@ -50,6 +53,9 @@ public class InMemoryContractRepository : ContractRepository {
 
     @Synchronized
     override fun history(work: WorkId): List<Contract> = rows[work]?.toList() ?: emptyList()
+
+    @Synchronized
+    override fun latest(work: WorkId): Contract? = rows[work]?.lastOrNull()
 
     @Synchronized
     override fun append(contract: Contract) {
@@ -89,7 +95,7 @@ public class Contracts(
     private val clock: Clock,
     private val events: Events? = null,
 ) {
-    public fun current(work: WorkId): Contract? = repository.history(work).lastOrNull()
+    public fun current(work: WorkId): Contract? = repository.latest(work)
 
     public fun history(work: WorkId): List<Contract> = repository.history(work)
 
