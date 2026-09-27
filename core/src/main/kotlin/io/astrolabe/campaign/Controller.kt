@@ -453,7 +453,7 @@ public class Controller @JvmOverloads public constructor(
         val attempts = Attempts(store, clock)
         val frozen = attempts.load(request.work, request.attempt) ?: AttemptConfig.freeze(config).also { attempts.save(request.work, request.attempt, it) }
         val effective = frozen.config
-        if (effective != config) {
+        if (effective != io.astrolabe.configSnapshot(config)) {
             events?.emit(AgentEvent.Warning(ids, "config-frozen", "the configuration changed during attempt ${request.attempt.value}; it takes effect at the next attempt (invariant 12)"))
         }
         val dirty = DirtyState(workspace, store.blobs, stamper, ids, clock)

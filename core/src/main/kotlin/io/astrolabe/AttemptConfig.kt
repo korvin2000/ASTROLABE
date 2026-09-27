@@ -3,7 +3,11 @@ package io.astrolabe
 import io.astrolabe.cell.RoleTexts
 import io.astrolabe.id.Digest
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.Transient
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.Json
 
 /**
@@ -39,17 +43,49 @@ public data class Controls(
  * versions and controls. Mid-attempt configuration changes have no effect until the next attempt (P1.9.4).
  * [fingerprint] enters compile and attempt fingerprints (D-38).
  */
-@Serializable
-public data class AttemptConfig(
-    val harnessVersion: String,
-    val config: Config,
-    val roleTextVersions: Map<String, String>,
-    val controls: Controls = Controls.ALL,
+@Serializable(with = AttemptConfig.Serializer::class)
+public class AttemptConfig(
+    public val harnessVersion: String,
+    config: Config,
+    roleTextVersions: Map<String, String>,
+    public val controls: Controls = Controls.ALL,
     /** False only for evaluation research arms; such attempts are ineligible for promotion. */
-    val production: Boolean = true,
+    public val production: Boolean = true,
 ) {
-    @Transient
-    val fingerprint: Digest = Digest.ofUtf8(STABLE_JSON.encodeToString(serializer(), this))
+    public val config: Config = configSnapshot(config)
+    public val roleTextVersions: Map<String, String> = frozenMap(roleTextVersions)
+    private val snapshot = AttemptConfigSnapshot(harnessVersion, this.config, this.roleTextVersions, controls, production)
+    public val fingerprint: Digest = Digest.ofUtf8("astrolabe/attempt-config/v2\n" + STABLE_JSON.encodeToString(AttemptConfigSnapshot.serializer(), snapshot))
+
+    /** Every construction path, including copy and decoding, takes a fresh immutable snapshot. */
+    public fun copy(
+        harnessVersion: String = this.harnessVersion,
+        config: Config = this.config,
+        roleTextVersions: Map<String, String> = this.roleTextVersions,
+        controls: Controls = this.controls,
+        production: Boolean = this.production,
+    ): AttemptConfig = AttemptConfig(harnessVersion, config, roleTextVersions, controls, production)
+
+    public operator fun component1(): String = harnessVersion
+    public operator fun component2(): Config = config
+    public operator fun component3(): Map<String, String> = roleTextVersions
+    public operator fun component4(): Controls = controls
+    public operator fun component5(): Boolean = production
+
+    override fun equals(other: Any?): Boolean = other is AttemptConfig && snapshot == other.snapshot
+    override fun hashCode(): Int = snapshot.hashCode()
+    override fun toString(): String = snapshot.toString().replaceFirst("AttemptConfigSnapshot", "AttemptConfig")
+
+    internal object Serializer : KSerializer<AttemptConfig> {
+        override val descriptor: SerialDescriptor = AttemptConfigSnapshot.serializer().descriptor
+        override fun serialize(encoder: Encoder, value: AttemptConfig) {
+            encoder.encodeSerializableValue(AttemptConfigSnapshot.serializer(), value.snapshot)
+        }
+        override fun deserialize(decoder: Decoder): AttemptConfig {
+            val value = decoder.decodeSerializableValue(AttemptConfigSnapshot.serializer())
+            return AttemptConfig(value.harnessVersion, value.config, value.roleTextVersions, value.controls, value.production)
+        }
+    }
 
     /** Every reason this configuration must not run as a production attempt. */
     public fun productionViolations(): List<ConfigViolation> = buildList {
@@ -83,6 +119,16 @@ public data class AttemptConfig(
             AttemptConfig(harnessVersion, config, roleTextVersions, controls, production = false)
     }
 }
+
+@Serializable
+@SerialName("io.astrolabe.AttemptConfig")
+private data class AttemptConfigSnapshot(
+    val harnessVersion: String,
+    val config: Config,
+    val roleTextVersions: Map<String, String>,
+    val controls: Controls = Controls.ALL,
+    val production: Boolean = true,
+)
 
 public class InvalidConfig(public val violations: List<ConfigViolation>) :
     IllegalArgumentException("invalid configuration: " + violations.joinToString("; "))
