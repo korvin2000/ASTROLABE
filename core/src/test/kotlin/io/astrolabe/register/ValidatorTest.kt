@@ -9,6 +9,21 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class ValidatorTest {
+    @Test
+    fun `new historical facts are stale immediately including missing anchors`() {
+        val old = io.astrolabe.id.FileVersion(io.astrolabe.id.Digest.ofUtf8("old"))
+        val now = io.astrolabe.id.FileVersion(io.astrolabe.id.Digest.ofUtf8("now"))
+        for (current in listOf(old, now, null)) {
+            val ctx = object : ValidationContext by Ctx() {
+                override fun currentVersion(path: String) = current
+            }
+            val fact = applied(validator.check(base, Patch.of(
+                Op.FactAdd(ClaimKind.Verified, "historical claim", anchor = io.astrolabe.evidence.Anchor("a.py", old), evidence = "#12"), Op.Next("inspect"),
+            ), ctx)).facts.single()
+            assertEquals(current != old, fact.stale)
+        }
+    }
+
     private val validator = Validator(HeuristicEstimator())
 
     private class Ctx(

@@ -278,6 +278,7 @@ public class Cell @JvmOverloads constructor(
 
             // Render: [A] first (rebuilt every turn), then the cached regions, then admission.
             val contract = contract()
+            ws.checks.synchronizeAcceptance(contract)
             contractVersion = contract.version
             val refactor = RefactorMode.detect(contract)
             if (refactor.active && !redOkUntilIncrementEnd) {
@@ -456,7 +457,8 @@ public class Cell @JvmOverloads constructor(
             val stepRun = if (dispatchRefusal == null) stepLeft(registerBefore, register)?.let { step -> tools.verify?.runLayer(Layer.BlastAndStepAccept, listOfNotNull(step.accept)) } else null
             // §7.4: an edit batch whose impact risk exceeds θ runs the blast layer now (P4.5.2, D-152).
             val riskRun = if (dispatchRefusal == null && stepRun == null && batchBefore.isNotEmpty()) tools.verify?.riskAboveTheta(EditHunks.of(batchBefore) { ws.registry.read(it)?.bytes }) else null
-            val layerRuns = listOfNotNull(stepRun, riskRun, if (proposal && dispatchRefusal == null) tools.verify?.onStop(increment.accept) else null)
+            val implementingCompletion = ctx.role.packetKind == PacketKind.Result
+            val layerRuns = listOfNotNull(stepRun, riskRun, if (proposal && implementingCompletion && dispatchRefusal == null) tools.verify?.onStop(increment.accept) else null)
             for (layerRun in layerRuns) {
                 notTested += layerRun.notTested
                 val what = if (layerRun.layer == Layer.IncrementAcceptance) "verify-on-stop" else if (layerRun === riskRun) "risk > θ" else "step boundary"
@@ -508,7 +510,7 @@ public class Cell @JvmOverloads constructor(
             // Terminal requests, the completion path, pressure.
             (tools.state.pendingBlock ?: tools.task?.pendingBlock)?.let { return blocked(it) }
             if (proposal) {
-                unavailable(currenciesNow)?.let { return blocked(it) }
+                if (implementingCompletion) unavailable(currenciesNow)?.let { return blocked(it) }
                 val output = RoleOutput(turn, response.text, register, certifiedAfter.mapNotNull { currenciesNow.certifiedReceipt(it) }, refusals, packet(PacketStatus.Done, null))
                 when (val decision = completion.assess(output, report)) {
                     is CompletionDecision.Accepted -> return completed(response.text, decision.evidenceRefs)
@@ -589,7 +591,7 @@ public class Cell @JvmOverloads constructor(
             }
             (Partition.of(calls) as? Partition.Rejected)?.let { return Validated.Refused("${it.reason}; no call of this turn executed") }
             if (reserveTurn && calls.any { it.family == ToolFamily.Edit }) return Validated.Refused("${CellBudget.GATE}; the edit refused the whole turn")
-            calls.firstOrNull { !mask.allows(it.name) }?.let {
+            calls.firstOrNull { call -> call.operationNames.any { !mask.allows(it) } }?.let {
                 return Validated.Refused("${it.name} is masked in this turn; no call of this turn executed")
             }
             requiredOp?.let { op ->
@@ -1066,6 +1068,8 @@ public class Cell @JvmOverloads constructor(
                 Aliases.parse(id)?.let { return ev.aliases.resolve(ids.work, it) != null }
                 return ev.observations.get(id) != null || ev.receipts.get(id) != null || ev.journal.get(id) != null
             }
+
+            override fun currentVersion(path: String): io.astrolabe.id.FileVersion? = ws.registry.version(path)
 
             override fun acceptGreen(accept: String): Boolean {
                 val currencies = currencies(ws.stamper.stamp().id)

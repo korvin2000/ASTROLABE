@@ -21,11 +21,18 @@ public class SqliteIntentJournal(private val store: Store, private val clock: Cl
     override fun update(intentId: String, status: IntentStatus): Unit = store.db.tx { tx ->
         val current = tx.query("SELECT body FROM intents WHERE intent_id = ?", intentId) { decode(it.string("body")) }.firstOrNull()
             ?: throw IllegalArgumentException("unknown intent $intentId")
-        require(status.ordinal >= current.status.ordinal || status == IntentStatus.Unknown) {
+        require(intentTransition(current.status, status)) {
             "intent $intentId cannot move from ${current.status} to $status"
         }
         val next = current.copy(status = status)
         tx.execute("UPDATE intents SET status = ?, body = ? WHERE intent_id = ?", status.name, JSON.encodeToString(Intent.serializer(), next), intentId)
+    }
+
+    override fun reconcile(intentId: String, evidence: String): Unit = store.db.tx { tx ->
+        val current = tx.query("SELECT body FROM intents WHERE intent_id = ?", intentId) { decode(it.string("body")) }.firstOrNull()
+            ?: throw IllegalArgumentException("unknown intent $intentId")
+        val next = reconciledIntent(current, evidence)
+        tx.execute("UPDATE intents SET status = ?, body = ? WHERE intent_id = ?", next.status.name, JSON.encodeToString(Intent.serializer(), next), intentId)
     }
 
     override fun open(): List<Intent> = store.db.query(

@@ -327,6 +327,17 @@ public class Checks private constructor(private val checks: LinkedHashMap<String
         return check
     }
 
+    /** Reconcile executable obligations after a committed plan or amendment; old receipts retain their definition identity. */
+    public fun synchronizeAcceptance(contract: Contract) {
+        val current = seed(contract, RunnerCommands()).all()
+        val ids = current.map { it.id }.toSet()
+        checks.keys.removeAll { it.startsWith("CHK-accept-") && it !in ids }
+        for (check in current) {
+            val old = checks[check.id]
+            if (old == null || old.definitionVersion != check.definitionVersion) replace(check)
+        }
+    }
+
     public companion object {
         public const val TYPES_TOUCHED: String = "CHK-types-touched"
         public const val TESTS_BLAST: String = "CHK-tests-blast"

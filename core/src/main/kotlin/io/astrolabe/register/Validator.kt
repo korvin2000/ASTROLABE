@@ -10,6 +10,9 @@ public interface ValidationContext {
     /** True when [id] names an existing store artifact (journal result, receipt, observation, alias). */
     public fun evidenceExists(id: String): Boolean
 
+    /** Unknown versions are conservative: an anchored fact cannot claim current evidence. */
+    public fun currentVersion(path: String): io.astrolabe.id.FileVersion? = null
+
     /** True when the step's `accept:` is green at the current version. */
     public fun acceptGreen(accept: String): Boolean
 
@@ -108,7 +111,11 @@ public class Validator(
                     if (op.kind == ClaimKind.Verified && (op.evidence == null || !context.evidenceExists(op.evidence))) {
                         return reject("v needs an existing evidence id", "fact.add(v): evidence=${op.evidence}")
                     }
-                    next.copy(facts = next.facts + Fact(nextN(next.facts.map { it.n }), op.kind, op.text, op.anchor, op.evidence))
+                    val staleAt = op.anchor?.let { anchor ->
+                        val current = context.currentVersion(anchor.path)
+                        if (current == anchor.version) null else current ?: anchor.version
+                    }
+                    next.copy(facts = next.facts + Fact(nextN(next.facts.map { it.n }), op.kind, op.text, op.anchor, op.evidence, staleAt))
                 }
                 is Op.FactRefute -> {
                     val fact = next.fact(op.n) ?: return reject("unknown fact", "fact.refute(${op.n})")

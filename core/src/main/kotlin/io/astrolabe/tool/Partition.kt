@@ -60,6 +60,10 @@ public sealed interface Partition {
             val phases = calls.associate { it.opId to phaseOf(it) }
             val position = calls.associate { it.opId to (phases.getValue(it.opId).ordinal.toLong() shl 32 or it.opId.toLong()) }
             for (call in calls) {
+                val edit = call.args as? Args.Edit
+                if (edit != null && edit.args.ops.map { it.condition }.distinct().size > 1) {
+                    return Rejected(call.opId, "op ${call.opId}: edit operations must share one condition; split conditional operations into separate calls")
+                }
                 val text = call.condition ?: continue
                 val condition = Condition.parse(text)
                     ?: return Rejected(call.opId, "op ${call.opId}: malformed condition '$text' (expected green(op:N) or applied(op:N))")

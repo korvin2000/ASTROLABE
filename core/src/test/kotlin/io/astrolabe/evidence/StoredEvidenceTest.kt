@@ -115,8 +115,15 @@ class StoredEvidenceTest {
         val after = SqliteIntentJournal(store, clock)
         assertEquals(listOf("int-1"), after.open().map { it.intentId })
         assertEquals(IntentStatus.Dispatched, after.get("int-1")!!.status)
-        after.update("int-1", IntentStatus.Committed)
+        after.update("int-1", IntentStatus.Unknown)
+        kotlin.test.assertFailsWith<IllegalArgumentException> { after.update("int-1", IntentStatus.Committed) }
+        kotlin.test.assertFailsWith<IllegalArgumentException> { after.reconcile("int-1", " ") }
+        after.reconcile("int-1", "host: inspected workspace and terminated previous process")
         assertTrue(after.open().isEmpty())
+        reopen()
+        val resolved = SqliteIntentJournal(store, clock)
+        assertEquals("host: inspected workspace and terminated previous process", resolved.get("int-1")!!.reconciliation)
+        kotlin.test.assertFailsWith<IllegalArgumentException> { resolved.update("int-1", IntentStatus.Unknown) }
     }
 
     @Test

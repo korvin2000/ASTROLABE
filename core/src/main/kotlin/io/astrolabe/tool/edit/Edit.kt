@@ -187,7 +187,7 @@ public class Edit(
         val alias = aliases.allocate(ids.work, editId, "edit", ids.context, workspace.id).text
         val contract = contracts.current(ids.work)
             ?: return render(args, alias, actionId, EditResult(false, editId, emptyList(), emptyList(), emptyMap(), emptyMap(), emptyMap(), emptyList(), emptyList(), EditError("unknown", null, null, "no committed contract for ${ids.work}")), context)
-        if (!mask.allows(call.name)) {
+        if (call.operationNames.any { !mask.allows(it) }) {
             return render(args, alias, actionId, EditResult(false, editId, emptyList(), emptyList(), emptyMap(), emptyMap(), emptyMap(), emptyList(), emptyList(), EditError("unsupported", null, null, "${call.name} is masked in this role")), context)
         }
         val result = workspace.mutation.withLock {

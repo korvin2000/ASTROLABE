@@ -59,6 +59,34 @@ import kotlin.test.assertTrue
 /** P1.8.7: the cell turn loop of §3.7 — order, fail-closed validation, gates, every exit kind, and a checkpoint on every path out (fault injection). */
 class CellTest {
     @Test
+    fun `create permission cannot admit a later delete in the same edit call`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val role = Roles.implementing.copy(toolMask = io.astrolabe.provider.ToolMask.of("look.read", "edit.create"))
+            f.run(ScriptedModel.of(
+                Scripted.Reply(listOf(read("read", "src/a.py"))),
+                Scripted.Reply(listOf(call("mixed", "edit", """{"ops":[{"create":"src/new.py","content":"new"},{"delete":"src/a.py","expect":"${f.version("src/a.py").digest.hex}"}],"why":"mixed"}"""))),
+                Scripted.Reply(listOf(say("stop")), stop = io.astrolabe.provider.StopReason.Refusal),
+            ), role = role)
+            assertTrue(Files.exists(f.repo.root.resolve("src/a.py")))
+            assertFalse(Files.exists(f.repo.root.resolve("src/new.py")))
+        }
+    }
+
+    @Test
+    fun `plan and probe completion reach their validator without running product acceptance`() = runTest {
+        for (role in listOf(Roles.plan, Roles.probe)) {
+            CellFixture(stateRoot.resolve(role.name)).use { f ->
+                var assessed = false
+                val exit = f.run(ScriptedModel.of(Scripted.Reply(listOf(say("packet")))), role = role,
+                    completion = RoleCompletion { _, _ -> assessed = true; CompletionDecision.Accepted(emptyList()) })
+                assertTrue(assessed)
+                assertIs<CellExit.Completed>(exit)
+                assertTrue(f.checks.required().all { it.last == null }, "product checks belong to implementing completion")
+            }
+        }
+    }
+
+    @Test
     fun `partial usage retains the generation reservation including known overruns`() = runTest {
         val input = io.astrolabe.provider.BillingDimension.UNCACHED_INPUT
         val output = io.astrolabe.provider.BillingDimension.OUTPUT

@@ -31,6 +31,9 @@ public data class ToolCall(
 ) {
     val name: String get() = ToolOps.name(family, op)
 
+    internal val operationNames: List<String>
+        get() = (args as? Args.Edit)?.args?.ops?.map { ToolOps.name(family, it.kind) } ?: listOf(name)
+
     /** `if: green(op:N)` / `applied(op:N)` when present. */
     val condition: String?
         get() = when (val a = args) {

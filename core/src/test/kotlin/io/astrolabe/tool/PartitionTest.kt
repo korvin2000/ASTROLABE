@@ -9,6 +9,16 @@ import kotlin.test.assertTrue
 
 /** P1.6.2 turn partition (§5.4): phases by effect, emitted op ids, backward-only conditions, one transform alone. */
 class PartitionTest {
+    @Test
+    fun `later edit operations retain their masks and cannot hide a different condition`() {
+        val parsed = assertIs<ParsedCalls.Valid>(ToolCalls.parse(listOf(
+            ProviderCall("c1", "edit", """{"ops":[{"create":"a","content":"a"},{"delete":"b","expect":"abcd","if":"green(op:2)"}],"why":"w"}"""),
+            ProviderCall("c2", "run", """{"argv":["check"]}"""),
+        )))
+        assertEquals(listOf("edit.create", "edit.delete"), parsed.calls.first().operationNames)
+        assertIs<Partition.Rejected>(Partition.of(parsed.calls))
+    }
+
     /** Raw call templates by `family.op`; `%IF%` is replaced by a condition clause or nothing. */
     private val templates = mapOf(
         "look.read" to ("look" to """{"what":"read","target":"src/a.py:1-20"}"""),

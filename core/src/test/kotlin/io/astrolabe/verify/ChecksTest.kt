@@ -41,6 +41,19 @@ import kotlin.test.assertTrue
 
 class ChecksTest {
     @Test
+    fun `committed acceptance additions and command changes update the live registry`() {
+        val checks = Checks.seed(contract, RunnerCommands())
+        val before = checks[Checks.acceptId("AC-1")]!!.definitionVersion
+        val command = Command(listOf("new-check"))
+        val changed = contract.copy(acceptance = contract.acceptance.map {
+            if (it.id == "AC-1") Acceptance.Run(it.id, command, Origin.User) else it
+        } + Acceptance.Run("AC-added", command, Origin.User))
+        checks.synchronizeAcceptance(changed)
+        assertEquals(command, checks.forAcceptance("AC-added").single().command)
+        assertTrue(before != checks[Checks.acceptId("AC-1")]!!.definitionVersion)
+    }
+
+    @Test
     fun `digest capacity refuses mandatory overflow and reduces more than 64 requests`() {
         val ledger = Ledger.initial(contract)
         assertFailsWith<io.astrolabe.register.DigestCapacity> { ContractDigest.render(contract, ledger, emptyList(), estimator, capTokens = 1) }
