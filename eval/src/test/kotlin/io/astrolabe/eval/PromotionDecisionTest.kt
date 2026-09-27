@@ -56,7 +56,7 @@ class PromotionDecisionTest {
             PromotionEvidence.of(manifest, variants[1].attempt!!, clean, EvaluationOrigin.Synthetic, "ambiguous attempt")
         }
         val report = PromotionReport.evaluate(score(variants[0]), score(variants[1]), evidence, usd("0"), usd("0"))
-        val decision = PromotionDecision.decide(report, fixtures(), manifest)
+        val decision = PromotionDecision.decide(report, FixtureReport(variants[1].fingerprint.hex, measured()), manifest)
         assertFalse(decision.issues.any { it.code in setOf(EvaluationIssueCode.EvidenceMismatch, EvaluationIssueCode.MultipleSelection) }, decision.issues.toString())
     }
 
@@ -143,7 +143,7 @@ class PromotionDecisionTest {
         val repos = 2
         val manifest = manifest(repos, listOf(baselineArm, candidateArm))
         val clean = CampaignIntegrity.check(IntegrityInput(emptyList(), emptyList(), emptyList(), emptyList(), null, emptyList(), 0))
-        val evidence = PromotionEvidence.of(manifest, candidate, clean, EvaluationOrigin.Measured, "pilot")
+        val evidence = PromotionEvidence.of(manifest, candidate, clean, EvaluationOrigin.Measured, "pilot", design(repos))
         assertEquals(listOf(EvidenceCheck.Pass, EvidenceCheck.Pass, EvidenceCheck.Pass),
             listOf(evidence.integrity, evidence.independence, evidence.mandatoryControls))
         val reserveOff = EvalArms.configure(EvalArm.Reserve, "off", base)
@@ -204,5 +204,40 @@ class PromotionDecisionTest {
     /** One passing fixture per invariant: every invariant measured and zero. */
     private fun measured() = Invariant.entries.map { FixtureResult("C", "${it.fixtures.first()} ok()", listOf(it.fixtures.first()), FixtureStatus.Passed, null) }
 
-    private fun fixtures() = FixtureReport("B1", measured())
+    private fun fixtures() = FixtureReport(candidate.fingerprint.hex, measured())
+
+    @Test
+    fun `promotion rejects altered final trial membership and foreign fixture evidence`() {
+        val original = manifest(2, listOf(baselineArm, candidateArm))
+        val tasks = original.workload.tasks + WorkloadTask("training", setOf(0), "training-repo", null, "hard", BigDecimal.ONE, null)
+        val manifest = CampaignManifest("partition", original.harnessVersion, original.variants, original.arms,
+            WorkloadDesign(original.workload.policy, tasks), original.assignment + (WorkloadTrialKey("training", 0) to WorkloadPartition.Development), original.memory)
+        val trials = design(2).trials
+        fun designFor(rows: List<PlannedTrial>) = EvaluationDesign(policy, manifest.fingerprint, baseline.fingerprint, setOf(candidate.fingerprint), rows)
+        val clean = CampaignIntegrity.check(IntegrityInput(emptyList(), emptyList(), emptyList(), emptyList(), null, emptyList(), 0))
+        fun decide(design: EvaluationDesign, fixtures: FixtureReport = fixtures()): PromotionDecision {
+            val evidence = PromotionEvidence.of(manifest, candidate, clean, EvaluationOrigin.Measured, "pilot", design)
+            val report = PromotionReport.evaluate(Scorecard.calculate(design, baseline.fingerprint, table(design, baseline, "5")),
+                Scorecard.calculate(design, candidate.fingerprint, table(design, candidate, "2")), evidence, usd("0"), usd("0"))
+            return PromotionDecision.decide(report, fixtures, manifest)
+        }
+        val valid = designFor(trials)
+        assertFalse(decide(valid).issues.any { it.code == EvaluationIssueCode.EvidenceMismatch })
+        assertEquals(EvidenceCheck.Unknown, PromotionEvidence.of(manifest, candidate, clean, EvaluationOrigin.Measured, "no design").independence)
+        val first = trials.first()
+        val invalid = listOf(
+            trials.drop(1),
+            trials + first.copy(key = first.key.copy(task = "invented")),
+            trials.drop(1) + first.copy(key = first.key.copy(repository = "invented")),
+            trials.drop(1) + first.copy(stratum = if (first.stratum == "easy") "hard" else "easy"),
+            trials.drop(1) + first.copy(key = first.key.copy(repetition = 9)),
+            trials + PlannedTrial(TrialKey("training-repo", "training", 0), "hard", first.matchedInputs),
+        )
+        for (rows in invalid) {
+            val design = designFor(rows)
+            assertEquals(EvidenceCheck.Fail, PromotionEvidence.of(manifest, candidate, clean, EvaluationOrigin.Measured, "bad design", design).independence)
+            assertTrue(decide(design).issues.any { it.code == EvaluationIssueCode.EvidenceMismatch })
+        }
+        assertTrue(decide(valid, FixtureReport(baseline.fingerprint.hex, measured())).issues.any { it.code == EvaluationIssueCode.EvidenceMismatch })
+    }
 }
