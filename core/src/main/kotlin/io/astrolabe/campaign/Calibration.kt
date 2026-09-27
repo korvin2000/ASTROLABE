@@ -1,5 +1,6 @@
 package io.astrolabe.campaign
 
+import io.astrolabe.AttemptConfig
 import io.astrolabe.Flags
 import io.astrolabe.ShapePolicy
 import io.astrolabe.contract.Increment
@@ -34,31 +35,42 @@ public object Calibration {
     /** Bands from the D-16 size classes: small, medium, large expected-file counts. */
     @JvmStatic
     public fun policy(shape: ShapePolicy = ShapePolicy()): CalibrationPolicy =
-        CalibrationPolicy("d16-bands-v1", listOf(shape.smallMaxFiles, shape.largeMinFiles - 1, Int.MAX_VALUE))
+        CalibrationPolicy(
+            "d16-bands-v1:${shape.smallMaxFiles}:${shape.largeMinFiles}",
+            listOf(shape.smallMaxFiles, shape.largeMinFiles - 1, Int.MAX_VALUE),
+        )
 
     /**
-     * One observation per dispatched increment of every stored campaign: verified ⇒ completed, cancelled ⇒ cancelled,
-     * unverified in a failed campaign ⇒ failed, otherwise unfinished (censored). The subsystem is the increment's
-     * first write-scope directory.
+     * One observation per dispatched increment with a frozen attempt: verified ⇒ completed, cancelled ⇒ cancelled,
+     * unverified in a failed campaign ⇒ failed, otherwise unfinished (censored). Campaigns lacking frozen provenance
+     * cannot be assigned to the caller's series. The subsystem is the increment's first write-scope directory.
      */
     @JvmStatic
     public fun observations(store: Store, series: CalibrationSeries): List<CalibrationObservation> =
-        store.db.query("SELECT body FROM campaigns ORDER BY work_id, attempt_id") { JSON.decodeFromString(CampaignState.serializer(), it.string("body")) }
-            .flatMap { state ->
-                state.graph.increments.filter { it.cells.isNotEmpty() }.map { increment ->
-                    val outcome = when {
-                        increment.status == IncrementStatus.Verified -> CalibrationOutcome.Completed
-                        increment.status == IncrementStatus.Cancelled -> CalibrationOutcome.Cancelled
-                        state.outcome == CampaignOutcome.Cancelled -> CalibrationOutcome.Cancelled
-                        state.outcome == CampaignOutcome.Failed -> CalibrationOutcome.Failed
-                        else -> CalibrationOutcome.Unfinished
-                    }
-                    CalibrationObservation.fromIncrement(
-                        CalibrationId(state.work, state.attempt, increment.id), series, subsystem(increment), outcome,
-                        "campaign:${state.work.value}/${state.attempt.value}", increment,
-                    )
+        store.db.query(
+            "SELECT c.body AS campaign_body, a.body AS attempt_body FROM campaigns c " +
+                "JOIN attempts a ON a.work_id = c.work_id AND a.attempt_id = c.attempt_id ORDER BY c.work_id, c.attempt_id",
+        ) { row ->
+            JSON.decodeFromString(CampaignState.serializer(), row.string("campaign_body")) to
+                JSON.decodeFromString(AttemptConfig.serializer(), row.string("attempt_body"))
+        }.flatMap { (state, frozen) ->
+            val observedSeries = CalibrationSeries(
+                series.repository, frozen.harnessVersion, policy(frozen.config.defaults.shapePolicy).version,
+            )
+            state.graph.increments.filter { it.cells.isNotEmpty() }.map { increment ->
+                val outcome = when {
+                    increment.status == IncrementStatus.Verified -> CalibrationOutcome.Completed
+                    increment.status == IncrementStatus.Cancelled -> CalibrationOutcome.Cancelled
+                    state.outcome == CampaignOutcome.Cancelled -> CalibrationOutcome.Cancelled
+                    state.outcome == CampaignOutcome.Failed -> CalibrationOutcome.Failed
+                    else -> CalibrationOutcome.Unfinished
                 }
+                CalibrationObservation.fromIncrement(
+                    CalibrationId(state.work, state.attempt, increment.id), observedSeries, subsystem(increment), outcome,
+                    "campaign:${state.work.value}/${state.attempt.value}", increment,
+                )
             }
+        }
 
     /** The ≤ [BLOCK_CAP_TOKENS]-token `[K]` block of the plan cell, or `null` when the flag is off or no history exists. */
     @JvmStatic
