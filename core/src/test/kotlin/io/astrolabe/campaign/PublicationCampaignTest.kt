@@ -204,8 +204,13 @@ class PublicationCampaignTest {
             assertNull(repo.git.readRef(harness), "no harness commit of an unverified tree")
 
             repo.write("src/a.py", "def a():\n    return 10\n")
-            c.cancellation.cancel("the host stopped the campaign")
-            val fenced = ctl.publish(c, run, PublicationRequest(Stage.LocalCommit), AutonomousAuthority())
+            val cancelling = object : Authority by AutonomousAuthority() {
+                override suspend fun approve(request: DClassRequest): Decision {
+                    c.cancellation.cancel("the host stopped the campaign while approval was pending")
+                    return Decision(request.id, request.contractRevision, true)
+                }
+            }
+            val fenced = ctl.publish(c, run, PublicationRequest(Stage.LocalCommit), cancelling)
             assertTrue(assertIs<PublicationResult.Refused>(fenced.results.single()).refusal.detail.startsWith("publication fenced: cancelled"))
             assertNull(repo.git.readRef(harness), "a cancelled campaign publishes nothing")
         }
