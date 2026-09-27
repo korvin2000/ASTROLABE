@@ -2,8 +2,33 @@
 
 Branch: `feature/bugfix`. Baseline: `9a80e117445be357285fec2cffffe0fd45290a9a`.
 
-**88 fixed across eight sessions (6 in the current continuation); 54 open; F-034 previously resolved.**
+**98 fixed across nine sessions (10 in this continuation); 44 open; F-034 previously resolved.**
 The complete remaining queue is `findings.md` ? JSON `fix_progress.remaining_open_ids`.
+
+## Ninth continuation: authority, evidence and transform repairs
+
+| Finding | Commit | Change and evidence |
+|---|---|---|
+| F-084 | `81ce469` | Cell validates every parsed operation against the advertised effective turn mask before dispatch; probe edits and plan/review runs are refused. CellTest passes. |
+| F-117 | `76d60b5` | Unresolved bare JS/TS imports are incomplete dependency information (except explicit node: builtins), so local aliases cannot support a narrow blast. ImportGraphTest passes with a syntax-tier alias regression. |
+| F-118 | `81ce469` | Only complete, untruncated, unredacted reference results clear impact obligations. Lexical reference views remain incomplete; plan rescoping remains available. CellTest passes. |
+| F-119 | `a41a7fa` | All actual transform changes, including new files, are checked against the current contract and path protection. Refusal triggers the existing guarded inverse; forbidden and contract-protected new files are removed. TransformTest passes. |
+| F-120 | `a41a7fa` | Transform diff blobs use the configured redactor; exact preimages/postimages remain protected. Characterization bytes are stored as protected comparison blobs. TransformTest and BehaviourSnapshotTest pass. |
+| F-132 | `e9d84db` | A durable repair reservation precedes helper effects; completion is a separate event. Interrupted helpers and stale routed grants cannot spend the same repair again after resume. RecoveryCampaignTest passes. |
+| F-134 | `217db66` | Integration reads current contract/generation/authority inside main ownership after staging and before effects. Both contract and generation changes during lock contention refuse publication. IntegratorTest passes. |
+| F-136 | `dc19437` | Publication checks coroutine cancellation and the live campaign fence before each stage and after approval; changed contracts also refuse. PublicationTest and PublicationCampaignTest pass. |
+| F-138 | `c32bc22` | QA redacts CLI/HTTP transcripts before blob storage and observed output before records/finish export; matching still uses original output. QaDriverTest passes. |
+| F-142 | `b9312b0` | Evaluation IDs bind comparator/arm semantics, shape cap and frozen attempt. Designs/trials/evidence use these IDs, and promotion checks manifest membership. CampaignTest and PromotionDecisionTest pass. |
+
+### Verification and compatibility
+
+- Eleven selected classes passed on Windows JDK 26 (nine core, two eval), in focused batches. The import-graph batch initially found an obsolete completeness expectation; evaluation initially rejected an invalid fingerprint-kind label. Both were corrected and their affected classes pass. No full suite/build, Linux/CI or P7 run.
+- Core/eval ABI dumps regenerated and checked. QaDriver adds configurable redaction while retaining explicit Java overloads; Kotlin consumers using default constructor arguments must rebuild. Eval adds configuration fingerprint accessors and PromotionEvidence overloads. No database schema change.
+- Old evaluation manifests and trial tables need regeneration under configuration IDs that include shape and comparator/arm semantics. The legacy attempt-only evidence overload refuses absent or ambiguous configurations.
+- Unresolved bare script imports conservatively widen dependency analysis. Lexical reference views cannot discharge complete-reference obligations; a newly scoped plan remains the supported alternative.
+- Repair reservations consume allowance even when the helper throws; resume does not replay unknown effects. Historical repair completion rows still consume one allowance. Existing leaked/raw artifacts are not migrated or scrubbed by these fixes.
+- Transform validation is after execution under the existing trusted-local model. Guarded recovery restores only matching postimages; external writes or path refusals remain reported partial effects. QA HTTP candidate binding remains open as F-137.
+- D-285 through D-290 record these choices. Eight fix commits run from e9d84db through a41a7fa; API dumps and continuation records follow. Push target: origin/feature/bugfix, authorized by the user.
 
 ## Eighth continuation: smaller out-of-order repairs
 

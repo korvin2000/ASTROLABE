@@ -1,6 +1,6 @@
 # Implementation audit findings
 
-**Remediation:** 88 fixed on `feature/bugfix` (6 committed in this continuation); 54 remain open; F-034 was already resolved. See [bugfix progress](audit/BUGFIX-PROGRESS.md). Original audit evidence remains historical; `fix_progress` is the current repair status.
+**Remediation:** 98 fixed on `feature/bugfix` (10 in this continuation); 44 remain open; F-034 was already resolved. See [bugfix progress](audit/BUGFIX-PROGRESS.md). Original audit evidence remains historical; `fix_progress` is the current repair status.
 
 ```json
 {
@@ -544,18 +544,22 @@
     "date": "2026-09-28",
     "status": "committed",
     "fixed_this_session": [
-      "F-115",
-      "F-069",
-      "F-042",
-      "F-039",
-      "F-052",
-      "F-110"
+      "F-084",
+      "F-117",
+      "F-118",
+      "F-119",
+      "F-120",
+      "F-132",
+      "F-134",
+      "F-136",
+      "F-138",
+      "F-142"
     ],
-    "fixed_this_session_count": 6,
+    "fixed_this_session_count": 10,
     "previously_resolved": [
       "F-034"
     ],
-    "remaining_open_count": 54,
+    "remaining_open_count": 44,
     "remaining_open_ids": [
       "F-016",
       "F-017",
@@ -571,7 +575,6 @@
       "F-048",
       "F-075",
       "F-082",
-      "F-084",
       "F-086",
       "F-087",
       "F-089",
@@ -591,10 +594,6 @@
       "F-111",
       "F-112",
       "F-113",
-      "F-117",
-      "F-118",
-      "F-119",
-      "F-120",
       "F-122",
       "F-124",
       "F-125",
@@ -602,14 +601,9 @@
       "F-127",
       "F-128",
       "F-129",
-      "F-132",
       "F-133",
-      "F-134",
       "F-135",
-      "F-136",
       "F-137",
-      "F-138",
-      "F-142",
       "F-143"
     ],
     "next_priority": [
@@ -622,78 +616,45 @@
       "F-033",
       "F-036",
       "F-122",
-      "F-127",
-      "F-142"
+      "F-127"
     ],
     "handoff": "CONTINUE-TASK.md",
     "detail": "audit/BUGFIX-PROGRESS.md",
-    "verification": "F-115/F-069/F-042/F-052/F-110 RED/GREEN and F-039 OutlineTest passed. Full Windows JDK 26 build after all six fixes passed: 1667 tests, 13 skipped, zero failures/errors; ABI and packaging passed. No new Linux/CI or P7 evidence.",
-    "current_build": {
-      "command": "./gradlew.bat build -q --console=plain",
-      "exit": 0,
-      "tests": 1667,
-      "failures": 0,
-      "errors": 0,
-      "skipped": 13,
-      "coverage": "all six fixes through fbee771"
-    },
+    "verification": "Eleven selected test classes passed on Windows JDK 26 across focused batches. Core/eval ABI regenerated and checked. No full suite/build, Linux/CI or P7 run, per the requested selective verification scope.",
+    "current_build": null,
     "source_changes_allowed": true,
     "verification_results": {
-      "full_build_command": "./gradlew.bat build -q --console=plain",
-      "full_build_exit": 0,
-      "log": "build/bugfix-seventh-build-verified.log",
-      "abi": "core/eval unchanged",
+      "selected_core_classes": [
+        "RecoveryCampaignTest",
+        "PublicationCampaignTest",
+        "PublicationTest",
+        "IntegratorTest",
+        "QaDriverTest",
+        "CellTest",
+        "ImportGraphTest",
+        "TransformTest",
+        "BehaviourSnapshotTest"
+      ],
+      "selected_eval_classes": [
+        "CampaignTest",
+        "PromotionDecisionTest"
+      ],
+      "result": "passed",
+      "corrections": [
+        "ImportGraphTest previously assumed a bare react import could not be a local alias; updated to assert uncertainty.",
+        "Initial evaluation fingerprint kind included a forbidden slash; corrected to the canonical encoder format."
+      ],
+      "abi": "core/eval regenerated and checkKotlinAbi passed",
+      "full_suite": "not run (user requested selective tests)",
       "linux_ci": "not run",
       "p7": "excluded",
-      "first_full_build": {
-        "source_checkpoint": "3c0ff07",
-        "exit": 1,
-        "core_tests": 1572,
-        "failures": 2,
-        "skipped": 13,
-        "corrections": [
-          "DeriveS0Test expected old direct node runner; now expects npm test.",
-          "GeneratedToolTest uses git status --short; explicitly recognized as read-only."
-        ]
-      },
-      "modules": {
-        "core": {
-          "tests": 1572,
-          "failures": 0,
-          "errors": 0,
-          "skipped": 13,
-          "passed": 1559
-        },
-        "provider-api": {
-          "tests": 19,
-          "failures": 0,
-          "errors": 0,
-          "skipped": 0,
-          "passed": 19
-        },
-        "eval": {
-          "tests": 50,
-          "failures": 0,
-          "errors": 0,
-          "skipped": 0,
-          "passed": 50
-        },
-        "index-treesitter": {
-          "tests": 17,
-          "failures": 0,
-          "errors": 0,
-          "skipped": 0,
-          "passed": 17
-        }
-      },
-      "total_passed": 1645,
-      "total_skipped": 13,
-      "review_corrections": [
-        "Derived S0 TypeScript acceptance uses npm test, preserving lifecycle hooks.",
-        "git status --short is a positively recognized read-only form used by generated tools."
-      ],
-      "platform_limits": [
-        "Five real-symlink capture/export regressions from the prior continuation remain skipped on this Windows host. No new Linux/CI execution."
+      "logs": [
+        "build/bugfix-ninth-safety.log",
+        "build/bugfix-ninth-masks.log",
+        "build/bugfix-ninth-evaluation.log",
+        "build/bugfix-ninth-evaluation-verified.log",
+        "build/bugfix-ninth-transform.log",
+        "build/bugfix-ninth-abi-check.log"
       ]
     },
     "active_processes": [],
@@ -727,12 +688,16 @@
       "F-035",
       "F-037",
       "F-038",
+      "F-039",
+      "F-040",
+      "F-042",
       "F-043",
       "F-046",
       "F-047",
       "F-049",
       "F-050",
       "F-051",
+      "F-052",
       "F-053",
       "F-054",
       "F-055",
@@ -749,6 +714,7 @@
       "F-066",
       "F-067",
       "F-068",
+      "F-069",
       "F-070",
       "F-071",
       "F-072",
@@ -760,16 +726,27 @@
       "F-079",
       "F-080",
       "F-081",
+      "F-083",
+      "F-085",
       "F-088",
+      "F-090",
       "F-094",
+      "F-096",
+      "F-097",
       "F-098",
+      "F-099",
+      "F-108",
+      "F-110",
+      "F-114",
+      "F-115",
       "F-116",
       "F-121",
       "F-123",
       "F-130",
       "F-131",
       "F-139",
-      "F-140"
+      "F-140",
+      "F-141"
     ],
     "fixed_on_branch": [
       "F-001",
@@ -801,13 +778,16 @@
       "F-035",
       "F-037",
       "F-038",
+      "F-039",
       "F-040",
+      "F-042",
       "F-043",
       "F-046",
       "F-047",
       "F-049",
       "F-050",
       "F-051",
+      "F-052",
       "F-053",
       "F-054",
       "F-055",
@@ -824,6 +804,7 @@
       "F-066",
       "F-067",
       "F-068",
+      "F-069",
       "F-070",
       "F-071",
       "F-072",
@@ -836,6 +817,7 @@
       "F-080",
       "F-081",
       "F-083",
+      "F-084",
       "F-085",
       "F-088",
       "F-090",
@@ -845,17 +827,28 @@
       "F-098",
       "F-099",
       "F-108",
+      "F-110",
       "F-114",
+      "F-115",
       "F-116",
+      "F-117",
+      "F-118",
+      "F-119",
+      "F-120",
       "F-121",
       "F-123",
       "F-130",
       "F-131",
+      "F-132",
+      "F-134",
+      "F-136",
+      "F-138",
       "F-139",
       "F-140",
-      "F-141"
+      "F-141",
+      "F-142"
     ],
-    "fixed_on_branch_count": 82,
+    "fixed_on_branch_count": 98,
     "previous_session_verification_results": {
       "initial_full_core": {
         "tests": 1293,
@@ -895,7 +888,7 @@
       },
       "full_core_rerun": false
     },
-    "source_checkpoint": "4604b89",
+    "source_checkpoint": "a41a7fa",
     "previous_continuation_verification_results": {
       "first_continuation_full_core": {
         "tests": 1314,
@@ -1143,6 +1136,27 @@
       "platform_limits": [
         "Five new real-symlink capture/export regressions skipped on Windows because symlink creation is unavailable. Windows junction and native process-quiescence tests ran. No new Linux group confirmation evidence."
       ]
+    },
+    "previous_eighth_verification_results": {
+      "verification": "F-115/F-069/F-042/F-052/F-110 RED/GREEN and F-039 OutlineTest passed. Full Windows JDK 26 build after all six fixes passed: 1667 tests, 13 skipped, zero failures/errors; ABI and packaging passed. No new Linux/CI or P7 evidence.",
+      "build": {
+        "command": "./gradlew.bat build -q --console=plain",
+        "exit": 0,
+        "tests": 1667,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 13,
+        "coverage": "all six fixes through fbee771"
+      }
+    },
+    "last_full_build": {
+      "command": "./gradlew.bat build -q --console=plain",
+      "exit": 0,
+      "tests": 1667,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 13,
+      "coverage": "all six fixes through fbee771"
     }
   }
 }
@@ -2411,10 +2425,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-084 - Masked role operations still reach executors with the implementing role's defaults
 
 - Task: [P1.8.1](TODO.md#L947).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed.
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/campaign/Controller.kt#L1272).
 - Analysis: Controller.runCell registers Edit/Run/Verify/State/Kb for every role without supplying their actual effective mask; they retain ToolOps.implementingS0. Cell.maskFor restricts the advertised request, but validateCalls and Dispatcher do not enforce that mask on returned calls. A probe/reviewer/plan response that emits a masked edit or run can therefore execute it under the campaign's ordinary authority. Read-only delegation and review isolation promises are broken; this is not a claim that a role is an OS security boundary. Enforce the effective turn mask before dispatch and pass consistent role capabilities to executors. Regression: script a valid but masked edit/run from probe/review/plan and assert no filesystem or process effects. Role-mask intersection unit tests do not exercise this path.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Remediation (2026-09-28, `81ce469`): Cell validates every parsed operation against the advertised effective turn mask before dispatch; probe edits and plan/review runs are refused. CellTest passes.
+
 
 ### F-085 - The loop gate keeps demanding STATE after its recovery action was performed
 
@@ -2699,34 +2715,42 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-117 - Unresolved TypeScript path aliases can be treated as complete dependency information
 
 - Task: [P3.2.1](TODO.md#L1401).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed.
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/atlas/ImportGraph.kt#L218).
 - Analysis: For a non-relative JS/TS import, graph construction tries only known package.json names and otherwise silently treats the import as external. It does not inspect tsconfig paths/baseUrl or mark such unresolved local aliases uncertain. Under a syntax-tier outline source, graph.complete can consequently be true while an internal '@app/helper' dependency is absent; Impact then narrows the blast/test set using incomplete edges. Resolve declared aliases or conservatively mark ambiguous bare imports incomplete. Regression: a syntax-tier project with a tsconfig path alias and a test importing through it must include that dependent test or widen scope. Default lexical-tier impact already widens conservatively; no tier-1 runtime reproduction claimed.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Remediation (2026-09-28, `76d60b5`): Unresolved bare JS/TS imports are incomplete dependency information (except explicit node: builtins), so local aliases cannot support a narrow blast. ImportGraphTest passes with a syntax-tier alias regression.
+
 
 ### F-118 - A truncated reference lookup clears all impact-review obligations for the symbol
 
 - Task: [P3.2.4](TODO.md#L1420).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed.
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/cell/Cell.kt#L399).
 - Analysis: Cell calls impact.inspected(target) for every look(refs) outcome with status=ok, without requiring complete, untruncated results or any displayed reference coverage. ImpactNudges.inspected removes all pending definitions sharing that symbol. A tiny-budget lookup can thus show only a fraction of the callers, yet remove the public-definition exit-gate requirement for all of them. Track inspected reference identities/ranges and preserve missing obligations when a result is incomplete/truncated. Regression: change a public symbol with more callers than fit the reference result; one small lookup must not clear every caller obligation.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Remediation (2026-09-28, `81ce469`): Only complete, untruncated, unredacted reference results clear impact obligations. Lexical reference views remain incomplete; plan rescoping remains available. CellTest passes.
+
 
 ### F-119 - A transform can create unauthorized files inside its declared glob and still be accepted
 
 - Task: [P3.3.1](TODO.md#L1454).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed.
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/tool/edit/Transform.kt#L219).
 - Analysis: Edit scope-checks only the pre-existing inventory before launching a transform. Post-run changedInScope is classified solely by scopeGlob, without ScopeGuard/contract/protected-path validation of newly created paths. With only src/a.py initially allowed, a broad glob can pass preflight, then create src/b.py or a new protected path inside the glob and return accepted=true. Trusted-local limitations explain why effects cannot always be prevented, but not accepting unauthorized mutations as successful edits. Revalidate every actual changed/created path against current committed scope/protection and report/refuse unauthorized effects with guarded recovery. Regression: a transform creates a previously absent, contract-forbidden file under an otherwise matching glob; it must not be accepted.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Remediation (2026-09-28, `a41a7fa`): All actual transform changes, including new files, are checked against the current contract and path protection. Refusal triggers the existing guarded inverse; forbidden and contract-protected new files are removed. TransformTest passes.
+
 
 ### F-120 - Transform diffs are stored as reusable artifacts before any redaction
 
 - Task: [P3.3.1](TODO.md#L1454).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed.
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/tool/edit/Transform.kt#L261).
 - Analysis: TransformRun builds a diff from raw before/after source and stores it directly as BlobKind.DIFF without Redaction or the recovery flag used for protected preimages/postimages. BehaviourSnapshots similarly stores characterization bytes as ordinary BlobKind.OUTPUT. Synthetic credentials embedded in changed lines/goldens therefore survive in reusable artifacts even if later display text is redacted. Redact model-facing/reusable views before storage; retain byte-exact comparison/recovery data only in the explicitly protected raw class, with safe derived views. Regression: secrets in a transformed source line and characterization file must be absent from reusable artifacts while protected inverse/equivalence data remains usable.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Remediation (2026-09-28, `a41a7fa`): Transform diff blobs use the configured redactor; exact preimages/postimages remain protected. Characterization bytes are stored as protected comparison blobs. TransformTest and BehaviourSnapshotTest pass.
+
 
 ### F-121 - Reordering existing test lines is classified as a harmless addition
 
@@ -2827,10 +2851,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-132 - Repair allowance is durably consumed only after side effects finish
 
 - Task: [P4.6.3](TODO.md#L1707).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed.
 - Location: [campaign/Recoveries.kt](core/src/main/kotlin/io/astrolabe/campaign/Recoveries.kt#L158).
 - Analysis: CampaignRecovery.repair invokes the helper before incrementing repairs and appending the REPAIR journal record. A crash or thrown helper/acceptance exception after effects but before that append leaves no spent allowance for replay; resume grants the same scoped repair again, possibly repeating unknown effects. Record/reserve the repair attempt before dispatch and reconcile its result afterward; recover incomplete attempts before retry. Regression: inject failure after helper effects but before journal completion, resume, and verify no unaccounted extra repair or blind replay.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; current-source trace and scoped test inspection; no new runtime reproduction claimed.
+- Remediation (2026-09-28, `e9d84db`): A durable repair reservation precedes helper effects; completion is a separate event. Interrupted helpers and stale routed grants cannot spend the same repair again after resume. RecoveryCampaignTest passes.
+
 
 ### F-133 - Integration publication does not prove the complete tested candidate equals the published tree
 
@@ -2843,10 +2869,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-134 - Integration fails to recheck the current contract and generation inside the publication lock
 
 - Task: [P5.1.3](TODO.md#L1765).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed.
 - Location: [delegate/Integrator.kt](core/src/main/kotlin/io/astrolabe/delegate/Integrator.kt#L280).
 - Analysis: admit checks contract version, but publication never compares now.contractVersion with dispatch versions. It also captures current() before waiting for main.mutation; its generation snapshot can be superseded while waiting. An amendment during combined verification or generation change during lock contention can therefore publish an obsolete patch if the authority callback otherwise allows it. Read current authority/generation/contract inside the lock immediately before effects and validate all dispatch versions. Regression: amend during checks and supersede while lock acquisition is suspended; no bytes publish.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; current-source trace and scoped test inspection; no new runtime reproduction claimed.
+- Remediation (2026-09-28, `217db66`): Integration reads current contract/generation/authority inside main ownership after staging and before effects. Both contract and generation changes during lock contention refuse publication. IntegratorTest passes.
+
 
 ### F-135 - Multi-file integration can leave a partially published main workspace
 
@@ -2859,10 +2887,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-136 - Publication can proceed after cancellation while awaiting approval
 
 - Task: [P5.2.1](TODO.md#L1793).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed.
 - Location: [campaign/Publisher.kt](core/src/main/kotlin/io/astrolabe/campaign/Publisher.kt#L207).
 - Analysis: Publications checks c.refusal once at entry, then Publisher.publish suspends in authority.approve and immediately calls perform after a valid reply. Neither a cancellation/lost lease during that await nor between requested stages is rechecked. The original snapshot can thus be pushed, merged or deployed after the campaign loses publication authority. Supply a live fence and recheck it after approval and before every effect; keep immutable committed-tree identity binding. Regression: cancel while authority approval is pending, return Approved, and assert no commit/push/deploy occurs.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; current-source trace and scoped test inspection; no new runtime reproduction claimed.
+- Remediation (2026-09-28, `dc19437`): Publication checks coroutine cancellation and the live campaign fence before each stage and after approval; changed contracts also refuse. PublicationTest and PublicationCampaignTest pass.
+
 
 ### F-137 - HTTP QA receipts claim candidate isolation without binding the server to that candidate
 
@@ -2875,10 +2905,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-138 - QA stores and reports unredacted process and HTTP output
 
 - Task: [P5.3.1](TODO.md#L1803).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed.
 - Location: [delegate/QaDriver.kt](core/src/main/kotlin/io/astrolabe/delegate/QaDriver.kt#L214).
 - Analysis: executed writes the raw transcript directly as BlobKind.LOG without Redaction; drive puts the same output in QaCase.observed, later persisted/exported in QaRunRecord. Credentials printed by a product or returned by HTTP survive in reusable logs and finish artifacts, bypassing the ordinary Run redaction boundary. Redact reusable transcripts and observed fields before storage/rendering, keeping raw data only under an explicit protected policy if necessary. Regression: synthetic secrets in CLI/HTTP output are absent from logs, QA records and finish exports.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; current-source trace and scoped test inspection; no new runtime reproduction claimed.
+- Remediation (2026-09-28, `c32bc22`): QA redacts CLI/HTTP transcripts before blob storage and observed output before records/finish export; matching still uses original output. QaDriverTest passes.
+
 
 ### F-139 - Generated tool registrations retain mutable script and capability collections
 
@@ -2913,10 +2945,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-142 - Shape comparator configurations collapse to the same evaluation identity
 
 - Task: [P6.1.2](TODO.md#L1884).
-- Severity: high. Confidence: reproduced. Status: open.
+- Severity: high. Confidence: reproduced. Status: fixed.
 - Location: [eval/src/main/kotlin/io/astrolabe/eval/Campaigns.kt](eval/src/main/kotlin/io/astrolabe/eval/Campaigns.kt#L43).
 - Analysis: Variants.configure(B1/B2/B3) freezes the identical base AttemptConfig and stores the differing S0/S1/S2 cap only in VariantConfig.maxShape. Shape arms do the same in EvalArms.configure. Scorecards, trial configuration IDs and PromotionDecision's frozen set use only attempt.fingerprint, so these distinct experiments collide; EvaluationDesign even rejects comparing a baseline with a candidate sharing its fingerprint. Define a configuration identity including enforced shape cap and arm/comparator semantics and use it throughout trials/design/evidence. Regression: B1/B2/B3 and each shape arm have distinct usable evaluation IDs even with identical base Config.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; successful stdin JShell probe against current compiled classes; synthetic data only. With Config(profiles=FakeProfiles.all), B1/B2/B3 caps were [S0,S1,S2] and equalFingerprints=true. The initial probe used an invalid empty profile configuration and is not evidence.
+- Remediation (2026-09-28, `b9312b0`): Evaluation IDs bind comparator/arm semantics, shape cap and frozen attempt. Designs/trials/evidence use these IDs, and promotion checks manifest membership. CampaignTest and PromotionDecisionTest pass.
+
 
 ### F-143 - Promotion decision does not bind evaluated trials to the frozen workload partition
 

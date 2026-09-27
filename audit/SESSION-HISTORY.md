@@ -632,3 +632,10 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - Focused regressions passed; final full Windows JDK 26 build after all six passed (1667 tests, 13 skipped, zero failures/errors; ABI/packaging).
 - F-110 also passed NotesTest, StoreKbTest and CuratorTest. No new Linux/CI or P7 evidence.
 - Earlier local commits were undone at the owner's request so they could review the unstaged fixes. After review, the owner authorized commit and push; six fresh fix commits now end at `fbee771`.
+
+## 2026-09-28 — bugfix ninth continuation
+- Fixed F-084/F-117/F-118/F-119/F-120/F-132/F-134/F-136/F-138/F-142: 98 fixed, 44 open.
+- Eight fix commits through a41a7fa; core/eval API dumps regenerated and checked.
+- Eleven selected classes passed across focused Windows JDK 26 batches; corrected one obsolete import expectation and one invalid fingerprint label. No full suite/build or new Linux/CI/P7 run.
+- Updated handoff, findings and repair ledger; D-285 through D-290 record compatibility and conservative policies.
+- User authorized commit/push to origin/feature/bugfix. Pre-existing CLAUDE.md/ISSUES.md and untracked task files preserved.

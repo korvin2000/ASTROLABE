@@ -52,9 +52,9 @@ Schema **v4** (no bump this session). `packets` also holds behaviour-snapshot, c
 Local choices D-112–D-113, D-120–D-126, D-135–D-137, D-145–D-155, D-160–D-165, D-170–D-174, D-180–D-183, D-190–D-195,
 D-200–D-202, D-210–D-213, D-220–D-223, D-230–D-233, D-240–D-244, D-250–D-254, D-260 (TODO §3). Owner decision D-175
 (new dependencies allowed under pinned-version rules).
-
-## Audit remediation (2026-09-27)
-Branch `feature/bugfix`: 88 fixed (6 current, committed after owner review), 54 open, F-034 previously resolved.
+## Audit remediation (2026-09-28)
+Branch `feature/bugfix`: 98 fixed (10 this continuation), 44 open, F-034 previously resolved.
 See `findings.md` and `audit/BUGFIX-PROGRESS.md`; historical CI gates above predate these fixes.
-Full Windows build after all six current fixes passed: 1667 tests, 13 skipped; packaging/ABI passed. No new Linux/CI.
-D-277 through D-284 cover npm lifecycle, loop/rebuild, calibration, review surfaces, await errors, fixture containers, unknown commands and packet feedback.
+Eleven selected test classes passed on Windows JDK 26; core/eval ABI regenerated and checked.
+No full suite/build or new Linux/CI run. Last full Windows build: fbee771, 1667 tests, 13 skipped.
+D-285 through D-290 cover authority, repair reservations, incomplete evidence, redaction and evaluation identities.
