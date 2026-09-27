@@ -31,6 +31,7 @@ import io.astrolabe.evidence.Outcome
 import io.astrolabe.id.CandidateId
 import io.astrolabe.id.Digest
 import io.astrolabe.id.FileVersion
+import io.astrolabe.id.Generation
 import io.astrolabe.id.IdGen
 import io.astrolabe.provider.BillingDimension
 import io.astrolabe.provider.InvocationId
@@ -775,6 +776,7 @@ public class Cell @JvmOverloads constructor(
             val note = "rebuilt: pressure (generation $rebuilds) — $why · ${carry.known}"
             rebuildNotes += note
             ev.journal.append(JournalEvent(idGen.next("ev"), ids, turn, JournalKind.Boundary, text = note, at = clock.instant()))
+            events?.emit(AgentEvent.Cell.Rebuilt(ids, why, Generation(rebuilds)))
         }
 
         private fun persist(checkpoint: CellCheckpoint) {

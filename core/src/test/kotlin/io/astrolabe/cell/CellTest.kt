@@ -317,6 +317,8 @@ class CellTest {
             assertEquals(2, partial.checkpoint.turn)
             assertEquals(1, partial.checkpoint.rebuilds)
             assertTrue(f.transcript(2).filterIsInstance<io.astrolabe.provider.Message>().any { it.text.startsWith("rebuilt: pressure (generation 1)") }, "the rebuild is announced in the pinned transcript")
+            assertEquals(1, f.recorder.ofType<AgentEvent.Cell.Rebuilt>().size)
+            assertEquals(1, f.recorder.ofType<AgentEvent.Cell.Rebuilt>().single().generation.value)
             assertTrue(f.journal.events(JournalScope(f.ids.work, kinds = setOf(JournalKind.Boundary))).any { it.text.startsWith("rebuilt: pressure (generation 1)") })
             // FX-11 through pressure: the scoped dead end survives the rebuild and KNOWN is declared as the seeds only.
             assertTrue(f.anchorText(2).contains("monkeypatching the clock") && f.anchorText(2).contains("scope: tests/"), f.anchorText(2))
