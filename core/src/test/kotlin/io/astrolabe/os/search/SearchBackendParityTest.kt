@@ -10,6 +10,8 @@ import java.nio.file.Files
 import java.nio.file.attribute.FileTime
 import java.nio.file.attribute.PosixFileAttributeView
 import java.time.Instant
+import io.astrolabe.workspace.createJunction
+import io.astrolabe.workspace.requireSupported
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -20,6 +22,84 @@ import kotlin.test.assertTrue
  * from [reportSkippedRipgrep] rather than passing silently.
  */
 class SearchBackendParityTest {
+    @Test
+    fun `a broken Git index cannot fall back to searching ignored files`() {
+        val repo = SearchFixture.gitRepo()
+        try {
+            Files.writeString(repo.root.resolve(".git/index"), "broken index")
+            assertTrue(bothBackends(SearchRequest("beta", SearchMode.Literal,
+                SearchScope.All(repo.root), BUDGET)) is SearchOutcome.Failed)
+        } finally {
+            repo.delete()
+        }
+    }
+
+    @Test
+    fun `a tracked ancestor replaced with a directory link is denied`() {
+        val repo = SearchFixture.gitRepo()
+        val outside = SearchFixture.plainTree()
+        val link = repo.root.resolve("src")
+        try {
+            Files.move(link, repo.root.resolve("original-src"))
+            if (System.getProperty("os.name").startsWith("Windows")) {
+                requireSupported(createJunction(link, outside.root.resolve("src")))
+            } else {
+                Files.createSymbolicLink(link, outside.root.resolve("src"))
+            }
+            assertTrue(bothBackends(SearchRequest("beta", SearchMode.Literal,
+                SearchScope.Paths(repo.root, listOf("src")), BUDGET)) is SearchOutcome.Denied)
+        } finally {
+            Files.deleteIfExists(link)
+            repo.delete()
+            outside.delete()
+        }
+    }
+
+    @Test
+    fun `an unreadable subtree is a denial instead of a complete negative`() {
+        val plain = SearchFixture.plainTree()
+        val dir = plain.root.resolve("src")
+        try {
+            assumeTrue(Files.getFileAttributeView(dir, PosixFileAttributeView::class.java) != null)
+            val permissions = Files.getPosixFilePermissions(dir)
+            try {
+                Files.setPosixFilePermissions(dir, emptySet())
+                assumeTrue(!Files.isReadable(dir), "user can still read the directory")
+                assertTrue(bothBackends(SearchRequest("beta", SearchMode.Literal,
+                    SearchScope.All(plain.root), BUDGET)) is SearchOutcome.Denied)
+            } finally {
+                Files.setPosixFilePermissions(dir, permissions)
+            }
+        } finally {
+            plain.delete()
+        }
+    }
+
+    @Test
+    fun `Unicode classes boundaries and line separators agree`() {
+        val plain = SearchFixture.plainTree()
+        try {
+            val cases = listOf(
+                Triple("é\n", "^\\w+$", 1),
+                Triple("١\n", "^\\d+$", 1),
+                Triple("\u00a0\n", "^\\s+$", 1),
+                Triple("é!\n", "\\bé\\b", 1),
+                Triple("a\u2028b\n", "^a.b$", 1),
+                Triple("a\u0085b\n", "^a.b$", 1),
+                Triple("a\rb\n", "^a.b$", 0),
+                Triple("a\r", "a$", 1),
+            )
+            for ((content, pattern, matches) in cases) {
+                Files.writeString(plain.root.resolve("unicode.txt"), content)
+                val hits = bothBackends(SearchRequest(pattern, SearchMode.Regex,
+                    SearchScope.Paths(plain.root, listOf("unicode.txt")), BUDGET)).requireHits()
+                assertEquals(matches, hits.hits.size, pattern)
+            }
+        } finally {
+            plain.delete()
+        }
+    }
+
 
     private var ripgrepSkipped = false
 

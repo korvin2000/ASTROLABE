@@ -1,5 +1,9 @@
 package io.astrolabe.os.search
 
+import io.astrolabe.workspace.Intent
+import io.astrolabe.workspace.PathResolution
+import io.astrolabe.workspace.RejectionReason
+import io.astrolabe.workspace.WorkspacePath
 import java.io.IOException
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.AccessDeniedException
@@ -580,7 +584,16 @@ internal object Candidates {
     private const val BINARY_PROBE_BYTES = 8 * 1024
     private const val GIT_EXECUTABLE = "git"
 
-    fun resolve(request: SearchRequest): CandidateSet {
+    fun resolve(request: SearchRequest): CandidateSet = try {
+        resolveChecked(request)
+    } catch (failure: AccessDeniedException) {
+        val path = failure.file?.let { request.scope.root.relativize(Path.of(it)).joinToString("/") }
+        CandidateSet.Denied("the filesystem denied access during candidate enumeration", listOfNotNull(path))
+    } catch (failure: IOException) {
+        CandidateSet.Failed("could not enumerate search candidates: ${failure.message}")
+    }
+
+    private fun resolveChecked(request: SearchRequest): CandidateSet {
         val root = request.scope.root.normalize()
         if (!Files.isDirectory(root)) return CandidateSet.Failed("search root is not a directory: $root")
 
@@ -600,13 +613,14 @@ internal object Candidates {
             ?.let { FileSystems.getDefault().getPathMatcher("glob:${it.glob}") }
 
         val base = gitListFiles(root) ?: walk(root)
+        val workspace = WorkspacePath.of(root)
         val denied = ArrayList<String>()
         val selected = ArrayList<Candidate>()
         for (rel in base) {
             if (hasHiddenSegment(rel)) continue
             if (scoped != null && scoped.none { rel == it || rel.startsWith("$it/") }) continue
             if (globMatcher != null && !globMatcher.matches(Path.of(rel))) continue
-            val abs = root.resolve(rel)
+            var abs = root.resolve(rel)
             val attributes = try {
                 Files.readAttributes(abs, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
             } catch (_: NoSuchFileException) {
@@ -614,10 +628,22 @@ internal object Candidates {
             } catch (_: AccessDeniedException) {
                 denied += rel
                 continue
-            } catch (_: IOException) {
-                continue
             }
             if (attributes.isSymbolicLink || !attributes.isRegularFile) continue
+            when (val resolved = workspace.resolve(rel, Intent.Read)) {
+                is PathResolution.Rejected -> {
+                    if (resolved.reason == RejectionReason.Unresolvable) return CandidateSet.Failed(resolved.detail)
+                    denied += rel
+                    continue
+                }
+                is PathResolution.Resolved -> {
+                    if (resolved.kind.isLink || resolved.linkAncestors.isNotEmpty()) {
+                        denied += rel
+                        continue
+                    }
+                    abs = resolved.real
+                }
+            }
             if (request.since != null && attributes.lastModifiedTime().toInstant() < request.since) continue
             when (isBinary(abs)) {
                 BinaryProbe.Binary -> continue
@@ -657,15 +683,22 @@ internal object Candidates {
             BinaryProbe.Denied
         } catch (_: NoSuchFileException) {
             BinaryProbe.Gone
-        } catch (_: IOException) {
-            BinaryProbe.Gone
         }
 
     /**
      * The files git itself considers part of the tree, which is what ripgrep's default ignore
-     * handling approximates. Null when [root] is not in a git repository, or git is unavailable.
+     * handling approximates. Fall back only when no Git metadata exists in the root or its ancestors.
      */
     private fun gitListFiles(root: Path): List<String>? {
+        val repository = generateSequence(root) { it.parent }.any { directory ->
+            try {
+                Files.readAttributes(directory.resolve(".git"), BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
+                true
+            } catch (_: NoSuchFileException) {
+                false
+            }
+        }
+        if (!repository) return null
         val output = try {
             val process = ProcessBuilder(
                 GIT_EXECUTABLE, "ls-files", "-z", "--cached", "--others", "--exclude-standard",
@@ -674,13 +707,11 @@ internal object Candidates {
             val bytes = process.inputStream.use { it.readBytes() }
             val exit = process.waitFor()
             stderr.join()
-            if (exit != 0) return null
+            if (exit != 0) throw IOException("git ls-files exited $exit inside a repository")
             String(bytes, UTF_8)
-        } catch (_: IOException) {
-            return null
-        } catch (_: InterruptedException) {
+        } catch (interrupted: InterruptedException) {
             Thread.currentThread().interrupt()
-            return null
+            throw IOException("git ls-files interrupted", interrupted)
         }
         return output.split(' ').filter { it.isNotEmpty() }.distinct()
     }
@@ -709,7 +740,7 @@ internal object Candidates {
                     return FileVisitResult.CONTINUE
                 }
 
-                override fun visitFileFailed(file: Path, exc: IOException): FileVisitResult = FileVisitResult.CONTINUE
+                override fun visitFileFailed(file: Path, exc: IOException): FileVisitResult = throw exc
             },
         )
         return files

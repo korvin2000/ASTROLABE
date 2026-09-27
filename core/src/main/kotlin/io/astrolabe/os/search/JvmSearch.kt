@@ -60,12 +60,30 @@ internal class JvmSearch : Search {
 
     private fun compile(request: SearchRequest): Pattern {
         val normalized = request.normalizedPattern()
-        val flags = if (normalized.caseSensitive) 0 else Pattern.CASE_INSENSITIVE or Pattern.UNICODE_CASE
+        val flags = Pattern.UNICODE_CHARACTER_CLASS or Pattern.UNIX_LINES or
+            (if (normalized.caseSensitive) 0 else Pattern.CASE_INSENSITIVE or Pattern.UNICODE_CASE)
         val body = when (request.mode) {
             SearchMode.Literal -> Pattern.quote(normalized.body)
-            SearchMode.Regex -> normalized.body
+            SearchMode.Regex -> crlfPattern(normalized.body)
         }
         return Pattern.compile(body, flags)
+    }
+
+    /** rg --crlf excludes CR from dot and permits an end anchor immediately before a final CR. */
+    private fun crlfPattern(body: String): String = buildString {
+        var escaped = false
+        var inClass = false
+        for (char in body) {
+            when {
+                escaped -> { append(char); escaped = false }
+                char == '\\' -> { append(char); escaped = true }
+                char == '[' -> { append(char); inClass = true }
+                char == ']' -> { append(char); inClass = false }
+                !inClass && char == '.' -> append("[^\\r\\n]")
+                !inClass && char == '$' -> append("(?=\\r?$)")
+                else -> append(char)
+            }
+        }
     }
 
     /** Feeds every matching line of [content] to [collector]; returns false once the search must stop. */
