@@ -1,11 +1,34 @@
-# Bugfix progress ? 2026-09-26
+# Bugfix progress ? 2026-09-27
 
 Branch: `feature/bugfix`. Baseline: `9a80e117445be357285fec2cffffe0fd45290a9a`.
 
-**48 fixed across three sessions (10 in the latest continuation); 94 open; F-034 previously resolved.**
+**54 fixed across four sessions (6 in the latest continuation); 88 open; F-034 previously resolved.**
 The complete remaining queue is `findings.md` ? JSON `fix_progress.remaining_open_ids`.
 
-## Latest continuation: ten further repairs
+## Latest continuation: six further repairs
+
+| Finding | Commit | Change and evidence |
+|---|---|---|
+| F-001 | `9192a41` | Attempt construction, copy and decoding own immutable nested collections, including provider JSON and default role definitions. Host mutations and exposed-reference mutation attempts cannot change frozen inputs. Controller compares normalized snapshots. |
+| F-002 | `9192a41` | Fingerprint encoding `attempt-config/v2` sorts maps and sets while preserving lists and JSON arrays. Reordered equivalent configurations match; changed prices, permissions and sequence order differ. |
+| F-023 | `8491837` | Contract changes and final amendment provenance commit atomically. Accepted/rejected records, projections and exports survive reopening; injected SQL failures roll back both contract and resolution. |
+| F-061 | `568f6bf` | Handles, foreground/MCP reconciliation and observations persist before intent commit. All open unsafe intents fence replay, including Observed after failed commit updates. Injected handle, observation and commit failures cannot permit a duplicate launch. |
+| F-063 | `568f6bf` | Background handles persist classification, pre-run members and base commit. Poll/cancel retain D/unknown labels. Dirty-to-clean and clean HEAD changes invalidate evidence; pre-existing dirt is excluded. Concurrent changes are reported as interval changes with unknown attribution. |
+| F-064 | `568f6bf` | Cancellation interrupts waiting and continuously producing polls, terminates owned processes and propagates after intent accounting. Shared capture retains at most 8 MiB while draining to terminal EOF; capped/missing logs remain incomplete and cannot certify green. |
+
+### Verification and compatibility
+
+- Regression-first checks reproduced four amendment failures, seven run/capture failures and three configuration failures before their fixes. Two initial compile attempts used tests that were still being completed; those compile issues were corrected before behavioral RED runs.
+- Focused batches passed: 40 initial tests, 100 broader tests, and 48 final configuration/lifecycle/run/capture tests. These batches overlap and are not additive totals.
+- Review corrections cover continuously producing polls, interrupted I/O cleanup, clean HEAD transitions, default-role snapshots and normalized Controller config comparisons.
+- Full Windows JDK 26 build on `b7b74d0`: **passed**. Core: 1377 tests, 1370 passed, 7 skipped, zero failures/errors; provider-api 17, eval 49, index-treesitter 17 passed. Total: **1453 passed, 7 skipped**. Compilation, packaging and ABI checks passed. Log: ignored `build/bugfix-fourth-build.log`.
+- ABI regenerated in `b7b74d0`. `ContractRepository` implementors must provide atomic `commitResolution` and durable `resolved`; `Contracts.resolved(work)` adds work filtering. Handle constructor/copy signatures gain defaulted provenance fields. Consumers must rebuild.
+- AttemptConfig retains constructor/copy/components and JSON field shape, but uses a custom serializer instead of the generated implementation. Existing JSON decodes into immutable inputs. Its v2 fingerprint is intentionally recomputed on old snapshots, invalidating compiled-context caches; stored historical SQL fingerprint values are not rewritten.
+- No database schema bump. Legacy handle JSON loads conservatively as D/unknown without reconstructed launch membership. Legacy amendment rows that were already left Pending are not repaired automatically: their signed resolution provenance was never recorded.
+- D-266 records background interval attribution; D-267 records the 8 MiB capture cap; D-268 records immutable inputs and fingerprint compatibility. Output beyond the cap is unavailable from the captured blob; this is explicit incomplete evidence, not a complete recall log.
+- Local commits only. No push, PR, Linux/CI, live provider or P7 validation. Existing user edits remain preserved.
+
+## Third continuation: ten further repairs
 
 | Finding | Commit | Change and evidence |
 |---|---|---|
@@ -109,10 +132,9 @@ Total: **1,429 passed, 7 skipped**, zero failures/errors. Log: ignored `build/bu
 
 ## Resume order
 
-1. Read findings.md fix_progress and preserve existing CLAUDE.md/ISSUES.md and untracked continuation files.
-2. F-061 run intent/handle durability; F-063 background effect classification/provenance; F-064 cancellation and bounded output capture.
-3. F-023 durable atomic amendment resolution, then remaining open findings in audit order (F-001/F-002/F-004 first).
-4. Keep P0-P6 at 185/185 implemented; repair status belongs in findings.md. P7 remains excluded.
+1. Read findings.md fix_progress; preserve existing CLAUDE.md/ISSUES.md and untracked continuation files.
+2. Continue in audit order: F-004 request estimation, F-006 onward. Exact queue: fix_progress.remaining_open_ids.
+3. Keep P0-P6 at 185/185 implemented; repair status belongs in findings.md. P7 remains excluded.
 
 ## Existing implementation debts
 

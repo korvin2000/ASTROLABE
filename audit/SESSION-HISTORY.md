@@ -594,3 +594,13 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - No public signature/schema changes. D-265 records handle resume policy; historical unassociated edit aliases are not migrated.
 - No new Linux/CI/live/P7 validation. Nothing pushed. Existing user edits preserved.
 - Handoff and repair ledger updated; next: F-061/F-063/F-064/F-023.
+
+## 2026-09-27 - fourth feature/bugfix session
+- Six repairs: F-001/F-002/F-023/F-061/F-063/F-064; 54 fixed, 88 open, F-034 previously resolved.
+- Immutable/canonical attempt inputs, atomic amendment resolutions, durable run evidence, honest background provenance and bounded cancellable capture.
+- Regression-first checks plus independent review corrections; final focused batch 48 passed.
+- Full Windows JDK 26 build on b7b74d0: 1453 passed, 7 skipped, zero failures/errors; packaging and ABI passed.
+- D-266/D-267/D-268 document provenance, capture cap and fingerprint compatibility; core ABI updated, no SQL schema bump.
+- Legacy fingerprints invalidate caches; legacy handles default to D/unknown; lost historical amendment resolutions cannot be reconstructed.
+- No new Linux/CI/live/P7 validation. Nothing pushed. Existing user edits preserved.
+- Handoff and repair ledger updated; next F-004, then remaining findings in audit order.

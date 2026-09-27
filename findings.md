@@ -1,6 +1,6 @@
 # Implementation audit findings
 
-**Remediation:** 48 fixed on `feature/bugfix` (10 in this continuation); 94 remain open; F-034 was already resolved. See [bugfix progress](audit/BUGFIX-PROGRESS.md). Original audit evidence remains historical; `fix_progress` is the current repair status.
+**Remediation:** 54 fixed on `feature/bugfix` (6 in this continuation); 88 remain open; F-034 was already resolved. See [bugfix progress](audit/BUGFIX-PROGRESS.md). Original audit evidence remains historical; `fix_progress` is the current repair status.
 
 ```json
 {
@@ -541,28 +541,22 @@
   },
   "fix_progress": {
     "branch": "feature/bugfix",
-    "date": "2026-09-26",
+    "date": "2026-09-27",
     "status": "session_complete_remaining_findings_open",
     "fixed_this_session": [
-      "F-022",
-      "F-054",
-      "F-056",
-      "F-057",
-      "F-058",
-      "F-062",
-      "F-065",
-      "F-076",
-      "F-088",
-      "F-094"
+      "F-001",
+      "F-002",
+      "F-023",
+      "F-061",
+      "F-063",
+      "F-064"
     ],
-    "fixed_this_session_count": 10,
+    "fixed_this_session_count": 6,
     "previously_resolved": [
       "F-034"
     ],
-    "remaining_open_count": 94,
+    "remaining_open_count": 88,
     "remaining_open_ids": [
-      "F-001",
-      "F-002",
       "F-004",
       "F-006",
       "F-010",
@@ -575,7 +569,6 @@
       "F-019",
       "F-020",
       "F-021",
-      "F-023",
       "F-024",
       "F-025",
       "F-026",
@@ -598,9 +591,6 @@
       "F-046",
       "F-048",
       "F-052",
-      "F-061",
-      "F-063",
-      "F-064",
       "F-069",
       "F-075",
       "F-082",
@@ -657,36 +647,32 @@
       "F-143"
     ],
     "next_priority": [
-      "F-061",
-      "F-063",
-      "F-064",
-      "F-023",
-      "F-001",
-      "F-002",
-      "F-004"
+      "F-004",
+      "F-006",
+      "F-010",
+      "F-013",
+      "F-014",
+      "F-015",
+      "F-016"
     ],
     "handoff": "CONTINUE-TASK.md",
     "detail": "audit/BUGFIX-PROGRESS.md",
-    "verification": "Windows JDK 26 full build passed on b13c18d: 1353 core tests: 1346 passed, 7 skipped, zero failures/errors; provider-api 17, eval 49, index-treesitter 17 passed. Compilation, packaging and ABI checks passed. No new Linux/remote CI or P7 validation.",
+    "verification": "Windows JDK 26 full build passed on b7b74d0: 1377 core tests: 1370 passed, 7 skipped, zero failures/errors; provider-api 17, eval 49, index-treesitter 17 passed. All modules: 1453 passed, 7 skipped. Compilation, packaging and ABI checks passed. No new Linux/remote CI or P7 validation.",
     "source_changes_allowed": true,
     "verification_results": {
-      "first_full_core": {
-        "tests": 1353,
-        "passed": 1339,
-        "failures": 7,
-        "errors": 0,
-        "skipped": 7,
-        "correction": "The initial guard also blocked plain late completion. Preserve archival completion from existing evidence while blocking all new effects/checks; the seven existing lifecycle tests remain unchanged."
-      },
       "full_build_command": "./gradlew.bat build -q --console=plain",
       "full_build_exit": 0,
+      "log": "build/bugfix-fourth-build.log",
+      "abi": "core dump regenerated",
+      "linux_ci": "not run",
+      "p7": "excluded",
       "modules": {
         "core": {
-          "tests": 1353,
+          "tests": 1377,
           "failures": 0,
           "errors": 0,
           "skipped": 7,
-          "passed": 1346
+          "passed": 1370
         },
         "provider-api": {
           "tests": 17,
@@ -710,53 +696,23 @@
           "passed": 17
         }
       },
-      "full_core_rerun": true,
-      "log": "build/bugfix-third-build-verified.log",
-      "linux_or_remote_ci": false,
-      "focused": "New repro batches failed before correction. Final focused checks passed after three stale observation/crash assertions were updated to verify the new alias/partial-effect behavior. Review corrections added whitespace, dispatch and selective-revert coverage."
+      "total_passed": 1453,
+      "total_skipped": 7,
+      "focused_final": {
+        "tests": 48,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "review_corrections": [
+        "continuous-output interruption",
+        "interrupted-I/O termination",
+        "clean HEAD background changes",
+        "default role snapshot and normalized comparison"
+      ]
     },
     "active_processes": [],
     "previous_session_fixed": [
-      "F-003",
-      "F-005",
-      "F-007",
-      "F-008",
-      "F-009",
-      "F-011",
-      "F-012",
-      "F-035",
-      "F-043",
-      "F-047",
-      "F-049",
-      "F-050",
-      "F-051",
-      "F-053",
-      "F-055",
-      "F-059",
-      "F-060",
-      "F-066",
-      "F-067",
-      "F-068",
-      "F-070",
-      "F-071",
-      "F-072",
-      "F-073",
-      "F-074",
-      "F-077",
-      "F-078",
-      "F-079",
-      "F-080",
-      "F-081",
-      "F-098",
-      "F-116",
-      "F-121",
-      "F-123",
-      "F-130",
-      "F-131",
-      "F-139",
-      "F-140"
-    ],
-    "fixed_on_branch": [
       "F-003",
       "F-005",
       "F-007",
@@ -806,7 +762,63 @@
       "F-139",
       "F-140"
     ],
-    "fixed_on_branch_count": 48,
+    "fixed_on_branch": [
+      "F-001",
+      "F-002",
+      "F-003",
+      "F-005",
+      "F-007",
+      "F-008",
+      "F-009",
+      "F-011",
+      "F-012",
+      "F-022",
+      "F-023",
+      "F-035",
+      "F-043",
+      "F-047",
+      "F-049",
+      "F-050",
+      "F-051",
+      "F-053",
+      "F-054",
+      "F-055",
+      "F-056",
+      "F-057",
+      "F-058",
+      "F-059",
+      "F-060",
+      "F-061",
+      "F-062",
+      "F-063",
+      "F-064",
+      "F-065",
+      "F-066",
+      "F-067",
+      "F-068",
+      "F-070",
+      "F-071",
+      "F-072",
+      "F-073",
+      "F-074",
+      "F-076",
+      "F-077",
+      "F-078",
+      "F-079",
+      "F-080",
+      "F-081",
+      "F-088",
+      "F-094",
+      "F-098",
+      "F-116",
+      "F-121",
+      "F-123",
+      "F-130",
+      "F-131",
+      "F-139",
+      "F-140"
+    ],
+    "fixed_on_branch_count": 54,
     "previous_session_verification_results": {
       "initial_full_core": {
         "tests": 1293,
@@ -846,7 +858,7 @@
       },
       "full_core_rerun": false
     },
-    "source_checkpoint": "ae8fa2a",
+    "source_checkpoint": "b7b74d0",
     "previous_continuation_verification_results": {
       "first_continuation_full_core": {
         "tests": 1314,
@@ -891,6 +903,52 @@
       "full_core_rerun": true,
       "log": "build/bugfix-continuation-build-verified.log",
       "linux_or_remote_ci": false
+    },
+    "previous_third_verification_results": {
+      "first_full_core": {
+        "tests": 1353,
+        "passed": 1339,
+        "failures": 7,
+        "errors": 0,
+        "skipped": 7,
+        "correction": "The initial guard also blocked plain late completion. Preserve archival completion from existing evidence while blocking all new effects/checks; the seven existing lifecycle tests remain unchanged."
+      },
+      "full_build_command": "./gradlew.bat build -q --console=plain",
+      "full_build_exit": 0,
+      "modules": {
+        "core": {
+          "tests": 1353,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 7,
+          "passed": 1346
+        },
+        "provider-api": {
+          "tests": 17,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 17
+        },
+        "eval": {
+          "tests": 49,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 49
+        },
+        "index-treesitter": {
+          "tests": 17,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 17
+        }
+      },
+      "full_core_rerun": true,
+      "log": "build/bugfix-third-build-verified.log",
+      "linux_or_remote_ci": false,
+      "focused": "New repro batches failed before correction. Final focused checks passed after three stale observation/crash assertions were updated to verify the new alias/partial-effect behavior. Review corrections added whitespace, dispatch and selective-revert coverage."
     }
   }
 }
@@ -1108,7 +1166,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-001 - Attempt configuration remains mutable after freeze
 
 - Task: [P0.1.3](TODO.md#L548); follow-up: P1.9.4, P2.2.5.
-- Severity: high. Confidence: reproduced. Status: open.
+- Severity: high. Confidence: reproduced. Status: fixed (2026-09-27).
 - Locations: [AttemptConfig.freeze / fingerprint](core/src/main/kotlin/io/astrolabe/AttemptConfig.kt#L47), [Config collection fields](core/src/main/kotlin/io/astrolabe/Config.kt#L38), [Controller.open](core/src/main/kotlin/io/astrolabe/campaign/Controller.kt#L338).
 - Problem: `freeze` stores the original Config and roleTextVersions objects without a defensive snapshot. Kotlin read-only Map/List/Set interfaces do not prevent mutation through the caller's retained mutable collection or Java references. Nested profile prices/capabilities, roles/tool masks, redaction configuration and quality commands are also collection-bearing. The fingerprint is computed only once, so it continues to describe the old contents after mutation.
 - Trigger and impact: open an attempt using a mutable profile/role map, then replace a value or mutate a nested collection. The first-open controller directly uses `frozen.config`; behavior and accounting inputs can change mid-attempt while the stored fingerprint and persisted attempt still describe the previous values. This violates invariant 12 and undermines reproducibility. A reopened attempt is deserialized separately, which does not protect the first-open path.
@@ -1118,11 +1176,13 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 
 - Runtime evidence (2026-09-24, after fresh core compilation): clearing the host profile map leaves frozen profiles=0 while fingerprint remains unchanged. JShell snippets ran from stdin; no source/test file was added.
 - Current-source recheck (2026-09-25, 9a80e117): AttemptConfig.freeze still retains Config/maps and Controller.open uses frozen.config (455); no defensive snapshot added. Earlier runtime evidence retains its original baseline; this recheck is source inspection.
+- Fix (2026-09-27, `9192a41`): Every constructor, copy and deserialization takes a deep immutable configuration snapshot, including default roles and nested provider JSON. Controller compares normalized snapshots. Retained-source and exposed-reference mutation regressions pass.
+
 
 ### F-002 - Configuration fingerprints depend on insertion order
 
 - Task: [P0.1.3](TODO.md#L548).
-- Severity: medium. Confidence: reproduced. Status: open.
+- Severity: medium. Confidence: reproduced. Status: fixed (2026-09-27).
 - Location: [AttemptConfig.fingerprint / STABLE_JSON](core/src/main/kotlin/io/astrolabe/AttemptConfig.kt#L58).
 - Problem: `Json { encodeDefaults = true }` is labeled stable but does not canonicalize Map/Set iteration order. Equal Config objects with the same profile/role/price mappings inserted in a different order can serialize differently and receive different fingerprints. roleTextVersions has the same issue.
 - Impact: equivalent configuration can invalidate attempt/compile fingerprints and create unnecessary rebuild/cache misses or confusing provenance differences. Exact downstream impact should be rechecked at P2.2.5/P3.7.1.
@@ -1132,6 +1192,8 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 
 - Runtime evidence (2026-09-24, after fresh core compilation): equal role-version maps inserted in reverse order produce different fingerprints. JShell snippets ran from stdin; no source/test file was added.
 - Current-source recheck (2026-09-25, 9a80e117): AttemptConfig.fingerprint still hashes ordinary encodeDefaults JSON without canonical map/set ordering. Earlier runtime evidence retains its original baseline; this recheck is source inspection.
+- Fix (2026-09-27, `9192a41`): Versioned attempt-config/v2 fingerprints canonicalize map/set order, including provider JSON objects, while retaining ordered lists and arrays. Equivalent insertion orders match; real value and sequence changes differ. Legacy JSON remains readable but recomputes the new fingerprint.
+
 
 ### F-003 - Duplicate tool-call IDs pass pairing validation
 
@@ -1376,12 +1438,14 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-023 - Resolved amendments are neither persisted nor restored atomically
 
 - Task: [P1.1.3](TODO.md#L692).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-27).
 - Locations: [Contracts.resolvedHistory / resolve](core/src/main/kotlin/io/astrolabe/contract/Contracts.kt#L71), [SqliteContractRepository.projection / recordResolved](core/src/main/kotlin/io/astrolabe/contract/SqliteContractRepository.kt#L75).
 - Problem: resolve stores the Accepted/Rejected record only in an in-memory map and removes it from amendmentsPending. The SQL projection upserts only still-pending amendments, leaving the old row Pending. recordResolved exists but has no call sites. A new Contracts instance has an empty resolvedHistory. The map is also updated before the contract repository operation succeeds.
 - Impact: UI/export can show a resolved amendment as pending; reopening loses the authoritative resolution/provenance used for audit/finish. A failed append can leave memory claiming acceptance without a committed amendment. Historical contract bodies may preserve proposal text, but do not preserve the signed resolution record correctly.
 - Possible solutions: persist contract change and amendment resolution in one repository transaction, reload resolved history by work, and derive memory/events after commit. Avoid a separate manually invoked repair method that can be omitted or crash between writes.
 - Future regression: accept and reject, close/reopen and compare the contract, amendment table, resolved() and exports. Inject a repository failure before commit and require no accepted resolution in memory or storage.
+- Fix (2026-09-27, `8491837`): Contract revisions/projections and final amendment provenance commit in one repository transaction. Resolutions are read from the repository after reopen, with optional work scoping. Accepted/rejected reopen, exports and injected SQL-failure rollback regressions pass.
+
 
 ### F-024 - Contract digest returns over-cap text without a capacity outcome
 
@@ -1823,13 +1887,15 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-061 - Run commits its intent before durable handle/result evidence exists
 
 - Task: [P1.6.5](TODO.md#L851); related P1.4.3/P1.9.2.
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-27).
 - Location: [Run.run Consequential callback and outcome handling](core/src/main/kotlin/io/astrolabe/tool/run/Run.kt#L198).
 - Problem: Consequential.persist publishes only a log blob, then commits the intent. For a background launch, Handles.save runs afterwards; for a foreground launch, stamp reconciliation, structured result and Observation persistence happen afterwards.
 - Trigger and impact: crash or storage failure after intent commit but before handle/result save. The child may still run, yet the store has no handle association and the intent is absent from open-intent reconciliation. A sidecar alone is not scanned/rebound by the observed Controller.open path. The same command can therefore escape the unknown-effect retry block despite an unresolved launch.
 - Possible solutions: durably persist the process handle and enough observed result/recovery metadata before committing the intent; keep background actions open or explicitly terminally classified according to their lifecycle. Include a recoverable intent-to-sidecar link at launch.
 - Future regression: inject faults after log publication, at intent commit and before handle/result insertion; reopen must recover ownership/outcome or preserve an unknown effect that blocks duplicate launch.
 - Current-source recheck (2026-09-25, 9a80e117): Run Consequential.persist still stores only a LOG blob before intent completion; handles.save and observations.record execute afterward (200?233). Earlier runtime evidence retains its original baseline; this recheck is source inspection.
+- Fix (2026-09-27, `568f6bf`): Handle and observation persistence plus foreground/MCP reconciliation precede intent commit. Every open unsafe intent blocks retry, including an Observed intent left by a failed commit update. Handle/observation/commit fault regressions preserve the retry fence.
+
 
 ### F-062 - Poll and cancel accept handles belonging to another campaign
 
@@ -1847,24 +1913,28 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-063 - Background completion loses effect classification and its actual pre-run path state
 
 - Task: [P1.6.5](TODO.md#L851).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-27).
 - Locations: [Handle fields](core/src/main/kotlin/io/astrolabe/tool/run/Handles.kt#L19), [Run.poll / announceFromNow](core/src/main/kotlin/io/astrolabe/tool/run/Run.kt#L333).
 - Problem: Handle stores only the pre-run candidate ID, not the pre-run member map or original effect class/unknown-effect qualification. Terminal poll walks current dirty members against registry.recorded and labels the result R when none are announced, otherwise W. It cannot preserve an originally D/unknown classification or compute the actual before/after path set.
 - Impact: a destructive/external background command can be reported R after completion; pre-existing dirty files can be attributed to it, and a change returning a file to a clean HEAD state can disappear because that path is absent from current members. Concurrent unrelated edits can also be attributed to the background run.
 - Possible solutions: persist launch classification and baseline/provenance needed for a conservative diff; preserve D and unknown flags through all polls. Attribute only what can be established, otherwise report unknown touched effects rather than infer them from the current registry.
 - Future regression: background D command with no tree changes, pre-existing dirty files, dirty-to-clean restoration and a concurrent unrelated edit must retain honest effect labels and change provenance.
 - Current-source recheck (2026-09-25, 9a80e117): Terminal poll still reconstructs change provenance from current members and registry.recorded; reports R/W instead of retaining launch D/unknown classification (424?454). Earlier runtime evidence retains its original baseline; this recheck is source inspection.
+- Fix (2026-09-27, `568f6bf`): Handles persist launch classification and dirty-member/base-commit provenance. Poll/cancel retain D labels; terminal polls compare both membership and changed Git base trees. Interval changes invalidate evidence without claiming exclusive process attribution. Legacy handles default to D/unknown.
+
 
 ### F-064 - Synchronous run observation delays cancellation and accumulates unbounded output in heap
 
 - Task: [P1.6.5](TODO.md#L851); related P1.9.4.
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-27).
 - Locations: [Run.launch](core/src/main/kotlin/io/astrolabe/tool/run/Run.kt#L241), [Executions.observe](core/src/main/kotlin/io/astrolabe/tool/run/Executions.kt#L20), [LocalOs.poll](core/src/main/kotlin/io/astrolabe/os/LocalOs.kt#L91).
 - Problem: a suspend Run path calls a blocking polling loop with no suspension/cancellation check, while collecting all output into ByteArrayOutputStream. Job.cancel does not interrupt this ordinary blocking loop; process ownership/deadline eventually acts, but cancellation is not promptly delivered to the foreground child. Output budgets/redaction limits are applied after accumulation.
 - Impact: a requested campaign cancel can wait until process exit/deadline, with the child continuing effects; a noisy long-running process can exhaust host heap before shaping its small requested view.
 - Possible solutions: observe through a cancellation-aware owned-process lifecycle, request termination on cancellation and independently preserve terminal accounting; spool/stream bounded captures rather than accumulate the entire log in memory. If evidence is capped, report explicit capture incompleteness.
 - Future regression: cancel a long foreground process immediately and verify bounded termination/settlement latency; stream output larger than the memory budget and preserve bounded heap plus honest recall/capture semantics.
 - Current-source recheck (2026-09-25, 9a80e117): Run.launch still blocks in a polling loop with ByteArrayOutputStream and no cancellation check; only process deadline/exit ends it (333?346). Earlier runtime evidence retains its original baseline; this recheck is source inspection.
+- Fix (2026-09-27, `568f6bf`): Foreground observation is interruptible and cancellation terminates owned processes before propagating. The shared observer retains at most 8 MiB while draining the log and marks discarded capture unknown. Terminal background reads are capped and missing logs are incomplete. Waiting/noisy-poll, interrupted-I/O, terminal-cap and end-to-end run cancellation regressions pass.
+
 
 ### F-065 - Terminal process status stops log draining before all cursor chunks are read
 

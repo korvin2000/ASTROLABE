@@ -1,7 +1,7 @@
 # Bugfix continuation
 
-Checkpoint: `feature/bugfix`, 2026-09-26. Source checkpoint: `b13c18d`.
-**48 findings fixed across three sessions (10 latest); 94 open; F-034 previously resolved.**
+Checkpoint: `feature/bugfix`, 2026-09-27. Source checkpoint: `b7b74d0`.
+**54 findings fixed across four sessions (6 latest); 88 open; F-034 previously resolved.**
 P0-P6 remains 185/185 implemented. P7 excluded. Local commits only; nothing pushed.
 
 ## Read first
@@ -10,25 +10,23 @@ P0-P6 remains 185/185 implemented. P7 excluded. Local commits only; nothing push
 3. Selected finding sections and cited code/tests only. Do not repeat the audit.
 
 ## Next fixes
-1. F-061 run intent/handle durability.
-2. F-063 background effect classification and pre-run path provenance.
-3. F-064 cancellation-aware observation and bounded output capture.
-4. F-023 durable atomic amendment resolution.
-5. Continue remaining findings in audit order: F-001/F-002/F-004 first.
+1. F-004 generic request estimation and native/protocol context.
+2. Continue remaining findings in audit order: F-006, F-010, F-013, F-014, F-015, F-016.
 
 ## Verification
-Full Windows JDK 26 build passed: 1346 core passed, 7 skipped; other modules and ABI passed.
-All modules: 1429 passed, 7 skipped, zero failures/errors.
-Log: ignored `build/bugfix-third-build-verified.log`. No new Linux/CI or P7 evidence.
-Focused regressions and independent review corrections passed; details are in the repair ledger.
+Full Windows JDK 26 build passed: 1370 core passed, 7 skipped; all modules 1453 passed.
+Zero failures/errors; packaging and ABI passed. Log: `build/bugfix-fourth-build.log`.
+Focused regressions passed. No new Linux/CI or P7 evidence.
 
 ## Compatibility and decisions
-No public signature/schema changes in this continuation.
-D-265: handles require matching work/workspace; cross-attempt resume within that boundary is allowed.
-Exact observation IDs preserve historical views; run aliases recall the latest poll.
-New edit aliases identify their observations; old unassociated edit aliases are not migrated.
-D-262/D-263/D-264 still apply: verification command authorization, edit path conflicts, shaper/2 receipts.
-Capture still blocks and buffers in memory (F-064); drain completeness alone does not close it.
+F-001/F-002/F-023/F-061/F-063/F-064 repaired; see the ledger for evidence.
+D-266: background changes describe an interval, with unknown exclusive attribution.
+D-267: captures retain at most 8 MiB; capped/missing evidence cannot certify green.
+D-268: immutable config includes default roles; canonical v2 fingerprints invalidate old caches.
+ContractRepository adds atomic resolution/read methods; Handle gains defaulted provenance fields.
+Core consumers must rebuild. Existing JSON decodes; legacy handles default to D/unknown.
+Historical amendment rows lacking signed resolutions are not reconstructed.
+D-262/D-263/D-264/D-265 still apply. No database schema bump.
 
 ## Existing implementation debts
 D-254 recovery wiring; D-70/D-71 replanning; D-241 S3 resume; D-252 retrieval;

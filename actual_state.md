@@ -53,8 +53,8 @@ Local choices D-112–D-113, D-120–D-126, D-135–D-137, D-145–D-155, D-160�
 D-200–D-202, D-210–D-213, D-220–D-223, D-230–D-233, D-240–D-244, D-250–D-254, D-260 (TODO §3). Owner decision D-175
 (new dependencies allowed under pinned-version rules).
 
-## Audit remediation (2026-09-26)
-Branch `feature/bugfix`: 48 fixed (10 latest), 94 open, F-034 previously resolved.
+## Audit remediation (2026-09-27)
+Branch `feature/bugfix`: 54 fixed (6 latest), 88 open, F-034 previously resolved.
 See `findings.md` and `audit/BUGFIX-PROGRESS.md`; historical gates above predate these fixes.
-Full Windows build passes: 1346 core passed, 7 skipped; other modules and ABI pass. No new Linux/CI.
-D-262/D-263/D-264 remain; D-265 scopes handles to work/workspace and permits cross-attempt resume.
+Full Windows build passed: 1453 passed, 7 skipped; packaging and ABI passed. No new Linux/CI.
+D-266/D-267/D-268 cover background provenance, bounded capture and immutable config fingerprints.
