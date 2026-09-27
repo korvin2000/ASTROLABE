@@ -87,6 +87,25 @@ public fun interface ChangeListener {
     public fun onChange(change: VersionChange)
 }
 
+/** Acknowledged listeners are not repeated; a listener that throws must tolerate retrying its own effects. */
+internal class ChangeDelivery(val change: VersionChange, private val listeners: List<ChangeListener>) {
+    private var next = 0
+    private var delivering = false
+
+    fun finish() {
+        check(!delivering) { "change listeners must not recursively announce transitions" }
+        delivering = true
+        try {
+            while (next < listeners.size) {
+                listeners[next].onChange(change)
+                next++
+            }
+        } finally {
+            delivering = false
+        }
+    }
+}
+
 /**
  * The single component behind coherence (§3.3, §4.4): `version(path)`, `displayed(path, v)` and the
  * change notifications that make a stale read impossible to serve as current.
@@ -119,6 +138,7 @@ public class VersionRegistry(public val workspace: Workspace) {
     /** `path → FileVersion` or [DELETED]; the transition already announced to the listeners. */
     private val current = ConcurrentHashMap<String, Any>()
     private val listeners = CopyOnWriteArrayList<ChangeListener>()
+    private var pendingDelivery: ChangeDelivery? = null
 
     // ------------------------------------------------------------- versions
 
@@ -236,16 +256,24 @@ public class VersionRegistry(public val workspace: Workspace) {
      *
      * Listeners run on the calling thread, in subscription order; a mutator therefore announces a
      * change only after the bytes are on disk, and workspace mutation stays serialized (D-26).
+     * Failed delivery remains pending and resumes before another change. Only acknowledged listeners
+     * are skipped on retry, and [recorded] advances only after every listener acknowledges.
      */
     public fun change(path: String, from: FileVersion?, to: FileVersion?, cause: String) {
-        if (from == to) return
         val next: Any = to ?: DELETED
         synchronized(current) {
-            if (current[path] == next) return
-            current[path] = next
+            finishPending()
+            if (from == to || current[path] == next) return
+            pendingDelivery = ChangeDelivery(VersionChange(path, from, to, cause), listeners.toList())
+            finishPending()
         }
-        val change = VersionChange(path, from, to, cause)
-        for (listener in listeners) listener.onChange(change)
+    }
+
+    private fun finishPending() {
+        val delivery = pendingDelivery ?: return
+        delivery.finish()
+        current[delivery.change.path] = delivery.change.to ?: DELETED
+        pendingDelivery = null
     }
 
     /** The last version this registry recorded for [path] through [change]; not a filesystem read. */
