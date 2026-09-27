@@ -2,8 +2,37 @@
 
 Branch: `feature/bugfix`. Baseline: `9a80e117445be357285fec2cffffe0fd45290a9a`.
 
-**106 fixed across ten sessions (8 in this continuation); 36 open; F-034 previously resolved.**
+**119 fixed across eleven sessions (13 in this continuation); 23 open; F-034 previously resolved.**
 The complete remaining queue is `findings.md` ? JSON `fix_progress.remaining_open_ids`.
+
+## Eleventh continuation: runtime authority, recovery and knowledge reads
+
+| Finding | Commit | Change and evidence |
+|---|---|---|
+| F-044 | `d4d2524` | Explicit intent transitions keep Committed terminal. Unknown outcomes close only through reconcile with a durable nonblank authority/evidence reference; SQLite reopen and terminal-state regressions pass. |
+| F-045 | `d4d2524` | Fact insertion compares anchors with current raw versions through the runtime ValidationContext. Moved and missing anchors are immediately stale; historical evidence cannot reset freshness. |
+| F-048 | `d4d2524` | Cell and Edit check every sub-operation against the role mask. Mixed edit conditions are refused before effects; shared conditions are validated and enforced by the dispatcher. A create-first/delete-second cell regression preserves both paths. |
+| F-091 | `cdb1f58` | Resuming Finishing is an explicit single-sequence transition that invalidates completion currency while retaining execution history. S0 reruns regression acceptance and completes without another model cell; lifecycle and reopen regressions pass. |
+| F-092 | `cdb1f58` | Workspace mutation protection reads the current committed contract at each resolution, including child workspaces. Pending proposals grant nothing; approved changes apply immediately and after reopen. Git metadata remains protected. |
+| F-093 | `cdb1f58` | All open intents, including Unknown, and open handles fence expired/reassigned leases. Expired renewals advance execution generation even for the same holder. Reopen is refused until the prior unknown intent has a durable disposition. |
+| F-102 | `d4d2524, cdb1f58` | The live registry reconciles run obligations after plan admission and before each cell turn. Added/changed commands receive current definitions, removed seeded obligations leave the registry, and historical receipt definition identity is retained. |
+| F-103 | `d4d2524` | Automatic product acceptance and unavailable-product-runner blocking apply only to Result completion. Plan and probe packets reach their bound validator without launching product acceptance. |
+| F-106 | `cdb1f58` | Controller seeds Workset only from entries whose seed unit was selected and whose section is actually present in compiled K. Omitted large seed blocks grant no coverage. |
+| F-111 | `6fcc5a4, cdb1f58` | Every KB result body and scope passes through the configured redaction policy before model return. Search queries, summaries, STATUS bodies and skill reads are covered; masks and scan limits appear in runtime metadata. |
+| F-112 | `d4d2524, 6fcc5a4` | Parallel reads carry their individual admission into the executor. KB renders at most that allowance and 1500 tokens; get/skill expose offset/version paging over the redacted capture and reject changed cursors. Protected raw data remains stored; content beyond the configured redaction scan cap stays explicitly unavailable. |
+| F-125 | `6fcc5a4` | Rechecks and injection resolve admitted note dependencies with exact revision pins and paths with recorded hashes. Unknown named contracts remain stale unless the host supplies their current versions. Cycles, missing targets and moved dependencies cannot readmit or inject advice; explicit KB reads label them stale. |
+| F-126 | `6fcc5a4, cdb1f58` | Focus-note rendering uses shared Injection eligibility, current workspace versions, fresh note revisions and current stored status on every render. Frozen/live bases cannot replay an invalidated captured note; moved, missing-dependency and role-excluded notes remain absent. |
+
+### Verification and compatibility
+
+- 79 distinct selected tests passed on Windows JDK 26. The initial batch had 55 passes and one new finalization failure; correcting the recovery transition passed that regression and ten lifecycle checks. Eleven additional authority/wiring/schema checks and two StoreKb checks passed. No full suite/build or Linux/CI/P7 run.
+- Core ABI regenerated and checked; eval and index-treesitter test sources compiled. New optional serialized fields preserve existing JSON; JVM consumers must rebuild for changed constructors and interfaces. No schema bump.
+- Unknown intents require explicit host reconciliation with an authority/evidence reference. Open handles also require a terminal disposition before expired-writer reassignment. Expired same-holder renewal advances generation.
+- Mixed edit conditions must be split into separate calls. Every operation still requires its own role permission. Missing fact anchors are stale at insertion.
+- Interrupted finalization preserves completed cells but rechecks acceptance; it does not infer completion from the stored intermediate phase. Committed scope protection replaces configurable defaults while retaining Git-metadata denial.
+- KB get/skill paging uses offsets and a digest of the redacted capture. Each page fits its admitted read allowance, capped at 1500 tokens. The configured redaction scan cap still hides unscanned tails; raw canonical notes remain stored. Unknown dependency versions fail closed; hosts can supply named contract versions to Curator.recheck/InjectionInputs.
+- F-113 remains open for durable project-horizon wiring, despite the new serve-time dependency fallback. F-109 pressure rebuild remains separate from initial seed selection. D-297 through D-302 record these choices.
+- User authorized commit/push to origin/feature/bugfix. Pre-existing CLAUDE.md/ISSUES.md and untracked task files were preserved.
 
 ## Tenth continuation: candidate fidelity, recovery and evaluation
 

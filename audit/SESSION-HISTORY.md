@@ -645,3 +645,10 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - Eight repair commits through 5d530f0 cover raw candidate fidelity, recoverable snapshots, Atlas containment, partial usage, Windows launch cleanup, isolated retries and promotion provenance.
 - Eleven selected classes and one CellTest method passed on Windows JDK 26, with platform skips. Eval ABI regenerated; core/eval checks passed. No full suite/build or new Linux/CI/P7 run.
 - D-291 through D-296 and the handoff/repair ledger record compatibility and remaining work. User authorized push to origin/feature/bugfix; pre-existing edits preserved.
+
+## 2026-09-28 ? bugfix eleventh continuation
+- Fixed 13 findings: F-044/F-045/F-048/F-091/F-092/F-093/F-102/F-103/F-106/F-111/F-112/F-125/F-126. Ledger: 119 fixed, 23 open.
+- Three repair commits through cdb1f58 cover intent reconciliation, cell authority, finalization recovery, scope binding, compiled coverage and knowledge reads.
+- 79 distinct selected tests passed after the documented recovery sequence correction; core ABI regenerated/checked and dependent module test sources compiled.
+- No full suite/build, Linux/CI or P7 run. D-297 through D-302 record compatibility and conservative defaults.
+- User authorized commit/push to origin/feature/bugfix. Pre-existing edits and untracked task files preserved.

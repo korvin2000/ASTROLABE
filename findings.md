@@ -1,6 +1,6 @@
 # Implementation audit findings
 
-**Remediation:** 106 fixed on `feature/bugfix` (8 in this continuation); 36 remain open; F-034 was already resolved. See [bugfix progress](audit/BUGFIX-PROGRESS.md). Original audit evidence remains historical; `fix_progress` is the current repair status.
+**Remediation:** 119 fixed on `feature/bugfix` (13 in this continuation); 23 remain open; F-034 was already resolved. See [bugfix progress](audit/BUGFIX-PROGRESS.md). Original audit evidence remains historical; `fix_progress` is the current repair status.
 
 ```json
 {
@@ -544,51 +544,43 @@
     "date": "2026-09-28",
     "status": "committed",
     "fixed_this_session": [
-      "F-027",
-      "F-031",
-      "F-032",
-      "F-036",
-      "F-087",
-      "F-101",
-      "F-122",
-      "F-143"
+      "F-044",
+      "F-045",
+      "F-048",
+      "F-091",
+      "F-092",
+      "F-093",
+      "F-102",
+      "F-103",
+      "F-106",
+      "F-111",
+      "F-112",
+      "F-125",
+      "F-126"
     ],
-    "fixed_this_session_count": 8,
+    "fixed_this_session_count": 13,
     "previously_resolved": [
       "F-034"
     ],
-    "remaining_open_count": 36,
+    "remaining_open_count": 23,
     "remaining_open_ids": [
       "F-016",
       "F-017",
       "F-019",
       "F-033",
       "F-041",
-      "F-044",
-      "F-045",
-      "F-048",
       "F-075",
       "F-082",
       "F-086",
       "F-089",
-      "F-091",
-      "F-092",
-      "F-093",
       "F-095",
       "F-100",
-      "F-102",
-      "F-103",
       "F-104",
       "F-105",
-      "F-106",
       "F-107",
       "F-109",
-      "F-111",
-      "F-112",
       "F-113",
       "F-124",
-      "F-125",
-      "F-126",
       "F-127",
       "F-128",
       "F-129",
@@ -602,156 +594,67 @@
       "F-019",
       "F-033",
       "F-041",
-      "F-044",
-      "F-045",
       "F-075",
+      "F-082",
       "F-086",
-      "F-127"
+      "F-089",
+      "F-095"
     ],
     "handoff": "CONTINUE-TASK.md",
     "detail": "audit/BUGFIX-PROGRESS.md",
-    "verification": "Eleven selected test classes and one CellTest regression passed in focused Windows JDK 26 batches, with platform skips. Eval ABI regenerated; core/eval ABI checks passed. No full suite/build, Linux/CI or P7 run.",
+    "verification": "79 distinct selected tests passed after corrections on Windows JDK 26. Core ABI regenerated and checked; eval/index-treesitter test sources compiled. No full suite/build, Linux/CI or P7 run.",
     "current_build": null,
     "source_changes_allowed": true,
     "verification_results": {
       "selected_core_classes": [
-        "ShadowRefTest",
-        "LocalOsFilesTest",
-        "AtlasTest",
-        "SniffTest",
-        "VerifyTest",
-        "SchedulerTest",
-        "StamperTest",
-        "DirtyStateTest",
-        "SnapshotCaptureRegressionTest",
-        "WindowsOwnerTest"
+        "StoredEvidenceTest",
+        "EvidenceTest",
+        "ValidatorTest",
+        "PartitionTest",
+        "DispatcherTest",
+        "KbToolTest",
+        "InjectionTest",
+        "KbLifecycleTest",
+        "ChecksTest",
+        "LifecycleTest",
+        "ScopeGuardTest",
+        "RoleWiringTest",
+        "ToolContractsTest",
+        "StoreKbTest"
       ],
       "selected_core_methods": [
-        "CellTest.partial usage retains the generation reservation including known overruns"
+        "CompilerFullTest.omitted seed sections cannot grant workset coverage",
+        "CellTest.plan and probe completion reach their validator without running product acceptance",
+        "CellTest.create permission cannot admit a later delete in the same edit call",
+        "ControllerTest.interrupted finalization rechecks acceptance and completes without another model cell",
+        "ControllerTest.expired writer cannot reopen over unknown effects until durable reconciliation",
+        "ControllerTest.committed scope amendments update path protection immediately and after reopen"
       ],
-      "selected_eval_classes": [
-        "PromotionDecisionTest"
+      "distinct_tests_passed": 79,
+      "batches": [
+        "Initial 56 tests: 55 passed and new finalization regression failed on sequence validation.",
+        "Recovery correction: 11 passed (10 lifecycle checks and finalization regression).",
+        "Additional authority/wiring/schema checks: 11 passed.",
+        "StoreKbTest: 2 passed."
       ],
-      "result": "passed; POSIX mode and unavailable symlink cases skipped on Windows",
       "corrections": [
-        "New promotion fixture initially violated the existing complex-workload quota; corrected its training stratum.",
-        "New retry fixture initially used Path += on an ArrayList; corrected to add before running tests."
+        "Corrected positional arguments in the new fact test before execution.",
+        "Interrupted finalization now resumes in one lifecycle transition, preserving the durable sequence invariant."
       ],
-      "abi": "eval regenerated; core/eval checkKotlinAbi passed",
+      "abi": "core regenerated and checkKotlinAbi passed",
+      "dependent_modules": "eval and index-treesitter test sources compiled",
       "full_suite": "not run (user requested selective tests)",
       "linux_ci": "not run",
       "p7": "excluded",
       "logs": [
-        "build/bugfix-tenth-shadow.log",
-        "build/bugfix-tenth-paths.log",
-        "build/bugfix-tenth-retry-promotion-verified.log",
-        "build/bugfix-tenth-raw.log",
-        "build/bugfix-tenth-budget-process.log",
-        "build/bugfix-tenth-abi-check.log"
+        "build/bugfix-eleventh-focused.log",
+        "build/bugfix-eleventh-recovery.log",
+        "build/bugfix-eleventh-authority.log",
+        "build/bugfix-eleventh-compatibility.log"
       ]
     },
     "active_processes": [],
     "previous_session_fixed": [
-      "F-001",
-      "F-002",
-      "F-003",
-      "F-004",
-      "F-005",
-      "F-006",
-      "F-007",
-      "F-008",
-      "F-009",
-      "F-010",
-      "F-011",
-      "F-012",
-      "F-013",
-      "F-014",
-      "F-015",
-      "F-018",
-      "F-020",
-      "F-021",
-      "F-022",
-      "F-023",
-      "F-024",
-      "F-025",
-      "F-026",
-      "F-028",
-      "F-029",
-      "F-030",
-      "F-035",
-      "F-037",
-      "F-038",
-      "F-039",
-      "F-040",
-      "F-042",
-      "F-043",
-      "F-046",
-      "F-047",
-      "F-049",
-      "F-050",
-      "F-051",
-      "F-052",
-      "F-053",
-      "F-054",
-      "F-055",
-      "F-056",
-      "F-057",
-      "F-058",
-      "F-059",
-      "F-060",
-      "F-061",
-      "F-062",
-      "F-063",
-      "F-064",
-      "F-065",
-      "F-066",
-      "F-067",
-      "F-068",
-      "F-069",
-      "F-070",
-      "F-071",
-      "F-072",
-      "F-073",
-      "F-074",
-      "F-076",
-      "F-077",
-      "F-078",
-      "F-079",
-      "F-080",
-      "F-081",
-      "F-083",
-      "F-084",
-      "F-085",
-      "F-088",
-      "F-090",
-      "F-094",
-      "F-096",
-      "F-097",
-      "F-098",
-      "F-099",
-      "F-108",
-      "F-110",
-      "F-114",
-      "F-115",
-      "F-116",
-      "F-117",
-      "F-118",
-      "F-119",
-      "F-120",
-      "F-121",
-      "F-123",
-      "F-130",
-      "F-131",
-      "F-132",
-      "F-134",
-      "F-136",
-      "F-138",
-      "F-139",
-      "F-140",
-      "F-141",
-      "F-142"
-    ],
-    "fixed_on_branch": [
       "F-001",
       "F-002",
       "F-003",
@@ -859,7 +762,128 @@
       "F-142",
       "F-143"
     ],
-    "fixed_on_branch_count": 106,
+    "fixed_on_branch": [
+      "F-001",
+      "F-002",
+      "F-003",
+      "F-004",
+      "F-005",
+      "F-006",
+      "F-007",
+      "F-008",
+      "F-009",
+      "F-010",
+      "F-011",
+      "F-012",
+      "F-013",
+      "F-014",
+      "F-015",
+      "F-018",
+      "F-020",
+      "F-021",
+      "F-022",
+      "F-023",
+      "F-024",
+      "F-025",
+      "F-026",
+      "F-027",
+      "F-028",
+      "F-029",
+      "F-030",
+      "F-031",
+      "F-032",
+      "F-035",
+      "F-036",
+      "F-037",
+      "F-038",
+      "F-039",
+      "F-040",
+      "F-042",
+      "F-043",
+      "F-044",
+      "F-045",
+      "F-046",
+      "F-047",
+      "F-048",
+      "F-049",
+      "F-050",
+      "F-051",
+      "F-052",
+      "F-053",
+      "F-054",
+      "F-055",
+      "F-056",
+      "F-057",
+      "F-058",
+      "F-059",
+      "F-060",
+      "F-061",
+      "F-062",
+      "F-063",
+      "F-064",
+      "F-065",
+      "F-066",
+      "F-067",
+      "F-068",
+      "F-069",
+      "F-070",
+      "F-071",
+      "F-072",
+      "F-073",
+      "F-074",
+      "F-076",
+      "F-077",
+      "F-078",
+      "F-079",
+      "F-080",
+      "F-081",
+      "F-083",
+      "F-084",
+      "F-085",
+      "F-087",
+      "F-088",
+      "F-090",
+      "F-091",
+      "F-092",
+      "F-093",
+      "F-094",
+      "F-096",
+      "F-097",
+      "F-098",
+      "F-099",
+      "F-101",
+      "F-102",
+      "F-103",
+      "F-106",
+      "F-108",
+      "F-110",
+      "F-111",
+      "F-112",
+      "F-114",
+      "F-115",
+      "F-116",
+      "F-117",
+      "F-118",
+      "F-119",
+      "F-120",
+      "F-121",
+      "F-122",
+      "F-123",
+      "F-125",
+      "F-126",
+      "F-130",
+      "F-131",
+      "F-132",
+      "F-134",
+      "F-136",
+      "F-138",
+      "F-139",
+      "F-140",
+      "F-141",
+      "F-142",
+      "F-143"
+    ],
+    "fixed_on_branch_count": 119,
     "previous_session_verification_results": {
       "initial_full_core": {
         "tests": 1293,
@@ -899,7 +923,7 @@
       },
       "full_core_rerun": false
     },
-    "source_checkpoint": "5d530f0",
+    "source_checkpoint": "cdb1f58",
     "previous_continuation_verification_results": {
       "first_continuation_full_core": {
         "tests": 1314,
@@ -1201,6 +1225,43 @@
         "build/bugfix-ninth-evaluation-verified.log",
         "build/bugfix-ninth-transform.log",
         "build/bugfix-ninth-abi-check.log"
+      ]
+    },
+    "previous_tenth_verification_results": {
+      "selected_core_classes": [
+        "ShadowRefTest",
+        "LocalOsFilesTest",
+        "AtlasTest",
+        "SniffTest",
+        "VerifyTest",
+        "SchedulerTest",
+        "StamperTest",
+        "DirtyStateTest",
+        "SnapshotCaptureRegressionTest",
+        "WindowsOwnerTest"
+      ],
+      "selected_core_methods": [
+        "CellTest.partial usage retains the generation reservation including known overruns"
+      ],
+      "selected_eval_classes": [
+        "PromotionDecisionTest"
+      ],
+      "result": "passed; POSIX mode and unavailable symlink cases skipped on Windows",
+      "corrections": [
+        "New promotion fixture initially violated the existing complex-workload quota; corrected its training stratum.",
+        "New retry fixture initially used Path += on an ArrayList; corrected to add before running tests."
+      ],
+      "abi": "eval regenerated; core/eval checkKotlinAbi passed",
+      "full_suite": "not run (user requested selective tests)",
+      "linux_ci": "not run",
+      "p7": "excluded",
+      "logs": [
+        "build/bugfix-tenth-shadow.log",
+        "build/bugfix-tenth-paths.log",
+        "build/bugfix-tenth-retry-promotion-verified.log",
+        "build/bugfix-tenth-raw.log",
+        "build/bugfix-tenth-budget-process.log",
+        "build/bugfix-tenth-abi-check.log"
       ]
     }
   }
@@ -1963,7 +2024,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-044 - Unknown intents cannot transition to reconciled completion
 
 - Task: [P1.4.3](TODO.md#L788); related P1.9.2/P2.2.4.
-- Severity: high. Confidence: reproduced. Status: open.
+- Severity: high. Confidence: reproduced. Status: fixed (2026-09-28).
 - Locations: [InMemoryIntentJournal.update](core/src/main/kotlin/io/astrolabe/evidence/Intent.kt#L59), [SqliteIntentJournal.update](core/src/main/kotlin/io/astrolabe/evidence/StoredEvidence.kt#L21), [Controller.open reconciliation](core/src/main/kotlin/io/astrolabe/campaign/Controller.kt#L379).
 - Problem: transition validity is ordinal-based and Unknown is declared after Committed. Once marked Unknown, the only accepted next state is Unknown. The API has no separate reconciled terminal disposition. Conversely Committed -> Unknown is allowed, reopening a completed action.
 - Impact: a normal crash-recovery path marks open intents Unknown permanently; even an authority which has established the outcome cannot close one through IntentJournal.update. Run then continues refusing the same non-replay-safe command forever. Existing reopen test jumps directly from Dispatched to Committed and misses the actual Controller path.
@@ -1971,16 +2032,20 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Future regression: Recorded -> Dispatched -> Unknown -> explicit reconciled completion across reopen; unknown side effects must stay blocked until supporting evidence/authority is persisted, then become resolved. Committed must not reopen accidentally.
 - Runtime evidence: corrected stdin JShell probe against current classes raised `intent i cannot move from Unknown to Committed` after successfully recording and marking i Unknown. The earlier ambiguous Java import probe was discarded.
 - Current-source recheck (2026-09-25, 9a80e117): Both intent journals still enforce ordinal transitions, while Controller marks unresolved intents Unknown (501); reconciliation cannot transition Unknown to Committed. Earlier runtime evidence retains its original baseline; this recheck is source inspection.
+- Fix (2026-09-28, `d4d2524`): Explicit intent transitions keep Committed terminal. Unknown outcomes close only through reconcile with a durable nonblank authority/evidence reference; SQLite reopen and terminal-state regressions pass.
+
 
 ### F-045 - A newly added verified fact is not checked for already-stale anchors
 
 - Task: [P1.5.2](TODO.md#L809); related P1.4.4/P1.8.7.
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Locations: [Validator FactAdd](core/src/main/kotlin/io/astrolabe/register/Validator.kt#L103), [Register.markStale](core/src/main/kotlin/io/astrolabe/register/Register.kt#L131), [StateTool.patch](core/src/main/kotlin/io/astrolabe/tool/state/StateTool.kt#L126).
 - Problem: FactAdd(Verified) validates only evidence ID existence, then creates Fact with staleAt=null even if its supplied anchor points to an old version. markStale acts only on subsequent version-change notifications, so a change which occurred before insertion will never mark this new fact. The validation interface cannot ask whether an anchor/evidence is current.
 - Trigger and impact: retain an old observation, edit the file, then add a verified fact anchored to the old version and that valid observation ID. STATE renders it as fresh v until another change or rebuild. A gate looking only at Fact.stale cannot warn about reliance on this obsolete fact. This is a freshness defect, not a claim that the harness can mechanically prove all fact text.
 - Possible solutions: initialize fact freshness from Coherence.serve/current raw versions and evidence provenance when accepting the patch; retain historical facts with a harness-owned stale/unknown marker. Do not let a model-provided old anchor reset freshness by adding a new fact.
 - Future regression: after an anchor changes, add a verified fact with an existing historical observation; it must render stale/unknown immediately and trigger applicable stale-fact controls.
+- Fix (2026-09-28, `d4d2524`): Fact insertion compares anchors with current raw versions through the runtime ValidationContext. Moved and missing anchors are immediately stale; historical evidence cannot reset freshness.
+
 
 ### F-046 - STATE line and code-fence validation omits auxiliary rendered fields
 
@@ -2012,7 +2077,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-048 - Mixed edit operations lose their individual masks and dependency checks
 
 - Task: [P1.6.1](TODO.md#L823); related P1.6.2/P1.6.4.
-- Severity: high. Confidence: reproduced. Status: open.
+- Severity: high. Confidence: reproduced. Status: fixed (2026-09-28).
 - Locations: [ToolCall.condition / ToolCalls.opName](core/src/main/kotlin/io/astrolabe/tool/ToolCall.kt#L31), [Partition.of](core/src/main/kotlin/io/astrolabe/tool/Partition.kt#L66), [Edit.execute/run](core/src/main/kotlin/io/astrolabe/tool/edit/Edit.kt#L162).
 - Problem: an edit call is named by its first operation (unless any transform exists), and condition exposes only the first non-null condition. Cell/Executor mask checks see that single name; Partition validates that one condition; Edit never evaluates per-operation conditions.
 - Reproduction: edit call 1 creates a; edit call 2 contains create b if applied(op:1) and create c if green(op:3); run call 3 is later in execution order. Partition accepts Ordered, silently missing the illegal forward dependency of c.
@@ -2020,6 +2085,8 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Possible solutions: validate the mask and all dependency predicates for every sub-operation before effects, and evaluate conditions at their permitted execution boundary. If mixed conditional semantics cannot be supported atomically, reject them explicitly instead of collapsing metadata.
 - Future regression: denied second op, malformed/forward second condition, and a false prerequisite must reject or produce explicit nonexecuted dispositions without world effects.
 - Current-source recheck (2026-09-25, 9a80e117): ToolCall.condition still exposes only first non-null edit condition; Partition and Dispatcher consume that single condition. Edit.run validates operations/scopes but does not enforce per-op conditions/masks. Earlier runtime evidence retains its original baseline; this recheck is source inspection.
+- Fix (2026-09-28, `d4d2524`): Cell and Edit check every sub-operation against the role mask. Mixed edit conditions are refused before effects; shared conditions are validated and enforced by the dispatcher. A create-first/delete-second cell regression preserves both paths.
+
 
 ### F-049 - Parallel look execution mutates a non-thread-safe Workset
 
@@ -2544,26 +2611,32 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-091 - A crash after the Finishing transition leaves the campaign unrecoverable on reopen
 
 - Task: [P1.9.1](TODO.md#L1003).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/campaign/Controller.kt#L1540).
 - Analysis: Finishing and Finished are saved as two independent transitions. If the process stops between them, Controller.open reloads Finishing but only resumes Ended/resumable states, reconciles Opened states and repairs Running cells. Neither runS0 nor runS1 can dispatch from the remaining Finishing state, and no reopen branch completes or rolls back finalization. A valid saved intermediate state therefore strands the campaign. Add idempotent finalization recovery that rechecks current acceptance before completing, or store the durable final state atomically. Regression: reopen a campaign persisted immediately after Transition.Finishing and verify safe progress without manually editing the database.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-28, `cdb1f58`): Resuming Finishing is an explicit single-sequence transition that invalidates completion currency while retaining execution history. S0 reruns regression acceptance and completes without another model cell; lifecycle and reopen regressions pass.
+
 
 ### F-092 - Committed scope changes cannot authorize paths hard-coded as protected at open
 
 - Task: [P1.9.2](TODO.md#L1010).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/campaign/Controller.kt#L442).
 - Analysis: The controller always constructs Workspace with default ProtectedPaths before loading the committed contract and never rebuilds/binds its path policy. ScopeGuard resolves Intent.Mutate through that immutable policy before checking the current contract. Removing package-lock.json, CI or migrations from contract protection via an approved amendment therefore still fails the path guard, including after reopen. The task log says binding is implemented, but actual construction only passes those defaults into initial deriveS0. Preserve unconditional Git-metadata protection while binding the configurable write restrictions to committed authority and revalidating changes. Regression: an approved scope/protection amendment enabling a lockfile or migration permits the intended edit; pending amendments do not.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-28, `cdb1f58`): Workspace mutation protection reads the current committed contract at each resolution, including child workspaces. Pending proposals grant nothing; approved changes apply immediately and after reopen. Git metadata remains protected.
+
 
 ### F-093 - Open-time reconciliation removes unknown effects from the writer-reassignment fence
 
 - Task: [P1.9.2](TODO.md#L1010).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/campaign/Controller.kt#L499).
 - Analysis: Open marks all uncommitted campaign intents Unknown and merely polls existing process handles. The unreconciled list passed to Leases.acquire is then intents.open().filter { status != Unknown }, excluding precisely those unresolved effects. Fence.grant requires previous-owner unknown effects to be reconciled before another writer receives the workspace. An expired previous holder can thus be replaced while a background process is still running or its effects remain unknown; marking an intent Unknown is not terminal reconciliation. Include unresolved unknown intents and live/lost handles in the handoff fence, and grant only after a safe disposition. Regression: reopen after lease expiry with a live old process/Unknown intent; new write authority must remain denied until reconciliation. Same-command replay suppression in Run does not fence a different new command.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-28, `cdb1f58`): All open intents, including Unknown, and open handles fence expired/reassigned leases. Expired renewals advance execution generation even for the same holder. Reopen is refused until the prior unknown intent has a durable disposition.
+
 
 ### F-094 - Final review can approve an old tree while the controller completes the changed campaign
 
@@ -2644,18 +2717,22 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-102 - Accepted plan obligations never enter the running check registry
 
 - Task: [P2.1.2](TODO.md#L1143).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/campaign/Controller.kt#L944).
 - Analysis: Controller.open seeds Checks from the pre-plan contract. PlanIntake can add Run acceptance items, but the admitted-plan path only installs the graph and writes a boundary; no production controller path registers/replaces checks for newly committed acceptance. The new increment therefore names an obligation with no executable check. Verify.acceptance either refuses the whole selection or silently drops an unmapped item (F-070), while the exit/final gate cannot certify it. Reconcile check definitions with each committed contract revision before dispatch, retaining historical results only with valid definition identity. Regression: a plan adds a valid Run criterion to a requirement and its implementation executes that new check before completion. This also limits the currently reachable autonomous command-bypass scenario described historically in F-071.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-28, `d4d2524, cdb1f58`): The live registry reconciles run obligations after plan admission and before each cell turn. Added/changed commands receive current definitions, removed seeded obligations leave the registry, and historical receipt definition identity is retained.
+
 
 ### F-103 - Non-implementing role completion runs implementation acceptance before validating its packet
 
 - Task: [P2.1.2](TODO.md#L1143).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/cell/Cell.kt#L429).
 - Analysis: Every no-call completion proposal runs tools.verify.onStop(increment.accept), then unavailable(currenciesNow) can return Blocked before RoleCompletion.assess is called. Controller constructs the plan increment with all campaign acceptance items; probe/review child contexts also use the shared loop. A valid plan or investigation packet can therefore be blocked by an unavailable product test runner, and planning/review unnecessarily executes implementation checks outside its declared completion duties. Dispatch completion verification by packet/role requirements; implementation acceptance belongs to Result completion, while other roles should execute only their own declared validation obligations. Regression: a valid plan/probe packet with an unavailable campaign acceptance runner must still reach its own validator and preserve that missing test evidence for the implementing stage.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-28, `d4d2524`): Automatic product acceptance and unavailable-product-runner blocking apply only to Result completion. Plan and probe packets reach their bound validator without launching product acceptance.
+
 
 ### F-104 - Increment-split proposals have no live controller re-planning path
 
@@ -2676,10 +2753,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-106 - Seeds omitted from the compiled prompt still grant KNOWN edit coverage
 
 - Task: [P2.3.1](TODO.md#L1217).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/campaign/Controller.kt#L1237).
 - Analysis: Compiler makes seed blocks optional and includes only ContextCover.selectedIds in compiled.k.sections. Controller nevertheless passes every Seeds.render(...).shown entry to runCell, which immediately Workset.seed(seeds) before any request. It never filters seeds by the compiler's actual selection. Under a small context budget, a seed can be omitted from the model's prompt yet retain authoritative KNOWN coverage; Cell.observeWorkset also records it as displayed/read. This permits anchored edits against bytes the new cell never received and falsifies packet coverage. Seed Workset only from content actually serialized into the accepted request, with source/version/range mapping. Regression: force one current seed out of the context selection, then attempt an anchored edit using it; it must require look/read first.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-28, `cdb1f58`): Controller seeds Workset only from entries whose seed unit was selected and whose section is actually present in compiled K. Omitted large seed blocks grant no coverage.
+
 
 ### F-107 - Bounded cross-cell fact retention is never applied by the runtime
 
@@ -2719,18 +2798,22 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-111 - Knowledge reads return reusable note text without applying redaction
 
 - Task: [P2.6.2](TODO.md#L1309).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/tool/kb/KbTool.kt#L130).
 - Analysis: KbTool.entry returns StoreKb's full Markdown directly; search includes the raw query and summaries, and result only detects instruction shapes/estimates size. Neither StoreKb nor KbTool applies the configured Redaction boundary. In particular harness-generated STATUS archives can contain register/decision text without going through candidate-note admission, so a secret embedded there can be replayed to the model through kb.get even when file reads would redact it. Apply the same model-facing redaction/mask policy at every KB rendering boundary and preserve protected raw recovery separately. Regression: synthetic secrets in STATUS, a note body/summary and a search query must never appear in the rendered tool result.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-28, `6fcc5a4, cdb1f58`): Every KB result body and scope passes through the configured redaction policy before model return. Search queries, summaries, STATUS bodies and skill reads are covered; masks and scan limits appear in runtime metadata.
+
 
 ### F-112 - KB entry reads can exceed the turn read budget by an unbounded amount
 
 - Task: [P2.6.2](TODO.md#L1309).
-- Severity: medium. Confidence: confirmed_source. Status: open.
+- Severity: medium. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/tool/kb/KbTool.kt#L130).
 - Analysis: The dispatcher reserves a fixed KB read estimate, but kb.get/skill renders the entire entry and does not consult TurnContext.readBudget or a result token cap. STATUS is explicitly exempt from Note.MAX_BODY_TOKENS and accumulates archived records, so a legitimate checkpoint can grow without bound and be returned in a single result. Post-execution reconciliation observes the overrun after all bytes are already in the transcript, potentially forcing pressure exit and repeated loss/retrieval. Bound the rendered view using the admitted budget and provide a durable paging/recall mechanism. Regression: a large STATUS read must stay within the actual admitted result budget while preserving access to omitted records.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-28, `d4d2524, 6fcc5a4`): Parallel reads carry their individual admission into the executor. KB renders at most that allowance and 1500 tokens; get/skill expose offset/version paging over the redacted capture and reject changed cursors. Protected raw data remains stored; content beyond the configured redaction scan cap stays explicitly unavailable.
+
 
 ### F-113 - Knowledge dependency invalidation is disconnected from live workspace changes
 
@@ -2850,18 +2933,22 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-125 - Stale-note rechecks accept unresolved and wrong-version dependencies
 
 - Task: [P4.1.2](TODO.md#L1557).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Location: [kb/Curator.kt](core/src/main/kotlin/io/astrolabe/kb/Curator.kt#L129).
 - Analysis: recheck strips @version, resolves only note IDs and treats missing dependencies as true. A stale note depending on a changed source path or contract version, without versioned anchors, is immediately readmitted. Injection.eligibility repeats the missing-target/stripped-version logic. Resolve typed note/path/contract dependencies and recorded versions; unknown resolution must retain stale status. Regression: moved path, missing contract and newer contract revision cannot readmit or inject old advice.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; current-source trace and scoped test inspection; no new runtime reproduction claimed.
+- Fix (2026-09-28, `6fcc5a4`): Rechecks and injection resolve admitted note dependencies with exact revision pins and paths with recorded hashes. Unknown named contracts remain stale unless the host supplies their current versions. Cycles, missing targets and moved dependencies cannot readmit or inject advice; explicit KB reads label them stale.
+
 
 ### F-126 - Focus notes bypass freshness and role eligibility
 
 - Task: [P4.1.3](TODO.md#L1562).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Location: [kb/Injection.kt](core/src/main/kotlin/io/astrolabe/kb/Injection.kt#L250).
 - Analysis: Controller passes all notes directly to KnowledgeUse/FocusNotes (Controller.kt:1295). render checks only captured Admitted status and matching path, not Injection.eligibility, current versions, dependencies or role scope. A note excluded by ranking as moved can appear in [A]; invalidations after opening cannot update captured Note instances. Reuse current eligibility checks on each render. Regression: moved-anchor, superseded-dependency and role-excluded notes stay absent, including mid-cell invalidation.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; current-source trace and scoped test inspection; no new runtime reproduction claimed.
+- Fix (2026-09-28, `6fcc5a4, cdb1f58`): Focus-note rendering uses shared Injection eligibility, current workspace versions, fresh note revisions and current stored status on every render. Frozen/live bases cannot replay an invalidated captured note; moved, missing-dependency and role-excluded notes remain absent.
+
 
 ### F-127 - Extractor token usage is logged without budget reconciliation
 
