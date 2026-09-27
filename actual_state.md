@@ -53,8 +53,8 @@ Local choices D-112–D-113, D-120–D-126, D-135–D-137, D-145–D-155, D-160�
 D-200–D-202, D-210–D-213, D-220–D-223, D-230–D-233, D-240–D-244, D-250–D-254, D-260 (TODO §3). Owner decision D-175
 (new dependencies allowed under pinned-version rules).
 ## Audit remediation (2026-09-28)
-Branch `feature/bugfix`: 98 fixed (10 this continuation), 44 open, F-034 previously resolved.
+Branch `feature/bugfix`: 106 fixed (8 this continuation), 36 open, F-034 previously resolved.
 See `findings.md` and `audit/BUGFIX-PROGRESS.md`; historical CI gates above predate these fixes.
-Eleven selected test classes passed on Windows JDK 26; core/eval ABI regenerated and checked.
-No full suite/build or new Linux/CI run. Last full Windows build: fbee771, 1667 tests, 13 skipped.
-D-285 through D-290 cover authority, repair reservations, incomplete evidence, redaction and evaluation identities.
+Eleven selected classes and one CellTest method passed on Windows JDK 26, with platform skips.
+Eval ABI regenerated; core/eval ABI checks passed. No full suite/build or new Linux/CI run.
+Last full Windows build: fbee771, 1667 tests, 13 skipped. D-291 through D-296 record current repairs.

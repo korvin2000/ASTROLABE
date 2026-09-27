@@ -1,6 +1,6 @@
 # Implementation audit findings
 
-**Remediation:** 98 fixed on `feature/bugfix` (10 in this continuation); 44 remain open; F-034 was already resolved. See [bugfix progress](audit/BUGFIX-PROGRESS.md). Original audit evidence remains historical; `fix_progress` is the current repair status.
+**Remediation:** 106 fixed on `feature/bugfix` (8 in this continuation); 36 remain open; F-034 was already resolved. See [bugfix progress](audit/BUGFIX-PROGRESS.md). Original audit evidence remains historical; `fix_progress` is the current repair status.
 
 ```json
 {
@@ -544,31 +544,25 @@
     "date": "2026-09-28",
     "status": "committed",
     "fixed_this_session": [
-      "F-084",
-      "F-117",
-      "F-118",
-      "F-119",
-      "F-120",
-      "F-132",
-      "F-134",
-      "F-136",
-      "F-138",
-      "F-142"
+      "F-027",
+      "F-031",
+      "F-032",
+      "F-036",
+      "F-087",
+      "F-101",
+      "F-122",
+      "F-143"
     ],
-    "fixed_this_session_count": 10,
+    "fixed_this_session_count": 8,
     "previously_resolved": [
       "F-034"
     ],
-    "remaining_open_count": 44,
+    "remaining_open_count": 36,
     "remaining_open_ids": [
       "F-016",
       "F-017",
       "F-019",
-      "F-027",
-      "F-031",
-      "F-032",
       "F-033",
-      "F-036",
       "F-041",
       "F-044",
       "F-045",
@@ -576,14 +570,12 @@
       "F-075",
       "F-082",
       "F-086",
-      "F-087",
       "F-089",
       "F-091",
       "F-092",
       "F-093",
       "F-095",
       "F-100",
-      "F-101",
       "F-102",
       "F-103",
       "F-104",
@@ -594,7 +586,6 @@
       "F-111",
       "F-112",
       "F-113",
-      "F-122",
       "F-124",
       "F-125",
       "F-126",
@@ -603,152 +594,64 @@
       "F-129",
       "F-133",
       "F-135",
-      "F-137",
-      "F-143"
+      "F-137"
     ],
     "next_priority": [
       "F-016",
       "F-017",
       "F-019",
-      "F-027",
-      "F-031",
-      "F-032",
       "F-033",
-      "F-036",
-      "F-122",
+      "F-041",
+      "F-044",
+      "F-045",
+      "F-075",
+      "F-086",
       "F-127"
     ],
     "handoff": "CONTINUE-TASK.md",
     "detail": "audit/BUGFIX-PROGRESS.md",
-    "verification": "Eleven selected test classes passed on Windows JDK 26 across focused batches. Core/eval ABI regenerated and checked. No full suite/build, Linux/CI or P7 run, per the requested selective verification scope.",
+    "verification": "Eleven selected test classes and one CellTest regression passed in focused Windows JDK 26 batches, with platform skips. Eval ABI regenerated; core/eval ABI checks passed. No full suite/build, Linux/CI or P7 run.",
     "current_build": null,
     "source_changes_allowed": true,
     "verification_results": {
       "selected_core_classes": [
-        "RecoveryCampaignTest",
-        "PublicationCampaignTest",
-        "PublicationTest",
-        "IntegratorTest",
-        "QaDriverTest",
-        "CellTest",
-        "ImportGraphTest",
-        "TransformTest",
-        "BehaviourSnapshotTest"
+        "ShadowRefTest",
+        "LocalOsFilesTest",
+        "AtlasTest",
+        "SniffTest",
+        "VerifyTest",
+        "SchedulerTest",
+        "StamperTest",
+        "DirtyStateTest",
+        "SnapshotCaptureRegressionTest",
+        "WindowsOwnerTest"
+      ],
+      "selected_core_methods": [
+        "CellTest.partial usage retains the generation reservation including known overruns"
       ],
       "selected_eval_classes": [
-        "CampaignTest",
         "PromotionDecisionTest"
       ],
-      "result": "passed",
+      "result": "passed; POSIX mode and unavailable symlink cases skipped on Windows",
       "corrections": [
-        "ImportGraphTest previously assumed a bare react import could not be a local alias; updated to assert uncertainty.",
-        "Initial evaluation fingerprint kind included a forbidden slash; corrected to the canonical encoder format."
+        "New promotion fixture initially violated the existing complex-workload quota; corrected its training stratum.",
+        "New retry fixture initially used Path += on an ArrayList; corrected to add before running tests."
       ],
-      "abi": "core/eval regenerated and checkKotlinAbi passed",
+      "abi": "eval regenerated; core/eval checkKotlinAbi passed",
       "full_suite": "not run (user requested selective tests)",
       "linux_ci": "not run",
       "p7": "excluded",
       "logs": [
-        "build/bugfix-ninth-safety.log",
-        "build/bugfix-ninth-masks.log",
-        "build/bugfix-ninth-evaluation.log",
-        "build/bugfix-ninth-evaluation-verified.log",
-        "build/bugfix-ninth-transform.log",
-        "build/bugfix-ninth-abi-check.log"
+        "build/bugfix-tenth-shadow.log",
+        "build/bugfix-tenth-paths.log",
+        "build/bugfix-tenth-retry-promotion-verified.log",
+        "build/bugfix-tenth-raw.log",
+        "build/bugfix-tenth-budget-process.log",
+        "build/bugfix-tenth-abi-check.log"
       ]
     },
     "active_processes": [],
     "previous_session_fixed": [
-      "F-001",
-      "F-002",
-      "F-003",
-      "F-004",
-      "F-005",
-      "F-006",
-      "F-007",
-      "F-008",
-      "F-009",
-      "F-010",
-      "F-011",
-      "F-012",
-      "F-013",
-      "F-014",
-      "F-015",
-      "F-018",
-      "F-020",
-      "F-021",
-      "F-022",
-      "F-023",
-      "F-024",
-      "F-025",
-      "F-026",
-      "F-028",
-      "F-029",
-      "F-030",
-      "F-035",
-      "F-037",
-      "F-038",
-      "F-039",
-      "F-040",
-      "F-042",
-      "F-043",
-      "F-046",
-      "F-047",
-      "F-049",
-      "F-050",
-      "F-051",
-      "F-052",
-      "F-053",
-      "F-054",
-      "F-055",
-      "F-056",
-      "F-057",
-      "F-058",
-      "F-059",
-      "F-060",
-      "F-061",
-      "F-062",
-      "F-063",
-      "F-064",
-      "F-065",
-      "F-066",
-      "F-067",
-      "F-068",
-      "F-069",
-      "F-070",
-      "F-071",
-      "F-072",
-      "F-073",
-      "F-074",
-      "F-076",
-      "F-077",
-      "F-078",
-      "F-079",
-      "F-080",
-      "F-081",
-      "F-083",
-      "F-085",
-      "F-088",
-      "F-090",
-      "F-094",
-      "F-096",
-      "F-097",
-      "F-098",
-      "F-099",
-      "F-108",
-      "F-110",
-      "F-114",
-      "F-115",
-      "F-116",
-      "F-121",
-      "F-123",
-      "F-130",
-      "F-131",
-      "F-139",
-      "F-140",
-      "F-141"
-    ],
-    "fixed_on_branch": [
       "F-001",
       "F-002",
       "F-003",
@@ -848,7 +751,115 @@
       "F-141",
       "F-142"
     ],
-    "fixed_on_branch_count": 98,
+    "fixed_on_branch": [
+      "F-001",
+      "F-002",
+      "F-003",
+      "F-004",
+      "F-005",
+      "F-006",
+      "F-007",
+      "F-008",
+      "F-009",
+      "F-010",
+      "F-011",
+      "F-012",
+      "F-013",
+      "F-014",
+      "F-015",
+      "F-018",
+      "F-020",
+      "F-021",
+      "F-022",
+      "F-023",
+      "F-024",
+      "F-025",
+      "F-026",
+      "F-027",
+      "F-028",
+      "F-029",
+      "F-030",
+      "F-031",
+      "F-032",
+      "F-035",
+      "F-036",
+      "F-037",
+      "F-038",
+      "F-039",
+      "F-040",
+      "F-042",
+      "F-043",
+      "F-046",
+      "F-047",
+      "F-049",
+      "F-050",
+      "F-051",
+      "F-052",
+      "F-053",
+      "F-054",
+      "F-055",
+      "F-056",
+      "F-057",
+      "F-058",
+      "F-059",
+      "F-060",
+      "F-061",
+      "F-062",
+      "F-063",
+      "F-064",
+      "F-065",
+      "F-066",
+      "F-067",
+      "F-068",
+      "F-069",
+      "F-070",
+      "F-071",
+      "F-072",
+      "F-073",
+      "F-074",
+      "F-076",
+      "F-077",
+      "F-078",
+      "F-079",
+      "F-080",
+      "F-081",
+      "F-083",
+      "F-084",
+      "F-085",
+      "F-087",
+      "F-088",
+      "F-090",
+      "F-094",
+      "F-096",
+      "F-097",
+      "F-098",
+      "F-099",
+      "F-101",
+      "F-108",
+      "F-110",
+      "F-114",
+      "F-115",
+      "F-116",
+      "F-117",
+      "F-118",
+      "F-119",
+      "F-120",
+      "F-121",
+      "F-122",
+      "F-123",
+      "F-130",
+      "F-131",
+      "F-132",
+      "F-134",
+      "F-136",
+      "F-138",
+      "F-139",
+      "F-140",
+      "F-141",
+      "F-142",
+      "F-143"
+    ],
+    "fixed_on_branch_count": 106,
     "previous_session_verification_results": {
       "initial_full_core": {
         "tests": 1293,
@@ -888,7 +899,7 @@
       },
       "full_core_rerun": false
     },
-    "source_checkpoint": "a41a7fa",
+    "source_checkpoint": "5d530f0",
     "previous_continuation_verification_results": {
       "first_continuation_full_core": {
         "tests": 1314,
@@ -1157,6 +1168,40 @@
       "errors": 0,
       "skipped": 13,
       "coverage": "all six fixes through fbee771"
+    },
+    "previous_ninth_verification_results": {
+      "selected_core_classes": [
+        "RecoveryCampaignTest",
+        "PublicationCampaignTest",
+        "PublicationTest",
+        "IntegratorTest",
+        "QaDriverTest",
+        "CellTest",
+        "ImportGraphTest",
+        "TransformTest",
+        "BehaviourSnapshotTest"
+      ],
+      "selected_eval_classes": [
+        "CampaignTest",
+        "PromotionDecisionTest"
+      ],
+      "result": "passed",
+      "corrections": [
+        "ImportGraphTest previously assumed a bare react import could not be a local alias; updated to assert uncertainty.",
+        "Initial evaluation fingerprint kind included a forbidden slash; corrected to the canonical encoder format."
+      ],
+      "abi": "core/eval regenerated and checkKotlinAbi passed",
+      "full_suite": "not run (user requested selective tests)",
+      "linux_ci": "not run",
+      "p7": "excluded",
+      "logs": [
+        "build/bugfix-ninth-safety.log",
+        "build/bugfix-ninth-masks.log",
+        "build/bugfix-ninth-evaluation.log",
+        "build/bugfix-ninth-evaluation-verified.log",
+        "build/bugfix-ninth-transform.log",
+        "build/bugfix-ninth-abi-check.log"
+      ]
     }
   }
 }
@@ -1713,13 +1758,15 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-027 - Raw-byte candidate changes can disappear behind Git clean filters
 
 - Task: [P1.2.2](TODO.md#L716); related [P1.2.3](TODO.md#L723), P1.2.4/P1.7.4.
-- Severity: high. Confidence: reproduced. Status: open.
+- Severity: high. Confidence: reproduced. Status: fixed (2026-09-28).
 - Locations: [Stamper.trackedDelta](core/src/main/kotlin/io/astrolabe/workspace/Stamper.kt#L220), [DirtyState.capture](core/src/main/kotlin/io/astrolabe/workspace/DirtyState.kt#L216).
 - Reproduction: in a new isolated Git repo configure `filter.strip.clean = git stripspace` for `*.txt`; write `hello SPACE LF` and commit, then replace it with equal-length `hello TAB LF`. Raw bytes differ. Fresh compiled Stamper returns equal stamps and empty member sets before/after because both normalize to the same Git blob.
 - Problem: raw-byte hashing occurs only for paths reported changed by git status. Git's normalization/clean-filter equivalence determines that membership and can hide a change before the SDK hashes it. DirtyState selects from the same status list, so no recovery entry is captured for this raw change either.
 - Impact: candidate equality, change detection and recovery can miss actual source bytes consumed by tools. A prior receipt may look current for a different raw workspace. The documented clean-file export limitation does not make raw stamp equality sound.
 - Possible solutions: derive consequential candidate membership from a raw baseline/manifest rather than Git's normalized dirty list alone; capture exact raw content for clean tracked paths when filters or checkout conversion can change it. Fail closed or explicitly exclude unsupported filtered repositories until fidelity is established.
 - Future regression: normalization-equivalent raw changes under a real clean filter must alter candidate identity and survive snapshot/materialization. The preliminary LF-to-CRLF probe did change the stamp on this machine; it is not the reproduced counterexample.
+- Fix (2026-09-28, `2799e18`): Stamping compares every remaining tracked path against its raw Git object and actual supported mode. DirtyState includes filter-hidden members and rechecks the stamp. A real clean-filter regression proves distinct candidate IDs, exact export and restoration for Git-equivalent raw bytes.
+
 
 ### F-028 - Snapshot code follows symlinks before deciding what object to capture
 
@@ -1760,22 +1807,26 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-031 - Crash after shadow-ref update leaves the durable snapshot index behind
 
 - Task: [P1.2.4](TODO.md#L729).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Location: [ShadowRef.commit](core/src/main/kotlin/io/astrolabe/workspace/ShadowRef.kt#L324).
 - Problem: commit moves the Git ref before publishing the manifest blob and before atomically writing the turn index. There is no persisted intent/recovery step in this class that reconciles a moved ref with the older index. On the next commit, expectedOld is taken from that older index, so updateRef rejects the harness's own newer head. At snapshot 0, reopen can also think there is no initial snapshot while the ref already exists.
 - Impact: an ordinary crash/storage failure in this interval can block campaign reopen or all later snapshots. The commit message contains a manifest digest, but the corresponding serialized manifest blob need not have been published yet, so reconstruction is not always available. Controller.open/drift call sites inspected; broader P2 resume review remains pending.
 - Possible solutions: publish recovery material before ref movement and persist an intent containing old/new refs and index update; on open reconcile the crash interval without overwriting unrelated ref changes. Keep genuine external CAS conflicts distinguishable from recoverable local publication.
 - Future regression: terminate or inject failure after updateRef, after manifest publication and before index rename; reopen must recover exactly one snapshot or explicitly return a recoverable unknown state, preserving snapshot-0 authority.
+- Fix (2026-09-28, `2e12762`): Manifest blobs and a pending index are durable before ref movement. Reopen completes a matching publication once, discards an unmoved intent, and refuses unrelated ref movement. Injected index failures at turn zero and a later turn recover and permit subsequent snapshots.
+
 
 ### F-032 - Snapshot export/restore drops executable modes and validates bytes only
 
 - Task: [P1.2.4](TODO.md#L729); related P0.6.1, P1.2.3/P1.6.4/P1.7.5.
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Locations: [ShadowRef.materialize / restore](core/src/main/kotlin/io/astrolabe/workspace/ShadowRef.kt#L229), [DirtyState.worktreeEntry mode](core/src/main/kotlin/io/astrolabe/workspace/DirtyState.kt#L316), [LocalOs.replaceFileAtomically](core/src/main/kotlin/io/astrolabe/os/LocalOs.kt#L162), [MaterializeResult.ok](core/src/main/kotlin/io/astrolabe/workspace/ShadowRef.kt#L72).
 - Problem: exported regular files use Files.write without applying entry.mode; restore and ordinary atomic replacement replace the inode with a default-mode temporary file without preserving executable permissions. DirtyState marks every untracked regular file REGULAR because reportedMode is ABSENT, even on POSIX. Validation checks digest alone, not mode/type for all exported paths; limitations do not make ok false.
 - Impact: a tracked executable such as gradlew or scripts/check.sh can lose execute permission in a supposedly verified candidate or after an edit/revert. The isolated baseline can fail solely because export changed the filesystem semantics. A symlink fallback can similarly satisfy a byte digest while having the wrong type. POSIX execution was not available in this session; the omitted mode application is visible in source.
 - Possible solutions: capture actual supported modes for untracked files, preserve/apply permissions deliberately during publication, and verify type plus mode plus bytes across the entire candidate. Treat unsupported fidelity as unavailable rather than a successful materialization with a warning.
 - Future regression: on Linux export, edit and restore a 0755 script, invoke it directly and compare modes; include a symlink whose creation is refused and require an unavailable/mismatch result.
+- Fix (2026-09-28, `6b7ab81`): Atomic replacement preserves POSIX permissions; snapshots apply executable modes and validate every exported tree path by bytes, type and supported mode. Restore guards mode changes. Clean-path omission regression passes; executable export/edit/restore regression is present but skipped on Windows.
+
 
 ### F-033 - Preimage lookup is lost across cells/restart and its journal index is written after mutation
 
@@ -1815,13 +1866,15 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-036 - Atlas and command discovery bypass the canonical filesystem boundary
 
 - Task: [P1.3.1](TODO.md#L750); related P1.3.2/P1.3.4/P1.2.6.
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Locations: [Atlas scanRepository/readRelative/resolveRelative](core/src/main/kotlin/io/astrolabe/atlas/Atlas.kt#L425), [Sniff.commands](core/src/main/kotlin/io/astrolabe/atlas/Sniff.kt#L102).
 - Problem: Git supplies lexical file names, then Atlas uses following readAttributes/readAllBytes without WorkspacePath containment or protected-path validation. Sniff rereads manifests through the same helper. A tracked final symlink or ancestor link can lead outside the workspace or into protected Git metadata; the no-Git tree walk has different link semantics.
 - Impact: outside file contents can enter outlines/export names and repository commands, and an external linked package.json can define inferred acceptance commands. Look's guarded reread does not protect the prime or Sniff path. F-021 described the analogous search boundary; this is a separate production consumer.
 - Evidence: source data flow through gitListFiles -> scanRepository -> parseAll -> readRelative, and Sniff.commands. No link runtime reproduction in this checkpoint.
 - Possible solutions: bind Atlas/Sniff to WorkspacePath and an explicit read policy; preserve a visible unavailable/unsupported entry when safe access cannot be established. Do not follow a manifest link and silently treat its target as trusted in-repository configuration.
 - Future regression: tracked link/ancestor pointing outside or at .git must not expose external declarations or commands; permitted internal aliases must use canonical identity.
+- Fix (2026-09-28, `b82a7b2`): Atlas scan, refresh, reads and metadata lookup resolve through WorkspacePath. Sniff shares guarded reads. External and protected Git-directory junction regressions pass on Windows, including explicit path-set command discovery.
+
 
 ### F-037 - Atlas cache can return stale declarations after a same-size, same-time rewrite
 
@@ -2453,10 +2506,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-087 - Incomplete provider usage can release the cell's conservative token reservation
 
 - Task: [P1.8.7](TODO.md#L986).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/cell/Cell.kt#L328).
 - Analysis: Admission reserves estimated input plus output. Reconciliation uses any non-null response.usage, summing totalInput and OUTPUT with a zero default, without requiring usage.isComplete. The preceding contextAdmission.observed deliberately checks completeness, but budget reconciliation does not. Partial usage therefore charges only reported dimensions and frees the rest, permitting additional work beyond the intended token bound. Preserve the conservative reservation for unknown dimensions until terminal reconciliation, and account complete usage once. Regression: partial input-only/output-only usage must not lower the committed charge below the known-plus-unknown conservative bound.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-28, `ed14e95`): Incomplete usage retains at least the admitted estimate, adds conservative funding for missing input/output dimensions, and includes known overruns. The selected CellTest regression covers input-only, output-only and oversized output usage. Late terminal reconciliation remains F-086.
+
 
 ### F-088 - Dispatch authority can expire during model generation and still allow tool effects
 
@@ -2579,10 +2634,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-101 - A failed Windows job assignment leaks the newly created suspended process
 
 - Task: [P1.12.4](TODO.md#L1120).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/os/WindowsOwner.kt#L98).
 - Analysis: CreateProcessW succeeds with CREATE_SUSPENDED, then AssignProcessToJobObject may fail. The catch calls TerminateJobObject on the job that did not receive the process and closes the process handle, but never terminates that unassigned process itself. LocalOs cannot clean it up because owner.start threw before returning OwnedProcess. The suspended process survives the failed launch and later owner shutdown. On post-create failure terminate the process directly when assignment is not known to have succeeded, wait for exit and close all handles. Regression: fault-inject job assignment failure after process creation and prove the child no longer exists.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-28, `5d530f0`): Post-create launch failures terminate the child directly as well as its job, wait for exit, then close handles. A real Windows child with an injected failure before job assignment exits without executing its command.
+
 
 ### F-102 - Accepted plan obligations never enter the running check registry
 
@@ -2765,10 +2822,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-122 - The flaky retry reuses the ordinary execution path instead of forcing an isolated rerun
 
 - Task: [P3.6.1](TODO.md#L1507).
-- Severity: medium. Confidence: confirmed_source. Status: open.
+- Severity: medium. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/tool/verify/Verify.kt#L318).
 - Analysis: runTriaged reruns every Failed check by calling runOne again with the same scheduler. Controller configures candidates only for isolation-enabled/S3 paths, so normal S0-S2 retries run again on the same live tree rather than a pinned disposable candidate. If the first failing check changed inputs or residual state, the second result describes different conditions; it may repeat side effects and is not the required isolated flake check. Force a pinned isolated rerun with explicit comparable inputs/environment, or record that isolation is unavailable instead of claiming flake triage. Regression: a first failed run mutates input/state; retry must use the original pinned candidate and preserve both attempts' provenance.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-28, `adf8840`): Flaky retries require an isolated export of the original candidate and a matching known environment. Missing isolation or changed input retains the first failure with an explicit unavailable message. VerifyTest covers real isolated disagreeing outcomes and refusal after first-attempt mutation; SchedulerTest passes.
+
 
 ### F-123 - Campaign full-suite and quality gates bypass receipt certification requirements
 
@@ -2955,10 +3014,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-143 - Promotion decision does not bind evaluated trials to the frozen workload partition
 
 - Task: [P6.1.3](TODO.md#L1891).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Location: [eval/src/main/kotlin/io/astrolabe/eval/PromotionPolicy.kt](eval/src/main/kotlin/io/astrolabe/eval/PromotionPolicy.kt#L102).
 - Analysis: PromotionDecision compares design.manifest to the supplied manifest fingerprint and checks missing declared candidates, but never compares design.trials with manifest.workload/assignment. EvaluationDesign accepts arbitrary PlannedTrials and validateRows checks rows only against that self-declared design. Training/selection tasks, a cherry-picked subset or invented repository cluster identities can therefore be scored under a legitimate final-manifest hash. Evidence.of additionally labels independence Pass from the manifest grouping policy without checking actual trial membership. Construct/validate the planned trial projection from the frozen evidence partition, including exact task/repetition/repository/stratum identity, and bind fixtures to the candidate. Regression: extra, omitted, relabelled and wrong-partition pairs block promotion despite matching manifest hashes.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; current-source trace and scoped test inspection; no new runtime reproduction claimed.
+- Fix (2026-09-28, `3ffb27c`): Promotion checks exact Final partition membership and frozen task, repetition, repository and stratum identities. Fixture evidence must name the candidate configuration fingerprint. PromotionEvidence needs a validated design to claim independence; legacy calls remain unknown. Altered and wrong-partition trials and foreign fixtures are rejected.
+
 
 ## Audit completion (2026-09-25)
 

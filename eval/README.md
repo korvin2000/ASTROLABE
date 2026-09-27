@@ -17,6 +17,11 @@ as well as the frozen attempt. `AttemptConfig.fingerprint` alone cannot distingu
 Pass the selected config to `PromotionEvidence.of`; its legacy attempt overload requires exactly one
 matching config in the manifest. Manifests and trial tables made with the old IDs must be regenerated.
 
+Pass the `EvaluationDesign` to `PromotionEvidence.of` to establish independence; without it,
+independence remains unknown. Promotion requires exactly the manifest's Final partition, with the
+frozen task, repetition, repository and stratum identities. Fixture reports used for promotion must
+carry the candidate configuration fingerprint as their `--configuration` label.
+
 Supply one `EvaluationTrial` per configuration and planned repository/task/repetition key. Its
 cost includes all attempts, helpers, review and integration. Repetitions stay in the same task stratum;
 repository labels identify independent clusters, including related repositories under one label.

@@ -861,8 +861,14 @@ public final class io/astrolabe/eval/PromotionDecision$Companion {
 public final class io/astrolabe/eval/PromotionEvidence {
 	public static final field INSTANCE Lio/astrolabe/eval/PromotionEvidence;
 	public static final fun of (Lio/astrolabe/eval/CampaignManifest;Lio/astrolabe/AttemptConfig;Lio/astrolabe/eval/IntegrityVerdict;Lio/astrolabe/eval/EvaluationOrigin;Ljava/lang/String;)Lio/astrolabe/eval/EvaluationEvidence;
+	public static final fun of (Lio/astrolabe/eval/CampaignManifest;Lio/astrolabe/AttemptConfig;Lio/astrolabe/eval/IntegrityVerdict;Lio/astrolabe/eval/EvaluationOrigin;Ljava/lang/String;Lio/astrolabe/eval/EvaluationDesign;)Lio/astrolabe/eval/EvaluationEvidence;
 	public static final fun of (Lio/astrolabe/eval/CampaignManifest;Lio/astrolabe/eval/ArmConfig;Lio/astrolabe/eval/IntegrityVerdict;Lio/astrolabe/eval/EvaluationOrigin;Ljava/lang/String;)Lio/astrolabe/eval/EvaluationEvidence;
+	public static final fun of (Lio/astrolabe/eval/CampaignManifest;Lio/astrolabe/eval/ArmConfig;Lio/astrolabe/eval/IntegrityVerdict;Lio/astrolabe/eval/EvaluationOrigin;Ljava/lang/String;Lio/astrolabe/eval/EvaluationDesign;)Lio/astrolabe/eval/EvaluationEvidence;
 	public static final fun of (Lio/astrolabe/eval/CampaignManifest;Lio/astrolabe/eval/VariantConfig;Lio/astrolabe/eval/IntegrityVerdict;Lio/astrolabe/eval/EvaluationOrigin;Ljava/lang/String;)Lio/astrolabe/eval/EvaluationEvidence;
+	public static final fun of (Lio/astrolabe/eval/CampaignManifest;Lio/astrolabe/eval/VariantConfig;Lio/astrolabe/eval/IntegrityVerdict;Lio/astrolabe/eval/EvaluationOrigin;Ljava/lang/String;Lio/astrolabe/eval/EvaluationDesign;)Lio/astrolabe/eval/EvaluationEvidence;
+	public static synthetic fun of$default (Lio/astrolabe/eval/CampaignManifest;Lio/astrolabe/AttemptConfig;Lio/astrolabe/eval/IntegrityVerdict;Lio/astrolabe/eval/EvaluationOrigin;Ljava/lang/String;Lio/astrolabe/eval/EvaluationDesign;ILjava/lang/Object;)Lio/astrolabe/eval/EvaluationEvidence;
+	public static synthetic fun of$default (Lio/astrolabe/eval/CampaignManifest;Lio/astrolabe/eval/ArmConfig;Lio/astrolabe/eval/IntegrityVerdict;Lio/astrolabe/eval/EvaluationOrigin;Ljava/lang/String;Lio/astrolabe/eval/EvaluationDesign;ILjava/lang/Object;)Lio/astrolabe/eval/EvaluationEvidence;
+	public static synthetic fun of$default (Lio/astrolabe/eval/CampaignManifest;Lio/astrolabe/eval/VariantConfig;Lio/astrolabe/eval/IntegrityVerdict;Lio/astrolabe/eval/EvaluationOrigin;Ljava/lang/String;Lio/astrolabe/eval/EvaluationDesign;ILjava/lang/Object;)Lio/astrolabe/eval/EvaluationEvidence;
 }
 
 public final class io/astrolabe/eval/PromotionReport {

@@ -1,6 +1,6 @@
 # Bugfix continuation
-Checkpoint: `feature/bugfix`, 2026-09-28. Eight fix commits from `e9d84db` through `a41a7fa`.
-**98 findings fixed (10 this continuation); 44 open; F-034 previously resolved.**
+Checkpoint: `feature/bugfix`, 2026-09-28. Eight fix commits from `2e12762` through `5d530f0`.
+**106 findings fixed (8 this continuation); 36 open; F-034 previously resolved.**
 P0-P6 remains 185/185 implemented. P7 excluded. User authorized committing and pushing to origin/feature/bugfix.
 
 ## Read first
@@ -10,27 +10,27 @@ P0-P6 remains 185/185 implemented. P7 excluded. User authorized committing and p
 
 ## Next fixes
 1. F-016 POSIX detached-process containment; F-017 Git deadlines; F-019 search bounds.
-2. F-027 raw membership under Git filters; F-031/F-032/F-033 snapshot recovery/fidelity.
-3. F-036 Atlas/Sniff containment. Smaller remaining candidates: F-122 isolated flaky retries, F-127 extractor billing.
-4. F-143 evaluation trial/workload binding and F-137 HTTP QA candidate binding remain open.
+2. F-033 durable preimage associations; F-041 Gradle wrapper launch; F-044 unknown-intent reconciliation.
+3. F-045 fact freshness; F-075 Gradle/Maven report acquisition; F-086 provider terminal reconciliation.
+4. F-127 extractor billing and F-137 HTTP QA candidate binding remain open.
 5. Complete queue: `findings.md` JSON `fix_progress.remaining_open_ids`.
 
 ## This continuation
-Fixed F-084/F-117/F-118/F-119/F-120/F-132/F-134/F-136/F-138/F-142.
-Turn masks are enforced; publication rechecks authority; repair allowance is reserved before dispatch.
-Incomplete references retain obligations; ambiguous bare imports widen dependency analysis.
-Transforms validate actual changed paths and redact diffs; QA redacts transcripts and observations.
-Characterization bytes use protected comparison storage. Evaluation IDs include shape/comparator semantics.
+Fixed F-027/F-031/F-032/F-036/F-087/F-101/F-122/F-143.
+Raw tracked bytes are checked even when Git reports clean; hidden changes enter recovery snapshots.
+Shadow publication has a durable pending index; export/restore preserves supported modes and validates types.
+Atlas/Sniff uses WorkspacePath. Failed Windows launches terminate unassigned suspended children.
+Partial usage keeps conservative funding; retries require isolation; promotion binds final trials and fixtures.
 
 ## Verification and compatibility
-Eleven selected test classes passed on Windows JDK 26; core/eval ABI regenerated and checked.
+Eleven selected classes and one CellTest method passed on Windows JDK 26, with platform skips; eval ABI regenerated and core/eval checked.
 No full suite/build or Linux/CI run this session, per the user's selective-testing request.
 Last full Windows build: fbee771, 1667 tests, 13 skipped; packaging/ABI passed.
-D-285 through D-290 record the fixes. No database schema change.
-QaDriver's Kotlin default-constructor callers must rebuild; explicit Java overloads remain.
-Regenerate old evaluation manifests/trial tables using VariantConfig/ArmConfig fingerprints.
-Lexical refs cannot clear complete-reference obligations; plan rescoping remains available.
-Existing raw/leaked artifacts are not scrubbed. Trusted-local transforms retain guarded recovery limits.
+D-291 through D-296 record the fixes. No database schema change.
+Pass a design to PromotionEvidence to establish independence; fixture labels must be config fingerprints.
+Stamp cost is proportional to tracked bytes; large-repository performance was not benchmarked.
+Old incomplete snapshots and ref/index gaps without pending records are not migrated.
+No candidate directory or changed candidate/unknown environment means isolated retry is unavailable.
 
 ## Existing debts and workspace
 D-254 recovery wiring; D-70/D-71 replanning; D-241 S3 resume; D-252 retrieval;

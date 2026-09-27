@@ -2,8 +2,31 @@
 
 Branch: `feature/bugfix`. Baseline: `9a80e117445be357285fec2cffffe0fd45290a9a`.
 
-**98 fixed across nine sessions (10 in this continuation); 44 open; F-034 previously resolved.**
+**106 fixed across ten sessions (8 in this continuation); 36 open; F-034 previously resolved.**
 The complete remaining queue is `findings.md` ? JSON `fix_progress.remaining_open_ids`.
+
+## Tenth continuation: candidate fidelity, recovery and evaluation
+
+| Finding | Commit | Change and evidence |
+|---|---|---|
+| F-027 | `2799e18` | Stamping compares every remaining tracked path against its raw Git object and actual supported mode. DirtyState includes filter-hidden members and rechecks the stamp. A real clean-filter regression proves distinct candidate IDs, exact export and restoration for Git-equivalent raw bytes. |
+| F-031 | `2e12762` | Manifest blobs and a pending index are durable before ref movement. Reopen completes a matching publication once, discards an unmoved intent, and refuses unrelated ref movement. Injected index failures at turn zero and a later turn recover and permit subsequent snapshots. |
+| F-032 | `6b7ab81` | Atomic replacement preserves POSIX permissions; snapshots apply executable modes and validate every exported tree path by bytes, type and supported mode. Restore guards mode changes. Clean-path omission regression passes; executable export/edit/restore regression is present but skipped on Windows. |
+| F-036 | `b82a7b2` | Atlas scan, refresh, reads and metadata lookup resolve through WorkspacePath. Sniff shares guarded reads. External and protected Git-directory junction regressions pass on Windows, including explicit path-set command discovery. |
+| F-087 | `ed14e95` | Incomplete usage retains at least the admitted estimate, adds conservative funding for missing input/output dimensions, and includes known overruns. The selected CellTest regression covers input-only, output-only and oversized output usage. Late terminal reconciliation remains F-086. |
+| F-101 | `5d530f0` | Post-create launch failures terminate the child directly as well as its job, wait for exit, then close handles. A real Windows child with an injected failure before job assignment exits without executing its command. |
+| F-122 | `adf8840` | Flaky retries require an isolated export of the original candidate and a matching known environment. Missing isolation or changed input retains the first failure with an explicit unavailable message. VerifyTest covers real isolated disagreeing outcomes and refusal after first-attempt mutation; SchedulerTest passes. |
+| F-143 | `3ffb27c` | Promotion checks exact Final partition membership and frozen task, repetition, repository and stratum identities. Fixture evidence must name the candidate configuration fingerprint. PromotionEvidence needs a validated design to claim independence; legacy calls remain unknown. Altered and wrong-partition trials and foreign fixtures are rejected. |
+
+### Verification and compatibility
+
+- Eleven selected classes and one CellTest method passed across focused Windows JDK 26 batches. The new promotion fixture needed its training stratum corrected to meet the existing quota; a retry fixture compile error was corrected before its tests ran. No full suite/build, Linux/CI or P7 validation.
+- Eval ABI regenerated; core/eval ABI checks passed. Existing PromotionEvidence overloads remain; omitting the design now leaves independence unknown. Promotion fixture labels must be the candidate configuration fingerprint. No schema change.
+- Stamping now reads every tracked path to compare raw Git object identity. Cost is proportional to tracked bytes; large-repository performance was not benchmarked. Filter-hidden changes invalidate old candidate identities and are captured in new snapshots; old incomplete snapshots are not repaired.
+- Shadow publication uses a durable pending index. Historical ref/index gaps without a pending record still require explicit recovery; unrelated ref movements are never overwritten.
+- Export validation checks all tree members. Windows cannot represent POSIX executable bits; the Linux executable regression is present but skipped here. Real Windows junction containment and suspended-child cleanup regressions ran.
+- Ordinary verification without a candidate directory keeps the first failure and reports isolated retry unavailable. Changed candidates or unknown environments also prevent retries. Partial usage is charged conservatively; F-086 terminal reconciliation remains open.
+- D-291 through D-296 record these compatibility and policy details. User authorized push to origin/feature/bugfix. Existing CLAUDE.md/ISSUES.md and untracked task files remain untouched.
 
 ## Ninth continuation: authority, evidence and transform repairs
 

@@ -639,3 +639,9 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - Eleven selected classes passed across focused Windows JDK 26 batches; corrected one obsolete import expectation and one invalid fingerprint label. No full suite/build or new Linux/CI/P7 run.
 - Updated handoff, findings and repair ledger; D-285 through D-290 record compatibility and conservative policies.
 - User authorized commit/push to origin/feature/bugfix. Pre-existing CLAUDE.md/ISSUES.md and untracked task files preserved.
+
+## 2026-09-28 — bugfix tenth continuation
+- Fixed F-027/F-031/F-032/F-036/F-087/F-101/F-122/F-143: 106 fixed, 36 open.
+- Eight repair commits through 5d530f0 cover raw candidate fidelity, recoverable snapshots, Atlas containment, partial usage, Windows launch cleanup, isolated retries and promotion provenance.
+- Eleven selected classes and one CellTest method passed on Windows JDK 26, with platform skips. Eval ABI regenerated; core/eval checks passed. No full suite/build or new Linux/CI/P7 run.
+- D-291 through D-296 and the handoff/repair ledger record compatibility and remaining work. User authorized push to origin/feature/bugfix; pre-existing edits preserved.
