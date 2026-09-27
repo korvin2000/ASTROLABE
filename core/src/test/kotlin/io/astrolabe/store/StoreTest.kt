@@ -4,6 +4,8 @@ import io.astrolabe.Config
 import io.astrolabe.fixtures.StoreInspector
 import io.astrolabe.fixtures.TempRepo
 import io.astrolabe.os.Git
+import io.astrolabe.workspace.createJunction
+import io.astrolabe.workspace.requireSupported
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
@@ -11,10 +13,51 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
+import kotlin.test.assertFalse
 import org.junit.jupiter.api.io.TempDir
 
 /** P0.5.1: opening a project store end to end from a repository (§4, D-44, D-15, D-26). */
 class StoreTest {
+    @Test
+    fun `state roots within any registered worktree are rejected before creation`() {
+        TempRepo.create().use { repo ->
+            repo.write("a.txt", "one")
+            val commit = repo.commit("one")
+            val linked = scratch.resolve("linked")
+            repo.git.worktreeAdd(linked, commit)
+            try {
+                for (git in listOf(repo.git, Git(linked))) {
+                    for (root in listOf(repo.root, linked, repo.root.resolve("new/state"), linked.resolve("new/state"))) {
+                        assertFailsWith<IllegalArgumentException> { Store.open(root, git, TEST_CLOCK).close() }
+                        assertFalse(Files.exists(root.resolve("astrolabe")))
+                    }
+                }
+                assertFalse(Files.exists(repo.root.resolve("new")))
+                assertFalse(Files.exists(linked.resolve("new")))
+            } finally {
+                repo.git.worktreeRemove(linked, force = true)
+            }
+        }
+    }
+
+    @Test
+    fun `an external alias to a workspace cannot hold durable state`() {
+        TempRepo.create().use { repo ->
+            val link = stateRoot.resolve("alias")
+            if (System.getProperty("os.name").startsWith("Windows")) {
+                requireSupported(createJunction(link, repo.root))
+            } else {
+                Files.createSymbolicLink(link, repo.root)
+            }
+            try {
+                assertFailsWith<IllegalArgumentException> { Store.open(link.resolve("new/state"), repo.git, TEST_CLOCK).close() }
+                assertFalse(Files.exists(repo.root.resolve("new")))
+            } finally {
+                Files.delete(link)
+            }
+        }
+    }
+
 
     @TempDir
     lateinit var stateRoot: Path
