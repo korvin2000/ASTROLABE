@@ -54,6 +54,7 @@ class CeilingTest {
 
         // git that does not move a ref is not D.
         assertEquals(EffectClass.R, classify("git", "status").effectClass)
+        assertEquals(EffectClass.R, classify("git", "status", "--short").effectClass)
         assertEquals(EffectClass.R, classify("git", "diff", "--stat").effectClass)
     }
 

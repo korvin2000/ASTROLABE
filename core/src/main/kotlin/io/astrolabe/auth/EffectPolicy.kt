@@ -288,7 +288,7 @@ public object EffectPolicy {
     private fun readOnly(executable: String, program: String, args: List<String>): Boolean =
         '/' !in executable && '\\' !in executable && (
             program in setOf("ls", "cat", "type", "pwd", "echo", "true", "false", "whoami", "id") ||
-                (program == "git" && (args == listOf("status") || args == listOf("diff", "--stat")))
+                (program == "git" && args in listOf(listOf("status"), listOf("status", "--short"), listOf("diff", "--stat")))
         )
 
     // ---- command patterns -------------------------------------------------------------------------------
