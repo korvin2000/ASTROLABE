@@ -620,3 +620,9 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - Bounded GC, confirmed process settlement, safe snapshot capture, Atlas freshness/aggregates and STATE field validation. Decisions D-272 through D-276.
 - First full tests: 1637 passed, 13 skipped; corrected the LocalOs constructor ABI in e74302a. Final full Windows build on e74302a passed: 1637 passed, 13 skipped; packaging/ABI passed.
 - Five new symlink tests skip on this Windows host; junction/process tests ran. No new Linux/CI or P7 evidence. Local commits only; user edits preserved.
+
+## 2026-09-27 ? bugfix seventh continuation
+- Out-of-order small fixes: F-040/F-083/F-085/F-090/F-096/F-097/F-099/F-108/F-114/F-141; 82 fixed, 60 open.
+- Focused regressions and core/eval ABI passed. First full core run had two stale/safe-form expectations; focused corrections pass. Final full Windows build on 4604b89 passed: 1645 passed, 13 skipped; packaging/core/eval ABI passed.
+- D-277 through D-284 record npm lifecycle, loop/rebuild, calibration, acceptance executables, await errors, fixture containers, unknown commands and packet feedback.
+- Local commits only; no new Linux/CI or P7 evidence. User edits preserved.

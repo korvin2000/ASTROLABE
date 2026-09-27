@@ -54,7 +54,7 @@ D-200–D-202, D-210–D-213, D-220–D-223, D-230–D-233, D-240–D-244, D-250
 (new dependencies allowed under pinned-version rules).
 
 ## Audit remediation (2026-09-27)
-Branch `feature/bugfix`: 72 fixed (8 latest), 70 open, F-034 previously resolved.
+Branch `feature/bugfix`: 82 fixed (10 latest), 60 open, F-034 previously resolved.
 See `findings.md` and `audit/BUGFIX-PROGRESS.md`; historical gates above predate these fixes.
-Full Windows build passed: 1637 passed, 13 skipped; packaging/ABI passed. No new Linux/CI.
-D-272 through D-276 cover GC, process settlement, snapshot integrity, Atlas and STATE fields.
+Full Windows build passed: 1645 passed, 13 skipped; packaging/core/eval ABI passed. No new Linux/CI.
+D-277 through D-284 cover npm lifecycle, loop/rebuild, calibration, review surfaces, await errors, fixture containers, unknown commands and packet feedback.

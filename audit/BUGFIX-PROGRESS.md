@@ -2,8 +2,33 @@
 
 Branch: `feature/bugfix`. Baseline: `9a80e117445be357285fec2cffffe0fd45290a9a`.
 
-**72 fixed across six sessions (8 in the latest continuation); 70 open; F-034 previously resolved.**
+**82 fixed across seven sessions (10 in the latest continuation); 60 open; F-034 previously resolved.**
 The complete remaining queue is `findings.md` ? JSON `fix_progress.remaining_open_ids`.
+
+## Seventh continuation: ten smaller out-of-order repairs
+
+| Finding | Commit | Change and evidence |
+|---|---|---|
+| F-040 | `9fc57c8, 864cfe0` | Sniff keeps npm test for every declared test script, preserving pretest/posttest and npm script environment. Hooked package regression failed before the fix; SniffTest passes. Npm script order confirmed in official npm documentation. |
+| F-085 | `331c113` | An applied STATE patch clears the cell's historical loop signatures after dispatch. A later unrelated read executes without demanding another patch; focused CellTest failed before and passed after. |
+| F-099 | `f77a20b` | Cell emits AgentEvent.Cell.Rebuilt after the rebuild boundary journal entry, with the actual local generation and reason. The real pressure fixture now observes one event for one checkpoint rebuild. |
+| F-108 | `f2a8e7b` | Residency selects the actual complete-tail occurrences by identity and position instead of value-set membership. Equal old/recent assistant messages retain only the selected recent resident; ResidencyTest and CellTest pass. |
+| F-114 | `b6b1421` | Calibration labels unfinished increments Cancelled after host cancellation and Unfinished after external stops, reserving Failed for failed campaigns. Injected stopped campaigns no longer change the eligible sizing denominator. |
+| F-083 | `ea4cd41` | Acceptance command matching includes explicitly relative argv[0] executables. Root and package-cwd scripts enter the acceptance surface, bind their required check and block completion pending review; TestIntegrityTest passes. |
+| F-096 | `5b6c1a7` | CampaignHandle.await returns Deferred.await directly, preserving the original exceptional failure. A closed-store fault after provider dispatch failed before the fix; Kotlin facade cancellation and failure regressions pass. |
+| F-141 | `2584c17` | FixtureRunner retains relevant failed JUnit containers separately from descendant test results, reports them in JSON/CLI and vetoes green/invariantsZero. AfterAll-after-pass and failed dynamic factory regressions pass. Eval ABI remains compatible. |
+| F-097 | `f564b73, 4604b89` | Unknown executable forms become W with effectsUnknown and WorkspaceWrite capability, so Run cannot mark them replay-safe. Positive bare read-only forms remain R; a local ./ls wrapper stays unknown. CeilingTest and RunTest pass. Historical persisted intents are not rewritten. |
+| F-090 | `3c0ff07` | Accepted role-completion retries place escaped validator gaps into the next model-facing anchor, ahead of stale gate nudges. The first two bounded gaps are shown each retry; full gaps remain in the journal and packet. A corrected second probe response regression passes. |
+
+### Verification and compatibility
+
+- Focused RED/GREEN regressions ran for all ten findings; broader Cell/Residency, Sniff, Calibration, TestIntegrity, facade, Run/Ceiling, ResultPacket and FixtureRunner test classes passed.
+- Core and eval ABI checks passed before the gate. First full Windows run on 3c0ff07: 1572 core tests, 2 failed expectations, 13 skipped. Derived S0 now expects npm test; the known read-only `git status --short` form remains R. Both affected suites pass focused checks. Full corrected build on 4604b89 **passed: 1645 passed, 13 skipped**, zero failures/errors; compilation, packaging and core/eval ABI passed. Ignored log: `build/bugfix-seventh-build-verified.log`.
+- The effect policy now requires W authority for unrecognized executable forms and denies automatic replay. Old persisted intent rows that were previously stamped replay-safe are not rewritten.
+- Fixture-report JSON adds `containerFailures`; descendant fixture result counts retain their existing meaning. Container failures veto green and invariant eligibility.
+- Completion feedback renders two bounded, escaped gap lines per retry; the full list is preserved in the packet/journal. Later validators can surface remaining gaps after earlier ones are repaired.
+- Source changes preserve core/eval ABI and database schema. No new Linux/CI, live-provider or P7 validation. Local commits only; existing user edits remain untouched.
+- npm lifecycle behavior follows the [official npm scripts documentation](https://docs.npmjs.com/cli/v11/using-npm/scripts/#npm-test).
 
 ## Sixth continuation: eight further repairs
 

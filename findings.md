@@ -1,6 +1,6 @@
 # Implementation audit findings
 
-**Remediation:** 72 fixed on `feature/bugfix` (8 in this continuation); 70 remain open; F-034 was already resolved. See [bugfix progress](audit/BUGFIX-PROGRESS.md). Original audit evidence remains historical; `fix_progress` is the current repair status.
+**Remediation:** 82 fixed on `feature/bugfix` (10 in this continuation); 60 remain open; F-034 was already resolved. See [bugfix progress](audit/BUGFIX-PROGRESS.md). Original audit evidence remains historical; `fix_progress` is the current repair status.
 
 ```json
 {
@@ -544,20 +544,22 @@
     "date": "2026-09-27",
     "status": "session_complete_remaining_findings_open",
     "fixed_this_session": [
-      "F-013",
-      "F-015",
-      "F-028",
-      "F-029",
-      "F-030",
-      "F-037",
-      "F-038",
-      "F-046"
+      "F-040",
+      "F-085",
+      "F-099",
+      "F-108",
+      "F-114",
+      "F-083",
+      "F-096",
+      "F-141",
+      "F-097",
+      "F-090"
     ],
-    "fixed_this_session_count": 8,
+    "fixed_this_session_count": 10,
     "previously_resolved": [
       "F-034"
     ],
-    "remaining_open_count": 70,
+    "remaining_open_count": 60,
     "remaining_open_ids": [
       "F-016",
       "F-017",
@@ -568,7 +570,6 @@
       "F-033",
       "F-036",
       "F-039",
-      "F-040",
       "F-041",
       "F-042",
       "F-044",
@@ -578,20 +579,14 @@
       "F-069",
       "F-075",
       "F-082",
-      "F-083",
       "F-084",
-      "F-085",
       "F-086",
       "F-087",
       "F-089",
-      "F-090",
       "F-091",
       "F-092",
       "F-093",
       "F-095",
-      "F-096",
-      "F-097",
-      "F-099",
       "F-100",
       "F-101",
       "F-102",
@@ -600,13 +595,11 @@
       "F-105",
       "F-106",
       "F-107",
-      "F-108",
       "F-109",
       "F-110",
       "F-111",
       "F-112",
       "F-113",
-      "F-114",
       "F-115",
       "F-117",
       "F-118",
@@ -626,7 +619,6 @@
       "F-136",
       "F-137",
       "F-138",
-      "F-141",
       "F-142",
       "F-143"
     ],
@@ -638,42 +630,43 @@
       "F-031",
       "F-032",
       "F-033",
-      "F-036"
+      "F-036",
+      "F-052",
+      "F-069",
+      "F-115",
+      "F-122",
+      "F-127",
+      "F-142"
     ],
     "handoff": "CONTINUE-TASK.md",
     "detail": "audit/BUGFIX-PROGRESS.md",
-    "verification": "Full Windows JDK 26 build passed on e74302a: 1637 passed, 13 skipped, zero failures/errors. Compilation, packaging and ABI passed. No new Linux/CI or P7 evidence.",
+    "verification": "Full Windows JDK 26 build passed on 4604b89: 1645 passed, 13 skipped, zero failures/errors. Compilation, packaging and core/eval ABI passed. No new Linux/CI or P7 evidence.",
     "source_changes_allowed": true,
     "verification_results": {
       "full_build_command": "./gradlew.bat build -q --console=plain",
       "full_build_exit": 0,
-      "log": "build/bugfix-sixth-build-verified.log",
+      "log": "build/bugfix-seventh-build-verified.log",
+      "abi": "core/eval unchanged",
       "linux_ci": "not run",
       "p7": "excluded",
       "first_full_build": {
-        "source_checkpoint": "aff4943",
+        "source_checkpoint": "3c0ff07",
         "exit": 1,
-        "core": {
-          "tests": 1565,
-          "passed": 1552,
-          "failures": 0,
-          "errors": 0,
-          "skipped": 13
-        },
-        "failure": "checkKotlinAbi no-argument LocalOs constructor missing from ABI snapshot; restoring original public primary constructor"
+        "core_tests": 1572,
+        "failures": 2,
+        "skipped": 13,
+        "corrections": [
+          "DeriveS0Test expected old direct node runner; now expects npm test.",
+          "GeneratedToolTest uses git status --short; explicitly recognized as read-only."
+        ]
       },
-      "abi": "existing core ABI preserved; constructor correction verified",
-      "review_corrections": [
-        "Restore original public primary LocalOs constructor so the no-argument Java constructor remains in the ABI dump.",
-        "Staged corruption asserts the existing GitError; collapsed-directory fixture includes files in enumeration."
-      ],
       "modules": {
         "core": {
-          "tests": 1565,
+          "tests": 1572,
           "failures": 0,
           "errors": 0,
           "skipped": 13,
-          "passed": 1552
+          "passed": 1559
         },
         "provider-api": {
           "tests": 19,
@@ -683,11 +676,11 @@
           "passed": 19
         },
         "eval": {
-          "tests": 49,
+          "tests": 50,
           "failures": 0,
           "errors": 0,
           "skipped": 0,
-          "passed": 49
+          "passed": 50
         },
         "index-treesitter": {
           "tests": 17,
@@ -697,80 +690,18 @@
           "passed": 17
         }
       },
-      "total_passed": 1637,
+      "total_passed": 1645,
       "total_skipped": 13,
+      "review_corrections": [
+        "Derived S0 TypeScript acceptance uses npm test, preserving lifecycle hooks.",
+        "git status --short is a positively recognized read-only form used by generated tools."
+      ],
       "platform_limits": [
-        "Five new real-symlink capture/export regressions skipped on Windows because symlink creation is unavailable. Windows junction and native process-quiescence tests ran. No new Linux group confirmation evidence."
+        "Five real-symlink capture/export regressions from the prior continuation remain skipped on this Windows host. No new Linux/CI execution."
       ]
     },
     "active_processes": [],
     "previous_session_fixed": [
-      "F-001",
-      "F-002",
-      "F-003",
-      "F-004",
-      "F-005",
-      "F-006",
-      "F-007",
-      "F-008",
-      "F-009",
-      "F-010",
-      "F-011",
-      "F-012",
-      "F-014",
-      "F-018",
-      "F-020",
-      "F-021",
-      "F-022",
-      "F-023",
-      "F-024",
-      "F-025",
-      "F-026",
-      "F-035",
-      "F-043",
-      "F-047",
-      "F-049",
-      "F-050",
-      "F-051",
-      "F-053",
-      "F-054",
-      "F-055",
-      "F-056",
-      "F-057",
-      "F-058",
-      "F-059",
-      "F-060",
-      "F-061",
-      "F-062",
-      "F-063",
-      "F-064",
-      "F-065",
-      "F-066",
-      "F-067",
-      "F-068",
-      "F-070",
-      "F-071",
-      "F-072",
-      "F-073",
-      "F-074",
-      "F-076",
-      "F-077",
-      "F-078",
-      "F-079",
-      "F-080",
-      "F-081",
-      "F-088",
-      "F-094",
-      "F-098",
-      "F-116",
-      "F-121",
-      "F-123",
-      "F-130",
-      "F-131",
-      "F-139",
-      "F-140"
-    ],
-    "fixed_on_branch": [
       "F-001",
       "F-002",
       "F-003",
@@ -844,7 +775,91 @@
       "F-139",
       "F-140"
     ],
-    "fixed_on_branch_count": 72,
+    "fixed_on_branch": [
+      "F-001",
+      "F-002",
+      "F-003",
+      "F-004",
+      "F-005",
+      "F-006",
+      "F-007",
+      "F-008",
+      "F-009",
+      "F-010",
+      "F-011",
+      "F-012",
+      "F-013",
+      "F-014",
+      "F-015",
+      "F-018",
+      "F-020",
+      "F-021",
+      "F-022",
+      "F-023",
+      "F-024",
+      "F-025",
+      "F-026",
+      "F-028",
+      "F-029",
+      "F-030",
+      "F-035",
+      "F-037",
+      "F-038",
+      "F-040",
+      "F-043",
+      "F-046",
+      "F-047",
+      "F-049",
+      "F-050",
+      "F-051",
+      "F-053",
+      "F-054",
+      "F-055",
+      "F-056",
+      "F-057",
+      "F-058",
+      "F-059",
+      "F-060",
+      "F-061",
+      "F-062",
+      "F-063",
+      "F-064",
+      "F-065",
+      "F-066",
+      "F-067",
+      "F-068",
+      "F-070",
+      "F-071",
+      "F-072",
+      "F-073",
+      "F-074",
+      "F-076",
+      "F-077",
+      "F-078",
+      "F-079",
+      "F-080",
+      "F-081",
+      "F-083",
+      "F-085",
+      "F-088",
+      "F-090",
+      "F-094",
+      "F-096",
+      "F-097",
+      "F-098",
+      "F-099",
+      "F-108",
+      "F-114",
+      "F-116",
+      "F-121",
+      "F-123",
+      "F-130",
+      "F-131",
+      "F-139",
+      "F-140",
+      "F-141"
+    ],
+    "fixed_on_branch_count": 82,
     "previous_session_verification_results": {
       "initial_full_core": {
         "tests": 1293,
@@ -884,7 +899,7 @@
       },
       "full_core_rerun": false
     },
-    "source_checkpoint": "e74302a",
+    "source_checkpoint": "4604b89",
     "previous_continuation_verification_results": {
       "first_continuation_full_core": {
         "tests": 1314,
@@ -1072,6 +1087,65 @@
       ],
       "platform_limits": [
         "New POSIX directory-permission regression skipped on Windows; Windows junction regressions ran."
+      ]
+    },
+    "previous_sixth_verification_results": {
+      "full_build_command": "./gradlew.bat build -q --console=plain",
+      "full_build_exit": 0,
+      "log": "build/bugfix-sixth-build-verified.log",
+      "linux_ci": "not run",
+      "p7": "excluded",
+      "first_full_build": {
+        "source_checkpoint": "aff4943",
+        "exit": 1,
+        "core": {
+          "tests": 1565,
+          "passed": 1552,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 13
+        },
+        "failure": "checkKotlinAbi no-argument LocalOs constructor missing from ABI snapshot; restoring original public primary constructor"
+      },
+      "abi": "existing core ABI preserved; constructor correction verified",
+      "review_corrections": [
+        "Restore original public primary LocalOs constructor so the no-argument Java constructor remains in the ABI dump.",
+        "Staged corruption asserts the existing GitError; collapsed-directory fixture includes files in enumeration."
+      ],
+      "modules": {
+        "core": {
+          "tests": 1565,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 13,
+          "passed": 1552
+        },
+        "provider-api": {
+          "tests": 19,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 19
+        },
+        "eval": {
+          "tests": 49,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 49
+        },
+        "index-treesitter": {
+          "tests": 17,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 17
+        }
+      },
+      "total_passed": 1637,
+      "total_skipped": 13,
+      "platform_limits": [
+        "Five new real-symlink capture/export regressions skipped on Windows because symlink creation is unavailable. Windows junction and native process-quiescence tests ran. No new Linux group confirmation evidence."
       ]
     }
   }
@@ -1778,13 +1852,15 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-040 - Direct node test inference drops declared npm lifecycle checks
 
 - Task: [P1.3.4](TODO.md#L769); related P1.1.2/P1.7.1.
-- Severity: high. Confidence: reproduced. Status: open.
+- Severity: high. Confidence: reproduced. Status: fixed (2026-09-27).
 - Location: [Sniff.packageJson](core/src/main/kotlin/io/astrolabe/atlas/Sniff.kt#L152).
 - Reproduction: package.json has pretest=node prepare.js, test=node --test and posttest=node check.js. Sniff returns only [node, --test].
 - Problem: a bare test script is optimized into the direct runner without checking lifecycle hooks or npm-provided execution environment. npm test runs pretest, test and posttest; bypassing npm omits required setup and post-test checks. See [official npm script lifecycle](https://docs.npmjs.com/cli/v11/using-npm/scripts/#npm-test).
 - Impact: an auto-derived acceptance command can test a different contract from the repository's declared test entry point, including skipping a failing posttest quality gate or running against stale generated fixtures.
 - Possible solutions: keep the package-manager test entry point by default; optimize only with an explicit proven-equivalent environment/hook policy, and record that policy as part of check identity.
 - Future regression: a failing pretest/posttest must prevent acceptance just as npm test does; generated setup and lifecycle environment must be preserved.
+- Fix (2026-09-27, `9fc57c8, 864cfe0`): Sniff keeps npm test for every declared test script, preserving pretest/posttest and npm script environment. Hooked package regression failed before the fix; SniffTest passes. Npm script order confirmed in official npm documentation.
+
 
 ### F-041 - Sniffed Gradle wrapper commands have no executable-resolution implementation
 
@@ -2323,12 +2399,14 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-083 - Acceptance-surface detection ignores a repository-local executable
 
 - Task: [P1.7.8](TODO.md#L938).
-- Severity: high. Confidence: reproduced. Status: open.
+- Severity: high. Confidence: reproduced. Status: fixed (2026-09-27).
 - Locations: [TestIntegrity.surfaceOf](core/src/main/kotlin/io/astrolabe/verify/TestIntegrity.kt#L193), [TestIntegrity.namesPath](core/src/main/kotlin/io/astrolabe/verify/TestIntegrity.kt#L268).
 - Reproduction: the actual namesPath helper returns false for argv=[./scripts/check.sh], cwd=null, path=scripts/check.sh. It drops argv[0] before identifying command inputs. A script under that name is neither a recognized test path nor a built-in config filename.
 - Impact: editing the executable that defines a required acceptance command can bypass acceptance-surface flagging and its review requirement. The helper also cannot tie that executable to its required checks through command-path matching.
 - Possible solution: include argv[0] when it resolves to a workspace-local executable, preserving the distinction from externally resolved runner names; resolve cwd and path spellings canonically.
 - Future regression: rewrite a required ./scripts/check.sh at repository root and in a package cwd; both must flag the relevant acceptance obligation and require review before completion.
+- Fix (2026-09-27, `ea4cd41`): Acceptance command matching includes explicitly relative argv[0] executables. Root and package-cwd scripts enter the acceptance surface, bind their required check and block completion pending review; TestIntegrityTest passes.
+
 
 ### F-084 - Masked role operations still reach executors with the implementing role's defaults
 
@@ -2341,10 +2419,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-085 - The loop gate keeps demanding STATE after its recovery action was performed
 
 - Task: [P1.8.5](TODO.md#L972).
-- Severity: medium. Confidence: confirmed_source. Status: open.
+- Severity: medium. Confidence: confirmed_source. Status: fixed (2026-09-27).
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/cell/Gates.kt#L377).
 - Analysis: Cell.signatures accumulates every successful call for the whole cell. Gates.Loop recounts the entire history on every turn and re-emits its hard rejection for every historical count above the threshold. validateCalls clears requiredOp when a STATE op is present, but the unchanged history immediately sets it again at the end of that turn. Subsequent unrelated tool-only turns are refused indefinitely. Clear or acknowledge the offending episode after the required recovery, or restrict the gate to a current repetition window. Regression: three identical calls, a valid STATE recovery, then an unrelated look/edit without STATE; the last turn must execute. Existing CellTest ends at recovery/completion and misses the following tool turn.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-27, `331c113`): An applied STATE patch clears the cell's historical loop signatures after dispatch. A later unrelated read executes without demanding another patch; focused CellTest failed before and passed after.
+
 
 ### F-086 - Provider terminal reconciliation is never consumed by the cell runtime
 
@@ -2383,10 +2463,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-090 - Role validator feedback is persisted but not returned to the model
 
 - Task: [P1.8.8](TODO.md#L996).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-27).
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/cell/Cell.kt#L480).
 - Analysis: When a packet validator returns CompletionDecision.Continue(gaps), Cell only calls recordGaps, which appends to an in-memory packet list and Journal. The next Anchor uses nudges computed before completion.assess, not those gaps; no feedback message is appended to residents or pinned context. Non-implementing roles can therefore be asked to retry an invalid packet without being told which fields/evidence failed, then terminate after the refusal limit. Feed validator gaps into the next rendered request while retaining the journal record. Regression: a first invalid plan/review/probe packet and a corrected second response; the second request must contain the validator's specific rejection.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-27, `3c0ff07`): Accepted role-completion retries place escaped validator gaps into the next model-facing anchor, ahead of stale gate nudges. The first two bounded gaps are shown each retry; full gaps remain in the journal and packet. A corrected second probe response regression passes.
+
 
 ### F-091 - A crash after the Finishing transition leaves the campaign unrecoverable on reopen
 
@@ -2433,18 +2515,22 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-096 - CampaignHandle.await reports internal failures as user cancellation
 
 - Task: [P1.9.6](TODO.md#L1037).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-27).
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/Astrolabe.kt#L176).
 - Analysis: await calls Deferred.join and returns Cancelled whenever job.isCancelled. A Deferred completed exceptionally is also cancelled in coroutine state, so exceptions from controller persistence, compiler/wiring or final export are silently converted to CampaignOutcome.Cancelled instead of being propagated or reported Failed. The Java facade inherits this result. Await the Deferred result and distinguish deliberate cancellation from exceptional failure, retaining the original cause. Regression: force a controller/export exception and assert an exceptional future or Failed outcome, while host cancellation still yields Cancelled.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-27, `5b6c1a7`): CampaignHandle.await returns Deferred.await directly, preserving the original exceptional failure. A closed-store fault after provider dispatch failed before the fix; Kotlin facade cancellation and failure regressions pass.
+
 
 ### F-097 - Unknown executables are classified as read-only and safe to replay
 
 - Task: [P1.10.2](TODO.md#L1055).
-- Severity: high. Confidence: reproduced. Status: open.
+- Severity: high. Confidence: reproduced. Status: fixed (2026-09-27).
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/auth/EffectPolicy.kt#L180).
 - Analysis: Pure runtime probe: classify([./scripts/deploy-helper], cwd=null, workspaceRoot=C:/repo) returns effect=R, effectsUnknown=false. classifyOne starts at R/known and only promotes recognized command families; an arbitrary repository executable matches none. Run derives replaySafe directly from R && !effectsUnknown, so a lost acknowledgement permits relaunch of that same unknown executable. It may write, delete or publish despite the harness describing it as read-only/predictable. Default unknown commands to unknown effects and non-replay-safe, and recognize safe argv forms positively. Regression: an unrecognized executable and a wrapper around a mutating command must never be automatically replayable. No executable was launched by the probe.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; successful stdin JShell probe against current compiled classes; synthetic inputs only.
+- Fix (2026-09-27, `f564b73, 4604b89`): Unknown executable forms become W with effectsUnknown and WorkspaceWrite capability, so Run cannot mark them replay-safe. Positive bare read-only forms remain R; a local ./ls wrapper stays unknown. CeilingTest and RunTest pass. Historical persisted intents are not rewritten.
+
 
 ### F-098 - Overlapping redaction matches can expose a secret recognized by the default rules
 
@@ -2459,10 +2545,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-099 - Real context rebuilds never produce the events counted by runtime metrics
 
 - Task: [P1.11.1](TODO.md#L1073).
-- Severity: medium. Confidence: confirmed_source. Status: open.
+- Severity: medium. Confidence: confirmed_source. Status: fixed (2026-09-27).
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/cell/Cell.kt#L743).
 - Analysis: Cell.rebuild increments rebuilds, rewrites transcript/Workset and journals a Boundary, but never emits AgentEvent.Cell.Rebuilt. A production-source search finds the event only in its declaration and Metrics consumers. CellMetrics.rebuilds and CampaignMetrics.rebuildsPerCell therefore report zero for actual pressure rebuilds, corrupting the telemetry used to assess context sizing/continuations. Emit the event from the successful rebuild boundary with its actual generation, or derive metrics from the canonical persisted rebuild record. Regression: run the existing pressure-rebuild fixture and compute Metrics from its real events; counts must agree with checkpoint.rebuilds.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-27, `f77a20b`): Cell emits AgentEvent.Cell.Rebuilt after the rebuild boundary journal entry, with the actual local generation and reason. The real pressure fixture now observes one event for one checkpoint rebuild.
+
 
 ### F-100 - Concurrent Windows launches inherit each other's transient handles
 
@@ -2531,10 +2619,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-108 - Pressure rebuild retains old messages that merely equal a recent message
 
 - Task: [P2.5.2](TODO.md#L1287).
-- Severity: medium. Confidence: confirmed_source. Status: open.
+- Severity: medium. Confidence: confirmed_source. Status: fixed (2026-09-27).
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/cell/Cell.kt#L745).
 - Analysis: Cell converts Rebuild.tail(...) to a Set<Item>, then filters the entire resident history by value membership. Message equality is by content, so an older assistant message equal to one in the retained tail is reintroduced even though its turn was evicted. Repeated short replies or repeated long explanations can defeat the six-turn bound and cause the supposedly reduced context to overflow again. Retain the selected resident positions/identities, not all historical items with equal values. Regression: many protocol turns sharing the same assistant text; pressure rebuild must retain only the actual tail occurrences with their matched calls/results.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-27, `f2a8e7b`): Residency selects the actual complete-tail occurrences by identity and position instead of value-set membership. Equal old/recent assistant messages retain only the selected recent resident; ResidencyTest and CellTest pass.
+
 
 ### F-109 - The production pressure rebuild bypasses recompilation and lost-coverage validation
 
@@ -2579,10 +2669,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-114 - Cancelled or externally blocked campaigns are counted as failed calibration samples
 
 - Task: [P2.6.4](TODO.md#L1320).
-- Severity: medium. Confidence: confirmed_source. Status: open.
+- Severity: medium. Confidence: confirmed_source. Status: fixed (2026-09-27).
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/campaign/Calibration.kt#L49).
 - Analysis: The observation adapter maps every non-verified/non-explicitly-cancelled increment in any Ended campaign to CalibrationOutcome.Failed. Host cancellation, waiting_for_input, blocked_external and budget interruption commonly leave the increment InProgress/Blocked, so they enter the kernel's eligible Completed-or-Failed denominator instead of being censored Cancelled/Unfinished. This biases turn medians and overrun rates that guide later sizing. Derive observation outcome from both campaign disposition and increment evidence, preserving censoring. Regression: identical completed work plus a host-cancelled partial must leave eligible sizing statistics unchanged.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-27, `b6b1421`): Calibration labels unfinished increments Cancelled after host cancellation and Unfinished after external stops, reserving Failed for failed campaigns. Injected stopped campaigns no longer change the eligible sizing denominator.
+
 
 ### F-115 - Calibration rewrites all historical samples into the current harness and sizing series
 
@@ -2809,10 +2901,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-141 - Fixture runner loses container failures after tests have completed
 
 - Task: [P6.1.1](TODO.md#L1878).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-27).
 - Location: [eval/src/main/kotlin/io/astrolabe/eval/FixtureRunner.kt](eval/src/main/kotlin/io/astrolabe/eval/FixtureRunner.kt#L240).
 - Analysis: Collector.executionFinished records a failed container only for descendant tests not already present in results. If fixture tests pass and @AfterAll fails, all descendants already exist as Passed, so the failure disappears from failed, green and invariant metrics. A failed dynamic-test factory with no discovered descendants is also dropped. Preserve failed-container outcomes explicitly and make green/invariant eligibility fail on any relevant container failure. Regression: passing FX tests followed by throwing @AfterAll, and an FX factory failure before child registration, must produce a nonzero runner exit.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; current-source trace and scoped test inspection; no new runtime reproduction claimed.
+- Fix (2026-09-27, `2584c17`): FixtureRunner retains relevant failed JUnit containers separately from descendant test results, reports them in JSON/CLI and vetoes green/invariantsZero. AfterAll-after-pass and failed dynamic factory regressions pass. Eval ABI remains compatible.
+
 
 ### F-142 - Shape comparator configurations collapse to the same evaluation identity
 

@@ -1,6 +1,6 @@
 # Bugfix continuation
-Checkpoint: `feature/bugfix`, 2026-09-27. Source checkpoint: `e74302a`.
-**72 findings fixed across six sessions (8 latest); 70 open; F-034 previously resolved.**
+Checkpoint: `feature/bugfix`, 2026-09-27. Source checkpoint: `4604b89`.
+**82 findings fixed across seven sessions (10 latest); 60 open; F-034 previously resolved.**
 P0-P6 remains 185/185 implemented. P7 excluded. Local commits only; nothing pushed.
 
 ## Read first
@@ -9,26 +9,26 @@ P0-P6 remains 185/185 implemented. P7 excluded. Local commits only; nothing push
 3. Selected finding sections and cited code/tests only. Do not repeat the audit.
 
 ## Next fixes
-1. F-016 POSIX detached-process containment; F-017 complete Git command deadlines/bounds.
-2. F-019 search CPU/memory/process bounds; F-027 raw membership hidden by clean filters.
-3. F-031 shadow-ref crash recovery, F-032 executable modes/export fidelity, F-033 durable preimages.
-4. F-036 Atlas/Sniff containment, then remaining queue in findings.md.
+1. F-016 POSIX detached-process containment; F-017 Git deadlines; F-019 search bounds.
+2. F-027 raw membership under Git filters; F-031/F-032/F-033 snapshot recovery/fidelity.
+3. F-036 Atlas/Sniff containment. For smaller work: F-052/F-069/F-115/F-122/F-127/F-142.
+4. The complete remaining queue is `findings.md` JSON `fix_progress.remaining_open_ids`.
 
 ## Verification
-Full Windows JDK 26 build passed on e74302a: 1637 passed, 13 skipped; ABI/packaging passed.
-Log: `build/bugfix-sixth-build-verified.log`. No new Linux/CI or P7 evidence.
-Five new real-symlink tests skip on this Windows host; Windows junction/process tests ran.
+Full Windows JDK 26 build passed on 4604b89: 1645 passed, 13 skipped; ABI/packaging passed.
+Log: `build/bugfix-seventh-build-verified.log`. Core/eval ABI checks passed. No new Linux/CI or P7 evidence.
 
 ## Compatibility and decisions
-F-013/F-015/F-028/F-029/F-030/F-037/F-038/F-046 repaired.
-D-272: GC cleanup capped at 4096 entries/rows; mandatory reference repair remains proportional.
-D-273: terminal publication waits for container quiescence; failed confirmation is Lost.
-D-274: no-follow link capture; unreadable/staged failures and observed input movement abort.
-D-275: Atlas rehashes content and refreshes collapsed totals; total work remains repository-sized.
-D-276: every rendered STATE operation string obeys inline length/newline/fence validation.
-No schema/public API change. Existing incomplete snapshots are not reconstructed.
-GC cursors restart on reopen; detached POSIX groups and Git-filter membership remain open.
-D-261 through D-271 still apply; see ledger. External-writer acquisition remains best-effort.
+F-040/F-083/F-085/F-090/F-096/F-097/F-099/F-108/F-114/F-141 repaired.
+D-277: npm test discovery preserves lifecycle hooks and environment.
+D-278: applied STATE clears loop episodes; durable rebuild events and resident-position tails.
+D-279/D-280: partial calibration censoring; local acceptance executables require review.
+D-281/D-282: await propagates internal failures; fixture container failures veto green.
+D-283: new unknown commands are W/unknown and require WorkspaceWrite, preventing replay.
+D-284: two bounded validator gaps reach the next anchor; all remain in the packet/journal.
+Old persisted intents classified replay-safe are not rewritten; audit before trusting legacy replay.
+Fixture-report JSON adds `containerFailures`; fixture-test counts keep their meaning.
+No database schema or core/eval public ABI change. D-261 through D-276 still apply.
 
 ## Existing implementation debts
 D-254 recovery wiring; D-70/D-71 replanning; D-241 S3 resume; D-252 retrieval;
