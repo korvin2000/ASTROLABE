@@ -19,6 +19,22 @@ import org.junit.jupiter.api.io.TempDir
 class PreimagesTest {
 
     @Test
+    fun `preimage associations survive a new cell and interrupted postimage publication`(@TempDir state: Path) {
+        WorkspaceFixture.create(state).use { f ->
+            fun open() = Preimages(f.workspace, f.store.blobs, f.ids, f.clock, f.store)
+            val before = f.bytes("src/a.py")
+            open().saveThenWrite("durable", "src/a.py", FileVersion.of(before), before) {
+                assertEquals(FileVersion.of(before), open().of("durable", "src/a.py")!!.versionBefore)
+                f.repo.write("src/a.py", "changed")
+            }
+            assertIs<RevertResult.Refused>(open().revert("durable", "src/a.py", f.os))
+            open().recordPostimage("durable", "src/a.py", FileVersion.of(f.bytes("src/a.py")))
+            assertIs<RevertResult.Reverted>(open().revert("durable", "src/a.py", f.os))
+            assertContentEquals(before, f.bytes("src/a.py"))
+        }
+    }
+
+    @Test
     fun `the preimage is saved before the write`(@TempDir state: Path) {
         WorkspaceFixture.create(state).use { fixture ->
             val order = CopyOnWriteArrayList<String>()

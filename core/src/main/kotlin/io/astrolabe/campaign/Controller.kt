@@ -1253,7 +1253,7 @@ public class Controller @JvmOverloads public constructor(
         val receipts = SqliteReceipts(c.store, clock)
         val registerVersions = SqliteRegisterVersions(c.store, clock)
         val checkpoints = SqliteCheckpoints(c.store, clock)
-        val preimages = Preimages(tree.workspace, c.store.blobs, ids, clock)
+        val preimages = Preimages(tree.workspace, c.store.blobs, ids, clock, c.store)
         val isolated = child?.isolated == true
         val scheduler = Scheduler(tree.checks, tree.workspace, tree.registry, tree.stamper, receipts, aliases, idGen, ids, clock, candidates = if (isolated) c.store.layout.candidates else candidates(c), isolateAll = isolated)
         val checker = Checker(tree.checks, runner, c.os, tree.stamper, tree.registry, tree.workspace, c.store.blobs, redaction, idGen, ids, logs)
