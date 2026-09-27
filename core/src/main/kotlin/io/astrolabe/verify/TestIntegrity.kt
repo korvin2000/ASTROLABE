@@ -266,7 +266,11 @@ public object TestIntegrity {
     /** True when an argv token (resolved against [cwd]) or [cwd] itself is [path] or a directory above it. */
     private fun namesPath(argv: List<String>, cwd: String?, path: String): Boolean {
         val base = cwd?.let { normalize(it) }?.takeIf { it.isNotEmpty() && it != "." }
-        val candidates = argv.drop(1).map { normalize(it) }.filter { it.isNotEmpty() && !it.startsWith("-") }
+        val executable = argv.firstOrNull()?.takeIf {
+            val named = normalize(it)
+            '/' in named && !named.startsWith('/') && !named.matches(Regex("^[A-Za-z]:.*"))
+        }
+        val candidates = (argv.drop(1) + listOfNotNull(executable)).map { normalize(it) }.filter { it.isNotEmpty() && !it.startsWith("-") }
             .map { if (base != null && !it.startsWith("$base/")) "$base/$it" else it } + listOfNotNull(base)
         return candidates.any { path == it || path.startsWith("$it/") }
     }

@@ -113,6 +113,21 @@ class TestIntegrityTest {
     }
 
     @Test
+    fun `editing a repository executable used by acceptance requires review`() {
+        val (base, _) = s0()
+        for ((cwd, path) in listOf(null to "scripts/check.sh", "packages/web" to "packages/web/scripts/check.sh")) {
+            val contract = base.strengthen(
+                Acceptance.Run("AC-script", Command(listOf("./scripts/check.sh"), cwd = cwd), Origin.Model("R1")),
+            )
+            val checks = Checks.seed(contract, RunnerCommands(test = Command(listOf("python", "-m", "pytest", "-q"))))
+            val flag = TestIntegrity.baseline(listOf(path), "edit script", contract, checks).single()
+            assertEquals(AcceptanceSurface.AcceptanceCommand, flag.surface)
+            assertTrue("CHK-accept-AC-script" in flag.requiredChecks)
+            assertTrue(flag.blocksCompletion)
+        }
+    }
+
+    @Test
     fun `a weakened required check cannot complete without an approving verdict that saw the original obligation (FX-14 baseline)`() = runTest {
         val (contract, checks) = s0()
         val flags = TestIntegrity.baseline(listOf("tests/test_total.py"), "edit #3", contract, checks).map { it.copy(reason = "rounding test asserted the old behaviour") }
