@@ -19,7 +19,7 @@ import java.util.TreeMap
  * `JOB_OBJECT_LIMIT_KILL_ON_CLOSE` is set and no breakaway flag is set, so descendants cannot
  * leave the job and the whole tree dies when the job handle closes — including when this JVM dies.
  */
-internal class WindowsOwner : ProcessOwner {
+internal class WindowsOwner(private val beforeAssignment: (Long) -> Unit = {}) : ProcessOwner {
 
     override val essentialEnvironmentNames: Set<String> = setOf(
         "SystemRoot", "SystemDrive", "windir", "PATH", "PATHEXT", "COMSPEC", "TEMP", "TMP", "USERPROFILE",
@@ -96,6 +96,7 @@ internal class WindowsOwner : ProcessOwner {
                 val thread = info.get(ValueLayout.ADDRESS, Win32.PI_THREAD)
                 val pid = info.get(ValueLayout.JAVA_INT, Win32.PI_PID).toLong() and 0xFFFF_FFFFL
                 try {
+                    beforeAssignment(pid)
                     if (Win32.assignProcessToJobObject.callInt(capture, job, process) == 0) {
                         fail("AssignProcessToJobObject", capture)
                     }
@@ -103,8 +104,16 @@ internal class WindowsOwner : ProcessOwner {
                     if (Win32.resumeThread.callInt(capture, thread) == -1) fail("ResumeThread", capture)
                     WindowsProcess(pid, startedAt, process, job)
                 } catch (failure: Throwable) {
-                    Win32.terminateJobObject.callInt(capture, job, 1)
-                    Win32.closeHandle.callInt(capture, process)
+                    try {
+                        // Assignment may have failed: the suspended child need not belong to the job.
+                        if (Win32.terminateProcess.callInt(capture, process, 1) == 0)
+                            failure.addSuppressed(OsFailure("TerminateProcess", capture.get(ValueLayout.JAVA_INT, Win32.LAST_ERROR), "failed launch cleanup"))
+                        Win32.terminateJobObject.callInt(capture, job, 1)
+                        if (Win32.waitForSingleObject.callInt(capture, process, 5_000) != 0)
+                            failure.addSuppressed(OsFailure("WaitForSingleObject", 0, "failed launch did not exit within 5 seconds"))
+                    } finally {
+                        Win32.closeHandle.callInt(capture, process)
+                    }
                     throw failure
                 } finally {
                     Win32.closeHandle.callInt(capture, thread)
