@@ -9,6 +9,42 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class RequestTest {
+    private val exactTextEstimator = object : TokenEstimator {
+        override val id = "exact-text"
+        override val version = "1"
+        override fun estimate(text: String) = Estimate(text.length.toLong(), true, id, version)
+    }
+
+    @Test
+    fun `exact text counts do not establish exact request counts`() {
+        val request = Fixtures.request(Segment(SegmentKind.T, List(100) { Message.text(Role.User, "x") }))
+        val estimate = request.estimate(exactTextEstimator)
+        assertFalse(estimate.exact)
+        assertTrue(estimate.marginTokens >= 1_600)
+        val caps = Fixtures.capabilities.copy(contextLimitTokens = request.maxOutputTokens + 150, outputLimitTokens = request.maxOutputTokens)
+        assertIs<Validation.Rejected>(Validations.standard(request, estimate, caps))
+    }
+
+    @Test
+    fun `protocol ids contribute and native replay has unknown effective size`() {
+        val short = ToolCall("c", "look", "{}")
+        val long = short.copy(id = "c".repeat(1_000))
+        assertTrue(long.estimate(exactTextEstimator).tokens > short.estimate(exactTextEstimator).tokens)
+        assertTrue(ToolResult.text(long.id, "ok").estimate(exactTextEstimator).tokens > 1_000)
+        for (item in listOf(
+            ReasoningRef("p", native = JsonPrimitive("opaque replay")),
+            Message(Role.User, listOf(Text("x")), native = JsonPrimitive("native replacement")),
+            Message(Role.User, listOf(Opaque("image", JsonPrimitive("reference")))),
+        )) {
+            val request = Fixtures.request(Segment(SegmentKind.T, listOf(item)))
+            val estimate = request.estimate(exactTextEstimator)
+            assertTrue(estimate.unknownHistory, item.toString())
+            assertFalse(estimate.exact)
+            assertTrue(assertIs<Validation.Rejected>(Validations.standard(request, estimate, Fixtures.capabilities))
+                .problems.any { it.kind == ProblemKind.UnknownHistorySize })
+        }
+    }
+
     private val s = Segment(SegmentKind.S, listOf(Message.text(Role.System, "kernel")), breakpoint = true)
     private val t = Segment(SegmentKind.T, listOf(Message.text(Role.User, "fix it")))
     private val a = Segment(SegmentKind.A, listOf(Message.text(Role.User, "anchor")))
@@ -45,7 +81,7 @@ class RequestTest {
     fun `estimate charges tools and every item once and is never exact with a heuristic estimator`() {
         val request = Fixtures.request(s, t, a)
         val estimate = request.estimate(Fixtures.CharEstimator)
-        val expected = listOf("look", "observe", Fixtures.schema.jsonSchema.toString(), "kernel", "fix it", "anchor")
+        val expected = listOf("look", "observe", Fixtures.schema.jsonSchema.toString(), "System", "kernel", "User", "fix it", "User", "anchor")
             .sumOf { (it.length + 3) / 4L }
         assertEquals(expected, estimate.tokens)
         assertFalse(estimate.exact)
