@@ -62,6 +62,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -218,6 +219,20 @@ class RecoveryCampaignTest {
             val s1 = recovery.repair(ids, "I2", recovery.failed(ids, "I2", kind, "missing module", listOf("rcpt-4"), "unstated", stamp), listOf("AC-2"), emptyMap(), Tokens(50_000), Shape.S1, packet, policy, repair)
             assertTrue(assertIs<RepairOutcome.Escalated>(s1).reason.startsWith("not available in S1"), s1.reason)
             assertEquals(2, checked)
+
+            val interrupted = recovery.failed(ids, "I3", kind, "missing helper", listOf("rcpt-5"), "setup", stamp)
+            var effects = 0
+            val throwing = Repair(Router(), {
+                effects++
+                error("helper failed after effects")
+            }, { AcceptanceCheck(true, "unused") }, HeuristicEstimator())
+            assertFailsWith<IllegalStateException> {
+                recovery.repair(ids, "I3", interrupted, listOf("AC-3"), emptyMap(), Tokens(50_000), Shape.S2, packet, policy, throwing)
+            }
+            val afterCrash = CampaignRecovery(journal, idGen, clock, request.work, limits)
+            assertIs<Recovery.Return>(afterCrash.failed(ids, "I3", kind, "missing helper", listOf("rcpt-6"), "setup", stamp).recovery)
+            assertIs<RepairOutcome.Escalated>(afterCrash.repair(ids, "I3", interrupted, listOf("AC-3"), emptyMap(), Tokens(50_000), Shape.S2, packet, policy, throwing))
+            assertEquals(1, effects, "the interrupted helper is not replayed even with a stale routed grant")
         }
     }
 }
