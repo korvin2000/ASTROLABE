@@ -352,10 +352,15 @@ internal class TransformRun(
     private fun observe(start: Proc): Proc {
         var current = start
         var cursor = 0L
-        while (!current.status.isTerminal) {
-            val poll = os.poll(current, cursor, minOf(pollSliceSeconds, exec.timeoutSeconds + 5))
-            cursor = poll.nextCursorBytes
-            current = current.copy(status = poll.status)
+        try {
+            while (!current.status.isTerminal) {
+                val poll = os.poll(current, cursor, minOf(pollSliceSeconds, exec.timeoutSeconds + 5))
+                cursor = poll.nextCursorBytes
+                current = current.copy(status = poll.status)
+            }
+        } catch (interrupted: InterruptedException) {
+            runCatching { os.terminate(current) }.exceptionOrNull()?.let(interrupted::addSuppressed)
+            throw interrupted
         }
         return current
     }

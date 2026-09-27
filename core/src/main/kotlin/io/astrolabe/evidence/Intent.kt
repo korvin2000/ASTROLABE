@@ -101,17 +101,25 @@ public object Consequential {
         val observed = try {
             dispatch()
         } catch (t: Throwable) {
-            journal.update(intent.intentId, IntentStatus.Unknown)
+            markUnknown(journal, intent.intentId, t)
             return ActionOutcome.Unknown(intent.intentId, t)
         }
         journal.update(intent.intentId, IntentStatus.Observed)
         try {
             persist(observed)
         } catch (t: Throwable) {
-            journal.update(intent.intentId, IntentStatus.Unknown)
+            markUnknown(journal, intent.intentId, t)
             return ActionOutcome.Unknown(intent.intentId, t)
         }
         journal.update(intent.intentId, IntentStatus.Committed)
         return ActionOutcome.Completed(observed)
+    }
+
+    private fun markUnknown(journal: IntentJournal, intentId: String, failure: Throwable) {
+        if (failure is kotlinx.coroutines.CancellationException) {
+            runCatching { journal.update(intentId, IntentStatus.Unknown) }.exceptionOrNull()?.let(failure::addSuppressed)
+            throw failure
+        }
+        journal.update(intentId, IntentStatus.Unknown)
     }
 }

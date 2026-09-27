@@ -154,7 +154,7 @@ public class QaDriver @JvmOverloads constructor(
             Files.createDirectories(logs)
             val log = Files.createTempFile(logs, "qa-${probe.id}-", ".log")
             val proc = runner.start(SpawnSpec(Launch.Shell(target), root, log, deadlineSeconds = deadlineSeconds))
-            val observed = io.astrolabe.tool.run.Executions.observe(os, proc, deadlineSeconds, deadlineSeconds)
+            val observed = io.astrolabe.tool.run.Executions.observeCancellable(os, proc, deadlineSeconds, deadlineSeconds)
             output.append(observed.output.toString(Charsets.UTF_8))
             if (observed.lost) ProcStatus.Lost else observed.proc.status
         } catch (failure: IOException) {

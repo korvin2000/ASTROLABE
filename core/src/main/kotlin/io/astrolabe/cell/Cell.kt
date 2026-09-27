@@ -688,7 +688,7 @@ public class Cell @JvmOverloads constructor(
         }
 
         /** Drains the scheduled paths into the end-of-turn checker and the atlas; returns the stamp after the checks, or `null` when nothing ran. */
-        private fun drainScheduled(contract: Contract): StampReport? {
+        private suspend fun drainScheduled(contract: Contract): StampReport? {
             val scheduled = ws.coherence.takeScheduled()
             if (scheduled.isEmpty()) return null
             touched += scheduled
@@ -698,7 +698,7 @@ public class Cell @JvmOverloads constructor(
             tools.verify?.inputs = atlas.rows.map { it.path }
             tools.verify?.atlas = atlas
             val checker = ws.checker ?: return null
-            val results = checker.run(scheduled, defaults.checkerTimeBoxSeconds.toLong())
+            val results = kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { checker.run(scheduled, defaults.checkerTimeBoxSeconds.toLong()) }
             if (results.isEmpty()) return null
             for (result in results) {
                 val receipt = ws.scheduler.record(result, contract.version)

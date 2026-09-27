@@ -192,7 +192,9 @@ public class Edit(
         }
         val result = workspace.mutation.withLock {
             beforeDispatch()
-            run(args, contracts.current(ids.work) ?: contract, context, editId, alias, actionId)
+            kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) {
+                run(args, contracts.current(ids.work) ?: contract, context, editId, alias, actionId)
+            }
         }
         return render(args, alias, actionId, result, context)
     }
@@ -505,6 +507,8 @@ public class Edit(
                 break@loop
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
+            } catch (interrupted: InterruptedException) {
+                throw interrupted
             } catch (failure: Exception) {
                 error = ioError(plan, failure, applied)
                 break@loop

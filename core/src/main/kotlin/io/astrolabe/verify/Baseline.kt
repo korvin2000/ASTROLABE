@@ -187,7 +187,7 @@ public class Baseline(
             val receipt = receipt(receiptId, check, contractVersion, s0, command.argv, command.cwd, null, Outcome.Unavailable, null, TestedInputs(inputs, InputStability.Isolated), null, limits)
             return BaselineResult(receipt, null, dir, materialized)
         }
-        val observed = io.astrolabe.tool.run.Executions.observe(os, proc, POLL_SLICE_SECONDS, timeoutSeconds)
+        val observed = io.astrolabe.tool.run.Executions.observeCancellable(os, proc, POLL_SLICE_SECONDS, timeoutSeconds)
         proc = observed.proc
         val lost = observed.lost
         if (lost) limits += Limit("observation", "the process observation was lost; reconcile before retry")

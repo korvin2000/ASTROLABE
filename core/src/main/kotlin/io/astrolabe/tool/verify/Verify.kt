@@ -216,11 +216,11 @@ public class Verify(
 
     // ------------------------------------------------------------------ ops
 
-    private fun check(args: VerifyArgs, contract: Contract): ToolOutcome {
+    private suspend fun check(args: VerifyArgs, contract: Contract): ToolOutcome {
         val runner = checker ?: return refused(args, "unavailable", "no end-of-turn checker is configured for this cell")
         val paths = args.paths?.takeIf { it.isNotEmpty() } ?: touched
         if (paths.isEmpty()) return refused(args, "ok", "nothing touched: no check to run")
-        val results = runner.run(paths, checkerTimeBoxSeconds)
+        val results = kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { runner.run(paths, checkerTimeBoxSeconds) }
         if (results.isEmpty()) return refused(args, "unavailable", "no type or lint runner is registered for this repository")
         val receipts = results.map { scheduler.record(it, contract.version) }
         val lines = results.zip(receipts).map { (result, receipt) -> result.line(scheduler.aliasOf(receipt.receiptId)) }
@@ -370,7 +370,7 @@ public class Verify(
                 view = "  ${check.id}: unavailable — cannot start ${command.argv.first()}: ${failure.message}"
                 return@runCheck Executed(command.argv, command.cwd, false, null, Outcome.Unavailable, null, null, listOf("cannot start ${command.argv.first()}: ${failure.message}"))
             }
-            val observed = Executions.observe(os, proc, POLL_SLICE_SECONDS, timeoutSeconds)
+            val observed = Executions.observeCancellable(os, proc, POLL_SLICE_SECONDS, timeoutSeconds)
             val safeLog = redaction.applyBytes(observed.output, ContentClass.ReusableEvidence)
             val blob = blobs.put(safeLog.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
             val capture = RunCapture(

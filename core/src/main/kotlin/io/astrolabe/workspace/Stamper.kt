@@ -13,6 +13,7 @@ import io.astrolabe.os.UntrackedFiles
 import io.astrolabe.store.Migrations
 import io.astrolabe.store.Store
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import java.nio.charset.StandardCharsets
 import java.nio.file.FileSystems
@@ -38,6 +39,7 @@ public enum class EntryType {
  * for [EntryType.Deleted]. [sizeBytes] is metadata: it is recorded but does not enter the encoding,
  * because the digest already determines it.
  */
+@Serializable
 public data class StampEntry(
     val path: String,
     val type: EntryType,
