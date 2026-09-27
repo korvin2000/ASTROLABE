@@ -29,17 +29,20 @@ import kotlin.concurrent.withLock
  *
  * Requires `--enable-native-access=ALL-UNNAMED`; see [Os].
  */
-public class LocalOs internal constructor(
-    private val owner: ProcessOwner,
+public class LocalOs @JvmOverloads public constructor(
     private val clock: Clock = Clock.systemUTC(),
     override val ownerToken: OwnerToken = OwnerToken.random(),
 ) : Os {
 
-    @JvmOverloads
-    public constructor(
+    private var owner: ProcessOwner = ProcessOwner.forThisPlatform()
+
+    internal constructor(
+        owner: ProcessOwner,
         clock: Clock = Clock.systemUTC(),
         ownerToken: OwnerToken = OwnerToken.random(),
-    ) : this(ProcessOwner.forThisPlatform(), clock, ownerToken)
+    ) : this(clock, ownerToken) {
+        this.owner = owner
+    }
 
     private val supervised = ConcurrentHashMap<IdentityKey, Supervision>()
 
