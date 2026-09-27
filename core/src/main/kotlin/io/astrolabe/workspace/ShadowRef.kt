@@ -13,6 +13,7 @@ import io.astrolabe.os.Identity
 import io.astrolabe.os.IndexEntry
 import io.astrolabe.os.ObjectId
 import io.astrolabe.os.Os
+import io.astrolabe.os.RefUpdateRejected
 import io.astrolabe.os.TreeEntryKind
 import io.astrolabe.store.BlobKind
 import io.astrolabe.store.Store
@@ -128,6 +129,8 @@ public class ShadowRef @JvmOverloads public constructor(
         .resolve(work.value)
         .resolve(attempt.value)
         .resolve("${workspace.id.value}.index")
+
+    private val pendingFile: Path = stateFile.resolveSibling("${stateFile.fileName}.pending")
 
     init {
         for (component in listOf(work.value, attempt.value, workspace.id.value)) {
@@ -371,9 +374,6 @@ public class ShadowRef @JvmOverloads public constructor(
         val message = "astrolabe snapshot turn ${manifest.turn}\n\n" +
             "manifest ${manifest.manifestDigest.hex}\nstamp ${manifest.stampId.digest.hex}\n"
         val commit = git.commitTree(tree, listOfNotNull(previous), message, identity)
-        // D-04 compare-and-swap: a ref moved by anyone else fails loudly with RefUpdateRejected.
-        git.updateRef(ref, commit, previous)
-
         val manifestBlob = store.blobs.put(
             Snapshot.encodeToBytes(manifest),
             BlobKind.PACKET,
@@ -388,7 +388,17 @@ public class ShadowRef @JvmOverloads public constructor(
             stampId = manifest.stampId,
             capturedAt = manifest.capturedAt,
         )
-        writeIndex(ShadowIndex(ref, index.records + record))
+        val next = ShadowIndex(ref, index.records + record)
+        // Recovery material and the intended index must be durable before moving the ref.
+        writeIndex(next, pendingFile)
+        try {
+            git.updateRef(ref, commit, previous)
+        } catch (conflict: RefUpdateRejected) {
+            Files.deleteIfExists(pendingFile)
+            throw conflict
+        }
+        writeIndex(next)
+        Files.deleteIfExists(pendingFile)
         Files.deleteIfExists(tempIndex)
         return record
     }
@@ -455,14 +465,40 @@ public class ShadowRef @JvmOverloads public constructor(
     }
 
     private fun readIndex(): ShadowIndex {
-        if (!Files.exists(stateFile)) return ShadowIndex(ref)
-        return JSON.decodeFromString(ShadowIndex.serializer(), Files.readString(stateFile, StandardCharsets.UTF_8))
+        val index = if (Files.exists(stateFile)) decodeIndex(stateFile) else ShadowIndex(ref)
+        check(index.ref == ref) { "shadow index belongs to another ref" }
+        if (!Files.exists(pendingFile)) return index
+        val pending = decodeIndex(pendingFile)
+        check(pending.ref == ref && pending.records.isNotEmpty()) { "invalid pending shadow index" }
+        if (pending == index) {
+            Files.deleteIfExists(pendingFile)
+            return index
+        }
+        check(pending.records.dropLast(1) == index.records) { "pending shadow index does not extend the current index" }
+        val record = pending.records.last()
+        val head = workspace.git.readRef(ref)?.hex
+        when (head) {
+            record.commit -> {
+                val manifest = Snapshot.decode(store.blobs.get(record.manifestBlob))
+                check(manifest.turn == record.turn && manifest.manifestDigest == record.manifestDigest &&
+                    manifest.stampId == record.stampId) { "pending snapshot manifest is inconsistent" }
+                writeIndex(pending)
+                Files.deleteIfExists(pendingFile)
+                return pending
+            }
+            index.records.lastOrNull()?.commit -> Files.deleteIfExists(pendingFile)
+            else -> throw SnapshotIntegrityError("shadow ref $ref moved outside its pending publication; recovery refused")
+        }
+        return index
     }
 
-    private fun writeIndex(index: ShadowIndex) {
+    private fun decodeIndex(path: Path): ShadowIndex =
+        JSON.decodeFromString(ShadowIndex.serializer(), Files.readString(path, StandardCharsets.UTF_8))
+
+    private fun writeIndex(index: ShadowIndex, target: Path = stateFile) {
         Files.createDirectories(stateFile.parent)
         os.replaceFileAtomically(
-            stateFile,
+            target,
             JSON.encodeToString(ShadowIndex.serializer(), index).toByteArray(StandardCharsets.UTF_8),
         )
     }

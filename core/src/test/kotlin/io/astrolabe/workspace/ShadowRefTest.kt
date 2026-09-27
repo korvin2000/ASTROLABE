@@ -23,6 +23,35 @@ import org.junit.jupiter.api.io.TempDir
 class ShadowRefTest {
 
     @Test
+    fun `reopen finishes an interrupted snapshot index publication including turn zero`(@TempDir state: Path) {
+        WorkspaceFixture.create(state).use { fixture ->
+            val failingOs = object : io.astrolabe.os.Os by fixture.os {
+                override fun replaceFileAtomically(path: Path, bytes: ByteArray) {
+                    if (path.fileName.toString() == "ws-1.json") throw java.io.IOException("index publication failed")
+                    fixture.os.replaceFileAtomically(path, bytes)
+                }
+            }
+            val interrupted = ShadowRef(fixture.ids.work, fixture.ids.attempt, fixture.workspace,
+                fixture.store, fixture.dirtyState, failingOs, fixture.clock)
+            for (turn in 0..1) {
+                fixture.repo.modify("src/a.py", "def a():\n    return ${turn + 10}\n")
+                val captured = fixture.dirtyState.capture(turn)
+                assertFailsWith<java.io.IOException> {
+                    if (turn == 0) interrupted.open(captured) else interrupted.snapshot(captured)
+                }
+                val movedHead = interrupted.head()!!
+                val reopened = fixture.shadowRef()
+                assertEquals(movedHead.hex, reopened.record(turn)!!.commit)
+                assertEquals(captured, reopened.manifest(turn))
+                assertEquals(turn + 1, reopened.records().size)
+                assertEquals(reopened.records(), fixture.shadowRef().records(), "recovery is idempotent")
+            }
+            fixture.shadowRef().snapshot(2)
+            assertEquals(3, fixture.shadowRef().records().size)
+        }
+    }
+
+    @Test
     fun `snapshots 1 to 3 move the ref and stay selectable in constant time`(@TempDir state: Path) {
         WorkspaceFixture.create(state).use { fixture ->
             val shadow = fixture.shadowRef()
