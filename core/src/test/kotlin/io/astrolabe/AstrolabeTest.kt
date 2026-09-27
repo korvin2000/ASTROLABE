@@ -17,6 +17,7 @@ import io.astrolabe.java.AstrolabeJava
 import io.astrolabe.java.JavaAuthority
 import io.astrolabe.provider.JavaInvocation
 import io.astrolabe.provider.JavaProviderAdapter
+import io.astrolabe.provider.InvocationId
 import io.astrolabe.provider.Message
 import io.astrolabe.provider.Role
 import io.astrolabe.verify.ReviewRequest
@@ -26,6 +27,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.future.future
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Path
 import java.util.concurrent.CopyOnWriteArrayList
@@ -87,6 +89,28 @@ class AstrolabeTest {
                 handle.amend("also keep b unchanged")
                 handle.cancel()
                 assertEquals(CampaignOutcome.Cancelled, withTimeout(10_000) { handle.await() })
+            }
+        }
+    }
+
+    @Test
+    fun `await propagates an internal campaign failure instead of reporting cancellation`() = runBlocking<Unit> {
+        val adapter = FakeAdapter(
+            ScriptedModel.of(Scripted.Reply(listOf(Message.text(Role.Assistant, "continuing")))),
+            holdResponses = true,
+        )
+        Astrolabe(config, adapter, AutonomousAuthority()).use { sdk ->
+            sdk.open(repo.root).use { project ->
+                val handle = sdk.campaign(project, "make a return 10")
+                val requested = withTimeout(10_000) { handle.events.first { it is AgentEvent.Cell.ModelRequested } }
+                    as AgentEvent.Cell.ModelRequested
+                val invocation = InvocationId(requested.invocationId)
+                withTimeout(10_000) { while (adapter.invocation(invocation) == null) yield() }
+                project.store.db.close()
+                adapter.release(invocation)
+                val failure = runCatching { withTimeout(10_000) { handle.await() } }.exceptionOrNull()
+                assertTrue(failure != null, "a broken store must not look like host cancellation")
+                assertTrue(failure !is kotlinx.coroutines.CancellationException, "preserve the persistence failure")
             }
         }
     }

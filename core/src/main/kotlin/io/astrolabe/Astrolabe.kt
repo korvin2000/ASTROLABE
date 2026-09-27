@@ -173,10 +173,7 @@ public class CampaignHandle internal constructor(
 
     public val events: Flow<AgentEvent> get() = bus.records().filter { it.event.ids.work == workId }.map { it.event }
 
-    public suspend fun await(): CampaignOutcome {
-        job.join()
-        return if (job.isCancelled) CampaignOutcome.Cancelled else job.await()
-    }
+    public suspend fun await(): CampaignOutcome = job.await()
 
     /**
      * Cancels the campaign through its token (§3.7, D-26): an in-flight model call is interrupted, the cell settles
