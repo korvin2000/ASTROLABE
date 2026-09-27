@@ -240,7 +240,7 @@ public class Delegator @JvmOverloads constructor(
     private suspend fun runChild(run: ChildRun): ChildOutcome = try {
         runner.run(run)
     } catch (failure: RuntimeException) {
-        ChildOutcome.Failed("child ${run.handle.id} threw ${failure::class.simpleName}: ${failure.message}", Tokens.ZERO)
+        ChildOutcome.Failed("child ${run.handle.id} threw ${failure::class.simpleName}: ${failure.message}; usage unknown, reservation retained", run.packet.reservedBudget)
     }
 
     /** Publication (§10.1): the outcome is checked against cancellation, the lease and the generation; spend counts either way. */

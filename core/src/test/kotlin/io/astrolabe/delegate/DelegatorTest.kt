@@ -255,6 +255,8 @@ class DelegatorTest {
         val failing = delegator(scope = this, runner = { throw IllegalStateException("provider down") })
         val failed = assertIs<Collected.Failed>(failing.collect(started(failing.dispatch(ChildKind.Probe, packet(ChildKind.Probe), DispatchMode.Sync))))
         assertTrue(failed.reason.contains("provider down"), failed.reason)
+        assertEquals(packet(ChildKind.Probe).reservedBudget, failed.spend)
+        assertEquals(failed.spend, failing.budget.spent)
 
         val wrongKind = delegator(scope = this, runner = { child -> ChildOutcome.Published(ChildPacket.Review(Verdict("rv", 1, stamp, VerdictOutcome.Approve, confidence = 1.0, signedBy = "x")), Tokens(20)) })
         assertEquals("a probe child published a review packet", assertIs<Collected.Late>(wrongKind.collect(started(wrongKind.dispatch(ChildKind.Probe, packet(ChildKind.Probe), DispatchMode.Sync)))).reason)

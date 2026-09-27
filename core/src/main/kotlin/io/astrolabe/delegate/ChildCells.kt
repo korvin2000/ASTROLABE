@@ -60,7 +60,7 @@ public class CellChildRunner @JvmOverloads constructor(
         val budget = ChildBudget(probeBudget.turns, Tokens(minOf(probeBudget.tokens.value, child.packet.reservedBudget.value)))
         val seat = ChildSeat(child.handle.child, child.cancellation, RoutingFunction.Probe)
         val exit = cell.run(seat, Roles.probe, Probe.completion(child.packet.base, { investigation = it }), budget, ChildBrief.render(child.packet, Probe.OUTPUT))
-            ?: return ChildOutcome.Failed("probe ${child.handle.id} was cancelled before it ended", Tokens.ZERO)
+            ?: return ChildOutcome.Failed("probe ${child.handle.id} was cancelled before it ended; usage unknown", budget.tokens)
         val spend = spendOf(exit.packet.cost)
         val packet = investigation
         return if (exit is CellExit.Completed && packet != null) ChildOutcome.Published(ChildPacket.Investigation(packet), spend)
@@ -84,7 +84,7 @@ public class CellChildRunner @JvmOverloads constructor(
         internal suspend fun judge(cell: ChildCell, seat: ChildSeat, packet: EvidencePacket, budget: ChildBudget): JudgeRun {
             var verdict: Verdict? = null
             val exit = cell.run(seat, Roles.review, Judge.completion(packet, { verdict = it }), budget, packet.render(Judge.OUTPUT))
-                ?: return JudgeRun(null, Tokens.ZERO, "the review cell was cancelled before it ended")
+                ?: return JudgeRun(null, budget.tokens, "the review cell was cancelled before it ended; usage unknown")
             val published = verdict.takeIf { exit is CellExit.Completed }
             return JudgeRun(published, spendOf(exit.packet.cost), if (published == null) "the review cell ended ${exit.packet.status.wire}: ${exit.packet.reason ?: "no verdict"}" else null)
         }
