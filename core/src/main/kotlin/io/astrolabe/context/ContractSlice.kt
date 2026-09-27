@@ -23,10 +23,12 @@ public data class ContractSlice(
     /** Original obligations shown beside a weakened check (§8.6); empty until the test-integrity guard reports one. */
     val originalObligations: Map<String, String> = emptyMap(),
     val contractsTouched: List<String> = emptyList(),
+    /** Independent obligations retained across copying and serialization, including increment-only checks. */
+    val incrementAcceptanceIds: Set<String> = acceptance.map { it.id }.toSet(),
 ) {
     /** Acceptance ids the slice must define: every id the increment accepts plus every id its requirements name. */
     val requiredAcceptanceIds: Set<String>
-        get() = (requirements.flatMap { it.acceptance }).toSet()
+        get() = incrementAcceptanceIds + requirements.flatMap { it.acceptance }
 
     /** IX-11: an acceptance id present without its complete definition fails coverage. */
     public fun coverage(): SliceCoverage {
@@ -76,6 +78,7 @@ public data class ContractSlice(
                 acceptance = acceptance,
                 originalObligations = originalObligations,
                 contractsTouched = contract.contractsTouched,
+                incrementAcceptanceIds = increment.accept.toSet(),
             )
         }
     }

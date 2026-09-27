@@ -50,6 +50,7 @@ import io.astrolabe.provider.UsageItem
 import io.astrolabe.provider.Validation
 import io.astrolabe.provider.estimate
 import io.astrolabe.register.ContractDigest
+import io.astrolabe.register.DigestCapacity
 import io.astrolabe.register.Mark
 import io.astrolabe.register.ObligationStatus
 import io.astrolabe.register.Register
@@ -289,7 +290,11 @@ public class Cell @JvmOverloads constructor(
                 is SchemaSelection.Supported -> selection.set
                 is SchemaSelection.Unsupported -> return failed("tool schemas unsupported for ${selection.profileId}: ${selection.reason}")
             }
-            val anchor = renderAnchor(contract)
+            val anchor = try {
+                renderAnchor(contract)
+            } catch (capacity: DigestCapacity) {
+                return partial(PartialReason.Pressure, "replan: ${capacity.message}")
+            }
             val layout = Layout.render(ctx.role, mask, ctx.config.executionMode, ctx.prime, CompiledK(ContractSlice.forIncrement(contract, increment), ctx.preexisting, ctx.sections), transcript(contract))
             val request = Request(layout + anchor.segment(), schemas.schemas, ctx.model.profile, ctx.model.effort, ctx.model.maxOutputTokens, mask)
             val estimate = request.estimate(estimator)

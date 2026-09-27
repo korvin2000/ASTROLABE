@@ -41,6 +41,17 @@ import kotlin.test.assertTrue
 
 class ChecksTest {
     @Test
+    fun `digest capacity refuses mandatory overflow and reduces more than 64 requests`() {
+        val ledger = Ledger.initial(contract)
+        assertFailsWith<io.astrolabe.register.DigestCapacity> { ContractDigest.render(contract, ledger, emptyList(), estimator, capTokens = 1) }
+        val excluded = contract.copy(exclusions = listOf("mandatory exclusion ".repeat(200)))
+        assertFailsWith<io.astrolabe.register.DigestCapacity> { ContractDigest.render(excluded, ledger, emptyList(), estimator) }
+        val many = contract.copy(requests = (1..100).map { UserRequest("history-$it", Instant.EPOCH, "request ".repeat(40)) })
+        val digest = ContractDigest.render(many, ledger, emptyList(), estimator)
+        assertTrue(estimator.estimate(digest).tokens <= 150, digest)
+    }
+
+    @Test
     fun `audit verification policy invalidates earlier check definitions`() {
         val check = Check("CHK-policy", CheckKind.Unit, Selector.All, Closure.Unknown, CostClass.Fast, Trigger.OnDemand)
         assertNotEquals(check.copy(parserPolicy = "shaper/1").definitionVersion, check.definitionVersion)
@@ -116,6 +127,14 @@ class ChecksTest {
         val coverage = idsOnly.coverage()
         assertFalse(coverage.complete)
         assertEquals(listOf("AC-2"), coverage.missingAcceptance)
+        val extra = ContractSlice.forIncrement(contract, increment.copy(accept = listOf("AC-1")))
+        val incrementOnlyMissing = extra.copy(acceptance = extra.acceptance.filter { it.id != "AC-1" })
+        assertEquals(listOf("AC-1"), incrementOnlyMissing.coverage().missingAcceptance)
+        assertFalse(incrementOnlyMissing.coverage().complete)
+        val decoded = kotlinx.serialization.json.Json.decodeFromString<ContractSlice>(
+            kotlinx.serialization.json.Json.encodeToString(ContractSlice.serializer(), incrementOnlyMissing),
+        )
+        assertEquals(incrementOnlyMissing.coverage(), decoded.coverage())
         assertFailsWith<IllegalArgumentException> { ContractSlice.forIncrement(contract, increment.copy(accept = listOf("AC-9"))) }
     }
 

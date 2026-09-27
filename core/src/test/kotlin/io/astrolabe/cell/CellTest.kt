@@ -58,6 +58,17 @@ import kotlin.test.assertTrue
 
 /** P1.8.7: the cell turn loop of §3.7 — order, fail-closed validation, gates, every exit kind, and a checkpoint on every path out (fault injection). */
 class CellTest {
+    @Test
+    fun `a digest that cannot fit stops before provider dispatch`() = runTest {
+        CellFixture(stateRoot, defaults = Defaults(digestCapTokens = 1)).use { f ->
+            val exit = assertIs<CellExit.Partial>(f.run(ScriptedModel.of()))
+            assertEquals(PartialReason.Pressure, exit.reason)
+            assertTrue(exit.hint.contains("contract digest needs"), exit.hint)
+            assertTrue(f.adapter.calls.isEmpty())
+            assertEquals(CellStatus.Partial, f.checkpoints.latest(f.ids.context!!)!!.status)
+        }
+    }
+
     @TempDir
     lateinit var stateRoot: Path
 
