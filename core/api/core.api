@@ -47,17 +47,6 @@ public final class io/astrolabe/AttemptConfig {
 	public fun toString ()Ljava/lang/String;
 }
 
-public final synthetic class io/astrolabe/AttemptConfig$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
-	public static final field INSTANCE Lio/astrolabe/AttemptConfig$$serializer;
-	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
-	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/AttemptConfig;
-	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
-	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
-	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/AttemptConfig;)V
-	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
-	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
-}
-
 public final class io/astrolabe/AttemptConfig$Companion {
 	public final fun freeze (Lio/astrolabe/Config;Ljava/lang/String;Ljava/util/Map;)Lio/astrolabe/AttemptConfig;
 	public static synthetic fun freeze$default (Lio/astrolabe/AttemptConfig$Companion;Lio/astrolabe/Config;Ljava/lang/String;Ljava/util/Map;ILjava/lang/Object;)Lio/astrolabe/AttemptConfig;
@@ -7617,8 +7606,15 @@ public final class io/astrolabe/contract/Contract$Companion {
 
 public abstract interface class io/astrolabe/contract/ContractRepository {
 	public abstract fun append (Lio/astrolabe/contract/Contract;)V
+	public abstract fun commitResolution (Lio/astrolabe/contract/Contract;Lio/astrolabe/contract/Amendment;)V
 	public abstract fun history (Lio/astrolabe/id/WorkId;)Ljava/util/List;
 	public abstract fun replaceLatest (Lio/astrolabe/contract/Contract;)V
+	public abstract fun resolved (Lio/astrolabe/id/WorkId;)Ljava/util/List;
+	public static synthetic fun resolved$default (Lio/astrolabe/contract/ContractRepository;Lio/astrolabe/id/WorkId;ILjava/lang/Object;)Ljava/util/List;
+}
+
+public final class io/astrolabe/contract/ContractRepository$DefaultImpls {
+	public static synthetic fun resolved$default (Lio/astrolabe/contract/ContractRepository;Lio/astrolabe/id/WorkId;ILjava/lang/Object;)Ljava/util/List;
 }
 
 public final class io/astrolabe/contract/Contracts {
@@ -7636,6 +7632,7 @@ public final class io/astrolabe/contract/Contracts {
 	public final fun propose (Lio/astrolabe/id/WorkId;Lio/astrolabe/id/ContextId;Ljava/lang/String;Ljava/lang/String;Z)Lio/astrolabe/contract/Amendment;
 	public final fun resolve (Lio/astrolabe/id/WorkId;Ljava/lang/String;Lio/astrolabe/event/Authority;Lkotlin/jvm/functions/Function1;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public final fun resolved ()Ljava/util/List;
+	public final fun resolved (Lio/astrolabe/id/WorkId;)Ljava/util/List;
 	public final fun strengthen (Lio/astrolabe/id/WorkId;Lio/astrolabe/contract/Acceptance;)Lio/astrolabe/contract/Contract;
 }
 
@@ -7645,8 +7642,10 @@ public final class io/astrolabe/contract/Contracts$Companion {
 public final class io/astrolabe/contract/InMemoryContractRepository : io/astrolabe/contract/ContractRepository {
 	public fun <init> ()V
 	public fun append (Lio/astrolabe/contract/Contract;)V
+	public fun commitResolution (Lio/astrolabe/contract/Contract;Lio/astrolabe/contract/Amendment;)V
 	public fun history (Lio/astrolabe/id/WorkId;)Ljava/util/List;
 	public fun replaceLatest (Lio/astrolabe/contract/Contract;)V
+	public fun resolved (Lio/astrolabe/id/WorkId;)Ljava/util/List;
 }
 
 public final class io/astrolabe/contract/Increment {
@@ -8058,9 +8057,11 @@ public final class io/astrolabe/contract/Shape$Companion {
 public final class io/astrolabe/contract/SqliteContractRepository : io/astrolabe/contract/ContractRepository {
 	public fun <init> (Lio/astrolabe/store/Store;Ljava/time/Clock;)V
 	public fun append (Lio/astrolabe/contract/Contract;)V
+	public fun commitResolution (Lio/astrolabe/contract/Contract;Lio/astrolabe/contract/Amendment;)V
 	public fun history (Lio/astrolabe/id/WorkId;)Ljava/util/List;
 	public final fun recordResolved (Lio/astrolabe/id/WorkId;Lio/astrolabe/contract/Amendment;)V
 	public fun replaceLatest (Lio/astrolabe/contract/Contract;)V
+	public fun resolved (Lio/astrolabe/id/WorkId;)Ljava/util/List;
 }
 
 public final class io/astrolabe/contract/UserRequest {
@@ -22408,10 +22409,15 @@ public final class io/astrolabe/tool/run/GenericShaper : io/astrolabe/tool/run/S
 
 public final class io/astrolabe/tool/run/Handle {
 	public static final field Companion Lio/astrolabe/tool/run/Handle$Companion;
-	public fun <init> (Ljava/lang/String;Lio/astrolabe/id/Identities;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;ZLjava/lang/String;Lio/astrolabe/os/Proc;Ljava/lang/String;JLjava/lang/String;)V
+	public fun <init> (Ljava/lang/String;Lio/astrolabe/id/Identities;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;ZLjava/lang/String;Lio/astrolabe/os/Proc;Ljava/lang/String;JLjava/lang/String;Lio/astrolabe/tool/EffectClass;ZLjava/util/Map;Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;Lio/astrolabe/id/Identities;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;ZLjava/lang/String;Lio/astrolabe/os/Proc;Ljava/lang/String;JLjava/lang/String;Lio/astrolabe/tool/EffectClass;ZLjava/util/Map;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Ljava/lang/String;
 	public final fun component10 ()J
 	public final fun component11 ()Ljava/lang/String;
+	public final fun component12 ()Lio/astrolabe/tool/EffectClass;
+	public final fun component13 ()Z
+	public final fun component14 ()Ljava/util/Map;
+	public final fun component15 ()Ljava/lang/String;
 	public final fun component2 ()Lio/astrolabe/id/Identities;
 	public final fun component3 ()Ljava/lang/String;
 	public final fun component4 ()Ljava/lang/String;
@@ -22420,16 +22426,20 @@ public final class io/astrolabe/tool/run/Handle {
 	public final fun component7 ()Ljava/lang/String;
 	public final fun component8 ()Lio/astrolabe/os/Proc;
 	public final fun component9 ()Ljava/lang/String;
-	public final fun copy (Ljava/lang/String;Lio/astrolabe/id/Identities;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;ZLjava/lang/String;Lio/astrolabe/os/Proc;Ljava/lang/String;JLjava/lang/String;)Lio/astrolabe/tool/run/Handle;
-	public static synthetic fun copy$default (Lio/astrolabe/tool/run/Handle;Ljava/lang/String;Lio/astrolabe/id/Identities;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;ZLjava/lang/String;Lio/astrolabe/os/Proc;Ljava/lang/String;JLjava/lang/String;ILjava/lang/Object;)Lio/astrolabe/tool/run/Handle;
+	public final fun copy (Ljava/lang/String;Lio/astrolabe/id/Identities;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;ZLjava/lang/String;Lio/astrolabe/os/Proc;Ljava/lang/String;JLjava/lang/String;Lio/astrolabe/tool/EffectClass;ZLjava/util/Map;Ljava/lang/String;)Lio/astrolabe/tool/run/Handle;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/run/Handle;Ljava/lang/String;Lio/astrolabe/id/Identities;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;ZLjava/lang/String;Lio/astrolabe/os/Proc;Ljava/lang/String;JLjava/lang/String;Lio/astrolabe/tool/EffectClass;ZLjava/util/Map;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/tool/run/Handle;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getActionId ()Ljava/lang/String;
 	public final fun getAlias ()Ljava/lang/String;
 	public final fun getArgv ()Ljava/util/List;
+	public final fun getBaseCommitBefore ()Ljava/lang/String;
 	public final fun getCursor ()J
 	public final fun getCwd ()Ljava/lang/String;
+	public final fun getEffectClass ()Lio/astrolabe/tool/EffectClass;
+	public final fun getEffectsUnknown ()Z
 	public final fun getHandleId ()Ljava/lang/String;
 	public final fun getIds ()Lio/astrolabe/id/Identities;
+	public final fun getMembersBefore ()Ljava/util/Map;
 	public final fun getProc ()Lio/astrolabe/os/Proc;
 	public final fun getShell ()Z
 	public final fun getStampBefore ()Ljava/lang/String;
@@ -26301,6 +26311,7 @@ public final class io/astrolabe/workspace/StagedEntry$Companion {
 }
 
 public final class io/astrolabe/workspace/StampEntry {
+	public static final field Companion Lio/astrolabe/workspace/StampEntry$Companion;
 	public fun <init> (Ljava/lang/String;Lio/astrolabe/workspace/EntryType;Lio/astrolabe/os/FileMode;Lio/astrolabe/id/Digest;J)V
 	public final fun component1 ()Ljava/lang/String;
 	public final fun component2 ()Lio/astrolabe/workspace/EntryType;
@@ -26317,6 +26328,21 @@ public final class io/astrolabe/workspace/StampEntry {
 	public final fun getType ()Lio/astrolabe/workspace/EntryType;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/workspace/StampEntry$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/workspace/StampEntry$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/workspace/StampEntry;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/workspace/StampEntry;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/workspace/StampEntry$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
 }
 
 public final class io/astrolabe/workspace/StampReport {
