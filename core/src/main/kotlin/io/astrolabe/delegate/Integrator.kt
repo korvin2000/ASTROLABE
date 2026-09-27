@@ -277,13 +277,10 @@ public class Integrator @JvmOverloads constructor(
 
     private suspend fun publish(candidate: Worktree, integrationBase: CandidateId, batch: List<WriterResult>, changes: List<Change>, receipts: List<String>): Integration {
         val handles = batch.map { it.handle }
-        val now = current()
         val patchHash = patchHash(changes)
         return main.mutation.withLock {
             val before = Stamper(main, env).report().candidateId
             if (before != integrationBase) return@withLock Integration.Rejected(handles, IntegrationStep.Publish, "main moved during integration: @${before.hash8}, integration base @${integrationBase.hash8}")
-            batch.firstNotNullOfOrNull { Fence.publish(it.dispatch.task.executionGeneration, now.generation, now.authority).refusal }
-                ?.let { return@withLock Integration.Rejected(handles, IntegrationStep.Publish, it, archived = archive(batch)) }
             // Every postimage is read and checked before the first byte reaches the main line.
             val staged = changes.map { change ->
                 val bytes = change.after?.let { after ->
@@ -292,6 +289,12 @@ public class Integrator @JvmOverloads constructor(
                 }
                 change to bytes
             }
+            val now = current()
+            batch.firstOrNull { it.dispatch.task.contractVersion != now.contractVersion }?.let {
+                return@withLock Integration.Rejected(handles, IntegrationStep.Publish, "contract is v${now.contractVersion}, dispatched under v${it.dispatch.task.contractVersion}", archived = archive(batch))
+            }
+            batch.firstNotNullOfOrNull { Fence.publish(it.dispatch.task.executionGeneration, now.generation, now.authority).refusal }
+                ?.let { return@withLock Integration.Rejected(handles, IntegrationStep.Publish, it, archived = archive(batch)) }
             val intent = Intent(idGen.next("intent"), batch.first().dispatch.task.ids, "integrate", listOf("integrate") + handles, null, "publish ${changes.size} paths @${integrationBase.hash8} patch ${patchHash.hash8}", at = clock.instant())
             intents.record(intent)
             for ((change, bytes) in staged) {

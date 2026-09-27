@@ -36,6 +36,8 @@ import io.astrolabe.workspace.WorkspaceFixture
 import io.astrolabe.workspace.Workspaces
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
@@ -111,6 +113,35 @@ class IntegratorTest {
     }
 
     private fun started(dispatch: Dispatch): Handle = assertIs<Dispatch.Started>(dispatch, dispatch.toString()).handle
+
+    @Test
+    fun `publication rechecks contract and generation after waiting for main ownership`(@TempDir state: Path) = runTest {
+        Rig(state, { mapOf("src/a.py" to "def a():\n    return 7\n") }).use { rig ->
+            val delegator = rig.delegator(backgroundScope)
+            val handle = started(delegator.dispatch(ChildKind.Writer, rig.task("I1", listOf("src/a.py")), DispatchMode.Sync))
+            val result = rig.collected(delegator, handle, delegator.collect(handle))
+            val before = rig.bytes("src/a.py")
+            for (amendContract in listOf(true, false)) {
+                rig.authority = IntegrationAuthority(1, ExecutionGeneration.INITIAL, PublicationAuthority { null })
+                val checked = CompletableDeferred<Unit>()
+                val integrator = rig.integrator(IntegrationChecks { _, _, _ ->
+                    rig.main.mutation.lock()
+                    checked.complete(Unit)
+                    IntegrationCheck(emptyList())
+                })
+                val pending = async { integrator.integrate(listOf(result)).single() }
+                checked.await()
+                runCurrent()
+                rig.authority = if (amendContract) rig.authority.copy(contractVersion = 2)
+                    else rig.authority.copy(generation = ExecutionGeneration(2))
+                rig.main.mutation.unlock()
+                val rejected = assertIs<Integration.Rejected>(pending.await())
+                assertEquals(IntegrationStep.Publish, rejected.step)
+                assertEquals(before, rig.bytes("src/a.py"))
+                assertTrue(rig.intents.open().isEmpty())
+            }
+        }
+    }
 
     @Test
     fun `FX-26 writer form - a cancelled writer's late patch is archived and its publication rejected`(@TempDir state: Path) = runTest {
