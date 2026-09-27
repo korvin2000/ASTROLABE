@@ -4,6 +4,7 @@ import io.astrolabe.id.Identities
 import io.astrolabe.provider.TokenEstimator
 import io.astrolabe.store.Migrations
 import io.astrolabe.store.Store
+import io.astrolabe.store.Tx
 import kotlinx.serialization.json.Json
 import java.nio.file.Files
 import java.nio.file.Path
@@ -39,44 +40,55 @@ public class KbWriter(private val store: Store, private val estimator: TokenEsti
 
     /** Stores [note] as a new note or its next revision; returns the revision number (1-based). */
     @Synchronized
-    public fun write(note: Note, ids: Identities): Int {
+    public fun write(note: Note, ids: Identities): Int = store.db.tx { tx ->
+        validate(note, current(tx, note.id))
+        persist(tx, note, ids)
+    }
+
+    /** Replaces [oldId] by [replacement] (which names it in `supersedes`); the old note stays, marked superseded. */
+    @Synchronized
+    public fun supersede(oldId: String, replacement: Note, ids: Identities): Int = store.db.tx { tx ->
+        val old = current(tx, oldId) ?: throw NoteRefused("no note $oldId to supersede")
+        if (replacement.supersedes != oldId) throw NoteRefused("${replacement.id} must name $oldId in supersedes")
+        if (replacement.id == oldId) throw NoteRefused("a replacement is a new note, not a rewrite of $oldId")
+        val superseded = old.copy(status = NoteStatus.Superseded)
+        validate(superseded, old)
+        validate(replacement, current(tx, replacement.id))
+        persist(tx, superseded, ids)
+        persist(tx, replacement, ids)
+    }
+
+    private fun current(tx: Tx, id: String): Note? =
+        tx.query("SELECT body FROM notes WHERE note_id = ?", id) { NOTE_JSON.decodeFromString(Note.serializer(), it.string("body")) }.firstOrNull()
+
+    private fun validate(note: Note, existing: Note?) {
         val bodyTokens = estimator.estimate(note.body).tokens
         // D-36: a harness STATUS checkpoint is lint-exempt; every other note is a compact unit.
         if (note.kind != NoteKind.STATUS && bodyTokens > Note.MAX_BODY_TOKENS) throw NoteRefused("${note.id}: body is $bodyTokens tokens > ${Note.MAX_BODY_TOKENS}; link a module")
-        val existing = notes.get(note.id)
         if (existing != null) {
             if (existing.kind != note.kind) throw NoteRefused("${note.id}: kind ${existing.kind} cannot become ${note.kind}")
             if (existing.status == NoteStatus.Admitted && existing.body != note.body && note.kind !in REVISED) {
                 throw NoteRefused("${note.id}: an admitted note's body is never rewritten in place; supersede it")
             }
         }
-        return store.db.tx { tx ->
-            val revision = tx.query("SELECT coalesce(max(revision), 0) AS r FROM note_revisions WHERE note_id = ?", note.id) { it.long("r").toInt() }.first() + 1
-            val body = NOTE_JSON.encodeToString(Note.serializer(), note)
-            val anchors = note.anchors.joinToString(" ") { it.path + (it.symbol?.let { s -> "#$s" } ?: "") }
-            val now = clock.instant()
-            tx.execute(
-                "INSERT OR REPLACE INTO notes (note_id, work_id, attempt_id, candidate_id, context_id, kind, status, summary, anchors, schema_version, created_at, body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                note.id, ids.work, ids.attempt, ids.candidate, ids.context, note.kind.name, note.status.wire, note.summary, anchors, Migrations.SCHEMA_VERSION, now, body,
-            )
-            tx.execute(
-                "INSERT INTO note_revisions (note_id, revision, work_id, attempt_id, candidate_id, context_id, schema_version, created_at, body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                note.id, revision, ids.work, ids.attempt, ids.candidate, ids.context, Migrations.SCHEMA_VERSION, now, body,
-            )
-            tx.execute("DELETE FROM notes_fts WHERE note_id = ?", note.id)
-            tx.execute("INSERT INTO notes_fts (note_id, summary, anchors) VALUES (?, ?, ?)", note.id, note.summary, anchors)
-            revision
-        }
     }
 
-    /** Replaces [oldId] by [replacement] (which names it in `supersedes`); the old note stays, marked superseded. */
-    @Synchronized
-    public fun supersede(oldId: String, replacement: Note, ids: Identities): Int {
-        val old = notes.get(oldId) ?: throw NoteRefused("no note $oldId to supersede")
-        if (replacement.supersedes != oldId) throw NoteRefused("${replacement.id} must name $oldId in supersedes")
-        if (replacement.id == oldId) throw NoteRefused("a replacement is a new note, not a rewrite of $oldId")
-        write(old.copy(status = NoteStatus.Superseded), ids)
-        return write(replacement, ids)
+    private fun persist(tx: Tx, note: Note, ids: Identities): Int {
+        val revision = tx.query("SELECT coalesce(max(revision), 0) AS r FROM note_revisions WHERE note_id = ?", note.id) { it.long("r").toInt() }.first() + 1
+        val body = NOTE_JSON.encodeToString(Note.serializer(), note)
+        val anchors = note.anchors.joinToString(" ") { it.path + (it.symbol?.let { s -> "#$s" } ?: "") }
+        val now = clock.instant()
+        tx.execute(
+            "INSERT OR REPLACE INTO notes (note_id, work_id, attempt_id, candidate_id, context_id, kind, status, summary, anchors, schema_version, created_at, body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            note.id, ids.work, ids.attempt, ids.candidate, ids.context, note.kind.name, note.status.wire, note.summary, anchors, Migrations.SCHEMA_VERSION, now, body,
+        )
+        tx.execute(
+            "INSERT INTO note_revisions (note_id, revision, work_id, attempt_id, candidate_id, context_id, schema_version, created_at, body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            note.id, revision, ids.work, ids.attempt, ids.candidate, ids.context, Migrations.SCHEMA_VERSION, now, body,
+        )
+        tx.execute("DELETE FROM notes_fts WHERE note_id = ?", note.id)
+        tx.execute("INSERT INTO notes_fts (note_id, summary, anchors) VALUES (?, ?, ?)", note.id, note.summary, anchors)
+        return revision
     }
 
     /** A status change (admit, deprecate, mark stale, reject) is a revision with the same body. */
