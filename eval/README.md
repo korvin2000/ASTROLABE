@@ -11,6 +11,12 @@ Weights sum exactly to one and complex strata carry at least half. `EvaluationDe
 baseline/candidate configuration digests and every `PlannedTrial`. A pair's `matchedInputs` digest
 must bind its start state, acceptance, environment and equal budget. The caller verifies these facts.
 
+Use `VariantConfig.fingerprint` or `ArmConfig.fingerprint` for configuration IDs in designs,
+trial rows, scorecards and promotion evidence. These bind the comparator/arm semantics and shape cap
+as well as the frozen attempt. `AttemptConfig.fingerprint` alone cannot distinguish shape experiments.
+Pass the selected config to `PromotionEvidence.of`; its legacy attempt overload requires exactly one
+matching config in the manifest. Manifests and trial tables made with the old IDs must be regenerated.
+
 Supply one `EvaluationTrial` per configuration and planned repository/task/repetition key. Its
 cost includes all attempts, helpers, review and integration. Repetitions stay in the same task stratum;
 repository labels identify independent clusters, including related repositories under one label.

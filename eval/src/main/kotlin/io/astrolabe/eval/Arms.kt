@@ -6,6 +6,7 @@ import io.astrolabe.Config
 import io.astrolabe.Controls
 import io.astrolabe.Flags
 import io.astrolabe.contract.Shape
+import io.astrolabe.id.Digest
 import io.astrolabe.kb.KbInjection
 
 /**
@@ -96,6 +97,8 @@ public data class ArmConfig(
     val maxShape: Shape?,
 ) {
     val promotionEligible: Boolean get() = arm.promotionEligible(level) && attempt?.let { it.production && it.controls.allEnabled } != false
+    /** Evaluation identity: arm/level and cap remain distinct even when the attempt is identical. */
+    public val fingerprint: Digest = fingerprint("arm-config", listOf(arm.name, level, attempt?.fingerprint, maxShape))
 }
 
 public object EvalArms {

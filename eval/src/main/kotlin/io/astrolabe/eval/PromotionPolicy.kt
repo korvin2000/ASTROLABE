@@ -74,8 +74,23 @@ public object PromotionEvidence {
         integrity: IntegrityVerdict,
         origin: EvaluationOrigin,
         provenance: String,
-    ): EvaluationEvidence = EvaluationEvidence(
-        configuration = candidate.fingerprint,
+    ): EvaluationEvidence {
+        val matches = manifest.variants.filter { it.attempt?.fingerprint == candidate.fingerprint }.map { it.fingerprint } +
+            manifest.arms.filter { it.attempt?.fingerprint == candidate.fingerprint }.map { it.fingerprint }
+        require(matches.size == 1) { "select a frozen VariantConfig or ArmConfig: the attempt identifies ${matches.size} evaluation configurations" }
+        return evidence(manifest, candidate, matches.single(), integrity, origin, provenance)
+    }
+
+    @JvmStatic
+    public fun of(manifest: CampaignManifest, candidate: VariantConfig, integrity: IntegrityVerdict, origin: EvaluationOrigin, provenance: String): EvaluationEvidence =
+        evidence(manifest, requireNotNull(candidate.attempt) { "live comparator has no frozen attempt" }, candidate.fingerprint, integrity, origin, provenance)
+
+    @JvmStatic
+    public fun of(manifest: CampaignManifest, candidate: ArmConfig, integrity: IntegrityVerdict, origin: EvaluationOrigin, provenance: String): EvaluationEvidence =
+        evidence(manifest, requireNotNull(candidate.attempt) { "research arm has no frozen attempt" }, candidate.fingerprint, integrity, origin, provenance)
+
+    private fun evidence(manifest: CampaignManifest, candidate: AttemptConfig, configuration: Digest, integrity: IntegrityVerdict, origin: EvaluationOrigin, provenance: String): EvaluationEvidence = EvaluationEvidence(
+        configuration = configuration,
         manifest = manifest.fingerprint,
         origin = origin,
         integrity = integrity.evidence,
@@ -105,7 +120,11 @@ public class PromotionDecision private constructor(
             val issues = mutableListOf<EvaluationIssue>()
             if (design.manifest != manifest.fingerprint)
                 issues += EvaluationIssue(EvaluationIssueCode.EvidenceMismatch, "design is not bound to manifest ${manifest.id}")
-            val frozen = (manifest.variants.mapNotNull { it.attempt } + manifest.arms.mapNotNull { it.attempt }).map { it.fingerprint }.toSet()
+            val frozen = (manifest.variants.filter { it.attempt != null }.map { it.fingerprint } +
+                manifest.arms.filter { it.attempt != null }.map { it.fingerprint }).toSet()
+            (design.candidates + design.baseline - frozen).sortedBy { it.hex }.forEach {
+                issues += EvaluationIssue(EvaluationIssueCode.EvidenceMismatch, "configuration ${it.hex} is not frozen in the manifest")
+            }
             (frozen - design.candidates - design.baseline).sortedBy { it.hex }.forEach {
                 issues += EvaluationIssue(EvaluationIssueCode.MultipleSelection, "frozen candidate ${it.hex} is not declared in the design")
             }

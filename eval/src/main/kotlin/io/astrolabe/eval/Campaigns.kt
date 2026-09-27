@@ -30,7 +30,10 @@ public enum class Variant(public val wire: String, public val composition: Strin
 }
 
 /** A comparator's frozen configuration; [attempt] is null for a live-only comparator (config only, never run offline). */
-public data class VariantConfig(val variant: Variant, val attempt: AttemptConfig?, val maxShape: Shape?)
+public data class VariantConfig(val variant: Variant, val attempt: AttemptConfig?, val maxShape: Shape?) {
+    /** Evaluation identity: the attempt plus the comparator semantics and enforced shape cap. */
+    public val fingerprint: Digest = fingerprint("variant-config", listOf(variant.wire, attempt?.fingerprint, maxShape))
+}
 
 public object Variants {
     /**
@@ -63,7 +66,7 @@ public class LiveGate internal constructor(public val id: String, public val cla
 }
 
 public object LiveGates {
-    private val EVIDENCE = listOf("campaign manifest fingerprint", "variant attempt fingerprints", "workload split fingerprint",
+    private val EVIDENCE = listOf("campaign manifest fingerprint", "evaluation configuration fingerprints", "workload split fingerprint",
         "integrity verdict (hidden acceptance, answer removal, memory reset/freeze, holdout)", "fixture report with every invariant measured and zero",
         "baseline and candidate scorecards with complete billing", "paired bounds overall and complex", "one-off investment and repayment volume",
         "promotion report and verdict")
@@ -126,9 +129,9 @@ public class CampaignManifest(
 
     public val fingerprint: Digest = fingerprint("campaign-manifest", buildList {
         addAll(listOf(id, harnessVersion, memory, workload.fingerprint, this@CampaignManifest.variants.size))
-        this@CampaignManifest.variants.forEach { addAll(listOf(it.variant.wire, it.attempt?.fingerprint, it.maxShape)) }
+        this@CampaignManifest.variants.forEach { add(it.fingerprint) }
         add(this@CampaignManifest.arms.size)
-        this@CampaignManifest.arms.forEach { addAll(listOf(it.arm.name, it.level, it.attempt?.fingerprint, it.maxShape)) }
+        this@CampaignManifest.arms.forEach { add(it.fingerprint) }
         val keys = split.assignment.keys.sortedWith(compareBy(WorkloadTrialKey::task, WorkloadTrialKey::repetition))
         add(keys.size)
         keys.forEach { addAll(listOf(it.task, it.repetition, split.assignment.getValue(it))) }
@@ -143,11 +146,13 @@ public class CampaignManifest(
         putJsonArray("repositories") { repositories.forEach { add(JsonPrimitive(it)) } }
         putJsonArray("variants") { this@CampaignManifest.variants.forEach { v -> add(buildJsonObject {
             put("variant", v.variant.wire); put("live", v.variant.live); put("maxShape", v.maxShape?.name?.let(::JsonPrimitive) ?: JsonNull)
+            put("configuration", v.fingerprint.hex)
             put("attempt", v.attempt?.fingerprint?.hex?.let(::JsonPrimitive) ?: JsonNull)
             put("flags", v.attempt?.config?.flags?.let { JSON.encodeToJsonElement(Flags.serializer(), it) } ?: JsonNull)
         }) } }
         putJsonArray("arms") { this@CampaignManifest.arms.forEach { a -> add(buildJsonObject {
             put("arm", a.arm.wire); put("level", a.level); put("runnable", a.attempt != null); put("promotionEligible", a.promotionEligible)
+            put("configuration", a.fingerprint.hex); put("maxShape", a.maxShape?.name?.let(::JsonPrimitive) ?: JsonNull)
             put("attempt", a.attempt?.fingerprint?.hex?.let(::JsonPrimitive) ?: JsonNull)
         }) } }
         putJsonArray("partitions") {
