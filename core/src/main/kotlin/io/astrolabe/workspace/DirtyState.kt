@@ -238,6 +238,10 @@ public class DirtyState(
 
         val staged = stagedEntries(status, index)
         val report = stamper.report()
+        // Include raw differences hidden by Git's clean filters and checkout conversions.
+        for ((path, entry) in report.members) {
+            if (path !in entries) entries[path] = worktreeEntry(path, entry.mode)
+        }
         val captured = entries.mapValues { (_, entry) ->
             val type = when (entry.kind) {
                 SnapshotEntryKind.File -> EntryType.File
@@ -247,7 +251,7 @@ public class DirtyState(
             StampEntry(entry.path, type, entry.mode, entry.digest, entry.sizeBytes)
         }
         val base = status.branch?.let { it.oid?.hex ?: io.astrolabe.id.Stamp.NO_COMMIT }
-        if (captured != report.members || base != report.baseCommit ||
+        if (captured != report.members || base != report.baseCommit || stamper.stamp().id != report.candidateId ||
             workspace.git.lsFiles() != index ||
             workspace.git.status(UntrackedFiles.ALL, includeIgnored = true) != status
         ) {

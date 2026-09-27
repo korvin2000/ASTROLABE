@@ -8,6 +8,7 @@ import io.astrolabe.id.Stamp
 import io.astrolabe.os.ChangeOrigin
 import io.astrolabe.os.FileMode
 import io.astrolabe.os.GitStatus
+import io.astrolabe.os.LsFilesEntry
 import io.astrolabe.os.StatusEntry
 import io.astrolabe.os.UntrackedFiles
 import io.astrolabe.store.Migrations
@@ -235,6 +236,12 @@ public class Stamper @JvmOverloads public constructor(
                 is StatusEntry.Untracked, is StatusEntry.Ignored -> Unit
             }
         }
+        // Git status compares filtered content. Even a Git-clean path can have different raw
+        // bytes (or an ignored mode change), so compare every remaining tracked path to its object.
+        for (row in workspace.git.lsFiles()) {
+            if (row.stage != 0 || row.path in entries) continue
+            captureEntry(row.path, row.mode, row)?.let { entries[row.path] = it }
+        }
         return entries.values.sortedWith(compareBy(PATH_ORDER) { it.path })
     }
 
@@ -249,7 +256,10 @@ public class Stamper @JvmOverloads public constructor(
      * which is the only mode that is meaningful on a platform without a POSIX executable bit;
      * [FileMode.ABSENT] means "git did not say", and the mode is then derived from the file itself.
      */
-    private fun stampEntry(path: String, reportedMode: FileMode): StampEntry {
+    private fun stampEntry(path: String, reportedMode: FileMode): StampEntry =
+        checkNotNull(captureEntry(path, reportedMode))
+
+    private fun captureEntry(path: String, reportedMode: FileMode, baseline: LsFilesEntry? = null): StampEntry? {
         val resolved = workspace.paths.resolveCapture(path)
         if (resolved !is PathResolution.Resolved) {
             throw SnapshotIntegrityError("cannot stamp '$path': $resolved")
@@ -258,15 +268,25 @@ public class Stamper @JvmOverloads public constructor(
             PathKind.Missing -> deleted(path)
             PathKind.Symlink -> {
                 val bytes = Files.readSymbolicLink(resolved.real).toString().toByteArray(StandardCharsets.UTF_8)
+                if (matchesObject(bytes, FileMode.SYMLINK, baseline)) return null
                 StampEntry(path, EntryType.Symlink, FileMode.SYMLINK, Digest.of(bytes), bytes.size.toLong())
             }
             PathKind.Regular -> {
                 val bytes = workspace.bytes(resolved)
                     ?: throw SnapshotIntegrityError("'$path' disappeared during stamping")
-                StampEntry(path, EntryType.File, fileMode(resolved, reportedMode), Digest.of(bytes), bytes.size.toLong())
+                val mode = fileMode(resolved, reportedMode)
+                if (matchesObject(bytes, mode, baseline)) return null
+                StampEntry(path, EntryType.File, mode, Digest.of(bytes), bytes.size.toLong())
             }
             else -> throw SnapshotIntegrityError("unsupported capture kind ${resolved.kind}: $path")
         }
+    }
+
+    private fun matchesObject(bytes: ByteArray, mode: FileMode, baseline: LsFilesEntry?): Boolean {
+        if (baseline == null || mode != baseline.mode) return false
+        val hash = java.security.MessageDigest.getInstance(if (baseline.id.hex.length == 40) "SHA-1" else "SHA-256")
+        hash.update("blob ${bytes.size}\u0000".toByteArray(StandardCharsets.US_ASCII))
+        return io.astrolabe.id.Hashing.hex(hash.digest(bytes)) == baseline.id.hex
     }
 
     /**

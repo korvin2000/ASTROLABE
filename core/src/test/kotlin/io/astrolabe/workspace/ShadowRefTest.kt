@@ -23,6 +23,33 @@ import org.junit.jupiter.api.io.TempDir
 class ShadowRefTest {
 
     @Test
+    fun `git clean filter equivalence cannot hide raw candidate changes or recovery bytes`(@TempDir state: Path) {
+        WorkspaceFixture.create(state) { repo ->
+            repo.cleanFilter("strip", "git stripspace", "*.txt")
+            repo.write("filtered.txt", "hello \n")
+            repo.commit("filtered content")
+        }.use { fixture ->
+            assertTrue(fixture.repo.git.status().entries.isEmpty(), "Git considers the filtered file clean")
+            val before = fixture.stamper.report()
+            assertTrue("filtered.txt" in before.members)
+            val shadow = fixture.shadowRef()
+            shadow.open(fixture.dirtyState.capture())
+            fixture.repo.write("filtered.txt", "hello\t\n")
+            assertTrue(fixture.repo.git.status().entries.isEmpty())
+            val after = fixture.stamper.report()
+            assertNotEquals(before.candidateId, after.candidateId)
+            assertEquals(setOf("filtered.txt"), Stamper.diff(before, after))
+            shadow.snapshot(1)
+            val output = state.resolve("raw-candidate")
+            assertTrue(shadow.materialize(1, output).ok)
+            assertEquals("hello\t\n", Files.readString(output.resolve("filtered.txt")))
+            assertIs<RestoreResult.Restored>(shadow.restore(0))
+            assertEquals("hello \n", Files.readString(fixture.repo.resolve("filtered.txt")))
+            assertEquals(before.candidateId, fixture.stamper.stamp().id)
+        }
+    }
+
+    @Test
     fun `materialize refuses an omitted clean tree entry`(@TempDir state: Path) {
         WorkspaceFixture.create(state).use { fixture ->
             val shadow = fixture.shadowRef()
