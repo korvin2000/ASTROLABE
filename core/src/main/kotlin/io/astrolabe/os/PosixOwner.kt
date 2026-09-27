@@ -9,6 +9,9 @@ import java.lang.foreign.StructLayout
 import java.lang.foreign.SymbolLookup
 import java.lang.foreign.ValueLayout
 import java.lang.invoke.MethodHandle
+import java.nio.file.Files
+import java.nio.file.NoSuchFileException
+import java.nio.file.Path
 
 /**
  * POSIX [ProcessOwner]: `posix_spawnp` with `POSIX_SPAWN_SETSID`, so the child is a session and
@@ -175,9 +178,44 @@ private class PosixProcess(override val pid: Long) : OwnedProcess {
     override fun terminateTree() {
         Arena.ofConfined().use { arena ->
             val capture = arena.allocate(Libc.CAPTURE)
-            // ESRCH means the group is already gone; the supervisor observes the exit regardless.
-            Libc.kill.callInt(capture, (-pid).toInt(), SIGKILL)
+            if (Libc.kill.callInt(capture, (-pid).toInt(), SIGKILL) != 0) {
+                val errno = capture.get(ValueLayout.JAVA_INT, Libc.ERRNO)
+                if (errno != ESRCH) throw OsFailure("kill", errno, "cannot terminate process group $pid")
+            }
         }
+    }
+
+    override fun awaitTreeExit(timeoutMillis: Long): Boolean {
+        val deadline = System.nanoTime() + timeoutMillis * 1_000_000L
+        while (true) {
+            if (reap() && groupQuiescent()) return true
+            if (System.nanoTime() >= deadline) return false
+            Thread.sleep(REAP_INTERVAL_MILLIS)
+        }
+    }
+
+    private fun groupQuiescent(): Boolean {
+        val gone = Arena.ofConfined().use { arena ->
+            val capture = arena.allocate(Libc.CAPTURE)
+            if (Libc.kill.callInt(capture, (-pid).toInt(), 0) == 0) false else {
+                val errno = capture.get(ValueLayout.JAVA_INT, Libc.ERRNO)
+                if (errno != ESRCH) throw OsFailure("kill", errno, "cannot inspect process group $pid")
+                true
+            }
+        }
+        if (gone) return true
+        // Linux may retain orphan zombies until init reaps them. They cannot write, but kill(0)
+        // still sees the group. Unreadable process metadata fails closed through the supervisor.
+        Files.newDirectoryStream(Path.of("/proc")).use { entries ->
+            for (entry in entries) {
+                if (entry.fileName.toString().toLongOrNull() == null) continue
+                val stat = try { Files.readString(entry.resolve("stat")) } catch (_: NoSuchFileException) { continue }
+                val fields = stat.substringAfterLast(") ").split(' ', limit = 4)
+                check(fields.size == 4) { "malformed process metadata: $entry" }
+                if (fields[2].toLong() == pid && fields[0] !in setOf("Z", "X", "x")) return false
+            }
+        }
+        return true
     }
 
     /** Nothing to release: the process was reaped by [awaitExit] and holds no inherited descriptor. */
@@ -209,6 +247,7 @@ private class PosixProcess(override val pid: Long) : OwnedProcess {
         const val WNOHANG = 1
         const val SIGKILL = 9
         const val EINTR = 4
+        const val ESRCH = 3
         const val REAP_INTERVAL_MILLIS = 20L
     }
 }

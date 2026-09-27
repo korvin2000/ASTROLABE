@@ -63,6 +63,9 @@ internal interface OwnedProcess : AutoCloseable {
     /** Kills the container and therefore the whole tree, descendants included. */
     fun terminateTree()
 
+    /** Confirms the owned container has no remaining writers; false when the deadline expires. */
+    fun awaitTreeExit(timeoutMillis: Long): Boolean
+
     /** Releases native handles. On Windows this also kills any survivor (kill-on-close). */
     override fun close()
 }

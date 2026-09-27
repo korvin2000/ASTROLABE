@@ -43,7 +43,7 @@ class ProcOwnershipTest {
 
         assertEquals(ProcStatus.Cancelled, os.terminate(proc).status)
 
-        assertTrue(ChildCommands.awaitPidGone(grandchild, 15_000L), "grandchild $grandchild survived termination")
+        assertTrue(!ChildCommands.isAlive(grandchild), "grandchild $grandchild survived termination")
     }
 
     /**
@@ -65,7 +65,7 @@ class ProcOwnershipTest {
 
         assertEquals(ProcStatus.DeadlineExceeded, os.awaitTerminal(proc, deadline + 30L).status)
 
-        assertTrue(ChildCommands.awaitPidGone(grandchild, 15_000L), "grandchild $grandchild survived the deadline")
+        assertTrue(!ChildCommands.isAlive(grandchild), "grandchild $grandchild survived the deadline")
     }
 
     @Test
@@ -75,7 +75,7 @@ class ProcOwnershipTest {
 
         assertEquals(ProcStatus.Exited(0), os.awaitTerminal(proc).status)
 
-        assertTrue(ChildCommands.awaitPidGone(grandchild, 15_000L), "grandchild $grandchild outlived its root")
+        assertTrue(!ChildCommands.isAlive(grandchild), "grandchild $grandchild outlived its root")
     }
 
     @Test
@@ -85,8 +85,8 @@ class ProcOwnershipTest {
 
         os.close()
 
-        assertTrue(ChildCommands.awaitPidGone(proc.pid, 15_000L))
-        assertTrue(ChildCommands.awaitPidGone(grandchild, 15_000L))
+        assertTrue(!ChildCommands.isAlive(proc.pid))
+        assertTrue(!ChildCommands.isAlive(grandchild))
     }
 
     @Test

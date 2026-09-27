@@ -249,8 +249,30 @@ private class WindowsProcess(
     override fun terminateTree() {
         Arena.ofConfined().use { arena ->
             val capture = arena.allocate(Win32.CAPTURE)
-            // A failure means the job is already gone; the supervisor observes the exit regardless.
-            Win32.terminateJobObject.callInt(capture, job, 1)
+            if (Win32.terminateJobObject.callInt(capture, job, 1) == 0) {
+                val code = capture.get(ValueLayout.JAVA_INT, Win32.LAST_ERROR)
+                throw OsFailure("TerminateJobObject", code, "job termination failed (GetLastError=$code)")
+            }
+        }
+    }
+
+    override fun awaitTreeExit(timeoutMillis: Long): Boolean {
+        Arena.ofConfined().use { arena ->
+            val capture = arena.allocate(Win32.CAPTURE)
+            val accounting = arena.allocate(Win32.JOB_BASIC_ACCOUNTING)
+            val deadline = System.nanoTime() + timeoutMillis * 1_000_000L
+            while (true) {
+                if (Win32.queryInformationJobObject.callInt(
+                        capture, job, 1, accounting, accounting.byteSize().toInt(), MemorySegment.NULL,
+                    ) == 0
+                ) {
+                    val code = capture.get(ValueLayout.JAVA_INT, Win32.LAST_ERROR)
+                    throw OsFailure("QueryInformationJobObject", code, "job accounting failed (GetLastError=$code)")
+                }
+                if (accounting.get(ValueLayout.JAVA_INT, Win32.JOB_ACTIVE_PROCESSES) == 0) return true
+                if (System.nanoTime() >= deadline) return false
+                Thread.sleep(10)
+            }
         }
     }
 
@@ -279,6 +301,19 @@ private object Win32 {
 
     val CAPTURE: StructLayout = Linker.Option.captureStateLayout()
     val LAST_ERROR: Long = CAPTURE.byteOffset(MemoryLayout.PathElement.groupElement("GetLastError"))
+
+    // https://learn.microsoft.com/windows/win32/api/winnt/ns-winnt-jobobject_basic_accounting_information
+    val JOB_BASIC_ACCOUNTING: StructLayout = MemoryLayout.structLayout(
+        ValueLayout.JAVA_LONG.withName("TotalUserTime"),
+        ValueLayout.JAVA_LONG.withName("TotalKernelTime"),
+        ValueLayout.JAVA_LONG.withName("ThisPeriodTotalUserTime"),
+        ValueLayout.JAVA_LONG.withName("ThisPeriodTotalKernelTime"),
+        ValueLayout.JAVA_INT.withName("TotalPageFaultCount"),
+        ValueLayout.JAVA_INT.withName("TotalProcesses"),
+        ValueLayout.JAVA_INT.withName("ActiveProcesses"),
+        ValueLayout.JAVA_INT.withName("TotalTerminatedProcesses"),
+    )
+    val JOB_ACTIVE_PROCESSES: Long = JOB_BASIC_ACCOUNTING.byteOffset(MemoryLayout.PathElement.groupElement("ActiveProcesses"))
 
     val SECURITY_ATTRIBUTES: StructLayout = MemoryLayout.structLayout(
         ValueLayout.JAVA_INT.withName("nLength"),
@@ -384,6 +419,13 @@ private object Win32 {
         "AssignProcessToJobObject",
         FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS),
     )
+    val queryInformationJobObject: MethodHandle = bind(
+        "QueryInformationJobObject",
+        FunctionDescriptor.of(
+            ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.ADDRESS,
+            ValueLayout.JAVA_INT, ValueLayout.ADDRESS,
+        ),
+    )
     val createProcessW: MethodHandle = bind(
         "CreateProcessW",
         FunctionDescriptor.of(
@@ -429,6 +471,7 @@ private object Win32 {
     )
 
     init {
+        check(JOB_BASIC_ACCOUNTING.byteSize() == 48L)
         check(SECURITY_ATTRIBUTES.byteSize() == 24L) { "SECURITY_ATTRIBUTES is ${SECURITY_ATTRIBUTES.byteSize()}, expected 24" }
         check(STARTUPINFOW.byteSize() == 104L) { "STARTUPINFOW is ${STARTUPINFOW.byteSize()}, expected 104" }
         check(PROCESS_INFORMATION.byteSize() == 24L) { "PROCESS_INFORMATION is ${PROCESS_INFORMATION.byteSize()}, expected 24" }
