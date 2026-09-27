@@ -75,6 +75,32 @@ class CalibrationTest {
     }
 
     @Test
+    fun `host cancellation and external stops do not become failed calibration samples`() {
+        TempRepo.create().use { repo ->
+            repo.write("a.txt", "a")
+            repo.commit("initial")
+            Store.open(stateRoot, repo.git, clock).use { store ->
+                seed(store)
+                val campaigns = SqliteCampaigns(store, clock)
+                for ((work, outcome) in listOf("W-3" to CampaignOutcome.Cancelled, "W-4" to CampaignOutcome.BlockedExternal)) {
+                    val contract = contract(work)
+                    var state = Lifecycle.open(contract, graph()).also(campaigns::save)
+                    for (transition in listOf(
+                        Transition.Reconciled(), Transition.Dispatched("I1", ContextId("cell-$work")),
+                        Transition.Lost(ContextId("cell-$work"), null), Transition.Stopped(outcome, "external stop"),
+                    )) state = Lifecycle.apply(state, contract, transition).also(campaigns::save)
+                }
+                val observations = Calibration.observations(store, series)
+                assertEquals(
+                    listOf(CalibrationOutcome.Failed, CalibrationOutcome.Unfinished, CalibrationOutcome.Cancelled, CalibrationOutcome.Unfinished),
+                    observations.map { it.outcome },
+                )
+                assertEquals(1, CalibrationStats.aggregate(observations, Calibration.policy()).groups.getValue(series).overall.eligible)
+            }
+        }
+    }
+
+    @Test
     fun `stored sizing aggregates deterministically, warns on an overrun band and renders the block only with history`() {
         TempRepo.create().use { repo ->
             repo.write("a.txt", "a")

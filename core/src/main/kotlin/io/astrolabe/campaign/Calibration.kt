@@ -38,7 +38,7 @@ public object Calibration {
 
     /**
      * One observation per dispatched increment of every stored campaign: verified ⇒ completed, cancelled ⇒ cancelled,
-     * unverified in an ended campaign ⇒ failed, otherwise unfinished (censored). The subsystem is the increment's
+     * unverified in a failed campaign ⇒ failed, otherwise unfinished (censored). The subsystem is the increment's
      * first write-scope directory.
      */
     @JvmStatic
@@ -49,7 +49,8 @@ public object Calibration {
                     val outcome = when {
                         increment.status == IncrementStatus.Verified -> CalibrationOutcome.Completed
                         increment.status == IncrementStatus.Cancelled -> CalibrationOutcome.Cancelled
-                        state.phase == CampaignPhase.Ended -> CalibrationOutcome.Failed
+                        state.outcome == CampaignOutcome.Cancelled -> CalibrationOutcome.Cancelled
+                        state.outcome == CampaignOutcome.Failed -> CalibrationOutcome.Failed
                         else -> CalibrationOutcome.Unfinished
                     }
                     CalibrationObservation.fromIncrement(
