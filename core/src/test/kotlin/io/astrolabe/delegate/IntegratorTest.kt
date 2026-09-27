@@ -115,6 +115,23 @@ class IntegratorTest {
     private fun started(dispatch: Dispatch): Handle = assertIs<Dispatch.Started>(dispatch, dispatch.toString()).handle
 
     @Test
+    fun `combined checks cannot publish a tree with changed dependencies`(@TempDir state: Path) = runTest {
+        Rig(state, { mapOf("src/a.py" to "def a():\n    return 7\n") }).use { rig ->
+            val delegator = rig.delegator(backgroundScope)
+            val handle = started(delegator.dispatch(ChildKind.Writer, rig.task("I1", listOf("src/a.py")), DispatchMode.Sync))
+            val result = rig.collected(delegator, handle, delegator.collect(handle))
+            val before = rig.stamp()
+            val integrator = rig.integrator(IntegrationChecks { tree, _, _ ->
+                Files.writeString(tree.root.resolve("README.md"), "unreviewed dependency")
+                IntegrationCheck(emptyList())
+            })
+            assertIs<Integration.Rejected>(integrator.integrate(listOf(result)).single())
+            assertEquals(before, rig.stamp())
+            assertTrue(rig.intents.open().isEmpty())
+        }
+    }
+
+    @Test
     fun `publication rechecks contract and generation after waiting for main ownership`(@TempDir state: Path) = runTest {
         Rig(state, { mapOf("src/a.py" to "def a():\n    return 7\n") }).use { rig ->
             val delegator = rig.delegator(backgroundScope)
