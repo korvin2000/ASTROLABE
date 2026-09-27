@@ -204,10 +204,12 @@ public class Look(
         blobs.put(content.bytes, BlobKind.PREIMAGE, ids, recovery = true)
         val full = redaction.apply(rendered(lines, span), ContentClass.ReusableEvidence)
         val hidden = shift(full.mask.hiddenLines, span.from - 1)
-        val view = fit(full.text.lines(), args.budget)
+        val view = fit(full.text.lines(), args.budget) { kept ->
+            "\n… ${span.to - span.from - kept + 1} more lines: recall ${alias.text} range ${span.from + kept}-${span.to}"
+        }
+        if (view.lines.isEmpty()) return refused(args, "refused", "${target.path}: selected line exceeds budget ${args.budget}; raise budget or narrow range", complete = false)
         val displayed = LineRange(span.from, span.from + view.lines.size - 1)
-        val more = if (view.truncated) "… ${span.to - displayed.to} more lines: recall ${alias.text} range ${displayed.to + 1}-${span.to}" else null
-        val body = view.lines.joinToString("\n") + (more?.let { "\n$it" } ?: "")
+        val body = view.body
         val mask = RedactionMask(hidden, full.mask.limitations)
         val blob = blobs.put(full.text.toByteArray(Charsets.UTF_8), BlobKind.OUTPUT, ids)
         observations.record(
@@ -265,8 +267,9 @@ public class Look(
         val summary = "${hits.hits.size} match${if (hits.hits.size == 1) "" else "es"} for /$pattern/ in $scopeText" +
             (hits.filesSearched?.let { " · $it files searched" } ?: "") + (if (hits.complete) "" else " · capture incomplete (${hits.backend.name.lowercase()} limit)")
         val full = redaction.apply((listOf(summary) + lines).joinToString("\n"), ContentClass.ReusableEvidence)
-        val view = fit(full.text.lines(), args.budget)
-        val body = view.lines.joinToString("\n") + (if (view.truncated) "\n… ${lines.size + 1 - view.lines.size} more lines: recall ${alias.text}" else "")
+        val view = fit(full.text.lines(), args.budget) { kept -> "\n… ${lines.size + 1 - kept} more lines: recall ${alias.text}" }
+        if (view.lines.isEmpty()) return refused(args, "refused", "find result exceeds budget ${args.budget}; raise budget", complete = false, scope = scopeText)
+        val body = view.body
         val versions = files.filterValues { it != null }.mapValues { it.value!!.version }
         val blob = blobs.put(full.text.toByteArray(Charsets.UTF_8), BlobKind.OUTPUT, ids)
         // Coverage: only hit lines actually displayed, minus lines the redaction hid.
@@ -305,8 +308,9 @@ public class Look(
         val lines = listOf("${hits.events.size} journal event${if (hits.events.size == 1) "" else "s"} match '$pattern' in store" + (if (hits.complete) "" else " · more than $findMaxHits: narrow the pattern")) +
             hits.events.map { "#${it.seq} ${it.kind.name.lowercase()}" + (it.turn?.let { t -> " turn $t" } ?: "") + ": " + it.text.lineSequence().first() }
         val full = redaction.apply(lines.joinToString("\n"), ContentClass.ReusableEvidence)
-        val view = fit(full.text.lines(), args.budget)
-        val body = view.lines.joinToString("\n") + (if (view.truncated) "\n… recall ${alias.text}" else "")
+        val view = fit(full.text.lines(), args.budget) { "\n… recall ${alias.text}" }
+        if (view.lines.isEmpty()) return refused(args, "refused", "store search result exceeds budget ${args.budget}; raise budget", complete = false, scope = "store")
+        val body = view.body
         val blob = blobs.put(full.text.toByteArray(Charsets.UTF_8), BlobKind.OUTPUT, ids)
         observations.record(Observation(alias.canonicalId, ids, actionId, null, blob, emptyList(), emptyMap(), hits.complete && !view.truncated, emptyMap(), hits.complete, RedactionMask(Ranges.EMPTY, full.mask.limitations), view.truncated))
         return outcome(alias.text, actionId, "ok", body, view.tokens, scope = "store", complete = hits.complete && !view.truncated, captureComplete = hits.complete, displayTruncated = view.truncated, redacted = full.mask.applied, artifact = blob)
@@ -345,34 +349,35 @@ public class Look(
         }
         val actionId = idGen.next("act")
         val recalled = allocate()
-        val view = fit(selected, args.budget)
+        val recorded = if (path != null && selectedSource != null) observation.sourceVersions.getValue(path) else null
+        val now = if (recorded != null && path != null) registry.version(path) else null
+        val status = if (recorded != null && recorded != now) "historical" else "ok"
+        val label = when {
+            recorded == null || recorded == now -> "recall of #$number"
+            now == null -> "recall of #$number · historical v=${recorded.hash8} (file gone); not KNOWN"
+            else -> "recall of #$number · historical v=${recorded.hash8} (now ${now.hash8}); not KNOWN, read again for current bytes"
+        }
+        val view = fit(selected, args.budget, prefix = "$label\n") { kept ->
+            "\n… recall #$number range ${selectedSource?.from?.plus(kept) ?: kept + 1}-${selectedSource?.to ?: selected.size}"
+        }
+        if (view.lines.isEmpty()) return refused(args, "refused", "recall result exceeds budget ${args.budget}; raise budget", complete = false)
         val shown = selectedSource?.let { LineRange(it.from, it.from + view.lines.size - 1) }
-        var status = "ok"
-        var label = "recall of #$number"
         val versions = LinkedHashMap<String, FileVersion>()
         if (path != null && shown != null) {
-            val recorded = observation.sourceVersions.getValue(path)
-            val now = registry.version(path)
+            val version = requireNotNull(recorded)
             val hidden = observation.redaction.hiddenLines.intersect(Ranges.of(shown))
-            val entry = Entry(path, Ranges.of(shown), recorded, EntrySource.Recall, context.turn, recalled.text, view.tokens, hidden)
+            val entry = Entry(path, Ranges.of(shown), version, EntrySource.Recall, context.turn, recalled.text, view.tokens, hidden)
             when (val result = workset.recall(entry, now, context.turn)) {
                 is Workset.RecallResult.Known -> {
-                    versions[path] = recorded
-                    registry.show(ids.context!!, generation, workspace.id, path, recorded, Ranges.of(shown), RedactionMask(hidden))
+                    versions[path] = version
+                    registry.show(ids.context!!, generation, workspace.id, path, version, Ranges.of(shown), RedactionMask(hidden))
                 }
                 is Workset.RecallResult.Historical -> {
-                    status = "historical"
-                    label = "recall of #$number · historical v=${recorded.hash8} (now ${result.currentVersion?.hash8 ?: "missing"}); not KNOWN, read again for current bytes"
                     result.currentVersion?.let { versions[path] = it }
                 }
             }
-            if (now == null) {
-                status = "historical"
-                label = "recall of #$number · historical v=${recorded.hash8} (file gone); not KNOWN"
-            }
         }
-        val more = if (view.truncated) "\n… recall #$number range ${(shown?.to ?: view.lines.size) + 1}-${selectedSource?.to ?: selected.size}" else ""
-        val body = label + "\n" + view.lines.joinToString("\n") + more
+        val body = view.body
         val blob = blobs.put(selected.joinToString("\n").toByteArray(Charsets.UTF_8), BlobKind.OUTPUT, ids)
         observations.record(
             Observation(
@@ -499,19 +504,26 @@ public class Look(
 
     // -------------------------------------------------------------- helpers
 
-    private class Fit(val lines: List<String>, val tokens: Long, val truncated: Boolean)
+    private class Fit(val lines: List<String>, val body: String, val tokens: Long, val truncated: Boolean)
 
-    /** Whole lines that fit [budget] tokens, at least one. */
-    private fun fit(lines: List<String>, budget: Int): Fit {
-        var total = 0L
+    /** Whole lines only; a marker and any recall label also consume the requested prompt budget. */
+    private fun fit(lines: List<String>, budget: Int, prefix: String = "", suffix: (Int) -> String = { "" }): Fit {
         val kept = ArrayList<String>()
+        var estimated = tokensOf(prefix)
         for (line in lines) {
-            val cost = tokensOf(line) + 1
-            if (kept.isNotEmpty() && total + cost > budget) break
+            val cost = tokensOf(line) + if (kept.isEmpty()) 0 else 1
+            if (estimated > budget.toLong() - cost && (kept.isNotEmpty() || tokensOf(prefix + line) > budget)) break
             kept += line
-            total += cost
+            estimated += cost
         }
-        return Fit(kept, total, kept.size < lines.size)
+        while (true) {
+            val truncated = kept.size < lines.size
+            val body = prefix + kept.joinToString("\n") + if (truncated) suffix(kept.size) else ""
+            val tokens = tokensOf(body)
+            if (tokens <= budget) return Fit(kept, body, tokens, truncated)
+            if (kept.isEmpty()) return Fit(emptyList(), "", 0, true)
+            kept.removeAt(kept.lastIndex)
+        }
     }
 
     private fun tokensOf(text: String): Long = estimator.estimate(text).tokens
@@ -548,16 +560,34 @@ public class Look(
         val actionId = idGen.next("act")
         val alias = allocate()
         val full = redaction.apply(text, ContentClass.ReusableEvidence)
-        val view = fit(full.text.lines(), args.budget)
-        val body = view.lines.joinToString("\n") + (if (view.truncated) "\n… recall ${alias.text}" else "")
+        val view = fit(full.text.lines(), args.budget) { "\n… recall ${alias.text}" }
+        if (view.lines.isEmpty()) return refused(args, "refused", "structural result exceeds budget ${args.budget}; raise budget", complete = false, scope = scope)
+        val body = view.body
         val blob = blobs.put(full.text.toByteArray(Charsets.UTF_8), BlobKind.OUTPUT, ids)
         observations.record(Observation(alias.canonicalId, ids, actionId, null, blob, versions.keys.toList(), emptyMap(), complete && !view.truncated, versions, true, RedactionMask(Ranges.EMPTY, full.mask.limitations), view.truncated))
         return outcome(alias.text, actionId, "ok", body, view.tokens, versions = versions, scope = scope, complete = complete && !view.truncated, captureComplete = true, displayTruncated = view.truncated, redacted = full.mask.applied, artifact = blob)
     }
 
     /** A result that observed nothing new: refusal, masked op, dedup pointer. Not aliased, not stored. */
-    private fun refused(args: LookArgs, status: String, body: String, versions: Map<String, FileVersion> = emptyMap(), complete: Boolean = true, scope: String? = null): ToolOutcome =
-        outcome("#-", idGen.next("act"), status, body, tokensOf(body), versions = versions, scope = scope ?: args.target, complete = complete, captureComplete = true, displayTruncated = false, redacted = false, artifact = null)
+    private fun refused(args: LookArgs, status: String, body: String, versions: Map<String, FileVersion> = emptyMap(), complete: Boolean = true, scope: String? = null): ToolOutcome {
+        val bounded = bounded(body, args.budget)
+        return outcome("#-", idGen.next("act"), status, bounded, tokensOf(bounded), versions = versions, scope = scope ?: args.target,
+            complete = complete, captureComplete = true, displayTruncated = bounded != body, redacted = false, artifact = null)
+    }
+
+    private fun bounded(body: String, budget: Int): String {
+        if (tokensOf(body) <= budget) return body
+        val marker = "…"
+        if (tokensOf(marker) > budget) return ""
+        var low = 0
+        var high = body.length
+        while (low < high) {
+            val middle = (low + high + 1) / 2
+            if (tokensOf(body.take(middle) + marker) <= budget) low = middle else high = middle - 1
+        }
+        val end = if (low in 1 until body.length && body[low - 1].isHighSurrogate() && body[low].isLowSurrogate()) low - 1 else low
+        return body.take(end) + marker
+    }
 
     private fun outcome(
         alias: String,

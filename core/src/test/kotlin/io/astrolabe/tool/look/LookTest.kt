@@ -159,6 +159,39 @@ class LookTest {
     }
 
     @Test
+    fun `a long source line and large outline cannot exceed the requested budget`() = runTest {
+        repo.write("src/long.py", "value = '" + "x".repeat(10_000) + "'\n")
+        val version = registry.version("src/long.py")!!
+        val narrow = look("""{"what":"read","target":"src/long.py:1-1","budget":30}""")
+        assertEquals("refused", status(narrow))
+        assertTrue(estimator.estimate(narrow.body).tokens <= 30, narrow.body)
+        assertFalse(workset.covers("src/long.py", version, LineRange(1, 1)))
+
+        val full = look("""{"what":"read","target":"src/long.py:1-1","budget":5000}""")
+        assertEquals("ok", status(full))
+        workset.stub(full.resultAlias!!)
+        val recalled = look("""{"what":"recall","id":"${full.resultAlias}","range":"1-1","budget":30}""")
+        assertEquals("refused", status(recalled))
+        assertTrue(estimator.estimate(recalled.body).tokens <= 30, recalled.body)
+        assertFalse(workset.covers("src/long.py", version, LineRange(1, 1)))
+
+        val found = look("""{"what":"find","target":"x{100}","glob":"src/long.py","budget":50}""")
+        assertTrue(estimator.estimate(found.body).tokens <= 50, found.body)
+        assertEquals(estimator.estimate(found.body).tokens, found.tokens)
+        assertFalse(workset.covers("src/long.py", version, LineRange(1, 1)))
+
+        repo.write("src/many.py", (1..200).joinToString("\n") { "def f$it(): return $it" })
+        val outline = look("""{"what":"read","target":"src/many.py","budget":30}""")
+        assertEquals("refused", status(outline))
+        assertTrue(estimator.estimate(outline.body).tokens <= 30, outline.body)
+        val tiny = look("""{"what":"read","target":"src/many.py","budget":1}""")
+        assertTrue(estimator.estimate(tiny.body).tokens <= 1, tiny.body)
+        val structural = look("""{"what":"outline","target":"src/many.py","budget":30}""")
+        assertTrue(estimator.estimate(structural.body).tokens <= 30, structural.body)
+        assertEquals(estimator.estimate(structural.body).tokens, structural.tokens)
+    }
+
+    @Test
     fun `symbol reads use the outline of the bytes just read and near disambiguates`() = runTest {
         val a = look("""{"what":"read","target":"src/a.py::a"}""")
         assertEquals("ok", status(a))
@@ -185,6 +218,8 @@ class LookTest {
         val shownTo = cut.header!!.runtime.scope!!.substringAfter("1-").toInt()
         assertTrue(shownTo in 2..199, cut.header!!.runtime.scope!!)
         assertTrue(cut.body.endsWith("more lines: recall #1 range ${shownTo + 1}-200"), cut.body)
+        assertEquals(estimator.estimate(cut.body).tokens, cut.tokens)
+        assertTrue(cut.tokens <= 60)
         assertTrue(workset.covers("src/big.py", v, LineRange(1, shownTo)))
         assertFalse(workset.covers("src/big.py", v, LineRange(1, shownTo + 1)), "coverage is what was displayed, not what was captured")
         val observation = SqliteObservations(store, clock).get("obs-1")!!
