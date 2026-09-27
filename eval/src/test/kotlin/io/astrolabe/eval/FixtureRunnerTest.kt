@@ -2,6 +2,8 @@ package io.astrolabe.eval
 
 import io.astrolabe.eval.samples.RunnerSampleFixtures
 import io.astrolabe.eval.samples.RunnerSampleParameterized
+import io.astrolabe.eval.samples.RunnerSampleAfterAll
+import io.astrolabe.eval.samples.RunnerSampleFactoryFailure
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
@@ -21,6 +23,23 @@ import kotlin.test.assertTrue
 class FixtureRunnerTest {
     private val sample = RunnerSampleFixtures::class.java.name
     private val sampleClass = FixtureSelection(listOf(sample))
+
+    @Test
+    fun `container failures remain visible after passing fixtures or before dynamic children`() {
+        val afterAll = FixtureRunner.run(FixtureSelection(listOf(RunnerSampleAfterAll::class.java.name)))
+        assertEquals(1, afterAll.passed)
+        assertFalse(afterAll.green)
+        assertFalse(afterAll.invariantsZero)
+        val afterAllFailures = Json.parseToJsonElement(afterAll.json()).jsonObject.getValue("containerFailures").jsonArray
+        assertEquals(1, afterAllFailures.size)
+        assertTrue(afterAllFailures.single().jsonPrimitive.content.contains("teardown failed"))
+
+        val factory = FixtureRunner.run(FixtureSelection(listOf(RunnerSampleFactoryFailure::class.java.name)))
+        assertEquals(emptyList(), factory.results)
+        val factoryFailures = Json.parseToJsonElement(factory.json()).jsonObject.getValue("containerFailures").jsonArray
+        assertEquals(1, factoryFailures.size)
+        assertTrue(factoryFailures.single().jsonPrimitive.content.contains("factory failed"))
+    }
 
     @Test
     fun `the runner reproduces the JUnit results of core's adapter fixture suite`() {
