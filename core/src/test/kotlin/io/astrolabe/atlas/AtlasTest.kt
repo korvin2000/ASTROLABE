@@ -19,6 +19,37 @@ import kotlin.test.assertTrue
 class AtlasTest {
 
     @Test
+    fun `linked manifests outside the root and in git metadata are excluded`(@TempDir outside: Path) {
+        TempRepo.create().use { repo ->
+            repo.write("linked/package.json", "{}")
+            repo.commit("track manifest")
+            val before = Atlas.build(repo.root)
+            Files.delete(repo.resolve("linked/package.json"))
+            Files.delete(repo.resolve("linked"))
+            for (target in listOf(outside, repo.resolve(".git"))) {
+                Files.writeString(target.resolve("package.json"), """{"scripts":{"test":"echo outside"}}""")
+                val link = repo.resolve("linked")
+                if (System.getProperty("os.name").startsWith("Windows")) {
+                    io.astrolabe.workspace.requireSupported(io.astrolabe.workspace.createJunction(link, target))
+                } else {
+                    Files.createSymbolicLink(link, target)
+                }
+                try {
+                    assertNull(Atlas.build(repo.root).row("linked/package.json"))
+                    assertNull(before.refresh(listOf("linked/package.json")).row("linked/package.json"))
+                    assertTrue(Sniff.commands(repo.root, setOf("linked/package.json")).isEmpty)
+                    assertNull(readRelative(repo.root, "linked/package.json"))
+                    before.save(outside.resolve("cache"))
+                } finally {
+                    Files.delete(link)
+                }
+            }
+            assertTrue(Sniff.commands(repo.root, setOf(".git/package.json", "../package.json",
+                outside.resolve("package.json").toString())).isEmpty)
+        }
+    }
+
+    @Test
     fun `every fixture file has a row with its own size and hash`() {
         for (fixture in Fixture.entries) {
             FixtureRepos.materialize(fixture).use { repo ->

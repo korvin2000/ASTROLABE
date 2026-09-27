@@ -266,7 +266,7 @@ public data class Atlas(
      */
     public fun save(indexesDir: Path): Path {
         Files.createDirectories(indexesDir)
-        val stamps = rows.associate { row -> row.path to mtimeOf(resolveRelative(root, row.path)) }
+        val stamps = rows.associate { row -> row.path to mtimeOf(root, row.path) }
         val cache = AtlasCache(
             schema = CACHE_SCHEMA,
             repoKey = repoKey.hex,
@@ -525,13 +525,19 @@ private fun walkFiles(root: Path): List<String> {
 }
 
 /** Resolves a forward-slashed workspace-relative path against [root] on every platform. */
-internal fun resolveRelative(root: Path, relative: String): Path =
-    relative.split('/').filter { it.isNotEmpty() }.fold(root) { path, segment ->
-        require(segment != "..") { "an atlas path may not escape the repository root; got '$relative'" }
-        path.resolve(segment)
-    }
+internal fun resolveRelative(root: Path, relative: String): Path {
+    val resolved = io.astrolabe.workspace.WorkspacePath.of(root).resolve(relative, io.astrolabe.workspace.Intent.Read)
+    if (resolved !is io.astrolabe.workspace.PathResolution.Resolved ||
+        resolved.kind != io.astrolabe.workspace.PathKind.Regular
+    ) throw IOException("atlas path refused: $relative ($resolved)")
+    return resolved.real
+}
 
-internal fun readRelative(root: Path, relative: String): ByteArray? = readBytes(resolveRelative(root, relative))
+internal fun readRelative(root: Path, relative: String): ByteArray? = try {
+    readBytes(resolveRelative(root, relative))
+} catch (_: IOException) {
+    null
+}
 
 internal fun readBytes(path: Path): ByteArray? = try {
     Files.readAllBytes(path)
@@ -541,8 +547,8 @@ internal fun readBytes(path: Path): ByteArray? = try {
     null
 }
 
-private fun mtimeOf(path: Path): Long = try {
-    Files.getLastModifiedTime(path).toMillis()
+private fun mtimeOf(root: Path, relative: String): Long = try {
+    Files.getLastModifiedTime(resolveRelative(root, relative)).toMillis()
 } catch (_: IOException) {
     0L
 }
