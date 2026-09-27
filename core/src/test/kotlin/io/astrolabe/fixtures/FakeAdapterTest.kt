@@ -23,6 +23,8 @@ import io.astrolabe.provider.ToolSchema
 import io.astrolabe.provider.Validation
 import io.astrolabe.provider.estimate
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
 import kotlinx.serialization.json.JsonObject
@@ -38,6 +40,44 @@ import kotlin.test.assertTrue
 
 /** AX-01..AX-10 (§15.4) and IX-15/16/17/24 at contract level against the fake adapter (TODO P0.3.5). */
 class FakeAdapterTest {
+    @Test
+    fun `cancel reconciles without a response waiter`() = runTest {
+        val late = listOf(Message.text(Role.Assistant, "late usage"))
+        val adapter = FakeAdapter(ScriptedModel.of(), holdResponses = true, lateOutputOnCancel = late)
+        val inv = adapter.start(request(), id())
+        inv.cancel()
+        val terminal = withTimeout(1_000) { inv.terminal() }
+        assertTrue(terminal.cancelled)
+        assertEquals(late, terminal.lateItems)
+        assertNotNull(terminal.usage)
+        inv.cancel()
+        assertEquals(terminal, inv.terminal())
+        assertEquals(1, adapter.calls.size)
+    }
+
+    @Test
+    fun `cancelling a suspended response waiter preserves terminal accounting`() = runTest {
+        val adapter = FakeAdapter(ScriptedModel.of(), holdResponses = true)
+        val inv = adapter.start(request(), id())
+        val waiter = async { inv.await() }
+        yield()
+        waiter.cancelAndJoin()
+        val terminal = withTimeout(1_000) { inv.terminal() }
+        assertTrue(terminal.cancelled)
+        assertNotNull(terminal.usage)
+        assertEquals(1, adapter.calls.size)
+        assertEquals(StopReason.Cancelled, inv.await().stop)
+    }
+
+    @Test
+    fun `release completes a held invocation without a response waiter`() = runTest {
+        val adapter = FakeAdapter(ScriptedModel.build { reply(Message.text(Role.Assistant, "released")) }, holdResponses = true)
+        val inv = adapter.start(request(), id())
+        adapter.release(inv.id)
+        assertEquals("released", withTimeout(1_000) { inv.terminal() }.response?.text)
+        assertEquals(1, adapter.calls.size)
+    }
+
     private val estimator = HeuristicEstimator()
     private val schema = ToolSchema("look", "observe the repository", JsonObject(mapOf("type" to JsonPrimitive("object"))), SchemaDialect.JSON_SCHEMA_2020_12)
     private val kernel = Segment(SegmentKind.S, listOf(Message.text(Role.System, "kernel contract " + "rule ".repeat(30))), breakpoint = true)
@@ -133,7 +173,7 @@ class FakeAdapterTest {
         val inv = adapter.start(request(transcript(Message.text(Role.User, "go"))), id())
         assertEquals(InvocationState.Requested, inv.state)
         inv.cancel()
-        assertEquals(InvocationState.CancelRequested, inv.state)
+        assertEquals(InvocationState.TerminalReconciled, inv.state)
         val response = inv.await()
         assertEquals(StopReason.Cancelled, response.stop)
         assertTrue(response.toolCalls.isEmpty())
