@@ -1,6 +1,6 @@
 # Implementation audit findings
 
-**Remediation:** 82 fixed on `feature/bugfix` (10 in this continuation); 60 remain open; F-034 was already resolved. See [bugfix progress](audit/BUGFIX-PROGRESS.md). Original audit evidence remains historical; `fix_progress` is the current repair status.
+**Remediation:** 88 fixed on `feature/bugfix` (6 committed in this continuation); 54 remain open; F-034 was already resolved. See [bugfix progress](audit/BUGFIX-PROGRESS.md). Original audit evidence remains historical; `fix_progress` is the current repair status.
 
 ```json
 {
@@ -541,25 +541,21 @@
   },
   "fix_progress": {
     "branch": "feature/bugfix",
-    "date": "2026-09-27",
-    "status": "session_complete_remaining_findings_open",
+    "date": "2026-09-28",
+    "status": "committed",
     "fixed_this_session": [
-      "F-040",
-      "F-085",
-      "F-099",
-      "F-108",
-      "F-114",
-      "F-083",
-      "F-096",
-      "F-141",
-      "F-097",
-      "F-090"
+      "F-115",
+      "F-069",
+      "F-042",
+      "F-039",
+      "F-052",
+      "F-110"
     ],
-    "fixed_this_session_count": 10,
+    "fixed_this_session_count": 6,
     "previously_resolved": [
       "F-034"
     ],
-    "remaining_open_count": 60,
+    "remaining_open_count": 54,
     "remaining_open_ids": [
       "F-016",
       "F-017",
@@ -569,14 +565,10 @@
       "F-032",
       "F-033",
       "F-036",
-      "F-039",
       "F-041",
-      "F-042",
       "F-044",
       "F-045",
       "F-048",
-      "F-052",
-      "F-069",
       "F-075",
       "F-082",
       "F-084",
@@ -596,11 +588,9 @@
       "F-106",
       "F-107",
       "F-109",
-      "F-110",
       "F-111",
       "F-112",
       "F-113",
-      "F-115",
       "F-117",
       "F-118",
       "F-119",
@@ -631,16 +621,22 @@
       "F-032",
       "F-033",
       "F-036",
-      "F-052",
-      "F-069",
-      "F-115",
       "F-122",
       "F-127",
       "F-142"
     ],
     "handoff": "CONTINUE-TASK.md",
     "detail": "audit/BUGFIX-PROGRESS.md",
-    "verification": "Full Windows JDK 26 build passed on 4604b89: 1645 passed, 13 skipped, zero failures/errors. Compilation, packaging and core/eval ABI passed. No new Linux/CI or P7 evidence.",
+    "verification": "F-115/F-069/F-042/F-052/F-110 RED/GREEN and F-039 OutlineTest passed. Full Windows JDK 26 build after all six fixes passed: 1667 tests, 13 skipped, zero failures/errors; ABI and packaging passed. No new Linux/CI or P7 evidence.",
+    "current_build": {
+      "command": "./gradlew.bat build -q --console=plain",
+      "exit": 0,
+      "tests": 1667,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 13,
+      "coverage": "all six fixes through fbee771"
+    },
     "source_changes_allowed": true,
     "verification_results": {
       "full_build_command": "./gradlew.bat build -q --console=plain",
@@ -1842,12 +1838,13 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-039 - Curly-language outline extraction has quadratic span-membership work
 
 - Task: [P1.3.3](TODO.md#L763).
-- Severity: medium. Confidence: confirmed_source. Status: open.
+- Severity: medium. Confidence: confirmed_source. Status: fixed (2026-09-27).
 - Location: [Outline.parseCurly](core/src/main/kotlin/io/astrolabe/atlas/Outline.kt#L499).
 - Problem: nestedAt scans every container span and insideBody scans every function span for each source line/declaration. In a file with N independent one-line functions, deciding top-level status performs roughly N squared body-range comparisons. BlockScanner can also be invoked repeatedly for each declaration; the 1 MiB Atlas file cap limits bytes but does not prevent tens of thousands of tiny declarations.
 - Impact: initial Atlas.build or a touched-file refresh can spend disproportionate synchronous CPU on a valid compact generated/source file, despite bounded model output. No timing claim or adversarial stress run is made.
 - Possible solutions: sweep sorted span boundaries while parsing, use an interval stack/index, or precompute membership once; retain explicit tier-0 incompleteness and a parser work budget for unusually complex files.
 - Future regression: files with increasing counts of independent declarations should show approximately linear membership work; malformed nesting must terminate under the same budget.
+- Fix (2026-09-27, `05f064b`): Container and function-body membership are precomputed with range deltas in O(lines + spans) before classification. Existing OutlineTest language and malformed-input cases pass. No throughput benchmark was run; repeated block scanning is a separate remaining cost.
 
 ### F-040 - Direct node test inference drops declared npm lifecycle checks
 
@@ -1875,12 +1872,13 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-042 - Bounded journal search deserializes the entire campaign history
 
 - Task: [P1.4.1](TODO.md#L775).
-- Severity: medium. Confidence: confirmed_source. Status: open.
+- Severity: medium. Confidence: confirmed_source. Status: fixed (2026-09-27).
 - Location: [Journal.events/search](core/src/main/kotlin/io/astrolabe/evidence/Journal.kt#L94).
 - Problem: even with a context/kind scope and limit=1, events() selects every body for the work, deserializes every JSON payload under the single DB lock, then filters scope in memory. search lowercases/scans all matches and only applies limit after allocating the full matching list.
 - Impact: lookup latency and heap grow with complete campaign history and full payload size, not the requested bounded result. While Db.query maps rows, other journal/checkpoint writers are blocked. The TODO explicitly defers FTS, but the current full-body loading is avoidable without FTS.
 - Possible solutions: push context/kind predicates into SQL; use a paginated or streaming text/ref scan with limit+1 to establish completeness, and load full bodies only for returned records. Add a text-view index/FTS if measured workloads justify it.
 - Future regression: a narrow search over a large multi-context history should deserialize only the necessary records and return correct complete=false once an extra match is found; measure DB lock occupancy as well as result count.
+- Fix (2026-09-27, `c0a2fed`): Context/kind predicates now execute in SQL; search scans fixed-size JSON view pages up to a frozen sequence ceiling and deserializes full events only for matching rows. A cross-page scoped regression failed before and passed after; StoredEvidenceTest and LookTest pass. DB lock occupancy was not benchmarked.
 
 ### F-043 - A contradictory failed execution can be represented as a green receipt
 
@@ -2001,13 +1999,14 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-052 - A single long source line bypasses the requested observation budget
 
 - Task: [P1.6.3](TODO.md#L836); related P1.6.2/P1.8.6.
-- Severity: medium. Confidence: confirmed_source. Status: open.
+- Severity: medium. Confidence: confirmed_source. Status: fixed (2026-09-27).
 - Location: [Look.fit](core/src/main/kotlin/io/astrolabe/tool/look/Look.kt#L404).
 - Problem: fit keeps at least one line even if that line alone exceeds budget. A whole-file request has an early refusal, but a range/symbol/search/recall request can reach fit with a huge first line. Returned tokens count kept content but excludes added recall/truncation text, and refusals can render an unbounded outline without applying the requested budget.
 - Impact: a read reserved for a small number of tokens can introduce a much larger body, overrun Reservations and pressure/capacity controls, or crowd out useful context. The redaction scan cap bounds some captures but is far above the ordinary read budget.
 - Possible solutions: refuse with a bounded structural hint when no whole line fits, or support a clearly partial character view which grants no full-line coverage; count all rendered result contributions and bound error/outline hints.
 - Future regression: very long first lines and a large declaration outline under a tiny read budget must stay within the promised budget or return a bounded capacity/refusal result with honest coverage.
 - Current-source recheck (2026-09-25, 9a80e117): Look.fit (507) retains an over-budget first line; whole-file refusal/outline rendering remains outside that budget bound. Earlier runtime evidence retains its original baseline; this recheck is source inspection.
+- Fix (2026-09-27, `47e16e7`): `look` fits only complete lines and includes labels/recall markers in its body token count; an over-budget first line is refused without coverage, and refusal/outline hints are bounded. Long read, recall, find, structural and tiny-budget regressions failed before and pass after in LookTest.
 
 ### F-053 - Multiple operations on one path can overwrite earlier successful edits in the same batch
 
@@ -2227,12 +2226,13 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-069 - Runner parsers discard namespaces needed for baseline failure identity
 
 - Task: [P1.6.6](TODO.md#L859); related P1.7.5/P3.6.1.
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-27).
 - Locations: [JestJson file extraction](core/src/main/kotlin/io/astrolabe/tool/run/JestShaper.kt#L226), [GenericSummaries.go](core/src/main/kotlin/io/astrolabe/tool/run/GenericShaper.kt#L146), [ReportArtifact.moduleOrDerived](core/src/main/kotlin/io/astrolabe/tool/run/Shaper.kt#L42).
 - Problem: Jest JSON paths are reduced to basename, so services/a/test.ts and services/b/test.ts become the same file identity. Go parsing assigns every case to the last package line in the entire capture, rather than the package for that case. The inferred JUnit module keeps only the last directory before build/target, which can likewise collide in nested monorepos.
 - Impact: different tests can share canonical identity, or a test's identity can change when an unrelated package is appended. In-run multiplicity flags catch some collisions, but a baseline/current run each containing one different same-named failure can appear to be the same pre-existing failure.
 - Possible solutions: preserve normalized repository/project-relative runner identities separately from display shortening; associate Go case groups with their own package records or consume structured events. Treat unresolved namespace as ambiguous rather than guessing.
 - Future regression: same basename/suite/test under two packages, reordered/appended Go packages, and nested modules with equal leaf names must remain distinct across baseline and current runs.
+- Fix (2026-09-27, `cdbe39d`): Jest JSON keeps project-relative paths where the capture cwd is known, Go binds each case group to its own package summary and withholds identities for unbound cases, and JUnit keeps nested module prefixes. All three collision regressions failed before and passed after; focused shaper tests pass.
 
 ### F-070 - Verify's green flag does not prove the requested checks certify the final tree
 
@@ -2637,10 +2637,11 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-110 - Note supersession commits removal of the old note before validating its replacement
 
 - Task: [P2.6.1](TODO.md#L1302).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-27).
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/kb/Notes.kt#L74).
 - Analysis: KbWriter.supersede calls write(old.copy(Superseded)) and then write(replacement), each in its own transaction. Replacement size/kind validation or a database failure can occur after the old admitted note has already been removed from active retrieval. The failed supersession thus leaves no active replacement and loses authoritative guidance despite reporting failure. Validate both records before mutation and commit their revisions/index changes atomically. Regression: oversized or conflicting replacement, and a fault during its insert; the old admitted note must remain active until a complete replacement commits.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-27, `22709c5`): KbWriter validates the predecessor and replacement inside one transaction, then persists both revisions and index updates atomically. Oversized replacement and injected insert-failure regressions failed before and pass after; NotesTest, StoreKbTest and CuratorTest pass.
 
 ### F-111 - Knowledge reads return reusable note text without applying redaction
 
@@ -2679,10 +2680,11 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-115 - Calibration rewrites all historical samples into the current harness and sizing series
 
 - Task: [P2.6.4](TODO.md#L1320).
-- Severity: medium. Confidence: confirmed_source. Status: open.
+- Severity: medium. Confidence: confirmed_source. Status: fixed (2026-09-27).
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/campaign/Calibration.kt#L45).
 - Analysis: observations(store, series) reads every saved campaign and assigns the caller's one CalibrationSeries to every row. Controller.extract supplies the current attempt harness version/current policy, so older attempts from different frozen versions or sizing policies are relabelled as current rather than kept in separate groups. CalibrationStats correctly groups its input but cannot recover lost provenance. Read series provenance from each attempt's frozen configuration/metadata and keep incompatible histories separate. Regression: store campaigns from two harness/policy versions, aggregate after upgrade, and verify that their series and derived priors remain distinct.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-27, `fbee771`): Calibration joins each campaign to its frozen attempt and retains its harness version and file-band policy; rows without frozen provenance are excluded. The focused CalibrationTest failed before the fix and passed after it.
 
 ### F-116 - A root package closure can be complete while pinning no files
 

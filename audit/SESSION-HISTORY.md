@@ -626,3 +626,9 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - Focused regressions and core/eval ABI passed. First full core run had two stale/safe-form expectations; focused corrections pass. Final full Windows build on 4604b89 passed: 1645 passed, 13 skipped; packaging/core/eval ABI passed.
 - D-277 through D-284 record npm lifecycle, loop/rebuild, calibration, acceptance executables, await errors, fixture containers, unknown commands and packet feedback.
 - Local commits only; no new Linux/CI or P7 evidence. User edits preserved.
+
+## 2026-09-27 — bugfix eighth continuation (owner approved)
+- Six out-of-order fixes remain unstaged: F-039/F-042/F-052/F-069/F-110/F-115. Ledger: 88 fixed, 54 open.
+- Focused regressions passed; final full Windows JDK 26 build after all six passed (1667 tests, 13 skipped, zero failures/errors; ABI/packaging).
+- F-110 also passed NotesTest, StoreKbTest and CuratorTest. No new Linux/CI or P7 evidence.
+- Earlier local commits were undone at the owner's request so they could review the unstaged fixes. After review, the owner authorized commit and push; six fresh fix commits now end at `fbee771`.

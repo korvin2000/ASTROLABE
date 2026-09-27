@@ -2,8 +2,21 @@
 
 Branch: `feature/bugfix`. Baseline: `9a80e117445be357285fec2cffffe0fd45290a9a`.
 
-**82 fixed across seven sessions (10 in the latest continuation); 60 open; F-034 previously resolved.**
+**88 fixed across eight sessions (6 in the current continuation); 54 open; F-034 previously resolved.**
 The complete remaining queue is `findings.md` ? JSON `fix_progress.remaining_open_ids`.
+
+## Eighth continuation: smaller out-of-order repairs
+
+| Finding | Commit | Change and evidence |
+|---|---|---|
+| F-115 | `fbee771` | Calibration derives each observation's harness and file-band policy from the frozen attempt; campaigns with no frozen provenance are excluded. A historical mixed-series regression failed before and passed after; focused CalibrationTest passes on Windows JDK 26. |
+| F-069 | `cdbe39d` | Jest, Go and JUnit identities retain file/package/module namespaces; unbound Go cases do not yield reusable failure identities. Three collision regressions failed before and passed after; focused JestShaperTest, GenericShaperTest and JUnitXmlShaperTest pass on Windows JDK 26. |
+| F-042 | `c0a2fed` | Journal scope filters run in SQL; store search scans fixed-size text/ref pages and loads full events only for matches. Scoped cross-page test failed before and passed after; StoredEvidenceTest and LookTest pass on Windows JDK 26. DB lock time has not been measured. |
+| F-039 | `05f064b` | Curly-language outline precomputes container/function-body membership with range deltas in O(lines + spans), removing per-line scans of all spans. Existing OutlineTest passes; no throughput benchmark was run. |
+| F-052 | `47e16e7` | Look refuses a selected line that cannot fit, counts the complete rendered body including recall text, and bounds refusal/outline hints. Long-line, recall, find, structural and one-token regressions failed before and pass after; focused LookTest passes on Windows JDK 26. |
+| F-110 | `22709c5` | Note supersession validates both notes and writes both revisions/FTS rows in one transaction. Oversized replacement and injected insert-failure regressions failed before and pass after; NotesTest, StoreKbTest and CuratorTest pass on Windows JDK 26. |
+
+Full Windows JDK 26 build after all six fixes passed: **1667 tests, 13 skipped, zero failures/errors**; compilation, packaging and ABI checks passed. No new Linux/CI or P7 evidence.
 
 ## Seventh continuation: ten smaller out-of-order repairs
 
