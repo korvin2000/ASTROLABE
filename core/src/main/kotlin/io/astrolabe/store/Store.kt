@@ -68,7 +68,11 @@ public class Store internal constructor(
     /** Releases the database and then ownership, in that order. */
     override fun close() {
         try {
-            db.close()
+            try {
+                blobs.closeScans()
+            } finally {
+                db.close()
+            }
         } finally {
             lock.close()
         }
