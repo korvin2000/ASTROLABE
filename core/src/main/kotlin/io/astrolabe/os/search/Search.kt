@@ -590,6 +590,8 @@ internal object Candidates {
     } catch (failure: AccessDeniedException) {
         val path = failure.file?.let { request.scope.root.relativize(Path.of(it)).joinToString("/") }
         CandidateSet.Denied("the filesystem denied access during candidate enumeration", listOfNotNull(path))
+    } catch (failure: io.astrolabe.os.GitError) {
+        CandidateSet.Failed("could not enumerate search candidates: ${failure.message}")
     } catch (failure: IOException) {
         CandidateSet.Failed("could not enumerate search candidates: ${failure.message}")
     }
@@ -646,6 +648,7 @@ internal object Candidates {
                 }
             }
             if (request.since != null && attributes.lastModifiedTime().toInstant() < request.since) continue
+            if (attributes.size() > 8L * 1024 * 1024) return CandidateSet.Failed("search file limit exceeded: $rel")
             when (isBinary(abs)) {
                 BinaryProbe.Binary -> continue
                 BinaryProbe.Denied -> {
