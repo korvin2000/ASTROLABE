@@ -123,7 +123,9 @@ public data class ReasoningRef(
                 val slash = tag.indexOf('/')
                 val at = tag.lastIndexOf('@')
                 if (slash <= 0 || at <= slash + 1 || at == tag.lastIndex) return null
-                return Origin(tag.substring(0, slash), tag.substring(slash + 1, at), tag.substring(at + 1))
+                val parts = listOf(tag.substring(0, slash), tag.substring(slash + 1, at), tag.substring(at + 1))
+                if (parts.any { it.isBlank() }) return null
+                return Origin(parts[0], parts[1], parts[2])
             }
         }
     }

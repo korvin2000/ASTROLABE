@@ -56,7 +56,8 @@ import java.util.concurrent.atomic.AtomicReference
  *
  * **Shutdown order** (D-328): stop campaigns → [close] (cells settle terminal accounting) → close the adapter → close
  * its transport. With [ownsAdapter], [close] waits for the campaigns to settle, up to
- * `Defaults.providerTerminalWaitSeconds`, and then closes an `AutoCloseable` adapter itself.
+ * `Defaults.providerTerminalWaitSeconds`, and then closes an `AutoCloseable` adapter itself; it blocks the caller,
+ * so a host never calls it from a campaign callback (authority, deployer), which would wait on its own campaign.
  */
 public class Astrolabe @JvmOverloads public constructor(
     public val config: Config,

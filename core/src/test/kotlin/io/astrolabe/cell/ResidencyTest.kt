@@ -1,6 +1,7 @@
 package io.astrolabe.cell
 
 import io.astrolabe.budget.HeuristicEstimator
+import io.astrolabe.context.RebuildReason
 import io.astrolabe.evidence.InMemoryObservations
 import io.astrolabe.evidence.Observation
 import io.astrolabe.fixtures.FakeAdapter
@@ -124,8 +125,13 @@ class ResidencyTest {
         assertTrue(items.indexOf(reasoning) in 0 until items.indexOfFirst { it is ToolCall && it.id == "r1" }, "the reasoning item is kept before its calls")
         assertFalse(Items.pairs(items).broken)
         assertTrue(Validations.standard(request(items), request(items).estimate(estimator), FakeProfiles.main.capabilities) is Validation.Ok)
-        val tail = residency.tail(evicted.residents + turn(31, results = 1, lines = 5), 31)
-        assertEquals(reasoning, tail.first().item, "a kept turn keeps its reasoning")
+        // The rebuild tail (§5.8, m turns) keeps or drops a turn whole: never reasoning without its calls, or calls without it.
+        val dropped = residency.items(residency.tail(evicted.residents, RebuildReason.Pressure.tailTurns))
+        assertTrue(dropped.none { it == reasoning || it is ToolCall && it.id in setOf("r1", "r2") })
+        val late = (2..30).flatMap { turn(it, results = 1, lines = 5) } + thinking.map { it.copy(turn = 31) } + turn(32, results = 1, lines = 5)
+        val kept = residency.items(residency.tail(late, 2))
+        assertEquals(reasoning, kept.first(), "the kept turn starts with its reasoning")
+        assertEquals(listOf("r1", "r2"), kept.filterIsInstance<ToolCall>().map { it.id }.take(2))
     }
 
     @Test

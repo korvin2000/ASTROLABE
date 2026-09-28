@@ -355,8 +355,9 @@ public class Cell @JvmOverloads constructor(
             var received: Response? = null
             var failure: Throwable? = null
             var terminal: io.astrolabe.provider.Terminal? = null
-            val progress = progressRelay(invocationId)
+            var progress: AutoCloseable? = null
             try {
+                progress = progressRelay(invocationId)
                 invocation = ctx.model.adapter.start(request, invocationId)
                 received = invocation.await()
             } catch (error: Throwable) {

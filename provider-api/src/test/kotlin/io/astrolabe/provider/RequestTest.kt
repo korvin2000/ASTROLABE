@@ -84,7 +84,7 @@ class RequestTest {
         val origin = ReasoningRef("vertex/claude-sonnet@20250101/x@anthropic-messages").origin()!!
         assertEquals(ReasoningRef.Origin("vertex", "claude-sonnet@20250101/x", "anthropic-messages"), origin)
         assertEquals("vertex/claude-sonnet@20250101/x@anthropic-messages", origin.tag)
-        for (tag in listOf("fake", "a/b", "a@b", "/m@api", "p/@api", "p/m@")) assertEquals(null, ReasoningRef(tag).origin(), tag)
+        for (tag in listOf("fake", "a/b", "a@b", "/m@api", "p/@api", "p/m@", " /m@api", "p/ @api", "p/m@ ")) assertEquals(null, ReasoningRef(tag).origin(), tag)
     }
 
     @Test
