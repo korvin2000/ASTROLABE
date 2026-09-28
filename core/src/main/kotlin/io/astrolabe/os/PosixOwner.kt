@@ -22,7 +22,13 @@ internal class PosixOwner : ProcessOwner {
             "-Xms8m", "-Xmx32m", "-XX:+UseSerialGC", "--enable-native-access=ALL-UNNAMED",
             "-cp", Path.of(location.toURI()).toString(), helper.name,
         ).directory(start.workingDirectory.toFile()).redirectError(ProcessBuilder.Redirect.appendTo(start.logPath.toFile()))
-            .apply { environment().clear() }.start()
+            .apply {
+                // The helper decodes -cp and PATH with the locale's charset; the target gets only its own envp.
+                val env = environment()
+                env.clear()
+                LOCALE_VARIABLES.forEach { name -> System.getenv(name)?.let { env[name] = it } }
+                if (env.isEmpty()) env["LC_ALL"] = "C.UTF-8"
+            }.start()
         val input = DataInputStream(process.inputStream)
         val output = DataOutputStream(process.outputStream)
         val startup = FutureTask {
@@ -57,6 +63,10 @@ internal class PosixOwner : ProcessOwner {
     }
 
     override fun terminateUnowned(pid: Long): Boolean = ProcessHandle.of(pid).map { it.destroy() }.orElse(false)
+
+    private companion object {
+        val LOCALE_VARIABLES = listOf("LANG", "LC_ALL", "LC_CTYPE")
+    }
 }
 
 /** Completion is acknowledged only after waitpid reports ECHILD in the isolated subreaper. */

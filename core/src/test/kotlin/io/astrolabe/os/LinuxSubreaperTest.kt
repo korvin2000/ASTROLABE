@@ -57,7 +57,8 @@ class LinuxSubreaperTest {
 
     @Test
     fun `argv executable is resolved using the requested PATH`(@TempDir directory: Path) {
-        val bin = Files.createDirectory(directory.resolve("custom bin"))
+        // A non-ASCII directory name also checks that the supervisor decodes paths in a UTF-8 locale.
+        val bin = Files.createDirectory(directory.resolve("custom bïn"))
         val executable = bin.resolve("astrolabe-path-probe")
         Files.writeString(executable, "#!/bin/sh\nprintf 'custom-path-ok\\n'\nexit 23\n")
         Files.setPosixFilePermissions(executable, PosixFilePermissions.fromString("rwx------"))
