@@ -4,8 +4,11 @@ import io.astrolabe.workspace.Intent
 import io.astrolabe.workspace.PathResolution
 import io.astrolabe.workspace.WorkspacePath
 import java.io.IOException
+import java.nio.file.FileVisitResult
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.attribute.BasicFileAttributes
 
 /** Existing reports are archived before dispatch; only newly created reports can certify this invocation. */
 internal class JUnitReports(private val root: Path, private val actionId: String) {
@@ -29,20 +32,28 @@ internal class JUnitReports(private val root: Path, private val actionId: String
         }
     }
 
-    private fun files(): List<Pair<String, Path>> = Files.walk(root, 12).use { stream ->
+    // walkFileTree, not Files.walk: an unreadable or vanishing directory elsewhere in the tree is skipped
+    // instead of escaping as UncheckedIOException past callers that handle IOException.
+    private fun files(): List<Pair<String, Path>> {
         val found = ArrayList<Pair<String, Path>>()
-        val iterator = stream.iterator()
-        while (iterator.hasNext()) {
-            val file = iterator.next()
-            val relative = root.relativize(file).joinToString("/")
-            if (!relative.endsWith(".xml") || !REPORT.matches(relative)) continue
-            val resolved = paths.resolve(relative, Intent.Mutate) as? PathResolution.Resolved
-                ?: throw IOException("report path refused: $relative")
-            if (!Files.isRegularFile(resolved.real)) continue
-            if (found.size == 4096) throw IOException("JUnit report count exceeds 4096")
-            found += relative to resolved.real
-        }
-        found.sortedBy { it.first }
+        Files.walkFileTree(root, emptySet(), 12, object : SimpleFileVisitor<Path>() {
+            override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult =
+                if (dir != root && dir.fileName.toString() == ".git") FileVisitResult.SKIP_SUBTREE else FileVisitResult.CONTINUE
+
+            override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
+                val relative = root.relativize(file).joinToString("/")
+                if (!relative.endsWith(".xml") || !REPORT.matches(relative)) return FileVisitResult.CONTINUE
+                val resolved = paths.resolve(relative, Intent.Mutate) as? PathResolution.Resolved
+                    ?: throw IOException("report path refused: $relative")
+                if (!Files.isRegularFile(resolved.real)) return FileVisitResult.CONTINUE
+                if (found.size == 4096) throw IOException("JUnit report count exceeds 4096")
+                found += relative to resolved.real
+                return FileVisitResult.CONTINUE
+            }
+
+            override fun visitFileFailed(file: Path, exc: IOException): FileVisitResult = FileVisitResult.CONTINUE
+        })
+        return found.sortedBy { it.first }
     }
 
     companion object {
