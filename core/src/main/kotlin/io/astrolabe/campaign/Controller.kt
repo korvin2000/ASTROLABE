@@ -523,14 +523,18 @@ public class Controller @JvmOverloads public constructor(
             journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Reconcile, refs = external.map { it.path }, text = "open: ${external.size} paths moved while closed (external) · reconciled @${stamp.hash8}", at = clock.instant()))
         }
         // §13.4: live background handles resolve to running, exited or lost by identity, never by pid alone.
-        val handles = SqliteHandles(store, clock).open().filter { it.ids.work == request.work }.map { handle ->
-            val status = when (runCatching { os.reattach(handle.proc).status }.getOrDefault(ProcStatus.Lost)) {
+        val handleRows = SqliteHandles(store, clock)
+        val handles = handleRows.open().filter { it.ids.work == request.work }.map { handle ->
+            val polled = runCatching { os.reattach(handle.proc).status }.getOrDefault(ProcStatus.Lost)
+            val status = when (polled) {
                 ProcStatus.Running -> "running"
                 is ProcStatus.Exited -> "exited"
                 ProcStatus.DeadlineExceeded -> "deadline_exceeded"
                 ProcStatus.Cancelled -> "cancelled"
                 ProcStatus.Lost -> "lost"
             }
+            // A process known to be over no longer fences the workspace hand-off; running and lost ones still do (§13.1).
+            if (polled.isTerminal && polled != ProcStatus.Lost) handleRows.save(handle.copy(proc = handle.proc.copy(status = polled), status = status))
             journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Reconcile, refs = listOf(handle.handleId, handle.actionId), text = "open: handle ${handle.handleId} (${handle.argv.joinToString(" ")}) $status · polled, never relaunched", at = clock.instant()))
             "${handle.handleId} $status"
         }
