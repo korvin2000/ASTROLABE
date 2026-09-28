@@ -106,10 +106,10 @@ Use F-none for commits without findings. Report DEFECT only when you can name a 
 
 ## Checkpoint
 
-- Status: in progress. Next round: B04–B06. Rounds done: 1 (B01–B03). FIXED: 9. REJECTED: 0.
+- Status: in progress. Next round: B07–B09. Rounds done: 2 (B01–B06). FIXED: 11. REJECTED: 0.
 - Round 1 review fixes: 261871f F-066, 1db9a3e F-043, 49f4b8c F-009, 2fcd391 F-053, f15acab F-088, 40950b0 F-059,
-  72d3b3c F-078, f6b3654 F-050. Public API unchanged so far (Look/Run/Scheduler/Shaper internals only).
-- Carry: F-064 (row 033) has a pre-confirmed defect in its Notes; fix it in the B05 round.
+  72d3b3c F-078, f6b3654 F-050. Round 2: b465b26 F-014, 8afc54f F-026, 69cf936 F-064.
+- Public API changed: `Observed` gained `truncated` (69cf936) → Finalize ABI regen needed.
 - 100 code-bearing commits in 14 batches (≤1000 code lines each; `e5321f3`/F-016 alone); 18 docs/ABI-only commits SKIP.
 
 ## Ledger
@@ -150,21 +150,21 @@ Code± = changed lines excluding `*.md` and `*/api/*.api`; Main± = lines under 
 | 028 | B03 | `e769511` | 147 | 30 | F-088 F-094 | fix: revalidate live authority before effects and final completion | F-088 partial; F-094 ACCEPT |  |
 | 029 | B03 | `b13c18d` | 16 | 16 | F-088 | fix: preserve late archival completion without dispatching new effects | F-088 FIXED (f15acab) | Run/mcp fence threw inside `Consequential.run` after the intent was Dispatched, leaving an open intent that refused the argv in later attempts; fence now runs before the intent. |
 | 030 | - | `ce0051a` | 0 | 0 | - | docs: record ten further repairs and passing full validation | SKIP (docs/ABI; covered by final docs+ABI step) |  |
-| 031 | B04 | `8491837` | 181 | 63 | F-023 | fix: persist amendment resolutions atomically with contract changes | PENDING |  |
-| 032 | B04 | `9192a41` | 297 | 116 | F-001 F-002 | fix: freeze nested configuration and canonicalize attempt fingerprints | PENDING |  |
-| 033 | B05 | `568f6bf` | 661 | 238 | F-061 F-063 F-064 | fix: retain durable run evidence and bound cancellable process capture | PENDING | Pre-confirmed defect (F-064): `Executions` sets `lost = truncated`, so a foreground run with >8 MiB output that exits normally throws in Run.launch → unknown_outcome + open intent (Run.kt:~349); Verify/Checker record UnknownOutcome. Fix: separate truncated from lost; captureComplete=false. |
+| 031 | B04 | `8491837` | 181 | 63 | F-023 | fix: persist amendment resolutions atomically with contract changes | F-023 NOTE | No backfill of rows pre-fix resolves left Pending; unscoped `resolved()` orders by proposal time (in-memory: resolution order); `commitResolution`/`resolved` are new abstract members of public `ContractRepository`; `check(updated == 1)` throws on a cross-work amendment id collision. |
+| 032 | B04 | `9192a41` | 297 | 116 | F-001 F-002 | fix: freeze nested configuration and canonicalize attempt fingerprints | F-001 NOTE; F-002 NOTE | F-001: snapshot sorts profiles by key, so receipt currency comes from the alphabetically first profile (differs only with mixed currencies). F-002: v1 fingerprints no longer match on load; Precompile keys miss once after upgrade. |
+| 033 | B05 | `568f6bf` | 661 | 238 | F-061 F-063 F-064 | fix: retain durable run evidence and bound cancellable process capture | F-061 NOTE; F-063 NOTE; F-064 FIXED (69cf936) | F-061: if render/observation fails after `handles.save`, `Run.unknown` hides the handle id and leaves the log blob unlinked (fence holds). F-063: a base-commit change lists every member as changed (conservative, noisy). F-064: capped capture was `lost` → a normal >8 MiB foreground run became unknown_outcome with an open intent (Verify/Checker/Baseline/QA/Syntax likewise); `Observed.truncated` now separate, capture marked incomplete, partial log never passes. Also NOTE: `Edit` wrapped in `runInterruptible` drops the partial EditResult on cancel; cap keeps the log head. |
 | 034 | - | `b7b74d0` | 0 | 0 | - | chore: refresh ABI for durable resolutions and run provenance | SKIP (docs/ABI; covered by final docs+ABI step) |  |
 | 035 | - | `cb715da` | 0 | 0 | - | docs: record six repairs and passing full Windows build | SKIP (docs/ABI; covered by final docs+ABI step) |  |
-| 036 | B06 | `6b7c801` | 82 | 0 | F-006 | fix: reconcile fake invocation cancellation without a response waiter | PENDING |  |
-| 037 | B06 | `55e86ea` | 76 | 38 | F-004 | fix: account for protocol framing and unknown native request context | PENDING |  |
-| 038 | B06 | `6bb0767` | 61 | 18 | F-014 | fix: reject durable state inside any registered workspace | PENDING |  |
-| 039 | B06 | `c406b7a` | 159 | 79 | F-018 F-020 F-021 | fix: align Unicode search and refuse unsafe candidate enumeration | PENDING |  |
-| 040 | B06 | `4c99034` | 168 | 102 | F-010 | fix: read composed projections from one snapshot and bound latest reads | PENDING |  |
-| 041 | B06 | `1e3ef70` | 52 | 22 | F-024 F-025 | fix: preserve slice obligations and enforce contract digest capacity | PENDING |  |
-| 042 | B06 | `88ab4f5` | 100 | 57 | F-026 | fix: resume failed coherence delivery before advancing recorded versions | PENDING |  |
-| 043 | B06 | `eccb010` | 22 | 2 | F-004 | fix: honor profile request estimators at cell admission and refresh ABI | PENDING |  |
+| 036 | B06 | `6b7c801` | 82 | 0 | F-006 | fix: reconcile fake invocation cancellation without a response waiter | F-006 ACCEPT | Intermediate cancel states are no longer observable in the fake (no fixture coverage for them). |
+| 037 | B06 | `55e86ea` | 76 | 38 | F-004 | fix: account for protocol framing and unknown native request context | F-004 partial | Final on row 043. |
+| 038 | B06 | `6bb0767` | 61 | 18 | F-014 | fix: reject durable state inside any registered workspace | F-014 FIXED (b465b26) | `git worktree list -z` needs git 2.36 (D-04 minimum 2.20; Ubuntu 22.04 ships 2.34), so Store.open failed there; newline porcelain form now. NOTE: a home dir inside a git worktree now needs `Config.stateRoot`. |
+| 039 | B06 | `c406b7a` | 159 | 79 | F-018 F-020 F-021 | fix: align Unicode search and refuse unsafe candidate enumeration | F-018 ACCEPT; F-020 NOTE; F-021 NOTE | F-020: a file deleted mid-walk in a non-git root fails the search instead of being skipped. F-021: link ancestors above a subdirectory search root are not checked; rg re-traversal TOCTOU documented. |
+| 040 | B06 | `4c99034` | 168 | 102 | F-010 | fix: read composed projections from one snapshot and bound latest reads | F-010 NOTE | Export holds the Db monitor and a read tx while JSON-encoding every view (writers wait). |
+| 041 | B06 | `1e3ef70` | 52 | 22 | F-024 F-025 | fix: preserve slice obligations and enforce contract digest capacity | F-024 NOTE; F-025 ACCEPT | F-024: contracts over ~35-40 requirements exceed the default 150-token digest cap and get Partial(Pressure) every cell until `digestCapTokens` is raised; Anchor.kt:156 overflow path still line-caps the digest. |
+| 042 | B06 | `88ab4f5` | 100 | 57 | F-026 | fix: resume failed coherence delivery before advancing recorded versions | F-026 FIXED (8afc54f) | A resumed delivery replayed into listeners/horizons that had unsubscribed (closed cells), and an unsubscribed always-failing listener blocked every later change(); resumed deliveries now skip unsubscribed listeners. |
+| 043 | B06 | `eccb010` | 22 | 2 | F-004 | fix: honor profile request estimators at cell admission and refresh ABI | F-004 NOTE | Per-item estimates return 0 for native/opaque items (resident accounting undercounts once P7 emits them; admission still rejects via UnknownHistorySize). New margins can reject long transcripts admitted before. |
 | 044 | - | `a7ccc15` | 0 | 0 | - | docs: record ten repairs and passing full Windows validation | SKIP (docs/ABI; covered by final docs+ABI step) |  |
-| 045 | B06 | `0126918` | 212 | 173 | F-013 | fix: bound blob cleanup scans and prioritize referenced orphan repair | PENDING |  |
+| 045 | B06 | `0126918` | 212 | 173 | F-013 | fix: bound blob cleanup scans and prioritize referenced orphan repair | F-013 NOTE | DirectoryStream handles stay open between passes until Store.close; cursors restart on reopen. |
 | 046 | B07 | `389634d` | 275 | 139 | F-015 | fix: confirm process container cleanup before publishing terminal outcomes | PENDING |  |
 | 047 | B07 | `527c95b` | 476 | 219 | F-028 F-029 F-030 | fix: preserve snapshot link objects and reject incomplete or mixed captures | PENDING |  |
 | 048 | B07 | `499addd` | 72 | 28 | F-037 F-038 | fix: revalidate atlas cache contents and refresh collapsed totals | PENDING |  |
