@@ -38,6 +38,14 @@ class AuditShaperTest {
     }
 
     @Test
+    fun `a wrapped runner with a nonzero exit is never a pass`() {
+        val result = Shapers.shape(Recorded.capture(argv = listOf("sh", "-c", "npx jest --coverage && echo ok"), exitCode = 1,
+            output = "Tests:       3 passed, 3 total\n".toByteArray()))
+        assertEquals(3, result.counts!!.passed)
+        assertEquals(Outcome.Inconclusive, result.status)
+    }
+
+    @Test
     fun `cargo aggregates every suite including later failures`() {
         val result = Shapers.shape(Recorded.capture(argv = listOf("cargo", "test"), exitCode = 0,
             output = ("test result: ok. 2 passed; 0 failed; 0 ignored\n" +

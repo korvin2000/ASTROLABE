@@ -385,7 +385,8 @@ internal fun deriveStatus(inputs: StatusInputs, limitations: MutableList<String>
         limitations += "the runner executed no tests: ${counts.discovered} discovered, 0 executed (D-50)"
         return Outcome.Inconclusive
     }
-    if (wrapper != null || exit == 0) {
+    // A wrapper may turn a failing exit into 0, but a nonzero exit is still observed (`jest && echo ok`).
+    if (exit == 0) {
         if (inputs.evidenceIncomplete) {
             limitations += "the structured evidence could not be read whole: a parse error is never a pass (§8.4)"
             return Outcome.Inconclusive
