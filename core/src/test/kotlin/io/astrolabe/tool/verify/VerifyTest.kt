@@ -300,6 +300,36 @@ class VerifyTest {
     }
 
     @Test
+    fun `without candidate isolation a failed slow check still gets its isolated retry from the default export root`() = runTest {
+        // The controller's default wiring: no `candidates` (first runs stay exclusive), only the retry export root.
+        scheduler = Scheduler(checks, workspace, registry, stamper, SqliteReceipts(store, clock), InMemoryAliases(), idGen, ids, clock, retryCandidates = stateRoot.resolve("candidates"))
+        val roots = ArrayList<Path>()
+        val scripted = object : io.astrolabe.tool.run.Runner {
+            override val mode = io.astrolabe.auth.ExecutionMode.TrustedLocal
+            override fun start(spec: io.astrolabe.os.SpawnSpec): io.astrolabe.os.Proc {
+                roots.add(spec.workingDirectory)
+                val command = if (roots.size % 2 == 1) printing("pytest_fail.txt", 1) else printing("pytest_pass.txt", 0)
+                return TrustedLocalRunner(os).start(spec.copy(command = io.astrolabe.os.Command.Argv(command.argv)))
+            }
+        }
+        verify = Verify(checks, scheduler, null, null, null, workspace, scripted, os, stamper, store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, contracts, stateRoot.resolve("logs"))
+        val command = printing("pytest_fail.txt", 1)
+        checks.register(Check("CHK-slow", CheckKind.Unit, Selector.Named(command), Closure.Known(setOf("src/a.py")), CostClass.Slow, Trigger.OnDemand, command = command))
+        val out = run("""{"what":"tests","selection":"ids","ids":["CHK-slow"]}""")
+        val attempts = SqliteReceipts(store, clock).forCheck("CHK-slow")
+        assertEquals(listOf(Outcome.Failed, Outcome.Passed, Outcome.Inconclusive), attempts.map { it.outcome }, out.body)
+        assertEquals(repo.root, roots[0], "the first run is not isolated")
+        assertTrue(roots[1].startsWith(stateRoot.resolve("candidates")))
+        assertEquals(InputStability.Isolated, attempts[1].testedInputs.stability)
+
+        // A fast check keeps the previous default: no retry without configured candidate isolation.
+        checks.register(Check("CHK-fast", CheckKind.Unit, Selector.Named(command), Closure.Known(setOf("src/a.py")), CostClass.Fast, Trigger.OnDemand, command = command))
+        val fast = run("""{"what":"tests","selection":"ids","ids":["CHK-fast"]}""")
+        assertTrue(fast.body.contains("isolated retry unavailable"), fast.body)
+        assertEquals(listOf(Outcome.Failed), SqliteReceipts(store, clock).forCheck("CHK-fast").map { it.outcome })
+    }
+
+    @Test
     fun `a failed check that changes the original candidate is not rerun`() = runTest {
         scheduler = Scheduler(checks, workspace, registry, stamper, SqliteReceipts(store, clock), InMemoryAliases(), idGen, ids, clock, candidates = stateRoot.resolve("candidates"))
         verify = Verify(checks, scheduler, null, null, null, workspace, TrustedLocalRunner(os), os, stamper, store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, contracts, stateRoot.resolve("logs"))

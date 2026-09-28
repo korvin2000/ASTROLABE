@@ -112,6 +112,11 @@ public class Scheduler(
     private val candidates: Path? = null,
     /** Every check, not only `slow|expensive` ones, runs on an isolated candidate (a review cell's `verify(tests)`, §8.8). */
     private val isolateAll: Boolean = false,
+    /**
+     * Where the §8.10 isolated retry of a failed `slow|expensive` check exports its original candidate when no
+     * [candidates] directory is configured (D-294); first runs are unaffected. `null` ⇒ no such retry.
+     */
+    private val retryCandidates: Path? = null,
 ) {
     private val aliasByReceipt = HashMap<String, String>()
 
@@ -155,7 +160,7 @@ public class Scheduler(
 
     /** A retry must export the original candidate; it never falls back to the live workspace. */
     internal suspend fun retryIsolated(check: Check, contractVersion: Int, first: Receipt, inputs: Collection<String>, execute: suspend (Path) -> Executed): Receipt? {
-        val root = candidates ?: return null
+        val root = candidates ?: retryCandidates?.takeIf { check.costClass == CostClass.Slow || check.costClass == CostClass.Expensive } ?: return null
         return runIsolated(check, contractVersion, inputs, root, execute, first)
     }
 
