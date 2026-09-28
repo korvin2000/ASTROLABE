@@ -437,7 +437,8 @@ public class Look(
             lines += "package ${pkg ?: "(unknown)"}${if (pkg == first) " (first)" else ""}: ${refs.size}"
             refs.forEach { lines += "  ${it.path}:${it.line} ${it.text}" }
         }
-        return textResult(args, lines.joinToString("\n"), scope = "refs $raw", complete = false)
+        // Lexical refs are never tier-complete; captureComplete says every reference the index found is listed.
+        return textResult(args, lines.joinToString("\n"), scope = "refs $raw", complete = false, captureComplete = !found.truncated)
     }
 
     private fun importers(args: LookArgs): ToolOutcome {
@@ -557,7 +558,7 @@ public class Look(
     }
 
     /** A structural result (tree, outline, def, catalog): observed and aliased, no coverage. */
-    private fun textResult(args: LookArgs, text: String, scope: String, versions: Map<String, FileVersion> = emptyMap(), complete: Boolean = true): ToolOutcome {
+    private fun textResult(args: LookArgs, text: String, scope: String, versions: Map<String, FileVersion> = emptyMap(), complete: Boolean = true, captureComplete: Boolean = true): ToolOutcome {
         val actionId = idGen.next("act")
         val alias = allocate()
         val full = redaction.apply(text, ContentClass.ReusableEvidence)
@@ -565,8 +566,8 @@ public class Look(
         if (view.lines.isEmpty()) return refused(args, "refused", "structural result exceeds budget ${args.budget}; raise budget", complete = false, scope = scope)
         val body = view.body
         val blob = blobs.put(full.text.toByteArray(Charsets.UTF_8), BlobKind.OUTPUT, ids)
-        observations.record(Observation(alias.canonicalId, ids, actionId, null, blob, versions.keys.toList(), emptyMap(), complete && !view.truncated, versions, true, RedactionMask(Ranges.EMPTY, full.mask.limitations), view.truncated))
-        return outcome(alias.text, actionId, "ok", body, view.tokens, versions = versions, scope = scope, complete = complete && !view.truncated, captureComplete = true, displayTruncated = view.truncated, redacted = full.mask.applied, artifact = blob)
+        observations.record(Observation(alias.canonicalId, ids, actionId, null, blob, versions.keys.toList(), emptyMap(), complete && !view.truncated, versions, captureComplete, RedactionMask(Ranges.EMPTY, full.mask.limitations), view.truncated))
+        return outcome(alias.text, actionId, "ok", body, view.tokens, versions = versions, scope = scope, complete = complete && !view.truncated, captureComplete = captureComplete, displayTruncated = view.truncated, redacted = full.mask.applied, artifact = blob)
     }
 
     /** A result that observed nothing new: refusal, masked op, dedup pointer. Not aliased, not stored. */

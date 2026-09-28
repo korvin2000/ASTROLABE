@@ -458,8 +458,9 @@ public class Cell @JvmOverloads constructor(
                         inspected.clear()
                         preimagesOf(alias).forEach { p -> batchBefore.getOrPut(p.path) { ev.preimages!!.bytesOf(p) } }
                     }
+                    // D-92: a refs view clears obligations only when every reference found was displayed unredacted.
                     if (call.family == ToolFamily.Look && outcome.header?.runtime?.status == "ok" &&
-                        outcome.header.runtime.completeness == "complete" && !outcome.header.truncated &&
+                        outcome.header.runtime.captureComplete && !outcome.header.truncated &&
                         !outcome.header.runtime.displayTruncated && !outcome.header.runtime.redactionApplied) {
                         (call.args as? Args.Look)?.args?.takeIf { it.what == "refs" }?.target?.let { impact.inspected(it); inspected += it }
                     }

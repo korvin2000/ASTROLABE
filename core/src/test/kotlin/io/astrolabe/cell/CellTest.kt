@@ -256,6 +256,26 @@ class CellTest {
     }
 
     @Test
+    fun `a fully displayed reference lookup resolves the public signature impact nudge`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val v = f.version("src/a.py")
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("reading a"), read("c1", "src/a.py"), patch("c2", """{"plan.add":"make a return 10"},{"plan.cursor":1},{"next":"edit a"}"""))),
+                Scripted.Reply(listOf(say("editing"), anchored("c3", "src/a.py", v, "def a():", "def a(scale=1):"))),
+                Scripted.Reply(listOf(say("ticking"), patch("c4", """{"plan.tick":{"n":1,"evidence":"#2"}},{"next":"done"}"""),
+                    call("c5", "look", """{"what":"refs","target":"a","budget":400}"""))),
+                Scripted.Reply(listOf(say("done"))),
+                Scripted.Reply(listOf(say("done"))),
+            )
+
+            f.run(model)
+
+            assertTrue((4..f.adapter.calls.size).none { f.anchorText(it).contains("unresolved impact nudge") },
+                (4..f.adapter.calls.size).joinToString("\n---\n") { f.anchorText(it) })
+        }
+    }
+
+    @Test
     fun `an incomplete reference lookup leaves the public signature impact nudge unresolved`() = runTest {
         CellFixture(stateRoot).use { f ->
             val v = f.version("src/a.py")
@@ -263,7 +283,7 @@ class CellTest {
                 Scripted.Reply(listOf(say("reading a"), read("c1", "src/a.py"), patch("c2", """{"plan.add":"make a return 10"},{"plan.cursor":1},{"next":"edit a"}"""))),
                 Scripted.Reply(listOf(say("editing"), anchored("c3", "src/a.py", v, "def a():", "def a(scale=1):"))),
                 Scripted.Reply(listOf(say("ticking"), patch("c4", """{"plan.tick":{"n":1,"evidence":"#2"}},{"next":"done"}"""),
-                    call("c5", "look", """{"what":"refs","target":"a","budget":100}"""))),
+                    call("c5", "look", """{"what":"refs","target":"a","budget":15}"""))),
                 Scripted.Reply(listOf(say("done"))),
                 Scripted.Reply(listOf(say("done"))),
             )
