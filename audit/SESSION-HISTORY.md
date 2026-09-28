@@ -699,3 +699,6 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - Tests: FakeProvider-backed adapter tests, recorded Anthropic/Responses SSE fixtures through the real codecs, an
   `Astrolabe` campaign end to end. Two Fable 5.1 reviews (core seams; adapter): all findings fixed.
 - ABI dumps regenerated; full Windows build at the end of the session (journal). Local commits only; not merged or pushed.
+- Owner asked to merge when green: merged `--no-ff` into local `main` (`500c94f`, not pushed). Follow-up
+  (`feat/ai-gate-qualification`, D-336): `AiGateProfiles.qualify`, opt-in `liveTest`, gateway/Gemini/Codex fixtures,
+  optional SDK checkout in CI; a third Fable review. Live smoke not run (no keys; billable, needs owner authorisation).

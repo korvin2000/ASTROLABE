@@ -112,3 +112,29 @@ object GateTestKit {
             tools = listOf(lookSchema), profile = profile, effort = effort, maxOutputTokens = maxOutput,
         )
 }
+
+/** A scripted endpoint routed by method and path suffix, for flows that also list models or probe the base URL. */
+class RouteScript : HttpTransport {
+    val calls: MutableList<HttpCall> = CopyOnWriteArrayList()
+    private val routes = CopyOnWriteArrayList<Triple<String, String, ConcurrentLinkedQueue<HttpReply>>>()
+
+    fun json(method: String, suffix: String, body: String, status: Int = 200): RouteScript =
+        add(method, suffix, HttpReply.of(status, mapOf("content-type" to listOf("application/json")), body.toByteArray(StandardCharsets.UTF_8)))
+
+    fun sse(method: String, suffix: String, vararg data: String): RouteScript =
+        add(method, suffix, HttpReply.of(200, mapOf("content-type" to listOf("text/event-stream")), data.joinToString("") { "data: $it\n\n" }.toByteArray(StandardCharsets.UTF_8)))
+
+    private fun add(method: String, suffix: String, reply: HttpReply): RouteScript = apply {
+        val route = routes.firstOrNull { it.first == method && it.second == suffix } ?: Triple(method, suffix, ConcurrentLinkedQueue<HttpReply>()).also { routes += it }
+        route.third += reply
+    }
+
+    override fun send(call: HttpCall, options: TransportOptions): HttpReply {
+        calls += call
+        val path = call.uri().toString().substringBefore('?').trimEnd('/')
+        val route = routes.firstOrNull { it.first == call.method() && path.endsWith(it.second.trimEnd('/')) && it.third.isNotEmpty() }
+        return route?.third?.poll() ?: throw AssertionError("no scripted reply for ${call.method()} ${call.uri()}")
+    }
+
+    fun posts(): List<GateObject> = calls.filter { it.method() == "POST" }.map { it.body().orElseThrow() as GateObject }
+}
