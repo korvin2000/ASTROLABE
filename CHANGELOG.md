@@ -1,5 +1,15 @@
 # Change record
 
+## Real LLM transport over AI Gate — 28 September 2026
+
+- New module `:provider-ai-gate`: `AiGateAdapter` implements `ProviderAdapter` over `llm-transport-sdk` (HTTP,
+  credentials, codecs, streaming, retries and cancellation live in the SDK); profiles bind through `Profile.config.gate`
+  and are checked against the SDK catalog and API facts. Built only where the SDK checkout is present (D-332).
+- Core seams: per-profile `EstimatorFactory` and `CellModel.rebind` (routing to a smaller-output profile no longer
+  fails), `ProviderError.ContextOverflow/Authentication/Timeout`, capability-driven cache breakpoints, `OutputLimit`
+  responses without calls, `ObservableAdapter` progress and `cell.model_progress`, `Astrolabe(ownsAdapter)`,
+  `AstrolabeJava` with a provider-module adapter. D-326–D-335; [journal](audit/OUT-OF-ORDER-P7-AIGATE.md).
+
 ## Bugfix branch ? 26 September 2026
 
 - Fixed 24 audit findings covering false-green verification, recall coverage, event ordering, cancellation, storage recovery, secret redaction, generated tools and scheduling. Details: [bugfix progress](audit/BUGFIX-PROGRESS.md).
