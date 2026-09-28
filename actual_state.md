@@ -53,8 +53,8 @@ Local choices D-112–D-113, D-120–D-126, D-135–D-137, D-145–D-155, D-160�
 D-200–D-202, D-210–D-213, D-220–D-223, D-230–D-233, D-240–D-244, D-250–D-254, D-260 (TODO §3). Owner decision D-175
 (new dependencies allowed under pinned-version rules).
 ## Audit remediation (2026-09-28)
-Branch `feature/bugfix`: 119 fixed (13 this continuation), 23 open, F-034 previously resolved.
+Branch `feature/bugfix`: 131 fixed (12 this continuation), 11 open, F-034 previously resolved.
 See `findings.md` and `audit/BUGFIX-PROGRESS.md`; historical CI gates above predate these fixes.
-79 distinct selected tests passed on Windows JDK 26 after a recovery sequence correction.
-Core ABI regenerated/checked; dependent eval/index-treesitter tests compiled. No full suite/build or Linux/CI.
-Last full Windows build: fbee771, 1667 tests, 13 skipped. D-297 through D-302 record current repairs.
+73 distinct selected tests passed on Windows JDK 26. Core ABI regenerated/checked; dependent tests compiled.
+No full suite/build or Linux/CI. Last full Windows build: fbee771, 1667 tests, 13 skipped.
+Code through 0898a57; ABI f232375. D-303 through D-311 record current repairs; no schema bump.

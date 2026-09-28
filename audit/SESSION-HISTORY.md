@@ -652,3 +652,10 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - 79 distinct selected tests passed after the documented recovery sequence correction; core ABI regenerated/checked and dependent module test sources compiled.
 - No full suite/build, Linux/CI or P7 run. D-297 through D-302 record compatibility and conservative defaults.
 - User authorized commit/push to origin/feature/bugfix. Pre-existing edits and untracked task files preserved.
+
+## 2026-09-28 - twelfth bugfix continuation
+- Fixed 12 findings: F-017/F-033/F-041/F-075/F-107/F-109/F-113/F-124/F-128/F-129/F-133/F-137.
+- Ledger: 131 fixed, 11 open, F-034 previously resolved; P0-P6 remains 185/185, P7 excluded.
+- 73 distinct selected tests passed after corrections; core ABI checked and dependent test sources compiled.
+- No full suite/build or Linux/CI run. Code through 0898a57; ABI f232375; D-303 through D-311.
+- Push to origin/feature/bugfix authorized. Existing user edits and untracked task files preserved.

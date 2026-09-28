@@ -1,6 +1,6 @@
 # Implementation audit findings
 
-**Remediation:** 119 fixed on `feature/bugfix` (13 in this continuation); 23 remain open; F-034 was already resolved. See [bugfix progress](audit/BUGFIX-PROGRESS.md). Original audit evidence remains historical; `fix_progress` is the current repair status.
+**Remediation:** 131 fixed on `feature/bugfix` (12 in this continuation); 11 remain open; F-034 was already resolved. See [bugfix progress](audit/BUGFIX-PROGRESS.md). Original audit evidence remains historical; `fix_progress` is the current repair status.
 
 ```json
 {
@@ -544,32 +544,27 @@
     "date": "2026-09-28",
     "status": "committed",
     "fixed_this_session": [
-      "F-044",
-      "F-045",
-      "F-048",
-      "F-091",
-      "F-092",
-      "F-093",
-      "F-102",
-      "F-103",
-      "F-106",
-      "F-111",
-      "F-112",
-      "F-125",
-      "F-126"
-    ],
-    "fixed_this_session_count": 13,
-    "previously_resolved": [
-      "F-034"
-    ],
-    "remaining_open_count": 23,
-    "remaining_open_ids": [
-      "F-016",
       "F-017",
-      "F-019",
       "F-033",
       "F-041",
       "F-075",
+      "F-107",
+      "F-109",
+      "F-113",
+      "F-124",
+      "F-128",
+      "F-129",
+      "F-133",
+      "F-137"
+    ],
+    "fixed_this_session_count": 12,
+    "previously_resolved": [
+      "F-034"
+    ],
+    "remaining_open_count": 11,
+    "remaining_open_ids": [
+      "F-016",
+      "F-019",
       "F-082",
       "F-086",
       "F-089",
@@ -577,192 +572,75 @@
       "F-100",
       "F-104",
       "F-105",
-      "F-107",
-      "F-109",
-      "F-113",
-      "F-124",
       "F-127",
-      "F-128",
-      "F-129",
-      "F-133",
-      "F-135",
-      "F-137"
+      "F-135"
     ],
     "next_priority": [
       "F-016",
-      "F-017",
       "F-019",
-      "F-033",
-      "F-041",
-      "F-075",
       "F-082",
       "F-086",
       "F-089",
-      "F-095"
+      "F-095",
+      "F-100",
+      "F-104",
+      "F-105",
+      "F-127"
     ],
     "handoff": "CONTINUE-TASK.md",
     "detail": "audit/BUGFIX-PROGRESS.md",
-    "verification": "79 distinct selected tests passed after corrections on Windows JDK 26. Core ABI regenerated and checked; eval/index-treesitter test sources compiled. No full suite/build, Linux/CI or P7 run.",
+    "verification": "73 distinct selected tests passed on Windows JDK 26 after corrections. Core ABI regenerated and checked; eval/index-treesitter test sources compiled. No full suite/build, Linux/CI or P7 run.",
     "current_build": null,
     "source_changes_allowed": true,
     "verification_results": {
       "selected_core_classes": [
-        "StoredEvidenceTest",
-        "EvidenceTest",
-        "ValidatorTest",
-        "PartitionTest",
-        "DispatcherTest",
-        "KbToolTest",
-        "InjectionTest",
-        "KbLifecycleTest",
-        "ChecksTest",
-        "LifecycleTest",
-        "ScopeGuardTest",
-        "RoleWiringTest",
-        "ToolContractsTest",
-        "StoreKbTest"
+        "DelegatorTest",
+        "IntegratorTest",
+        "ProbeTest",
+        "QaDriverTest",
+        "SniffTest",
+        "PreimagesTest",
+        "CuratorTest",
+        "NoteHorizonTest",
+        "GitTest",
+        "FactCoherenceTest",
+        "CarryForwardTest",
+        "ResumeTest"
       ],
       "selected_core_methods": [
-        "CompilerFullTest.omitted seed sections cannot grant workset coverage",
-        "CellTest.plan and probe completion reach their validator without running product acceptance",
-        "CellTest.create permission cannot admit a later delete in the same edit call",
-        "ControllerTest.interrupted finalization rechecks acceptance and completes without another model cell",
-        "ControllerTest.expired writer cannot reopen over unknown effects until durable reconciliation",
-        "ControllerTest.committed scope amendments update path protection immediately and after reopen"
+        "VerifyTest.JVM verification captures new reports and cannot reuse stale success",
+        "ControllerTest.reopen durably invalidates notes with only path dependencies",
+        "CellTest.the first pressure rebuilds the projection, a second one ends the cell partial, at admission or from the gate"
       ],
-      "distinct_tests_passed": 79,
-      "batches": [
-        "Initial 56 tests: 55 passed and new finalization regression failed on sequence validation.",
-        "Recovery correction: 11 passed (10 lifecycle checks and finalization regression).",
-        "Additional authority/wiring/schema checks: 11 passed.",
-        "StoreKbTest: 2 passed."
-      ],
+      "distinct_tests_passed": 73,
       "corrections": [
-        "Corrected positional arguments in the new fact test before execution.",
-        "Interrupted finalization now resumes in one lifecycle transition, preserving the durable sequence invariant."
+        "Selected integration tests exposed an existing Recorded-to-Committed transition; publication now records Dispatched first.",
+        "Corrected new test API names, report fixture input stability/output and focus.set syntax before passing their checks.",
+        "The Git timeout fixture now uses an absolute Windows ping executable because Git sanitizes its environment."
       ],
-      "abi": "core regenerated and checkKotlinAbi passed",
+      "abi": "core regenerated; checkKotlinAbi passed",
       "dependent_modules": "eval and index-treesitter test sources compiled",
       "full_suite": "not run (user requested selective tests)",
       "linux_ci": "not run",
       "p7": "excluded",
       "logs": [
-        "build/bugfix-eleventh-focused.log",
-        "build/bugfix-eleventh-recovery.log",
-        "build/bugfix-eleventh-authority.log",
-        "build/bugfix-eleventh-compatibility.log"
+        "build/bugfix-twelfth-delegation.log",
+        "build/bugfix-twelfth-evidence.log",
+        "build/bugfix-twelfth-wrapper.log",
+        "build/bugfix-twelfth-reports.log",
+        "build/bugfix-twelfth-preimages.log",
+        "build/bugfix-twelfth-curator.log",
+        "build/bugfix-twelfth-horizon.log",
+        "build/bugfix-twelfth-pressure.log",
+        "build/bugfix-twelfth-git.log",
+        "build/bugfix-twelfth-git-deadline.log",
+        "build/bugfix-twelfth-retention.log",
+        "build/bugfix-twelfth-compatibility.log",
+        "build/bugfix-twelfth-resume.log"
       ]
     },
     "active_processes": [],
     "previous_session_fixed": [
-      "F-001",
-      "F-002",
-      "F-003",
-      "F-004",
-      "F-005",
-      "F-006",
-      "F-007",
-      "F-008",
-      "F-009",
-      "F-010",
-      "F-011",
-      "F-012",
-      "F-013",
-      "F-014",
-      "F-015",
-      "F-018",
-      "F-020",
-      "F-021",
-      "F-022",
-      "F-023",
-      "F-024",
-      "F-025",
-      "F-026",
-      "F-027",
-      "F-028",
-      "F-029",
-      "F-030",
-      "F-031",
-      "F-032",
-      "F-035",
-      "F-036",
-      "F-037",
-      "F-038",
-      "F-039",
-      "F-040",
-      "F-042",
-      "F-043",
-      "F-046",
-      "F-047",
-      "F-049",
-      "F-050",
-      "F-051",
-      "F-052",
-      "F-053",
-      "F-054",
-      "F-055",
-      "F-056",
-      "F-057",
-      "F-058",
-      "F-059",
-      "F-060",
-      "F-061",
-      "F-062",
-      "F-063",
-      "F-064",
-      "F-065",
-      "F-066",
-      "F-067",
-      "F-068",
-      "F-069",
-      "F-070",
-      "F-071",
-      "F-072",
-      "F-073",
-      "F-074",
-      "F-076",
-      "F-077",
-      "F-078",
-      "F-079",
-      "F-080",
-      "F-081",
-      "F-083",
-      "F-084",
-      "F-085",
-      "F-087",
-      "F-088",
-      "F-090",
-      "F-094",
-      "F-096",
-      "F-097",
-      "F-098",
-      "F-099",
-      "F-101",
-      "F-108",
-      "F-110",
-      "F-114",
-      "F-115",
-      "F-116",
-      "F-117",
-      "F-118",
-      "F-119",
-      "F-120",
-      "F-121",
-      "F-122",
-      "F-123",
-      "F-130",
-      "F-131",
-      "F-132",
-      "F-134",
-      "F-136",
-      "F-138",
-      "F-139",
-      "F-140",
-      "F-141",
-      "F-142",
-      "F-143"
-    ],
-    "fixed_on_branch": [
       "F-001",
       "F-002",
       "F-003",
@@ -883,7 +761,140 @@
       "F-142",
       "F-143"
     ],
-    "fixed_on_branch_count": 119,
+    "fixed_on_branch": [
+      "F-001",
+      "F-002",
+      "F-003",
+      "F-004",
+      "F-005",
+      "F-006",
+      "F-007",
+      "F-008",
+      "F-009",
+      "F-010",
+      "F-011",
+      "F-012",
+      "F-013",
+      "F-014",
+      "F-015",
+      "F-017",
+      "F-018",
+      "F-020",
+      "F-021",
+      "F-022",
+      "F-023",
+      "F-024",
+      "F-025",
+      "F-026",
+      "F-027",
+      "F-028",
+      "F-029",
+      "F-030",
+      "F-031",
+      "F-032",
+      "F-033",
+      "F-035",
+      "F-036",
+      "F-037",
+      "F-038",
+      "F-039",
+      "F-040",
+      "F-041",
+      "F-042",
+      "F-043",
+      "F-044",
+      "F-045",
+      "F-046",
+      "F-047",
+      "F-048",
+      "F-049",
+      "F-050",
+      "F-051",
+      "F-052",
+      "F-053",
+      "F-054",
+      "F-055",
+      "F-056",
+      "F-057",
+      "F-058",
+      "F-059",
+      "F-060",
+      "F-061",
+      "F-062",
+      "F-063",
+      "F-064",
+      "F-065",
+      "F-066",
+      "F-067",
+      "F-068",
+      "F-069",
+      "F-070",
+      "F-071",
+      "F-072",
+      "F-073",
+      "F-074",
+      "F-075",
+      "F-076",
+      "F-077",
+      "F-078",
+      "F-079",
+      "F-080",
+      "F-081",
+      "F-083",
+      "F-084",
+      "F-085",
+      "F-087",
+      "F-088",
+      "F-090",
+      "F-091",
+      "F-092",
+      "F-093",
+      "F-094",
+      "F-096",
+      "F-097",
+      "F-098",
+      "F-099",
+      "F-101",
+      "F-102",
+      "F-103",
+      "F-106",
+      "F-107",
+      "F-108",
+      "F-109",
+      "F-110",
+      "F-111",
+      "F-112",
+      "F-113",
+      "F-114",
+      "F-115",
+      "F-116",
+      "F-117",
+      "F-118",
+      "F-119",
+      "F-120",
+      "F-121",
+      "F-122",
+      "F-123",
+      "F-124",
+      "F-125",
+      "F-126",
+      "F-128",
+      "F-129",
+      "F-130",
+      "F-131",
+      "F-132",
+      "F-133",
+      "F-134",
+      "F-136",
+      "F-137",
+      "F-138",
+      "F-139",
+      "F-140",
+      "F-141",
+      "F-142",
+      "F-143"
+    ],
+    "fixed_on_branch_count": 131,
     "previous_session_verification_results": {
       "initial_full_core": {
         "tests": 1293,
@@ -923,7 +934,7 @@
       },
       "full_core_rerun": false
     },
-    "source_checkpoint": "cdb1f58",
+    "source_checkpoint": "f232375",
     "previous_continuation_verification_results": {
       "first_continuation_full_core": {
         "tests": 1314,
@@ -1262,6 +1273,54 @@
         "build/bugfix-tenth-raw.log",
         "build/bugfix-tenth-budget-process.log",
         "build/bugfix-tenth-abi-check.log"
+      ]
+    },
+    "previous_eleventh_verification_results": {
+      "selected_core_classes": [
+        "StoredEvidenceTest",
+        "EvidenceTest",
+        "ValidatorTest",
+        "PartitionTest",
+        "DispatcherTest",
+        "KbToolTest",
+        "InjectionTest",
+        "KbLifecycleTest",
+        "ChecksTest",
+        "LifecycleTest",
+        "ScopeGuardTest",
+        "RoleWiringTest",
+        "ToolContractsTest",
+        "StoreKbTest"
+      ],
+      "selected_core_methods": [
+        "CompilerFullTest.omitted seed sections cannot grant workset coverage",
+        "CellTest.plan and probe completion reach their validator without running product acceptance",
+        "CellTest.create permission cannot admit a later delete in the same edit call",
+        "ControllerTest.interrupted finalization rechecks acceptance and completes without another model cell",
+        "ControllerTest.expired writer cannot reopen over unknown effects until durable reconciliation",
+        "ControllerTest.committed scope amendments update path protection immediately and after reopen"
+      ],
+      "distinct_tests_passed": 79,
+      "batches": [
+        "Initial 56 tests: 55 passed and new finalization regression failed on sequence validation.",
+        "Recovery correction: 11 passed (10 lifecycle checks and finalization regression).",
+        "Additional authority/wiring/schema checks: 11 passed.",
+        "StoreKbTest: 2 passed."
+      ],
+      "corrections": [
+        "Corrected positional arguments in the new fact test before execution.",
+        "Interrupted finalization now resumes in one lifecycle transition, preserving the durable sequence invariant."
+      ],
+      "abi": "core regenerated and checkKotlinAbi passed",
+      "dependent_modules": "eval and index-treesitter test sources compiled",
+      "full_suite": "not run (user requested selective tests)",
+      "linux_ci": "not run",
+      "p7": "excluded",
+      "logs": [
+        "build/bugfix-eleventh-focused.log",
+        "build/bugfix-eleventh-recovery.log",
+        "build/bugfix-eleventh-authority.log",
+        "build/bugfix-eleventh-compatibility.log"
       ]
     }
   }
@@ -1697,13 +1756,15 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-017 - Git operations can block indefinitely outside the owned-process deadline path
 
 - Task: [P0.6.2](TODO.md#L647); related [P0.6.4](TODO.md#L660).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Locations: [Git.exec](core/src/main/kotlin/io/astrolabe/os/Git.kt#L360), [TempRepo.runGit](core/src/testFixtures/kotlin/io/astrolabe/fixtures/TempRepo.kt).
 - Problem: blocking readAllBytes, waitFor and thread joins have no deadline or comprehensive finally cleanup; this path uses ProcessBuilder directly, not LocalOs supervision. Interrupting the coroutine does not automatically stop blocking reads or the git process. A stalled git executable, filesystem or configured Git helper can freeze store opening, stamps and snapshots before the cell's own controls run. Captured output is also unbounded.
 - Evidence: direct control-flow inspection. TODO already records intermittent fixture git failure and the absence of timeout; this finding includes the production Git wrapper and does not claim that timeout explains that historical failure.
 - Possible solutions: bound the complete command lifecycle including pipe draining, terminate its owned process tree on deadline/cancellation/error, and preserve stderr plus a typed timeout diagnostic. Stream large outputs or apply an operation-specific capture limit without silently truncating authoritative data.
 - Future regression: a fake git executable hangs before stdout closes, writes unlimited stderr, or blocks stdin; each operation must terminate with bounded diagnostics and leave no child.
 - Current-source recheck (2026-09-25, 9a80e117): Git.exec still blocks on readAllBytes, waitFor and unbounded joins without a deadline (389?427). Earlier runtime evidence retains its original baseline; this recheck is source inspection.
+- Fix (2026-09-28, `c24c4fe`): Git commands now bound pipe pumping and process waiting to a configurable 120-second deadline, with 64 MiB stdout and 1 MiB stderr caps. Oversize capture fails explicitly; interruption and errors terminate the process and observed descendants. Fixture Git calls are also bounded. GitTest passes, including a stalled launcher and output overflow.
+
 
 ### F-018 - Supported Unicode regex patterns produce different search results by backend
 
@@ -1892,13 +1953,15 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-033 - Preimage lookup is lost across cells/restart and its journal index is written after mutation
 
 - Task: [P1.2.5](TODO.md#L736); related P1.4.3/P1.6.4/P1.8.7/P2.2.4.
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Locations: [Preimages.saved / saveThenWrite](core/src/main/kotlin/io/astrolabe/workspace/Preimages.kt#L89), [Controller cell construction](core/src/main/kotlin/io/astrolabe/campaign/Controller.kt#L887), [Cell.journalPreimages](core/src/main/kotlin/io/astrolabe/cell/Cell.kt#L588).
 - Problem: edit-to-path/preimage/postimage mappings live only in saved. A fresh Preimages instance is created for each cell, with no reload API or journal reconstruction call. Cell writes its serialized preimage index only after the tool has returned, rather than before mutation. Blobs are durable before writes, but the metadata needed to locate and guard them is not durably attached to the edit at that point.
 - Impact: an edit alias from a previous cell or resumed session cannot be inverted by the built-in lookup, despite campaign-global aliases and surviving recovery bytes. A crash after mutation but before post-tool journaling can lose the reliable preimage association. Snapshot-based recovery may still exist, but does not fulfill revert-by-edit behavior.
 - Possible solutions: persist the typed preimage association before mutation and postimage/result atomically with the action outcome; reload by campaign/edit ID across cells and resume. Keep uncertain postimage outcomes explicit and refuse unsafe inverses.
 - Future regression: edit in cell 1 then revert its alias in cell 2 and after reopen; inject a crash after write/before tool return and prove the recovery metadata is discoverable and correctly guarded.
 - Current-source recheck (2026-09-25, 9a80e117): Controller creates Preimages per cell (1243); saved remains memory-only; Cell.journalPreimages (625) records mappings only after tool completion (395). Earlier runtime evidence retains its original baseline; this recheck is source inspection.
+- Fix (2026-09-28, `7a12c08`): Preimages persists workspace-qualified edit associations in SQLite before mutation and records guarded postimages afterward. New cell instances can resolve the same edit; interrupted writes retain discoverable recovery bytes and refuse an inverse until a postimage is known. PreimagesTest passes.
+
 
 ### F-034 - Selective inverses are limited and their advertised turn fallback is not wired
 
@@ -1990,12 +2053,14 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-041 - Sniffed Gradle wrapper commands have no executable-resolution implementation
 
 - Task: [P1.3.4](TODO.md#L769); related P1.6.5/P1.7.2.
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Locations: [Sniff.gradle/hasWrapper](core/src/main/kotlin/io/astrolabe/atlas/Sniff.kt#L190), [TrustedLocalRunner.start](core/src/main/kotlin/io/astrolabe/tool/run/Runner.kt#L25), [WindowsOwner.renderCommandLine](core/src/main/kotlin/io/astrolabe/os/WindowsOwner.kt#L161), [PosixOwner.start](core/src/main/kotlin/io/astrolabe/os/PosixOwner.kt#L29).
 - Problem: Sniff returns the bare executable gradlew even when the wrapper is in an ancestor directory. Its KDoc promises translation to ./gradlew or gradlew.bat, but the production runner passes the argv unchanged to native launch. No gradlew resolver exists in the main source tree. The Windows native Argv path also does not select a command interpreter for .bat/.cmd launchers.
 - Impact: common Gradle repositories cannot run their inferred acceptance on POSIX PATHs without the current directory, and Windows cannot use the extensionless shell wrapper as an executable. Subpackage cwd loses the known ancestor wrapper location. Fixture Runners supplies its own launcher, so green fixture tests do not establish production command viability.
 - Possible solutions: resolve/pin a platform-specific launcher and its exact path when discovering the manifest, retaining package cwd; provide a deliberate safe batch-file execution strategy on Windows. Apply the same check to other package-manager launchers rather than relying on shell behavior in a direct native spawn.
 - Future regression: execute the inferred command from a child Gradle project with a root wrapper on both platforms and no globally installed Gradle; verify no PATH-dependent alternate program is selected.
+- Fix (2026-09-28, `d99e21a`): Sniff pins the platform-specific Gradle wrapper relative to the package cwd, including ancestor wrappers. Windows native argv launches .bat/.cmd through an explicit interpreter path and refuses arguments that cannot be preserved. SniffTest executes the inferred ancestor wrapper through LocalOs.
+
 
 ### F-042 - Bounded journal search deserializes the entire campaign history
 
@@ -2438,12 +2503,14 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-075 - Normal Gradle/Maven verification never supplies the reports required to pass
 
 - Task: [P1.7.1](TODO.md#L891); integration with P1.6.7.
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Locations: [Checks.seed](core/src/main/kotlin/io/astrolabe/verify/Check.kt#L346), [Verify.runOne](core/src/main/kotlin/io/astrolabe/tool/verify/Verify.kt#L330), [JUnitXmlShaper](core/src/main/kotlin/io/astrolabe/tool/run/JUnitXmlShaper.kt#L30).
 - Trigger/problem: Sniff registers Gradle/Maven tests as acceptance/full-suite commands. Even when the executable launches and produces valid JUnit XML, Verify constructs RunCapture without reports (default empty). JUnitXmlShaper requires fresh XML evidence; successful console output alone yields no counts and cannot pass. Baseline has a report collector, but ordinary verification does not use it.
 - Impact: supported default Java/JVM projects cannot satisfy these run obligations through normal verify. This is separate from F-041 executable resolution and from P7 live transports.
 - Possible solution: collect invocation-bound JUnit reports from the actual execution root, with explicit freshness/cache provenance, and pass them to the existing shaper.
 - Future regression: successful and failing Gradle/Maven fixtures through Verify, including isolated roots and stale prior reports; success requires fresh parsed tests, never exit code alone.
+- Fix (2026-09-28, `b713e83`): Verify archives prior Gradle/Maven JUnit XML before dispatch and collects bounded, newly produced reports from the actual execution cwd, including nested modules. It passes captured reports to the shaper and refuses stale success. The selected VerifyTest regression passes.
+
 
 ### F-076 - Touched checker paths are resolved twice for nested package commands
 
@@ -2763,10 +2830,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-107 - Bounded cross-cell fact retention is never applied by the runtime
 
 - Task: [P2.4.2](TODO.md#L1257).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/context/FactCoherence.kt#L41).
 - Analysis: FactCoherence.retain implements missing-evidence demotion, stale streak tracking, archive and capacity-gap reporting, but has no production caller. Controller.carryFrom and Cell.rebuild only call CarryForward.carry, which marks moved anchors but preserves unresolved verified facts and never archives old stale/refuted records. Controller.boundary always passes an empty archived list into STATUS. Repeated continuations therefore retain unusable facts indefinitely and can fill mandatory STATE until compilation stops; tests of the standalone retention policy do not prove runtime behavior. Apply retention at the boundary, persist streak/archive state and surface an unresolvable capacity gap. Regression: continue twice with a stale unreferenced fact and missing evidence; it must be archived/demoted while remaining recallable.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-28, `0898a57`): Cell boundaries persist one retention decision per cell. Carried facts retain stale-cell counts, missing evidence demotes verified claims, and inactive stale facts become durable STATUS archives. Resume cannot age the same boundary twice; a remaining register-cap gap blocks compilation. FactCoherenceTest, CarryForwardTest and ResumeTest pass.
+
 
 ### F-108 - Pressure rebuild retains old messages that merely equal a recent message
 
@@ -2781,10 +2850,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-109 - The production pressure rebuild bypasses recompilation and lost-coverage validation
 
 - Task: [P2.5.3](TODO.md#L1293).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/cell/Cell.kt#L743).
 - Analysis: Rebuild.run provides compileK, projection coverage validation and a rehydrate/refusal path, but has no production caller. Cell's custom pressure path truncates residents, computes carry seeds and grants their Workset coverage, then leaves ctx.sections unchanged; it neither renders those newly carried seeds into K nor checks mandatory information lost from the tail. A selected carry seed whose original tool result was dropped can therefore remain KNOWN without any surviving serialized source view. Use the common projection rebuild or equivalently recompile/revalidate before publishing the new Workset. Regression: pressure evicts a referenced source observation; it must be serialized as a seed in the rebuilt request or lose KNOWN authority, and missing mandatory evidence must trigger rehydration/refusal.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-28, `0898a57`): Pressure rebuild now uses Rebuild.run, checkpoints before replacement, renders carried source seeds into rebuilt K, retains other compiled sections, checks mandatory coverage and refuses a projection with lost evidence. Workset receives only the seeds actually rendered. The selected CellTest pressure regression passes.
+
 
 ### F-110 - Note supersession commits removal of the old note before validating its replacement
 
@@ -2818,10 +2889,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-113 - Knowledge dependency invalidation is disconnected from live workspace changes
 
 - Task: [P2.6.3](TODO.md#L1315).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/kb/NoteHorizon.kt#L19).
 - Analysis: NoteHorizon has no production registration or construction. Cell Coherence registers Workset, register, Checks and touched-ledger listeners only. StoreKb.stale checks anchors but ignores validity.dependsOn; Injection only checks dependency-note status and anchor bytes, not pinned dependency versions. A note depending solely on src/config.py@oldHash or another contract version can thus remain Admitted and be retrieved/injected as current after that dependency changes. Register the project horizon and reconcile it on reopen, and validate pinned dependencies at serve time as a fail-closed fallback. Regression: mutate a dependency-only path or contract version during a real campaign/reopen; kb.get/search and injection must report or exclude the stale note.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-28, `0898a57`): The main cell registers NoteHorizon with coherence and reconciles dependency and anchor versions on each workspace reconciliation. Campaign open performs the same durable reconciliation before freezing notes. NoteHorizonTest and a ControllerTest dependency-only reopen regression pass; unknown named versions remain ineligible at serve time.
+
 
 ### F-114 - Cancelled or externally blocked campaigns are counted as failed calibration samples
 
@@ -2925,10 +2998,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-124 - Admission rollback does not restore the superseded predecessor
 
 - Task: [P4.1.1](TODO.md#L1550).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Location: [kb/Curator.kt](core/src/main/kotlin/io/astrolabe/kb/Curator.kt#L88).
 - Analysis: Admit B superseding admitted A, then roll back B's batch. batch() marks A Superseded; rollback() returns only B to Candidate. Neither version is available to injection. Rolling back an older batch after later supersession can also change a note owned by a later batch. Persist before-state/revision ownership for all affected notes and restore transactionally, rejecting later-batch conflicts. Regression: replacement rollback restores A; rollback across later supersession preserves its state.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; current-source trace and scoped test inspection; no new runtime reproduction claimed.
+- Fix (2026-09-28, `e68cb48`): Admission records before-state and resulting revisions for every changed note, together with the queue decision, in one transaction. Rollback validates ownership and restores predecessors and candidates atomically; later revisions and legacy batches without ownership records are refused. CuratorTest passes.
+
 
 ### F-125 - Stale-note rechecks accept unresolved and wrong-version dependencies
 
@@ -2961,18 +3036,22 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-128 - Delegation exceptions reconcile real child work as zero spend
 
 - Task: [P4.4.1](TODO.md#L1605).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Location: [delegate/Delegator.kt](core/src/main/kotlin/io/astrolabe/delegate/Delegator.kt#L253).
 - Analysis: runChild converts every RuntimeException (including coroutine cancellation) to Failed with Tokens.ZERO. ChildCells and Writers also return zero when the cell exits through null cancellation. Work already performed before cancellation/exception therefore releases the entire reservation although it may have billed usage. Independent child accounting must reconcile observed usage on every terminal path; keep unknown charges reserved until resolved. Regression: child spends tokens then throws/is cancelled; tree budget retains that spend and another dispatch cannot reuse it.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; current-source trace and scoped test inspection; no new runtime reproduction claimed.
+- Fix (2026-09-28, `6649cec`): Thrown or cancelled child calls with unknown usage consume their reserved allowance instead of returning zero spend. Probe, review and writer null-exit paths use their admitted allowance; known returned spend remains unchanged. DelegatorTest covers exception funding and later-result accounting.
+
 
 ### F-129 - Probe packets accept fabricated evidence aliases and unread ranges
 
 - Task: [P4.4.2](TODO.md#L1612).
-- Severity: medium. Confidence: reproduced. Status: open.
+- Severity: medium. Confidence: reproduced. Status: fixed (2026-09-28).
 - Location: [delegate/Probe.kt](core/src/main/kotlin/io/astrolabe/delegate/Probe.kt#L207).
 - Analysis: pointer accepts any nonempty #alias without resolving it or checking that the probe received it; range validation checks only a path's readVersions, not displayed line coverage. Observed claims can cite #does-not-exist or unseen line 999999 of a partially read file and are published as observed; freshness even reports every alias Current. Pass the actual evidence resolver and displayed ranges to validation. Regression: nonexistent/unseen aliases and out-of-coverage ranges are gaps, while shown evidence succeeds.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; successful stdin JShell probe against current compiled classes; synthetic data only. Current compiled Probe.parse accepted an observed claim citing #nonexistent with shown={} and returned Parsed.
+- Fix (2026-09-28, `a471bc4`): Probe parsing accepts only resolved aliases delivered by the cell and line ranges covered by its current displayed, unredacted Workset entries. Legacy parse calls without display evidence fail closed. Alias freshness is unknown without a resolver. ProbeTest rejects fabricated aliases and unseen or invalid ranges.
+
 
 ### F-130 - Review reuse bypasses the failed-required-check veto
 
@@ -3007,10 +3086,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-133 - Integration publication does not prove the complete tested candidate equals the published tree
 
 - Task: [P5.1.3](TODO.md#L1765).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Location: [delegate/Integrator.kt](core/src/main/kotlin/io/astrolabe/delegate/Integrator.kt#L278).
 - Analysis: After combined checks and gates, publish hashes only the packet's changed paths against their original after hashes. It neither verifies the integration candidate's full stamp nor proves the resulting main stamp equals the one certified by checks/review. A check or review-time process can alter another input on the disposable tree; staged changed paths still pass and only those paths reach main. Bind checks/gates to one full verified candidate manifest and revalidate it before publication, then compare the resulting tree identity. Regression: combined check changes a dependency outside the patch, or review changes it after checks; publication must refuse. S3 uses worktrees and TreeVerification rather than Scheduler.runIsolated, so this is an independent full-tree publication gap; F-079/F-080 remain relevant to the ordinary isolated final-verification path.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; current-source trace and scoped test inspection; no new runtime reproduction claimed.
+- Fix (2026-09-28, `5ae4892`): Integration captures a full candidate identity before checks, rejects changes during checks or review, revalidates before publication and compares the resulting main identity before committing the intent. Corrected the missing Dispatched intent transition. IntegratorTest passes, including mutation outside the patch.
+
 
 ### F-134 - Integration fails to recheck the current contract and generation inside the publication lock
 
@@ -3043,10 +3124,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-137 - HTTP QA receipts claim candidate isolation without binding the server to that candidate
 
 - Task: [P5.3.1](TODO.md#L1803).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed (2026-09-28).
 - Location: [delegate/QaDriver.kt](core/src/main/kotlin/io/astrolabe/delegate/QaDriver.kt#L189).
 - Analysis: The HTTP path ignores the isolated root passed by Scheduler and sends a request directly to any admitted loopback URL using the host HttpClient. Nothing starts or identifies a server from the exported candidate, so an unrelated/stale localhost service can pass while the scheduler labels the result isolated at the candidate stamp. Loopback does not prove disposable environment or tested-code identity; a Confined runner does not confine this HTTP call either. Require a lifecycle-managed service bound to the candidate/environment and route calls through that environment. Regression: an unrelated localhost service returning expected text cannot certify another candidate.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; current-source trace and scoped test inspection; no new runtime reproduction claimed.
+- Fix (2026-09-28, `96aa811`): HTTP QA requires a host service launcher bound to the disposable execution root and packet environment. Requests use that service origin and close its lifecycle afterward; an unrelated loopback URL alone is refused. QaDriverTest exercises candidate-file-backed HTTP and CLI checks and confirms service cleanup.
+
 
 ### F-138 - QA stores and reports unredacted process and HTTP output
 

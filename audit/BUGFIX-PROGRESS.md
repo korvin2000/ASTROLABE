@@ -2,8 +2,37 @@
 
 Branch: `feature/bugfix`. Baseline: `9a80e117445be357285fec2cffffe0fd45290a9a`.
 
-**119 fixed across eleven sessions (13 in this continuation); 23 open; F-034 previously resolved.**
+**131 fixed (12 in this continuation); 11 open; F-034 previously resolved.**
 The complete remaining queue is `findings.md` ? JSON `fix_progress.remaining_open_ids`.
+
+## Twelfth continuation: bounded execution and durable evidence
+
+| Finding | Commit | Change and evidence |
+|---|---|---|
+| F-017 | `c24c4fe` | Git commands now bound pipe pumping and process waiting to a configurable 120-second deadline, with 64 MiB stdout and 1 MiB stderr caps. Oversize capture fails explicitly; interruption and errors terminate the process and observed descendants. Fixture Git calls are also bounded. GitTest passes, including a stalled launcher and output overflow. |
+| F-033 | `7a12c08` | Preimages persists workspace-qualified edit associations in SQLite before mutation and records guarded postimages afterward. New cell instances can resolve the same edit; interrupted writes retain discoverable recovery bytes and refuse an inverse until a postimage is known. PreimagesTest passes. |
+| F-041 | `d99e21a` | Sniff pins the platform-specific Gradle wrapper relative to the package cwd, including ancestor wrappers. Windows native argv launches .bat/.cmd through an explicit interpreter path and refuses arguments that cannot be preserved. SniffTest executes the inferred ancestor wrapper through LocalOs. |
+| F-075 | `b713e83` | Verify archives prior Gradle/Maven JUnit XML before dispatch and collects bounded, newly produced reports from the actual execution cwd, including nested modules. It passes captured reports to the shaper and refuses stale success. The selected VerifyTest regression passes. |
+| F-107 | `0898a57` | Cell boundaries persist one retention decision per cell. Carried facts retain stale-cell counts, missing evidence demotes verified claims, and inactive stale facts become durable STATUS archives. Resume cannot age the same boundary twice; a remaining register-cap gap blocks compilation. FactCoherenceTest, CarryForwardTest and ResumeTest pass. |
+| F-109 | `0898a57` | Pressure rebuild now uses Rebuild.run, checkpoints before replacement, renders carried source seeds into rebuilt K, retains other compiled sections, checks mandatory coverage and refuses a projection with lost evidence. Workset receives only the seeds actually rendered. The selected CellTest pressure regression passes. |
+| F-113 | `0898a57` | The main cell registers NoteHorizon with coherence and reconciles dependency and anchor versions on each workspace reconciliation. Campaign open performs the same durable reconciliation before freezing notes. NoteHorizonTest and a ControllerTest dependency-only reopen regression pass; unknown named versions remain ineligible at serve time. |
+| F-124 | `e68cb48` | Admission records before-state and resulting revisions for every changed note, together with the queue decision, in one transaction. Rollback validates ownership and restores predecessors and candidates atomically; later revisions and legacy batches without ownership records are refused. CuratorTest passes. |
+| F-128 | `6649cec` | Thrown or cancelled child calls with unknown usage consume their reserved allowance instead of returning zero spend. Probe, review and writer null-exit paths use their admitted allowance; known returned spend remains unchanged. DelegatorTest covers exception funding and later-result accounting. |
+| F-129 | `a471bc4` | Probe parsing accepts only resolved aliases delivered by the cell and line ranges covered by its current displayed, unredacted Workset entries. Legacy parse calls without display evidence fail closed. Alias freshness is unknown without a resolver. ProbeTest rejects fabricated aliases and unseen or invalid ranges. |
+| F-133 | `5ae4892` | Integration captures a full candidate identity before checks, rejects changes during checks or review, revalidates before publication and compares the resulting main identity before committing the intent. Corrected the missing Dispatched intent transition. IntegratorTest passes, including mutation outside the patch. |
+| F-137 | `96aa811` | HTTP QA requires a host service launcher bound to the disposable execution root and packet environment. Requests use that service origin and close its lifecycle afterward; an unrelated loopback URL alone is refused. QaDriverTest exercises candidate-file-backed HTTP and CLI checks and confirms service cleanup. |
+
+### Verification and compatibility
+
+- 73 distinct selected tests passed on Windows JDK 26. GitTest initially passed 18/19; its environment-dependent timeout fixture was corrected and the failed test passed. Other new fixture compile/assertion errors were corrected, and the affected selections passed. The integration transition defect found by existing tests was fixed before commit.
+- Core ABI regenerated and checked; eval and index-treesitter test sources compiled. No full suite/build, Linux/CI, live-provider or P7 run. The final focused resume run passed after ensuring interrupted-boundary archives reach STATUS.
+- New defaulted JSON fields keep existing note queue and fact records readable; no schema bump. JVM consumers must rebuild. Historical preimages without durable associations are not reconstructed; legacy admission batches without rollback ownership are refused.
+- Git defaults: 120-second deadline, 64 MiB stdout and 1 MiB stderr; overflow fails without returning truncated authoritative data. Process cleanup terminates the root and observed descendants. Detached-process containment remains F-016; this is not new kernel-containment evidence. No Linux runtime validation.
+- Unknown child usage consumes its admitted allowance conservatively; this is not a claim of exact provider billing. Campaign-wide funding and provider terminal reconciliation remain F-095/F-086. HTTP QA now needs a host launcher that starts/stops a service from the supplied candidate and honors its environment; the default refuses unbound HTTP.
+- Gradle wrapper paths are host-specific and relative to the package cwd. Windows batch arguments containing quotes, percent, exclamation or newlines are refused. Existing reports are preserved under the invocation's log archive; absent fresh reports remain inconclusive, with no inferred build-cache provenance.
+- Pressure rebuild preserves other compiled sections and publishes only rendered seed coverage. Retention decisions and archives survive boundaries/reopen. Unknown named knowledge dependencies remain ineligible. Rollback appends restored note revisions and refuses later ownership conflicts.
+- Integration verifies complete candidate identity around checks, review and publication. Transactional multi-file rollback remains F-135; a final identity mismatch leaves the intent Unknown for explicit reconciliation.
+- D-303 through D-311 record these policies. Push target is origin/feature/bugfix, authorized by the user. Preserve pre-existing CLAUDE.md/ISSUES.md and untracked task files.
 
 ## Eleventh continuation: runtime authority, recovery and knowledge reads
 
