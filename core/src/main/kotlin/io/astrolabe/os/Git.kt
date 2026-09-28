@@ -329,10 +329,13 @@ public class Git @JvmOverloads constructor(
     }
 
     /** Registered workspace roots, including the main tree, for external-state validation. */
+    // `worktree list -z` needs git 2.36; the newline form works from the D-04 minimum (2.20).
     internal fun worktreeRoots(): List<Path> =
-        decode(run(listOf("worktree", "list", "--porcelain", "-z")))
-            .split('\u0000')
+        decode(run(listOf("worktree", "list", "--porcelain")))
+            .lineSequence()
+            .map { it.removeSuffix("\r") }
             .filter { it.startsWith("worktree ") }
+            .toList()
             .map { Path.of(it.removePrefix("worktree ")).toAbsolutePath().normalize() }
 
     /**
