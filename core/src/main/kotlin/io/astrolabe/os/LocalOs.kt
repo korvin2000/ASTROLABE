@@ -24,8 +24,8 @@ import kotlin.concurrent.withLock
  * requesting coroutine may be cancelled at any moment without losing that record (D-26).
  *
  * When the root exits, the supervisor terminates and confirms quiescence of its owned container
- * before publishing the outcome. Failed confirmation is Lost. Windows owns all descendants;
- * POSIX owns the original process group only (detached groups remain unsupported, F-016).
+ * before publishing the outcome. Failed confirmation is Lost. Windows uses a job object;
+ * Linux uses an isolated subreaper whose completion acknowledgment requires ECHILD.
  *
  * Requires `--enable-native-access=ALL-UNNAMED`; see [Os].
  */

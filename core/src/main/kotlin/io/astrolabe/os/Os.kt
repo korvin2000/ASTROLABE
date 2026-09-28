@@ -12,9 +12,9 @@ import kotlin.math.abs
  * Operating-system adapter: owned process launch, durable log capture, atomic file replacement and
  * real-path resolution.
  *
- * Windows owns the full process tree from birth through a job object. POSIX owns the original
- * process group only: detached descendants are unsupported and may survive cleanup (F-016).
- * Group quiescence does not certify detached descendants. Every
+ * Windows owns descendants through a job object. Linux launches each command beneath a separate
+ * kernel subreaper that adopts detached descendants and confirms their termination with waitpid.
+ * On Linux [Proc.pid] identifies that supervisor; the reported exit code is the command's. Every
  * launch is described by a [Proc] record that is persisted next to its log file, independently of
  * the coroutine that requested it, so a resumed harness reads status and log cursor from the
  * filesystem alone.

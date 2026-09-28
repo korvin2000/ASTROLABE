@@ -16,7 +16,7 @@ import kotlin.test.assertTrue
 
 /**
  * P0.6.1 tree ownership: a descendant that the root process spawned must never survive the root's
- * container (Windows job object, POSIX session). D-43, IX-20.
+ * owner (Windows job object, Linux subreaper). D-43, IX-20.
  */
 class ProcOwnershipTest {
 

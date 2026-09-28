@@ -1,0 +1,50 @@
+name: process-ownership
+
+on:
+  push:
+    branches: [feature/bugfix]
+    paths:
+      - 'core/src/main/kotlin/io/astrolabe/os/**'
+      - 'core/src/main/java/io/astrolabe/os/**'
+      - 'core/src/test/kotlin/io/astrolabe/os/**'
+      - '.github/workflows/process-ownership.yml'
+  pull_request:
+    paths:
+      - 'core/src/main/kotlin/io/astrolabe/os/**'
+      - 'core/src/main/java/io/astrolabe/os/**'
+      - 'core/src/test/kotlin/io/astrolabe/os/**'
+      - '.github/workflows/process-ownership.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '26'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: true
+      - name: Detached descendants and ownership regressions
+        run: >-
+          ./gradlew :core:test
+          --tests 'io.astrolabe.os.LinuxSubreaperTest'
+          --tests 'io.astrolabe.os.ProcOwnershipTest'
+          --tests 'io.astrolabe.os.LocalOsSettlementTest'
+          --tests 'io.astrolabe.os.LocalOsProcessTest'
+          --tests 'io.astrolabe.os.ProcResolutionTest'
+          --console=plain --no-daemon
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-process-ownership
+          path: |
+            core/build/reports/tests/test/**
+            core/build/test-results/test/**
+          if-no-files-found: ignore
