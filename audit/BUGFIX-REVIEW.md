@@ -106,15 +106,18 @@ Use F-none for commits without findings. Report DEFECT only when you can name a 
 
 ## Checkpoint
 
-- Status: in progress. Round 4 (B10–B12) reviewed, verdicts not yet written: verify its DEFECTs (F-093, F-075,
-  F-019 ×2, F-095) and fix; then B13, B14. Rounds done: 3 (B01–B09). FIXED: 22. REJECTED: 0.
+- Status: all batches reviewed. Open: rows 110 (4f6eb64: F-095 funding wedge + ResultPacketTest regression) and
+  111 (1120f89: ControllerTest "interrupted finalization" regression) — a worker is fixing them; then Finalize.
+  FIXED: 26 so far. REJECTED: 0. F-034 recheck: still resolved at the tip (Controller passes `shadowRef =
+  tree.shadow`; Edit accepts `turn:N`). Docs: owner's dba6344 CLAUDE.md/ISSUES.md edits kept (intentional);
+  D-rows aligned in 66a192d.
 - Round 1 review fixes: 261871f F-066, 1db9a3e F-043, 49f4b8c F-009, 2fcd391 F-053, f15acab F-088, 40950b0 F-059,
   72d3b3c F-078, f6b3654 F-050. Round 2: b465b26 F-014, 8afc54f F-026, 69cf936 F-064. Round 3: 43a1d6e F-029,
   c0b6ddf F-028, ebf1a92+7aa5736 F-027, 8baf840 F-083, 3d224ae F-096, c19aef6 F-097, 4054157 F-069, c924b42 F-036,
-  edf8040 F-125, 82c0615 F-118, f5c39cf F-090.
+  edf8040 F-125, 82c0615 F-118, f5c39cf F-090. Round 4: 829997b F-019, 53ab668 F-075, 5f043fc F-093. B13: d8e5918 F-016.
 - Public API changed: `Observed.truncated` (69cf936), `RunCapture.executionRoot` (4054157) → Finalize ABI regen.
-- Pre-existing failure at dba6344: ResultPacketTest "a failed cell still hands back a packet…" expects
-  `callsWithoutUsage == 1`, gets 0 (suspect 4f6eb64 F-086/F-095, B11). Fix in round 4.
+- Pre-existing failures at dba6344 (bisected): ResultPacketTest "a failed cell still hands back a packet…"
+  (broken by 4f6eb64) and ControllerTest "interrupted finalization rechecks acceptance…" (broken by 1120f89).
 - 100 code-bearing commits in 14 batches (≤1000 code lines each; `e5321f3`/F-016 alone); 18 docs/ABI-only commits SKIP.
 
 ## Ledger
@@ -217,29 +220,29 @@ Code± = changed lines excluding `*.md` and `*/api/*.api`; Main± = lines under 
 | 090 | - | `52607da` | 0 | 0 | - | docs: record eight repairs and selective verification | SKIP (docs/ABI; covered by final docs+ABI step) |  |
 | 091 | B09 | `d4d2524` | 163 | 88 | F-044 F-045 F-048 F-102 F-103 F-112 | fix: enforce edit permissions and current cell evidence | F-044 NOTE; F-045 NOTE; F-048 ACCEPT; F-102 partial; F-103 ACCEPT; F-112 partial | F-044: `reconcile` accepts any non-blank evidence string; Unknown Run intents stay blocked until a host reconciles. F-045: Validator sets staleAt to the new version (others use anchor.version). F-102: cdb1f58 (row 093) needed. |
 | 092 | B09 | `6fcc5a4` | 159 | 92 | F-111 F-112 F-125 F-126 | fix: redact and bound knowledge reads and validate note dependencies | F-111 partial; F-112 NOTE; F-125 FIXED (edf8040); F-126 partial | F-112: STATUS text beyond the redaction scan cap unreachable; a budget smaller than the cursor suffix returns an empty page. F-125: dependency recursion was exponential on diamond DAGs and each search hit reloaded all notes; memoized, notes loaded once per search. NOTE: notes pinned to `contract@vN` are never injected. |
-| 093 | B10 | `cdb1f58` | 133 | 65 | F-091 F-092 F-093 F-102 F-106 F-111 F-126 | fix: recover finalization and bind workspace authority to committed state | IN_REVIEW |  |
+| 093 | B10 | `cdb1f58` | 133 | 65 | F-091 F-092 F-093 F-102 F-106 F-111 F-126 | fix: recover finalization and bind workspace authority to committed state | F-091 ACCEPT; F-092 NOTE; F-093 FIXED (5f043fc); F-102 ACCEPT; F-106 ACCEPT; F-111 NOTE; F-126 ACCEPT | F-092: committed protection uses exact-case patterns; a not-yet-existing path keeps typed case on Windows. F-093: open polled handles without saving, so an exited handle fenced every reopen; terminal states now saved (running/lost still fence, per the finding). No dedicated regression (handle fixture cost). F-111: [A]/[K] injected note bodies rely on admission-time redaction. |
 | 094 | - | `2106397` | 0 | 0 | - | docs: record thirteen repairs and selective verification | SKIP (docs/ABI; covered by final docs+ABI step) |  |
-| 095 | B10 | `6649cec` | 10 | 8 | F-128 | fix: retain child funding when terminal usage is unknown | IN_REVIEW |  |
-| 096 | B10 | `5ae4892` | 32 | 15 | F-133 | fix: bind integration publication to the complete tested candidate | IN_REVIEW |  |
-| 097 | B10 | `a471bc4` | 34 | 29 | F-129 | fix: validate probe citations against delivered evidence | IN_REVIEW |  |
-| 098 | B10 | `96aa811` | 49 | 29 | F-137 | fix: require candidate-bound service lifecycle for HTTP QA | IN_REVIEW |  |
-| 099 | B10 | `d99e21a` | 43 | 27 | F-041 | fix: resolve ancestor Gradle wrappers and launch Windows batch argv | IN_REVIEW |  |
-| 100 | B10 | `b713e83` | 86 | 61 | F-075 | fix: collect invocation-bound JUnit reports during verification | IN_REVIEW |  |
-| 101 | B10 | `7a12c08` | 52 | 36 | F-033 | fix: persist edit preimage associations before workspace mutation | IN_REVIEW |  |
-| 102 | B10 | `e68cb48` | 81 | 64 | F-124 | fix: roll back knowledge admission atomically with revision ownership | IN_REVIEW |  |
-| 103 | B10 | `c24c4fe` | 37 | 0 | F-017 | fix: bound Git command lifetime and captured output | IN_REVIEW |  |
-| 104 | B10 | `0898a57` | 169 | 135 | F-107 F-109 F-113 | fix: rebuild carried context and persist fact and note coherence | IN_REVIEW |  |
+| 095 | B10 | `6649cec` | 10 | 8 | F-128 | fix: retain child funding when terminal usage is unknown | F-128 NOTE | Unknown charge uses the whole allowance permanently; runChild turns CancellationException into Failed (pre-existing). |
+| 096 | B10 | `5ae4892` | 32 | 15 | F-133 | fix: bind integration publication to the complete tested candidate | F-133 NOTE | Combined checks writing non-ignored build artifacts now reject every integration. |
+| 097 | B10 | `a471bc4` | 34 | 29 | F-129 | fix: validate probe citations against delivered evidence | F-129 NOTE | Negative test never exercises partial coverage; seed/carry-forward aliases not in shownAliases; alias-backed findings summarized as stale. |
+| 098 | B10 | `96aa811` | 49 | 29 | F-137 | fix: require candidate-bound service lifecycle for HTTP QA | F-137 ACCEPT |  |
+| 099 | B10 | `d99e21a` | 43 | 27 | F-041 | fix: resolve ancestor Gradle wrappers and launch Windows batch argv | F-041 NOTE | Wrapper names follow the host OS and are persisted, so a campaign resumed on the other OS runs the wrong wrapper; batch argv with %, !, " or CR/LF is refused. |
+| 100 | B10 | `b713e83` | 86 | 61 | F-075 | fix: collect invocation-bound JUnit reports during verification | F-075 FIXED (53ab668) | `Files.walk` threw UncheckedIOException (uncaught by Verify's IOException handling) on any unreadable directory under the command dir; now walkFileTree skipping failures and `.git`. |
+| 101 | B10 | `7a12c08` | 52 | 36 | F-033 | fix: persist edit preimage associations before workspace mutation | F-033 ACCEPT |  |
+| 102 | B10 | `e68cb48` | 81 | 64 | F-124 | fix: roll back knowledge admission atomically with revision ownership | F-124 ACCEPT |  |
+| 103 | B10 | `c24c4fe` | 37 | 0 | F-017 | fix: bound Git command lifetime and captured output | F-017 NOTE | All failures report START_FAILED; early-exit git before reading stdin becomes GitError; finally kills descendants seen (may kill detached auto-gc/fsmonitor); 120 s default for large-repo ops. |
+| 104 | B10 | `0898a57` | 169 | 135 | F-107 F-109 F-113 | fix: rebuild carried context and persist fact and note coherence | F-107 ACCEPT; F-109 ACCEPT; F-113 NOTE | F-113: reconcile at open durably marks Stale admitted notes with unpinned/unknown dependsOn, removing them from kb.get/search. |
 | 105 | - | `f232375` | 0 | 0 | - | chore: update core ABI for recovery and evidence fixes | SKIP (docs/ABI; covered by final docs+ABI step) |  |
 | 106 | - | `01c34b3` | 0 | 0 | - | docs: record twelve fixes and selective verification | SKIP (docs/ABI; covered by final docs+ABI step) |  |
-| 107 | B10 | `0959ee7` | 102 | 38 | F-100 | fix: allowlist inherited Windows process handles | IN_REVIEW |  |
-| 108 | B10 | `0ba3658` | 133 | 106 | F-019 | fix: bound search file reads regex work and process output | IN_REVIEW |  |
-| 109 | B11 | `0fc1dbf` | 204 | 116 | F-135 | fix: recover interrupted integration publications from durable preimages | IN_REVIEW |  |
+| 107 | B10 | `0959ee7` | 102 | 38 | F-100 | fix: allowlist inherited Windows process handles | F-100 NOTE | Handles still created inheritable; JDK ProcessBuilder children (git, rg) inherit all, so a concurrent one can hold a log handle open. |
+| 108 | B10 | `0ba3658` | 133 | 106 | F-019 | fix: bound search file reads regex work and process output | F-019 partial | Final on row 112. |
+| 109 | B11 | `0fc1dbf` | 204 | 116 | F-135 | fix: recover interrupted integration publications from durable preimages | F-135 NOTE | A conflicting later edit sets the intent Unknown and every later open/integrate throws until a host reconciles (fail-closed); Integrator.kt:313 `catch Throwable` swallows CancellationException into Rejected; crash leftovers (`.astrolabe-integration-*.tmp`) not removed. |
 | 110 | B11 | `4f6eb64` | 356 | 201 | F-086 F-095 F-127 | fix: persist campaign funding and reconcile provider and extractor usage | IN_REVIEW |  |
 | 111 | B11 | `1120f89` | 433 | 201 | F-082 F-089 F-104 F-105 | fix: complete independently assessed work and resume or replan blocked increment | IN_REVIEW |  |
-| 112 | B11 | `745e229` | 3 | 3 | F-019 | fix: retain typed failures when search candidate enumeration fails | IN_REVIEW |  |
-| 113 | B12 | `0d7ad78` | 21 | 21 | (no finding: review as change) | docs: clarify platform process ownership boundaries | IN_REVIEW |  |
+| 112 | B11 | `745e229` | 3 | 3 | F-019 | fix: retain typed failures when search candidate enumeration fails | F-019 FIXED (829997b) | The 10M character-read budget was search-wide (JVM backend failed any no-match search over ~10 MB); the 8 MiB check ran before the binary probe (one large binary failed every search, both backends). Now per-line budget + global deadline; binaries skipped. NOTE: oversized text and >1 MiB rg JSON lines still fail the search explicitly. |
+| 113 | B12 | `0d7ad78` | 21 | 21 | (no finding: review as change) | docs: clarify platform process ownership boundaries | F-none ACCEPT | Comments and named Win32 constants only (values verified). |
 | 114 | - | `bc742fe` | 0 | 0 | - | chore: update core ABI for campaign evidence and funding | SKIP (docs/ABI; covered by final docs+ABI step) |  |
 | 115 | - | `a7189d4` | 0 | 0 | - | docs: record ten fixes and remaining POSIX containment work | SKIP (docs/ABI; covered by final docs+ABI step) |  |
-| 116 | B13 | `e5321f3` | 878 | 657 | F-016 | fix: own detached Linux descendants with an isolated subreaper | PENDING |  |
-| 117 | B14 | `1b507f2` | 9 | 9 | (no finding: review as change) | docs: close final finding after Linux containment validation [skip ci] | PENDING |  |
+| 116 | B13 | `e5321f3` | 878 | 657 | F-016 | fix: own detached Linux descendants with an isolated subreaper | F-016 FIXED (d8e5918) | Root cause removed (subreaper adopts setsid/double-fork orphans; FINISHED only after ECHILD; failures → Lost; deadline classification kept; Windows unchanged). Defect: helper JVM started with an empty env → C locale → non-ASCII classpath/PATH failed every Linux launch; host locale vars now passed (Linux-only test, compile-verified here). NOTE: 10 s cleanup budget equals host confirm budget (near-limit cleanup → Lost); EPERM on uid-changed descendants and daemon-handed work escape (reported Lost); nested jar `require` throws IllegalArgumentException; process-ownership.yml triggers only on feature/bugfix. |
+| 117 | B14 | `1b507f2` | 9 | 9 | (no finding: review as change) | docs: close final finding after Linux containment validation [skip ci] | F-none ACCEPT | Docs + one KDoc line; claims match e5321f3. |
 | 118 | - | `dba6344` | 0 | 0 | - | all issues fixed | SKIP (docs/ABI; covered by final docs+ABI step) |  |
