@@ -562,10 +562,12 @@ public class Cell @JvmOverloads constructor(
                     }
                     is CompletionDecision.Continue -> {
                         recordGaps(decision.gaps)
-                        nudges = (decision.gaps.take(MAX_NUDGES).map {
+                        val gapLines = decision.gaps.take(MAX_NUDGES).map {
                             "packet validation: ${Boundary.escape(it.replace('\r', ' ').replace('\n', ' ')).take(240)}"
-                        } + nudges)
-                            .take(MAX_NUDGES)
+                        }
+                        // §5.1 order: this turn's hard rejections stay first; the gaps precede the softer nudges.
+                        val rejected = nudges.take(report.rejections.size)
+                        nudges = (rejected + gapLines + nudges.drop(rejected.size)).take(MAX_NUDGES)
                         refusals += 1
                     }
                 }
