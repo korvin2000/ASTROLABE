@@ -298,6 +298,7 @@ public object PatternSubset {
 
     /** The rule [pattern] violates, or null when it is inside the subset. */
     public fun check(pattern: String, mode: SearchMode): SearchOutcome.Unsupported? {
+        if (pattern.length > 4096) return refuse("pattern exceeds 4096 characters")
         if (pattern.isEmpty()) return refuse("an empty pattern is not searchable")
         if (mode == SearchMode.Literal) return null
         val body = if (pattern.startsWith(CASE_INSENSITIVE_PREFIX)) {
@@ -699,29 +700,9 @@ internal object Candidates {
             }
         }
         if (!repository) return null
-        val output = try {
-            val process = ProcessBuilder(
-                GIT_EXECUTABLE, "ls-files", "-z", "--cached", "--others", "--exclude-standard",
-            ).directory(root.toFile()).start()
-            val stderr = drainAsync(process)
-            val bytes = process.inputStream.use { it.readBytes() }
-            val exit = process.waitFor()
-            stderr.join()
-            if (exit != 0) throw IOException("git ls-files exited $exit inside a repository")
-            String(bytes, UTF_8)
-        } catch (interrupted: InterruptedException) {
-            Thread.currentThread().interrupt()
-            throw IOException("git ls-files interrupted", interrupted)
-        }
+        val output = String(io.astrolabe.os.Git(root).searchFiles(), UTF_8)
         return output.split(' ').filter { it.isNotEmpty() }.distinct()
     }
-
-    private fun drainAsync(process: Process): Thread =
-        Thread { process.errorStream.use { it.readBytes() } }
-            .apply {
-                isDaemon = true
-                start()
-            }
 
     private fun walk(root: Path): List<String> {
         val files = ArrayList<String>()

@@ -39,9 +39,13 @@ internal class JvmSearch : Search {
             return SearchOutcome.Unsupported("the JVM regex engine rejected the pattern: ${e.description}")
         }
         val denied = ArrayList<String>()
+        val work = MatchWork()
         for (candidate in candidates) {
             val bytes = try {
-                Files.readAllBytes(candidate.absPath)
+                work.check()
+                Files.newInputStream(candidate.absPath).use { it.readNBytes(MAX_FILE_BYTES + 1) }
+            } catch (_: SearchLimit) {
+                return SearchOutcome.Failed("search time limit exceeded")
             } catch (_: AccessDeniedException) {
                 denied += candidate.relPath
                 continue
@@ -50,7 +54,14 @@ internal class JvmSearch : Search {
             } catch (e: IOException) {
                 return SearchOutcome.Failed("could not read '${candidate.relPath}': ${e.message}")
             }
-            if (!scan(candidate.relPath, String(bytes, UTF_8), regex, collector)) break
+            if (bytes.size > MAX_FILE_BYTES) return SearchOutcome.Failed("search file limit exceeded: ${candidate.relPath}")
+            try {
+                if (!scan(candidate.relPath, String(bytes, UTF_8), regex, collector, work)) break
+            } catch (_: SearchLimit) {
+                return SearchOutcome.Failed("search work or time limit exceeded")
+            } catch (_: StackOverflowError) {
+                return SearchOutcome.Failed("search regex stack limit exceeded")
+            }
         }
         if (denied.isNotEmpty()) {
             return SearchOutcome.Denied("the filesystem denied access to ${denied.size} file(s)", denied.sorted())
@@ -87,7 +98,7 @@ internal class JvmSearch : Search {
     }
 
     /** Feeds every matching line of [content] to [collector]; returns false once the search must stop. */
-    private fun scan(relPath: String, content: String, regex: Pattern, collector: HitCollector): Boolean {
+    private fun scan(relPath: String, content: String, regex: Pattern, collector: HitCollector, work: MatchWork): Boolean {
         var lineNumber = 1
         var start = 0
         while (true) {
@@ -98,7 +109,8 @@ internal class JvmSearch : Search {
             // file is content, not a terminator — which is what `rg --crlf` also does.
             val textEnd = if (newline >= 0 && end > start && content[end - 1] == '\r') end - 1 else end
             val text = content.substring(start, textEnd)
-            val matcher = regex.matcher(text)
+            work.check()
+            val matcher = regex.matcher(BoundedText(text, work))
             if (matcher.find() && !collector.offer(Hit(relPath, lineNumber, matcher.start() + 1, text))) {
                 return false
             }
@@ -107,4 +119,24 @@ internal class JvmSearch : Search {
             lineNumber++
         }
     }
+
+    private class SearchLimit : RuntimeException()
+
+    private class MatchWork {
+        private var reads = 0L
+        private val deadline = System.nanoTime() + 30_000_000_000L
+        fun check() {
+            if (++reads > 10_000_000 || Thread.currentThread().isInterrupted || System.nanoTime() >= deadline) throw SearchLimit()
+        }
+    }
+
+    /** Pattern consumes CharSequence, so even backtracking is subject to the shared work budget. */
+    private class BoundedText(private val text: String, private val work: MatchWork) : CharSequence {
+        override val length: Int get() = text.length
+        override fun get(index: Int): Char { work.check(); return text[index] }
+        override fun subSequence(startIndex: Int, endIndex: Int): CharSequence = BoundedText(text.substring(startIndex, endIndex), work)
+        override fun toString(): String = text
+    }
+
+    private companion object { const val MAX_FILE_BYTES = 8 * 1024 * 1024 }
 }

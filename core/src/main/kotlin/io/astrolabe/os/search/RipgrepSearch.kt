@@ -25,6 +25,7 @@ internal class RipgrepSearch(private val executable: String) : Search {
     override val backend: SearchBackend = SearchBackend.Ripgrep
 
     override fun find(request: SearchRequest): SearchOutcome {
+        val deadline = System.nanoTime() + 30_000_000_000L
         PatternSubset.check(request.pattern, request.mode)?.let { return it }
         val candidates = when (val resolved = Candidates.resolve(request)) {
             is CandidateSet.Failed -> return SearchOutcome.Failed(resolved.reason)
@@ -38,7 +39,7 @@ internal class RipgrepSearch(private val executable: String) : Search {
         val known = candidates.associateBy { it.relPath }
         val command = baseCommand(request)
         for (chunk in chunks(candidates)) {
-            val failure = runChunk(root, command, chunk, known, collector)
+            val failure = runChunk(root, command, chunk, known, collector, deadline)
             if (failure != null) return failure
             if (collector.truncation != null) break
         }
@@ -75,14 +76,29 @@ internal class RipgrepSearch(private val executable: String) : Search {
         chunk: List<Candidate>,
         known: Map<String, Candidate>,
         collector: HitCollector,
+        deadline: Long,
     ): SearchOutcome? {
+        if (System.nanoTime() >= deadline) return SearchOutcome.Failed("search deadline exceeded")
         val process = try {
             ProcessBuilder(command + chunk.map { it.relPath }).directory(root.toFile()).start()
         } catch (e: IOException) {
             return SearchOutcome.Failed("could not start '$executable': ${e.message}")
         }
         val stderr = ByteArrayOutputStream()
-        val drain = Thread { process.errorStream.use { it.copyTo(stderr) } }
+        val timedOut = java.util.concurrent.atomic.AtomicBoolean(false)
+        val timer = java.util.Timer("search-deadline", true)
+        timer.schedule(object : java.util.TimerTask() {
+            override fun run() { timedOut.set(true); process.destroyForcibly() }
+        }, ((deadline - System.nanoTime()) / 1_000_000).coerceAtLeast(1))
+        val drain = Thread { try { process.errorStream.use { input ->
+            val buffer = ByteArray(8192)
+            while (true) {
+                val n = input.read(buffer)
+                if (n < 0) break
+                val keep = minOf(n, (65536 - stderr.size()).coerceAtLeast(0))
+                stderr.write(buffer, 0, keep)
+            }
+        } } catch (_: IOException) { } }
         drain.isDaemon = true
         drain.start()
 
@@ -91,7 +107,15 @@ internal class RipgrepSearch(private val executable: String) : Search {
         try {
             process.inputStream.bufferedReader(UTF_8).use { reader ->
                 while (true) {
-                    val line = reader.readLine() ?: break
+                    val line = buildString {
+                        while (true) {
+                            val ch = reader.read()
+                            if (ch < 0 || ch == 10) break
+                            if (length >= 1024 * 1024) throw IOException("search JSON line exceeds 1 MiB")
+                            append(ch.toChar())
+                        }
+                    }
+                    if (line.isEmpty()) break
                     if (line.isBlank()) continue
                     when (val event = parse(line, known)) {
                         is ParsedEvent.Other -> Unit
@@ -109,17 +133,22 @@ internal class RipgrepSearch(private val executable: String) : Search {
             broken = "could not read '$executable' output: ${e.message}"
             stopped = true
         } finally {
-            if (stopped) process.destroy()
+            if (stopped) process.destroyForcibly()
         }
 
         val exit = try {
-            process.waitFor()
+            if (!process.waitFor(((deadline - System.nanoTime()) / 1_000_000).coerceAtLeast(1), java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                timedOut.set(true)
+                process.destroyForcibly()
+            }
+            if (timedOut.get()) -1 else process.exitValue()
         } catch (_: InterruptedException) {
-            process.destroy()
+            process.destroyForcibly()
             Thread.currentThread().interrupt()
             return SearchOutcome.Failed("the search was interrupted")
-        }
+        } finally { timer.cancel() }
         drain.join(DRAIN_MILLIS)
+        if (timedOut.get()) return SearchOutcome.Failed("search deadline exceeded")
         broken?.let { return SearchOutcome.Failed(it) }
         if (stopped) return null // we killed it; its exit status is ours, not a ripgrep verdict
         return classify(exit, String(stderr.toByteArray(), UTF_8))
