@@ -314,10 +314,7 @@ public class Run(
                 logBlob = blobs.put(redaction.applyBytes(reply.content.toByteArray(Charsets.UTF_8), ContentClass.ReusableEvidence).text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
                 val after = stamper.report()
                 val changed = announce(before, after, "run ${alias.text}")
-                val effectClass = when {
-                    entry.effectClass == EffectClass.R && changed.isNotEmpty() -> if (changed.any { workspace.paths.isProtected(it, PathIntent.Mutate) }) EffectClass.D else EffectClass.W
-                    else -> entry.effectClass
-                }
+                val effectClass = observedClass(entry.effectClass, changed)
                 val capture = RunCapture(actionId = actionId, argv = argv, exitCode = if (reply.isError) 1 else 0, output = reply.content.toByteArray(Charsets.UTF_8))
                 val shaped = Shapers.shape(capture, ShapeBudget(args.budget, estimator, alias.text))
                 val touched = if (changed.isEmpty()) "" else "\ntouched (by run ${alias.text} $program: ${changed.size} path${if (changed.size == 1) "" else "s"}) " + changed.take(10).joinToString(", ")
@@ -370,10 +367,7 @@ public class Run(
     ): ToolOutcome {
         val after = stamper.report()
         val changed = announce(before, after, "run $alias")
-        val effectClass = when {
-            label == EffectClass.R && changed.isNotEmpty() -> if (changed.any { workspace.paths.isProtected(it, PathIntent.Mutate) }) EffectClass.D else EffectClass.W
-            else -> label
-        }
+        val effectClass = observedClass(label, changed)
         val status = proc.status
         val capture = RunCapture(
             actionId = actionId, argv = argv, shell = shell, cwd = args.cwd,
@@ -394,6 +388,13 @@ public class Run(
         )
         return render(args, result, argv, shell, before, after, effectsUnknown || status is ProcStatus.Lost,
             captureMask = redaction.applyBytes(output, ContentClass.ReusableEvidence).mask)
+    }
+
+    /** §4.6 post hoc: a write under a protected path is D whatever the launch label; any other change lifts R to W. */
+    private fun observedClass(label: EffectClass, changed: List<String>): EffectClass = when {
+        changed.isEmpty() -> label
+        changed.any { workspace.paths.isProtected(it, PathIntent.Mutate) } -> EffectClass.D
+        else -> maxOf(label, EffectClass.W)
     }
 
     /** Announces every stamped member that moved; a path nobody read before has `from = null` (conservative marking). */
@@ -450,9 +451,7 @@ public class Run(
                 val shaped = Shapers.shape(capture, ShapeBudget(args.budget, estimator, handle.alias))
                 val outcome = if (status is ProcStatus.Lost || status is ProcStatus.Cancelled) Outcome.UnknownOutcome else shaped.status
                 val view = "handle ${handle.handleId} ${wire(status)}\n" + shaped.view + "\nBackground effects cannot be attributed exclusively to this process." + (if (changed.isEmpty()) "" else "\nchanged during background run (${changed.size} paths): " + changed.take(10).joinToString(", "))
-                val effectClass = if (handle.effectClass == EffectClass.R && changed.isNotEmpty()) {
-                    if (changed.any { workspace.paths.isProtected(it, PathIntent.Mutate) }) EffectClass.D else EffectClass.W
-                } else handle.effectClass
+                val effectClass = observedClass(handle.effectClass, changed)
                 val result = RunResult(handle.alias, handle.actionId, capture.exitCode, outcome, view, shaped.viewTruncated, logBlob, effectClass, stampBefore, after.candidateId, true, changed, handle.handleId, shaped.counts, shaped, shaped.limitations)
                 render(args, result, handle.argv, handle.shell, null, after, effectsUnknown = true, captureMask = safeLog.mask)
             }
