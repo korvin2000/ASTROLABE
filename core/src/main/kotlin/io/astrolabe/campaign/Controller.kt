@@ -1128,7 +1128,8 @@ public class Controller @JvmOverloads public constructor(
             val active = if (permitted) Extractor(c.store, HeuristicEstimator(), idGen, clock, extraction, c.journal, events) else extractor
             val report = active.run(trace, packet.ids, if (i == packets.lastIndex) findings else emptyList(), packets.take(i).map { it.register })
             if (permitted) accounting.extraction(packet.ids, invocation, report.tokens.takeIf { report.failure == null },
-                if (report.failure == null) report.tokens else maxOf(bound, report.tokens), report.money ?: extraction.maxCost?.copy(unknown = true), currency)
+                if (report.failure == null) report.tokens else maxOf(bound, report.tokens), report.money, currency,
+                report.money ?: extraction.maxCost)
         }
         val policy = Calibration.policy(c.attempt.config.defaults.shapePolicy)
         val series = CalibrationSeries(c.workspace.root.fileName?.toString() ?: "repo", c.attempt.harnessVersion, policy.version)

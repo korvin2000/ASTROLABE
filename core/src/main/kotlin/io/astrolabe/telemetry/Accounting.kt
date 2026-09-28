@@ -97,9 +97,8 @@ public class Accounting(private val store: Store, private val clock: Clock) {
             warm = usage?.let { u -> u.quantities[BillingDimension.CACHE_READ]?.let { it > 0 } ?: if (BillingDimension.CACHE_READ in u.unknown) null else false },
             at = prior?.at ?: clock.instant(),
             fundedTokens = fundedTokens ?: usage?.takeIf { it.isComplete }?.quantities?.values?.fold(0L, ::add) ?: prior?.fundedTokens,
-            fundedMoney = if (!money.unknown) money else prior?.fundedMoney?.let {
-                it.copy(amount = maxOf(it.amount, money.amount), unknown = true)
-            },
+            // An unsettled call keeps its conservative reservation as known funding, so later calls stay affordable.
+            fundedMoney = if (!money.unknown) money else prior?.fundedMoney?.let { it.copy(amount = maxOf(it.amount, money.amount)) },
         )
         store.db.tx { tx -> save(tx, account) }
         return account
@@ -136,11 +135,12 @@ public class Accounting(private val store: Store, private val clock: Clock) {
         true
     }
 
-    internal fun extraction(ids: Identities, invocationId: String, tokens: Long?, funded: Long, cost: Money?, currency: String = "USD") {
+    internal fun extraction(ids: Identities, invocationId: String, tokens: Long?, funded: Long, cost: Money?, currency: String = "USD",
+                            fundedCost: Money? = cost) {
         val usage = tokens?.let { BillableUsage(mapOf(BillingDimension("extractor_tokens") to it),
             io.astrolabe.provider.UsageProvenance("host", "extractor", "reported-total")) }
         val account = CallAccount(invocationId, ids, "extractor", usage, cost ?: Money.unknown(currency), "host",
-            Quantities(null, null, tokens, null), null, clock.instant(), funded, cost)
+            Quantities(null, null, tokens, null), null, clock.instant(), funded, fundedCost)
         store.db.tx { save(it, account) }
     }
 
