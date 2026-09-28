@@ -975,7 +975,8 @@ public class Controller @JvmOverloads public constructor(
     private suspend fun plan(c: OpenedCampaign, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?, packets: MutableList<ResultPacket>, splits: List<StoredSplit> = emptyList()): Transition.Stopped? {
         fun blocked(reason: String) = Transition.Stopped(CampaignOutcome.BlockedExternal, reason)
         val contract = c.contract
-        val pinnedSplits = if (splits.isEmpty()) emptyList() else listOf("Replan the full authorized graph. Keep completed definitions unchanged; replace requested unfinished increments.\n" +
+        val pinnedSplits = if (splits.isEmpty()) emptyList() else listOf("Replan the full authorized graph. Keep completed definitions unchanged; replace requested unfinished increments. " +
+            "Give every replacement increment a new id: an id already in the current graph must keep its definition unchanged.\n" +
             splits.joinToString("\n") { "${it.split.increment}: ${it.split.reason}; parts ${it.split.parts.joinToString()}" } +
             "\nCurrent graph: " + Json.encodeToString(io.astrolabe.graph.RequirementGraph.serializer(), checkNotNull(c.state).graph))
         val planning = Increment(PLAN, contract.requirements.map { it.id }, contract.acceptance.map { it.id }, emptyList(), 0, title = "plan ${c.ids.work.value}")
@@ -1015,7 +1016,9 @@ public class Controller @JvmOverloads public constructor(
                 val merged = admission.graph.increments.map { proposed ->
                     val old = kept[proposed.id]
                     if (old != null) {
-                        if (old.definitionDigest() != proposed.definitionDigest()) return blocked("replan changes dispatched definition ${old.id}")
+                        // D-316: never auto-rename; dependents' `depends_on` would silently pick the old or the new definition.
+                        if (old.definitionDigest() != proposed.definitionDigest()) return blocked("replan changes dispatched definition ${old.id}; " +
+                            if (old.id in replaced) "give the replacement a new id instead of ${old.id}" else "keep ${old.id} unchanged")
                         old
                     } else proposed
                 }.toMutableList()

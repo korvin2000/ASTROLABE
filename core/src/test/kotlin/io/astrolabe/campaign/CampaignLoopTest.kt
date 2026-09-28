@@ -106,6 +106,31 @@ class CampaignLoopTest {
         }
     }
 
+    @Test
+    fun `a replan reusing a split increment id names the id to rename`() = runBlocking<Unit> {
+        controller().open(repo.root, request, policy).use { c ->
+            val replacement = """{"increments":[
+                {"id":"I1","requirements":["R1"],"accept":["AC-1"],"write_scope":["src/"],"expected_files":1,"produces":"artifact"},
+                {"id":"I2","requirements":["R2"],"accept":["AC-2"],"write_scope":["src/"],"expected_files":1,"depends_on":["I1"],"produces":"artifact"},
+                {"id":"I2b","requirements":["R2"],"accept":["AC-1","AC-2"],"write_scope":["src/"],"expected_files":1,"depends_on":["I2"],"produces":"artifact"}]}"""
+            val replies = planning() + listOf(
+                Scripted.Reply(listOf(say("I1 is ready"))),
+                Scripted.Reply(listOf(
+                    call("split", "task", """{"op":"propose","kind":"increment_split","proposal":{"increment":"I2","reason":"separate b implementation from its regression review","parts":["implementation","regression review"]}}"""),
+                    call("split-boundary", "state", """{"op":"blocked","blocked":{"reason":"waiting for increment split planning","evidence":[]}}"""),
+                )),
+                Scripted.Reply(listOf(call("replan", "task", """{"op":"propose","kind":"plan","proposal":$replacement}"""))),
+                Scripted.Reply(listOf(say("replacement plan ready"))),
+            )
+            val adapter = FakeAdapter(ScriptedModel.of(*replies.toTypedArray()))
+            val run = controller().run(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator()))
+            assertEquals(CampaignOutcome.BlockedExternal, run.outcome, run.state?.reason)
+            assertTrue(run.state!!.reason!!.endsWith("give the replacement a new id instead of I2"), run.state?.reason)
+            assertTrue("Give every replacement increment a new id" in texts(adapter.calls[4].request))
+            assertEquals(listOf("I1", "I2"), c.state!!.graph.increments.map { it.id }, "a refused replan leaves the graph unchanged")
+        }
+    }
+
     @TempDir
     lateinit var stateRoot: Path
 
