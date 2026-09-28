@@ -116,6 +116,7 @@ import io.astrolabe.kb.Kb
 import io.astrolabe.kb.KbIndex
 import io.astrolabe.kb.KbInjection
 import io.astrolabe.kb.KbNegatives
+import io.astrolabe.kb.NoteHorizon
 import io.astrolabe.kb.KbWriter
 import io.astrolabe.kb.KnowledgeUse
 import io.astrolabe.kb.Note
@@ -565,6 +566,7 @@ public class Controller @JvmOverloads public constructor(
             state = Lifecycle.apply(state, contract, Transition.Stopped(CampaignOutcome.BlockedExternal, shape.reason)).also(campaigns::save)
         }
 
+        NoteHorizon(KbWriter(store, HeuristicEstimator(), clock), Notes(store), ids).reconcile(registry::version, mapOf("contract" to "v${contract.version}"))
         return OpenedCampaign(
             request, ids, store, os, workspace, registry, stamper, dirty, shadow, s0, atlas, derived.sniffed, commands,
             contracts, checks, rules, prime, kb, journal, intents, campaigns, reconciliation, prescan, impactPrescan, shape, state, refusal, owned,
@@ -972,7 +974,7 @@ public class Controller @JvmOverloads public constructor(
         val ids = c.ids.copy(context = cell)
         val verification = c.checks.all().mapNotNull { check -> check.last?.let { CarriedReceipt(check.id, it.receiptId, it.applicability.name.lowercase()) } }
         val status = StatusNotes(KbWriter(c.store, HeuristicEstimator(), clock), Notes(c.store), c.store.layout.kb)
-        status.checkpoint(ids, if (reason is RebuildReason.RoleSwitch) StatusBoundary.RoleSwitch else StatusBoundary.CellEnd, emptyList(), verification, c.intents.open().map { it.intentId })
+        status.checkpoint(ids, if (reason is RebuildReason.RoleSwitch) StatusBoundary.RoleSwitch else StatusBoundary.CellEnd, retainedFacts(c, cell)?.archived.orEmpty(), verification, c.intents.open().map { it.intentId })
         val revision = Notes(c.store).revisions(status.id(c.ids.work)).size
         c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, text = "rebuilt: ${reason.wire} · fresh lineage, empty tail · STATUS revision $revision", at = clock.instant()))
     }
@@ -993,14 +995,35 @@ public class Controller @JvmOverloads public constructor(
             " · " + (carry?.known ?: "KNOWN: seeds only (0) · NOT SEEN: everything else")
     }
 
+    private fun retainedFacts(c: OpenedCampaign, cell: ContextId): io.astrolabe.context.Retention? {
+        val register = SqliteRegisterVersions(c.store, clock).latest(cell) ?: return null
+        val aliases = SqliteAliases(c.store, clock)
+        val observations = SqliteObservations(c.store, clock)
+        val receipts = SqliteReceipts(c.store, clock)
+        return io.astrolabe.context.FactRetention.capture(c.store, c.ids.copy(context = cell), register, c.registry::version,
+            { id ->
+                val canonical = Aliases.parse(id)?.let { aliases.resolve(c.ids.work, it)?.canonicalId } ?: id
+                observations.get(canonical) != null || receipts.get(canonical) != null || c.journal.get(canonical) != null
+            }, HeuristicEstimator(), c.attempt.config.defaults.registerCapTokens, clock)
+    }
+
     /** The carry-forward of [cell] (§6.2): its latest register, its end export and its packet, re-validated now. */
     private fun carryFrom(c: OpenedCampaign, cell: ContextId, packet: ResultPacket?): Carry? {
-        val register = withReviewOpenItems(c, SqliteRegisterVersions(c.store, clock).latest(cell) ?: return null)
+        val retained = retainedFacts(c, cell) ?: return null
+        if (retained.archived.isNotEmpty()) {
+            val status = StatusNotes(KbWriter(c.store, HeuristicEstimator(), clock), Notes(c.store), c.store.layout.kb)
+            if (!status.archived(c.ids.work).containsAll(retained.archived)) {
+                status.checkpoint(c.ids.copy(context = cell), StatusBoundary.CellEnd, retained.archived,
+                    c.checks.all().mapNotNull { check -> check.last?.let { CarriedReceipt(check.id, it.receiptId, it.applicability.name.lowercase()) } },
+                    c.intents.open().map { it.intentId })
+            }
+        }
+        val register = withReviewOpenItems(c, retained.register)
         val aliases = SqliteAliases(c.store, clock)
         return CarryForward.carry(
             register, Seeds.cellEnd(SqliteCheckpoints(c.store, clock), cell), packet, { c.registry.version(it) },
             { id -> Aliases.parse(id)?.let { aliases.resolve(c.ids.work, it) } != null }, emptyList(), emptyList(),
-        )
+        ).copy(capacityGap = retained.capacityGap)
     }
 
     /** Every ended campaign leaves a finish receipt, stored and exported, and says so on the bus (§5.9). */
@@ -1335,6 +1358,7 @@ public class Controller @JvmOverloads public constructor(
             pinned = pinned,
             precompile = precompile,
             knowledge = knowledge,
+            noteHorizon = if (tree.workspace === c.workspace) NoteHorizon(KbWriter(c.store, estimator, clock), Notes(c.store), ids) else null,
         )
         val budget = child?.budget?.let { CellBudget.of(it.tokens, it.turns, contract.budget.reserves) }
             ?: CellBudget.of(contract.budget.tokens, contract.budget.turnsPerCell, contract.budget.reserves)

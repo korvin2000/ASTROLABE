@@ -386,13 +386,14 @@ class CellTest {
         }
         CellFixture(stateRoot.resolve("gate"), defaults = Defaults(alpha = 0.1)).use { f ->
             val small = Profile("small", FakeProfiles.PROVIDER, "fake-small", FakeProfiles.capabilities(12_000, 500), FakeProfiles.main.priceTable)
-            val deadEnd = """{"deadend.add":{"text":"monkeypatching the clock","evidence":null,"scope":"tests/","reopen":"fixtures isolated"}},{"next":"look again"}"""
-            val model = ScriptedModel.of(Scripted.Reply(listOf(say("look"), tree("c1"), patch("c0", deadEnd))), Scripted.Reply(listOf(say("look again"), tree("c2"))))
+            val deadEnd = """{"deadend.add":{"text":"monkeypatching the clock","evidence":null,"scope":"tests/","reopen":"fixtures isolated"}},{"next":"look again"},{"focus.set":"src/a.py"}"""
+            val model = ScriptedModel.of(Scripted.Reply(listOf(say("look"), read("c1", "src/a.py"), patch("c0", deadEnd))), Scripted.Reply(listOf(say("look again"), tree("c2"))))
             val exit = f.run(model, profile = small, profiles = FakeProfiles.all + (small.id to small))
             val partial = assertIs<CellExit.Partial>(exit)
             assertEquals(PartialReason.Pressure, partial.reason)
             assertTrue(partial.hint.contains("pressure: context") && partial.hint.contains("second pressure"), partial.hint)
             assertEquals(2, f.adapter.calls.size, "the rebuilt projection took one more turn")
+            assertTrue(f.adapter.calls[1].request.segments.any { segment -> segment.kind == io.astrolabe.provider.SegmentKind.K && segment.items.filterIsInstance<io.astrolabe.provider.Message>().any { "SEED src/a.py" in it.text } }, "carried source is rendered into rebuilt K")
             assertEquals(2, partial.checkpoint.turn)
             assertEquals(1, partial.checkpoint.rebuilds)
             assertTrue(f.transcript(2).filterIsInstance<io.astrolabe.provider.Message>().any { it.text.startsWith("rebuilt: pressure (generation 1)") }, "the rebuild is announced in the pinned transcript")

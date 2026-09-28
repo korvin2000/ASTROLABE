@@ -145,6 +145,7 @@ public class CellContext @JvmOverloads constructor(
     public val knowledge: CellKnowledge? = null,
     /** Repair-helper diagnosis lines addressed to this cell (§13.2): rendered in every later `[A]` (P4.6.3). */
     public val diagnoses: Diagnoses? = null,
+    public val noteHorizon: io.astrolabe.kb.NoteHorizon? = null,
 ) {
     init {
         require(ids.context != null) { "a cell runs under its own context id" }

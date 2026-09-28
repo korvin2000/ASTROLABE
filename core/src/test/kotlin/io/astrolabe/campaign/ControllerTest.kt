@@ -75,6 +75,18 @@ import kotlin.test.assertTrue
 /** P1.9.2 campaign open and reconciliation: capture, contract, reconcile before dispatch (FX-23 open-time), shape. */
 class ControllerTest {
     @Test
+    fun `reopen durably invalidates notes with only path dependencies`() {
+        open().use { c ->
+            val note = io.astrolabe.kb.Note("LES-dependency", io.astrolabe.kb.NoteKind.LES, io.astrolabe.kb.NoteStatus.Admitted,
+                "depends on a", "Use the current a implementation", "src/**",
+                validity = io.astrolabe.kb.NoteValidity(dependsOn = listOf("src/a.py@${c.registry.version("src/a.py")!!.digest.hex}")))
+            io.astrolabe.kb.KbWriter(c.store, HeuristicEstimator(), clock).write(note, c.ids)
+        }
+        repo.write("src/a.py", "def a(): return 99\n")
+        open().use { c -> assertEquals(io.astrolabe.kb.NoteStatus.Stale, io.astrolabe.kb.Notes(c.store).get("LES-dependency")!!.status) }
+    }
+
+    @Test
     fun `committed scope amendments update path protection immediately and after reopen`() {
         val target = "package-lock.json"
         repo.write(target, "{}")

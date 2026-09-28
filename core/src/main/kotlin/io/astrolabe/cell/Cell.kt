@@ -173,6 +173,8 @@ public class Cell @JvmOverloads constructor(
 
         private var turn = 0
         private var residents: List<Resident> = emptyList()
+        private var sections = ctx.sections
+        private var rebuildGap: String? = null
         private var fired: Set<GateKey> = emptySet()
         private val impact = ImpactNudges()
         private val signatures = ArrayList<CallSignature>()
@@ -227,6 +229,7 @@ public class Cell @JvmOverloads constructor(
             subscriptions += ws.coherence.register(ws.workset)
             subscriptions += ws.coherence.register(ChangeListener { tools.state.markStale(it) })
             subscriptions += ws.coherence.register(ws.checks)
+            ctx.noteHorizon?.let { subscriptions += ws.coherence.register(it) }
             subscriptions += ws.coherence.register(ChangeListener { touchedLedger += Touched.of(it) })
             tools.edit?.increment = increment
             tools.verify?.inputs = atlas.rows.map { it.path }
@@ -277,6 +280,7 @@ public class Cell @JvmOverloads constructor(
                 }
             }
 
+            rebuildGap?.let { return partial(PartialReason.Pressure, it) }
             // Render: [A] first (rebuilt every turn), then the cached regions, then admission.
             val contract = contract()
             ws.checks.synchronizeAcceptance(contract)
@@ -298,7 +302,7 @@ public class Cell @JvmOverloads constructor(
             } catch (capacity: DigestCapacity) {
                 return partial(PartialReason.Pressure, "replan: ${capacity.message}")
             }
-            val layout = Layout.render(ctx.role, mask, ctx.config.executionMode, ctx.prime, CompiledK(ContractSlice.forIncrement(contract, increment), ctx.preexisting, ctx.sections), transcript(contract))
+            val layout = Layout.render(ctx.role, mask, ctx.config.executionMode, ctx.prime, CompiledK(ContractSlice.forIncrement(contract, increment), ctx.preexisting, sections), transcript(contract))
             val request = Request(layout + anchor.segment(), schemas.schemas, ctx.model.profile, ctx.model.effort, ctx.model.maxOutputTokens, mask)
             val estimate = estimator.estimate(request)
             when (val validation = ctx.model.adapter.validate(request, estimate)) {
@@ -693,6 +697,7 @@ public class Cell @JvmOverloads constructor(
                     ev.journal.append(JournalEvent(idGen.next("ev"), ids, turn, JournalKind.Reconcile, refs = unannounced, text = "$cause: ${unannounced.size} paths moved unannounced · reconciled @${after.candidateId.hash8}", at = clock.instant()))
                 }
             }
+            ctx.noteHorizon?.reconcile(ws.registry::version, mapOf("contract" to "v${ctx.contracts.current(ids.work)?.version}"))
             lastReport = after
             reconciledTurn = turn
             ws.scheduler.refresh(after.candidateId, after.env)
@@ -785,15 +790,41 @@ public class Cell @JvmOverloads constructor(
          * and a pinned `rebuilt:` note names the generation. Nothing is summarised by a model.
          */
         private fun rebuild(why: String) {
-            rebuilds += 1
-            residents = residency.tail(residents, RebuildReason.Pressure.tailTurns)
+            val contract = contract()
             val carry = CarryForward.carry(
-                register, ws.workset.export(), null, { ws.registry.version(it) },
-                { id -> Aliases.parse(id)?.let { ev.aliases.resolve(ids.work, it) } != null }, emptyList(), emptyList(),
+                register, ws.workset.export(), null, ws.registry::version,
+                { id -> Aliases.parse(id)?.let { ev.aliases.resolve(ids.work, it) } != null }, emptyList(), pinned(contract),
             )
-            ws.workset.rebuild(carry.seeds)
-            tools.state.validated(carry.register)
-            val note = "rebuilt: pressure (generation $rebuilds) — $why · ${carry.known}"
+            val seeds = io.astrolabe.context.Seeds.render(carry.seeds, ws.registry::read)
+            val carried = carry.copy(seeds = seeds.shown, notSeen = carry.notSeen + seeds.notSeen)
+            val nextSections = sections.filterNot { it.id.startsWith("seed-") || it.id == "carry-forward" } +
+                KSection("carry-forward", "Carry-forward", carried.render()) +
+                seeds.blocks.mapIndexed { index, text -> KSection("seed-$index", "Seed", text) }
+            val current = io.astrolabe.context.Projection(rebuilds, ctx.role, ctx.model.profile, ctx.prime,
+                CompiledK(ContractSlice.forIncrement(contract, increment), ctx.preexisting, sections), transcript(contract), "")
+            val (next, record) = io.astrolabe.context.Rebuild.run(
+                RebuildReason.Pressure, current, carried, "", ctx.prime,
+                { _, _ -> current.k.copy(sections = nextSections) },
+                object : io.astrolabe.context.RebuildHooks {
+                    override fun checkpoint(old: io.astrolabe.context.Projection, reason: RebuildReason) {
+                        persist(checkpoint(CellStatus.Running, ws.stamper.report().candidateId, null))
+                    }
+                    override fun status(reason: RebuildReason) {}
+                    override fun rehydrate(lost: List<String>) {
+                        contract()
+                        rebuildGap = "replan: pressure rebuild lost required evidence: ${lost.joinToString()}"
+                    }
+                },
+                { projection -> io.astrolabe.context.Compiler(estimator, ctx.config).coverage(contract, increment,
+                    Layout.compiled(projection.k), projection.repository, projection.transcript.pinned, io.astrolabe.context.CompileInputs()) },
+            )
+            if (record.lost.isNotEmpty()) return
+            rebuilds = next.generation
+            sections = next.k.sections
+            residents = residency.tail(residents, RebuildReason.Pressure.tailTurns)
+            ws.workset.rebuild(seeds.shown)
+            tools.state.validated(carried.register)
+            val note = "rebuilt: pressure (generation $rebuilds) - $why - ${carried.known}"
             rebuildNotes += note
             ev.journal.append(JournalEvent(idGen.next("ev"), ids, turn, JournalKind.Boundary, text = note, at = clock.instant()))
             events?.emit(AgentEvent.Cell.Rebuilt(ids, why, Generation(rebuilds)))

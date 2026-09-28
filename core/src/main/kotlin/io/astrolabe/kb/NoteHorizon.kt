@@ -1,6 +1,7 @@
 package io.astrolabe.kb
 
 import io.astrolabe.id.Identities
+import io.astrolabe.id.FileVersion
 import io.astrolabe.workspace.ChangeListener
 import io.astrolabe.workspace.VersionChange
 
@@ -29,6 +30,18 @@ public class NoteHorizon(private val writer: KbWriter, private val notes: Notes,
     public fun contractChanged(name: String, version: Int) {
         mark("$name is now v$version") { note ->
             note.validity.dependsOn.any { dep -> dep.substringBeforeLast('@') == name && dep.substringAfterLast('@').removePrefix("v") != version.toString() }
+        }
+    }
+
+    /** Reconciles changes made while closed and dependencies without direct workspace anchors. */
+    @Synchronized
+    @JvmOverloads
+    public fun reconcile(current: (String) -> FileVersion?, dependencyVersions: Map<String, String> = emptyMap()) {
+        val all = notes.all().associateBy { it.id }
+        val versions = dependencyVersions + notes.versions()
+        mark("dependency reconciliation") { note ->
+            note.anchors.any { it.version != null && current(it.path)?.digest?.hex?.startsWith(it.version) != true } ||
+                !Injection.dependenciesCurrent(note, all, current, versions)
         }
     }
 

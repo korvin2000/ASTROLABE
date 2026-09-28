@@ -117,6 +117,7 @@ public class Compiler(
         val k = CompiledK(slice, preexisting, chosen.filter { it.section != null }.map { it.section!! })
         val missing = coverage(contract, increment, Layout.compiled(k), prime, transcript.pinned, inputs)
         return when {
+            inputs.carry?.capacityGap != null -> Compiled.NeedsRescoping(selection, inputs.carry.capacityGap)
             missing.isNotEmpty() -> Compiled.NeedsEvidence(selection, missing)
             selection.status == ContextSelectionStatus.Fit -> Compiled.Ready(k, selection)
             else -> Compiled.NeedsRescoping(

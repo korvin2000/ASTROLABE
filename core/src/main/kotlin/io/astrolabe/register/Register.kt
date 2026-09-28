@@ -52,6 +52,8 @@ public data class Fact(
     val evidenceId: String? = null,
     val staleAt: FileVersion? = null,
     val refutedBy: String? = null,
+    /** Harness-owned consecutive cell-boundary stale count. */
+    val staleCells: Int = 0,
 ) {
     val stale: Boolean get() = staleAt != null
 }

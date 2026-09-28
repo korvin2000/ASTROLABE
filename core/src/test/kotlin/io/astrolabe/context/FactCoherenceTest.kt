@@ -36,6 +36,23 @@ class FactCoherenceTest {
     )
 
     @Test
+    fun `durable cell retention ages once and archives on the next cell`(@org.junit.jupiter.api.io.TempDir state: java.nio.file.Path) {
+        io.astrolabe.workspace.WorkspaceFixture.create(state).use { f ->
+            fun capture(register: Register) = FactRetention.capture(f.store, f.ids, register, { v("moved") }, { it in evidence }, estimator, 1200, f.clock)
+            val first = capture(raceReport.copy(deadEnds = emptyList(), decisions = emptyList()))
+            assertEquals(ClaimKind.Hypothesis, first.register.fact(4)!!.kind)
+            assertEquals(1, first.register.fact(1)!!.staleCells)
+            assertEquals(first, capture(raceReport), "retrying a boundary reads its durable decision")
+            val second = capture(first.register.copy(cell = ContextId("cell-2")))
+            assertEquals(listOf(1, 2), second.archived.map { it.n })
+            assertTrue(second.register.facts.none { it.kind == ClaimKind.Verified })
+            val status = StatusNotes(io.astrolabe.kb.KbWriter(f.store, estimator, f.clock), io.astrolabe.kb.Notes(f.store), f.store.layout.kb)
+            status.checkpoint(f.ids, StatusBoundary.CellEnd, second.archived, emptyList(), emptyList())
+            assertEquals(second.archived, status.archived(f.ids.work))
+        }
+    }
+
+    @Test
     fun `repeated rebuilds keep the race evidence reachable through dead ends and the archive (FX-20)`() {
         val moved = mapOf("tests/test_checkout.py" to v("t-2"), "src/checkout.py" to v("c-2"))
         var register = raceReport
