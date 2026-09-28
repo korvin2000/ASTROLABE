@@ -175,6 +175,43 @@ class AcceptanceEvidenceTest {
         }
     }
 
+    /** An S0 cell edits a test file behind a required check with no Check/Review item: a flag-only review. */
+    private fun s0TestEdit(approval: io.astrolabe.IntegrityApproval): Pair<Reviewer, io.astrolabe.verify.TestIntegrityFlag> = runBlocking {
+        val printing = if (WINDOWS) Command(listOf("cmd.exe", "/d", "/s", "/c", "type pytest_pass.txt")) else Command(listOf("/bin/sh", "-c", "cat pytest_pass.txt"))
+        seed(Acceptance.Run("AC-2", printing, Origin.User))
+        val ctl = Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all, integrityApproval = approval), clock, idGen)
+        ctl.open(repo.root, request, policy).use { c ->
+            assertEquals(Shape.S0, c.contract.shape)
+            val path = "tests/test_a.py"
+            val reviewer = Reviewer()
+            val result = ctl.run(c, model(
+                Scripted.Reply(listOf(read("read-test", path))),
+                Scripted.Reply(listOf(anchored("edit-test", path, c.registry.version(path)!!, "    assert 1 == 1", "    assert (1 == 1)"))),
+                Scripted.Reply(listOf(say("done"))),
+                Scripted.Reply(listOf(say("""{"verdict":"approve","confidence":0.9,"findings":[]}"""))),
+            ), reviewer, maxCells = 1)
+            val flag = assertNotNull(result.exit, result.state?.reason).packet.flags.testIntegrity.single { it.path == path }
+            assertTrue(flag.requiredChecks.isNotEmpty(), "the edit must touch a required check")
+            reviewer to flag
+        }
+    }
+
+    @Test
+    fun `S0 under autonomous integrity approval resolves a required test edit through the review cell`() {
+        val (reviewer, flag) = s0TestEdit(io.astrolabe.IntegrityApproval.Autonomous)
+        assertTrue(reviewer.requests.isEmpty(), "the host is only the fallback")
+        val verdict = assertNotNull(flag.verdict, "the flag must be resolved")
+        assertTrue(verdict.approved)
+        assertNotEquals("host:alice", verdict.signedBy)
+    }
+
+    @Test
+    fun `S0 under human integrity approval still resolves a required test edit through the host`() {
+        val (reviewer, flag) = s0TestEdit(io.astrolabe.IntegrityApproval.Human)
+        assertTrue(reviewer.requests.isNotEmpty())
+        assertEquals("host:alice", assertNotNull(flag.verdict, "the flag must be resolved").signedBy)
+    }
+
     @Test
     fun `an approved increment review reaches the implementing cell completion gate`() = runBlocking<Unit> {
         seed(Acceptance.Review("AC-R", "a maintainer approves a", Origin.User))

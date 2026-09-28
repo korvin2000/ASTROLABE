@@ -51,6 +51,7 @@ public class Validator(
     private val registerCapTokens: Int = 1_200,
     private val patchCapTokens: Int = 400,
     private val factLineMaxChars: Int = 240,
+    private val referenceMaxChars: Int = 1_000,
 ) {
     internal fun schemaRejection(register: Register, rawPatch: String, reason: String): Validation.Rejected =
         Validation.Rejected("schema", reason, Sizes(RegisterRender.tokens(register, estimator), registerCapTokens, estimator.estimate(rawPatch).tokens, patchCapTokens))
@@ -77,8 +78,8 @@ public class Validator(
         val flags = ArrayList<String>()
         var cursorMoved = false
         for (op in eligible) {
-            for (text in opText(op)) {
-                if (text.length > factLineMaxChars) return reject("line ≤ $factLineMaxChars chars", "${op::class.simpleName}: ${text.length} chars")
+            for ((text, maxChars) in opText(op)) {
+                if (text.length > maxChars) return reject("line ≤ $maxChars chars", "${op::class.simpleName}: ${text.length} chars")
                 if (text.contains("```") || text.contains("~~~")) return reject("no fenced code", "${op::class.simpleName} contains a code fence")
                 if (text.any { it == '\n' || it == '\r' || it == '\u0085' || it == '\u2028' || it == '\u2029' }) {
                     return reject("single line", "${op::class.simpleName} contains a line break")
@@ -174,20 +175,28 @@ public class Validator(
         private fun words(text: String): Set<String> = text.lowercase().split(Regex("[^a-z0-9_]+")).filter { it.length >= 5 }.toSet()
     }
 
-    /** Every model-controlled string rendered in STATE is an inline field. */
-    private fun opText(op: Op): List<String> = when (op) {
-        is Op.PlanAdd -> listOfNotNull(op.text, op.accept, op.req)
-        is Op.PlanCursor -> emptyList()
-        is Op.PlanTick -> listOfNotNull(op.evidence)
-        is Op.PlanCancel -> listOf(op.reason)
-        is Op.FactAdd -> listOfNotNull(op.text, op.evidence, op.anchor?.path)
-        is Op.FactRefute -> listOf(op.evidence)
-        is Op.DeadendAdd -> listOfNotNull(op.text, op.evidence, op.scope, op.reopen)
-        is Op.DecisionAdd -> listOfNotNull(op.text, op.because, op.rejected, op.probe)
-        is Op.OpenAdd -> listOfNotNull(op.text, op.trip, op.needs)
-        is Op.OpenClose -> listOf(op.evidence)
-        is Op.FocusSet -> listOf(op.dir)
-        is Op.AmendPropose -> listOf(op.change, op.reason)
-        is Op.Next -> listOf(op.text)
+    /**
+     * Every model-controlled string rendered in STATE is an inline field. D-276: prose keeps the §17 fact-line cap;
+     * verbatim references (accept commands, requirement ids, evidence ids, anchor and focus paths) cannot be
+     * paraphrased shorter and get [referenceMaxChars].
+     */
+    private fun opText(op: Op): List<Pair<String, Int>> {
+        fun prose(vararg s: String?) = s.filterNotNull().map { it to factLineMaxChars }
+        fun ref(vararg s: String?) = s.filterNotNull().map { it to referenceMaxChars }
+        return when (op) {
+            is Op.PlanAdd -> prose(op.text) + ref(op.accept, op.req)
+            is Op.PlanCursor -> emptyList()
+            is Op.PlanTick -> ref(op.evidence)
+            is Op.PlanCancel -> prose(op.reason)
+            is Op.FactAdd -> prose(op.text) + ref(op.evidence, op.anchor?.path)
+            is Op.FactRefute -> ref(op.evidence)
+            is Op.DeadendAdd -> prose(op.text, op.scope, op.reopen) + ref(op.evidence)
+            is Op.DecisionAdd -> prose(op.text, op.because, op.rejected, op.probe)
+            is Op.OpenAdd -> prose(op.text, op.trip, op.needs)
+            is Op.OpenClose -> ref(op.evidence)
+            is Op.FocusSet -> ref(op.dir)
+            is Op.AmendPropose -> prose(op.change, op.reason)
+            is Op.Next -> prose(op.text)
+        }
     }
 }

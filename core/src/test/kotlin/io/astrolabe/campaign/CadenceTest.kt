@@ -38,6 +38,7 @@ import java.nio.file.Path
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -95,10 +96,12 @@ class CadenceTest {
         val controller = Controller(config, clock, idGen)
         controller.open(repo.root, request, policy).use { c ->
             val method = Controller::class.java.declaredMethods.single { it.name == "fullSuite" }.also { it.isAccessible = true }
+            var last: Any? = null
             suspend fun result(): String {
                 val result = kotlin.coroutines.intrinsics.suspendCoroutineUninterceptedOrReturn<Any> { continuation ->
                     method.invoke(controller, c, "regression", continuation)
                 }
+                last = result
                 return result::class.simpleName!!
             }
             val quality = c.checks[Checks.QUALITY_GATE]!!
@@ -112,6 +115,9 @@ class CadenceTest {
             val scratch = Command(if (WINDOWS) listOf("cmd.exe", "/d", "/s", "/c", "mkdir build&echo scratch>build/report.txt&type pytest_pass.txt") else listOf("/bin/sh", "-c", "mkdir -p build; echo scratch > build/report.txt; cat pytest_pass.txt"))
             c.checks.replace(full.copy(command = scratch))
             assertEquals("NotCertified", result(), "a later suite stamp cannot silently replace the quality gate candidate")
+            assertContains(last.toString(), "moved non-ignored paths: ")
+            assertContains(last.toString(), "build/report.txt")
+            assertContains(last.toString(), "gitignore build and test artifacts")
             assertTrue(SqliteReceipts(c.store, clock).forCheck(Checks.FULL).last().testedInputs.eligible, "declared scratch output leaves the suite eligible")
         }
     }

@@ -569,8 +569,40 @@ class EditTest {
             val version = seen(path, 1, 4)
             val out = run(anchored(path, version, hunk("    return 1\n", "    return 2\n")))
             assertEquals("ok", status(out), out.body)
-            assertEquals("def example():${ending}    return 2${ending}${ending}# untouched${ending}", Files.readString(repo.resolve(path)))
+            // D-324: the file is tab-indented, so the one-width space indentation of the replacement follows it.
+            assertEquals("def example():${ending}\treturn 2${ending}${ending}# untouched${ending}", Files.readString(repo.resolve(path)))
         }
+    }
+
+    @Test
+    fun `replacements take the dominant line ending and unambiguous tab indentation of the file`() = runTest {
+        repo.write("src/crlf.py", "def a():\r\n    x = 1\r\n    y = 2\r\n")
+        val crlf = seen("src/crlf.py", 1, 3)
+        assertEquals("ok", status(run(anchored("src/crlf.py", crlf, hunk("\n    x = 1\n", "\n    x = 10\n    z = 3\n")))))
+        val pure = Files.readString(repo.resolve("src/crlf.py"))
+        assertEquals("def a():\r\n    x = 10\r\n    z = 3\r\n    y = 2\r\n", pure)
+        assertFalse(Regex("(?<!\r)\n").containsMatchIn(pure), "no bare LF in a CRLF file")
+
+        repo.write("src/lf.py", "a = 1\r\nb = 2\nc = 3\nd = 4\n")
+        val lf = seen("src/lf.py", 1, 4)
+        assertEquals("ok", status(run(anchored("src/lf.py", lf, hunk("c = 3", "c = 30\ne = 5")))))
+        assertEquals("a = 1\r\nb = 2\nc = 30\ne = 5\nd = 4\n", Files.readString(repo.resolve("src/lf.py")))
+
+        repo.write("src/tabs.py", "def t():\n\tif x:\n\t\treturn 1\n")
+        val tabs = seen("src/tabs.py", 1, 3)
+        assertEquals("ok", status(run(anchored("src/tabs.py", tabs, hunk("\tif x:\n\t\treturn 1\n", "    if y:\n        return 2\n")))))
+        assertEquals("def t():\n\tif y:\n\t\treturn 2\n", Files.readString(repo.resolve("src/tabs.py")))
+
+        // A nested replacement uniformly at 8 spaces over two-tab lines is two 4-wide levels, not one 8-wide level.
+        repo.write("src/nested.py", "def n():\n\tif x:\n\t\tlog()\n\t\treturn 1\n")
+        val nested = seen("src/nested.py", 1, 4)
+        assertEquals("ok", status(run(anchored("src/nested.py", nested, hunk("\t\tlog()\n\t\treturn 1\n", "        log()\n        return 2\n")))))
+        assertEquals("def n():\n\tif x:\n\t\tlog()\n\t\treturn 2\n", Files.readString(repo.resolve("src/nested.py")))
+
+        repo.write("src/mixed.py", "def m():\n\tif x:\n        return 1\n")
+        val mixed = seen("src/mixed.py", 1, 3)
+        assertEquals("ok", status(run(anchored("src/mixed.py", mixed, hunk("        return 1\n", "    return 2\n")))))
+        assertEquals("def m():\n\tif x:\n    return 2\n", Files.readString(repo.resolve("src/mixed.py")), "mixed indentation is ambiguous")
     }
 
     @Test

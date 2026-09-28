@@ -24,7 +24,8 @@ import java.util.concurrent.TimeUnit
 public class Git @JvmOverloads constructor(
     repo: Path,
     public val executable: String = "git",
-    private val timeoutMillis: Long = 120_000,
+    /** Deadline of one command (D-303, `Defaults.gitDeadlineSeconds`). */
+    public val timeoutMillis: Long = 600_000,
     private val maxOutputBytes: Int = 64 * 1024 * 1024,
 ) {
     init { require(timeoutMillis in 1..3_600_000 && maxOutputBytes in 1 until Int.MAX_VALUE) }
@@ -67,6 +68,12 @@ public class Git @JvmOverloads constructor(
             forms.add(RepositoryForm.SPARSE_CHECKOUT)
         }
         return forms
+    }
+
+    /** `git config --bool --get [key]`: the effective boolean, or `null` when the key is unset. */
+    public fun configBool(key: String): Boolean? {
+        val result = exec(listOf("config", "--bool", "--get", key))
+        return if (result.exitCode == 0) decode(result.stdout).trim() == "true" else null
     }
 
     private fun requireSupportedForm(operation: String) {
@@ -506,6 +513,7 @@ public class Git @JvmOverloads constructor(
         val pumps = listOf(stdout, stderr, input)
         val descendants = LinkedHashMap<Long, ProcessHandle>()
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis)
+        var completed = false
         try {
             while (true) {
                 process.descendants().use { children -> children.forEach { descendants[it.pid()] = it } }
@@ -516,7 +524,9 @@ public class Git @JvmOverloads constructor(
                 if (process.isAlive) process.waitFor(minOf(remaining, TimeUnit.MILLISECONDS.toNanos(25)), TimeUnit.NANOSECONDS)
                 else Thread.sleep(10)
             }
-            return Execution(process.exitValue(), stdout.get(), decode(stderr.get()))
+            val execution = Execution(process.exitValue(), stdout.get(), decode(stderr.get()))
+            completed = true
+            return execution
         } catch (failure: InterruptedException) {
             Thread.currentThread().interrupt()
             throw GitError(command, START_FAILED, "git interrupted; process terminated")
@@ -525,9 +535,13 @@ public class Git @JvmOverloads constructor(
             val diagnostic = if (stderr.isDone) runCatching { decode(stderr.get()).take(4096) }.getOrDefault("") else ""
             throw GitError(command, START_FAILED, "$detail\n$diagnostic")
         } finally {
-            process.descendants().use { children -> children.forEach { descendants[it.pid()] = it } }
-            descendants.values.toList().asReversed().forEach { if (it.isAlive) it.destroyForcibly() }
-            if (process.isAlive) process.destroyForcibly()
+            // D-303: only a deadline, overflow, interrupt or error kills; detached auto-gc/maintenance and
+            // fsmonitor daemons legitimately outlive a completed command.
+            if (!completed) {
+                process.descendants().use { children -> children.forEach { descendants[it.pid()] = it } }
+                descendants.values.toList().asReversed().forEach { if (it.isAlive) it.destroyForcibly() }
+                if (process.isAlive) process.destroyForcibly()
+            }
             pumps.forEach { it.cancel(true) }
             // Pipe close may contend with a pump; cleanup must not extend the command deadline.
             Thread.ofVirtual().name("git-close").start {

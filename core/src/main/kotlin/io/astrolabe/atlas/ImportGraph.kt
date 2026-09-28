@@ -171,6 +171,7 @@ public class ImportGraph private constructor(
             }
             val pythonRoots = pythonRoots(files.keys, packages)
             val scriptPackages = scriptPackages(atlas, files.keys)
+            val externals = ScriptExternals(atlas.root, known)
             val manifestsByDirectory = files.keys.filter { it.substringAfterLast('/') in MANIFESTS }
                 .groupBy { it.substringBeforeLast('/', "") }
 
@@ -221,7 +222,7 @@ public class ImportGraph private constructor(
                             } else {
                                 val local = resolveScriptPackage(cleaned, scriptPackages, known)
                                 if (local != null) edge(path, local)
-                                else if (!cleaned.startsWith("node:")) reason(path, "unresolved bare import $cleaned (package or local alias)")
+                                else if (!cleaned.startsWith("node:") && !externals.isExternal(path, cleaned)) reason(path, "unresolved bare import $cleaned (package or local alias)")
                             }
                         }
                         Language.Kotlin, Language.Java -> {

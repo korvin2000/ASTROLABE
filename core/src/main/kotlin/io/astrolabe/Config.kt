@@ -42,6 +42,7 @@ public data class Config(
     val executionMode: ExecutionMode = defaults.executionMode,
     val dClass: DClassPolicy = defaults.dClass,
     val integrityApproval: IntegrityApproval = defaults.integrityApproval,
+    val unknownOutcomeReconciliation: UnknownOutcomeReconciliation = defaults.unknownOutcomeReconciliation,
     val ceiling: Stage = defaults.ceiling,
     /** The one authorized rules file (D-32); discovery alone never binds one. */
     val rulesFile: RulesBinding? = null,

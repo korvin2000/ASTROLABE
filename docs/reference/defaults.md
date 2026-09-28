@@ -24,11 +24,11 @@ All numbers are declared defaults for the first evaluation round, not derived op
 | `R_max` total live results / `[A]` max | 16K / 2.5K tokens | explicit residency bound |
 | Immediate-stub threshold for stale reads | 800 tokens | [§5.3](../runtime/register-workset.md#sec-5-3) |
 | `look.budget` / `run.budget` | 1,500 / 1,200 tokens | shared across parallel looks in one turn |
-| Register cap / contract digest cap / patch cap | 1,200 / 150 / 400 tokens | acceptance lives in `[K]` |
+| Register cap / contract digest cap / patch cap | 1,200 / 150 (+8 per requirement, ceiling 2,000; 0 per requirement pins 150, D-270) / 400 tokens | acceptance lives in `[K]` |
 | Fact line / note body / note summary | ≤ 240 chars / ≤ 120 tokens / ≤ 200 chars | no code in facts |
 | Workset seeds per cell / KB injection / focus notes / focus zoom | ≤ 4K / ≤ 8 notes 1.5K (CON uncapped) / ≤ 300 / ≤ 300 tokens | |
 | Touched ledger in `[A]` | ≤ 10 files | rest via recall |
-| Checker time box | 20 s | deferred ⇒ `not_run`; started then timed out ⇒ `timeout`; scheduled at step boundary |
+| Checker time box | 20 s; 120 s for a touched-selector check that fell back to project-wide scope (D-322) | deferred ⇒ `not_run`; started then timed out ⇒ `timeout`; scheduled at step boundary |
 | `θ` risk threshold for early slow checks | 40 | `Σ Δlines·(1+log2(1+fanin))` `[C1 §6]` |
 | Full-suite cadence | every 5 verified increments and at campaign end | |
 | Reserves | cell: verification 15 % + recovery/persist 5 % of tokens and turns; campaign: recovery 10 % | unspendable elsewhere; raised to known check costs before start `[B §11.6]` |
@@ -40,8 +40,8 @@ All numbers are declared defaults for the first evaluation round, not derived op
 | Flaky policy | one isolated rerun; disagreement ⇒ `inconclusive` + Open item | [§8.10](../verification/refactoring.md#sec-8-10) |
 | Memory admission | interactive: queue; autonomous: factual `LES`/conditional `PIT` with anchors, scoped, confidence ≤ 0.6 | [§4.5](../knowledge/records.md#sec-4-5) |
 | Profiles | main: one capable model, configured effort; helper: cheap, low effort; escalation: none | [§11](../operations/routing.md#sec-11) |
-| Mode | `interactive`, `trusted-local`, `d_class: ask`, ceiling `patch` | autonomous commit off |
-| Timeouts | `run` 120 s; process-group kill; never replay | |
+| Mode | `interactive`, `trusted-local`, `d_class: ask`, `integrity_approval: autonomous` (D-320), unknown outcomes reconciled by the `host` (D-321), ceiling `patch` | autonomous commit off |
+| Timeouts | `run` 120 s; process-group kill; never replay; one git command 600 s (`gitDeadlineSeconds`, D-303); provider terminal wait 60 s (then usage unknown, conservative funding, D-314) | |
 
 ---
 <!-- end-source-section: 17 -->

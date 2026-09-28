@@ -15,12 +15,12 @@ class DefaultsTest {
         "R_max total live results / [A] max" to listOf("rMaxTokens", "anchorMaxTokens"),
         "Immediate-stub threshold for stale reads" to listOf("immediateStubTokens"),
         "look.budget / run.budget" to listOf("lookBudgetTokens", "runBudgetTokens"),
-        "Register cap / contract digest cap / patch cap" to listOf("registerCapTokens", "digestCapTokens", "patchCapTokens"),
+        "Register cap / contract digest cap / patch cap" to listOf("registerCapTokens", "digestCapTokens", "digestTokensPerRequirement", "digestCapCeilingTokens", "patchCapTokens"),
         "Fact line / note body / note summary" to listOf("factLineMaxChars", "noteBodyMaxTokens", "noteSummaryMaxChars"),
         "Workset seeds per cell / KB injection / focus notes / focus zoom" to
             listOf("seedsMaxTokens", "injectionMaxNotes", "injectionMaxTokens", "focusNotesMaxTokens", "focusZoomMaxTokens"),
         "Touched ledger in [A]" to listOf("touchedInAnchor"),
-        "Checker time box" to listOf("checkerTimeBoxSeconds"),
+        "Checker time box" to listOf("checkerTimeBoxSeconds", "checkerFallbackTimeBoxSeconds"),
         "θ risk threshold for early slow checks" to listOf("theta"),
         "Full-suite cadence" to listOf("fullSuiteCadence"),
         "Reserves" to listOf("reserveVerification", "reserveRecoveryAndPersist", "campaignRecoveryReserve"),
@@ -33,8 +33,8 @@ class DefaultsTest {
         "Flaky policy" to listOf("flakyIsolatedReruns"),
         "Memory admission" to listOf("admissionConfidenceMax"),
         "Profiles" to listOf("profileRoles"),
-        "Mode" to listOf("mode", "executionMode", "dClass", "ceiling"),
-        "Timeouts" to listOf("runTimeoutSeconds"),
+        "Mode" to listOf("mode", "executionMode", "dClass", "integrityApproval", "unknownOutcomeReconciliation", "ceiling"),
+        "Timeouts" to listOf("runTimeoutSeconds", "gitDeadlineSeconds", "providerTerminalWaitSeconds"),
     )
 
     private val fields = Defaults::class.java.declaredFields
@@ -67,8 +67,13 @@ class DefaultsTest {
         assertEquals(1_200, d.runBudgetTokens)
         assertEquals(1_200, d.registerCapTokens)
         assertEquals(150, d.digestCapTokens)
+        assertEquals(8, d.digestTokensPerRequirement)
+        assertEquals(2_000, d.digestCapCeilingTokens)
+        assertEquals(630, d.effectiveDigestCapTokens(60))
+        assertEquals(150, d.copy(digestTokensPerRequirement = 0).effectiveDigestCapTokens(60))
         assertEquals(400, d.patchCapTokens)
         assertEquals(20, d.checkerTimeBoxSeconds)
+        assertEquals(120, d.checkerFallbackTimeBoxSeconds)
         assertEquals(40, d.theta)
         assertEquals(5, d.fullSuiteCadence)
         assertEquals(0.15, d.reserveVerification)
@@ -76,6 +81,8 @@ class DefaultsTest {
         assertEquals(0.10, d.campaignRecoveryReserve)
         assertEquals(12, d.campaignCells)
         assertEquals(120, d.runTimeoutSeconds)
+        assertEquals(600, d.gitDeadlineSeconds)
+        assertEquals(60, d.providerTerminalWaitSeconds)
         assertEquals(2, d.attemptsPerIncrement)
         assertTrue(d.violations().isEmpty())
     }

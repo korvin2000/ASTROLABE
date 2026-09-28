@@ -123,6 +123,8 @@ class AnchorTest {
         )
         // What a cell must not miss survives every reduction.
         assertTrue(anchor.text.startsWith("── CONTRACT v3"), anchor.text.take(80))
+        assertTrue(anchor.text.contains("R2 in_progress") && anchor.text.contains("exclusions: refund flow"), "the digest is never line-capped")
+        assertTrue(anchor.reductions.none { it.startsWith("contract digest") }, anchor.reductions.toString())
         assertTrue(anchor.text.contains("── Checks @d1e7"), "checks are never reduced")
         assertTrue(anchor.text.contains("⟨ctx 38% · turn 14/40⟩"), "the gauge is never reduced")
         assertTrue(anchor.text.contains("── impact: 3 references not inspected"), "a nudge is never reduced")

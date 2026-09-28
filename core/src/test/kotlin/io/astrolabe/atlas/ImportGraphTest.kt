@@ -153,6 +153,29 @@ class ImportGraphTest {
     }
 
     @Test
+    fun `declared packages and node builtins are external while aliases and undeclared names stay incomplete`() {
+        TempRepo.create().use { repo ->
+            repo.write("package.json", """{"name":"app","dependencies":{"react":"^19","@app/helper":"1"},"devDependencies":{"@scope/kit":"1"}}""")
+            repo.write("tsconfig.json", "{\n  // comments are allowed\n  \"compilerOptions\": {\"paths\": {\"@app/*\": [\"src/*\"]}},\n}\n")
+            repo.write("src/helper.ts", "export function helper() { return 1; }\n")
+            repo.write("src/ui.tsx", "import React from \"react\";\nimport { kit } from \"@scope/kit/sub\";\nexport const ui = [React, kit];\n")
+            repo.write("src/io.ts", "import fs from \"fs\";\nimport { join } from \"node:path\";\nimport { readFile } from \"fs/promises\";\nexport const io = [fs, join, readFile];\n")
+            repo.write("src/alias.ts", "import { helper } from \"@app/helper\";\nexport const a = helper;\n")
+            repo.write("src/undeclared.ts", "import lodash from \"lodash\";\nexport const u = lodash;\n")
+            repo.write("broken/package.json", "{ \"name\": \"broken\", \"dependencies\": { \"react\": ")
+            repo.write("broken/index.ts", "import React from \"react\";\nexport const b = React;\n")
+            repo.commit("externals")
+            val graph = graphOf(repo.root)
+
+            assertTrue(graph.isComplete("src/ui.tsx"), graph.unresolved("src/ui.tsx").toString())
+            assertTrue(graph.isComplete("src/io.ts"), graph.unresolved("src/io.ts").toString())
+            assertFalse(graph.isComplete("src/alias.ts"), "a paths alias may be local even when the name is declared")
+            assertEquals(listOf("unresolved bare import lodash (package or local alias)"), graph.unresolved("src/undeclared.ts"))
+            assertFalse(graph.isComplete("broken/index.ts"), "a malformed manifest proves nothing")
+        }
+    }
+
+    @Test
     fun `monorepo packages resolve python and workspace script imports per package`() {
         TempRepo.create().use { repo ->
             repo.write("services/a/pyproject.toml", "[project]\nname = \"a\"\n")

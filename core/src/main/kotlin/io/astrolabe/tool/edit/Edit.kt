@@ -344,10 +344,16 @@ public class Edit(
         val expect = FileVersion(io.astrolabe.id.Digest(op.expect!!))
         val content = current(index, path, expect)
         val text = decodeStrict(content.bytes) ?: throw Refusal(EditError("unsupported", index, path, "'$path' is not valid UTF-8 text; binary changes need an explicit operation (§9.5)"))
-        val eol = if (text.contains("\r\n")) "\r\n" else "\n"
+        val eol = dominantEol(text)
+        val tabIndented = tabIndented(text)
         val located = op.hunks!!.map { hunk ->
             when (val location = Anchors.locate(text, hunk.anchor, hunk.near)) {
-                is Location.One -> location.span to hunk.new.replace("\r\n", "\n").replace("\n", eol)
+                is Location.One -> {
+                    val atLineStart = location.span.start == 0 || text[location.span.start - 1] == '\n'
+                    val lf = hunk.new.replace("\r\n", "\n")
+                    val replaced = text.substring(location.span.start, location.span.end).replace("\r\n", "\n")
+                    location.span to (if (tabIndented) tabsFor(lf, replaced, atLineStart) else lf).replace("\n", eol)
+                }
                 is Location.None -> throw Refusal(EditError("anchor", index, path, "anchor 0× in '$path'" + (if (location.candidates.isEmpty()) "" else "; nearest: " + location.candidates.joinToString(" · ") { "${it.line}: ${it.text}" }), candidates = location.candidates))
                 is Location.Many -> throw Refusal(EditError("anchor", index, path, "anchor ${location.sites.size}× in '$path': sites " + location.sites.joinToString(", ") { "${it.lines}" } + " — add near=", sites = location.sites.map { it.lines }))
             }
@@ -681,6 +687,46 @@ public class Edit(
 
     /** Lines as an editor counts them: a trailing newline ends the last line, it does not start an empty one. */
     private fun contentLines(text: String): List<String> = text.lines().let { if (text.endsWith("\n") && it.isNotEmpty()) it.dropLast(1) else it }
+
+    /** D-324: the file's majority line ending (a tie keeps CRLF), so a replacement never mixes endings in. */
+    private fun dominantEol(text: String): String {
+        val crlf = Regex("\r\n").findAll(text).count()
+        val lf = text.count { it == '\n' } - crlf
+        return if (crlf > 0 && crlf >= lf) "\r\n" else "\n"
+    }
+
+    /** Every indented line of the file is indented with tabs only (D-324). */
+    private fun tabIndented(text: String): Boolean {
+        val indents = text.split('\n').filter { it.isNotBlank() }.map { line -> line.takeWhile { it == ' ' || it == '\t' } }.filter { it.isNotEmpty() }
+        return indents.isNotEmpty() && indents.all { indent -> indent.all { it == '\t' } }
+    }
+
+    /**
+     * D-324: a replacement indented with spaces becomes tab-indented for a tab-indented file when one tab's width
+     * follows from the [replaced] lines: the smallest space indent of the replacement over the smallest tab depth
+     * of the replaced text (8 spaces over two tabs is 4, never one 8-wide level). Anything ambiguous (tabs, mixed
+     * or inconsistent widths, no indented replaced line) is left as written. A first line that continues a line
+     * of the file ([atLineStart] false) has no indentation of its own.
+     */
+    private fun tabsFor(replacement: String, replaced: String, atLineStart: Boolean): String {
+        fun ownLines(block: String) = block.split('\n').withIndex().filter { (i, line) -> (i > 0 || atLineStart) && line.isNotBlank() }
+        val lines = replacement.split('\n')
+        val own = ownLines(replacement)
+        val indents = own.map { (_, line) -> line.takeWhile { it == ' ' || it == '\t' } }.filter { it.isNotEmpty() }
+        if (indents.isEmpty() || indents.any { indent -> indent.any { it == '\t' } }) return replacement
+        val depth = ownLines(replaced).map { (_, line) -> line.takeWhile { it == '\t' }.length }.filter { it > 0 }.minOrNull() ?: return replacement
+        val smallest = indents.minOf { it.length }
+        if (smallest % depth != 0) return replacement
+        val width = smallest / depth
+        if (indents.any { it.length % width != 0 }) return replacement
+        val converted = own.map { it.index }.toSet()
+        return lines.mapIndexed { i, line ->
+            if (i !in converted) line else {
+                val spaces = line.takeWhile { it == ' ' }.length
+                "\t".repeat(spaces / width) + line.substring(spaces)
+            }
+        }.joinToString("\n")
+    }
 
     private fun decodeStrict(bytes: ByteArray): String? = try {
         Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString()

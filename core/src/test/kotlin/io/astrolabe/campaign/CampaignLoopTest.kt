@@ -73,6 +73,31 @@ class CampaignLoopTest {
     }
 
     @Test
+    fun `a factual host answer unblocks the waiting increment without amending the contract`() = runBlocking<Unit> {
+        controller().open(repo.root, request, policy).use { c ->
+            val replies = planning() + listOf(
+                Scripted.Reply(listOf(say("I1 is ready"))),
+                Scripted.Reply(listOf(call("question", "task", """{"op":"ask","question":"Which value should b return?"}"""))),
+            )
+            assertEquals(CampaignOutcome.WaitingForInput, controller().run(c, model(replies)).outcome)
+        }
+        controller().open(repo.root, request, policy).use { c ->
+            val version = c.contract.version
+            assertEquals(IncrementStatus.Blocked, c.state!!.graph.increments.single { it.id == "I2" }.status, "no amendment, so open leaves I2 blocked")
+            val host = object : io.astrolabe.event.Authority by io.astrolabe.event.AutonomousAuthority() {
+                override suspend fun ask(question: io.astrolabe.event.Question) =
+                    io.astrolabe.event.Answer(question.id, question.contractRevision, "b should return 20", changesRequirements = false)
+            }
+            val adapter = FakeAdapter(ScriptedModel.of(*implement(c, "src/b.py", "    return 2", "    return 20", "\"AC-1\",\"AC-2\"").toTypedArray()))
+            val run = controller().run(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator()), host)
+            assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+            assertEquals(version, c.contracts.current(request.work)!!.version, "a factual answer never bumps the contract")
+            assertTrue("host answer for I2 (factual, contract stays v$version): b should return 20" in texts(adapter.calls.first().request))
+            assertEquals(1, c.state!!.cells.count { it.increment == "I1" }, "verified work is retained on resume")
+        }
+    }
+
+    @Test
     fun `implementation split reaches the plan role and replaces only unfinished work`() = runBlocking<Unit> {
         controller().open(repo.root, request, policy).use { c ->
             val replacement = """{"increments":[
@@ -103,6 +128,31 @@ class CampaignLoopTest {
             assertEquals(1, c.state!!.cells.count { it.increment == "I1" })
             assertEquals(1, c.state!!.cells.count { it.increment == "I2a" })
             assertEquals(1, c.state!!.cells.count { it.increment == "I2b" })
+        }
+    }
+
+    @Test
+    fun `a replan reusing a split increment id names the id to rename`() = runBlocking<Unit> {
+        controller().open(repo.root, request, policy).use { c ->
+            val replacement = """{"increments":[
+                {"id":"I1","requirements":["R1"],"accept":["AC-1"],"write_scope":["src/"],"expected_files":1,"produces":"artifact"},
+                {"id":"I2","requirements":["R2"],"accept":["AC-2"],"write_scope":["src/"],"expected_files":1,"depends_on":["I1"],"produces":"artifact"},
+                {"id":"I2b","requirements":["R2"],"accept":["AC-1","AC-2"],"write_scope":["src/"],"expected_files":1,"depends_on":["I2"],"produces":"artifact"}]}"""
+            val replies = planning() + listOf(
+                Scripted.Reply(listOf(say("I1 is ready"))),
+                Scripted.Reply(listOf(
+                    call("split", "task", """{"op":"propose","kind":"increment_split","proposal":{"increment":"I2","reason":"separate b implementation from its regression review","parts":["implementation","regression review"]}}"""),
+                    call("split-boundary", "state", """{"op":"blocked","blocked":{"reason":"waiting for increment split planning","evidence":[]}}"""),
+                )),
+                Scripted.Reply(listOf(call("replan", "task", """{"op":"propose","kind":"plan","proposal":$replacement}"""))),
+                Scripted.Reply(listOf(say("replacement plan ready"))),
+            )
+            val adapter = FakeAdapter(ScriptedModel.of(*replies.toTypedArray()))
+            val run = controller().run(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator()))
+            assertEquals(CampaignOutcome.BlockedExternal, run.outcome, run.state?.reason)
+            assertTrue(run.state!!.reason!!.endsWith("give the replacement a new id instead of I2"), run.state?.reason)
+            assertTrue("Give every replacement increment a new id" in texts(adapter.calls[4].request))
+            assertEquals(listOf("I1", "I2"), c.state!!.graph.increments.map { it.id }, "a refused replan leaves the graph unchanged")
         }
     }
 

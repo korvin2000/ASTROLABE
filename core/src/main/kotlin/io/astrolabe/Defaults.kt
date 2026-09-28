@@ -17,6 +17,8 @@ public data class Defaults(
     // Cell turn budget
     val turnsPerCell: Int = 40,
     val turnNudgeFraction: Double = 0.80,
+    // Bounded wait for a provider terminal after the response (D-314)
+    val providerTerminalWaitSeconds: Int = 60,
     // α pressure threshold
     val alpha: Double = 0.65,
     // k eviction batch / m turns kept on rebuild
@@ -33,6 +35,9 @@ public data class Defaults(
     // Register cap / contract digest cap / patch cap
     val registerCapTokens: Int = 1_200,
     val digestCapTokens: Int = 150,
+    // D-270: the digest cap grows per requirement up to a ceiling; 0 per requirement pins [digestCapTokens]
+    val digestTokensPerRequirement: Int = 8,
+    val digestCapCeilingTokens: Int = 2_000,
     val patchCapTokens: Int = 400,
     // Fact line / note body / note summary
     val factLineMaxChars: Int = 240,
@@ -48,6 +53,8 @@ public data class Defaults(
     val touchedInAnchor: Int = 10,
     // Checker time box
     val checkerTimeBoxSeconds: Int = 20,
+    // Checker time box for a touched-selector check that fell back to project-wide scope (D-322)
+    val checkerFallbackTimeBoxSeconds: Int = 120,
     // θ risk threshold for early slow checks
     val theta: Int = 40,
     // Full-suite cadence
@@ -90,9 +97,12 @@ public data class Defaults(
     val executionMode: ExecutionMode = ExecutionMode.TrustedLocal,
     val dClass: DClassPolicy = DClassPolicy.Ask,
     val integrityApproval: IntegrityApproval = IntegrityApproval.Autonomous,
+    val unknownOutcomeReconciliation: UnknownOutcomeReconciliation = UnknownOutcomeReconciliation.Host,
     val ceiling: Stage = Stage.Patch,
     // Timeouts
     val runTimeoutSeconds: Int = 120,
+    /** Deadline of one git command (D-303); at most one hour, the [io.astrolabe.os.Git] bound. */
+    val gitDeadlineSeconds: Int = 600,
 ) {
     /** Values that would disable a mandatory control or make a bound meaningless (D-48, IX-18). */
     public fun violations(): List<ConfigViolation> {
@@ -112,6 +122,7 @@ public data class Defaults(
         fraction("turnNudgeFraction", turnNudgeFraction, exclusiveZero = true)
         fraction("admissionConfidenceMax", admissionConfidenceMax, exclusiveZero = false)
         positive("turnsPerCell", turnsPerCell)
+        positive("providerTerminalWaitSeconds", providerTerminalWaitSeconds)
         positive("k", k)
         if (m < 0) v += ConfigViolation("m", "must be ≥ 0")
         positive("rMaxTokens", rMaxTokens)
@@ -121,12 +132,15 @@ public data class Defaults(
         positive("runBudgetTokens", runBudgetTokens)
         positive("registerCapTokens", registerCapTokens)
         positive("digestCapTokens", digestCapTokens)
+        if (digestTokensPerRequirement < 0) v += ConfigViolation("digestTokensPerRequirement", "must be ≥ 0")
+        positive("digestCapCeilingTokens", digestCapCeilingTokens)
         positive("patchCapTokens", patchCapTokens)
         positive("factLineMaxChars", factLineMaxChars)
         positive("noteBodyMaxTokens", noteBodyMaxTokens)
         positive("noteSummaryMaxChars", noteSummaryMaxChars)
         positive("touchedInAnchor", touchedInAnchor)
         positive("checkerTimeBoxSeconds", checkerTimeBoxSeconds)
+        positive("checkerFallbackTimeBoxSeconds", checkerFallbackTimeBoxSeconds)
         if (theta < 0) v += ConfigViolation("theta", "must be ≥ 0")
         positive("fullSuiteCadence", fullSuiteCadence)
         positive("stallTurns", stallTurns)
@@ -146,8 +160,20 @@ public data class Defaults(
         positive("campaignCells", campaignCells)
         if (flakyIsolatedReruns < 0) v += ConfigViolation("flakyIsolatedReruns", "must be ≥ 0")
         positive("runTimeoutSeconds", runTimeoutSeconds)
+        positive("gitDeadlineSeconds", gitDeadlineSeconds)
+        if (gitDeadlineSeconds > 3600) v += ConfigViolation("gitDeadlineSeconds", "must be ≤ 3600")
         v += shapePolicy.violations()
         return v
+    }
+
+    /**
+     * The contract digest cap for a contract with [requirements] requirements (D-270): every requirement status
+     * is mandatory, so the cap grows by [digestTokensPerRequirement] each, never below [digestCapTokens] and
+     * never above [digestCapCeilingTokens] unless [digestCapTokens] itself is higher.
+     */
+    public fun effectiveDigestCapTokens(requirements: Int): Int {
+        val scaled = digestCapTokens.toLong() + digestTokensPerRequirement.toLong() * requirements.coerceAtLeast(0)
+        return minOf(scaled, maxOf(digestCapTokens, digestCapCeilingTokens).toLong()).toInt()
     }
 }
 

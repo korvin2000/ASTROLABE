@@ -142,21 +142,25 @@ public class Checker(
 
     /**
      * Runs every end-of-turn type/lint/syntax check on [touched] within one time box of [timeBoxSeconds].
-     * Nothing touched ⇒ nothing to check.
+     * Nothing touched ⇒ nothing to check. A touched-selector check whose tool cannot take paths runs
+     * project-wide ([argvFor]) and is measured against the larger [fallbackTimeBoxSeconds] from the same batch
+     * start instead (D-322).
      */
-    public fun run(touched: Collection<String>, timeBoxSeconds: Long = 20): List<CheckerResult> {
-        require(timeBoxSeconds > 0) { "timeBoxSeconds must be positive" }
+    @JvmOverloads
+    public fun run(touched: Collection<String>, timeBoxSeconds: Long = 20, fallbackTimeBoxSeconds: Long = timeBoxSeconds): List<CheckerResult> {
+        require(timeBoxSeconds > 0 && fallbackTimeBoxSeconds > 0) { "time boxes must be positive" }
         val paths = touched.map { it.replace('\\', '/') }.distinct().sorted()
         if (paths.isEmpty()) return emptyList()
         val candidates = checks.byTrigger(Trigger.EndOfTurn).filter { it.command != null && it.kind in INLINE_KINDS }
-        val deadline = System.nanoTime() + timeBoxSeconds * NANOS_PER_SECOND
+        val started = System.nanoTime()
         return candidates.map { check ->
             val selected = paths.filter { commandPath(it, check.command!!.cwd, insideOnly = true) != null }
-            val remainingNanos = deadline - System.nanoTime()
+            val box = if (fellBackToProjectWide(check)) maxOf(timeBoxSeconds, fallbackTimeBoxSeconds) else timeBoxSeconds
+            val remainingNanos = started + box * NANOS_PER_SECOND - System.nanoTime()
             val result = if (selected.isEmpty()) {
                 notRun(check, selected, "no touched files in the command directory")
             } else if (remainingNanos <= 0) {
-                notRun(check, selected, "time box of ${timeBoxSeconds}s exhausted before dispatch")
+                notRun(check, selected, "time box of ${box}s exhausted before dispatch")
             } else {
                 execute(check, selected, (remainingNanos + NANOS_PER_SECOND - 1) / NANOS_PER_SECOND)
             }
@@ -254,11 +258,19 @@ public class Checker(
         @JvmStatic
         public fun argvFor(check: Check, touched: Collection<String>): List<String> {
             val command = requireNotNull(check.command) { "check ${check.id} declares no command" }
-            val takesPaths = DiagnosticsParser.recognise(command.argv) in setOf(DiagnosticTool.Ruff, DiagnosticTool.Eslint, DiagnosticTool.Mypy, DiagnosticTool.Pyright)
-            val shell = command.argv.first().substringAfterLast('/').substringAfterLast('\\').substringBeforeLast('.').lowercase() in setOf("sh", "bash", "cmd", "powershell", "pwsh")
-            return if (check.selector == Selector.Touched && takesPaths && !shell) {
+            return if (check.selector == Selector.Touched && takesPaths(command.argv)) {
                 command.argv + touched.mapNotNull { commandPath(it, command.cwd, insideOnly = true) }.distinct().sorted()
             } else command.argv
+        }
+
+        /** A touched-selector check whose tool takes no paths runs project-wide (F-076, D-322). */
+        private fun fellBackToProjectWide(check: Check): Boolean =
+            check.selector == Selector.Touched && !takesPaths(check.command!!.argv)
+
+        private fun takesPaths(argv: List<String>): Boolean {
+            val recognised = DiagnosticsParser.recognise(argv) in setOf(DiagnosticTool.Ruff, DiagnosticTool.Eslint, DiagnosticTool.Mypy, DiagnosticTool.Pyright)
+            val shell = argv.first().substringAfterLast('/').substringAfterLast('\\').substringBeforeLast('.').lowercase() in setOf("sh", "bash", "cmd", "powershell", "pwsh")
+            return recognised && !shell
         }
     }
 }

@@ -1,5 +1,7 @@
 package io.astrolabe.workspace
 
+import java.util.Locale
+
 /**
  * The one path-pattern convention of contract scopes and increment write scopes (D-31, §8.6), applied to
  * workspace-relative paths with forward slashes:
@@ -11,14 +13,16 @@ package io.astrolabe.workspace
  *   single star and `?` stay inside one segment;
  * - `**` alone — the whole repository.
  *
- * Matching is exact-case: the path contract already unified case aliases on case-insensitive filesystems
- * (D-47), so what arrives here is the on-disk spelling.
+ * Matching is exact-case by default: the path contract already unified case aliases of existing entries on
+ * case-insensitive filesystems (D-47). A not-yet-existing path keeps the caller's spelling, so a protection
+ * check on such a filesystem passes [ignoreCase] (D-302).
  */
 public object PathPattern {
     @JvmStatic
-    public fun matches(pattern: String, relative: String): Boolean {
-        val path = relative.replace('\\', '/').removePrefix("./").trimEnd('/')
-        val raw = pattern.replace('\\', '/').removePrefix("./")
+    @JvmOverloads
+    public fun matches(pattern: String, relative: String, ignoreCase: Boolean = false): Boolean {
+        val path = relative.replace('\\', '/').removePrefix("./").trimEnd('/').let { if (ignoreCase) it.lowercase(Locale.ROOT) else it }
+        val raw = pattern.replace('\\', '/').removePrefix("./").let { if (ignoreCase) it.lowercase(Locale.ROOT) else it }
         if (raw.isEmpty() || raw == "/" || path.isEmpty()) return false
         if (raw == "**") return true
         val glob = raw.any { it == '*' || it == '?' }

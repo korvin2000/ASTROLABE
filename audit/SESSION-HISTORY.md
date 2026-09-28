@@ -680,3 +680,12 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - Bisected two tests already failing at dba6344 (4f6eb64, 1120f89) and fixed them.
 - ABI regenerated (`Observed.truncated`, `RunCapture.executionRoot`); `assemble testClasses checkKotlinAbi` green; only targeted tests run.
 - Merged --no-ff into local main; not pushed (owner approval pending).
+
+## 2026-09-28: fine-tune follow-ups (`fix/fine-tune`)
+- CI on `main` @ 30cc45c was red on both OSes; logs read via a signed-in browser. Seven `fix(ci)` commits (obsolete test
+  expectations after F-064/D-313/4f6eb64/d4d2524, the untested fresh-workspace fence of cdb1f58, a handled ContextOverflow).
+- 21 owner-selected items implemented by four worktree agents (groups A–D), reviewed and merged `--no-ff`; the coordinator
+  dropped F-024's new over-budget pressure stop and calibrated F-054's tab conversion. D-321–D-325 added.
+- Incident: `git bisect run` exported GIT_DIR into fixture tests, which rewrote `.git/config` and moved `main`; repaired with
+  owner approval (main restored to 30cc45c, fixture config removed, leaked authors rewritten before merge).
+- Core ABI regenerated; Windows `gradlew check` run locally; merged into `main` and pushed with owner approval.

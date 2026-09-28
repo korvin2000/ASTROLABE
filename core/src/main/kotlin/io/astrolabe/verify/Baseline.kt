@@ -194,7 +194,8 @@ public class Baseline(
 
         // D-45 `isolated`: the exported candidate is verified against its manifest after the run as well.
         val after = snapshot(dir)
-        val mutated = (before.keys + after.keys).filter { before[it] != after[it] }.toSet()
+        // D-323: report and coverage artifacts the suite writes are outputs, not inputs; any other change withholds.
+        val mutated = (before.keys + after.keys).filter { before[it] != after[it] && !reportArtifact(it) }.toSet()
         if (mutated.isNotEmpty()) limits += Limit("input_mutation", "the suite changed its own inputs in the candidate: ${mutated.sorted().joinToString(", ")}; the receipt cannot certify them")
         val redacted = redaction.applyBytes(observed.output, ContentClass.ReusableEvidence)
         val blob = blobs.put(redacted.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
@@ -240,6 +241,15 @@ public class Baseline(
         }
     }
 
+    /** Well-known test report and coverage outputs (D-323): `junit*.xml`, `TEST-*.xml`, coverage data and tool caches. */
+    private fun reportArtifact(path: String): Boolean {
+        val segments = path.split('/')
+        val name = segments.last()
+        return (name.endsWith(".xml") && (name.startsWith("junit") || name.startsWith("TEST-"))) ||
+            name == ".coverage" || name == "coverage.xml" ||
+            segments.dropLast(1).any { it in ARTIFACT_DIRS || it.endsWith(".egg-info") }
+    }
+
     private fun receipt(
         receiptId: String, check: Check, contractVersion: Int, s0: CandidateId, argv: List<String>, cwd: String?, exit: Int?,
         outcome: Outcome, counts: io.astrolabe.evidence.Counts?, tested: TestedInputs, raw: Digest?, limits: List<Limit>,
@@ -282,5 +292,6 @@ public class Baseline(
     private companion object {
         const val POLL_SLICE_SECONDS = 5L
         const val REPORT_WALK_DEPTH = 8
+        val ARTIFACT_DIRS = setOf("htmlcov", ".pytest_cache", ".nyc_output", "coverage")
     }
 }

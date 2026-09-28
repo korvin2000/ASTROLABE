@@ -163,7 +163,7 @@ class SnapshotCaptureRegressionTest {
     }
 
     @Test
-    fun `an index change during blob publication refuses an incomplete staged snapshot`(@TempDir state: Path) {
+    fun `an index change during blob publication never yields an incomplete staged snapshot`(@TempDir state: Path) {
         WorkspaceFixture.create(state).use { fixture ->
             fixture.repo.modify("src/a.py", "dirty a\n")
             fixture.repo.modify("src/b.py", "dirty b to stage during capture\n")
@@ -181,13 +181,15 @@ class SnapshotCaptureRegressionTest {
             )
             val dirtyState = DirtyState(fixture.workspace, blobs, fixture.stamper, fixture.ids, fixture.clock)
 
-            assertFailsWith<IllegalStateException> { dirtyState.capture() }
+            // D-274: the attempt that saw the change is discarded; the retry captures the settled index.
+            val snapshot = dirtyState.capture()
             assertTrue(changed, "the index writer must run during acquisition")
+            assertTrue(snapshot.staged.any { it.path == "src/b.py" }, "the retried snapshot carries the staged change")
         }
     }
 
     @Test
-    fun `a base commit change during blob publication refuses a mixed snapshot`(@TempDir state: Path) {
+    fun `a base commit change during blob publication never yields a mixed snapshot`(@TempDir state: Path) {
         WorkspaceFixture.create(state).use { fixture ->
             fixture.repo.modify("src/a.py", "dirty a before base changes\n")
             var changed = false
@@ -204,8 +206,11 @@ class SnapshotCaptureRegressionTest {
             )
             val dirtyState = DirtyState(fixture.workspace, blobs, fixture.stamper, fixture.ids, fixture.clock)
 
-            assertFailsWith<IllegalStateException> { dirtyState.capture() }
+            // D-274: the attempt that saw the change is discarded; the retry captures the new base.
+            val snapshot = dirtyState.capture()
             assertTrue(changed, "the base writer must run during acquisition")
+            assertEquals(fixture.repo.git.revParse("HEAD").hex, snapshot.baseCommit)
+            assertEquals(fixture.stamper.stamp().id, snapshot.stampId)
         }
     }
 

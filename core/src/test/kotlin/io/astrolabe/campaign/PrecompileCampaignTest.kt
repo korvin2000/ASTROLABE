@@ -61,14 +61,14 @@ class PrecompileCampaignTest {
     private val files = (1..3).map { "src/f$it.py" }
 
     /**
-     * The acceptance command. A [mutating] one writes a declared scratch artifact into the tree on its second run
-     * (the first run — the plan cell's verify-on-stop — only leaves [sentinel] outside the repository), so the tree
-     * moves while I1's checks run and stays put afterwards.
+     * The acceptance command. A [mutating] one writes a declared scratch artifact into the tree on its first run
+     * only — the increment's own verify-on-stop, since a plan cell runs no product acceptance (d4d2524) — and
+     * leaves [sentinel] outside the repository, so the tree moves while I1's checks run and stays put afterwards.
      */
     private fun printing(mutating: Boolean, sentinel: Path): Command = when {
-        WINDOWS && mutating -> Command(listOf("cmd.exe", "/d", "/s", "/c", "type pytest_pass.txt & if exist $sentinel (echo checked> build\\marker.txt) else (echo x> $sentinel)"))
+        WINDOWS && mutating -> Command(listOf("cmd.exe", "/d", "/s", "/c", "type pytest_pass.txt & if not exist $sentinel (echo checked> build\\marker.txt& echo x> $sentinel)"))
         WINDOWS -> Command(listOf("cmd.exe", "/d", "/s", "/c", "type pytest_pass.txt"))
-        mutating -> Command(listOf("/bin/sh", "-c", "cat pytest_pass.txt; if [ -e $sentinel ]; then echo checked > build/marker.txt; else echo x > $sentinel; fi"))
+        mutating -> Command(listOf("/bin/sh", "-c", "cat pytest_pass.txt; if [ ! -e $sentinel ]; then echo checked > build/marker.txt; echo x > $sentinel; fi"))
         else -> Command(listOf("/bin/sh", "-c", "cat pytest_pass.txt"))
     }
 

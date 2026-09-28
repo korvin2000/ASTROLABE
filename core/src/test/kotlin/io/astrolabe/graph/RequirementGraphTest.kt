@@ -260,7 +260,7 @@ class RequirementGraphTest {
             CompletionProposal("I1", "done", 1, stamp, stamp, null, Digest.ofUtf8("env")),
             c, graph.increments.single(), Register.empty(ContextId("cell-I1"), "I1", "check"),
             Ledger.initial(c), stamp, emptyMap(),
-            assessments = listOf(Assessment("AC1", "signature unchanged", "#44", true, "user", 1)),
+            assessments = listOf(Assessment("AC1", "signature unchanged", "#44", true, "user", 1, candidate = stamp)),
         ))
         val ledger = graph.recordAccepted(c, result).ledger(c, stamp)
         assertEquals(RequirementStatus.Verified, ledger["R1"]!!.status)

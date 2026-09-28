@@ -11,6 +11,9 @@ import io.astrolabe.cell.CellFixture.Companion.runCmd
 import io.astrolabe.cell.CellFixture.Companion.say
 import io.astrolabe.cell.CellFixture.Companion.tree
 import io.astrolabe.contract.Command
+import io.astrolabe.contract.Contract
+import io.astrolabe.contract.Ledger
+import io.astrolabe.register.ContractDigest
 import io.astrolabe.event.AgentEvent
 import io.astrolabe.evidence.Closure
 import io.astrolabe.evidence.IntentStatus
@@ -168,6 +171,30 @@ class CellTest {
             assertTrue(exit.hint.contains("contract digest needs"), exit.hint)
             assertTrue(f.adapter.calls.isEmpty())
             assertEquals(CellStatus.Partial, f.checkpoints.latest(f.ids.context!!)!!.status)
+        }
+    }
+
+    @Test
+    fun `a 60-requirement contract runs without digest pressure under defaults`() = runTest {
+        val sixty: (Contract) -> Contract = { c ->
+            val r1 = c.requirements.first()
+            c.copy(requirements = (1..60).map { i -> r1.copy(id = "R$i", text = "requirement $i of the contract") })
+        }
+        CellFixture(stateRoot.resolve("scaled"), shapeContract = sixty).use { f ->
+            val estimator = f.estimator
+            fun cost(c: Contract) =
+                estimator.estimate(ContractDigest.render(c, Ledger.initial(c), emptyList(), estimator, 100_000)).tokens
+            val perRequirement = (cost(f.contract) - cost(f.contract.copy(requirements = f.contract.requirements.take(1)))) / 59.0
+            assertTrue(perRequirement <= Defaults().digestTokensPerRequirement, "measured $perRequirement tokens per requirement")
+            val exit = f.run(ScriptedModel.of(Scripted.Reply(listOf(say("done")))))
+            assertFalse(exit is CellExit.Partial && exit.reason == PartialReason.Pressure, exit.toString())
+            assertTrue(f.adapter.calls.isNotEmpty())
+            assertTrue(f.anchorText(1).contains("R60 pending"), f.anchorText(1))
+        }
+        CellFixture(stateRoot.resolve("pinned"), defaults = Defaults(digestTokensPerRequirement = 0), shapeContract = sixty).use { f ->
+            val exit = assertIs<CellExit.Partial>(f.run(ScriptedModel.of()))
+            assertEquals(PartialReason.Pressure, exit.reason)
+            assertTrue(exit.hint.contains("contract digest needs"), exit.hint)
         }
     }
 
@@ -394,6 +421,28 @@ class CellTest {
             val later = f.transcript(7).filterIsInstance<ToolResult>().map { resultText(it) }
             assertTrue(later.any { it.contains("src/a.py") && !it.contains("state op is required") }, later.toString())
             assertEquals(1, f.recorder.ofType<AgentEvent.Cell.GateFired>().count { it.text.contains("same result 2 times") })
+        }
+    }
+
+    @Test
+    fun `a repeated identical next patch does not reset the loop gate but a material change does`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val next = """{"next":"look around"}"""
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("look"), patch("p1", next), tree("c1"))),
+                Scripted.Reply(listOf(say("look again"), patch("p2", next), tree("c2"))),
+                Scripted.Reply(listOf(say("and again"), patch("p3", next), tree("c3"))),
+                Scripted.Reply(listOf(say("once more"), patch("p4", next), tree("c4"))),
+                Scripted.Reply(listOf(say("recording"), patch("p5", """{"next":"read a.py"}"""), tree("c5"))),
+                Scripted.Reply(listOf(say("look after the change"), tree("c6"))),
+                Scripted.Reply(listOf(say("done"))),
+            )
+
+            f.run(model)
+
+            assertTrue(f.anchorText(4).contains("look.tree returned the same result 2 times"), f.anchorText(4))
+            assertTrue(f.anchorText(5).contains("look.tree returned the same result 3 times — turn ended"), f.anchorText(5))
+            assertFalse(f.anchorText(7).contains("loop: look.tree"), f.anchorText(7))
         }
     }
 

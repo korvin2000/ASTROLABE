@@ -106,6 +106,7 @@ public class Verify(
     private val mask: ToolMask = ToolOps.implementingS0,
     private val timeoutSeconds: Long = 600,
     private val checkerTimeBoxSeconds: Long = 20,
+    private val checkerFallbackTimeBoxSeconds: Long = 120,
     private val envAllowlist: Set<String> = RedactionConfig.DEFAULT_ENV_ALLOWLIST,
     /** The campaign-scope human review path `review(scope=campaign)` routes to (P3.5.2, D-23); `null` ⇒ unavailable. */
     private val campaignReview: CampaignReview? = null,
@@ -122,7 +123,7 @@ public class Verify(
         }
     init {
         require(ids.context != null) { "verify runs inside a cell: ids.context is its lineage" }
-        require(timeoutSeconds > 0 && checkerTimeBoxSeconds > 0) { "timeouts must be positive" }
+        require(timeoutSeconds > 0 && checkerTimeBoxSeconds > 0 && checkerFallbackTimeBoxSeconds > 0) { "timeouts must be positive" }
     }
 
     /** The paths touched since the checker last ran; the cell keeps it current (`Coherence.takeScheduled`). */
@@ -221,7 +222,7 @@ public class Verify(
         val runner = checker ?: return refused(args, "unavailable", "no end-of-turn checker is configured for this cell")
         val paths = args.paths?.takeIf { it.isNotEmpty() } ?: touched
         if (paths.isEmpty()) return refused(args, "ok", "nothing touched: no check to run")
-        val results = kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { runner.run(paths, checkerTimeBoxSeconds) }
+        val results = kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { runner.run(paths, checkerTimeBoxSeconds, checkerFallbackTimeBoxSeconds) }
         if (results.isEmpty()) return refused(args, "unavailable", "no type or lint runner is registered for this repository")
         val receipts = results.map { scheduler.record(it, contract.version) }
         val lines = results.zip(receipts).map { (result, receipt) -> result.line(scheduler.aliasOf(receipt.receiptId)) }

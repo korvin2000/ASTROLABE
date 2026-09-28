@@ -184,10 +184,13 @@ public class WorkspacePath private constructor(
     public val caseInsensitive: Boolean,
 ) {
     @Volatile
-    private var committedWriteProtection: ((String) -> Boolean)? = null
+    private var committedWriteProtection: ((String, Boolean) -> Boolean)? = null
 
-    /** The controller binds mutable write restrictions to committed authority; metadata stays unreadable. */
-    internal fun bindWriteProtection(protects: (String) -> Boolean) {
+    /**
+     * The controller binds mutable write restrictions to committed authority; metadata stays unreadable.
+     * [protects] receives the relative path and whether to fold case ([caseInsensitive], D-302).
+     */
+    internal fun bindWriteProtection(protects: (relative: String, ignoreCase: Boolean) -> Boolean) {
         committedWriteProtection = protects
     }
 
@@ -374,7 +377,7 @@ public class WorkspacePath private constructor(
             }
         }
         if (intent == Intent.Mutate) {
-            if (committed != null) return if (committed(relative)) {
+            if (committed != null) return if (committed(relative, caseInsensitive)) {
                 PathResolution.Rejected(RejectionReason.Protected, "'$relative' is protected by the committed contract")
             } else null
             val name = fold(relative.substringAfterLast('/'))

@@ -329,11 +329,11 @@ public class Stamper @JvmOverloads public constructor(
     }
 
     /**
-     * Read actual executable state on POSIX, even if core.fileMode is disabled. On Windows Git's
-     * reported mode carries the executable bit that the filesystem cannot represent.
+     * Read actual executable state on POSIX unless `core.fileMode` is disabled (D-293). On Windows, and
+     * where the repository distrusts the bit, Git's reported mode carries the executable bit instead.
      */
-    private fun fileMode(resolved: PathResolution.Resolved, reportedMode: FileMode): FileMode = when {
-        POSIX -> if (Files.isExecutable(resolved.real)) FileMode.EXECUTABLE else FileMode.REGULAR
+    internal fun fileMode(resolved: PathResolution.Resolved, reportedMode: FileMode): FileMode = when {
+        POSIX && workspace.fileModeTrusted -> if (Files.isExecutable(resolved.real)) FileMode.EXECUTABLE else FileMode.REGULAR
         reportedMode == FileMode.EXECUTABLE || reportedMode == FileMode.REGULAR -> reportedMode
         else -> FileMode.REGULAR
     }
@@ -501,4 +501,15 @@ public data class EnvFingerprint(
             for (value in values) fields.add(group to value)
         }
     }
+}
+
+/**
+ * Diagnosis for a stamp that moved under a check (F-123, F-133): the moved non-ignored paths, bounded to
+ * [limit] plus a count, and the hint that build and test artifacts must be gitignored to leave the stamp alone.
+ */
+internal fun movedPathsHint(before: StampReport, after: StampReport, limit: Int = 10): String {
+    val moved = Stamper.diff(before, after).toList()
+    if (moved.isEmpty()) return "no stamped path moved (the environment fingerprint changed)"
+    val shown = moved.take(limit).joinToString(", ") + if (moved.size > limit) " (+${moved.size - limit} more)" else ""
+    return "moved non-ignored paths: $shown; gitignore build and test artifacts so checks leave the stamp unchanged"
 }

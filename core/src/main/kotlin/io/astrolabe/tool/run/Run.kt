@@ -1,6 +1,7 @@
 package io.astrolabe.tool.run
 
 import io.astrolabe.Config
+import io.astrolabe.auth.Capability
 import io.astrolabe.auth.CapabilitySet
 import io.astrolabe.auth.Ceiling
 import io.astrolabe.auth.Classification
@@ -189,7 +190,10 @@ public class Run(
         val actionId = idGen.next("act")
         val alias = aliases.allocate(ids.work, actionId, "result", ids.context, workspace.id)
         val before = stamper.report()
-        val intent = Intent(idGen.next("intent"), ids, actionId, argv, args.cwd, classification.toString(), at = clock.instant(), replaySafe = replaySafe)
+        // D-321: a background process may outlive a crash, so only a foreground run's effects are confined to one stamp.
+        val confined = !args.bg && classification.effectClass != EffectClass.D && !classification.effectsUnknown &&
+            classification.requiredCapabilities.all { it in setOf(Capability.WorkspaceRead, Capability.WorkspaceWrite, Capability.RunLocal) }
+        val intent = Intent(idGen.next("intent"), ids, actionId, argv, args.cwd, classification.toString(), at = clock.instant(), replaySafe = replaySafe, workspaceConfined = confined)
         val spec = SpawnSpec(
             command = if (shell) Command.Shell(args.cmd!!) else Command.Argv(argv),
             workingDirectory = cwd,

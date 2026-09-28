@@ -178,6 +178,16 @@ class WorkspacePathTest {
         assertReason(RejectionReason.Protected, paths.resolve("MIGRATIONS/0001_init.sql", Intent.Mutate))
     }
 
+    @Test
+    fun `committed protection folds case for a new path where the filesystem folds case`() {
+        if (!paths.caseInsensitive) return
+        val scope = io.astrolabe.contract.Scope.repositoryMinus(ProtectedPaths())
+        paths.bindWriteProtection { path, ignoreCase -> scope.protects(path, ignoreCase) }
+        assertReason(RejectionReason.Protected, paths.resolve("web/PACKAGE-LOCK.JSON", Intent.Mutate))
+        assertReason(RejectionReason.Protected, paths.resolve(".GitHub/workflows/ci.yml", Intent.Mutate))
+        assertResolved(paths.resolve("src/fresh.py", Intent.Mutate))
+    }
+
     // ------------------------------------------------------------ publication
 
     @Test

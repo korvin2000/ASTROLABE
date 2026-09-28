@@ -134,6 +134,8 @@ internal class CellFixture(
     osOverride: ((LocalOs) -> Os)? = null,
     /** The verbatim request the S0 contract derives from; a behaviour-preserving one activates refactor mode. */
     val request: String = REQUEST,
+    /** Applied to the derived S0 contract before it is opened. */
+    shapeContract: (Contract) -> Contract = { it },
 ) : AutoCloseable {
     val repo: TempRepo = TempRepo.create().also { repo -> files.forEach { (path, text) -> repo.write(path, text) }; repo.commit("initial") }
     val clock = FakeClock.at("2026-09-21T10:00:00Z")
@@ -152,6 +154,7 @@ internal class CellFixture(
     val atlas: Atlas = Atlas.build(repo.root)
     val contract: Contract = contracts.deriveS0(ids.work, ids.attempt, request, atlas, Config(), Tokens(200_000)).contract
         .let { it.copy(scope = it.scope.copy(writePaths = listOf("src/", "tests/"))) }
+        .let(shapeContract)
         .also { contracts.open(it) }
     val checks: Checks = Checks.seed(contract, RunnerCommands(typecheck = echo("types ok")))
     val journal = Journal(store, clock)

@@ -1840,6 +1840,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Future regression: a fake git executable hangs before stdout closes, writes unlimited stderr, or blocks stdin; each operation must terminate with bounded diagnostics and leave no child.
 - Current-source recheck (2026-09-25, 9a80e117): Git.exec still blocks on readAllBytes, waitFor and unbounded joins without a deadline (389?427). Earlier runtime evidence retains its original baseline; this recheck is source inspection.
 - Fix (2026-09-28, `c24c4fe`): Git commands now bound pipe pumping and process waiting to a configurable 120-second deadline, with 64 MiB stdout and 1 MiB stderr caps. Oversize capture fails explicitly; interruption and errors terminate the process and observed descendants. Fixture Git calls are also bounded. GitTest passes, including a stalled launcher and output overflow.
+- Fine-tune (2026-09-28, `009e301`): default git deadline 600 s (`Defaults.gitDeadlineSeconds`); descendants are killed only on deadline, overflow, interrupt or error (D-303).
 
 
 ### F-018 - Supported Unicode regex patterns produce different search results by backend
@@ -1879,6 +1880,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Possible solutions: propagate denied/failed paths and distinguish true absence from I/O errors. Only use the no-repository fallback after establishing that condition; treat Git failure as failed or explicitly partial.
 - Future regression: inaccessible directory, injected read error and failing git inside a repository must not produce a complete negative result or silently broaden ignore scope.
 - Fix (2026-09-27, `c406b7a`): Enumeration and binary-probe I/O failures propagate as Failed/Denied. Directory-walk failures are no longer hidden; Git errors inside a detected repository cannot fall back to an unrestricted walk. Corrupt-index regression passes; unreadable-directory regression is present but skipped on Windows.
+- Fine-tune (2026-09-28, `384db50`): the non-repository search walk skips entries deleted mid-walk; other failures stay typed (D-325).
 
 
 ### F-021 - Candidate filtering checks symlinks only at the final file component
@@ -1929,6 +1931,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Possible solutions: compute mandatory minimum size and return a typed capacity failure when it cannot fit; otherwise use a terminating reduction strategy that checks its postcondition. Keep complete mandatory definitions in the appropriate region and document any digest reference strategy explicitly.
 - Future regression: many requirements, long exclusions, more than 64 user messages and capTokens=1; result must either satisfy the declared bound or explicitly refuse with an actionable capacity result.
 - Fix (2026-09-27, `1e3ef70`): Digest reduction terminates by removing optional content, without the 64-step cutoff. Mandatory overflow throws DigestCapacity; Cell checkpoints a pressure exit before provider dispatch. Tiny caps, long exclusions and 100 historical requests are covered.
+- Fine-tune (2026-09-28, `6e70501`): effective digest cap = min(max(cap, 2000), 150 + 8·requirements); `[A]` never line-caps the digest; an over-budget anchor is reported, not cut (D-270).
 
 
 ### F-025 - Slice coverage forgets acceptance obligations owned only by the increment
@@ -2007,6 +2010,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Possible solutions: derive the stamp from the captured immutable manifest and common base/environment inputs; validate membership/base/index before and after acquisition, retry boundedly and mark unresolved movement as unknown. Use isolated snapshots where required.
 - Future regression: inject a writer between entry capture and stamping; snapshot identity must match exported bytes or acquisition must fail explicitly, never mix the two versions.
 - Fix (2026-09-27, `527c95b`): DirtyState compares immutable captured entries with the stamp report and rechecks base commit, Git status and the staged index. Observed movement aborts with SnapshotIntegrityError. Injected changes to file bytes, index membership and HEAD during blob publication are refused. This detects inconsistent acquisition but does not provide an atomic snapshot against external writers; F-027 remains open.
+- Fine-tune (2026-09-28, `35e2d38`): dirty-state capture retries up to three immediate attempts before `SnapshotIntegrityError` (D-274).
 
 
 ### F-031 - Crash after shadow-ref update leaves the durable snapshot index behind
@@ -2031,6 +2035,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Possible solutions: capture actual supported modes for untracked files, preserve/apply permissions deliberately during publication, and verify type plus mode plus bytes across the entire candidate. Treat unsupported fidelity as unavailable rather than a successful materialization with a warning.
 - Future regression: on Linux export, edit and restore a 0755 script, invoke it directly and compare modes; include a symlink whose creation is refused and require an unavailable/mismatch result.
 - Fix (2026-09-28, `6b7ab81`): Atomic replacement preserves POSIX permissions; snapshots apply executable modes and validate every exported tree path by bytes, type and supported mode. Restore guards mode changes. Clean-path omission regression passes; executable export/edit/restore regression is present but skipped on Windows.
+- Fine-tune (2026-09-28, `9252765`): with `core.fileMode=false` stamps, capture and shadow restore use git's mode, not the filesystem bit (D-293).
 
 
 ### F-033 - Preimage lookup is lost across cells/restart and its journal index is written after mutation
@@ -2183,6 +2188,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Runtime evidence: corrected stdin JShell probe against current classes raised `intent i cannot move from Unknown to Committed` after successfully recording and marking i Unknown. The earlier ambiguous Java import probe was discarded.
 - Current-source recheck (2026-09-25, 9a80e117): Both intent journals still enforce ordinal transitions, while Controller marks unresolved intents Unknown (501); reconciliation cannot transition Unknown to Committed. Earlier runtime evidence retains its original baseline; this recheck is source inspection.
 - Fix (2026-09-28, `d4d2524`): Explicit intent transitions keep Committed terminal. Unknown outcomes close only through reconcile with a durable nonblank authority/evidence reference; SQLite reopen and terminal-state regressions pass.
+- Fine-tune (2026-09-28, `d60685b`): `Config.unknownOutcomeReconciliation = Automatic` (default `Host`) reconciles replay-safe R and foreground workspace-confined intents at open with journaled evidence; D-class, external and live/lost background effects keep the fence (D-321).
 
 
 ### F-045 - A newly added verified fact is not checked for already-stale anchors
@@ -2208,6 +2214,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Possible solutions: validate every field rendered as a line according to its own type, including newline/fence handling; render structured values with a consistent escaping policy where multiline content is legitimate.
 - Future regression: put fences/newlines and overlong text in every auxiliary rendered field, not only FactAdd.text; reject or safely render it while preserving ordinary quoted command text.
 - Fix (2026-09-27, `aff4943`): Validator checks every rendered operation string, including evidence IDs, anchor paths and auxiliary fields, for the 240-character limit, embedded line breaks and both Markdown fence styles. A matrix covers 25 fields with five invalid forms plus valid inline commands; focused register checks pass.
+- Fine-tune (2026-09-28, `a95bca7`): STATE references (accept commands, requirement/evidence ids, anchor and focus paths) accept 1000 chars; prose keeps 240 (D-276).
 
 
 ### F-047 - Recalling a missing file grants KNOWN coverage despite a historical label
@@ -2320,6 +2327,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Future regression: tabs/spaces, leading indentation, CRLF/LF and anchors with terminal newlines should replace exactly the intended raw span and preserve surrounding bytes.
 - Current-source recheck (2026-09-25, 9a80e117): Anchors.normalized still trims normalized anchor and maps only retained characters (69); Edit.replace inserts complete replacement text (528). Earlier runtime evidence retains its original baseline; this recheck is source inspection.
 - Fix (2026-09-26, `c2f6989`): Normalized anchor spans include requested boundary indentation and line endings, including whitespace after the final newline. Tabs, CRLF/LF, inline surroundings and end-to-end replacements are covered.
+- Fine-tune (2026-09-28, `de6dad7`, `5fdcf4e`): anchored replacements take the file's dominant EOL; spaces become tabs only in a tab-indented file, with the tab width calibrated against the replaced lines (D-324).
 
 
 ### F-055 - Edit error diagnostics expose raw secrets to the model and reusable storage
@@ -2614,6 +2622,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Possible solution: translate selected paths relative to the command cwd, restrict them to the relevant package, and encode runner-specific selection or conservatively run its declared project command.
 - Future regression: nested package edits, edits outside that package, and project-wide checker commands; assert actual files checked, not just the appended argv list.
 - Fix (2026-09-26, `c49ca61`): Checker and blast arguments are relative to command cwd while evidence paths remain workspace-relative. Nested checkers ignore unrelated package paths; known file-oriented commands receive selected files and project/unknown commands run as declared. Actual nested-file reading and argument regressions pass.
+- Fine-tune (2026-09-28, `24fe926`): touched-selector checks that fall back to project-wide scope get `Defaults.checkerFallbackTimeBoxSeconds` (120 s) (D-322).
 
 
 ### F-077 - Matching candidate stamps bypass verifier-version invalidation
@@ -2678,6 +2687,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Possible solution: withhold pre-existing classification when baseline inputs changed or stability is unknown, carry the reason into the ledger view, and use full membership/metadata validation.
 - Future regression: mutate an input before a failure, restore it before exit, or create a new input; none may establish a comparable pre-existing-failure ledger.
 - Fix (2026-09-26, `137b89b`): Baseline snapshots compare membership, versions, timestamps and executable state. Mutated, restored or expanded input trees cannot publish a pre-existing-failure ledger.
+- Fine-tune (2026-09-28, `9c340e5`): junit/TEST-*.xml, coverage data and tool caches no longer count as mutated baseline inputs; any other change still withholds (D-323).
 
 
 ### F-082 - Check acceptance assessments have no production path into completion
@@ -2723,6 +2733,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Analysis: Cell.signatures accumulates every successful call for the whole cell. Gates.Loop recounts the entire history on every turn and re-emits its hard rejection for every historical count above the threshold. validateCalls clears requiredOp when a STATE op is present, but the unchanged history immediately sets it again at the end of that turn. Subsequent unrelated tool-only turns are refused indefinitely. Clear or acknowledge the offending episode after the required recovery, or restrict the gate to a current repetition window. Regression: three identical calls, a valid STATE recovery, then an unrelated look/edit without STATE; the last turn must execute. Existing CellTest ends at recovery/completion and misses the following tool turn.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
 - Fix (2026-09-27, `331c113`): An applied STATE patch clears the cell's historical loop signatures after dispatch. A later unrelated read executes without demanding another patch; focused CellTest failed before and passed after.
+- Fine-tune (2026-09-28, `7f73eb6`): loop signatures clear only when a STATE patch changes the register beyond its version (D-278).
 
 
 ### F-086 - Provider terminal reconciliation is never consumed by the cell runtime
@@ -2734,6 +2745,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
 - Fix (2026-09-28, `4f6eb64`): The cell retains Invocation, consumes terminal exactly once under NonCancellable after success, failure or cancellation, archives late items without executing them, and settles one accounting row. Unknown usage retains conservative funding. TerminalAccountingTest and the partial-usage regression pass. Cancellation waits for the provider to fulfill its terminal SPI.
 - Review fix (2026-09-28, `4988bd7`): the ResultPacketTest refused-call assertion was obsolete under terminal-reported usage and is updated (test only).
+- Fine-tune (2026-09-28, `4ba304f`): provider terminal wait bounded by `Defaults.providerTerminalWaitSeconds` (60 s); a timeout keeps usage unknown with conservative funding and is journaled (D-314).
 
 
 ### F-087 - Incomplete provider usage can release the cell's conservative token reservation
@@ -2796,6 +2808,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Analysis: The controller always constructs Workspace with default ProtectedPaths before loading the committed contract and never rebuilds/binds its path policy. ScopeGuard resolves Intent.Mutate through that immutable policy before checking the current contract. Removing package-lock.json, CI or migrations from contract protection via an approved amendment therefore still fails the path guard, including after reopen. The task log says binding is implemented, but actual construction only passes those defaults into initial deriveS0. Preserve unconditional Git-metadata protection while binding the configurable write restrictions to committed authority and revalidating changes. Regression: an approved scope/protection amendment enabling a lockfile or migration permits the intended edit; pending amendments do not.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
 - Fix (2026-09-28, `cdb1f58`): Workspace mutation protection reads the current committed contract at each resolution, including child workspaces. Pending proposals grant nothing; approved changes apply immediately and after reopen. Git metadata remains protected.
+- Fine-tune (2026-09-28, `9395d2f`): committed write protection folds case on case-insensitive filesystems (WorkspacePath and ScopeGuard); a new `PACKAGE-LOCK.JSON` is refused (D-302).
 
 
 ### F-093 - Open-time reconciliation removes unknown effects from the writer-reassignment fence
@@ -2807,6 +2820,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
 - Fix (2026-09-28, `cdb1f58`): All open intents, including Unknown, and open handles fence expired/reassigned leases. Expired renewals advance execution generation even for the same holder. Reopen is refused until the prior unknown intent has a durable disposition.
 - Review fix (2026-09-28, `5f043fc`): open persists terminal handle states it polls, so finished processes stop fencing reopen.
+- Fine-tune (2026-09-28, `d60685b`): see F-044: automatic reconciliation is opt-in; `b6fe739` also restores the grant of a never-held workspace (WorktreesTest).
 
 
 ### F-094 - Final review can approve an old tree while the controller completes the changed campaign
@@ -2850,6 +2864,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; successful stdin JShell probe against current compiled classes; synthetic inputs only.
 - Fix (2026-09-27, `f564b73, 4604b89`): Unknown executable forms become W with effectsUnknown and WorkspaceWrite capability, so Run cannot mark them replay-safe. Positive bare read-only forms remain R; a local ./ls wrapper stays unknown. CeilingTest and RunTest pass. Historical persisted intents are not rewritten.
 - Review fix (2026-09-28, `c19aef6`): post-hoc protected-path writes escalate to D for every launch label.
+- Fine-tune (2026-09-28, `72b6ffb`): guarded read-only allowlist (rg, grep, find, head/tail, git log/show/blame/…) with write/exec flags rejected; command/process substitutions are never read-only (D-283).
 
 
 ### F-098 - Overlapping redaction matches can expose a secret recognized by the default rules
@@ -2920,6 +2935,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Analysis: CampaignProposals is installed only for the initial plan cell. Ordinary S1 implementation uses TaskTool with its default S0 mask/no proposal intake; S2 may advertise task.propose but still has no intake. SqliteSplitRequests.forPlanRole is never called in production, and runS1 only plans before any increment has cells. Consequently the rescoping/scope-gate instruction to request increment_split cannot produce a new plan: calls are masked/unavailable, or an inbox record has no consumer. Wire main-line proposal intake, consume pending splits at a safe boundary and replan the remaining authorized work while preserving completed nodes. Regression: an implementing cell submits a split, the plan role receives it and the controller runs the resulting pending nodes; no graph changes happen merely on proposal.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
 - Fix (2026-09-28, `1120f89`): Main-line S1+ task.propose has a live intake. The controller consumes split requests at cell boundaries or reopen, pins the reason and current graph into planning, preserves completed definitions/evidence, and retains replaced unfinished nodes as cancelled history. The implementation-split campaign regression passes.
+- Fine-tune (2026-09-28, `a4c59b7`): the replan prompt requires fresh ids for replacements; the blocked reason names the id to rename (D-316).
 
 
 ### F-105 - A resumed blocked increment never becomes eligible for dispatch
@@ -2931,6 +2947,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
 - Fix (2026-09-28, `1120f89`): Reopen unblocks parked increments after a host contract amendment; otherwise run reassesses through host authority. Regression refresh derives stale obligations from current graph identity, so prerequisites are recertified without replaying verified work. The host-answer resume regression passes.
 - Review fix (2026-09-28, `36c589f`): stale requirements are the union of the durable and graph ledgers, so an interrupted finalization re-accepts.
+- Fine-tune (2026-09-28, `7c7a5a2`): a factual host answer (`changesRequirements = false`) unblocks without amending the contract and is pinned into the increment's next cells; per-question unblocking not done (D-317).
 
 
 ### F-106 - Seeds omitted from the compiled prompt still grant KNOWN edit coverage
@@ -3049,6 +3066,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Analysis: For a non-relative JS/TS import, graph construction tries only known package.json names and otherwise silently treats the import as external. It does not inspect tsconfig paths/baseUrl or mark such unresolved local aliases uncertain. Under a syntax-tier outline source, graph.complete can consequently be true while an internal '@app/helper' dependency is absent; Impact then narrows the blast/test set using incomplete edges. Resolve declared aliases or conservatively mark ambiguous bare imports incomplete. Regression: a syntax-tier project with a tsconfig path alias and a test importing through it must include that dependent test or widen scope. Default lexical-tier impact already widens conservatively; no tier-1 runtime reproduction claimed.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
 - Remediation (2026-09-28, `76d60b5`): Unresolved bare JS/TS imports are incomplete dependency information (except explicit node: builtins), so local aliases cannot support a narrow blast. ImportGraphTest passes with a syntax-tier alias regression.
+- Fine-tune (2026-09-28, `6e7deb7`): bare specifiers declared in the nearest package.json or naming a Node builtin are external; tsconfig/jsconfig aliases and undeclared names stay incomplete (D-287).
 
 
 ### F-118 - A truncated reference lookup clears all impact-review obligations for the symbol
@@ -3090,6 +3108,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Analysis: Runtime probe: change a Python test from 'assert False; return' to 'return; assert False' by reordering the two existing lines. TestIntegrity returns kind=additions-only, blocksCompletion=false. The classifier uses multisetMinus(lines(before), lines(after)), losing order; identical line multisets produce no removals/additions, so the additions-only exemption disables review even though the failing assertion became unreachable. Use an order-aware diff and conservatively classify control-flow changes; additions also need semantic caution because redefining a test can disable earlier checks. Regression: reordered return/assert, duplicate-test redefinition and control-flow-only changes must not be labelled harmless.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; successful stdin JShell probe against current compiled classes; synthetic inputs only.
 - Fix (2026-09-26, `f060c97`): Order-aware changed spans detect assertion/control-flow reorderings. Existing test-file additions conservatively require review (D-261).
+- Fine-tune (2026-09-28, `8f61f13`): under `integrityApproval = Autonomous` a flag-only review goes to the review cell in S0/S1 too, host as fallback (D-261, D-320).
 
 
 ### F-122 - The flaky retry reuses the ordinary execution path instead of forcing an isolated rerun
@@ -3100,6 +3119,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Analysis: runTriaged reruns every Failed check by calling runOne again with the same scheduler. Controller configures candidates only for isolation-enabled/S3 paths, so normal S0-S2 retries run again on the same live tree rather than a pinned disposable candidate. If the first failing check changed inputs or residual state, the second result describes different conditions; it may repeat side effects and is not the required isolated flake check. Force a pinned isolated rerun with explicit comparable inputs/environment, or record that isolation is unavailable instead of claiming flake triage. Regression: a first failed run mutates input/state; retry must use the original pinned candidate and preserve both attempts' provenance.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
 - Fix (2026-09-28, `adf8840`): Flaky retries require an isolated export of the original candidate and a matching known environment. Missing isolation or changed input retains the first failure with an explicit unavailable message. VerifyTest covers real isolated disagreeing outcomes and refusal after first-attempt mutation; SchedulerTest passes.
+- Fine-tune (2026-09-28, `6bfe2c1`): every check-running scheduler has a default isolated retry root (store `candidates/`) for slow/expensive checks; no live-workspace retry (D-294).
 
 
 ### F-123 - Campaign full-suite and quality gates bypass receipt certification requirements
@@ -3110,6 +3130,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Analysis: fullSuite treats the suite as Green when registry.last is Passed at the current stamp, without checking testedInputs.eligible or Scheduler.currency.certifies. A test that mutates/restores its input can therefore be accepted here despite an ineligible receipt. Configured quality gates are checked only for Outcome.Failed: Unavailable, Timeout, Inconclusive, stale or ineligible results are ignored, and a later suite run can invalidate their earlier passes without another currency check. Require a current eligible pass for every declared final gate at one final candidate, preserving undeclared as a separate case. Regression: passing-but-mutating suite, missing quality runner, timed-out quality gate and gate stale after suite; none may produce final acceptance.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
 - Fix (2026-09-26, `cf3e80d`): Every declared quality/full-suite gate must have current eligible passing evidence at one final stamp. Missing runners, mutating suites and quality gates stale after the suite remain uncertified.
+- Fine-tune (2026-09-28, `e8209d1`): behaviour kept; a not-certified final gate names the moved non-ignored paths and hints to gitignore artifacts (docs/verification/scheduler.md).
 
 
 ### F-124 - Admission rollback does not restore the superseded predecessor
@@ -3211,6 +3232,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Analysis: After combined checks and gates, publish hashes only the packet's changed paths against their original after hashes. It neither verifies the integration candidate's full stamp nor proves the resulting main stamp equals the one certified by checks/review. A check or review-time process can alter another input on the disposable tree; staged changed paths still pass and only those paths reach main. Bind checks/gates to one full verified candidate manifest and revalidate it before publication, then compare the resulting tree identity. Regression: combined check changes a dependency outside the patch, or review changes it after checks; publication must refuse. S3 uses worktrees and TreeVerification rather than Scheduler.runIsolated, so this is an independent full-tree publication gap; F-079/F-080 remain relevant to the ordinary isolated final-verification path.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; current-source trace and scoped test inspection; no new runtime reproduction claimed.
 - Fix (2026-09-28, `5ae4892`): Integration captures a full candidate identity before checks, rejects changes during checks or review, revalidates before publication and compares the resulting main identity before committing the intent. Corrected the missing Dispatched intent transition. IntegratorTest passes, including mutation outside the patch.
+- Fine-tune (2026-09-28, `5b8e737`): behaviour kept; integration identity rejections name the moved paths with the same hint (D-310).
 
 
 ### F-134 - Integration fails to recheck the current contract and generation inside the publication lock
@@ -3231,6 +3253,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Analysis: Publication writes files sequentially with Files.write/delete and then marks the intent committed. If the second write fails, earlier files remain changed; no rollback runs and the intent contains only handles/path count, not durable staged postimages or preimages. S3Round finally removes worktrees, so the private recovery source can also disappear. Stage a recoverable transaction manifest and backups before effects, preserve recovery data until terminal reconciliation, and restore on failed publication. Regression: deny/fail the second of two writes and inject a crash mid-loop; resume restores or completes the exact patch without accepting a mixed tree.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; current-source trace and scoped test inspection; no new runtime reproduction claimed.
 - Fix (2026-09-28, `0fc1dbf`): Integration persists a manifest with preimages and postimages before effects, atomically replaces each file, and restores preimages on publication failure. Controller open and Integrator entry recover pending manifests without temporary worktrees, refusing to overwrite conflicting later edits. Failed-second-write, interrupted-publication and store-reopen regressions pass.
+- Fine-tune (2026-09-28, `d89133d`): Integrator rethrows `CancellationException` after rollback (D-318).
 
 
 ### F-136 - Publication can proceed after cancellation while awaiting approval

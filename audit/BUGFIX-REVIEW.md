@@ -247,3 +247,39 @@ Code± = changed lines excluding `*.md` and `*/api/*.api`; Main± = lines under 
 | 116 | B13 | `e5321f3` | 878 | 657 | F-016 | fix: own detached Linux descendants with an isolated subreaper | F-016 FIXED (d8e5918) | Root cause removed (subreaper adopts setsid/double-fork orphans; FINISHED only after ECHILD; failures → Lost; deadline classification kept; Windows unchanged). Defect: helper JVM started with an empty env → C locale → non-ASCII classpath/PATH failed every Linux launch; host locale vars now passed (Linux-only test, compile-verified here). NOTE: 10 s cleanup budget equals host confirm budget (near-limit cleanup → Lost); EPERM on uid-changed descendants and daemon-handed work escape (reported Lost); nested jar `require` throws IllegalArgumentException; process-ownership.yml triggers only on feature/bugfix. |
 | 117 | B14 | `1b507f2` | 9 | 9 | (no finding: review as change) | docs: close final finding after Linux containment validation [skip ci] | F-none ACCEPT | Docs + one KDoc line; claims match e5321f3. |
 | 118 | - | `dba6344` | 0 | 0 | - | all issues fixed | SKIP (docs/ABI; covered by final docs+ABI step) |  |
+
+## Fine-tune follow-up (2026-09-28, `fix/fine-tune`)
+
+Owner-selected NOTE/FIXED follow-ups from `fine-tune-fixes.md`, implemented by four worktree agents and merged
+`--no-ff` after review. Every claim was verified against the code first; no item ended as NO CHANGE.
+
+| # | Finding | Verdict | Commit |
+|---|---|---|---|
+| 1 | F-092 | DONE: committed protection folds case on case-insensitive filesystems (also ScopeGuard) | 9395d2f |
+| 2 | F-044/F-093 | DONE: `Config.unknownOutcomeReconciliation` (`Host` default, `Automatic` opt-in), D-321 | d60685b |
+| 3 | F-117 | DONE: declared packages and Node builtins are external; aliases/undeclared stay incomplete | 6e7deb7 |
+| 4 | F-122 | DONE: default isolated retry root for slow/expensive checks | 6bfe2c1 |
+| 5 | F-024 | DONE: digest cap scales per requirement (ceiling 2000); `[A]` never cuts the digest (review: no new pressure stop) | 6e70501 |
+| 6 | F-030 | DONE: three capture attempts | 35e2d38 |
+| 7 | F-086 | DONE: 60 s bounded provider terminal wait | 4ba304f |
+| 8 | F-123 | DONE (diagnosis): moved paths + gitignore hint; documented | e8209d1 |
+| 9 | F-076 | DONE: 120 s box for project-wide fallback checks, D-322 | 24fe926 |
+| 10 | F-054 | DONE: dominant EOL; calibrated tab conversion (review fix 5fdcf4e), D-324 | de6dad7, 5fdcf4e |
+| 11 | F-032 | DONE: `core.fileMode=false` uses git's mode (POSIX test runs on Linux CI) | 9252765 |
+| 12 | F-121 | DONE: flag-only reviews go to the review cell in S0/S1 under `Autonomous` | 8f61f13 |
+| 13 | F-081 | DONE: report/coverage artifacts ignored by the baseline, D-323 | 9c340e5 |
+| 14 | F-133 | DONE (diagnosis): moved paths named in integration rejections | 5b8e737 |
+| 15 | F-085 | DONE: loop signatures clear only on a material STATE change | 7f73eb6 |
+| 16 | F-017 | DONE: 600 s configurable git deadline; daemons survive a completed command | 009e301 |
+| 17 | F-104 | DONE: fresh replacement ids required; blocked reason names the id; no auto-suffix | a4c59b7 |
+| 18 | F-135 | DONE: cancellation rethrown after rollback | d89133d |
+| 19 | F-020 | DONE: vanished files skipped in the non-repository search walk, D-325 | 384db50 |
+| 21 | F-046 | DONE: 1000-char STATE references, 240 for prose | a95bca7 |
+| F1 | F-097 | DONE: guarded read-only allowlist; substitutions are never read-only | 72b6ffb |
+| F2 | F-105 | DONE (part 2 only): factual answers unblock without amending; per-question unblocking needs a schema change | 7c7a5a2 |
+
+CI on `main` @ 30cc45c was red on both OSes before this work (8 core tests on Ubuntu; Windows `index-treesitter`
+git spawn failures `0xC0000142`). Fixed first, one commit each: afc3453 (DefaultsTest `integrityApproval` row),
+b6fe739 (a never-held workspace is not fenced), f16fd4d (ShapedViewTest vs F-064), 9d476c7 (RequirementGraphTest vs
+D-313), 148e3eb (VerticalSliceTest vs the extraction account), b29cc88 (FX-44 vs d4d2524), 25599e4 (LongRefactorTest:
+a handled `ContextOverflow` is not a pairing error); StageCCampaignTest is fixed by F-122.

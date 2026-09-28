@@ -43,4 +43,18 @@ class SearchLimitsTest {
         val result = Searches.jvm().find(SearchRequest("absent", SearchMode.Literal, SearchScope.All(root), 1024))
         assertTrue("file limit" in assertIs<SearchOutcome.Failed>(result).reason)
     }
+
+    @Test
+    fun `a file deleted mid-walk is skipped while other walk failures stay typed`(@TempDir root: Path) {
+        Files.writeString(root.resolve("kept.txt"), "kept\n")
+        val walk = TreeWalk(root)
+        val gone = root.resolve("gone.txt")
+
+        kotlin.test.assertEquals(java.nio.file.FileVisitResult.CONTINUE, walk.visitFileFailed(gone, java.nio.file.NoSuchFileException(gone.toString())))
+        kotlin.test.assertFailsWith<java.nio.file.AccessDeniedException> {
+            walk.visitFileFailed(gone, java.nio.file.AccessDeniedException(gone.toString()))
+        }
+        Files.walkFileTree(root, walk)
+        kotlin.test.assertEquals(listOf("kept.txt"), walk.files)
+    }
 }

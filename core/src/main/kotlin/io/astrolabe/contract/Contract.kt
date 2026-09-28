@@ -170,7 +170,8 @@ public data class Scope(val writePaths: List<String>, val protectedPaths: List<S
     public fun covers(relative: String): Boolean = writePaths.any { PathPattern.matches(it, relative) }
 
     /** True when a protected entry names [relative] (D-class: never written without committed authority). */
-    public fun protects(relative: String): Boolean = protectedPaths.any { PathPattern.matches(it, relative) }
+    @JvmOverloads
+    public fun protects(relative: String, ignoreCase: Boolean = false): Boolean = protectedPaths.any { PathPattern.matches(it, relative, ignoreCase) }
 
     /** §8.6 scope guard rule for one path: inside the write scope and outside the protected list. */
     public fun allowsWrite(relative: String): Boolean = covers(relative) && !protects(relative)

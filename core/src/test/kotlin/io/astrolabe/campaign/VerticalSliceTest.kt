@@ -190,7 +190,9 @@ class VerticalSliceTest {
 
                 // Per-call billed usage is visible in the exports; the turn counts are the fake-adapter baseline.
                 val calls = Accounting(c.store, clock).calls(request.work)
-                assertEquals(6 + run.exit!!.turns, calls.size, "six calls before the death, each priced before it acted")
+                // The post-cell extraction settles its own `extraction:` account (4f6eb64); model calls are counted apart.
+                val modelCalls = calls.filterNot { it.invocationId.startsWith("extraction:") }
+                assertEquals(6 + run.exit!!.turns, modelCalls.size, "six calls before the death, each priced before it acted")
                 assertTrue(calls.all { it.usage != null && it.quantities.billedUsage != null })
                 val usage = Export(c.store).write(request.work, acceptedTasks = 1, currency = "USD").first()
                 assertTrue(Files.readString(usage).contains("\"billedUsage\""))

@@ -360,12 +360,23 @@ public class Cell @JvmOverloads constructor(
                 failure = error
                 invocation?.cancel()
             } finally {
+                var terminalTimedOut = false
                 terminal = kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-                    try { invocation?.terminal() }
-                    catch (_: Exception) { null }
+                    // D-314: a provider that never settles must not hang the cell; unknown usage keeps conservative funding.
+                    try {
+                        invocation?.let { inv ->
+                            kotlinx.coroutines.withTimeoutOrNull(defaults.providerTerminalWaitSeconds * 1_000L) { inv.terminal() }
+                                ?: null.also { terminalTimedOut = true; inv.cancel() }
+                        }
+                    } catch (_: Exception) { null }
+                }
+                if (terminalTimedOut) {
+                    ev.journal.append(JournalEvent(idGen.next("ev"), ids, turn, JournalKind.Call,
+                        text = "provider terminal not reconciled within ${defaults.providerTerminalWaitSeconds}s; usage unknown, conservative funding retained",
+                        at = clock.instant()))
                 }
                 val settled = terminal
-                val usage = settled?.usage ?: received?.usage
+                val usage = if (terminalTimedOut) null else settled?.usage ?: received?.usage
                 val knownInput = usage?.quantities?.filterKeys { it.isInput }?.values?.fold(0L, Accounting::add) ?: 0L
                 val inputKnown = usage != null && usage.quantities.keys.any { it.isInput } && usage.unknown.none { it.isInput }
                 val inputCharge = if (inputKnown) knownInput else maxOf(knownInput, estimate.upperBoundTokens)
@@ -511,10 +522,11 @@ public class Cell @JvmOverloads constructor(
             val current = residency.occupancy(prefix(layout), residents, turn, anchor.tokens, pinnedTokens(contract))
             occupancy = current
 
-            // Gates on records.
+            // Gates on records. D-278: only a patch that materially changes the register acknowledges prior loop
+            // signatures; a repeated identical `next` bumps only the version and must not reset the loop gate.
             if (calls.any { it.family == ToolFamily.State && it.op == "patch" &&
                     (result?.of(it.opId) as? Disposition.Executed)?.outcome?.applied == true
-                }) signatures.clear()
+                } && register.copy(version = registerBefore.version) != registerBefore) signatures.clear()
             val currenciesNow = currencies(stampNow.candidateId)
             uncertified = outstanding(currenciesNow)
             val certifiedAfter = certified(currenciesNow)
@@ -585,7 +597,7 @@ public class Cell @JvmOverloads constructor(
         private fun renderAnchor(contract: Contract): AnchorRender {
             val stampNow = lastReport?.candidateId
             val currencies = currencies(stampNow)
-            val digest = ContractDigest.render(contract, ctx.ledger ?: Ledger.initial(contract), obligations(contract, currencies), estimator, defaults.digestCapTokens)
+            val digest = ContractDigest.render(contract, ctx.ledger ?: Ledger.initial(contract), obligations(contract, currencies), estimator, defaults.effectiveDigestCapTokens(contract.requirements.size))
             val worksetLine = ws.workset.render(estimator) + drops.joinToString("") { "; ${it.text}" }
             val focusNotes = ctx.knowledge?.focusNotes(register.focus, editedThisTurn)
             return Anchor.render(
@@ -772,7 +784,7 @@ public class Cell @JvmOverloads constructor(
             tools.verify?.inputs = atlas.rows.map { it.path }
             tools.verify?.atlas = atlas
             val checker = ws.checker ?: return null
-            val results = kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { checker.run(scheduled, defaults.checkerTimeBoxSeconds.toLong()) }
+            val results = kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { checker.run(scheduled, defaults.checkerTimeBoxSeconds.toLong(), defaults.checkerFallbackTimeBoxSeconds.toLong()) }
             if (results.isEmpty()) return null
             for (result in results) {
                 val receipt = ws.scheduler.record(result, contract.version)

@@ -710,28 +710,31 @@ internal object Candidates {
         return output.split(' ').filter { it.isNotEmpty() }.distinct()
     }
 
-    private fun walk(root: Path): List<String> {
-        val files = ArrayList<String>()
-        Files.walkFileTree(
-            root,
-            object : SimpleFileVisitor<Path>() {
-                override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult {
-                    if (dir != root && dir.fileName.toString().startsWith(".")) return FileVisitResult.SKIP_SUBTREE
-                    return FileVisitResult.CONTINUE
-                }
+    private fun walk(root: Path): List<String> = TreeWalk(root).also { Files.walkFileTree(root, it) }.files
+}
 
-                override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
-                    if (!attrs.isSymbolicLink && attrs.isRegularFile) {
-                        files += root.relativize(file).joinToString("/")
-                    }
-                    return FileVisitResult.CONTINUE
-                }
+/** The non-repository candidate walk: regular files outside hidden directories, in visit order. */
+internal class TreeWalk(private val root: Path) : SimpleFileVisitor<Path>() {
+    val files: ArrayList<String> = ArrayList()
 
-                override fun visitFileFailed(file: Path, exc: IOException): FileVisitResult = throw exc
-            },
-        )
-        return files
+    override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult {
+        if (dir != root && dir.fileName.toString().startsWith(".")) return FileVisitResult.SKIP_SUBTREE
+        return FileVisitResult.CONTINUE
     }
+
+    override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
+        if (!attrs.isSymbolicLink && attrs.isRegularFile) {
+            files += root.relativize(file).joinToString("/")
+        }
+        return FileVisitResult.CONTINUE
+    }
+
+    // D-325: an entry deleted mid-walk is skipped; any other failure stays typed for the caller.
+    override fun visitFileFailed(file: Path, exc: IOException): FileVisitResult =
+        if (exc is NoSuchFileException) FileVisitResult.CONTINUE else throw exc
+
+    override fun postVisitDirectory(dir: Path, exc: IOException?): FileVisitResult =
+        if (exc == null || exc is NoSuchFileException) FileVisitResult.CONTINUE else throw exc
 }
 
 /**

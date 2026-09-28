@@ -34,6 +34,7 @@ import io.astrolabe.fixtures.TempRepo
 import io.astrolabe.id.AttemptId
 import io.astrolabe.id.WorkId
 import io.astrolabe.kb.Notes
+import io.astrolabe.provider.ProblemKind
 import io.astrolabe.provider.Profile
 import io.astrolabe.provider.Request
 import io.astrolabe.provider.SegmentKind
@@ -166,7 +167,10 @@ class LongRefactorTest {
             assertEquals(c.contract.acceptance.map { it.id }, listOf("AC-1", "AC-2", "AC-3"))
             assertEquals(listOf("green", "green", "green"), run.finish!!.acceptance.map { it.status })
             assertEquals(listOf("def a():\n    return 10\n", "def b():\n    return 20\n", "def c():\n    return 30\n"), listOf("a", "b", "c").map { Files.readString(repo.root.resolve("src/$it.py")) })
-            assertTrue(adapter.validations.all { it.result == Validation.Ok }, "every request kept valid call/result pairing")
+            // A window overflow is refused before sending and answered by the rebuild or the partial asserted below
+            // (Cell §6.1); whether validation or admission sees it first varies with run-local path lengths.
+            val refused = adapter.validations.mapNotNull { it.result as? Validation.Rejected }.flatMap { it.problems }
+            assertTrue(refused.all { it.kind == ProblemKind.ContextOverflow }, "every request kept valid call/result pairing: $refused")
 
             // I2 took a pressure rebuild, ended partial and was continued; the verified I1 was never redone.
             assertEquals(mapOf("I1" to 1, "I2" to 2, "I3" to 1), state.graph.increments.associate { it.id to it.cells.size })
