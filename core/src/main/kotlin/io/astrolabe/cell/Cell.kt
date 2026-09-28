@@ -518,7 +518,12 @@ public class Cell @JvmOverloads constructor(
             uncertified = outstanding(currenciesNow)
             val certifiedAfter = certified(currenciesNow)
             if (Progress.events(registerBefore, register, turn, certifiedBefore, certifiedAfter).isNotEmpty()) lastProgressTurn = turn
-            val unresolved = TestIntegrity.unresolved(flags.values.toList())
+            val completionEvidence = if (proposal && implementingCompletion && dispatchRefusal == null)
+                ctx.completionEvidence?.invoke(flags.values.toList()) else null
+            completionEvidence?.flags?.forEach { flag -> flags[flag.path] = flag }
+            val evidenceStamp = ws.stamper.report().candidateId
+            val validEvidence = completionEvidence?.takeIf { evidenceStamp == stampNow.candidateId && contract().version == contract.version }
+            if (validEvidence == null) flags.replaceAll { _, flag -> flag.copy(verdict = null) }
             val repeated = repeatedFailures(currenciesNow, repaired = calls.any { it.family == ToolFamily.Edit })
             val editedByEdit = editedPaths.filter { origins[it] == ChangeOrigin.Edit }
             val state = GateState(
@@ -527,7 +532,7 @@ public class Cell @JvmOverloads constructor(
                 lastProgressTurn = lastProgressTurn, liveRunOutput = liveRunOutput,
                 contextTokens = current.totalTokens, contextMaxTokens = capabilities.contextLimitTokens.toLong(), rebuilds = rebuilds,
                 reserve = budget.verdict(outstanding(currenciesNow)), turnsMax = budget.turns, completionProposed = proposal,
-                currencies = currenciesNow, flags = unresolved, fired = fired, defaults = defaults,
+                currencies = currenciesNow, assessments = validEvidence?.assessments.orEmpty(), reviews = validEvidence?.reviews.orEmpty(), flags = flags.values.filter { it.kind != TestIntegrity.ADDITIONS_ONLY }, fired = fired, defaults = defaults,
                 impactNudges = impact.unresolved, unresolvedImpactNudges = impact.unresolvedPublic.map { it.missing },
                 outsideIncrement = editedByEdit.filter { p -> contract.scope.covers(p) && increment.writeScope.none { PathPattern.matches(it, p) } },
                 surfaceFlags = flags.values.filter { it.path in editedPaths }, editedPaths = editedPaths.toSet(),

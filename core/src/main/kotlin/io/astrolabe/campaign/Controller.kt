@@ -495,6 +495,7 @@ public class Controller @JvmOverloads public constructor(
                 refusal = "G_single(C) has nothing to accept against: ${issues.joinToString("; ") { it.detail }} — state a run: acceptance or amend the contract"
             }
         }
+        val priorVersion = state?.contractVersion
         if (state?.phase == CampaignPhase.Finishing) {
             state = Lifecycle.apply(state, contract, Transition.Resumed("finalization interrupted; revalidate acceptance before completing")).also(campaigns::save)
         }
@@ -503,6 +504,14 @@ public class Controller @JvmOverloads public constructor(
         }
 
         // §13.1: every intent that never committed is an unknown outcome until reconciled; none is replayed.
+        if (state?.phase in setOf(CampaignPhase.Opened, CampaignPhase.Running) && priorVersion != null && contract.version > priorVersion) {
+            for (blocked in state!!.graph.increments.filter { it.status == IncrementStatus.Blocked }) {
+                val ref = contract.requests.last().id
+                state = Lifecycle.apply(state!!, contract, Transition.Unblocked(blocked.id, ref)).also(campaigns::save)
+                journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Reconcile, refs = listOf(ref), text = "unblocked ${blocked.id} after host contract amendment v${contract.version}", at = clock.instant()))
+            }
+        }
+
         val unknown = intents.open().filter { it.ids.work == request.work }
         for (intent in unknown) {
             if (intent.status != IntentStatus.Unknown) intents.update(intent.intentId, IntentStatus.Unknown)
@@ -635,9 +644,27 @@ public class Controller @JvmOverloads public constructor(
         return finish(campaign, result, packets)
     }
 
+    private suspend fun reassessBlocked(c: OpenedCampaign, authority: Authority) {
+        for (increment in c.state?.graph?.increments.orEmpty().filter { it.status == IncrementStatus.Blocked }) {
+            val checkpoint = increment.cells.lastOrNull()?.let { SqliteCheckpoints(c.store, clock).latest(it) }
+            val question = io.astrolabe.event.Question(idGen.next("unblock"), c.contract.version, c.ids,
+                "May ${increment.id} resume? Resolve its prerequisite and provide the answer or evidence: ${checkpoint?.reason.orEmpty()}")
+            val answer = authority.ask(question) ?: continue
+            if (answer.questionId != question.id || answer.contractRevision != c.contract.version || answer.text.isBlank()) continue
+            c.contracts.amendByUser(c.ids.work, "Resume ${increment.id}: ${answer.text}")
+            c.journal.append(JournalEvent(idGen.next("ev"), c.ids, null, JournalKind.Reconcile, refs = listOf(question.id), text = "host unblocked ${increment.id}: ${answer.text}", at = clock.instant()))
+            c.advance(Transition.Unblocked(increment.id, question.id))
+        }
+    }
+
     private suspend fun runS1(c: OpenedCampaign, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?, maxCells: Int, packets: MutableList<ResultPacket>): S0Run {
         c.stop?.let { return S0Run(c.state, null, null, null) }
         c.refusal()?.let { return S0Run(c.advance(Transition.Stopped(stopOutcome(c), "nothing dispatched: $it")), null, null, null) }
+        val pendingSplits = SqliteSplitRequests(c.store, idGen, clock).forPlanRole(c.ids.work).filter { split ->
+            c.state?.graph?.increments?.any { it.id == split.split.increment && split.cell in it.cells && it.status !in setOf(IncrementStatus.Verified, IncrementStatus.Cancelled) } == true
+        }
+        if (pendingSplits.isNotEmpty()) plan(c, model, authority, syntax, span, packets, pendingSplits)?.let { return S0Run(c.advance(it), null, null, null) }
+        reassessBlocked(c, authority)
         val opened = checkNotNull(c.state)
         check(opened.phase == CampaignPhase.Running && opened.running == null) { "run needs a reconciled campaign with no running cell; it is ${opened.phase}" }
         // §4.2: the first cell of S1 is the plan cell; the placeholder graph is replaced once, before any dispatch.
@@ -692,8 +719,8 @@ public class Controller @JvmOverloads public constructor(
             }
             if (ready == null) {
                 // FX-42: verified work is never re-executed; its regression evidence is refreshed from current receipts.
-                refreshRegressions(c, scheduler)
-                if (checkNotNull(c.state).ledger.unfinished().size < unverified.size) continue
+                refreshRegressions(c, scheduler, authority)
+                if (checkNotNull(c.state).ledger.unfinished().size < unverified.size || checkNotNull(c.state).graph.readyFrontier(c.contract, 1).isNotEmpty()) continue
                 return last.copy(state = stopOrFinish(c, "no ready increment with ${unverified.size} requirements unverified: an empty frontier never means completed"))
             }
             if (cells >= maxCells) {
@@ -777,11 +804,18 @@ public class Controller @JvmOverloads public constructor(
             val completion = if (exit is CellExit.Completed) {
                 val returned = checkNotNull(c.state).graph.increments.first { it.id == increment.id }
                 if (review is ReviewOutcome.Declined) CompletionResult.Refused(listOf("required review: ${review.reason}"), 1, recoveryDirected = false)
-                else Verifier().accept(exit.packet.proposal(), c.contract, returned, exit.register, checkNotNull(c.state).ledger, stampNow, currencies(c, run.scheduler, stampNow), reviews = reviewItems(c.contract, returned, review))
+                else Verifier().accept(exit.packet.proposal(), c.contract, returned, exit.register, checkNotNull(c.state).ledger, stampNow, currencies(c, run.scheduler, stampNow), assessments = completionEvidence(c, returned).assessments, reviews = completionEvidence(c, returned).reviews + reviewItems(c.contract, returned, review), flags = completionEvidence(c, returned, exit.packet.flags.testIntegrity).flags)
             } else {
                 null
             }
             last = S0Run(c.state, exit, completion, compiled)
+            val splits = SqliteSplitRequests(c.store, idGen, clock).forPlanRole(c.ids.work).filter { it.cell == cellId && it.split.increment == increment.id }
+            if (splits.isNotEmpty() && exit !is CellExit.Completed && cells < maxCells && c.refusal() == null) {
+                cells += 1
+                plan(c, model, authority, syntax, span, packets, splits)?.let { return last.copy(state = c.advance(it)) }
+                s3 = null
+                continue
+            }
             when (val disposition = Lifecycle.disposition(exit, completion)) {
                 is Disposition.Close -> {
                     c.refusal()?.let { reason ->
@@ -888,10 +922,17 @@ public class Controller @JvmOverloads public constructor(
      * re-accepted from the receipts current now — never re-executed. Its green `run:` acceptances are regression
      * obligations the harness re-runs at campaign end (§4.1); one still without current receipts stays unfinished.
      */
-    private suspend fun refreshRegressions(c: OpenedCampaign, scheduler: Scheduler) {
+    private suspend fun refreshRegressions(c: OpenedCampaign, scheduler: Scheduler, authority: Authority) {
+        for (increment in checkNotNull(c.state).graph.increments.filter { it.status == IncrementStatus.Verified }) {
+            val assessed = completionEvidence(c, increment)
+            if (increment.accept.any { id -> (c.contract.acceptance(id) is Acceptance.Check && assessed.assessments.none { it.acceptanceId == id }) ||
+                    (c.contract.acceptance(id) is Acceptance.Review && id !in assessed.reviews) }) {
+                hostAssessment(c, increment, authority)
+            }
+        }
         reaccept(c, scheduler)
         val state = checkNotNull(c.state)
-        val stale = state.ledger.unfinished().toSet()
+        val stale = state.graph.ledger(c.contract, c.stamper.report().candidateId).unfinished().toSet()
         val runs = c.contract.acceptance.filterIsInstance<Acceptance.Run>().map { it.id }.toSet()
         val obligations = state.graph.increments.filter { it.status == IncrementStatus.Verified && it.requirementIds.any { r -> r in stale } }
             .flatMap { it.accept }.filter { it in runs }.distinct()
@@ -905,11 +946,11 @@ public class Controller @JvmOverloads public constructor(
     private fun reaccept(c: OpenedCampaign, scheduler: Scheduler) {
         val report = c.stamper.report()
         val state = checkNotNull(c.state)
-        val stale = state.ledger.unfinished().toSet()
+        val stale = state.graph.ledger(c.contract, c.stamper.report().candidateId).unfinished().toSet()
         for (increment in state.graph.increments.filter { it.status == IncrementStatus.Verified && it.requirementIds.any { r -> r in stale } }) {
             val cell = increment.cells.lastOrNull() ?: continue
             val proposal = CompletionProposal(increment.id, PacketStatus.Done.wire, c.contract.version, report.candidateId, report.candidateId, null, report.env.envId)
-            val result = Verifier().accept(proposal, c.contract, increment, Register.empty(cell, increment.id, increment.title), checkNotNull(c.state).ledger, report.candidateId, currencies(c, scheduler, report.candidateId))
+            val result = Verifier().accept(proposal, c.contract, increment, Register.empty(cell, increment.id, increment.title), checkNotNull(c.state).ledger, report.candidateId, currencies(c, scheduler, report.candidateId), assessments = completionEvidence(c, increment).assessments, reviews = completionEvidence(c, increment).reviews)
             if (result is CompletionResult.Accepted) c.advance(Transition.Committed(result, report.candidateId))
         }
     }
@@ -918,15 +959,18 @@ public class Controller @JvmOverloads public constructor(
      * The plan cell (§3.4, P2.1.2): `null` once a plan is admitted and installed, else the stop — a budget partial is
      * `budget_exhausted` (FX-49 S1), every other failure to plan blocks.
      */
-    private suspend fun plan(c: OpenedCampaign, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?, packets: MutableList<ResultPacket>): Transition.Stopped? {
+    private suspend fun plan(c: OpenedCampaign, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?, packets: MutableList<ResultPacket>, splits: List<StoredSplit> = emptyList()): Transition.Stopped? {
         fun blocked(reason: String) = Transition.Stopped(CampaignOutcome.BlockedExternal, reason)
         val contract = c.contract
+        val pinnedSplits = if (splits.isEmpty()) emptyList() else listOf("Replan the full authorized graph. Keep completed definitions unchanged; replace requested unfinished increments.\n" +
+            splits.joinToString("\n") { "${it.split.increment}: ${it.split.reason}; parts ${it.split.parts.joinToString()}" } +
+            "\nCurrent graph: " + Json.encodeToString(io.astrolabe.graph.RequirementGraph.serializer(), checkNotNull(c.state).graph))
         val planning = Increment(PLAN, contract.requirements.map { it.id }, contract.acceptance.map { it.id }, emptyList(), 0, title = "plan ${c.ids.work.value}")
         val knowledge = knowledge(c, planning, Roles.plan, model)
         val planInputs = CompileInputs(notes = knowledge.notes, contractsIndex = knowledge.contractsIndex, skills = knowledge.skills, skillConflicts = knowledge.skillConflicts)
         val compiler = Compiler(model.estimator, c.attempt.config)
-        val routing = route(c, RoutingFunction.Plan, planning, model, null, compiler.compile(planning, contract, model.profile, Roles.plan, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = planInputs)) { profile ->
-            compiler.compile(planning, contract, profile, Roles.plan, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = planInputs)
+        val routing = route(c, RoutingFunction.Plan, planning, model, null, compiler.compile(planning, contract, model.profile, Roles.plan, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = planInputs, pinned = pinnedSplits)) { profile ->
+            compiler.compile(planning, contract, profile, Roles.plan, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = planInputs, pinned = pinnedSplits)
         }
         val compiled = routing.compiled
         if (compiled !is Compiled.Ready) return blocked("the plan cell cannot be compiled: $compiled")
@@ -936,7 +980,7 @@ public class Controller @JvmOverloads public constructor(
         // The plan cell's own decisions travel with its packet: its register as last patched (handoff debt 1).
         val intake = CampaignProposals(proposals, SqliteSplitRequests(c.store, idGen, clock), { c.contracts.current(c.ids.work) }, { SqliteRegisterVersions(c.store, clock).latest(cellId) }, { c.kb.contractAnchors() })
         val completion = io.astrolabe.cell.RoleCompletion.forRole(Roles.plan, mapOf(io.astrolabe.cell.PacketKind.PlanArtifacts to PlanPacketValidator.completion({ c.contract }, proposals, conAnchors = { c.kb.contractAnchors() })))
-        val run = runCell(c, cellId, planning, Roles.plan, routing.model, authority, syntax, compiled, span, null, proposals = intake, completion = completion, inputs = planInputs)
+        val run = runCell(c, cellId, planning, Roles.plan, routing.model, authority, syntax, compiled, span, null, proposals = intake, completion = completion, inputs = planInputs, pinned = pinnedSplits)
         routing.selected?.let { router.record(it, outcomeOf(run.exit)) }
         val exit = run.exit ?: return Transition.Stopped(CampaignOutcome.Cancelled, "cancelled while planning")
         packets += exit.packet
@@ -952,7 +996,25 @@ public class Controller @JvmOverloads public constructor(
         return when (val admission = PlanIntake(c.contracts).admit(c.ids.work, stored, authority)) {
             is PlanAdmission.Admitted -> {
                 c.checks.synchronizeAcceptance(c.contract)
-                c.advance(Transition.Planned(admission.graph))
+                val previous = checkNotNull(c.state).graph
+                val replaced = splits.map { it.split.increment }.toSet()
+                val kept = previous.increments.filter { it.cells.isNotEmpty() || it.status != IncrementStatus.Pending }.associateBy { it.id }
+                val merged = admission.graph.increments.map { proposed ->
+                    val old = kept[proposed.id]
+                    if (old != null) {
+                        if (old.definitionDigest() != proposed.definitionDigest()) return blocked("replan changes dispatched definition ${old.id}")
+                        old
+                    } else proposed
+                }.toMutableList()
+                for (old in kept.values.filter { old -> merged.none { it.id == old.id } }) {
+                    if (old.id !in replaced || old.status in setOf(IncrementStatus.Verified, IncrementStatus.Cancelled)) return blocked("replan drops ${old.id}")
+                    merged += old.copy(status = IncrementStatus.Cancelled, cancelledReason = "split: ${splits.first { it.split.increment == old.id }.id}")
+                }
+                val graph = admission.graph.copy(increments = merged, evidence = previous.evidence)
+                val gaps = graph.validate(c.contract)
+                if (gaps.isNotEmpty()) return blocked("replacement graph refused: ${gaps.joinToString { it.detail }}")
+                c.advance(Transition.Planned(graph, replaced))
+                SqliteSplitRequests(c.store, idGen, clock).consumed(splits)
                 // §8.9 item 4: without CON notes to validate against, a missing CON reference is a recorded planning gap, not a refusal.
                 if (c.kb.contractAnchors().isEmpty()) {
                     for (gap in PlanPacketValidator.planningGaps(c.contract, stored.packet)) {
@@ -1090,13 +1152,14 @@ public class Controller @JvmOverloads public constructor(
         // Every later use reads the attempt's frozen configuration, never the controller's live one (invariant 12).
         val config = c.attempt.config
         c.refusal()?.let { return S0Run(c.advance(Transition.Stopped(stopOutcome(c), "nothing dispatched: $it")), null, null, null) }
+        reassessBlocked(c, authority)
         val opened = checkNotNull(c.state)
         check(opened.phase == CampaignPhase.Running && opened.running == null) { "runS0 needs a reconciled campaign with no running cell; it is ${opened.phase}" }
         val contract = c.contract
         val ready = opened.graph.readyFrontier(contract, 1).firstOrNull()
             ?: run {
                 val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = candidates(c))
-                refreshRegressions(c, scheduler)
+                refreshRegressions(c, scheduler, authority)
                 return S0Run(stopOrFinish(c, "no ready increment: an empty frontier never means completed", scheduler, authority = authority), null, null, null)
             }
         val role = Roles.implementing
@@ -1144,7 +1207,7 @@ public class Controller @JvmOverloads public constructor(
         val completion = if (exit is CellExit.Completed) {
             val current = c.contract
             val returned = checkNotNull(c.state).graph.increments.first { it.id == increment.id }
-            Verifier().accept(exit.packet.proposal(), current, returned, exit.register, checkNotNull(c.state).ledger, stampNow, currencies(c, scheduler, stampNow))
+            Verifier().accept(exit.packet.proposal(), current, returned, exit.register, checkNotNull(c.state).ledger, stampNow, currencies(c, scheduler, stampNow), assessments = completionEvidence(c, returned).assessments, reviews = completionEvidence(c, returned).reviews, flags = completionEvidence(c, returned, exit.packet.flags.testIntegrity).flags)
         } else {
             null
         }
@@ -1157,7 +1220,7 @@ public class Controller @JvmOverloads public constructor(
                 }
                 c.advance(Transition.Committed(disposition.accepted, stampNow))
                 events?.emit(AgentEvent.Campaign.IncrementClosed(c.ids, increment.id, "verified"))
-                stopOrFinish(c, "requirements remain unverified after ${increment.id}", scheduler)
+                stopOrFinish(c, "requirements remain unverified after ${increment.id}", scheduler, authority = authority)
             }
             // S0 has no continuation cell: the fallback is the honest outcome (D-64).
             is Disposition.Continue -> c.advance(Transition.Stopped(disposition.fallback, disposition.reason))
@@ -1327,9 +1390,10 @@ public class Controller @JvmOverloads public constructor(
             ),
             run = Run(tree.workspace, tree.registry, tree.stamper, runner, c.os, c.intents, SqliteHandles(c.store, clock), observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, c.contracts, authority, config, clock, logs, catalog = layered.mounts, tools = layered.tools),
             verify = verify,
-            task = if (proposals == null && delegator == null) TaskTool(authority, c.contracts, c.journal, estimator, idGen, ids, clock, events)
-            else TaskTool(
-                authority, c.contracts, c.journal, estimator, idGen, ids, clock, events, role.effectiveOps(contract.shape, ceiling), proposals,
+            task = TaskTool(
+                authority, c.contracts, c.journal, estimator, idGen, ids, clock, events, role.effectiveOps(contract.shape, ceiling), proposals ?: if (child == null && contract.shape >= Shape.S1) CampaignProposals(
+                    SqlitePlanProposals(c.store, idGen, clock), SqliteSplitRequests(c.store, idGen, clock),
+                    { c.contracts.current(c.ids.work) }, { registerVersions.latest(cellId) }, { c.kb.contractAnchors() }) else null,
                 delegator, delegator?.let { TaskPackets(WORKSPACE, ceiling, generation) }, tree.registry::version,
             ),
             kb = KbTool(c.kb, estimator, idGen, queue = Queue(c.store, KbWriter(c.store, estimator, clock), idGen, clock), ids = ids, events = events, deniedKinds = role.deniedNoteKinds, dense = layered.dense, redaction = redaction),
@@ -1370,6 +1434,16 @@ public class Controller @JvmOverloads public constructor(
             pinned = pinned,
             precompile = precompile,
             knowledge = knowledge,
+            completionEvidence = if (child == null && role.packetKind == io.astrolabe.cell.PacketKind.Result) { flags ->
+                val required = increment.accept.any { c.contract.acceptance(it) is Acceptance.Check || c.contract.acceptance(it) is Acceptance.Review } || flags.any { it.blocksCompletion }
+                if (required) {
+                    val reviewer = if (c.contract.shape >= Shape.S2 && increment.accept.none { c.contract.acceptance(it) is Acceptance.Check })
+                        reviewCell(c, increment, model, authority, syntax, span)
+                    else ReviewCell(io.astrolabe.delegate.ReviewJudge { _, _ -> io.astrolabe.delegate.JudgeRun(null, Tokens(0), "host assessment required") }, authority, c.store, idGen, clock, c.journal)
+                    reviewer.obtain(evidence(c, increment, listOf("completion acceptance"), flags, compiled.k.ledger, authority), Tier.Medium, c.registry::version)
+                }
+                completionEvidence(c, increment, flags)
+            } else null,
             noteHorizon = if (tree.workspace === c.workspace) NoteHorizon(KbWriter(c.store, estimator, clock), Notes(c.store), ids) else null,
         )
         val budget = child?.budget?.let { CellBudget.of(it.tokens, it.turns, contract.budget.reserves) }
@@ -1512,6 +1586,31 @@ public class Controller @JvmOverloads public constructor(
         }
     }
 
+    private suspend fun hostAssessment(c: OpenedCampaign, increment: Increment, authority: Authority) {
+        ReviewCell(io.astrolabe.delegate.ReviewJudge { _, _ -> io.astrolabe.delegate.JudgeRun(null, Tokens(0), "host assessment required") },
+            authority, c.store, idGen, clock, c.journal).obtain(
+            evidence(c, increment, listOf("current acceptance assessment"), emptyList(), null, authority), Tier.Medium, c.registry::version)
+    }
+
+    private fun completionEvidence(c: OpenedCampaign, increment: Increment, flags: List<io.astrolabe.verify.TestIntegrityFlag> = emptyList()): io.astrolabe.cell.CompletionEvidence {
+        val stamp = c.stamper.report().candidateId
+        val contract = c.contract
+        val integrity = flags.map { it.copy(verdict = null).line + it.originalObligation.orEmpty() }
+        val record = c.store.db.query("SELECT body FROM packets WHERE work_id = ? AND attempt_id = ? AND kind = ? ORDER BY rowid DESC",
+            c.ids.work, c.ids.attempt, ReviewCell.KIND) { Json.decodeFromString(io.astrolabe.delegate.ReviewRecord.serializer(), it.string("body")) }
+            .firstOrNull { it.approved && it.incrementId == increment.id && it.contractVersion == contract.version &&
+                it.candidate == stamp && it.verdict?.reviewedCandidate == stamp && it.verdict.contractRevision == contract.version &&
+                it.criteria.containsAll(increment.accept) && (flags.isEmpty() || it.integrity == integrity) &&
+                it.evidenceVersions.all { (path, version) -> c.registry.version(path) == version } }
+        val verdict = record?.verdict ?: return io.astrolabe.cell.CompletionEvidence(flags = flags.map { it.copy(verdict = null) })
+        return io.astrolabe.cell.CompletionEvidence(
+            increment.accept.mapNotNull { id -> (contract.acceptance(id) as? Acceptance.Check)?.let {
+                io.astrolabe.verify.Assessment(id, it.text, record.packetId, true, verdict.signedBy, contract.version, stamp)
+            } }, increment.accept.filter { contract.acceptance(it) is Acceptance.Review }.associateWith { verdict },
+            flags.map { it.copy(verdict = verdict) },
+        )
+    }
+
     /** The verdict each `review:` item of [increment] is signed with (§8.7); only an approval is passed on. */
     private fun reviewItems(contract: Contract, increment: Increment, review: ReviewOutcome?): Map<String, io.astrolabe.verify.Verdict> {
         val verdict = (review as? ReviewOutcome.Approved)?.record?.verdict ?: return emptyMap()
@@ -1574,9 +1673,21 @@ public class Controller @JvmOverloads public constructor(
             val receipt = c.checks.forAcceptance(item.id).firstNotNullOfOrNull { check -> currencies[check.id]?.takeIf { it.certifies }?.receiptId }
             if (receipt == null) gaps += "${item.id}: no current receipt at @${stamp.hash8}" else receipts += receipt
         }
+        for (increment in state.graph.increments.filter { it.status == IncrementStatus.Verified }) {
+            var assessed = completionEvidence(c, increment)
+            val independent = increment.accept.filter { contract.acceptance(it) !is Acceptance.Run }
+            if (independent.any { id -> assessed.assessments.none { it.acceptanceId == id } && id !in assessed.reviews } && authority != null) {
+                hostAssessment(c, increment, authority)
+                assessed = completionEvidence(c, increment)
+            }
+            for (id in independent) {
+                val reference = assessed.assessments.firstOrNull { it.acceptanceId == id }?.evidenceRef ?: assessed.reviews[id]?.requestId
+                if (reference == null) gaps += "$id: no independent assessment at @${stamp.hash8}" else receipts += reference
+            }
+        }
         c.refusal()?.let { return c.advance(Transition.Stopped(stopOutcome(c), "final acceptance not published: $it")) }
         if (gaps.isNotEmpty() || receipts.isEmpty()) {
-            return c.advance(Transition.Stopped(CampaignOutcome.Failed, "final acceptance at @${stamp.hash8} failed: ${gaps.ifEmpty { listOf("no run: receipt") }.joinToString("; ")}"))
+            return c.advance(Transition.Stopped(CampaignOutcome.Failed, "final acceptance at @${stamp.hash8} failed: ${gaps.ifEmpty { listOf("no acceptance evidence") }.joinToString("; ")}"))
         }
         if (reviewOwed != null) {
             // §8.9 items 5–6, D-23: the equivalence evidence, then the signed campaign-scope review — blocked when unavailable, never skipped.

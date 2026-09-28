@@ -58,7 +58,7 @@ class ExitGateTest {
     private fun green(receipt: String = "rcpt-1") = Currency(receipt, Applicability.Current, eligible = true, green = true, reasons = emptyList())
     private fun stale(receipt: String = "rcpt-1") = Currency(receipt, Applicability.Stale, eligible = true, green = true, reasons = listOf("candidate moved @s8 → @s9 (no reuse proof)"))
     private fun red(receipt: String = "rcpt-2") = Currency(receipt, Applicability.Current, eligible = true, green = false, reasons = listOf("outcome failed"))
-    private val assessed = Assessment("AC-2", "no public signature change in src/api/", "#44", accepted = true, by = "user", contractVersion = 2)
+    private val assessed = Assessment("AC-2", "no public signature change in src/api/", "#44", accepted = true, by = "user", contractVersion = 2, candidate = s9)
     private val signed = Verdict("rev-1", 2, s9, VerdictOutcome.Approve, confidence = 0.9, signedBy = "human:alice")
 
     private fun evaluate(
@@ -135,7 +135,7 @@ class ExitGateTest {
         val ledger = Ledger.initial(contract)
         val proposal = CompletionProposal("I1", "done", 2, baseStamp = s8, resultingStamp = s9, patchHash = Digest.ofUtf8("patch"), envId = env)
 
-        val moved = assertIs<CompletionResult.Refused>(verifier.accept(proposal, contract, increment, done, ledger, stampNow = s8, currencies = mapOf("CHK-accept-AC-1" to green()), assessments = listOf(assessed), reviews = mapOf("AC-3" to signed)))
+        val moved = assertIs<CompletionResult.Refused>(verifier.accept(proposal, contract, increment, done, ledger, stampNow = s8, currencies = mapOf("CHK-accept-AC-1" to green()), assessments = listOf(assessed.copy(candidate = s8)), reviews = mapOf("AC-3" to signed)))
         assertEquals(listOf(
             "resulting stamp @${s9.hash8} is not the tree now @${s8.hash8}",
             "AC-3: review does not certify the current candidate",

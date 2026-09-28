@@ -146,6 +146,8 @@ public class CellContext @JvmOverloads constructor(
     /** Repair-helper diagnosis lines addressed to this cell (§13.2): rendered in every later `[A]` (P4.6.3). */
     public val diagnoses: Diagnoses? = null,
     public val noteHorizon: io.astrolabe.kb.NoteHorizon? = null,
+    public val completionEvidence: (suspend (List<io.astrolabe.verify.TestIntegrityFlag>) -> CompletionEvidence)? = null,
+
 ) {
     init {
         require(ids.context != null) { "a cell runs under its own context id" }
@@ -239,3 +241,10 @@ public fun interface RoleCompletion {
         }
     }
 }
+
+/** Current, independently assessed evidence obtained before the implementing completion gate. */
+public data class CompletionEvidence(
+    val assessments: List<io.astrolabe.verify.Assessment> = emptyList(),
+    val reviews: Map<String, io.astrolabe.verify.Verdict> = emptyMap(),
+    val flags: List<io.astrolabe.verify.TestIntegrityFlag> = emptyList(),
+)

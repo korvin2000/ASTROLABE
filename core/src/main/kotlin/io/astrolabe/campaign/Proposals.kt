@@ -72,6 +72,10 @@ public class SqliteSplitRequests(private val store: Store, private val idGen: Id
         "SELECT body FROM packets WHERE work_id = ? AND kind = ? ORDER BY rowid", work, KIND,
     ) { JSON.decodeFromString(StoredSplit.serializer(), it.string("body")) }
 
+    internal fun consumed(requests: List<StoredSplit>) {
+        store.db.tx { tx -> requests.forEach { tx.execute("UPDATE packets SET kind = ? WHERE id = ? AND kind = ?", "increment_split_consumed", it.id, KIND) } }
+    }
+
     private companion object {
         const val KIND = "increment_split"
         val JSON = Json { encodeDefaults = true }

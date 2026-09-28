@@ -303,6 +303,7 @@ public object ShapeSelector {
                 expectedFiles = 0,
                 title = contract.requests.firstOrNull()?.text.orEmpty(),
                 produces = Production.Artifact,
+                evidenceKinds = contract.acceptance.filterIsInstance<Acceptance.Check>().associate { it.id to "independent host assessment of candidate evidence" },
             ),
         ),
     )
