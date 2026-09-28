@@ -34,7 +34,7 @@ class DefaultsTest {
         "Memory admission" to listOf("admissionConfidenceMax"),
         "Profiles" to listOf("profileRoles"),
         "Mode" to listOf("mode", "executionMode", "dClass", "integrityApproval", "ceiling"),
-        "Timeouts" to listOf("runTimeoutSeconds"),
+        "Timeouts" to listOf("runTimeoutSeconds", "gitDeadlineSeconds"),
     )
 
     private val fields = Defaults::class.java.declaredFields
@@ -76,6 +76,7 @@ class DefaultsTest {
         assertEquals(0.10, d.campaignRecoveryReserve)
         assertEquals(12, d.campaignCells)
         assertEquals(120, d.runTimeoutSeconds)
+        assertEquals(600, d.gitDeadlineSeconds)
         assertEquals(2, d.attemptsPerIncrement)
         assertTrue(d.violations().isEmpty())
     }

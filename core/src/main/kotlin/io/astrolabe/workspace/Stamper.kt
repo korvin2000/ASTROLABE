@@ -329,11 +329,11 @@ public class Stamper @JvmOverloads public constructor(
     }
 
     /**
-     * Read actual executable state on POSIX, even if core.fileMode is disabled. On Windows Git's
-     * reported mode carries the executable bit that the filesystem cannot represent.
+     * Read actual executable state on POSIX unless `core.fileMode` is disabled (D-293). On Windows, and
+     * where the repository distrusts the bit, Git's reported mode carries the executable bit instead.
      */
-    private fun fileMode(resolved: PathResolution.Resolved, reportedMode: FileMode): FileMode = when {
-        POSIX -> if (Files.isExecutable(resolved.real)) FileMode.EXECUTABLE else FileMode.REGULAR
+    internal fun fileMode(resolved: PathResolution.Resolved, reportedMode: FileMode): FileMode = when {
+        POSIX && workspace.fileModeTrusted -> if (Files.isExecutable(resolved.real)) FileMode.EXECUTABLE else FileMode.REGULAR
         reportedMode == FileMode.EXECUTABLE || reportedMode == FileMode.REGULAR -> reportedMode
         else -> FileMode.REGULAR
     }

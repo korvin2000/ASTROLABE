@@ -235,4 +235,20 @@ class StamperTest {
             assertTrue(report.trackedDelta.isEmpty())
         }
     }
+
+    @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX, org.junit.jupiter.api.condition.OS.MAC)
+    fun `with core fileMode false an executable bit on every file makes no member`(@TempDir state: Path) {
+        WorkspaceFixture.create(state).use { fixture ->
+            fixture.rawGit("config", "core.fileMode", "false")
+            for (path in listOf("src/a.py", "src/b.py", "README.md")) {
+                Files.setPosixFilePermissions(fixture.repo.resolve(path), java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x"))
+            }
+
+            val report = fixture.stamper.report()
+
+            assertTrue(report.members.isEmpty(), "the index mode is the mode when core.fileMode is false: ${report.members.keys}")
+            assertTrue(fixture.dirtyState.capture().entries.isEmpty())
+        }
+    }
 }

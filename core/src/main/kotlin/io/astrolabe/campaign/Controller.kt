@@ -417,7 +417,7 @@ public class Controller @JvmOverloads public constructor(
      * pre-scan stub and the shape. A reopen of a campaign that stopped on something outside it resumes it.
      */
     public fun open(repo: Path, request: CampaignRequest, policy: CampaignPolicy): OpenedCampaign {
-        val git = Git(repo)
+        val git = Git(repo, timeoutMillis = config.defaults.gitDeadlineSeconds * 1000L)
         val store = Store.open(config, git, clock, faults)
         val os = try {
             LocalOs(clock)
@@ -479,7 +479,7 @@ public class Controller @JvmOverloads public constructor(
             if (initial == Shape.S1 || initial == Shape.S2) d.copy(shape = initial) else d
         })
         val commands = derived.primary?.let(RunnerCommands::of) ?: RunnerCommands()
-        workspace.paths.bindWriteProtection { path -> contracts.current(request.work)?.scope?.protects(path) != false }
+        workspace.paths.bindWriteProtection { path, ignoreCase -> contracts.current(request.work)?.scope?.protects(path, ignoreCase) != false }
         val checks = Checks.seed(contract, commands, qualityGates = effective.qualityGates)
         val rules = RulesTrust(workspace.root).approved(effective.rulesFile)?.let { RulesSnapshot(it.binding.path, it.digest, it.text) }
         val prime = Prime.render(atlas, derived.sniffed, rules)
@@ -1354,7 +1354,7 @@ public class Controller @JvmOverloads public constructor(
         val config = c.attempt.config
         val contract = c.contract
         val redaction = Redaction(config.redaction)
-        tree.workspace.paths.bindWriteProtection { path -> c.contracts.current(c.ids.work)?.scope?.protects(path) != false }
+        tree.workspace.paths.bindWriteProtection { path, ignoreCase -> c.contracts.current(c.ids.work)?.scope?.protects(path, ignoreCase) != false }
         val logs = c.store.layout.root.resolve("logs")
         val estimator = model.estimator
         val runner = TrustedLocalRunner(c.os)

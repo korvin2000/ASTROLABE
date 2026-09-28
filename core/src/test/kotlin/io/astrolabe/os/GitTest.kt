@@ -39,6 +39,27 @@ class GitTest {
             val timed = assertFailsWith<GitError> { Git(repo.root, script.toString(), timeoutMillis = 200).version() }
             assertTrue(timed.stderr.contains("deadline exceeded"), timed.stderr)
             assertTrue(System.nanoTime() - start < java.util.concurrent.TimeUnit.SECONDS.toNanos(5))
+            assertEquals(600_000, Git(repo.root).timeoutMillis, "D-303 default deadline")
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX, org.junit.jupiter.api.condition.OS.MAC)
+    fun `a detached daemon started by a completed git command is not killed`() {
+        TempRepo.create().use { repo ->
+            val pidFile = scratch.resolve("daemon.pid")
+            val script = scratch.resolve("daemon-git")
+            Files.writeString(script, "#!/bin/sh\nsleep 30 </dev/null >/dev/null 2>&1 &\necho \$! > '$pidFile'\necho 'git version 2.45.1'\n")
+            script.toFile().setExecutable(true)
+
+            assertEquals(2, Git(repo.root, script.toString()).version().major)
+
+            val daemon = ProcessHandle.of(Files.readString(pidFile).trim().toLong()).orElse(null)
+            try {
+                assertTrue(daemon != null && daemon.isAlive, "normal completion leaves a detached daemon alone")
+            } finally {
+                daemon?.destroyForcibly()
+            }
         }
     }
 

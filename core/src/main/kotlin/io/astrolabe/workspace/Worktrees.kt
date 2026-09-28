@@ -67,7 +67,7 @@ public class Workspaces(
         Files.createDirectories(root)
         main.git.worktreeAdd(dir, commit)
         val worktree = try {
-            val workspace = Workspace(id, dir, Git(dir, main.git.executable), main.paths.protectedPaths)
+            val workspace = Workspace(id, dir, Git(dir, main.git.executable, main.git.timeoutMillis), main.paths.protectedPaths)
             copyDelta(report, workspace)
             val own = Stamper(workspace, env).report()
             if (own.candidateId != report.candidateId) {

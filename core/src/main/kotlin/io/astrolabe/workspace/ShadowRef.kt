@@ -218,7 +218,7 @@ public class ShadowRef @JvmOverloads public constructor(
         val divergent = guarded.sortedWith(Stamper.PATH_ORDER).filter { path ->
             val expected = latestTree[path]
             currentDigest(path) != expected?.let { digestOfBlob(git, it.id) } ||
-                (expected != null && !matchesMode(workspace.paths, path, expected.mode))
+                (expected != null && !matchesMode(workspace.paths, path, expected.mode, workspace.fileModeTrusted))
         }
         if (divergent.isNotEmpty()) return RestoreResult.Divergent(divergent)
         if (touched.isEmpty()) return RestoreResult.Restored(emptyList(), emptyList())
@@ -455,11 +455,12 @@ public class ShadowRef @JvmOverloads public constructor(
         Files.setPosixFilePermissions(path, if (mode == FileMode.EXECUTABLE) permissions + execute else permissions - execute)
     }
 
-    private fun matchesMode(paths: WorkspacePath, path: String, mode: FileMode): Boolean {
+    // D-293: a workspace with core.fileMode=false passes trustExecutable=false; an export directory keeps the strict check.
+    private fun matchesMode(paths: WorkspacePath, path: String, mode: FileMode, trustExecutable: Boolean = true): Boolean {
         val resolved = paths.resolveCapture(path) as? PathResolution.Resolved ?: return false
         if (mode == FileMode.SYMLINK) return resolved.kind == PathKind.Symlink
         if (resolved.kind != PathKind.Regular || mode !in setOf(FileMode.REGULAR, FileMode.EXECUTABLE)) return false
-        return !Files.getFileStore(resolved.real).supportsFileAttributeView("posix") ||
+        return !trustExecutable || !Files.getFileStore(resolved.real).supportsFileAttributeView("posix") ||
             Files.isExecutable(resolved.real) == (mode == FileMode.EXECUTABLE)
     }
 
