@@ -192,7 +192,8 @@ public object Runners {
             .orEmpty()
 
     private fun destroyTree(process: Process) {
-        runCatching { process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly) }
+        // A snapshot counts only if the runner outlived it: after exit it can name unrelated Windows orphans (D-303).
+        runCatching { process.toHandle().descendants().toList().takeIf { process.isAlive }?.forEach(ProcessHandle::destroyForcibly) }
         process.destroyForcibly()
     }
 

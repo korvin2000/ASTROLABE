@@ -266,8 +266,13 @@ private fun runGitOnce(directory: Path, argv: List<String>): Pair<Int, String> {
         check(process.waitFor(1, java.util.concurrent.TimeUnit.SECONDS)) { "fixture git deadline exceeded" }
         exitCode = process.exitValue()
     } finally {
-        process.descendants().use { children -> children.forEach { it.destroyForcibly() } }
-        if (process.isAlive) process.destroyForcibly()
+        // Only a git still running is killed with its tree: once it exited, `descendants()` can name unrelated
+        // Windows orphans whose dead parent had the same PID (D-303), which killed CI's runner.
+        if (process.isAlive) {
+            val tree = process.descendants().use { it.toList() }
+            if (process.isAlive) tree.forEach { it.destroyForcibly() }
+            process.destroyForcibly()
+        }
         capture.cancel(true)
     }
     return exitCode to output
