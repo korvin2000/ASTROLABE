@@ -12,8 +12,9 @@ import kotlin.math.abs
  * Operating-system adapter: owned process launch, durable log capture, atomic file replacement and
  * real-path resolution.
  *
- * A launched process is owned from birth by a kernel container (Windows job object, POSIX session)
- * so that its whole tree is terminable and no descendant can break away (`§13.1`, D-43). Every
+ * Windows owns the full process tree from birth through a job object. POSIX owns the original
+ * process group only: detached descendants are unsupported and may survive cleanup (F-016).
+ * Group quiescence does not certify detached descendants. Every
  * launch is described by a [Proc] record that is persisted next to its log file, independently of
  * the coroutine that requested it, so a resumed harness reads status and log cursor from the
  * filesystem alone.

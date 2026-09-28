@@ -3,8 +3,8 @@ package io.astrolabe.os
 import java.nio.file.Path
 
 /**
- * Creates a child process that is already owned by a kernel container when it starts running, so
- * no window exists in which a descendant could escape supervision (D-43).
+ * Creates a child already assigned to its platform ownership boundary: a Windows job or a POSIX
+ * process group. The latter cannot contain descendants that create another group/session (F-016).
  *
  * Internal: the ownership mechanism is an implementation detail of [LocalOs]. `ProcessHandle` is
  * used only for liveness and identity checks, never as the owner.
@@ -60,7 +60,7 @@ internal interface OwnedProcess : AutoCloseable {
     /** Exit code; only meaningful after [awaitExit] returned true. */
     fun exitCode(): Int
 
-    /** Kills the container and therefore the whole tree, descendants included. */
+    /** Kills the owned job/group. Detached POSIX descendants are outside this boundary. */
     fun terminateTree()
 
     /** Confirms the owned container has no remaining writers; false when the deadline expires. */

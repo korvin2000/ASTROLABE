@@ -15,8 +15,8 @@ import java.nio.file.Path
 
 /**
  * POSIX [ProcessOwner]: `posix_spawnp` with `POSIX_SPAWN_SETSID`, so the child is a session and
- * process-group leader (`pgid == pid`) before it execs and the whole tree is reachable with
- * `kill(-pgid)` (D-43). Older libcs without `POSIX_SPAWN_SETSID` fall back to
+ * process-group leader (`pgid == pid`) before it execs. `kill(-pgid)` reaches only descendants
+ * that stay in that group; detached-process containment remains F-016. Older libcs without `POSIX_SPAWN_SETSID` fall back to
  * `POSIX_SPAWN_SETPGROUP` with pgroup 0, which yields the same `pgid == pid`. Either way the
  * leadership is confirmed with `getpgid` before the launch is accepted, never assumed.
  *

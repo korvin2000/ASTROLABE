@@ -80,7 +80,7 @@ internal class WindowsOwner(private val beforeAssignment: (Long) -> Unit = {}) :
                 handles.setAtIndex(ValueLayout.ADDRESS, 0, nul)
                 handles.setAtIndex(ValueLayout.ADDRESS, 1, log)
                 if (Win32.updateProcThreadAttribute.callInt(
-                        capture, attributes, 0, 0x00020002L, handles, handles.byteSize(),
+                        capture, attributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, handles, handles.byteSize(),
                         MemorySegment.NULL, MemorySegment.NULL,
                     ) == 0) fail("UpdateProcThreadAttribute(handle list)", capture)
                 val startupInfo = arena.allocate(Win32.STARTUPINFOW.byteSize() + 8, 8)
@@ -99,7 +99,7 @@ internal class WindowsOwner(private val beforeAssignment: (Long) -> Unit = {}) :
                     MemorySegment.NULL,
                     MemorySegment.NULL,
                     1, // The explicit handle list excludes other simultaneous launches and host handles.
-                    CREATE_SUSPENDED or CREATE_UNICODE_ENVIRONMENT or CREATE_NO_WINDOW or 0x00080000,
+                    CREATE_SUSPENDED or CREATE_UNICODE_ENVIRONMENT or CREATE_NO_WINDOW or EXTENDED_STARTUPINFO_PRESENT,
                     environmentBlock(arena, start.environment),
                     arena.allocateFrom(start.workingDirectory.toString(), StandardCharsets.UTF_16LE),
                     startupInfo,
@@ -207,6 +207,8 @@ internal class WindowsOwner(private val beforeAssignment: (Long) -> Unit = {}) :
         private const val OPEN_ALWAYS = 4
         private const val FILE_ATTRIBUTE_NORMAL = 0x0000_0080
         private const val STARTF_USESTDHANDLES = 0x0000_0100
+        private const val PROC_THREAD_ATTRIBUTE_HANDLE_LIST = 0x00020002L
+        private const val EXTENDED_STARTUPINFO_PRESENT = 0x00080000
         private const val CREATE_SUSPENDED = 0x0000_0004
         private const val CREATE_UNICODE_ENVIRONMENT = 0x0000_0400
         private const val CREATE_NO_WINDOW = 0x0800_0000
