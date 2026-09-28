@@ -106,7 +106,10 @@ Use F-none for commits without findings. Report DEFECT only when you can name a 
 
 ## Checkpoint
 
-- Status: not started. Next round: B01–B03. Rounds done: 0. FIXED: 0. REJECTED: 0.
+- Status: in progress. Next round: B04–B06. Rounds done: 1 (B01–B03). FIXED: 9. REJECTED: 0.
+- Round 1 review fixes: 261871f F-066, 1db9a3e F-043, 49f4b8c F-009, 2fcd391 F-053, f15acab F-088, 40950b0 F-059,
+  72d3b3c F-078, f6b3654 F-050. Public API unchanged so far (Look/Run/Scheduler/Shaper internals only).
+- Carry: F-064 (row 033) has a pre-confirmed defect in its Notes; fix it in the B05 round.
 - 100 code-bearing commits in 14 batches (≤1000 code lines each; `e5321f3`/F-016 alone); 18 docs/ABI-only commits SKIP.
 
 ## Ledger
@@ -117,39 +120,39 @@ Code± = changed lines excluding `*.md` and `*/api/*.api`; Main± = lines under 
 
 | # | Batch | Commit | Code± | Main± | Findings | Subject | Verdict | Notes |
 |---|---|---|---|---|---|---|---|---|
-| 001 | B01 | `9dbf774` | 107 | 64 | F-066 F-067 | fix: reject incomplete test reports and count all suite outcomes | PENDING |  |
-| 002 | B01 | `24e53e3` | 59 | 35 | F-011 F-012 F-098 | fix: roll back failed commits and redact overlapping secret spans | PENDING |  |
-| 003 | B01 | `4e9d774` | 36 | 16 | F-003 F-005 | fix: reject duplicate tool ids and saturate token arithmetic | PENDING |  |
-| 004 | B01 | `d7551cc` | 75 | 30 | F-047 F-049 F-050 F-051 | fix: preserve recall coordinates and synchronize coverage updates | PENDING |  |
-| 005 | B01 | `f060c97` | 94 | 42 | F-043 F-077 F-121 F-131 F-140 | fix: enforce receipt currency and conservative test integrity review | PENDING |  |
-| 006 | B01 | `75e3280` | 54 | 25 | F-031 F-035 F-139 | fix: freeze generated tool definitions and type invalid path refusals | PENDING |  |
-| 007 | B01 | `43f8a15` | 86 | 14 | F-007 F-008 F-009 F-116 | fix: preserve event order cancellation and root closure membership | PENDING |  |
-| 008 | B01 | `210763d` | 19 | 11 | F-068 F-130 | fix: apply required check veto to cached reviews and partial XML reports | PENDING |  |
-| 009 | B01 | `15bfcaa` | 31 | 4 | F-011 | fix: quarantine database connections when rollback and close fail | PENDING |  |
-| 010 | B01 | `3f433f6` | 27 | 15 | F-043 | fix: distinguish expected QA exits from HTTP response status | PENDING |  |
+| 001 | B01 | `9dbf774` | 107 | 64 | F-066 F-067 | fix: reject incomplete test reports and count all suite outcomes | F-066 FIXED (261871f); F-067 ACCEPT | F-066: unittest `expected failures=` counted as failures; Jest `todo` rejected the report (Jest counts todo apart from pending). `success:false` with no failed assertion stays Inconclusive (conservative). |
+| 002 | B01 | `24e53e3` | 59 | 35 | F-011 F-012 F-098 | fix: roll back failed commits and redact overlapping secret spans | F-011 partial; F-012 NOTE; F-098 ACCEPT | F-012: write loops drain the buffer; the injected short-write regression was not added. |
+| 003 | B01 | `4e9d774` | 36 | 16 | F-003 F-005 | fix: reject duplicate tool ids and saturate token arithmetic | F-003 NOTE; F-005 ACCEPT | F-003: duplicate ids set `broken`, but the problem text does not name the duplicated ids. |
+| 004 | B01 | `d7551cc` | 75 | 30 | F-047 F-049 F-050 F-051 | fix: preserve recall coordinates and synchronize coverage updates | F-047 NOTE; F-049 ACCEPT; F-050 FIXED (f6b3654); F-051 ACCEPT | F-047: historical recall persists ranges at the recorded version; `Observation.coverage` has no main caller. F-050: a one-hit find recall treated summary+hit body as source and covered line+1; find aliases now kind `search`, recalled by view line. |
+| 005 | B01 | `f060c97` | 94 | 42 | F-043 F-077 F-121 F-131 F-140 | fix: enforce receipt currency and conservative test integrity review | F-043 partial; F-077 NOTE; F-121 NOTE; F-131 ACCEPT; F-140 ACCEPT | F-043: see row 010. F-077: exact-stamp branch passes `envId=null`, so an env change on the same stamp stays Current. F-121: test-file edits touching required checks block until reviewed (D-261, intended). Pre-fix stored Passed QA HTTP receipts (exit 200) no longer decode (pre-release store). |
+| 006 | B01 | `75e3280` | 54 | 25 | F-031 F-035 F-139 | fix: freeze generated tool definitions and type invalid path refusals | F-031 partial; F-035 partial; F-139 partial | No F-031 code here (all in 2e12762, row 082). F-035/F-139 sound so far; final verdicts on row 082. |
+| 007 | B01 | `43f8a15` | 86 | 14 | F-007 F-008 F-009 F-116 | fix: preserve event order cancellation and root closure membership | F-007 ACCEPT; F-008 NOTE; F-009 FIXED (49f4b8c); F-116 ACCEPT | F-008: DROP_OLDEST buffer drops are not counted in `Subscription.dropped` (seq gap shows them). F-009: a host cancelling its own future was rethrown as coroutine cancellation; now only the caller's own cancellation propagates, host cancel = no answer. |
+| 008 | B01 | `210763d` | 19 | 11 | F-068 F-130 | fix: apply required check veto to cached reviews and partial XML reports | F-068 ACCEPT; F-130 ACCEPT |  |
+| 009 | B01 | `15bfcaa` | 31 | 4 | F-011 | fix: quarantine database connections when rollback and close fail | F-011 NOTE | SQLite auto-rollback (FULL/IOERR, ON CONFLICT ROLLBACK) makes the explicit ROLLBACK fail and quarantines a clean connection; fails closed, the store must be reopened. |
+| 010 | B01 | `3f433f6` | 27 | 15 | F-043 | fix: distinguish expected QA exits from HTTP response status | F-043 FIXED (1db9a3e) | `deriveStatus` passed a wrapped runner at nonzero exit (`jest && echo ok`), which the new Receipt init rejects, so recordRun threw; a nonzero exit is now never a pass. |
 | 011 | - | `491c344` | 0 | 0 | - | docs: record 24 audit fixes verification and remaining repair queue | SKIP (docs/ABI; covered by final docs+ABI step) |  |
-| 012 | B01 | `6e4e671` | 60 | 27 | F-053 F-055 | fix: reject overlapping edit operations and redact diagnostics | PENDING |  |
-| 013 | B01 | `b5ae2f3` | 74 | 44 | F-059 | fix: redact run views and report bounded log captures | PENDING |  |
-| 014 | B01 | `2b30ba6` | 154 | 83 | F-059 F-070 F-078 F-079 F-080 | fix: bind verification results to complete stable candidates | PENDING |  |
-| 015 | B01 | `137b89b` | 42 | 24 | F-081 | fix: withhold baseline failure ledgers when inputs change | PENDING |  |
-| 016 | B01 | `e4e23eb` | 49 | 12 | F-060 F-074 | fix: bind authority replies to pending requests and current contracts | PENDING |  |
-| 017 | B02 | `cf3e80d` | 57 | 30 | F-123 | fix: require every final campaign gate to certify the candidate | PENDING |  |
-| 018 | B02 | `fb6bffc` | 35 | 12 | F-072 F-073 | fix: publish STATE changes only after persistence and track schema refusals | PENDING |  |
-| 019 | B02 | `6e1f2ca` | 70 | 27 | F-071 F-080 | fix: restrict model verification commands and invalidate legacy receipts | PENDING |  |
-| 020 | B02 | `da8bc42` | 33 | 8 | F-055 F-070 | fix: withhold unseen edit coverage and validate all acceptance selections | PENDING |  |
-| 021 | B02 | `ae8fa2a` | 17 | 0 | (no finding: review as change) | test: align precompile fixtures and policy changes with receipt rules | PENDING |  |
+| 012 | B01 | `6e4e671` | 60 | 27 | F-053 F-055 | fix: reject overlapping edit operations and redact diagnostics | F-053 FIXED (2fcd391); F-055 partial | F-053: two creates differing only in case passed the overlap check on a case-insensitive FS; identity now folds case there. F-055: final on row 020. |
+| 013 | B01 | `b5ae2f3` | 74 | 44 | F-059 | fix: redact run views and report bounded log captures | F-059 partial | Head defect fixed on row 014. |
+| 014 | B01 | `2b30ba6` | 154 | 83 | F-059 F-070 F-078 F-079 F-080 | fix: bind verification results to complete stable candidates | F-059 FIXED (40950b0); F-070 partial; F-078 FIXED (72d3b3c); F-079 ACCEPT; F-080 partial | F-059: run head cut argv to 80 columns before redacting, leaking a straddling secret prefix. F-078: mutated-input check was O(n²) list membership under `workspace.mutation`; now hash sets. Unknown closures hash the whole repo twice and store every path (NOTE). |
+| 015 | B01 | `137b89b` | 42 | 24 | F-081 | fix: withhold baseline failure ledgers when inputs change | F-081 NOTE | Any new non-scratch file the suite writes (junit.xml, htmlcov/) withholds the ledger: conservative, triage lost. |
+| 016 | B01 | `e4e23eb` | 49 | 12 | F-060 F-074 | fix: bind authority replies to pending requests and current contracts | F-060 ACCEPT; F-074 ACCEPT |  |
+| 017 | B02 | `cf3e80d` | 57 | 30 | F-123 | fix: require every final campaign gate to certify the candidate | F-123 NOTE | A suite writing non-scratch output moves the stamp, so such a campaign never finishes green (intended). CadenceTest reaches private `fullSuite` by reflection. |
+| 018 | B02 | `fb6bffc` | 35 | 12 | F-072 F-073 | fix: publish STATE changes only after persistence and track schema refusals | F-072 ACCEPT; F-073 ACCEPT |  |
+| 019 | B02 | `6e1f2ca` | 70 | 27 | F-071 F-080 | fix: restrict model verification commands and invalidate legacy receipts | F-071 NOTE; F-080 NOTE | F-071: `Baseline.run` still resolves `command.cwd` without containment (suite commands only, not model items). F-080: exec-bit regression is POSIX-only (Linux CI). |
+| 020 | B02 | `da8bc42` | 33 | 8 | F-055 F-070 | fix: withhold unseen edit coverage and validate all acceptance selections | F-055 NOTE; F-070 ACCEPT | F-055: any redaction in the report withholds coverage for every post-edit view (conservative, D-49). |
+| 021 | B02 | `ae8fa2a` | 17 | 0 | (no finding: review as change) | test: align precompile fixtures and policy changes with receipt rules | F-none ACCEPT | Fixture paths moved to scratch `build/`; assertions unchanged. |
 | 022 | - | `6fdea0c` | 0 | 0 | - | docs: record 14 additional fixes and passing full validation | SKIP (docs/ABI; covered by final docs+ABI step) |  |
-| 023 | B02 | `1316839` | 221 | 41 | F-022 | fix: bind amendment replies to current pending authority | PENDING |  |
-| 024 | B02 | `c49ca61` | 77 | 44 | F-076 F-088 | fix: rebase selected check paths to their command directory | PENDING |  |
-| 025 | B02 | `c2f6989` | 56 | 27 | F-054 | fix: preserve raw boundary whitespace in normalized anchors | PENDING |  |
-| 026 | B03 | `742d834` | 445 | 97 | F-056 F-057 F-058 F-088 | fix: scope reverts and retain honest edit effects and recall links | PENDING |  |
-| 027 | B03 | `ff510f7` | 295 | 112 | F-062 F-065 F-088 | fix: enforce handle ownership and drain terminal process logs | PENDING |  |
-| 028 | B03 | `e769511` | 147 | 30 | F-088 F-094 | fix: revalidate live authority before effects and final completion | PENDING |  |
-| 029 | B03 | `b13c18d` | 16 | 16 | F-088 | fix: preserve late archival completion without dispatching new effects | PENDING |  |
+| 023 | B02 | `1316839` | 221 | 41 | F-022 | fix: bind amendment replies to current pending authority | F-022 NOTE | A stale/mismatched reply silently returns `latest` with no event or typed stale classification. |
+| 024 | B02 | `c49ca61` | 77 | 44 | F-076 F-088 | fix: rebase selected check paths to their command directory | F-076 NOTE; F-088 partial | F-076: unrecognised Touched-selector tools and tsc now run project-wide (slower, may hit the 20s box). F-088: an authority lapse mid-`Checker.run` drops receipts of checks already run (effects stay fenced). |
+| 025 | B02 | `c2f6989` | 56 | 27 | F-054 | fix: preserve raw boundary whitespace in normalized anchors | F-054 NOTE | Replacement indentation/line endings replace the file's (tab→spaces, CRLF→LF), per the anchor contract. |
+| 026 | B03 | `742d834` | 445 | 97 | F-056 F-057 F-058 F-088 | fix: scope reverts and retain honest edit effects and recall links | F-056 ACCEPT; F-057 NOTE; F-058 NOTE; F-088 partial | F-057: a lease lapse mid-batch throws outside the op try, reported "effects unknown" (honest, less precise). F-058: `id = ? OR action_id = ?` has no index on action_id (full scan per get). |
+| 027 | B03 | `ff510f7` | 295 | 112 | F-062 F-065 F-088 | fix: enforce handle ownership and drain terminal process logs | F-062 ACCEPT; F-065 ACCEPT; F-088 partial | F-065: drain-to-EOF is sound. The 8 MiB cap marking a finished foreground run `lost` (unknown_outcome + open intent) comes from 568f6bf: handled under F-064, row 033. |
+| 028 | B03 | `e769511` | 147 | 30 | F-088 F-094 | fix: revalidate live authority before effects and final completion | F-088 partial; F-094 ACCEPT |  |
+| 029 | B03 | `b13c18d` | 16 | 16 | F-088 | fix: preserve late archival completion without dispatching new effects | F-088 FIXED (f15acab) | Run/mcp fence threw inside `Consequential.run` after the intent was Dispatched, leaving an open intent that refused the argv in later attempts; fence now runs before the intent. |
 | 030 | - | `ce0051a` | 0 | 0 | - | docs: record ten further repairs and passing full validation | SKIP (docs/ABI; covered by final docs+ABI step) |  |
 | 031 | B04 | `8491837` | 181 | 63 | F-023 | fix: persist amendment resolutions atomically with contract changes | PENDING |  |
 | 032 | B04 | `9192a41` | 297 | 116 | F-001 F-002 | fix: freeze nested configuration and canonicalize attempt fingerprints | PENDING |  |
-| 033 | B05 | `568f6bf` | 661 | 238 | F-061 F-063 F-064 | fix: retain durable run evidence and bound cancellable process capture | PENDING |  |
+| 033 | B05 | `568f6bf` | 661 | 238 | F-061 F-063 F-064 | fix: retain durable run evidence and bound cancellable process capture | PENDING | Pre-confirmed defect (F-064): `Executions` sets `lost = truncated`, so a foreground run with >8 MiB output that exits normally throws in Run.launch → unknown_outcome + open intent (Run.kt:~349); Verify/Checker record UnknownOutcome. Fix: separate truncated from lost; captureComplete=false. |
 | 034 | - | `b7b74d0` | 0 | 0 | - | chore: refresh ABI for durable resolutions and run provenance | SKIP (docs/ABI; covered by final docs+ABI step) |  |
 | 035 | - | `cb715da` | 0 | 0 | - | docs: record six repairs and passing full Windows build | SKIP (docs/ABI; covered by final docs+ABI step) |  |
 | 036 | B06 | `6b7c801` | 82 | 0 | F-006 | fix: reconcile fake invocation cancellation without a response waiter | PENDING |  |
