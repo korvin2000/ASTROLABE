@@ -11,6 +11,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
@@ -46,6 +47,17 @@ class AtlasTest {
             }
             assertTrue(Sniff.commands(repo.root, setOf(".git/package.json", "../package.json",
                 outside.resolve("package.json").toString())).isEmpty)
+        }
+    }
+
+    @Test
+    fun `a tracked link to a regular file inside the root keeps its row`() {
+        TempRepo.create().use { repo ->
+            repo.write("README.md", "# readme\n")
+            val linked = runCatching { Files.createSymbolicLink(repo.resolve("docs-link.md"), Path.of("README.md")) }
+            org.junit.jupiter.api.Assumptions.assumeTrue(linked.isSuccess, "symbolic links are unavailable on this host")
+            repo.commit("track link")
+            assertNotNull(Atlas.build(repo.root).row("docs-link.md"))
         }
     }
 

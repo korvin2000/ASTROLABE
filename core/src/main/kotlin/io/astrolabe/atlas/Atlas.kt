@@ -527,9 +527,11 @@ private fun walkFiles(root: Path): List<String> {
 /** Resolves a forward-slashed workspace-relative path against [root] on every platform. */
 internal fun resolveRelative(root: Path, relative: String): Path {
     val resolved = io.astrolabe.workspace.WorkspacePath.of(root).resolve(relative, io.astrolabe.workspace.Intent.Read)
-    if (resolved !is io.astrolabe.workspace.PathResolution.Resolved ||
-        resolved.kind != io.astrolabe.workspace.PathKind.Regular
-    ) throw IOException("atlas path refused: $relative ($resolved)")
+    if (resolved !is io.astrolabe.workspace.PathResolution.Resolved) throw IOException("atlas path refused: $relative ($resolved)")
+    // A tracked link to a regular file inside the root stays visible (§7.1); resolve already checked containment.
+    val regular = resolved.kind == io.astrolabe.workspace.PathKind.Regular ||
+        resolved.kind == io.astrolabe.workspace.PathKind.Symlink && Files.isRegularFile(resolved.real)
+    if (!regular) throw IOException("atlas path refused: $relative (${resolved.kind})")
     return resolved.real
 }
 
