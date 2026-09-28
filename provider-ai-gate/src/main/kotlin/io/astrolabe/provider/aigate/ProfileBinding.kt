@@ -3,8 +3,12 @@ package io.astrolabe.provider.aigate
 import io.astrolabe.provider.BillingDimension
 import io.astrolabe.provider.Effort
 import io.astrolabe.provider.InvocationId
+import io.astrolabe.provider.Message
 import io.astrolabe.provider.Profile
 import io.astrolabe.provider.Request
+import io.astrolabe.provider.Role
+import io.astrolabe.provider.Segment
+import io.astrolabe.provider.SegmentKind
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -13,6 +17,8 @@ import kotlinx.serialization.json.intOrNull
 import net.ai.gate.Llm
 import net.ai.gate.cache.CacheMode
 import net.ai.gate.cache.CacheRetention
+import net.ai.gate.chat.Conversation
+import net.ai.gate.error.LlmException
 import net.ai.gate.chat.options.ChatOptions
 import net.ai.gate.chat.options.HistoryPolicy
 import net.ai.gate.chat.options.ReasoningHandoff
@@ -147,7 +153,8 @@ internal class ProfileBinding private constructor(
     fun options(request: Request, id: InvocationId?, listener: LlmListener?): ChatOptions {
         val b = settings.options.toBuilder()
         if (outputCapEnforced) b.maxTokens(request.maxOutputTokens)
-        b.reasoning(reasoning(request.effort))
+        // With `effort = off` the template's own reasoning level (if any) stands.
+        if (settings.mapEffort) b.reasoning(reasoning(request.effort))
         b.responseCache(CacheMode.BYPASS)
         b.historyPolicy(if (settings.dropForeignReasoning) HistoryPolicy.ALLOW_ADAPTATION else HistoryPolicy.REJECT_LOSSY)
         b.reasoningHandoff(if (settings.dropForeignReasoning) ReasoningHandoff.DROP else ReasoningHandoff.KEEP)
@@ -157,6 +164,25 @@ internal class ProfileBinding private constructor(
         id?.let { b.tag("astrolabe.invocation", it.value) }
         listener?.let(b::listener)
         return b.build()
+    }
+
+    /**
+     * Each effort prepared (no network) with the profile's full output limit: a thinking budget the codec would have to
+     * raise `max_tokens` for fails here, once, instead of on every call of a cell that routes to this effort.
+     */
+    private fun probeEfforts(llm: Llm): List<String> {
+        if (!outputCapEnforced) return emptyList()
+        return Effort.entries.filter { reasoning(it) != null }.mapNotNull { effort ->
+            val probe = Request(
+                listOf(Segment(SegmentKind.A, listOf(Message.text(Role.User, "probe")))), emptyList(), profile, effort, profile.capabilities.outputLimitTokens,
+            )
+            try {
+                llm.prepare(model, Conversation.of("probe"), options(probe, null, null), true)
+                null
+            } catch (e: LlmException) {
+                "effort $effort does not fit outputLimitTokens ${profile.capabilities.outputLimitTokens} (${e.message}); raise the limit or set gate.effort = \"off\""
+            }
+        }
     }
 
     companion object {
@@ -218,7 +244,9 @@ internal class ProfileBinding private constructor(
                 }
             }
             if (problems.size > start) return null
-            return ProfileBinding(profile, model, features, settings, warnings)
+            val binding = ProfileBinding(profile, model, features, settings, warnings)
+            binding.probeEfforts(llm).forEach(::problem)
+            return if (problems.size > start) null else binding
         }
     }
 }

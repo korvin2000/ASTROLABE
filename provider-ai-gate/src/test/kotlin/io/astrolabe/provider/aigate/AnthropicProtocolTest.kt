@@ -158,6 +158,15 @@ class AnthropicProtocolTest {
     }
 
     @Test
+    fun `a profile whose output limit cannot hold an effort's thinking budget is refused when it binds`() {
+        WireScript().runtime(Anthropic.provider(), "ANTHROPIC_API_KEY").use { llm ->
+            val problems = AiGateAdapter.violations(llm, listOf(GateTestKit.sonnetProfile(output = 8_000)))
+            assertTrue(problems.any { it.contains("effort High does not fit outputLimitTokens 8000") }, problems.toString())
+            assertEquals(emptyList(), AiGateAdapter.violations(llm, listOf(GateTestKit.sonnetProfile(GateTestKit.gate("""{"effort":"off"}"""), output = 8_000))))
+        }
+    }
+
+    @Test
     fun `provider refusals of size and credentials become the kinds the cell acts on`() {
         val wire = WireScript()
             .json(400, """{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 250000 tokens > 200000 maximum"}}""")

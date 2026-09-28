@@ -26,7 +26,6 @@ import net.ai.gate.event.LlmListener
 import net.ai.gate.event.RequestEvent
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
-import java.util.concurrent.atomic.AtomicReference
 
 /** A request encoded once for the SDK, or why it cannot be. */
 internal sealed interface Prepared {
@@ -65,8 +64,19 @@ public class AiGateAdapter @JvmOverloads public constructor(
     private val invocations = ConcurrentHashMap<InvocationId, AiGateInvocation>()
     private val listeners = CopyOnWriteArrayList<InvocationListener>()
 
-    /** The last request prepared for estimate/validate: the cell asks both for the same request object, in turn. */
-    private val lastPrepared = AtomicReference<Pair<Request, Prepared>?>(null)
+    /**
+     * Requests prepared for estimate/validate, by identity: each cell asks both for the same request object in turn,
+     * and concurrent cells sharing this adapter keep their own entries. Bounded; `validate` takes its entry out.
+     */
+    private val recentlyPrepared = object : LinkedHashMap<Identity, Prepared>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Identity, Prepared>): Boolean = size > PREPARED_ENTRIES
+    }
+
+    /** A request compared by reference: a structural hash of a whole transcript would cost more than the encoding saved. */
+    private class Identity(val request: Request) {
+        override fun equals(other: Any?): Boolean = other is Identity && other.request === request
+        override fun hashCode(): Int = System.identityHashCode(request)
+    }
 
     init {
         val problems = ArrayList<String>()
@@ -85,7 +95,7 @@ public class AiGateAdapter @JvmOverloads public constructor(
         val problems = ArrayList<Problem>()
         (Validations.standard(request, estimate, binding.profile.capabilities) as? Validation.Rejected)?.let { problems += it.problems }
         if (problems.none { it.kind == ProblemKind.BrokenToolPairing }) {
-            when (val prepared = prepared(request, binding)) {
+            when (val prepared = prepared(request, binding, consume = true)) {
                 is Prepared.Refused -> problems += Problem(ProblemKind.InvalidRequest, prepared.reason)
                 is Prepared.Ready -> {
                     val effective = prepared.call.effectiveOptions().maxTokens()
@@ -145,9 +155,10 @@ public class AiGateAdapter @JvmOverloads public constructor(
         bindings.putIfAbsent(profile, compiled) ?: compiled
     }
 
-    /** Prepares [request] once for the estimate and the validation that follow it; any other request misses. */
-    internal fun prepared(request: Request, binding: ProfileBinding): Prepared {
-        lastPrepared.get()?.let { (cached, prepared) -> if (cached === request) return prepared }
+    /** Prepares [request] once for the estimate and the validation that follows it. */
+    internal fun prepared(request: Request, binding: ProfileBinding, consume: Boolean = false): Prepared {
+        val key = Identity(request)
+        synchronized(recentlyPrepared) { (if (consume) recentlyPrepared.remove(key) else recentlyPrepared[key]) }?.let { return it }
         val prepared = try {
             val conversation = RequestTranslator.translate(request, binding)
             Prepared.Ready(llm.prepare(binding.model, conversation, binding.options(request, null, null), true))
@@ -158,7 +169,7 @@ public class AiGateAdapter @JvmOverloads public constructor(
         } catch (e: IllegalArgumentException) {
             Prepared.Refused(e.message ?: e.toString())
         }
-        lastPrepared.set(request to prepared)
+        if (!consume) synchronized(recentlyPrepared) { recentlyPrepared[key] = prepared }
         return prepared
     }
 
@@ -178,6 +189,8 @@ public class AiGateAdapter @JvmOverloads public constructor(
 
     public companion object {
         public const val ID: String = "ai-gate"
+
+        private const val PREPARED_ENTRIES = 16
 
         /** What would keep [profiles] from binding to [llm], without throwing: for a settings UI and `Config` checks. */
         @JvmStatic

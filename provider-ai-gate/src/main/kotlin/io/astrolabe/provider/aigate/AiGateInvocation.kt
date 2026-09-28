@@ -93,11 +93,15 @@ internal class AiGateInvocation(
         }
         if (cancelNow) started.cancel()
         started.outcome().whenComplete { outcome, error ->
-            settle(
+            val terminal = try {
                 if (outcome != null) terminal(outcome)
-                // The executor rejected the call or the SDK failed internally: it never ran, so nothing was billed.
-                else failure(ProviderError.Transport("the SDK call did not run: ${error?.message}", error), UsageMapper.none(binding)),
-            )
+                // A rejected execution never ran, so nothing was billed; any other SDK failure may have followed a send.
+                else failure(ProviderError.Transport("the SDK call failed outside its outcome: ${error?.message}", error), if (rejected(error)) UsageMapper.none(binding) else UsageMapper.missing(binding))
+            } catch (e: RuntimeException) {
+                // A reply this adapter cannot translate still settles: the bill stays unknown, nothing is exposed.
+                failure(ProviderError.Transport("untranslatable provider outcome: ${e::class.simpleName}: ${e.message}", e), UsageMapper.missing(binding))
+            }
+            settle(terminal)
         }
         return this
     }
@@ -125,13 +129,15 @@ internal class AiGateInvocation(
     private fun terminal(outcome: CallOutcome): Terminal {
         outcome.reply()?.let { reply ->
             val r = ResponseTranslator.response(reply, binding, cancelRequested)
-            return Terminal(id, r, null, emptyList(), r.usage, cancelled = false)
+            return Terminal(id, r, null, emptyList(), r.usage, cancelled = r.stop == StopReason.Cancelled)
         }
         val error = checkNotNull(outcome.error())
         val partial = outcome.partial().orElse(null)
         val usage = partial?.let { UsageMapper.billable(it.usage(), it.responseModel().orElse(null), binding) } ?: when {
-            // Documented as not processed: never sent, or refused with a client error before any work (400, 401, 429 …).
-            !error.outcomeUnknown() && (outcome.attempts().none { it.sent() } || outcome.attempts().last().httpStatus()?.let { it in 400..499 } == true) -> UsageMapper.none(binding)
+            // Documented as not processed: never sent, or refused with a client error before any work (400, 401, 429 …),
+            // and no attempt received a successful response that could have streamed billable output.
+            !error.outcomeUnknown() && outcome.attempts().none { it.httpStatus()?.let { s -> s in 200..299 } == true } &&
+                (outcome.attempts().none { it.sent() } || outcome.attempts().last().httpStatus()?.let { it in 400..499 } == true) -> UsageMapper.none(binding)
             else -> UsageMapper.missing(binding)
         }
         val late = partial?.let { ResponseTranslator.items(it, calls = false) }.orEmpty()
@@ -144,6 +150,9 @@ internal class AiGateInvocation(
             else -> Terminal(id, null, ErrorMapper.error(error), late, usage, cancelled = false)
         }
     }
+
+    private fun rejected(error: Throwable?): Boolean =
+        generateSequence(error) { it.cause }.take(8).any { it is java.util.concurrent.RejectedExecutionException }
 
     private fun failure(error: ProviderError, usage: io.astrolabe.provider.BillableUsage) = Terminal(id, null, error, emptyList(), usage, cancelled = false)
 
