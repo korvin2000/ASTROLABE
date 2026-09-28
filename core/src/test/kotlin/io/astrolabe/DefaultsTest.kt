@@ -20,7 +20,7 @@ class DefaultsTest {
         "Workset seeds per cell / KB injection / focus notes / focus zoom" to
             listOf("seedsMaxTokens", "injectionMaxNotes", "injectionMaxTokens", "focusNotesMaxTokens", "focusZoomMaxTokens"),
         "Touched ledger in [A]" to listOf("touchedInAnchor"),
-        "Checker time box" to listOf("checkerTimeBoxSeconds"),
+        "Checker time box" to listOf("checkerTimeBoxSeconds", "checkerFallbackTimeBoxSeconds"),
         "θ risk threshold for early slow checks" to listOf("theta"),
         "Full-suite cadence" to listOf("fullSuiteCadence"),
         "Reserves" to listOf("reserveVerification", "reserveRecoveryAndPersist", "campaignRecoveryReserve"),
@@ -73,6 +73,7 @@ class DefaultsTest {
         assertEquals(150, d.copy(digestTokensPerRequirement = 0).effectiveDigestCapTokens(60))
         assertEquals(400, d.patchCapTokens)
         assertEquals(20, d.checkerTimeBoxSeconds)
+        assertEquals(120, d.checkerFallbackTimeBoxSeconds)
         assertEquals(40, d.theta)
         assertEquals(5, d.fullSuiteCadence)
         assertEquals(0.15, d.reserveVerification)

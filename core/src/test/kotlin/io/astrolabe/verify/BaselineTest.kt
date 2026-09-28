@@ -104,6 +104,26 @@ class BaselineTest {
         }
     }
 
+    @Test
+    fun `report and coverage artifacts written by the suite keep the ledger, any other new file withholds it`() = runTest {
+        val idGen = FixedIdGen()
+        fun runner() = Baseline(shadowRef, store.layout, TrustedLocalRunner(os), os, SqliteReceipts(store, clock), InMemoryAliases(), store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, clock, env)
+        val artifacts = runner().run(
+            suite(
+                "echo x>junit-report.xml&mkdir reports htmlcov pkg.egg-info&echo x>reports\\TEST-a.xml&echo x>coverage.xml&echo x>htmlcov\\index.html&echo x>pkg.egg-info\\PKG-INFO&type pytest_output.txt&exit /b 1",
+                "echo x > junit-report.xml; mkdir -p reports htmlcov pkg.egg-info; echo x > reports/TEST-a.xml; echo x > coverage.xml; echo x > htmlcov/index.html; echo x > pkg.egg-info/PKG-INFO; cat pytest_output.txt; exit 1",
+            ),
+            1, s0,
+        )
+        assertEquals(emptySet(), artifacts.receipt.testedInputs.mutatedDuringCheck)
+        assertTrue(artifacts.receipt.testedInputs.eligible)
+        assertNotNull(artifacts.ledger)
+
+        val other = runner().run(suite("echo x>notes.txt&type pytest_output.txt&exit /b 1", "echo x > notes.txt; cat pytest_output.txt; exit 1"), 1, s0)
+        assertEquals(setOf("notes.txt"), other.receipt.testedInputs.mutatedDuringCheck)
+        assertNull(other.ledger)
+    }
+
     private fun suite(windowsLine: String, posixLine: String) = Check(
         "CHK-full", CheckKind.Full, Selector.All, Closure.Unknown, CostClass.Expensive, Trigger.CampaignEnd,
         command = Command(if (windows) listOf("cmd.exe", "/d", "/s", "/c", windowsLine) else listOf("/bin/sh", "-c", posixLine)),

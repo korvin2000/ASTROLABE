@@ -201,6 +201,7 @@ import io.astrolabe.workspace.ShadowRef
 import io.astrolabe.workspace.Snapshot
 import io.astrolabe.workspace.SnapshotEntryKind
 import io.astrolabe.workspace.Stamper
+import io.astrolabe.workspace.movedPathsHint
 import io.astrolabe.workspace.VersionRegistry
 import io.astrolabe.workspace.Workspace
 import java.nio.file.Path
@@ -721,7 +722,7 @@ public class Controller @JvmOverloads public constructor(
             c.refusal()?.let { return last.copy(state = c.advance(Transition.Stopped(stopOutcome(c), "dispatch refused: $it"))) }
             val state = checkNotNull(c.state)
             val contract = c.contract
-            val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = candidates(c))
+            val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = candidates(c), retryCandidates = c.store.layout.candidates)
             val unverified = state.ledger.unfinished()
             if (unverified.isEmpty()) return last.copy(state = stopOrFinish(c, "requirements remain unverified", scheduler, campaign = true, authority = campaignJudge(c, authority, model, syntax, span)))
             // §10.4: ready S3 units run as parallel writers and integrate once; a unit that does not integrate turns S3 off.
@@ -886,7 +887,7 @@ public class Controller @JvmOverloads public constructor(
         val acceptance = OriginalAcceptance {
             harnessVerify(c, ids.copy(context = ContextId(idGen.next("repair-check"))), "repair-check", """{"what":"acceptance","ids":[${increment.accept.joinToString(",") { "\"$it\"" }}]}""")
             val stamp = c.stamper.report().candidateId
-            val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = candidates(c))
+            val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = candidates(c), retryCandidates = c.store.layout.candidates)
             val checks = increment.accept.flatMap { c.checks.forAcceptance(it) }
             val green = checks.isNotEmpty() && checks.all { scheduler.currency(it, stamp).certifies }
             AcceptanceCheck(green, "acceptance ${increment.accept.joinToString(", ")} ${if (green) "green" else "not green"} at @${stamp.hash8}")
@@ -1132,7 +1133,7 @@ public class Controller @JvmOverloads public constructor(
     private fun finish(c: OpenedCampaign, result: S0Run, packets: List<ResultPacket> = listOfNotNull(result.exit?.packet)): S0Run {
         val outcome = result.state?.outcome ?: return result
         val receipts = SqliteReceipts(c.store, clock)
-        val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, receipts, SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = candidates(c))
+        val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, receipts, SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = candidates(c), retryCandidates = c.store.layout.candidates)
         extract(c, packets)
         val receipt = FinishReceipts.build(c, packets, currencies(c, scheduler, c.stamper.report().candidateId), receipts::get)
         val (ref, _) = FinishReceipts.export(c, receipt)
@@ -1198,7 +1199,7 @@ public class Controller @JvmOverloads public constructor(
         val contract = c.contract
         val ready = opened.graph.readyFrontier(contract, 1).firstOrNull()
             ?: run {
-                val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = candidates(c))
+                val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = candidates(c), retryCandidates = c.store.layout.candidates)
                 refreshRegressions(c, scheduler, authority)
                 return S0Run(stopOrFinish(c, "no ready increment: an empty frontier never means completed", scheduler, authority = authority), null, null, null)
             }
@@ -1393,10 +1394,10 @@ public class Controller @JvmOverloads public constructor(
         val checkpoints = SqliteCheckpoints(c.store, clock)
         val preimages = Preimages(tree.workspace, c.store.blobs, ids, clock, c.store)
         val isolated = child?.isolated == true
-        val scheduler = Scheduler(tree.checks, tree.workspace, tree.registry, tree.stamper, receipts, aliases, idGen, ids, clock, candidates = if (isolated) c.store.layout.candidates else candidates(c), isolateAll = isolated)
+        val scheduler = Scheduler(tree.checks, tree.workspace, tree.registry, tree.stamper, receipts, aliases, idGen, ids, clock, candidates = if (isolated) c.store.layout.candidates else candidates(c), isolateAll = isolated, retryCandidates = c.store.layout.candidates)
         val checker = Checker(tree.checks, runner, c.os, tree.stamper, tree.registry, tree.workspace, c.store.blobs, redaction, idGen, ids, logs)
         val layered = plugged(c)
-        val verify = Verify(checks = tree.checks, scheduler = scheduler, checker = checker, baseline = null, s0 = tree.s0, workspace = tree.workspace, runner = runner, os = c.os, stamper = tree.stamper, blobs = c.store.blobs, redaction = redaction, estimator = estimator, idGen = idGen, ids = ids, contracts = c.contracts, logsDir = logs, campaignReview = campaignReview(c, authority),
+        val verify = Verify(checks = tree.checks, scheduler = scheduler, checker = checker, baseline = null, s0 = tree.s0, workspace = tree.workspace, runner = runner, os = c.os, stamper = tree.stamper, blobs = c.store.blobs, redaction = redaction, estimator = estimator, idGen = idGen, ids = ids, contracts = c.contracts, logsDir = logs, checkerTimeBoxSeconds = config.defaults.checkerTimeBoxSeconds.toLong(), checkerFallbackTimeBoxSeconds = config.defaults.checkerFallbackTimeBoxSeconds.toLong(), campaignReview = campaignReview(c, authority),
             // §8.8: review(scope=increment) is the review cell for S2+ main-line cells; a review cell never reaches it (no verify.review in its mask).
             incrementReview = if (child == null && contract.shape >= Shape.S2) IncrementReview { why -> reviewCell(c, increment, model, authority, syntax, span).obtain(evidence(c, increment, listOf(why), emptyList(), compiled.k.ledger, authority), Tier.Medium, c.registry::version) } else null,
             tiers = layered.tiers,
@@ -1786,9 +1787,11 @@ public class Controller @JvmOverloads public constructor(
         val ids = c.ids.copy(context = ContextId(idGen.next("finish")))
         // §8.1: every declared gate must certify the same final candidate as the suite.
         val gates = c.checks.all().filter { it.kind == CheckKind.Quality }.map { it.id }
+        val before = c.stamper.report()
         if (gates.isNotEmpty()) harnessVerify(c, ids, "quality", """{"what":"tests","selection":"ids","ids":[${gates.joinToString(",") { "\"$it\"" }}]}""")
         if (check != null) harnessVerify(c, ids, "full", """{"what":"tests","selection":"full"}""")
-        val stamp = c.stamper.report().candidateId
+        val after = c.stamper.report()
+        val stamp = after.candidateId
         val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, ids, clock)
         val required = (gates + listOfNotNull(check?.id)).mapNotNull { c.checks[it] }
         val currency = required.associate { it.id to scheduler.currency(it, stamp) }
@@ -1796,7 +1799,8 @@ public class Controller @JvmOverloads public constructor(
         val gap = required.firstOrNull { !currency.getValue(it.id).certifies }
         val certification = when {
             red != null -> FullSuite.Red("${red.id} ${red.last?.receiptId} failed at @${stamp.hash8}")
-            gap != null -> FullSuite.NotCertified("${gap.id}: ${currency.getValue(gap.id).reasons.joinToString("; ").ifEmpty { gap.last?.outcome?.name?.lowercase() ?: "not run" }} at @${stamp.hash8}")
+            gap != null -> FullSuite.NotCertified("${gap.id}: ${currency.getValue(gap.id).reasons.joinToString("; ").ifEmpty { gap.last?.outcome?.name?.lowercase() ?: "not run" }} at @${stamp.hash8}" +
+                if (after.candidateId != before.candidateId) " · the gates and suite moved the stamp from @${before.candidateId.hash8}: ${movedPathsHint(before, after)}" else "")
             else -> null
         }
         if (check == null) {
@@ -1815,7 +1819,7 @@ public class Controller @JvmOverloads public constructor(
         val redaction = Redaction(config.redaction)
         val logs = c.store.layout.root.resolve("logs")
         val runner = TrustedLocalRunner(c.os)
-        val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, ids, clock, candidates = candidates(c))
+        val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, ids, clock, candidates = candidates(c), retryCandidates = c.store.layout.candidates)
         val checker = Checker(c.checks, runner, c.os, c.stamper, c.registry, c.workspace, c.store.blobs, redaction, idGen, ids, logs)
         val verify = Verify(checks = c.checks, scheduler = scheduler, checker = checker, baseline = null, s0 = c.s0.stampId, workspace = c.workspace, runner = runner, os = c.os, stamper = c.stamper, blobs = c.store.blobs, redaction = redaction, estimator = HeuristicEstimator(), idGen = idGen, ids = ids, contracts = c.contracts, logsDir = logs)
         // An unknown closure is rescanned over the atlas rows, as in a cell; without them no receipt can certify the tree.

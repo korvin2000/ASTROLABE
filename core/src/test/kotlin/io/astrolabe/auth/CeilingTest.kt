@@ -79,6 +79,55 @@ class CeilingTest {
     }
 
     @Test
+    fun `read-only search, inspection and git read forms are R, and each writing or executing option is W unknown`() {
+        val readOnly = listOf(
+            listOf("rg", "-n", "TODO", "src"), listOf("grep", "-rn", "x", "src"), listOf("head", "-n", "5", "a.txt"),
+            listOf("wc", "-l", "a.txt"), listOf("find", "src", "-name", "*.kt"), listOf("findstr", "/s", "x", "*.kt"),
+            listOf("tree", "src"), listOf("sort", "-u", "a.txt"), listOf("uniq", "-c", "a.txt"), listOf("date", "+%F"),
+            listOf("hostname"), listOf("dir"), listOf("file", "a.txt"), listOf("git", "log", "--oneline", "-5"),
+            listOf("git", "show", "HEAD"), listOf("git", "diff", "HEAD~1"), listOf("git", "blame", "a.txt"),
+            listOf("git", "grep", "-n", "x"), listOf("git", "ls-files"), listOf("git", "rev-parse", "HEAD"),
+            listOf("git", "cat-file", "-p", "HEAD"), listOf("git", "branch", "-a"), listOf("git", "branch", "--list", "f*"),
+            listOf("git", "tag", "-l"), listOf("git", "remote", "-v"), listOf("git", "config", "--get", "user.name"),
+            listOf("git", "shortlog", "-sn"),
+        )
+        for (argv in readOnly) {
+            val classification = classify(*argv.toTypedArray())
+            assertEquals(EffectClass.R, classification.effectClass, "$argv")
+            assertFalse(classification.effectsUnknown, "$argv")
+            assertEquals(setOf(Capability.RunLocal, Capability.WorkspaceRead), classification.requiredCapabilities, "$argv")
+        }
+        val guarded = listOf(
+            listOf("rg", "--pre", "prog", "x"), listOf("rg", "--pre-glob", "*.gz", "x"),
+            listOf("find", ".", "-exec", "touch", "{}", ";"), listOf("find", ".", "-execdir", "x", ";"),
+            listOf("find", ".", "-ok", "x", ";"), listOf("find", ".", "-okdir", "x", ";"), listOf("find", ".", "-delete"),
+            listOf("find", ".", "-fprint", "out"), listOf("find", ".", "-fprint0", "out"), listOf("find", ".", "-fprintf", "out", "%p"),
+            listOf("find", ".", "-fls", "out"), listOf("tree", "-o", "out"), listOf("sort", "-o", "out", "a.txt"),
+            listOf("sort", "-uo", "out", "a.txt"), listOf("sort", "--output=out", "a.txt"), listOf("sort", "--out=out", "a.txt"),
+            listOf("sort", "--compress-program=gzip", "a.txt"), listOf("uniq", "a.txt", "out.txt"), listOf("date", "-s", "tomorrow"),
+            listOf("date", "0101"), listOf("hostname", "newname"), listOf("file", "-C", "-m", "magic"),
+            listOf("git", "log", "--output=out"), listOf("git", "diff", "--output", "out"), listOf("git", "show", "--ext-diff"),
+            listOf("git", "grep", "-O", "x"), listOf("git", "grep", "--open-files-in-pager=vi", "x"),
+            listOf("git", "-C", "sub", "status"), listOf("git", "-c", "core.pager=x", "log"), listOf("git", "--git-dir=x", "log"),
+            listOf("git", "branch", "feature"), listOf("git", "branch", "-m", "a", "b"), listOf("git", "tag", "v1"),
+            listOf("git", "remote", "add", "o", "u"), listOf("git", "config", "user.name", "x"),
+            listOf("git", "cat-file", "--batch"), listOf("sed", "-n", "1p", "a.txt"), listOf("awk", "1", "a.txt"),
+            listOf("env"), listOf("xargs", "rm"), listOf("printenv"), listOf("/usr/bin/grep", "x", "a.txt"),
+        )
+        for (argv in guarded) {
+            val classification = classify(*argv.toTypedArray())
+            assertEquals(EffectClass.W, classification.effectClass, "$argv")
+            assertTrue(classification.effectsUnknown, "$argv")
+        }
+        // Redirects and substitutions are classified independently of the allowlist.
+        assertEquals(EffectClass.W, EffectPolicy.classify(RunArgs(cmd = "rg x src > out.txt"), root, protectedPaths).effectClass)
+        assertEquals(EffectClass.W, EffectPolicy.classify(RunArgs(cmd = "git log >> out.txt"), root, protectedPaths).effectClass)
+        assertTrue(EffectPolicy.classify(RunArgs(cmd = "grep x $(touch y)"), root, protectedPaths).effectsUnknown)
+        assertTrue(EffectPolicy.classify(RunArgs(cmd = "cat <(touch y)"), root, protectedPaths).effectsUnknown)
+        assertEquals(EffectClass.R, EffectPolicy.classify(RunArgs(cmd = "git log --oneline | head -5"), root, protectedPaths).effectClass)
+    }
+
+    @Test
     fun `unknown local executables and wrappers have unknown write effects`() {
         for (argv in listOf(listOf("./scripts/deploy-helper"), listOf("mystery-wrapper", "git", "push"), listOf("./ls", "-la"))) {
             val classification = EffectPolicy.classify(argv, null, root, protectedPaths)

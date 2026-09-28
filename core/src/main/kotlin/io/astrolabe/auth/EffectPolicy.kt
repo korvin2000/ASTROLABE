@@ -202,7 +202,9 @@ public object EffectPolicy {
 
         val program = programName(argv.first())
         val args = argv.drop(1)
-        val recognized = readOnly(argv.first(), program, args) || program in config.scriptInterpreters ||
+        // D-283: a command or process substitution runs a command argv cannot see, so it is never read-only.
+        val substitution = tokens.any { "$(" in it || '`' in it } || redirects.any { it.startsWith("(") }
+        val recognized = (!substitution && readOnly(argv.first(), program, args)) || program in config.scriptInterpreters ||
             listOf(
                 config.privilegeCommands, config.networkCommands, config.packageInstallCommands,
                 config.gitRefMutations, config.destructiveFileCommands, config.writingCommands,
@@ -285,11 +287,67 @@ public object EffectPolicy {
         return Classification(effect, reasons, capabilities, render(tokens), effectsUnknown)
     }
 
-    private fun readOnly(executable: String, program: String, args: List<String>): Boolean =
-        '/' !in executable && '\\' !in executable && (
-            program in setOf("ls", "cat", "type", "pwd", "echo", "true", "false", "whoami", "id") ||
-                (program == "git" && args in listOf(listOf("status"), listOf("status", "--short"), listOf("diff", "--stat")))
-        )
+    /**
+     * Known read-only forms (D-283): bare program names only, and every option that writes a file, runs another
+     * program or changes system state keeps the command W/unknown. Redirects are classified before this check.
+     */
+    private fun readOnly(executable: String, program: String, args: List<String>): Boolean {
+        if ('/' in executable || '\\' in executable) return false
+        return when (program) {
+            in READ_ONLY_ANY_ARGS -> true
+            "rg" -> args.none { it == "--pre" || it.startsWith("--pre=") || it.startsWith("--pre-glob") || it.startsWith("--hostname-bin") }
+            "find" -> args.none { it in FIND_WRITES || it.startsWith("-exec") || it.startsWith("-ok") || it.startsWith("-fprint") }
+            "file" -> args.none { it == "-C" || it == "--compile" || shortCluster(it, 'C') }
+            "tree" -> args.none { it == "-R" || it.startsWith("-o") || it == "--output" }
+            "sort" -> args.none { abbreviates(it, "--output") || abbreviates(it, "--compress-program") || shortCluster(it, 'o') }
+            "uniq" -> args.count { !isFlag(it) } <= 1
+            "date" -> args.all { it.startsWith("+") || it in DATE_READ_FLAGS || it.startsWith("--iso-8601") || it.startsWith("--rfc-") }
+            "hostname" -> args.all { it in HOSTNAME_READ_FLAGS }
+            "git" -> gitReadOnly(args)
+            else -> false
+        }
+    }
+
+    /** A single-dash cluster such as `-uo` that contains the short option [option]. */
+    private fun shortCluster(token: String, option: Char): Boolean =
+        token.length > 1 && token[0] == '-' && token[1] != '-' && option in token.substring(1)
+
+    /** [token] names the long [option], also as a unique-prefix abbreviation (`--out=x`) that getopt and git accept. */
+    private fun abbreviates(token: String, option: String): Boolean {
+        val name = token.substringBefore('=')
+        return name.length > 2 && name.startsWith("--") && option.startsWith(name)
+    }
+
+    /** Git read forms; global options (`-C`, `-c`, `--git-dir`, …) before the subcommand are never read-only. */
+    private fun gitReadOnly(args: List<String>): Boolean {
+        val sub = args.firstOrNull() ?: return false
+        val rest = args.drop(1)
+        val flags = rest.filter { it.startsWith("-") }
+        val positionals = rest.filterNot { it.startsWith("-") }
+        val diffWrites = { token: String -> abbreviates(token, "--output") || abbreviates(token, "--ext-diff") }
+        return when (sub) {
+            "status", "blame", "ls-files", "ls-tree", "rev-parse", "describe", "shortlog" -> true
+            "diff", "log", "show" -> rest.none(diffWrites)
+            "grep" -> rest.none { diffWrites(it) || abbreviates(it, "--open-files-in-pager") || shortCluster(it, 'O') }
+            "cat-file" -> rest.size == 2 && rest[0] in setOf("-p", "-t", "-s")
+            "branch" -> flags.all { it in GIT_BRANCH_LIST_FLAGS } && (positionals.isEmpty() || "--list" in flags)
+            "tag" -> flags.all { it == "-l" || it == "--list" } && (positionals.isEmpty() || flags.isNotEmpty())
+            "remote" -> rest.isEmpty() || rest == listOf("-v") || rest == listOf("--verbose")
+            "config" -> rest.firstOrNull() in GIT_CONFIG_READS && rest.drop(1).none { it.startsWith("-") }
+            else -> false
+        }
+    }
+
+    private val READ_ONLY_ANY_ARGS = setOf(
+        "ls", "cat", "type", "pwd", "echo", "true", "false", "whoami", "id",
+        "head", "tail", "wc", "grep", "egrep", "fgrep", "findstr", "where", "which", "stat", "du", "df", "dir",
+        "uname", "cut", "diff", "cmp", "comm", "nl", "tac", "basename", "dirname", "realpath", "readlink",
+    )
+    private val FIND_WRITES = setOf("-delete", "-fls")
+    private val DATE_READ_FLAGS = setOf("-u", "--utc", "--universal", "-R", "--rfc-email", "-I", "/t", "/T")
+    private val HOSTNAME_READ_FLAGS = setOf("-s", "--short", "-f", "--fqdn", "--long", "-d", "--domain", "-i", "-I", "-A")
+    private val GIT_BRANCH_LIST_FLAGS = setOf("-a", "--all", "-r", "--remotes", "-v", "-vv", "--verbose", "--list")
+    private val GIT_CONFIG_READS = setOf("--get", "--get-all", "--get-regexp", "--list", "-l")
 
     // ---- command patterns -------------------------------------------------------------------------------
 

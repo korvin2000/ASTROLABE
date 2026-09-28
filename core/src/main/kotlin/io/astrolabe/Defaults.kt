@@ -53,6 +53,8 @@ public data class Defaults(
     val touchedInAnchor: Int = 10,
     // Checker time box
     val checkerTimeBoxSeconds: Int = 20,
+    // Checker time box for a touched-selector check that fell back to project-wide scope (D-322)
+    val checkerFallbackTimeBoxSeconds: Int = 120,
     // θ risk threshold for early slow checks
     val theta: Int = 40,
     // Full-suite cadence
@@ -138,6 +140,7 @@ public data class Defaults(
         positive("noteSummaryMaxChars", noteSummaryMaxChars)
         positive("touchedInAnchor", touchedInAnchor)
         positive("checkerTimeBoxSeconds", checkerTimeBoxSeconds)
+        positive("checkerFallbackTimeBoxSeconds", checkerFallbackTimeBoxSeconds)
         if (theta < 0) v += ConfigViolation("theta", "must be ≥ 0")
         positive("fullSuiteCadence", fullSuiteCadence)
         positive("stallTurns", stallTurns)

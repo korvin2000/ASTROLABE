@@ -264,7 +264,7 @@ internal class TreeVerification(private val c: OpenedCampaign, private val env: 
         val registry = VersionRegistry(workspace)
         val stamper = Stamper(workspace, env)
         val checks = Checks.seed(c.contract, c.commands, qualityGates = config.qualityGates)
-        val scheduler = Scheduler(checks, workspace, registry, stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, ids, clock)
+        val scheduler = Scheduler(checks, workspace, registry, stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, ids, clock, retryCandidates = c.store.layout.candidates)
         val runner = TrustedLocalRunner(c.os)
         val redaction = Redaction(config.redaction)
         val logs = c.store.layout.root.resolve("logs")
