@@ -26,7 +26,8 @@ public final class io/astrolabe/provider/aigate/AiGateProfiles {
 	public static final fun draft (Lnet/ai/gate/Llm;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/time/LocalDate;)Lio/astrolabe/provider/Profile;
 	public static final fun qualify (Lnet/ai/gate/Llm;Lio/astrolabe/provider/Profile;)Lio/astrolabe/provider/aigate/Qualification;
 	public static final fun qualify (Lnet/ai/gate/Llm;Lio/astrolabe/provider/Profile;Z)Lio/astrolabe/provider/aigate/Qualification;
-	public static synthetic fun qualify$default (Lnet/ai/gate/Llm;Lio/astrolabe/provider/Profile;ZILjava/lang/Object;)Lio/astrolabe/provider/aigate/Qualification;
+	public static final fun qualify (Lnet/ai/gate/Llm;Lio/astrolabe/provider/Profile;ZLjava/time/Duration;)Lio/astrolabe/provider/aigate/Qualification;
+	public static synthetic fun qualify$default (Lnet/ai/gate/Llm;Lio/astrolabe/provider/Profile;ZLjava/time/Duration;ILjava/lang/Object;)Lio/astrolabe/provider/aigate/Qualification;
 }
 
 public final class io/astrolabe/provider/aigate/Qualification {

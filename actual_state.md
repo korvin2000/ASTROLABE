@@ -5,7 +5,7 @@ Snapshot: TODO owns task status; CONTINUE-TASK.md owns next work; audit/SESSION-
 ## Counts (2026-09-26, from `#### P… · STATUS` headings)
 **185/185 DONE, 0 IN_PROGRESS, 0 TODO.** P0 19/19 · P1 64/64 · P2 30/30 · P3 25/25 · P4 25/25 · P5 15/15 · P6 7/7.
 Recount: `rg -c '^#### P\d+\.\d+\.\d+ .*· DONE' TODO.md`. P7 is out of scope except the owner-requested AI Gate
-transport (2026-09-28, branch `feat/ai-gate-transport`, D-326–D-335).
+transport (2026-09-28, merged into local `main`, D-326–D-336).
 
 ## Completion levels
 - **P0–P6:** `FIXTURE_VALIDATED` on Windows + Linux CI (JDK 26). Every live gate is `UNMEASURED` (P7).
@@ -55,6 +55,6 @@ D-200–D-202, D-210–D-213, D-220–D-223, D-230–D-233, D-240–D-244, D-250
 `fix(ci)` commits). New switches keep safe defaults: `unknownOutcomeReconciliation` Host, `gitDeadlineSeconds` 600,
 `providerTerminalWaitSeconds` 60, `checkerFallbackTimeBoxSeconds` 120, digest cap 150 + 8·requirements ≤ 2000
 (D-321–D-325). Core ABI dump regenerated; CI green on both OSes (36468171641).
-## AI Gate transport (2026-09-28, not merged)
-Real transport: `AiGateAdapter(llm, profiles)` + `Astrolabe(…, estimators = adapter.estimators(HeuristicEstimator()))`;
-profiles bind via `Profile.config.gate` (D-333); AX-01..10 pass offline (recorded frames, SDK fake); live smoke pending.
+## AI Gate transport (2026-09-28, merged into local `main`)
+`AiGateAdapter(llm, profiles)` + `Astrolabe(…, estimators = adapter.estimators(HeuristicEstimator()))`; profiles bind via
+`Profile.config.gate`, drafts/probes via `AiGateProfiles` (D-326–D-336); AX-01..10 pass offline; `liveTest` not yet run.

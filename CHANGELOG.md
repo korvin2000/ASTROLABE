@@ -9,6 +9,8 @@
   fails), `ProviderError.ContextOverflow/Authentication/Timeout`, capability-driven cache breakpoints, `OutputLimit`
   responses without calls, `ObservableAdapter` progress and `cell.model_progress`, `Astrolabe(ownsAdapter)`,
   `AstrolabeJava` with a provider-module adapter. D-326–D-335; [journal](audit/OUT-OF-ORDER-P7-AIGATE.md).
+- Endpoint qualification (`AiGateProfiles.qualify`), opt-in live smoke (`:provider-ai-gate:liveTest`), offline
+  gateway/Gemini/Codex fixtures, and an optional SDK checkout in CI (D-336).
 
 ## Bugfix branch ? 26 September 2026
 

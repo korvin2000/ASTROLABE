@@ -19,6 +19,7 @@ import net.ai.gate.model.Capability
 import net.ai.gate.model.SupportLevel
 import net.ai.gate.spi.protocol.ApiFeatures
 import java.math.BigDecimal
+import java.time.Duration
 import java.time.LocalDate
 
 /**
@@ -92,27 +93,29 @@ public object AiGateProfiles {
      * Probes [profile]'s endpoint and narrows the profile to what the probe proved (doc phase 8: "probe before
      * enabling `cache_read`"): the SDK's staged check with a tool round trip (and, with [cache], a prompt-cache round
      * trip), then one small call whose usage shows which counters the endpoint reports. **Billable**: three to five
-     * short calls. Usage fields the endpoint does not report are removed; explicit cache markers are withdrawn when the
-     * cache probe ran and did not pass. The result is a proposal to review, never applied to a running campaign.
+     * short calls within [timeout] for the staged check. Usage fields the endpoint does not report on an uncached call are
+     * removed (a read the cache probe observed counts as reported); a failed cache probe is not a disqualification: it
+     * withdraws explicit cache markers. The result is a proposal to review, never applied to a running campaign.
      */
     @JvmStatic
     @JvmOverloads
-    public fun qualify(llm: Llm, profile: Profile, cache: Boolean = false): Qualification {
+    public fun qualify(llm: Llm, profile: Profile, cache: Boolean = false, timeout: Duration = Duration.ofMinutes(2)): Qualification {
         val model = llm.model(profile.provider, profile.model)
-        val report = llm.test(model) { t -> t.toolRoundTrip(); if (cache) t.cacheRoundTrip() }
-        val problems = report.steps().filter { it.status() == ConnectionReport.Status.FAILED }.map { "${it.kind()}: ${it.message()}" }.toMutableList()
+        val report = llm.test(model) { t -> t.timeout(timeout).toolRoundTrip(); if (cache) t.cacheRoundTrip() }
+        val failed = report.steps().filter { it.status() == ConnectionReport.Status.FAILED }
+        val cacheStep = report.steps().firstOrNull { it.kind() == ConnectionReport.Kind.CACHE }
+        val problems = failed.filter { it !== cacheStep }.map { "${it.kind()}: ${it.message()}" }.toMutableList()
         if (problems.isNotEmpty()) return Qualification(profile, report, problems, emptyList())
         val notes = ArrayList<String>()
         val usage = llm.complete(model, Conversation.of("Reply with OK."), ChatOptions.builder().responseCache(CacheMode.BYPASS).build()).usage()
-        val reported = reported(usage)
+        val reported = reported(usage) + if (cacheStep?.status() == ConnectionReport.Status.PASSED) setOf(BillingDimension.CACHE_READ) else emptySet()
         if (BillingDimension.UNCACHED_INPUT !in reported || BillingDimension.OUTPUT !in reported) {
             problems += "USAGE: the endpoint reports $reported; input and output are needed to account a call"
         }
         val declared = profile.capabilities.usageFields
         val fields = declared.filter { it in reported }.toSet()
-        (declared - fields).forEach { notes += "usage field $it is not reported by the endpoint: removed" }
+        (declared - fields).forEach { notes += "usage field $it is not reported by the endpoint on an uncached call: removed" }
         var caching = profile.capabilities.caching
-        val cacheStep = report.steps().firstOrNull { it.kind() == ConnectionReport.Kind.CACHE }
         if (cache && caching.breakpoints && cacheStep?.status() != ConnectionReport.Status.PASSED) {
             notes += "no cache read observed (${cacheStep?.message() ?: "no cache step"}): explicit breakpoints withdrawn"
             caching = CacheCapability(breakpoints = false)

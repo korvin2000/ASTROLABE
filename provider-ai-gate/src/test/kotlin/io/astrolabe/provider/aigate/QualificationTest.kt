@@ -18,6 +18,7 @@ import net.ai.gate.auth.Environment
 import net.ai.gate.model.Capability
 import net.ai.gate.model.Model
 import net.ai.gate.model.Prices
+import net.ai.gate.vendors.anthropic.Anthropic
 import net.ai.gate.vendors.google.Gemini
 import net.ai.gate.vendors.openai.OpenAi
 import net.ai.gate.vendors.openai.OpenAiCompatible
@@ -98,6 +99,37 @@ class QualificationTest {
             val qualification = AiGateProfiles.qualify(llm, AiGateProfiles.draft(llm, "corp-gw", "llama-70b", "gw", date))
             assertFalse(qualification.qualified)
             assertTrue(qualification.problems.single().startsWith("TOOLS"), qualification.problems.toString())
+        }
+    }
+
+    @Test
+    fun `a failed cache probe withdraws explicit breakpoints instead of disqualifying the endpoint`() {
+        fun reply(content: String, stop: String, usage: String) =
+            """{"id":"m","type":"message","role":"assistant","model":"claude-gw","content":[$content],"stop_reason":"$stop","usage":$usage}"""
+        val cold = """{"input_tokens":5000,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens":1}"""
+        val route = RouteScript()
+            .json("GET", "/v1", "{}")
+            .json("POST", "/v1/messages", reply("""{"type":"tool_use","id":"toolu_1","name":"echo","input":{"text":"ok"}}""", "tool_use", """{"input_tokens":20,"output_tokens":5}"""))
+            .json("POST", "/v1/messages", reply("""{"type":"text","text":"ok"}""", "end_turn", """{"input_tokens":30,"output_tokens":1}"""))
+            .json("POST", "/v1/messages", reply("""{"type":"text","text":"OK"}""", "end_turn", cold))
+            .json("POST", "/v1/messages", reply("""{"type":"text","text":"OK"}""", "end_turn", cold))
+            .json("POST", "/v1/messages", reply("""{"type":"text","text":"OK"}""", "end_turn", """{"input_tokens":10,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens":1}"""))
+        val gateway = Anthropic.compatible("agw", URI.create("https://agw.example/v1")).toBuilder()
+            .model(Model.builder("agw", "claude-gw").contextWindow(200_000).maxOutputTokens(8_000).supports(Capability.TOOLS, Capability.STREAMING)
+                .prices(Prices.usd().input("3").cacheRead("0.3").cacheWrite("3.75").output("15").build()).build())
+            .build()
+        runtime(gateway, route, "AGW_API_KEY").use { llm ->
+            val draft = AiGateProfiles.draft(llm, "agw", "claude-gw", "agw", date)
+            assertTrue(draft.capabilities.caching.breakpoints, "an explicit-marker API")
+            val qualification = AiGateProfiles.qualify(llm, draft, cache = true)
+            assertTrue(qualification.qualified, qualification.problems.toString())
+            assertFalse(qualification.profile.capabilities.caching.breakpoints)
+            assertTrue(qualification.notes.any { it.contains("no cache read observed") }, qualification.notes.toString())
+            assertEquals(
+                setOf(BillingDimension.UNCACHED_INPUT, BillingDimension.CACHE_READ, BillingDimension.CACHE_WRITE_5M, BillingDimension.OUTPUT),
+                qualification.profile.capabilities.usageFields,
+            )
+            assertEquals(emptyList(), AiGateAdapter.violations(llm, listOf(qualification.profile)), "the narrowed profile binds")
         }
     }
 

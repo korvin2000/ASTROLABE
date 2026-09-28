@@ -49,10 +49,23 @@ throws, billing of SDK-internal failures, cancelled flag, known-zero after a 2xx
 Full build (`./gradlew build`, Windows, JDK 26, 31 min): green — provider-api 20, core 1,685 (20 platform skips),
 eval 52, index-treesitter 17, provider-ai-gate 29 tests; 0 failures/errors; `checkKotlinAbi` passes.
 
+## Follow-up (branch `feat/ai-gate-qualification`, D-336)
+
+The first release was merged `--no-ff` into local `main` (`500c94f`) after the green build. Then:
+- `AiGateProfiles.qualify`: staged check + tool round trip (+ optional cache round trip) + one usage probe; the profile
+  is narrowed to the usage fields the endpoint reports. `draft()` accepts subscription models without token prices.
+- `LiveSmokeTest` / `:provider-ai-gate:liveTest`: doc phase 7, opt-in and billable; verified to skip without keys.
+- Offline fixtures: OpenAI-compatible gateway without cache counters (qualified, then a streamed cell call), Gemini
+  thought signature replayed on its function call, Codex output-cap policy (bound reserved, never sent).
+- CI: optional checkout of `llm-transport-sdk` beside the repository.
+- Third Fable 5.1 review: a failed cache probe disqualified the endpoint instead of withdrawing breakpoints (fixed,
+  regression test), the SDK test's 15 s default budget (now `timeout`, default 2 min), a read the cache probe observed
+  counts as reported `cache_read`. Build: provider-ai-gate 37 tests (3 opt-in live skips), 0 failures; rest unchanged.
+
 ## Not done / next owners
 
-- Live smoke (doc phase 7): one Anthropic and one Responses profile, `llm.test(model)` first; gates stay `UNMEASURED`.
-- Gateways (OpenAI-compatible), Gemini and Codex qualification (doc phase 8): probe before declaring `cache_read`.
-- CI builds `:provider-ai-gate` only once it checks out the SDK (or the SDK is published beyond `mavenLocal`).
+- Run `liveTest` with owner-authorised keys (Anthropic, then Responses, then Gemini); gates stay `UNMEASURED`.
+- Qualify real gateways with `qualify` before declaring their profiles; a private SDK repository needs the
+  `LLM_TRANSPORT_SDK_TOKEN` secret for CI to build the module.
 - G-09 live text deltas: the SDK's `Llm.start` does not expose `ChatEvent`s; a UI uses SDK events/streams directly.
 - `continuation`, `nativeCompaction`, `hostedExecution` stay `false` until their ASTROLABE contracts exist (S-14 landed in the SDK).
