@@ -26,6 +26,7 @@ import io.astrolabe.workspace.VersionRegistry
 import io.astrolabe.workspace.Workspace
 import io.astrolabe.workspace.Workspaces
 import io.astrolabe.workspace.Worktree
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.nio.file.Files
@@ -313,6 +314,8 @@ public class Integrator @JvmOverloads constructor(
             } catch (failure: Throwable) {
                 val recovery = runCatching { IntegrationPublication.rollback(main, registry, blobs, intents, intent) }.exceptionOrNull()
                 if (recovery != null) failure.addSuppressed(recovery)
+                // D-318: rollback is blocking (no suspension point), so it completes before cancellation propagates.
+                if (failure is CancellationException) throw failure
                 return@withLock Integration.Rejected(handles, IntegrationStep.Publish,
                     "publication failed: ${failure.message}; " + if (recovery == null) "original bytes restored" else "recovery required: ${recovery.message}")
             }
