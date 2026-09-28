@@ -69,6 +69,12 @@ public class Git @JvmOverloads constructor(
         return forms
     }
 
+    /** `git config --bool --get [key]`: the effective boolean, or `null` when the key is unset. */
+    public fun configBool(key: String): Boolean? {
+        val result = exec(listOf("config", "--bool", "--get", key))
+        return if (result.exitCode == 0) decode(result.stdout).trim() == "true" else null
+    }
+
     private fun requireSupportedForm(operation: String) {
         unsupportedForms().firstOrNull()?.let { throw UnsupportedRepositoryForm(it, operation) }
     }

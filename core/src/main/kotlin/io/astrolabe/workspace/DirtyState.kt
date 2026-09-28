@@ -342,12 +342,8 @@ public class DirtyState(
             PathKind.Regular -> {
                 val bytes = workspace.bytes(resolved)
                     ?: throw SnapshotIntegrityError("'$path' disappeared during capture")
-                val mode = when {
-                    Files.getFileStore(resolved.real).supportsFileAttributeView("posix") ->
-                        if (Files.isExecutable(resolved.real)) FileMode.EXECUTABLE else FileMode.REGULAR
-                    reportedMode == FileMode.EXECUTABLE || reportedMode == FileMode.REGULAR -> reportedMode
-                    else -> FileMode.REGULAR
-                }
+                // One mode rule with the stamp report the recheck compares against (D-293).
+                val mode = stamper.fileMode(resolved, reportedMode)
                 SnapshotEntry(path, SnapshotEntryKind.File, mode,
                     blobs.put(bytes, BlobKind.PREIMAGE, ids, recovery = true), bytes.size.toLong())
             }

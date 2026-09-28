@@ -35,6 +35,12 @@ public class Workspace @JvmOverloads public constructor(
      */
     public val mutation: Mutex = Mutex()
 
+    /**
+     * False when the repository sets `core.fileMode=false` (D-293): the filesystem's executable bit is then
+     * noise (WSL/NTFS, vfat) and git's reported/index mode is the mode. Read once per workspace.
+     */
+    internal val fileModeTrusted: Boolean by lazy { git.configBool("core.fileMode") != false }
+
     init {
         val repo = runCatching { git.repo.toRealPath() }.getOrDefault(git.repo)
         require(this.root == repo) {
