@@ -360,12 +360,23 @@ public class Cell @JvmOverloads constructor(
                 failure = error
                 invocation?.cancel()
             } finally {
+                var terminalTimedOut = false
                 terminal = kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-                    try { invocation?.terminal() }
-                    catch (_: Exception) { null }
+                    // D-314: a provider that never settles must not hang the cell; unknown usage keeps conservative funding.
+                    try {
+                        invocation?.let { inv ->
+                            kotlinx.coroutines.withTimeoutOrNull(defaults.providerTerminalWaitSeconds * 1_000L) { inv.terminal() }
+                                ?: null.also { terminalTimedOut = true; inv.cancel() }
+                        }
+                    } catch (_: Exception) { null }
+                }
+                if (terminalTimedOut) {
+                    ev.journal.append(JournalEvent(idGen.next("ev"), ids, turn, JournalKind.Call,
+                        text = "provider terminal not reconciled within ${defaults.providerTerminalWaitSeconds}s; usage unknown, conservative funding retained",
+                        at = clock.instant()))
                 }
                 val settled = terminal
-                val usage = settled?.usage ?: received?.usage
+                val usage = if (terminalTimedOut) null else settled?.usage ?: received?.usage
                 val knownInput = usage?.quantities?.filterKeys { it.isInput }?.values?.fold(0L, Accounting::add) ?: 0L
                 val inputKnown = usage != null && usage.quantities.keys.any { it.isInput } && usage.unknown.none { it.isInput }
                 val inputCharge = if (inputKnown) knownInput else maxOf(knownInput, estimate.upperBoundTokens)

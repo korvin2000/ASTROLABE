@@ -41,7 +41,7 @@ All numbers are declared defaults for the first evaluation round, not derived op
 | Memory admission | interactive: queue; autonomous: factual `LES`/conditional `PIT` with anchors, scoped, confidence ≤ 0.6 | [§4.5](../knowledge/records.md#sec-4-5) |
 | Profiles | main: one capable model, configured effort; helper: cheap, low effort; escalation: none | [§11](../operations/routing.md#sec-11) |
 | Mode | `interactive`, `trusted-local`, `d_class: ask`, ceiling `patch` | autonomous commit off |
-| Timeouts | `run` 120 s; process-group kill; never replay | |
+| Timeouts | `run` 120 s; process-group kill; never replay; provider terminal wait 60 s (then usage unknown, conservative funding, D-314) | |
 
 ---
 <!-- end-source-section: 17 -->

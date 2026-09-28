@@ -17,6 +17,8 @@ public data class Defaults(
     // Cell turn budget
     val turnsPerCell: Int = 40,
     val turnNudgeFraction: Double = 0.80,
+    // Bounded wait for a provider terminal after the response (D-314)
+    val providerTerminalWaitSeconds: Int = 60,
     // α pressure threshold
     val alpha: Double = 0.65,
     // k eviction batch / m turns kept on rebuild
@@ -112,6 +114,7 @@ public data class Defaults(
         fraction("turnNudgeFraction", turnNudgeFraction, exclusiveZero = true)
         fraction("admissionConfidenceMax", admissionConfidenceMax, exclusiveZero = false)
         positive("turnsPerCell", turnsPerCell)
+        positive("providerTerminalWaitSeconds", providerTerminalWaitSeconds)
         positive("k", k)
         if (m < 0) v += ConfigViolation("m", "must be ≥ 0")
         positive("rMaxTokens", rMaxTokens)
