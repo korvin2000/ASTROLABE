@@ -9,7 +9,12 @@ import io.astrolabe.provider.SchemaDialect
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import net.ai.gate.Llm
+import net.ai.gate.cache.CacheMode
 import net.ai.gate.cache.CacheRetention
+import net.ai.gate.chat.Conversation
+import net.ai.gate.chat.options.ChatOptions
+import net.ai.gate.diagnostics.ConnectionReport
+import net.ai.gate.metadata.Usage
 import net.ai.gate.model.Capability
 import net.ai.gate.model.SupportLevel
 import net.ai.gate.spi.protocol.ApiFeatures
@@ -24,8 +29,9 @@ import java.time.LocalDate
  */
 public object AiGateProfiles {
     /**
-     * A profile [id] for [modelId] of [providerId], its prices dated [priceDate].
-     * @throws IllegalArgumentException when the catalog lacks the context window or output limit, or prices
+     * A profile [id] for [modelId] of [providerId], its prices dated [priceDate]. A model the catalog has no token
+     * prices for (a subscription plan such as Codex) gets an empty table: every charge is unknown, never zero.
+     * @throws IllegalArgumentException when the catalog lacks the context window or output limit
      */
     @JvmStatic
     public fun draft(llm: Llm, providerId: String, modelId: String, id: String, priceDate: LocalDate): Profile {
@@ -34,7 +40,7 @@ public object AiGateProfiles {
         val context = model.contextWindow()
         val output = model.maxOutputTokens()
         require(context.isPresent && output.isPresent) { "the catalog has no limits for $providerId/$modelId; describe the model in the provider's models" }
-        val prices = model.prices().orElseThrow { IllegalArgumentException("the catalog has no prices for $providerId/$modelId") }
+        val prices = model.prices().orElse(null)
         val reported = features.reportedUsageFields()
         val usage = LinkedHashSet<BillingDimension>()
         if ("input" in reported) usage += BillingDimension.UNCACHED_INPUT
@@ -66,19 +72,69 @@ public object AiGateProfiles {
             schemaDialects = setOf(SchemaDialect.JSON_SCHEMA_2020_12),
         )
         val perMillion = LinkedHashMap<BillingDimension, BigDecimal>()
-        prices.inputPerMillion().ifPresent { perMillion[BillingDimension.UNCACHED_INPUT] = it }
-        prices.cacheReadPerMillion().ifPresent { perMillion[BillingDimension.CACHE_READ] = it }
-        prices.cacheWritePerMillion().ifPresent { perMillion[BillingDimension.CACHE_WRITE_5M] = it }
-        prices.cacheWriteLongPerMillion().or { prices.cacheWritePerMillion() }.ifPresent { perMillion[BillingDimension.CACHE_WRITE_1H] = it }
-        prices.outputPerMillion().ifPresent { perMillion[BillingDimension.OUTPUT] = it }
+        prices?.inputPerMillion()?.ifPresent { perMillion[BillingDimension.UNCACHED_INPUT] = it }
+        prices?.cacheReadPerMillion()?.ifPresent { perMillion[BillingDimension.CACHE_READ] = it }
+        prices?.cacheWritePerMillion()?.ifPresent { perMillion[BillingDimension.CACHE_WRITE_5M] = it }
+        prices?.cacheWriteLongPerMillion()?.or { prices.cacheWritePerMillion() }?.ifPresent { perMillion[BillingDimension.CACHE_WRITE_1H] = it }
+        prices?.outputPerMillion()?.ifPresent { perMillion[BillingDimension.OUTPUT] = it }
         val gate = buildMap {
             put("v", JsonPrimitive(1))
             put("api", JsonPrimitive(features.api()))
             if (features.outputCap() == ApiFeatures.OutputCap.UNSUPPORTED) put("outputCap", JsonPrimitive("unsupported"))
         }
         return Profile(
-            id, providerId, modelId, capabilities, PriceTable(priceDate, prices.currency().currencyCode, perMillion),
+            id, providerId, modelId, capabilities, PriceTable(priceDate, prices?.currency()?.currencyCode ?: "USD", perMillion),
             config = JsonObject(mapOf("gate" to JsonObject(gate))),
         )
     }
+
+    /**
+     * Probes [profile]'s endpoint and narrows the profile to what the probe proved (doc phase 8: "probe before
+     * enabling `cache_read`"): the SDK's staged check with a tool round trip (and, with [cache], a prompt-cache round
+     * trip), then one small call whose usage shows which counters the endpoint reports. **Billable**: three to five
+     * short calls. Usage fields the endpoint does not report are removed; explicit cache markers are withdrawn when the
+     * cache probe ran and did not pass. The result is a proposal to review, never applied to a running campaign.
+     */
+    @JvmStatic
+    @JvmOverloads
+    public fun qualify(llm: Llm, profile: Profile, cache: Boolean = false): Qualification {
+        val model = llm.model(profile.provider, profile.model)
+        val report = llm.test(model) { t -> t.toolRoundTrip(); if (cache) t.cacheRoundTrip() }
+        val problems = report.steps().filter { it.status() == ConnectionReport.Status.FAILED }.map { "${it.kind()}: ${it.message()}" }.toMutableList()
+        if (problems.isNotEmpty()) return Qualification(profile, report, problems, emptyList())
+        val notes = ArrayList<String>()
+        val usage = llm.complete(model, Conversation.of("Reply with OK."), ChatOptions.builder().responseCache(CacheMode.BYPASS).build()).usage()
+        val reported = reported(usage)
+        if (BillingDimension.UNCACHED_INPUT !in reported || BillingDimension.OUTPUT !in reported) {
+            problems += "USAGE: the endpoint reports $reported; input and output are needed to account a call"
+        }
+        val declared = profile.capabilities.usageFields
+        val fields = declared.filter { it in reported }.toSet()
+        (declared - fields).forEach { notes += "usage field $it is not reported by the endpoint: removed" }
+        var caching = profile.capabilities.caching
+        val cacheStep = report.steps().firstOrNull { it.kind() == ConnectionReport.Kind.CACHE }
+        if (cache && caching.breakpoints && cacheStep?.status() != ConnectionReport.Status.PASSED) {
+            notes += "no cache read observed (${cacheStep?.message() ?: "no cache step"}): explicit breakpoints withdrawn"
+            caching = CacheCapability(breakpoints = false)
+        }
+        val narrowed = profile.copy(capabilities = profile.capabilities.copy(usageFields = fields, caching = caching))
+        return Qualification(narrowed, report, problems, notes)
+    }
+
+    private fun reported(usage: Usage): Set<BillingDimension> = buildSet {
+        if (usage.input().isPresent) add(BillingDimension.UNCACHED_INPUT)
+        if (usage.cacheRead().isPresent) add(BillingDimension.CACHE_READ)
+        if (CacheRetention.SHORT in usage.cacheWrites()) add(BillingDimension.CACHE_WRITE_5M)
+        if (CacheRetention.LONG in usage.cacheWrites()) add(BillingDimension.CACHE_WRITE_1H)
+        if (usage.cacheWrites().isEmpty() && usage.cacheWrite().isPresent) add(BillingDimension.CACHE_WRITE_5M)
+        if (usage.output().isPresent) add(BillingDimension.OUTPUT)
+    }
+}
+
+/**
+ * The outcome of [AiGateProfiles.qualify]: the probed [profile] (narrowed), the SDK's staged [report], [problems] that keep
+ * the endpoint from running cells, and [notes] on what was narrowed.
+ */
+public data class Qualification(val profile: Profile, val report: ConnectionReport, val problems: List<String>, val notes: List<String>) {
+    public val qualified: Boolean get() = problems.isEmpty()
 }

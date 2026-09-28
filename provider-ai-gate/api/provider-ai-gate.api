@@ -24,5 +24,26 @@ public final class io/astrolabe/provider/aigate/AiGateAdapter$Companion {
 public final class io/astrolabe/provider/aigate/AiGateProfiles {
 	public static final field INSTANCE Lio/astrolabe/provider/aigate/AiGateProfiles;
 	public static final fun draft (Lnet/ai/gate/Llm;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/time/LocalDate;)Lio/astrolabe/provider/Profile;
+	public static final fun qualify (Lnet/ai/gate/Llm;Lio/astrolabe/provider/Profile;)Lio/astrolabe/provider/aigate/Qualification;
+	public static final fun qualify (Lnet/ai/gate/Llm;Lio/astrolabe/provider/Profile;Z)Lio/astrolabe/provider/aigate/Qualification;
+	public static synthetic fun qualify$default (Lnet/ai/gate/Llm;Lio/astrolabe/provider/Profile;ZILjava/lang/Object;)Lio/astrolabe/provider/aigate/Qualification;
+}
+
+public final class io/astrolabe/provider/aigate/Qualification {
+	public fun <init> (Lio/astrolabe/provider/Profile;Lnet/ai/gate/diagnostics/ConnectionReport;Ljava/util/List;Ljava/util/List;)V
+	public final fun component1 ()Lio/astrolabe/provider/Profile;
+	public final fun component2 ()Lnet/ai/gate/diagnostics/ConnectionReport;
+	public final fun component3 ()Ljava/util/List;
+	public final fun component4 ()Ljava/util/List;
+	public final fun copy (Lio/astrolabe/provider/Profile;Lnet/ai/gate/diagnostics/ConnectionReport;Ljava/util/List;Ljava/util/List;)Lio/astrolabe/provider/aigate/Qualification;
+	public static synthetic fun copy$default (Lio/astrolabe/provider/aigate/Qualification;Lio/astrolabe/provider/Profile;Lnet/ai/gate/diagnostics/ConnectionReport;Ljava/util/List;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/provider/aigate/Qualification;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getNotes ()Ljava/util/List;
+	public final fun getProblems ()Ljava/util/List;
+	public final fun getProfile ()Lio/astrolabe/provider/Profile;
+	public final fun getQualified ()Z
+	public final fun getReport ()Lnet/ai/gate/diagnostics/ConnectionReport;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
 }
 

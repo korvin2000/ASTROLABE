@@ -18,6 +18,19 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      # D-332: `:provider-ai-gate` builds only next to the AI Gate SDK (llm-transport-sdk). A private SDK repository
+      # needs the LLM_TRANSPORT_SDK_TOKEN secret; without access this step fails softly and the module is skipped.
+      - name: Check out the AI Gate SDK
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          repository: korvin2000/llm-transport-sdk
+          path: llm-transport-sdk
+          token: ${{ secrets.LLM_TRANSPORT_SDK_TOKEN || github.token }}
+      # Beside the repository, where settings.gradle.kts looks by default; the ASTROLABE tree stays clean.
+      - name: Place the AI Gate SDK beside the repository
+        run: if [ -d llm-transport-sdk ]; then mv llm-transport-sdk ..; fi
+        shell: bash
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
