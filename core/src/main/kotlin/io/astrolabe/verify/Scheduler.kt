@@ -138,7 +138,9 @@ public class Scheduler(
             val after = stamper.report()
             announceMoved(registry, before, after, "check ${check.id}")
             val afterPaths = testedInputsFor(check, inputs)
-            val mutated = (paths + afterPaths).filter { it !in paths || it !in afterPaths || snapshot(it) != seenBefore[it] }.toSet()
+            val pathSet = paths.toHashSet()
+            val afterSet = afterPaths.toHashSet()
+            val mutated = (pathSet + afterSet).filter { it !in pathSet || it !in afterSet || snapshot(it) != seenBefore[it] }.toSet()
             val stability = when {
                 check.inputClosure == Closure.Unknown && paths.isEmpty() -> {
                     limits += Limit("input_stability", "closure unknown and no inputs enumerated: the tested inputs could not be rescanned")
