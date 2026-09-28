@@ -209,6 +209,36 @@ class SnapshotCaptureRegressionTest {
         }
     }
 
+    @Test
+    fun `an untracked nested repository is a directory member and does not fail capture`(@TempDir state: Path) {
+        WorkspaceFixture.create(state).use { fixture ->
+            fixture.rawGit("init", "-q", "nested")
+            fixture.repo.write("nested/inner.txt", "inner\n")
+
+            val report = fixture.stamper.report()
+            val nested = assertNotNull(report.members.values.singleOrNull { it.path.trimEnd('/') == "nested" })
+            assertEquals(EntryType.Directory, nested.type)
+            assertEquals(report.stamp.id, fixture.stamper.stamp().id)
+            val snapshot = fixture.dirtyState.capture()
+            assertEquals(report.stamp.id, snapshot.stampId)
+            assertTrue(snapshot.entries.none { it.path.trimEnd('/') == "nested" }, "a directory has no recovery bytes")
+        }
+    }
+
+    @Test
+    fun `a tracked file replaced by a directory does not fail the report`(@TempDir state: Path) {
+        WorkspaceFixture.create(state).use { fixture ->
+            Files.delete(fixture.repo.resolve("README.md"))
+            fixture.repo.write("README.md/c", "child\n")
+
+            val report = fixture.stamper.report()
+            assertEquals(EntryType.Directory, report.members["README.md"]?.type)
+            assertTrue("README.md/c" in report.members)
+            val snapshot = fixture.dirtyState.capture()
+            assertTrue(snapshot.entry("README.md/c")?.present == true)
+        }
+    }
+
     private fun assertLinkCaptured(fixture: WorkspaceFixture, path: String) {
         val targetBytes = Files.readSymbolicLink(fixture.repo.resolve(path)).toString().toByteArray(Charsets.UTF_8)
         val report = fixture.stamper.report()

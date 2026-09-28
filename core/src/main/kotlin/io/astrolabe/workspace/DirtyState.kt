@@ -221,14 +221,14 @@ public class DirtyState(
 
         for (entry in status.entries) {
             when (entry) {
-                is StatusEntry.Ordinary -> entries[entry.path] = worktreeEntry(entry.path, entry.worktreeMode)
-                is StatusEntry.Unmerged -> entries[entry.path] = worktreeEntry(entry.path, entry.worktreeMode)
-                is StatusEntry.Untracked -> entries[entry.path] = worktreeEntry(entry.path, FileMode.ABSENT)
+                is StatusEntry.Ordinary -> worktreeEntry(entry.path, entry.worktreeMode)?.let { entries[entry.path] = it }
+                is StatusEntry.Unmerged -> worktreeEntry(entry.path, entry.worktreeMode)?.let { entries[entry.path] = it }
+                is StatusEntry.Untracked -> worktreeEntry(entry.path, FileMode.ABSENT)?.let { entries[entry.path] = it }
                 is StatusEntry.Renamed -> {
-                    entries[entry.path] = worktreeEntry(entry.path, entry.worktreeMode)
+                    worktreeEntry(entry.path, entry.worktreeMode)?.let { entries[entry.path] = it }
                     if (entry.origin == ChangeOrigin.RENAME) {
                         val origin = worktreeEntry(entry.origPath, FileMode.ABSENT)
-                        if (origin.kind == SnapshotEntryKind.Deleted) entries[entry.origPath] = origin
+                        if (origin?.kind == SnapshotEntryKind.Deleted) entries[entry.origPath] = origin
                     }
                 }
 
@@ -240,7 +240,7 @@ public class DirtyState(
         val report = stamper.report()
         // Include raw differences hidden by Git's clean filters and checkout conversions.
         for ((path, entry) in report.members) {
-            if (path !in entries) entries[path] = worktreeEntry(path, entry.mode)
+            if (path !in entries) worktreeEntry(path, entry.mode)?.let { entries[path] = it }
         }
         val captured = entries.mapValues { (_, entry) ->
             val type = when (entry.kind) {
@@ -251,7 +251,9 @@ public class DirtyState(
             StampEntry(entry.path, type, entry.mode, entry.digest, entry.sizeBytes)
         }
         val base = status.branch?.let { it.oid?.hex ?: io.astrolabe.id.Stamp.NO_COMMIT }
-        if (captured != report.members || base != report.baseCommit || stamper.stamp().id != report.candidateId ||
+        // A directory member (nested repository, submodule) carries no bytes to recover.
+        val recoverable = report.members.filterValues { it.type != EntryType.Directory }
+        if (captured != recoverable || base != report.baseCommit || stamper.stamp().id != report.candidateId ||
             workspace.git.lsFiles() != index ||
             workspace.git.status(UntrackedFiles.ALL, includeIgnored = true) != status
         ) {
@@ -306,7 +308,7 @@ public class DirtyState(
         return staged.sortedWith(compareBy(Stamper.PATH_ORDER) { it.path + "" + it.stage })
     }
 
-    private fun worktreeEntry(path: String, reportedMode: FileMode): SnapshotEntry {
+    private fun worktreeEntry(path: String, reportedMode: FileMode): SnapshotEntry? {
         val resolved = workspace.paths.resolveCapture(path)
         if (resolved !is PathResolution.Resolved) {
             throw SnapshotIntegrityError("cannot capture '$path': $resolved")
@@ -330,6 +332,7 @@ public class DirtyState(
                 SnapshotEntry(path, SnapshotEntryKind.File, mode,
                     blobs.put(bytes, BlobKind.PREIMAGE, ids, recovery = true), bytes.size.toLong())
             }
+            PathKind.Directory -> null
             else -> throw SnapshotIntegrityError("unsupported capture kind ${resolved.kind}: $path")
         }
     }

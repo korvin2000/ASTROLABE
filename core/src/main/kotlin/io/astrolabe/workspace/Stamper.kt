@@ -239,7 +239,8 @@ public class Stamper @JvmOverloads public constructor(
         // Git status compares filtered content. Even a Git-clean path can have different raw
         // bytes (or an ignored mode change), so compare every remaining tracked path to its object.
         for (row in workspace.git.lsFiles()) {
-            if (row.stage != 0 || row.path in entries) continue
+            // A gitlink is a directory on disk; git status already reports submodule changes.
+            if (row.stage != 0 || row.path in entries || row.mode == FileMode.GITLINK) continue
             captureEntry(row.path, row.mode, row)?.let { entries[row.path] = it }
         }
         return entries.values.sortedWith(compareBy(PATH_ORDER) { it.path })
@@ -278,6 +279,7 @@ public class Stamper @JvmOverloads public constructor(
                 if (matchesObject(bytes, mode, baseline)) return null
                 StampEntry(path, EntryType.File, mode, Digest.of(bytes), bytes.size.toLong())
             }
+            PathKind.Directory -> StampEntry(path, EntryType.Directory, FileMode.TREE, Digest.ofUtf8(""), 0)
             else -> throw SnapshotIntegrityError("unsupported capture kind ${resolved.kind}: $path")
         }
     }
