@@ -144,8 +144,17 @@ public object Injection {
         return null
     }
 
-    internal fun dependenciesCurrent(note: Note, all: Map<String, Note>, current: ((String) -> FileVersion?)?, versions: Map<String, String>, seen: Set<String> = emptySet()): Boolean {
+    internal fun dependenciesCurrent(
+        note: Note,
+        all: Map<String, Note>,
+        current: ((String) -> FileVersion?)?,
+        versions: Map<String, String>,
+        seen: Set<String> = emptySet(),
+        memo: MutableMap<String, Boolean> = HashMap(),
+    ): Boolean {
         if (note.id in seen) return false
+        // A node reached again through a cycle is false from every entry point, so memoizing it is sound.
+        memo[note.id]?.let { return it }
         return note.validity.dependsOn.all { dep ->
             val name = dep.substringBeforeLast('@')
             val pin = dep.substringAfterLast('@', "")
@@ -153,12 +162,12 @@ public object Injection {
             if (target != null) {
                 target.status == NoteStatus.Admitted && (pin.isEmpty() || versions[name] == pin) &&
                     target.anchors.all { a -> a.version == null || current?.invoke(a.path)?.digest?.hex?.startsWith(a.version) == true } &&
-                    dependenciesCurrent(target, all, current, versions, seen + note.id)
+                    dependenciesCurrent(target, all, current, versions, seen + note.id, memo)
             } else {
                 pin.isNotEmpty() && (versions[name]?.let { it == pin }
                     ?: (pin.matches(Regex("[0-9a-f]{8,64}")) && current?.invoke(name)?.digest?.hex?.startsWith(pin) == true))
             }
-        }
+        }.also { memo[note.id] = it }
     }
 
     /**

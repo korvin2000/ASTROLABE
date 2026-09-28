@@ -39,6 +39,21 @@ class InjectionTest {
     private val estimator = HeuristicEstimator()
     private val work = WorkId("W-42")
 
+    @Test
+    @org.junit.jupiter.api.Timeout(10)
+    fun `a layered diamond of note dependencies is checked in linear time`() {
+        fun note(id: String, depends: List<String>) =
+            Note(id, NoteKind.CON, NoteStatus.Admitted, "contract $id", "b", "src/**", emptyList(), validity = NoteValidity(depends))
+        val layers = 40
+        val all = LinkedHashMap<String, Note>()
+        for (layer in 0 until layers) for (side in listOf("a", "b")) {
+            val id = "CON-$layer$side"
+            all[id] = note(id, if (layer == 0) emptyList() else listOf("CON-${layer - 1}a", "CON-${layer - 1}b"))
+        }
+        val top = note("CON-top", listOf("CON-${layers - 1}a", "CON-${layers - 1}b"))
+        assertTrue(Injection.dependenciesCurrent(top, all, null, emptyMap()))
+    }
+
     private fun les(id: String, scope: String = "subsystem:pay", evidence: Int = 2, depends: List<String> = emptyList(), validated: String? = null, status: NoteStatus = NoteStatus.Admitted) =
         Note(id, NoteKind.LES, status, "lesson $id about refunds", "Advice $id.", scope, basis = NoteBasis(evidenceRefs = List(evidence) { "#$it" }), validity = NoteValidity(depends, validated))
 
