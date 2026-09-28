@@ -51,8 +51,7 @@ Schema **v4** (no bump this session). `packets` also holds behaviour-snapshot, c
 
 ## Recorded deviations
 Local choices D-112–D-113, D-120–D-126, D-135–D-137, D-145–D-155, D-160–D-165, D-170–D-174, D-180–D-183, D-190–D-195,
-D-200–D-202, D-210–D-213, D-220–D-223, D-230–D-233, D-240–D-244, D-250–D-254, D-260 (TODO §3). Owner decision D-175
-(new dependencies allowed under pinned-version rules).
+D-200–D-202, D-210–D-213, D-220–D-223, D-230–D-233, D-240–D-244, D-250–D-254, D-260 (TODO §3); owner D-175 (deps).
 ## Audit remediation, review and fine-tune (2026-09-28)
 `feature/bugfix` fixed 142 findings; `review/bugfix` reviewed every fix (`audit/BUGFIX-REVIEW.md`: 28 review fixes,
 52 ACCEPT, 62 NOTE). `fix/fine-tune` closed 21 owner-selected follow-ups and the red CI of `main` @ 30cc45c (seven
