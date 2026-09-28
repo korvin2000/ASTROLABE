@@ -1840,7 +1840,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Future regression: a fake git executable hangs before stdout closes, writes unlimited stderr, or blocks stdin; each operation must terminate with bounded diagnostics and leave no child.
 - Current-source recheck (2026-09-25, 9a80e117): Git.exec still blocks on readAllBytes, waitFor and unbounded joins without a deadline (389?427). Earlier runtime evidence retains its original baseline; this recheck is source inspection.
 - Fix (2026-09-28, `c24c4fe`): Git commands now bound pipe pumping and process waiting to a configurable 120-second deadline, with 64 MiB stdout and 1 MiB stderr caps. Oversize capture fails explicitly; interruption and errors terminate the process and observed descendants. Fixture Git calls are also bounded. GitTest passes, including a stalled launcher and output overflow.
-- Fine-tune (2026-09-28, `009e301`): default git deadline 600 s (`Defaults.gitDeadlineSeconds`); descendants are killed only on deadline, overflow, interrupt or error (D-303).
+- Fine-tune (2026-09-28, `009e301`): default git deadline 600 s (`Defaults.gitDeadlineSeconds`); descendants are killed only on deadline, overflow, interrupt or error (D-303); a descendant snapshot counts only while git is alive (`53fffd5`): after exit it named unrelated Windows orphans with a reused parent PID and killed the CI runner.
 
 
 ### F-018 - Supported Unicode regex patterns produce different search results by backend

@@ -688,4 +688,6 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
   dropped F-024's new over-budget pressure stop and calibrated F-054's tab conversion. D-321–D-325 added.
 - Incident: `git bisect run` exported GIT_DIR into fixture tests, which rewrote `.git/config` and moved `main`; repaired with
   owner approval (main restored to 30cc45c, fixture config removed, leaked authors rewritten before merge).
+- Windows CI lost its runner since c24c4fe: post-exit `descendants()` kills hit unrelated orphans with a reused parent
+  PID (JDK cannot bound them once the root exited). Fixed in Git.kt and the fixtures; my bisect shells died the same way.
 - Core ABI regenerated; Windows `gradlew check` run locally; merged into `main` and pushed with owner approval.

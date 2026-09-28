@@ -18,14 +18,17 @@ P0–P6 remain 185/185 DONE; P7 stays out of scope.
 - Public ABI grew (Defaults/Config fields, `UnknownOutcomeReconciliation`, `Intent.workspaceConfined`,
   `PathPattern.matches`/`Scope.protects` ignoreCase, `Git.configBool`/`timeoutMillis`, `Checker.run`, `Scheduler`
   `retryCandidates`, `Validator` `referenceMaxChars`); core dump regenerated.
+- Windows CI root cause (runner "lost communication" after 0xC0000142 spawns since c24c4fe): `descendants()` called
+  after a process exited returns unrelated Windows orphans whose dead parent had the same PID, and Git.kt/TempRepo
+  killed them (runner, console hosts, other shells). Fixed in 53fffd5 (Git) and e03fb7b (fixtures); never call
+  `descendants()`/`ProcessHandle.of(pid)` for a kill after the root exited.
 - Incident: a `git bisect run` leaked GIT_DIR into test fixtures, which rewrote `.git/config` and moved `main`;
   repaired with owner approval. Never run fixture tests under `git bisect run`/hooks without unsetting repo env.
 
 ## Next
-1. Watch CI for the pushed `main` on both OSes; fix failures first. POSIX-only new tests (StamperTest core.fileMode,
-   GitTest daemon survival) run there first. Windows `index-treesitter` 0xC0000142 (DLL init) did not reproduce
-   locally and its CI log was never archived; if it recurs, suspect runner process pressure from parallel test tasks.
-2. Remove worktrees `bugfix-review`, `fine-tune`, `ft-a`…`ft-d`, `bisect2` once CI is green.
+1. Watch CI for the pushed `main` on both OSes; fix failures first (Ubuntu was green at d531a9f; Windows is the
+   first run with the descendant fix).
+2. Remove worktrees `bugfix-review`, `fine-tune`, `ft-a`…`ft-d` once CI is green.
 3. Possible later D-rows: per-question blocked-work unblocking (F-105 (1)); cross-version assessment reuse.
 
 ## Carried-forward debts (unchanged)

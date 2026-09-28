@@ -15,8 +15,11 @@ class WindowsOwnerTest {
     @Test
     fun `failure before job assignment terminates the suspended child`(@TempDir root: Path) {
         var pid = 0L
+        // Taken while the child exists, the handle carries its start time: a reused PID is never judged or killed.
+        var child: ProcessHandle? = null
         val owner = WindowsOwner { created ->
             pid = created
+            child = ProcessHandle.of(created).orElse(null)
             throw OsFailure("AssignProcessToJobObject", 5, "injected assignment failure")
         }
         try {
@@ -25,10 +28,10 @@ class WindowsOwnerTest {
                     root, System.getenv(), root.resolve("child.log")))
             }
             assertTrue(pid > 0)
-            assertFalse(ProcessHandle.of(pid).map { it.isAlive }.orElse(false), "unassigned process must be gone")
+            assertFalse(child?.isAlive ?: false, "unassigned process must be gone")
             assertFalse(Files.exists(root.resolve("ran.txt")), "the child never resumed")
         } finally {
-            ProcessHandle.of(pid).ifPresent { if (it.isAlive) it.destroyForcibly() }
+            child?.let { if (it.isAlive) it.destroyForcibly() }
         }
     }
 }

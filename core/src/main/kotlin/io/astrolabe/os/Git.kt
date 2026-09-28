@@ -516,7 +516,7 @@ public class Git @JvmOverloads constructor(
         var completed = false
         try {
             while (true) {
-                process.descendants().use { children -> children.forEach { descendants[it.pid()] = it } }
+                collectLiveDescendants(process, descendants)
                 pumps.filter { it.isDone }.forEach { it.get() }
                 if (!process.isAlive && pumps.all { it.isDone }) break
                 val remaining = deadline - System.nanoTime()
@@ -538,7 +538,7 @@ public class Git @JvmOverloads constructor(
             // D-303: only a deadline, overflow, interrupt or error kills; detached auto-gc/maintenance and
             // fsmonitor daemons legitimately outlive a completed command.
             if (!completed) {
-                process.descendants().use { children -> children.forEach { descendants[it.pid()] = it } }
+                collectLiveDescendants(process, descendants)
                 descendants.values.toList().asReversed().forEach { if (it.isAlive) it.destroyForcibly() }
                 if (process.isAlive) process.destroyForcibly()
             }
@@ -550,6 +550,16 @@ public class Git @JvmOverloads constructor(
                 runCatching { process.errorStream.close() }
             }
         }
+    }
+
+    /**
+     * D-303: `Process.descendants()` matches recorded parent PIDs and bounds them by the parent's start time only
+     * while the parent is in the snapshot. Once git has exited, Windows orphans whose dead parent had the same PID
+     * (and their whole subtrees) would be returned and killed, so a snapshot counts only if git outlived it.
+     */
+    private fun collectLiveDescendants(process: Process, into: MutableMap<Long, ProcessHandle>) {
+        val snapshot = process.descendants().use { it.toList() }
+        if (process.isAlive) snapshot.forEach { into[it.pid()] = it }
     }
 
     private fun applyEnvironment(
