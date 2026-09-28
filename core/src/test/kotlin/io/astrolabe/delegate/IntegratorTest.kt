@@ -38,6 +38,7 @@ import io.astrolabe.workspace.TEST_ENV
 import io.astrolabe.workspace.VersionRegistry
 import io.astrolabe.workspace.WorkspaceFixture
 import io.astrolabe.workspace.Workspaces
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
@@ -51,6 +52,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -171,6 +173,28 @@ class IntegratorTest {
                 assertTrue(interrupted, "the failure must occur during main-line publication")
                 assertEquals(before, rig.stamp(), "publication must not leave a mixture of original and writer bytes")
                 assertTrue(outcome.getOrNull() !is Integration.Published)
+            }
+        }
+    }
+
+    @Test
+    fun `cancellation during publication rolls back and propagates`(@TempDir state: Path) = runTest {
+        Rig(state, { linkedMapOf("src/a.py" to "a = 7\n", "src/b.py" to "b = 8\n") }).use { rig ->
+            val delegator = rig.delegator(backgroundScope)
+            val handle = started(delegator.dispatch(ChildKind.Writer, rig.task("I1", listOf("src/")), DispatchMode.Sync))
+            val result = rig.collected(delegator, handle, delegator.collect(handle))
+            val before = rig.stamp()
+            var cancelled = false
+            rig.registry.addListener { change ->
+                if (!cancelled && change.path == "src/a.py") {
+                    cancelled = true
+                    throw CancellationException("injected cancellation after first publication write")
+                }
+            }.use {
+                assertFailsWith<CancellationException> { rig.integrator().integrate(listOf(result)) }
+                assertTrue(cancelled, "the cancellation must occur during main-line publication")
+                assertEquals(before, rig.stamp(), "cancelled publication must restore the original bytes")
+                assertTrue(rig.intents.open().isEmpty(), "the rolled-back publication intent is reconciled")
             }
         }
     }

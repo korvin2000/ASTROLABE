@@ -27,6 +27,12 @@ public data class Intent(
     @Serializable(with = InstantSerializer::class) val at: Instant,
     /** Durable authority/evidence reference explaining the disposition of an unknown outcome. */
     val reconciliation: String? = null,
+    /**
+     * A foreground action whose classified effects (argv-predicted, no D-class, network, install, git-ref,
+     * privilege or outside-workspace capability) stay inside the workspace, so a stamp of the tree observes them
+     * all. Legacy rows default to `false` and stay host-reconciled (D-321).
+     */
+    val workspaceConfined: Boolean = false,
 ) {
     init {
         require(intentId.isNotBlank() && actionId.isNotBlank()) { "intent needs ids" }
