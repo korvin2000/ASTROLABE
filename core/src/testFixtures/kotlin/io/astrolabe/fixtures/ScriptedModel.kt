@@ -38,6 +38,12 @@ public enum class FaultKind {
     UnsupportedSchema,
     Transport,
     RateLimit,
+
+    /** The provider refused the request for size after admission: `await` throws ProviderError.ContextOverflow. */
+    ContextOverflow,
+
+    /** Credentials refused: `await` throws ProviderError.Authentication. */
+    Authentication,
 }
 
 /**

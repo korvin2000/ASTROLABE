@@ -88,14 +88,46 @@ public data class ToolResult(
     }
 }
 
-/** Reference to provider-side reasoning; the content is opaque and never replayed across providers (AX-07). */
+/**
+ * Reference to provider-side reasoning; the content is opaque and never replayed across providers (AX-07).
+ *
+ * Provenance convention for transport adapters (D-326): [providerTag] is `<provider>/<model>@<api>` (see [origin]) and
+ * [opaque] holds the replay data the transport needs, so [native] stays `null` — a non-null `native` has unknown
+ * effective size and blocks admission ([estimate]). The raw provider reply is archived by the cell's journal, not here.
+ */
 @Serializable
 @SerialName("reasoning_ref")
 public data class ReasoningRef(
     val providerTag: String,
     val opaque: JsonElement? = null,
     override val native: JsonElement? = null,
-) : Item
+) : Item {
+    /** The producing model of a `<provider>/<model>@<api>` tag; `null` for any other tag form. */
+    public fun origin(): Origin? = Origin.parse(providerTag)
+
+    /** Where reasoning came from; replay is valid only to the same provider, model and wire API. */
+    public data class Origin(val provider: String, val model: String, val api: String) {
+        init {
+            require(provider.isNotBlank() && model.isNotBlank() && api.isNotBlank()) { "origin parts must not be blank" }
+            require('/' !in provider && '@' !in api) { "provider has no '/', api has no '@'" }
+        }
+
+        /** `<provider>/<model>@<api>`; model ids may themselves contain `/` and `@`. */
+        val tag: String get() = "$provider/$model@$api"
+
+        override fun toString(): String = tag
+
+        public companion object {
+            @JvmStatic
+            public fun parse(tag: String): Origin? {
+                val slash = tag.indexOf('/')
+                val at = tag.lastIndexOf('@')
+                if (slash <= 0 || at <= slash + 1 || at == tag.lastIndex) return null
+                return Origin(tag.substring(0, slash), tag.substring(slash + 1, at), tag.substring(at + 1))
+            }
+        }
+    }
+}
 
 /** Usage reported by the provider for one call; an accounting item, never sent back. */
 @Serializable

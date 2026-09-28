@@ -40,6 +40,8 @@ import io.astrolabe.provider.InvocationId
 import io.astrolabe.provider.Item
 import io.astrolabe.provider.Message
 import io.astrolabe.provider.ProblemKind
+import io.astrolabe.provider.InvocationProgress
+import io.astrolabe.provider.ObservableAdapter
 import io.astrolabe.provider.ProviderError
 import io.astrolabe.provider.ReasoningRef
 import io.astrolabe.provider.Request
@@ -304,7 +306,7 @@ public class Cell @JvmOverloads constructor(
             } catch (capacity: DigestCapacity) {
                 return partial(PartialReason.Pressure, "replan: ${capacity.message}")
             }
-            val layout = Layout.render(ctx.role, mask, ctx.config.executionMode, ctx.prime, CompiledK(ContractSlice.forIncrement(contract, increment), ctx.preexisting, sections), transcript(contract))
+            val layout = Layout.render(ctx.role, mask, ctx.config.executionMode, ctx.prime, CompiledK(ContractSlice.forIncrement(contract, increment), ctx.preexisting, sections), transcript(contract), capabilities.caching.breakpoints)
             val request = Request(layout + anchor.segment(), schemas.schemas, ctx.model.profile, ctx.model.effort, ctx.model.maxOutputTokens, mask)
             val estimate = estimator.estimate(request)
             when (val validation = ctx.model.adapter.validate(request, estimate)) {
@@ -353,6 +355,7 @@ public class Cell @JvmOverloads constructor(
             var received: Response? = null
             var failure: Throwable? = null
             var terminal: io.astrolabe.provider.Terminal? = null
+            val progress = progressRelay(invocationId)
             try {
                 invocation = ctx.model.adapter.start(request, invocationId)
                 received = invocation.await()
@@ -375,6 +378,7 @@ public class Cell @JvmOverloads constructor(
                         text = "provider terminal not reconciled within ${defaults.providerTerminalWaitSeconds}s; usage unknown, conservative funding retained",
                         at = clock.instant()))
                 }
+                runCatching { progress?.close() }
                 val settled = terminal
                 val usage = if (terminalTimedOut) null else settled?.usage ?: received?.usage
                 val knownInput = usage?.quantities?.filterKeys { it.isInput }?.values?.fold(0L, Accounting::add) ?: 0L
@@ -395,8 +399,20 @@ public class Cell @JvmOverloads constructor(
                 }
             }
             failure?.let { error ->
-                if (error is ProviderError) return failed("provider ${error::class.simpleName}: ${error.message}")
-                throw error
+                when (error) {
+                    // I-17, D-331: the provider's own count refused the request; an estimation miss rebuilds like a validation overflow.
+                    is ProviderError.ContextOverflow -> {
+                        contextAdmission.rejected(estimate)
+                        if (rebuilds >= 1) return partial(PartialReason.Pressure, "replan: the provider refused the request for size after a rebuild (${error.message}) — split the increment")
+                        rebuild("the provider refused the request for size (${error.message})")
+                        return null
+                    }
+                    // D-331: credentials are the host's to fix; retrying or failing the increment would not help.
+                    is ProviderError.Authentication -> return blocked(BlockedRequest("provider authentication failed for profile ${ctx.model.profile.id}: ${error.message}",
+                        listOf("invocation ${invocationId.value}"), null, turn))
+                    is ProviderError -> return failed("provider ${error::class.simpleName}: ${error.message}")
+                    else -> throw error
+                }
             }
             val response = checkNotNull(received)
             val usage = terminal?.usage ?: response.usage
@@ -658,6 +674,22 @@ public class Cell @JvmOverloads constructor(
         }
 
         // ---------------------------------------------------------- results
+
+        /** A-08: content-free progress of [id] as `ModelProgress` events, when the adapter reports any; closed after the terminal. */
+        private fun progressRelay(id: InvocationId): AutoCloseable? {
+            val bus = events ?: return null
+            val observable = ctx.model.adapter as? ObservableAdapter ?: return null
+            return observable.addListener { p ->
+                if (p.id != id) return@addListener
+                bus.emit(
+                    when (p) {
+                        is InvocationProgress.Started -> AgentEvent.Cell.ModelProgress(ids, id.value, "started")
+                        is InvocationProgress.Output -> AgentEvent.Cell.ModelProgress(ids, id.value, "output", textChars = p.textChars, outputTokens = p.outputTokens)
+                        is InvocationProgress.Retrying -> AgentEvent.Cell.ModelProgress(ids, id.value, "retrying", attempt = p.attempt)
+                    },
+                )
+            }
+        }
 
         private fun appendNative(response: Response) {
             for (item in response.items) {

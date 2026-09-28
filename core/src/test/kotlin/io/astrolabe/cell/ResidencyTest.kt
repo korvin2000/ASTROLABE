@@ -19,6 +19,8 @@ import io.astrolabe.provider.Items
 import io.astrolabe.provider.Message
 import io.astrolabe.provider.ProblemKind
 import io.astrolabe.provider.Request
+import io.astrolabe.provider.Validations
+import io.astrolabe.provider.ReasoningRef
 import io.astrolabe.provider.Segment
 import io.astrolabe.provider.SegmentKind
 import io.astrolabe.provider.ToolCall
@@ -31,6 +33,7 @@ import io.astrolabe.workset.Workset
 import io.astrolabe.workspace.Ranges
 import io.astrolabe.workspace.VersionChange
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -103,6 +106,27 @@ class ResidencyTest {
         effort = Effort.Medium,
         maxOutputTokens = 1_000,
     )
+
+    @Test
+    fun `reasoning stays with its tool calls through eviction, trimming and the rebuild tail`() {
+        // Anthropic thinking with tool use and Gemini thought signatures replay only together with their calls (A-06).
+        val reasoning = ReasoningRef("anthropic/claude@anthropic-messages", JsonPrimitive("signed thinking"))
+        val thinking = listOf(
+            Resident(reasoning, 1, 12),
+            message("turn 1: reading two files\nthen deciding", 1),
+            call("r1", 1), call("r2", 1),
+            result("r1", "#901", 1, 20), result("r2", "#902", 1, 20),
+        )
+        val residents = thinking + (2..30).flatMap { turn(it, results = 1, lines = 5) }
+        val evicted = residency.batch(residents, 30)
+        assertTrue(evicted.stubbed.any { it.alias == "#901" } && evicted.trimmed > 0, "the turn-1 results were stubbed and its message trimmed")
+        val items = evicted.items
+        assertTrue(items.indexOf(reasoning) in 0 until items.indexOfFirst { it is ToolCall && it.id == "r1" }, "the reasoning item is kept before its calls")
+        assertFalse(Items.pairs(items).broken)
+        assertTrue(Validations.standard(request(items), request(items).estimate(estimator), FakeProfiles.main.capabilities) is Validation.Ok)
+        val tail = residency.tail(evicted.residents + turn(31, results = 1, lines = 5), 31)
+        assertEquals(reasoning, tail.first().item, "a kept turn keeps its reasoning")
+    }
 
     @Test
     fun `results live k turns then become stubs in place and every call-result unit stays complete`() {

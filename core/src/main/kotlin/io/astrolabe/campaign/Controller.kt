@@ -393,6 +393,8 @@ public class Controller @JvmOverloads public constructor(
     private val extraction: Extraction = Extraction.NONE,
     /** The host's optional layers (tier-1 index, dense retrieval, generated tools, mounts), each read only under its flag. */
     private val layers: OptionalLayers = OptionalLayers(),
+    /** Per-profile admission estimators for routed cells (D-06, D-327); `null` keeps the supplied cell model's estimator. */
+    private val estimators: io.astrolabe.provider.EstimatorFactory? = null,
 ) {
     // Resolved once per campaign at open, its attempt boundary (§12.2).
     private val plugged = Collections.synchronizedMap(WeakHashMap<OpenedCampaign, PluggedLayers>())
@@ -1301,7 +1303,7 @@ public class Controller @JvmOverloads public constructor(
             is Routed.Refused -> Routing(model, compiled, null, routed)
             is Routed.Selected -> {
                 if (routed.profile.id == model.profile.id && routed.effort == model.effort) return Routing(model, compiled, routed, null)
-                val cellModel = CellModel(model.adapter, routed.profile, model.estimator, routed.effort, model.maxOutputTokens)
+                val cellModel = model.rebind(routed.profile, routed.effort, estimators ?: io.astrolabe.provider.EstimatorFactory { model.estimator })
                 Routing(cellModel, if (routed.profile.id == model.profile.id) compiled else recompile(routed.profile), routed, null)
             }
         }

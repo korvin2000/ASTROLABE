@@ -83,6 +83,15 @@ class LayoutTest {
     }
 
     @Test
+    fun `a profile without explicit cache markers gets the same regions without breakpoints`() {
+        val marked = Layout.render(role, mask, ExecutionMode.TrustedLocal, prime, k(), transcript())
+        val automatic = Layout.render(role, mask, ExecutionMode.TrustedLocal, prime, k(), transcript(), explicitBreakpoints = false)
+
+        assertTrue(automatic.none { it.breakpoint })
+        assertEquals(marked.map { it.copy(breakpoint = false) }, automatic, "the flag changes no byte of any region (D-329)")
+    }
+
+    @Test
     fun `S carries the kernel contract, the mask, the evidence lines, the error policy, the data rule and the mode`() {
         val system = Layout.system(role, mask, ExecutionMode.TrustedLocal)
 

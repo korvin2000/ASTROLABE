@@ -25,6 +25,7 @@ import io.astrolabe.kb.EmptyKb
 import io.astrolabe.kb.Kb
 import io.astrolabe.os.Git
 import io.astrolabe.os.LocalOs
+import io.astrolabe.provider.EstimatorFactory
 import io.astrolabe.provider.ProviderAdapter
 import io.astrolabe.store.Store
 import io.astrolabe.telemetry.Spans
@@ -38,6 +39,9 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.job
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import java.nio.file.Path
 import java.time.Clock
 import java.util.concurrent.atomic.AtomicReference
@@ -49,6 +53,10 @@ import java.util.concurrent.atomic.AtomicReference
  * **Resources.** [open] acquires the project lock and the store; [Project.close] releases them. [close] cancels
  * every running campaign (each settles its checkpoint before it ends) and closes the event bus; it does not
  * close projects, which the host opened and closes.
+ *
+ * **Shutdown order** (D-328): stop campaigns → [close] (cells settle terminal accounting) → close the adapter → close
+ * its transport. With [ownsAdapter], [close] waits for the campaigns to settle, up to
+ * `Defaults.providerTerminalWaitSeconds`, and then closes an `AutoCloseable` adapter itself.
  */
 public class Astrolabe @JvmOverloads public constructor(
     public val config: Config,
@@ -60,12 +68,16 @@ public class Astrolabe @JvmOverloads public constructor(
     layers: OptionalLayers = OptionalLayers(),
     /** The host's `deploy` stage (§14.2); without one a requested deploy is refused. */
     private val deployer: Deployer? = null,
+    /** The estimator admission is decided with, per profile (D-06, I-17); the default is the planning heuristic. */
+    private val estimators: EstimatorFactory = EstimatorFactory { HeuristicEstimator() },
+    /** Whether [close] also closes [adapter] (D-328); a borrowed adapter is the host's to close. */
+    private val ownsAdapter: Boolean = false,
 ) : AutoCloseable {
     /** Every campaign's events, in emission order per bus; filter by work id or use [CampaignHandle.events]. */
     public val events: Events = Events(clock)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val controller = Controller(config, clock, idGen, events, spans = Spans(idGen, events), layers = layers)
+    private val controller = Controller(config, clock, idGen, events, spans = Spans(idGen, events), layers = layers, estimators = estimators)
 
     init {
         val violations = config.violations()
@@ -99,7 +111,7 @@ public class Astrolabe @JvmOverloads public constructor(
         synchronized(project) {
             check(project.active?.done != false) { "project already runs campaign ${project.active?.workId?.value}" }
             val opened = controller.open(project, CampaignRequest(WorkId(idGen.next("W")), AttemptId(FIRST_ATTEMPT), request), chosen)
-            val model = CellModel(adapter, profile, HeuristicEstimator())
+            val model = CellModel(adapter, profile, estimators.estimatorFor(profile))
             val published = AtomicReference<PublicationRun?>(null)
             val job = scope.async {
                 opened.use { c ->
@@ -114,7 +126,15 @@ public class Astrolabe @JvmOverloads public constructor(
 
     override fun close() {
         scope.cancel("Astrolabe closed")
-        events.close()
+        try {
+            if (ownsAdapter && adapter is AutoCloseable) {
+                // D-328: cells settle their terminal accounting under NonCancellable before the transport goes away.
+                runBlocking { withTimeoutOrNull(config.defaults.providerTerminalWaitSeconds * 1_000L) { scope.coroutineContext.job.join() } }
+                adapter.close()
+            }
+        } finally {
+            events.close()
+        }
     }
 
     public companion object {

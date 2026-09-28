@@ -648,6 +648,34 @@ class CellTest {
     }
 
     @Test
+    fun `a provider overflow after admission rebuilds once, and a second one ends the cell partial`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val exit = f.run(ScriptedModel.build {
+                fault(FaultKind.ContextOverflow)
+                fault(FaultKind.ContextOverflow)
+            })
+
+            val partial = assertIs<CellExit.Partial>(exit)
+            assertEquals(PartialReason.Pressure, partial.reason)
+            assertTrue(partial.hint.contains("refused the request for size after a rebuild"), partial.hint)
+            assertEquals(2, f.adapter.calls.size, "both calls were dispatched and accounted")
+            assertEquals(1, partial.checkpoint.rebuilds)
+        }
+    }
+
+    @Test
+    fun `a provider authentication failure blocks on the host instead of failing the increment`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val exit = f.run(ScriptedModel.build { fault(FaultKind.Authentication) })
+
+            val blocked = assertIs<CellExit.Blocked>(exit)
+            assertTrue(blocked.request.reason.contains("authentication") && blocked.request.reason.contains("invalid API key"), blocked.request.reason)
+            assertNull(blocked.request.question, "an external blocker, not a question for the user")
+            assertEquals(CellStatus.Blocked, f.checkpoints.latest(f.ids.context!!)!!.status)
+        }
+    }
+
+    @Test
     fun `cancellation persists a cancelled checkpoint before it propagates`() = runTest {
         CellFixture(stateRoot).use { f ->
             val context = f.context(ScriptedModel.of(Scripted.Reply(listOf(say("look"), tree("c1")))), holdResponses = true)

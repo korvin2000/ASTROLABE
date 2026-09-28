@@ -192,9 +192,12 @@ public object Layout {
 
     /**
      * The cached regions in `S R K T` order, each closed by a cache breakpoint. Regions the role's
-     * context view excludes, and empty ones, are left out.
+     * context view excludes, and empty ones, are left out. [explicitBreakpoints] is the profile's
+     * `caching.breakpoints` (D-329): a provider that caches prefixes automatically receives no markers, which
+     * changes no byte of the regions.
      */
     @JvmStatic
+    @JvmOverloads
     public fun render(
         role: Role,
         mask: ToolMask,
@@ -202,26 +205,27 @@ public object Layout {
         prime: String,
         k: CompiledK,
         transcript: Transcript,
+        explicitBreakpoints: Boolean = true,
     ): List<Segment> {
         val segments = ArrayList<Segment>(4)
         if (ContextPart.Kernel in role.contextView) {
-            segments += segment(SegmentKind.S, ItemRole.System, system(role, mask, mode))
+            segments += segment(SegmentKind.S, ItemRole.System, system(role, mask, mode), explicitBreakpoints)
         }
         if (ContextPart.Prime in role.contextView && prime.isNotBlank()) {
-            segments += segment(SegmentKind.R, ItemRole.User, prime)
+            segments += segment(SegmentKind.R, ItemRole.User, prime, explicitBreakpoints)
         }
         if (ContextPart.ContractSlice in role.contextView) {
-            segments += segment(SegmentKind.K, ItemRole.User, compiled(k))
+            segments += segment(SegmentKind.K, ItemRole.User, compiled(k), explicitBreakpoints)
         }
         if (ContextPart.Transcript in role.contextView && !transcript.isEmpty) {
             val items = transcript.pinned.map { Message.text(ItemRole.User, it) } + transcript.items
-            segments += Segment(SegmentKind.T, items, breakpoint = true)
+            segments += Segment(SegmentKind.T, items, breakpoint = explicitBreakpoints)
         }
         return segments
     }
 
     // `[R]` and `[K]` are harness-supplied context, not policy: only `[S]` speaks as the system, which
     // keeps the data/instruction rule true of everything the model reads below it.
-    private fun segment(kind: SegmentKind, role: ItemRole, text: String): Segment =
-        Segment(kind, listOf(Message.text(role, text)), breakpoint = true)
+    private fun segment(kind: SegmentKind, role: ItemRole, text: String, breakpoint: Boolean): Segment =
+        Segment(kind, listOf(Message.text(role, text)), breakpoint = breakpoint)
 }

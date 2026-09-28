@@ -287,6 +287,8 @@ public class FakeAdapter(
                 FaultKind.UnsupportedSchema -> error(ProviderError.UnsupportedSchema("tool schema rejected by provider"))
                 FaultKind.Transport -> error(ProviderError.Transport("connection reset"))
                 FaultKind.RateLimit -> error(ProviderError.RateLimit("rate limited", fault.retryAfterSeconds))
+                FaultKind.ContextOverflow -> error(ProviderError.ContextOverflow("prompt is too long", reportedInputTokens = FakeTokenizer.count(request)))
+                FaultKind.Authentication -> error(ProviderError.Authentication("invalid API key"))
             }
         }
 

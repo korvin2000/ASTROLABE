@@ -17,7 +17,9 @@ import io.astrolabe.event.Events
 import io.astrolabe.event.Subscription
 import io.astrolabe.event.Views
 import io.astrolabe.id.WorkId
+import io.astrolabe.provider.EstimatorFactory
 import io.astrolabe.provider.JavaProviderAdapter
+import io.astrolabe.provider.ProviderAdapter
 import io.astrolabe.provider.ProviderAdapters
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -46,17 +48,35 @@ import java.util.concurrent.ExecutionException
  * **Cancellation.** Cancelling the future of [JavaCampaignHandle.await] cancels the campaign, as does
  * [JavaCampaignHandle.cancel]; the outcome is then [CampaignOutcome.Cancelled].
  */
-public class AstrolabeJava @JvmOverloads public constructor(
-    config: Config,
-    adapter: JavaProviderAdapter,
-    authority: JavaAuthority,
-    clock: Clock = Clock.systemUTC(),
-    /** Optional layers (D-251–D-253); a dense source comes from `Retrievers.fromJava(JavaRetriever)`. */
-    layers: OptionalLayers = OptionalLayers(),
-    /** The host's `deploy` stage (§14.2), a synchronous SPI; without one a requested deploy is refused. */
-    deployer: Deployer? = null,
-) : AutoCloseable {
-    private val core = Astrolabe(config, ProviderAdapters.fromJava(adapter), Authorities.fromJava(authority), clock, layers = layers, deployer = deployer)
+public class AstrolabeJava private constructor(private val core: Astrolabe) : AutoCloseable {
+    @JvmOverloads
+    public constructor(
+        config: Config,
+        adapter: JavaProviderAdapter,
+        authority: JavaAuthority,
+        clock: Clock = Clock.systemUTC(),
+        /** Optional layers (D-251–D-253); a dense source comes from `Retrievers.fromJava(JavaRetriever)`. */
+        layers: OptionalLayers = OptionalLayers(),
+        /** The host's `deploy` stage (§14.2), a synchronous SPI; without one a requested deploy is refused. */
+        deployer: Deployer? = null,
+    ) : this(Astrolabe(config, ProviderAdapters.fromJava(adapter), Authorities.fromJava(authority), clock, layers = layers, deployer = deployer))
+
+    /**
+     * A provider module's adapter (for example `provider-ai-gate`'s `AiGateAdapter`), passed as the object the module
+     * built, with the per-profile [estimators] it supplies (D-06); [ownsAdapter] lets [close] close it (D-328).
+     */
+    @JvmOverloads
+    public constructor(
+        config: Config,
+        adapter: ProviderAdapter,
+        authority: JavaAuthority,
+        estimators: EstimatorFactory,
+        clock: Clock = Clock.systemUTC(),
+        layers: OptionalLayers = OptionalLayers(),
+        deployer: Deployer? = null,
+        ownsAdapter: Boolean = false,
+    ) : this(Astrolabe(config, adapter, Authorities.fromJava(authority), clock, layers = layers, deployer = deployer, estimators = estimators, ownsAdapter = ownsAdapter))
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** Opens [repo] (state root, project lock, store); the host closes the returned project. */

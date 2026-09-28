@@ -150,4 +150,50 @@ public sealed class ProviderError(message: String, cause: Throwable? = null) : R
     public class UnsupportedSchema(message: String) : ProviderError(message)
 
     public class MissingUsage(message: String) : ProviderError(message)
+
+    /**
+     * The provider refused the request for size after admission (I-17): an estimation miss, never a malformed
+     * history. The cell rebuilds its projection once, as for a [ProblemKind.ContextOverflow] validation.
+     */
+    public class ContextOverflow(message: String, public val reportedInputTokens: Long? = null) : ProviderError(message)
+
+    /** Credentials missing, expired or refused: the campaign is blocked on the host, never retried as transport. */
+    public class Authentication(message: String, cause: Throwable? = null) : ProviderError(message, cause)
+
+    /** A deadline or idle timeout; with [outcomeUnknown] the provider may still have processed and billed the call. */
+    public class Timeout(message: String, public val outcomeUnknown: Boolean) : ProviderError(message)
+}
+
+/**
+ * Content-free progress of one invocation (D-51), for hosts that show a live call: never text, so the journal stays
+ * the single record of model output. Delivered on the adapter's threads at a bounded rate; listeners must not block.
+ */
+public sealed interface InvocationProgress {
+    public val id: InvocationId
+
+    /** The provider accepted the request; [providerRequestId] when the transport knows one. */
+    public data class Started(override val id: InvocationId, val providerRequestId: String?) : InvocationProgress
+
+    /** Output so far: characters of text, and output tokens when the provider streams a count. */
+    public data class Output(override val id: InvocationId, val textChars: Long, val outputTokens: Long?) : InvocationProgress
+
+    /** The transport retries the call ([attempt] is the next one); retry policy stays in the transport. */
+    public data class Retrying(override val id: InvocationId, val attempt: Int, val reason: String) : InvocationProgress
+}
+
+public fun interface InvocationListener {
+    public fun onProgress(progress: InvocationProgress)
+}
+
+/** An adapter that reports [InvocationProgress]; closing the returned handle stops delivery to [listener]. */
+public interface ObservableAdapter : ProviderAdapter {
+    public fun addListener(listener: InvocationListener): AutoCloseable
+}
+
+/**
+ * The estimator admission is decided with, per profile (D-06, I-17): a provider module supplies one that counts
+ * its effective wire form; hosts without one use the planning heuristic.
+ */
+public fun interface EstimatorFactory {
+    public fun estimatorFor(profile: Profile): TokenEstimator
 }

@@ -22,6 +22,7 @@ class EventsTest {
     private val samples: List<AgentEvent> = listOf(
         AgentEvent.Campaign.Opened(ids, "U1"),
         AgentEvent.Cell.ModelResponded(ids, "inv-1", StopReason.ToolUse, null),
+        AgentEvent.Cell.ModelProgress(ids, "inv-1", "output", textChars = 120, outputTokens = 30),
         AgentEvent.Cell.ToolCalled(ids, 1, "look", "read", Phase.Locate, SpanId("s1"), SpanId("s0")),
         AgentEvent.Edit.Applied(ids, "e1", listOf("src/a.kt")),
         AgentEvent.Cell.Rebuilt(ids, "pressure", Generation(1)),
