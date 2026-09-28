@@ -192,8 +192,12 @@ public data class KbArgs(
     val why: String? = null,
     val id: String? = null,
     val note: JsonElement? = null,
+    val offset: Int = 0,
+    val version: String? = null,
 ) {
     init {
+        require(offset >= 0) { "kb offset must be nonnegative" }
+        require(offset == 0 || !version.isNullOrBlank()) { "continued kb pages need the returned version" }
         require(op in ToolOps.kb) { "unknown kb op '$op'" }
         when (op) {
             "search" -> require(!query.isNullOrBlank() && !why.isNullOrBlank()) { "kb(search) needs query and why" }

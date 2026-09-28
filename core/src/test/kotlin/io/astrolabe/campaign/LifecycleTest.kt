@@ -176,7 +176,7 @@ class LifecycleTest {
             "cell completed" to setOf("Dispatched", "Committed", "IncrementCancelled", "Stopped"),
             "cell blocked" to setOf("Unblocked", "IncrementCancelled", "Stopped"),
             "verified" to setOf("Committed", "Finishing", "Stopped"),  // a re-commit refreshes regression evidence
-            "finishing" to setOf("Finished", "Stopped"),
+            "finishing" to setOf("Finished", "Stopped", "Resumed"),
             "waiting for input" to setOf("Resumed"),
             "completed" to emptySet(),
             "failed" to emptySet(),

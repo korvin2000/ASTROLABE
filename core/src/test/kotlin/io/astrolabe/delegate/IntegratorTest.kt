@@ -22,6 +22,9 @@ import io.astrolabe.cell.TouchKind
 import io.astrolabe.contract.Shape
 import io.astrolabe.evidence.Coherence
 import io.astrolabe.evidence.InMemoryIntentJournal
+import io.astrolabe.evidence.Intent
+import io.astrolabe.evidence.IntentStatus
+import io.astrolabe.evidence.SqliteIntentJournal
 import io.astrolabe.fixtures.FixedIdGen
 import io.astrolabe.id.ContextId
 import io.astrolabe.id.Digest
@@ -29,6 +32,7 @@ import io.astrolabe.id.ExecutionGeneration
 import io.astrolabe.id.FileVersion
 import io.astrolabe.provider.BillingDimension
 import io.astrolabe.register.Register
+import io.astrolabe.store.Store
 import io.astrolabe.workspace.Stamper
 import io.astrolabe.workspace.TEST_ENV
 import io.astrolabe.workspace.VersionRegistry
@@ -36,8 +40,13 @@ import io.astrolabe.workspace.WorkspaceFixture
 import io.astrolabe.workspace.Workspaces
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.io.TempDir
+import org.junit.jupiter.api.condition.EnabledOnOs
+import org.junit.jupiter.api.condition.OS
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
@@ -111,6 +120,133 @@ class IntegratorTest {
     }
 
     private fun started(dispatch: Dispatch): Handle = assertIs<Dispatch.Started>(dispatch, dispatch.toString()).handle
+
+    @Test
+    fun `reopening a half-published integration restores durable preimages without a worktree`(@TempDir state: Path) {
+        WorkspaceFixture.create(state).use { fixture ->
+            val workspace = fixture.workspace
+            val originals = listOf("src/a.py", "src/b.py").associateWith { Files.readString(workspace.root.resolve(it)) }
+            val before = fixture.stamper.report().candidateId
+            val staged = originals.keys.map { it to "replacement for $it\n".toByteArray() }
+            val reference = IntegrationPublication.stage(workspace, staged, fixture.store.blobs, fixture.ids)
+            val intent = Intent("interrupted-integration", fixture.ids, "integrate", listOf("integrate", reference), null,
+                "publish two files", at = fixture.clock.instant())
+            val intents = SqliteIntentJournal(fixture.store, fixture.clock)
+            intents.record(intent)
+            intents.update(intent.intentId, IntentStatus.Dispatched)
+            Files.write(workspace.root.resolve(staged.first().first), staged.first().second)
+            assertTrue(fixture.stamper.report().candidateId != before)
+            // No writer worktree or in-memory postimages are supplied to the reopened recovery path.
+            fixture.store.close()
+
+            Store.open(state, fixture.repo.git, fixture.clock).use { reopened ->
+                val recoveredIntents = SqliteIntentJournal(reopened, fixture.clock)
+                IntegrationPublication.recover(workspace, VersionRegistry(workspace), reopened.blobs, recoveredIntents)
+                originals.forEach { (path, text) -> assertEquals(text, Files.readString(workspace.root.resolve(path))) }
+                assertEquals(before, Stamper(workspace, TEST_ENV).report().candidateId)
+                val recovered = assertNotNull(recoveredIntents.get(intent.intentId))
+                assertEquals(IntentStatus.Committed, recovered.status)
+                assertTrue(reference in recovered.reconciliation.orEmpty())
+                assertTrue(recoveredIntents.open().isEmpty())
+            }
+        }
+    }
+
+    @Test
+    fun `an interrupted multi-file publication restores all original bytes`(@TempDir state: Path) = runTest {
+        Rig(state, { linkedMapOf("src/a.py" to "a = 7\n", "src/b.py" to "b = 8\n") }).use { rig ->
+            val delegator = rig.delegator(backgroundScope)
+            val handle = started(delegator.dispatch(ChildKind.Writer, rig.task("I1", listOf("src/")), DispatchMode.Sync))
+            val result = rig.collected(delegator, handle, delegator.collect(handle))
+            val before = rig.stamp()
+            var interrupted = false
+            rig.registry.addListener { change ->
+                if (!interrupted && change.path == "src/a.py") {
+                    interrupted = true
+                    assertEquals("a = 7\n", rig.bytes("src/a.py"), "the first write happened before interruption")
+                    throw IOException("injected interruption after first publication write")
+                }
+            }.use {
+                val outcome = runCatching { rig.integrator().integrate(listOf(result)).single() }
+                assertTrue(interrupted, "the failure must occur during main-line publication")
+                assertEquals(before, rig.stamp(), "publication must not leave a mixture of original and writer bytes")
+                assertTrue(outcome.getOrNull() !is Integration.Published)
+            }
+        }
+    }
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    fun `failure writing the second integration file rolls back the first`(@TempDir state: Path) = runTest {
+        Rig(state, { linkedMapOf("src/a.py" to "a = 7\n", "src/b.py" to "b = 8\n") }).use { rig ->
+            val delegator = rig.delegator(backgroundScope)
+            val handle = started(delegator.dispatch(ChildKind.Writer, rig.task("I1", listOf("src/")), DispatchMode.Sync))
+            val result = rig.collected(delegator, handle, delegator.collect(handle))
+            val before = rig.stamp()
+            val second = rig.main.root.resolve("src/b.py")
+            var firstWasWritten = false
+            rig.registry.addListener { change -> if (change.path == "src/a.py" && rig.bytes("src/a.py") == "a = 7\n") firstWasWritten = true }.use {
+                try {
+                    val checks = IntegrationChecks { _, _, _ ->
+                        Files.setAttribute(second, "dos:readonly", true)
+                        IntegrationCheck(emptyList())
+                    }
+                    val outcome = runCatching { rig.integrator(checks).integrate(listOf(result)).single() }
+                    assertTrue(firstWasWritten, "the injected write failure must follow the first publication write")
+                    assertEquals(before, rig.stamp(), "the successful first write must be rolled back")
+                    assertTrue(outcome.getOrNull() !is Integration.Published)
+                } finally {
+                    Files.setAttribute(second, "dos:readonly", false)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `combined checks cannot publish a tree with changed dependencies`(@TempDir state: Path) = runTest {
+        Rig(state, { mapOf("src/a.py" to "def a():\n    return 7\n") }).use { rig ->
+            val delegator = rig.delegator(backgroundScope)
+            val handle = started(delegator.dispatch(ChildKind.Writer, rig.task("I1", listOf("src/a.py")), DispatchMode.Sync))
+            val result = rig.collected(delegator, handle, delegator.collect(handle))
+            val before = rig.stamp()
+            val integrator = rig.integrator(IntegrationChecks { tree, _, _ ->
+                Files.writeString(tree.root.resolve("README.md"), "unreviewed dependency")
+                IntegrationCheck(emptyList())
+            })
+            assertIs<Integration.Rejected>(integrator.integrate(listOf(result)).single())
+            assertEquals(before, rig.stamp())
+            assertTrue(rig.intents.open().isEmpty())
+        }
+    }
+
+    @Test
+    fun `publication rechecks contract and generation after waiting for main ownership`(@TempDir state: Path) = runTest {
+        Rig(state, { mapOf("src/a.py" to "def a():\n    return 7\n") }).use { rig ->
+            val delegator = rig.delegator(backgroundScope)
+            val handle = started(delegator.dispatch(ChildKind.Writer, rig.task("I1", listOf("src/a.py")), DispatchMode.Sync))
+            val result = rig.collected(delegator, handle, delegator.collect(handle))
+            val before = rig.bytes("src/a.py")
+            for (amendContract in listOf(true, false)) {
+                rig.authority = IntegrationAuthority(1, ExecutionGeneration.INITIAL, PublicationAuthority { null })
+                val checked = CompletableDeferred<Unit>()
+                val integrator = rig.integrator(IntegrationChecks { _, _, _ ->
+                    rig.main.mutation.lock()
+                    checked.complete(Unit)
+                    IntegrationCheck(emptyList())
+                })
+                val pending = async { integrator.integrate(listOf(result)).single() }
+                checked.await()
+                runCurrent()
+                rig.authority = if (amendContract) rig.authority.copy(contractVersion = 2)
+                    else rig.authority.copy(generation = ExecutionGeneration(2))
+                rig.main.mutation.unlock()
+                val rejected = assertIs<Integration.Rejected>(pending.await())
+                assertEquals(IntegrationStep.Publish, rejected.step)
+                assertEquals(before, rig.bytes("src/a.py"))
+                assertTrue(rig.intents.open().isEmpty())
+            }
+        }
+    }
 
     @Test
     fun `FX-26 writer form - a cancelled writer's late patch is archived and its publication rejected`(@TempDir state: Path) = runTest {

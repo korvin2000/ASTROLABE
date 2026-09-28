@@ -1,6 +1,5 @@
 package io.astrolabe.eval
 
-import io.astrolabe.AttemptConfig
 import io.astrolabe.Config
 import io.astrolabe.fixtures.FakeProfiles
 import io.astrolabe.id.AttemptId
@@ -22,6 +21,7 @@ import java.math.RoundingMode
 import java.time.Instant
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -29,12 +29,36 @@ class PromotionDecisionTest {
     private val base = Config(profiles = FakeProfiles.all)
     private val baselineArm = EvalArms.configure(EvalArm.Precompile, "off", base)
     private val candidateArm = EvalArms.configure(EvalArm.Precompile, "on", base)
-    private val baseline = baselineArm.attempt!!
-    private val candidate = candidateArm.attempt!!
+    private val baseline = baselineArm
+    private val candidate = candidateArm
     private val policy = ScorePolicy("score-1", listOf(
         StratumPolicy("hard", BigDecimal("0.6"), true, usd("1"), usd("10"), BigDecimal("0.5")),
         StratumPolicy("easy", BigDecimal("0.4"), false, usd("0.5"), usd("5"), BigDecimal("0.5")),
     ), BigDecimal("0.95"), 2, BigDecimal("0.6"), usd("100"), 1_000_000)
+
+    @Test
+    fun `shape comparators and arms have distinct identities throughout evaluation`() {
+        val variants = listOf(Variant.B1, Variant.B2, Variant.B3).map { Variants.configure(it, base) }
+        val arms = EvalArm.Shapes.levels.map { EvalArms.configure(EvalArm.Shapes, it, base) }
+        assertEquals(1, variants.map { it.attempt!!.fingerprint }.toSet().size)
+        val all = variants.map { it.fingerprint } + arms.map { it.fingerprint }
+        assertEquals(all.size, all.toSet().size)
+        val workload = manifest(2, emptyList())
+        val manifest = CampaignManifest("shapes", workload.harnessVersion, variants, arms, workload.workload, workload.assignment, MemoryMode.Cold)
+        val design = EvaluationDesign(policy, manifest.fingerprint, variants[0].fingerprint, all.drop(1).toSet(), design(2).trials)
+        fun score(config: VariantConfig) = Scorecard.calculate(design, config.fingerprint, design.trials.map {
+            Trials.fromCalls(it.key, config.fingerprint, it.matchedInputs, true, listOf(call("1", 100, 20)), "USD", 100, 0, 0, "shape fixture")
+        })
+        val clean = CampaignIntegrity.check(IntegrityInput(emptyList(), emptyList(), emptyList(), emptyList(), null, emptyList(), 0))
+        val evidence = PromotionEvidence.of(manifest, variants[1], clean, EvaluationOrigin.Synthetic, "shape fixture")
+        assertEquals(variants[1].fingerprint, evidence.configuration)
+        assertFailsWith<IllegalArgumentException> {
+            PromotionEvidence.of(manifest, variants[1].attempt!!, clean, EvaluationOrigin.Synthetic, "ambiguous attempt")
+        }
+        val report = PromotionReport.evaluate(score(variants[0]), score(variants[1]), evidence, usd("0"), usd("0"))
+        val decision = PromotionDecision.decide(report, FixtureReport(variants[1].fingerprint.hex, measured()), manifest)
+        assertFalse(decision.issues.any { it.code in setOf(EvaluationIssueCode.EvidenceMismatch, EvaluationIssueCode.MultipleSelection) }, decision.issues.toString())
+    }
 
     @Test
     fun `trial rows from accounting include every call and keep missing usage unknown`() {
@@ -119,10 +143,10 @@ class PromotionDecisionTest {
         val repos = 2
         val manifest = manifest(repos, listOf(baselineArm, candidateArm))
         val clean = CampaignIntegrity.check(IntegrityInput(emptyList(), emptyList(), emptyList(), emptyList(), null, emptyList(), 0))
-        val evidence = PromotionEvidence.of(manifest, candidate, clean, EvaluationOrigin.Measured, "pilot")
+        val evidence = PromotionEvidence.of(manifest, candidate, clean, EvaluationOrigin.Measured, "pilot", design(repos))
         assertEquals(listOf(EvidenceCheck.Pass, EvidenceCheck.Pass, EvidenceCheck.Pass),
             listOf(evidence.integrity, evidence.independence, evidence.mandatoryControls))
-        val reserveOff = EvalArms.configure(EvalArm.Reserve, "off", base).attempt!!
+        val reserveOff = EvalArms.configure(EvalArm.Reserve, "off", base)
         assertEquals(EvidenceCheck.Fail, PromotionEvidence.of(manifest, reserveOff, clean, EvaluationOrigin.Measured, "pilot").mandatoryControls)
 
         val investment = Investments.total(listOf(Investment(InvestmentKind.Index, usd("20")), Investment(InvestmentKind.Calibration, usd("10"))), "USD")
@@ -158,7 +182,7 @@ class PromotionDecisionTest {
             listOf("hard", "easy").map { s -> TrialKey("r$r", "$s-$r", 0).let { PlannedTrial(it, s, inputs(it)) } }
         })
 
-    private fun table(design: EvaluationDesign, attempt: AttemptConfig, cost: String, acceptHard: Boolean = true,
+    private fun table(design: EvaluationDesign, attempt: ArmConfig, cost: String, acceptHard: Boolean = true,
                       acceptEasy: Boolean = true, billed: Boolean = true) = design.trials.map { planned ->
         val accepted = if (planned.stratum == "hard") acceptHard else acceptEasy
         val calls = if (billed) listOf(call(cost, 1_000, 100)) else listOf(call(cost, 1_000, 100).copy(usage = null, money = Money.unknown("USD")))
@@ -180,5 +204,40 @@ class PromotionDecisionTest {
     /** One passing fixture per invariant: every invariant measured and zero. */
     private fun measured() = Invariant.entries.map { FixtureResult("C", "${it.fixtures.first()} ok()", listOf(it.fixtures.first()), FixtureStatus.Passed, null) }
 
-    private fun fixtures() = FixtureReport("B1", measured())
+    private fun fixtures() = FixtureReport(candidate.fingerprint.hex, measured())
+
+    @Test
+    fun `promotion rejects altered final trial membership and foreign fixture evidence`() {
+        val original = manifest(2, listOf(baselineArm, candidateArm))
+        val tasks = original.workload.tasks + WorkloadTask("training", setOf(0), "training-repo", null, "hard", BigDecimal.ONE, null)
+        val manifest = CampaignManifest("partition", original.harnessVersion, original.variants, original.arms,
+            WorkloadDesign(original.workload.policy, tasks), original.assignment + (WorkloadTrialKey("training", 0) to WorkloadPartition.Development), original.memory)
+        val trials = design(2).trials
+        fun designFor(rows: List<PlannedTrial>) = EvaluationDesign(policy, manifest.fingerprint, baseline.fingerprint, setOf(candidate.fingerprint), rows)
+        val clean = CampaignIntegrity.check(IntegrityInput(emptyList(), emptyList(), emptyList(), emptyList(), null, emptyList(), 0))
+        fun decide(design: EvaluationDesign, fixtures: FixtureReport = fixtures()): PromotionDecision {
+            val evidence = PromotionEvidence.of(manifest, candidate, clean, EvaluationOrigin.Measured, "pilot", design)
+            val report = PromotionReport.evaluate(Scorecard.calculate(design, baseline.fingerprint, table(design, baseline, "5")),
+                Scorecard.calculate(design, candidate.fingerprint, table(design, candidate, "2")), evidence, usd("0"), usd("0"))
+            return PromotionDecision.decide(report, fixtures, manifest)
+        }
+        val valid = designFor(trials)
+        assertFalse(decide(valid).issues.any { it.code == EvaluationIssueCode.EvidenceMismatch })
+        assertEquals(EvidenceCheck.Unknown, PromotionEvidence.of(manifest, candidate, clean, EvaluationOrigin.Measured, "no design").independence)
+        val first = trials.first()
+        val invalid = listOf(
+            trials.drop(1),
+            trials + first.copy(key = first.key.copy(task = "invented")),
+            trials.drop(1) + first.copy(key = first.key.copy(repository = "invented")),
+            trials.drop(1) + first.copy(stratum = if (first.stratum == "easy") "hard" else "easy"),
+            trials.drop(1) + first.copy(key = first.key.copy(repetition = 9)),
+            trials + PlannedTrial(TrialKey("training-repo", "training", 0), "hard", first.matchedInputs),
+        )
+        for (rows in invalid) {
+            val design = designFor(rows)
+            assertEquals(EvidenceCheck.Fail, PromotionEvidence.of(manifest, candidate, clean, EvaluationOrigin.Measured, "bad design", design).independence)
+            assertTrue(decide(design).issues.any { it.code == EvaluationIssueCode.EvidenceMismatch })
+        }
+        assertTrue(decide(valid, FixtureReport(baseline.fingerprint.hex, measured())).issues.any { it.code == EvaluationIssueCode.EvidenceMismatch })
+    }
 }

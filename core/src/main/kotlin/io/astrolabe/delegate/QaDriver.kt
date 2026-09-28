@@ -1,5 +1,7 @@
 package io.astrolabe.delegate
 
+import io.astrolabe.auth.ContentClass
+import io.astrolabe.auth.Redaction
 import io.astrolabe.contract.Command
 import io.astrolabe.evidence.Closure
 import io.astrolabe.evidence.Counts
@@ -72,6 +74,17 @@ public sealed interface QaDrive {
     public data class Refused(val reason: String) : QaDrive
 }
 
+/** Host-owned service launched from the supplied disposable candidate. Closing it must stop that service. */
+public interface QaHttpService : AutoCloseable {
+    public val origin: URI
+    override fun close()
+}
+
+/** Starts a fresh service using [root] as its only product input, under the packet's execution environment. */
+public fun interface QaHttpLauncher {
+    public fun start(root: Path, packet: QaPacket): QaHttpService
+}
+
 /**
  * The L3 driver (§10.3, §8.2 L3, P5.3.1). Each probe is a [CheckKind.Product] check of the [Layer.ProductUse] row, run
  * through the [scheduler] — which must isolate every check on an exported candidate (`isolateAll`) — so the receipt
@@ -90,6 +103,8 @@ public class QaDriver @JvmOverloads constructor(
     private val logs: Path,
     private val http: HttpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).connectTimeout(Duration.ofSeconds(5)).build(),
     private val deadlineSeconds: Long = 60,
+    private val redaction: Redaction = Redaction(),
+    private val httpLauncher: QaHttpLauncher? = null,
 ) {
     init {
         require(deadlineSeconds > 0) { "a QA case has a positive deadline" }
@@ -106,6 +121,7 @@ public class QaDriver @JvmOverloads constructor(
         if (environment is QaEnvironment.Confined && runner !is ConfinedRunner) return QaDrive.Refused("the packet requires ${environment.label}, the runner is ${runner.mode}")
         if (environment is QaEnvironment.IsolatedCandidate && environment.mode != runner.mode) return QaDrive.Refused("the packet requires ${environment.label}, the runner is ${runner.mode}")
         probes.firstOrNull { it.entryPoint !in admitted.entryPoints }?.let { return QaDrive.Refused("case ${it.id}: ${it.entryPoint.target} is not an entry point of the packet") }
+        if (probes.any { it.entryPoint.surface == QaSurface.Http } && httpLauncher == null) return QaDrive.Refused("HTTP QA requires a service launched from the isolated candidate")
         require(probes.map { it.id }.toSet().size == probes.size) { "QA case ids are unique" }
 
         val byCheck = probes.associateBy { checkIdOf(admitted, it) }
@@ -119,7 +135,7 @@ public class QaDriver @JvmOverloads constructor(
             var observed = ""
             val receipt = scheduler.runCheck(check, admitted.contractVersion) { root ->
                 val (executed, output) = execute(admitted, probe, root)
-                observed = output
+                observed = redaction.apply(output, ContentClass.ReusableEvidence).text
                 executed
             }
             receipts += receipt.receiptId
@@ -143,7 +159,7 @@ public class QaDriver @JvmOverloads constructor(
 
     private suspend fun execute(packet: QaPacket, probe: QaProbe, root: Path): Pair<Executed, String> = when (probe.entryPoint.surface) {
         QaSurface.Cli -> cli(packet, probe, root)
-        QaSurface.Http -> http(packet, probe)
+        QaSurface.Http -> http(packet, probe, root)
         QaSurface.Browser -> error("browser surfaces are refused at admission")
     }
 
@@ -153,16 +169,10 @@ public class QaDriver @JvmOverloads constructor(
         val status = try {
             Files.createDirectories(logs)
             val log = Files.createTempFile(logs, "qa-${probe.id}-", ".log")
-            var proc = runner.start(SpawnSpec(Launch.Shell(target), root, log, deadlineSeconds = deadlineSeconds))
-            var cursor = 0L
-            while (!proc.status.isTerminal) {
-                val poll = os.poll(proc, cursor, deadlineSeconds)
-                output.append(poll.text())
-                cursor = poll.nextCursorBytes
-                proc = proc.copy(status = poll.status)
-            }
-            output.append(os.poll(proc, cursor, 0).text())
-            proc.status
+            val proc = runner.start(SpawnSpec(Launch.Shell(target), root, log, deadlineSeconds = deadlineSeconds))
+            val observed = io.astrolabe.tool.run.Executions.observeCancellable(os, proc, deadlineSeconds, deadlineSeconds)
+            output.append(observed.output.toString(Charsets.UTF_8))
+            if (observed.lost) ProcStatus.Lost else observed.proc.status
         } catch (failure: IOException) {
             output.append("cannot start: ").append(failure.message)
             null
@@ -176,17 +186,23 @@ public class QaDriver @JvmOverloads constructor(
             probe.expected.met(exit, output.toString()) -> Outcome.Passed
             else -> Outcome.Failed
         }
-        executed(packet, listOf(target), root.toString(), true, exit, outcome, transcript) to output.toString()
+        executed(packet, listOf(target), root.toString(), true, exit, outcome, transcript, probe.expected.code) to output.toString()
     }
 
-    private suspend fun http(packet: QaPacket, probe: QaProbe): Pair<Executed, String> = withContext(Dispatchers.IO) {
+    private suspend fun http(packet: QaPacket, probe: QaProbe, root: Path): Pair<Executed, String> = withContext(Dispatchers.IO) {
         val target = probe.entryPoint.target.trim()
         val method = target.substringBefore(' ', "GET").uppercase()
         val url = target.substringAfterLast(' ')
         val (code, body) = try {
-            val request = HttpRequest.newBuilder(URI(url)).timeout(Duration.ofSeconds(deadlineSeconds)).method(method, HttpRequest.BodyPublishers.noBody()).build()
-            val response = http.send(request, HttpResponse.BodyHandlers.ofString())
-            response.statusCode() to response.body().orEmpty()
+            checkNotNull(httpLauncher).start(root, packet).use { service ->
+                val origin = service.origin
+                require(origin.scheme == "http" && origin.host in setOf("127.0.0.1", "localhost", "[::1]", "::1") && origin.userInfo == null && origin.rawQuery == null && origin.rawFragment == null && origin.path.orEmpty() in setOf("", "/")) { "QA service must expose a loopback HTTP origin" }
+                val targetUri = URI(url)
+                val bound = URI(origin.scheme, null, origin.host, origin.port, targetUri.path, targetUri.query, null)
+                val request = HttpRequest.newBuilder(bound).timeout(Duration.ofSeconds(deadlineSeconds)).method(method, HttpRequest.BodyPublishers.noBody()).build()
+                val response = http.send(request, HttpResponse.BodyHandlers.ofString())
+                response.statusCode() to response.body().orEmpty()
+            }
         } catch (failure: IOException) {
             null to "cannot reach: ${failure.message}"
         } catch (malformed: IllegalArgumentException) {
@@ -198,18 +214,19 @@ public class QaDriver @JvmOverloads constructor(
             probe.expected.met(code, body) -> Outcome.Passed
             else -> Outcome.Failed
         }
-        executed(packet, listOf(method, url), null, false, code, outcome, transcript) to body
+        executed(packet, listOf(method, url), null, false, null, outcome, transcript) to body
     }
 
-    private fun executed(packet: QaPacket, command: List<String>, cwd: String?, shell: Boolean, exit: Int?, outcome: Outcome, transcript: String): Executed {
+    private fun executed(packet: QaPacket, command: List<String>, cwd: String?, shell: Boolean, exit: Int?, outcome: Outcome, transcript: String, expectedExitCode: Int? = 0): Executed {
         // Artifact before row: the scheduler records the receipt only after this blob is published.
-        val raw = blobs.put(transcript.toByteArray(Charsets.UTF_8), BlobKind.LOG, packet.ids)
+        val safe = redaction.apply(transcript, ContentClass.ReusableEvidence)
+        val raw = blobs.put(safe.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, packet.ids)
         val counts = when (outcome) {
             Outcome.Passed -> Counts(passed = 1, discovered = 1)
             Outcome.Failed -> Counts(failed = 1, discovered = 1)
             else -> null
         }
-        return Executed(command, cwd, shell, exit, outcome, counts, raw)
+        return Executed(command, cwd, shell, exit, outcome, counts, raw, safe.limitations, expectedExitCode = expectedExitCode)
     }
 
     private fun passedOf(receipt: Receipt): Boolean? = when (receipt.outcome) {

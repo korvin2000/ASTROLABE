@@ -63,7 +63,10 @@ public class TurnContext(
     public val turn: Int,
     public val coverage: WorksetView,
     public val readBudget: Reservations,
-)
+) {
+    /** The individual admission, separate from the shared budget already reserved by parallel reads. */
+    internal var resultBudgetTokens: Long = readBudget.available.value
+}
 
 /** One tool family's executor (P1.6.3–P1.6.10). It returns typed outcomes; a throw is a harness defect. */
 public fun interface ToolExecutor {
@@ -138,7 +141,8 @@ public class Dispatcher(
             val permits = Semaphore(maxParallelReads)
             admitted.map { (call, reservation) ->
                 async {
-                    permits.withPermit { run(call, context, TurnPhase.Read) }.also { d ->
+                    val readContext = TurnContext(turn, context.coverage, context.readBudget).also { it.resultBudgetTokens = readTokensOf(call).toLong() }
+                    permits.withPermit { run(call, readContext, TurnPhase.Read) }.also { d ->
                         if (d is Disposition.Executed) reservation.reconcile(Tokens(d.outcome.tokens)) else reservation.release()
                     }
                 }
@@ -152,7 +156,8 @@ public class Dispatcher(
             var applying = true
             for (call in ordered.edits) {
                 results[call.opId] = if (applying) {
-                    run(call, context, TurnPhase.Edit).also { applying = it is Disposition.Executed && it.outcome.applied }
+                    (unmet(call, results)?.let { Disposition.NotExecuted(call.opId, it) }
+                        ?: run(call, context, TurnPhase.Edit)).also { applying = it is Disposition.Executed && it.outcome.applied }
                 } else {
                     Disposition.NotExecuted(call.opId, "an earlier edit call of this batch did not apply")
                 }

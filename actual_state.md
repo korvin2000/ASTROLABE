@@ -1,9 +1,8 @@
 # ASTROLABE — implemented state
 
-Snapshot, rewritten each session (≤60 lines). Progress truth is the TODO task statuses and `Log:` lines;
-next work is `CONTINUE-TASK.md`; history is `audit/SESSION-HISTORY.md`.
+Snapshot: TODO owns task status; CONTINUE-TASK.md owns next work; audit/SESSION-HISTORY.md records history.
 
-## Counts (2026-09-25, from `#### P… · STATUS` headings)
+## Counts (2026-09-26, from `#### P… · STATUS` headings)
 **185/185 DONE, 0 IN_PROGRESS, 0 TODO.** P0 19/19 · P1 64/64 · P2 30/30 · P3 25/25 · P4 25/25 · P5 15/15 · P6 7/7.
 Recount: `rg -c '^#### P\d+\.\d+\.\d+ .*· DONE' TODO.md`. P7 (live transports, hosts, live evaluation) is out of scope.
 
@@ -53,3 +52,9 @@ Schema **v4** (no bump this session). `packets` also holds behaviour-snapshot, c
 Local choices D-112–D-113, D-120–D-126, D-135–D-137, D-145–D-155, D-160–D-165, D-170–D-174, D-180–D-183, D-190–D-195,
 D-200–D-202, D-210–D-213, D-220–D-223, D-230–D-233, D-240–D-244, D-250–D-254, D-260 (TODO §3). Owner decision D-175
 (new dependencies allowed under pinned-version rules).
+## Audit remediation and review (2026-09-28)
+`feature/bugfix` fixed 142 findings (F-034 previously resolved); `review/bugfix` reviewed every fix
+(ledger `audit/BUGFIX-REVIEW.md`): 28 corrective review fixes, 52 ACCEPT, 62 NOTE, 0 rejected, merged locally into `main`.
+Two tests that already failed at the fix tip (ResultPacketTest, ControllerTest) are fixed. Public ABI grew:
+`Observed.truncated`, `RunCapture.executionRoot` (dump regenerated). `assemble testClasses checkKotlinAbi` passes.
+Only targeted Windows tests ran (Linux-only regressions compile-verified); full `check` runs when `main` is pushed.

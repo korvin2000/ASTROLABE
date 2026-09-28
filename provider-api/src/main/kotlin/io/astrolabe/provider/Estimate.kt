@@ -21,16 +21,16 @@ public data class Estimate(
     }
 
     /** Conservative bound used for admission; meaningless while [unknownHistory]. */
-    val upperBoundTokens: Long get() = tokens + marginTokens
+    val upperBoundTokens: Long get() = saturatedAdd(tokens, marginTokens)
 
     public operator fun plus(other: Estimate): Estimate {
         require(estimatorId == other.estimatorId) { "cannot add estimates from $estimatorId and ${other.estimatorId}" }
         return Estimate(
-            tokens = tokens + other.tokens,
+            tokens = saturatedAdd(tokens, other.tokens),
             exact = exact && other.exact,
             estimatorId = estimatorId,
             version = version,
-            marginTokens = marginTokens + other.marginTokens,
+            marginTokens = saturatedAdd(marginTokens, other.marginTokens),
             unknownHistory = unknownHistory || other.unknownHistory,
         )
     }
@@ -58,21 +58,25 @@ public interface TokenEstimator {
 
     public fun estimate(text: String): Estimate
 
-    /** Charges every serialized contribution of [request] once; see [Request.estimate]. */
+    /** Generic planning estimate; dispatch adapters must override for their effective wire format. */
     public fun estimate(request: Request): Estimate = request.estimate(this)
 }
 
 /**
- * Charges every serialized contribution once: tool schemas, every item of every segment (text, opaque
- * payloads, call arguments, result content, reasoning references) and the continuation. A continuation
- * without a reported effective history size yields [Estimate.unknownHistory] (never a silent fit, I-17).
+ * Planning estimate of normalized content, protocol identifiers and declared framing allowances.
+ * Even exact text tokenization cannot count an unspecified provider wire format exactly. The generic
+ * allowance is 32 tokens per request and 16 per tool/item, plus four per content part; these are planning
+ * margins, not a bound proven for a provider. Dispatch requires profile-specific validation (I-17).
+ * Native replay and non-text parts have unknown effective size. A provider estimator must account for
+ * their actual representation, replacing rather than double-counting the normalized view.
  */
 public fun Request.estimate(estimator: TokenEstimator): Estimate {
-    var total = Estimate.zero(estimator.id, estimator.version)
+    var total = Estimate(0, false, estimator.id, estimator.version, marginTokens = 32)
     for (tool in tools) {
         total += estimator.estimate(tool.name)
         total += estimator.estimate(tool.description)
         total += estimator.estimate(tool.jsonSchema.toString())
+        total += Estimate(0, false, estimator.id, estimator.version, marginTokens = 16)
     }
     for (segment in segments) {
         for (item in segment.items) total += item.estimate(estimator)
@@ -81,17 +85,25 @@ public fun Request.estimate(estimator: TokenEstimator): Estimate {
     return total
 }
 
-public fun Item.estimate(estimator: TokenEstimator): Estimate = when (this) {
-    is Message -> parts.fold(Estimate.zero(estimator.id, estimator.version)) { acc, part -> acc + part.estimate(estimator) }
-    is ToolCall -> estimator.estimate(name) + estimator.estimate(argsJson)
-    is ToolResult -> content.fold(Estimate.zero(estimator.id, estimator.version)) { acc, part -> acc + part.estimate(estimator) }
-    is ReasoningRef -> opaque?.let { estimator.estimate(it.toString()) } ?: Estimate.zero(estimator.id, estimator.version)
-    is UsageItem -> Estimate.zero(estimator.id, estimator.version)
-    is OpaqueContinuation -> effectiveHistoryTokens?.let { Estimate.reported(it, estimator.id, estimator.version) }
+public fun Item.estimate(estimator: TokenEstimator): Estimate {
+    if (this is UsageItem) return Estimate.zero(estimator.id, estimator.version)
+    if (this is OpaqueContinuation) return effectiveHistoryTokens?.let { Estimate.reported(it, estimator.id, estimator.version) }
         ?: Estimate.unknownHistory(estimator.id, estimator.version)
+    if (native != null) return Estimate.unknownHistory(estimator.id, estimator.version)
+    val content = when (this) {
+        is Message -> parts.fold(estimator.estimate(role.name)) { acc, part -> acc + part.estimate(estimator) }
+        is ToolCall -> estimator.estimate(id) + estimator.estimate(name) + estimator.estimate(argsJson)
+        is ToolResult -> content.fold(estimator.estimate(callId) + estimator.estimate(isError.toString())) { acc, part -> acc + part.estimate(estimator) }
+        is ReasoningRef -> opaque?.let { estimator.estimate(providerTag) + estimator.estimate(it.toString()) }
+            ?: Estimate.unknownHistory(estimator.id, estimator.version)
+        is UsageItem, is OpaqueContinuation -> error("handled above")
+    }
+    return content + Estimate(0, false, estimator.id, estimator.version, marginTokens = 16)
 }
 
 public fun ContentPart.estimate(estimator: TokenEstimator): Estimate = when (this) {
-    is Text -> estimator.estimate(text)
-    is Opaque -> estimator.estimate(payload.toString())
+    is Text -> estimator.estimate(text) + Estimate(0, false, estimator.id, estimator.version, marginTokens = 4)
+    is Opaque -> Estimate.unknownHistory(estimator.id, estimator.version)
 }
+
+internal fun saturatedAdd(a: Long, b: Long): Long = if (a > Long.MAX_VALUE - b) Long.MAX_VALUE else a + b

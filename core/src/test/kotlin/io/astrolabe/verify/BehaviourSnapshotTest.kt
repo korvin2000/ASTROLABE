@@ -82,7 +82,7 @@ class BehaviourSnapshotTest {
     fun setUp() {
         repo = TempRepo.create()
         repo.write("src/discount.py", "def discount(cart, tier):\n    return 4\n")
-        repo.write("tests/golden/cli.txt", "total: 4\n")
+        repo.write("tests/golden/cli.txt", "total: 4\npassword=golden-fixture-secret\n")
         repo.write("tests/__snapshots__/api.snap", "{\"total\": 4}\n")
         repo.write("tests/fixtures/api/cart.json", "{\"items\": 1}\n")
         repo.write("tests/expected.golden", "4\n")
@@ -137,8 +137,12 @@ class BehaviourSnapshotTest {
         assertEquals(s0, receipt.stampAfter)
         assertEquals(listOf("tests/__snapshots__/api.snap", "tests/expected.golden", "tests/fixtures/api/cart.json", "tests/golden/cli.txt"), snapshot.characterization.map { it.path })
         val golden = snapshot.characterization.first { it.path == "tests/golden/cli.txt" }
-        assertEquals("total: 4\n", Files.readString(store.blobs.path(golden.blob)), "the blob holds the s0 bytes, not the edited ones")
-        assertEquals(9L, golden.sizeBytes)
+        val raw = "total: 4\npassword=golden-fixture-secret\n"
+        assertEquals(raw, String(store.blobs.get(golden.blob)), "protected comparison bytes retain s0 exactly")
+        assertEquals(raw.toByteArray().size.toLong(), golden.sizeBytes)
+        assertTrue(Files.exists(store.blobs.path(golden.blob, recovery = true)))
+        assertFalse(Files.exists(store.blobs.path(golden.blob)), "raw characterization is never a reusable output blob")
+        assertFalse("golden-fixture-secret" in snapshot.render())
         assertEquals(snapshot, snapshots.latest(), "recorded durably for the equivalence comparison")
         val boundary = Journal(store, clock).events(JournalScope(ids.work, kinds = setOf(JournalKind.Boundary))).single()
         assertTrue(boundary.text.startsWith("behaviour snapshot @${s0.hash8}: CHK-full failed (${suite.receiptId}) · 4 characterization outputs"), boundary.text)

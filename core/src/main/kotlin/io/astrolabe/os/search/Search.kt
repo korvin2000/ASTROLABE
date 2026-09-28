@@ -1,5 +1,9 @@
 package io.astrolabe.os.search
 
+import io.astrolabe.workspace.Intent
+import io.astrolabe.workspace.PathResolution
+import io.astrolabe.workspace.RejectionReason
+import io.astrolabe.workspace.WorkspacePath
 import java.io.IOException
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.AccessDeniedException
@@ -294,6 +298,7 @@ public object PatternSubset {
 
     /** The rule [pattern] violates, or null when it is inside the subset. */
     public fun check(pattern: String, mode: SearchMode): SearchOutcome.Unsupported? {
+        if (pattern.length > 4096) return refuse("pattern exceeds 4096 characters")
         if (pattern.isEmpty()) return refuse("an empty pattern is not searchable")
         if (mode == SearchMode.Literal) return null
         val body = if (pattern.startsWith(CASE_INSENSITIVE_PREFIX)) {
@@ -580,7 +585,18 @@ internal object Candidates {
     private const val BINARY_PROBE_BYTES = 8 * 1024
     private const val GIT_EXECUTABLE = "git"
 
-    fun resolve(request: SearchRequest): CandidateSet {
+    fun resolve(request: SearchRequest): CandidateSet = try {
+        resolveChecked(request)
+    } catch (failure: AccessDeniedException) {
+        val path = failure.file?.let { request.scope.root.relativize(Path.of(it)).joinToString("/") }
+        CandidateSet.Denied("the filesystem denied access during candidate enumeration", listOfNotNull(path))
+    } catch (failure: io.astrolabe.os.GitError) {
+        CandidateSet.Failed("could not enumerate search candidates: ${failure.message}")
+    } catch (failure: IOException) {
+        CandidateSet.Failed("could not enumerate search candidates: ${failure.message}")
+    }
+
+    private fun resolveChecked(request: SearchRequest): CandidateSet {
         val root = request.scope.root.normalize()
         if (!Files.isDirectory(root)) return CandidateSet.Failed("search root is not a directory: $root")
 
@@ -600,13 +616,14 @@ internal object Candidates {
             ?.let { FileSystems.getDefault().getPathMatcher("glob:${it.glob}") }
 
         val base = gitListFiles(root) ?: walk(root)
+        val workspace = WorkspacePath.of(root)
         val denied = ArrayList<String>()
         val selected = ArrayList<Candidate>()
         for (rel in base) {
             if (hasHiddenSegment(rel)) continue
             if (scoped != null && scoped.none { rel == it || rel.startsWith("$it/") }) continue
             if (globMatcher != null && !globMatcher.matches(Path.of(rel))) continue
-            val abs = root.resolve(rel)
+            var abs = root.resolve(rel)
             val attributes = try {
                 Files.readAttributes(abs, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
             } catch (_: NoSuchFileException) {
@@ -614,11 +631,24 @@ internal object Candidates {
             } catch (_: AccessDeniedException) {
                 denied += rel
                 continue
-            } catch (_: IOException) {
-                continue
             }
             if (attributes.isSymbolicLink || !attributes.isRegularFile) continue
+            when (val resolved = workspace.resolve(rel, Intent.Read)) {
+                is PathResolution.Rejected -> {
+                    if (resolved.reason == RejectionReason.Unresolvable) return CandidateSet.Failed(resolved.detail)
+                    denied += rel
+                    continue
+                }
+                is PathResolution.Resolved -> {
+                    if (resolved.kind.isLink || resolved.linkAncestors.isNotEmpty()) {
+                        denied += rel
+                        continue
+                    }
+                    abs = resolved.real
+                }
+            }
             if (request.since != null && attributes.lastModifiedTime().toInstant() < request.since) continue
+            // Binaries are skipped whatever their size; only oversized text exceeds the file limit.
             when (isBinary(abs)) {
                 BinaryProbe.Binary -> continue
                 BinaryProbe.Denied -> {
@@ -627,7 +657,10 @@ internal object Candidates {
                 }
 
                 BinaryProbe.Gone -> continue
-                BinaryProbe.Text -> selected += Candidate(rel, abs)
+                BinaryProbe.Text -> {
+                    if (attributes.size() > 8L * 1024 * 1024) return CandidateSet.Failed("search file limit exceeded: $rel")
+                    selected += Candidate(rel, abs)
+                }
             }
         }
         if (denied.isNotEmpty()) {
@@ -657,40 +690,25 @@ internal object Candidates {
             BinaryProbe.Denied
         } catch (_: NoSuchFileException) {
             BinaryProbe.Gone
-        } catch (_: IOException) {
-            BinaryProbe.Gone
         }
 
     /**
      * The files git itself considers part of the tree, which is what ripgrep's default ignore
-     * handling approximates. Null when [root] is not in a git repository, or git is unavailable.
+     * handling approximates. Fall back only when no Git metadata exists in the root or its ancestors.
      */
     private fun gitListFiles(root: Path): List<String>? {
-        val output = try {
-            val process = ProcessBuilder(
-                GIT_EXECUTABLE, "ls-files", "-z", "--cached", "--others", "--exclude-standard",
-            ).directory(root.toFile()).start()
-            val stderr = drainAsync(process)
-            val bytes = process.inputStream.use { it.readBytes() }
-            val exit = process.waitFor()
-            stderr.join()
-            if (exit != 0) return null
-            String(bytes, UTF_8)
-        } catch (_: IOException) {
-            return null
-        } catch (_: InterruptedException) {
-            Thread.currentThread().interrupt()
-            return null
+        val repository = generateSequence(root) { it.parent }.any { directory ->
+            try {
+                Files.readAttributes(directory.resolve(".git"), BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
+                true
+            } catch (_: NoSuchFileException) {
+                false
+            }
         }
+        if (!repository) return null
+        val output = String(io.astrolabe.os.Git(root).searchFiles(), UTF_8)
         return output.split(' ').filter { it.isNotEmpty() }.distinct()
     }
-
-    private fun drainAsync(process: Process): Thread =
-        Thread { process.errorStream.use { it.readBytes() } }
-            .apply {
-                isDaemon = true
-                start()
-            }
 
     private fun walk(root: Path): List<String> {
         val files = ArrayList<String>()
@@ -709,7 +727,7 @@ internal object Candidates {
                     return FileVisitResult.CONTINUE
                 }
 
-                override fun visitFileFailed(file: Path, exc: IOException): FileVisitResult = FileVisitResult.CONTINUE
+                override fun visitFileFailed(file: Path, exc: IOException): FileVisitResult = throw exc
             },
         )
         return files

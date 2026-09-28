@@ -87,6 +87,25 @@ class StoredEvidenceTest {
     }
 
     @Test
+    fun `journal search bounds matches across pages and ignores unrelated event bodies`() {
+        val journal = Journal(store, clock)
+        val wanted = JournalScope(work, ids.context, setOf(JournalKind.Result))
+        val otherIds = ids.copy(context = ContextId("other-cell"))
+        journal.append(JournalEvent("other", otherIds, 1, JournalKind.Call, text = "needle", at = clock.instant()))
+        store.db.tx { it.execute("UPDATE journal SET body = ? WHERE event_id = ?", "{not an event}", "other") }
+        repeat(130) { index ->
+            journal.append(JournalEvent("ev-$index", ids, index, JournalKind.Result, text = "unrelated $index", at = clock.instant()))
+        }
+        journal.append(JournalEvent("hit-1", ids, 131, JournalKind.Result, text = "needle first", at = clock.instant()))
+        journal.append(JournalEvent("hit-2", ids, 132, JournalKind.Result, refs = listOf("needle-ref"), at = clock.instant()))
+        assertEquals(listOf("hit-1", "hit-2"), journal.search("needle", wanted).events.map { it.eventId })
+        val limited = journal.search("needle", wanted, limit = 1)
+        assertEquals(listOf("hit-1"), limited.events.map { it.eventId })
+        assertTrue(!limited.complete)
+        assertEquals(listOf("hit-1", "hit-2"), journal.events(wanted).takeLast(2).map { it.eventId })
+    }
+
+    @Test
     fun `intents survive a reopen and open ones stay unknown until reconciled`() {
         val intents = SqliteIntentJournal(store, clock)
         val intent = Intent("int-1", ids, "act-1", listOf("pip", "install", "x"), null, "installs", at = clock.instant())
@@ -96,8 +115,15 @@ class StoredEvidenceTest {
         val after = SqliteIntentJournal(store, clock)
         assertEquals(listOf("int-1"), after.open().map { it.intentId })
         assertEquals(IntentStatus.Dispatched, after.get("int-1")!!.status)
-        after.update("int-1", IntentStatus.Committed)
+        after.update("int-1", IntentStatus.Unknown)
+        kotlin.test.assertFailsWith<IllegalArgumentException> { after.update("int-1", IntentStatus.Committed) }
+        kotlin.test.assertFailsWith<IllegalArgumentException> { after.reconcile("int-1", " ") }
+        after.reconcile("int-1", "host: inspected workspace and terminated previous process")
         assertTrue(after.open().isEmpty())
+        reopen()
+        val resolved = SqliteIntentJournal(store, clock)
+        assertEquals("host: inspected workspace and terminated previous process", resolved.get("int-1")!!.reconciliation)
+        kotlin.test.assertFailsWith<IllegalArgumentException> { resolved.update("int-1", IntentStatus.Unknown) }
     }
 
     @Test

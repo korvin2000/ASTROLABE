@@ -57,11 +57,11 @@ class QaDriverTest {
     @BeforeTest
     fun setUp() {
         repo = TempRepo.create()
-        repo.write("report.txt", "total 10.05\n")
+        repo.write("report.txt", "total 10.05\npassword=qa-fixture-secret\n")
         repo.commit("fixture product")
         server = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0)
         server.createContext("/report") { exchange ->
-            val body = "total 10.05".toByteArray()
+            val body = "total 10.05\npassword=qa-fixture-secret".toByteArray()
             exchange.sendResponseHeaders(200, body.size.toLong())
             exchange.responseBody.use { it.write(body) }
         }
@@ -88,34 +88,62 @@ class QaDriverTest {
         Controller(config, clock, idGen).open(repo.root, request, policy).use { c ->
             val candidate = c.stamper.report().candidateId
             val cli = EntryPoint(QaSurface.Cli, if (WINDOWS) "type report.txt" else "cat report.txt")
+            val negativeCli = EntryPoint(QaSurface.Cli, if (WINDOWS) "exit /b 7" else "exit 7")
             val http = EntryPoint(QaSurface.Http, "GET http://127.0.0.1:${server.address.port}/report")
             val environment = QaEnvironment.IsolatedCandidate(candidate, c.store.layout.candidates.toString(), ExecutionMode.TrustedLocal)
             val packet = QaPacket(
                 c.ids, "I1", c.contract.version, candidate, listOf(ReviewCriterion.of(Acceptance.Check("AC-2", "the report total rounds half-up", Origin.User))),
-                "report totals round half-up", listOf(cli, http), environment,
+                "report totals round half-up", listOf(cli, http, negativeCli), environment,
             )
             val probes = listOf(
                 QaProbe("cli-total", cli, listOf("print the report"), QaExpectation(0, listOf("total 10.05"))),
                 QaProbe("http-total", http, listOf("GET /report"), QaExpectation(200, listOf("total 10.05"))),
+                QaProbe("negative-cli", negativeCli, listOf("exercise expected failure"), QaExpectation(7)),
             )
             val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = c.store.layout.candidates, isolateAll = true)
-            val driver = QaDriver(scheduler, c.checks, c.os, TrustedLocalRunner(c.os), c.store.blobs, stateRoot.resolve("qa-logs"))
+            val unbound = QaDriver(scheduler, c.checks, c.os, TrustedLocalRunner(c.os), c.store.blobs, stateRoot.resolve("qa-logs"))
+            assertIs<QaDrive.Refused>(unbound.drive(packet, probes, enabled = true), "an unrelated loopback service cannot certify the candidate")
+            var closed = false
+            val launcher = QaHttpLauncher { root, _ ->
+                assertTrue(root != c.workspace.root)
+                val service = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+                service.createContext("/report") { exchange ->
+                    val body = Files.readAllBytes(root.resolve("report.txt"))
+                    exchange.sendResponseHeaders(200, body.size.toLong())
+                    exchange.responseBody.use { it.write(body) }
+                }
+                service.start()
+                object : QaHttpService {
+                    override val origin = java.net.URI("http://127.0.0.1:${service.address.port}")
+                    override fun close() { service.stop(0); closed = true }
+                }
+            }
+            val driver = QaDriver(scheduler, c.checks, c.os, TrustedLocalRunner(c.os), c.store.blobs, stateRoot.resolve("qa-logs"), httpLauncher = launcher)
 
             assertIs<QaDrive.Refused>(driver.drive(packet, probes, enabled = false), "an optional layer: off unless Flags.qaCell")
             val production = packet.copy(entryPoints = listOf(EntryPoint(QaSurface.Http, "https://prod.example/report")))
             assertTrue(assertIs<QaDrive.Refused>(driver.drive(production, emptyList(), enabled = true)).reason.contains("never drives production"))
 
             val driven = assertIs<QaDrive.Driven>(driver.drive(packet, probes, c.attempt.config.flags.qaCell))
+            assertTrue(closed, "candidate service is stopped after the request")
             assertEquals(emptyList(), driven.gaps)
-            assertEquals(listOf(true, true), driven.result.cases.map { it.passed }, driven.result.cases.toString())
+            assertEquals(listOf(true, true, true), driven.result.cases.map { it.passed }, driven.result.cases.toString())
             val receipts = SqliteReceipts(c.store, clock)
             for (id in driven.result.receipts) {
                 val receipt = receipts.get(id)!!
                 assertEquals(InputStability.Isolated, receipt.testedInputs.stability, "QA ran on the exported candidate, never the live workspace")
                 assertEquals(candidate, receipt.stampAfter)
                 assertTrue(c.store.blobs.exists(receipt.raw!!), "the log blob was published before the receipt row")
+                assertTrue("qa-fixture-secret" !in String(c.store.blobs.get(receipt.raw!!)), "reusable QA logs are redacted")
             }
+            assertTrue(driven.result.cases.none { "qa-fixture-secret" in it.observed })
+            assertTrue(driven.record.cases.none { "qa-fixture-secret" in it.observed })
+            assertTrue(driven.result.cases.take(2).all { "[REDACTED:" in it.observed })
             assertTrue(String(c.store.blobs.get(Digest(driven.result.cases[1].artifacts.single()))).contains("HTTP 200"))
+            assertEquals(null, receipts.get(driven.result.receipts[1])!!.exitCode, "HTTP status is not a process exit")
+            assertEquals(7, receipts.get(driven.result.receipts[2])!!.exitCode)
+            assertEquals(7, receipts.get(driven.result.receipts[2])!!.expectedExitCode)
+
             QaRuns.record(c.store, idGen, clock, packet, driven.record)
 
             c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "fixture: the implementing cell did not run"))
@@ -123,10 +151,11 @@ class QaDriverTest {
             val (_, file) = FinishReceipts.export(c, finish)
             val qa = finish.qa.single()
             assertEquals(environment.label, qa.environment)
-            assertEquals(listOf("passed", "passed"), qa.cases.map { it.outcome })
+            assertEquals(listOf("passed", "passed", "passed"), qa.cases.map { it.outcome })
             assertTrue(qa.cases.all { case -> case.artifacts.isNotEmpty() && case.artifacts.all { c.store.blobs.exists(Digest(it)) } })
             assertTrue(finish.checksRun.map { it.receiptId }.containsAll(qa.receipts), "QA receipts are L3 check runs")
             val exported = Files.readString(file)
+            assertTrue("qa-fixture-secret" !in exported, "finish exports contain only redacted QA observations")
             qa.cases.flatMap { it.artifacts }.forEach { assertTrue(it in exported, "artifact $it is attached to the exported receipt") }
         }
     }

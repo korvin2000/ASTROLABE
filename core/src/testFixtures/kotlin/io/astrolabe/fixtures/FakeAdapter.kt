@@ -30,6 +30,9 @@ import io.astrolabe.provider.UsageProvenance
 import io.astrolabe.provider.Validation
 import io.astrolabe.provider.Validations
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -129,7 +132,7 @@ public class FakeAdapter(
 
     /** Lets a held invocation proceed (only meaningful with `holdResponses = true`). */
     public fun release(id: InvocationId) {
-        invocations[id]?.gate?.complete(Unit)
+        invocations[id]?.finish()
     }
 
     public fun invocation(id: InvocationId): Invocation? = invocations[id]
@@ -190,8 +193,6 @@ public class FakeAdapter(
     }
 
     private inner class FakeInvocation(override val id: InvocationId, private val request: Request) : Invocation {
-        internal val gate = CompletableDeferred<Unit>()
-
         @Volatile
         override var state: InvocationState = InvocationState.Requested
             private set
@@ -207,15 +208,12 @@ public class FakeAdapter(
         private val stateLock = Any()
 
         override suspend fun await(): Response {
-            if (holdResponses && !cancelRequested) gate.await()
-            val terminal = synchronized(stateLock) {
-                terminalRecord ?: run {
-                    val t = if (cancelRequested) cancelledTerminal() else complete()
-                    state = InvocationState.TerminalReconciled
-                    terminalRecord = t
-                    terminalDeferred.complete(t)
-                    t
-                }
+            val terminal = try {
+                currentCoroutineContext().ensureActive()
+                terminal()
+            } catch (cancelled: CancellationException) {
+                cancel()
+                throw cancelled
             }
             terminal.error?.let { throw it }
             return checkNotNull(terminal.response)
@@ -226,11 +224,25 @@ public class FakeAdapter(
                 if (state == InvocationState.TerminalReconciled) return
                 cancelRequested = true
                 state = InvocationState.CancelRequested
-                gate.complete(Unit)
+                finish()
             }
         }
 
-        override suspend fun terminal(): Terminal = terminalDeferred.await()
+        override suspend fun terminal(): Terminal {
+            if (!holdResponses) finish()
+            return terminalDeferred.await()
+        }
+
+        internal fun finish() {
+            synchronized(stateLock) {
+                if (terminalRecord != null) return
+                state = InvocationState.ProviderAcknowledged
+                val terminal = if (cancelRequested) cancelledTerminal() else complete()
+                terminalRecord = terminal
+                state = InvocationState.TerminalReconciled
+                terminalDeferred.complete(terminal)
+            }
+        }
 
         /** Cancellation observed before completion: no tool call escapes; late output and usage go to the terminal only. */
         private fun cancelledTerminal(): Terminal {

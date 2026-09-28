@@ -10,6 +10,9 @@ public interface ValidationContext {
     /** True when [id] names an existing store artifact (journal result, receipt, observation, alias). */
     public fun evidenceExists(id: String): Boolean
 
+    /** Unknown versions are conservative: an anchored fact cannot claim current evidence. */
+    public fun currentVersion(path: String): io.astrolabe.id.FileVersion? = null
+
     /** True when the step's `accept:` is green at the current version. */
     public fun acceptGreen(accept: String): Boolean
 
@@ -49,6 +52,9 @@ public class Validator(
     private val patchCapTokens: Int = 400,
     private val factLineMaxChars: Int = 240,
 ) {
+    internal fun schemaRejection(register: Register, rawPatch: String, reason: String): Validation.Rejected =
+        Validation.Rejected("schema", reason, Sizes(RegisterRender.tokens(register, estimator), registerCapTokens, estimator.estimate(rawPatch).tokens, patchCapTokens))
+
     public fun check(register: Register, patch: Patch, context: ValidationContext): Validation {
         val patchTokens = estimator.estimate(Json.encodeToString(Patch.serializer(), patch)).tokens
         var sizes = Sizes(RegisterRender.tokens(register, estimator), registerCapTokens, patchTokens, patchCapTokens)
@@ -71,10 +77,12 @@ public class Validator(
         val flags = ArrayList<String>()
         var cursorMoved = false
         for (op in eligible) {
-            val text = opText(op)
-            if (text != null) {
+            for (text in opText(op)) {
                 if (text.length > factLineMaxChars) return reject("line ≤ $factLineMaxChars chars", "${op::class.simpleName}: ${text.length} chars")
-                if (text.contains("```")) return reject("no fenced code", "${op::class.simpleName} contains a code fence")
+                if (text.contains("```") || text.contains("~~~")) return reject("no fenced code", "${op::class.simpleName} contains a code fence")
+                if (text.any { it == '\n' || it == '\r' || it == '\u0085' || it == '\u2028' || it == '\u2029' }) {
+                    return reject("single line", "${op::class.simpleName} contains a line break")
+                }
             }
             next = when (op) {
                 is Op.PlanAdd -> next.copy(plan = next.plan + Step(nextN(next.plan.map { it.n }), Mark.Todo, op.text, op.accept, op.after, op.req))
@@ -103,7 +111,11 @@ public class Validator(
                     if (op.kind == ClaimKind.Verified && (op.evidence == null || !context.evidenceExists(op.evidence))) {
                         return reject("v needs an existing evidence id", "fact.add(v): evidence=${op.evidence}")
                     }
-                    next.copy(facts = next.facts + Fact(nextN(next.facts.map { it.n }), op.kind, op.text, op.anchor, op.evidence))
+                    val staleAt = op.anchor?.let { anchor ->
+                        val current = context.currentVersion(anchor.path)
+                        if (current == anchor.version) null else current ?: anchor.version
+                    }
+                    next.copy(facts = next.facts + Fact(nextN(next.facts.map { it.n }), op.kind, op.text, op.anchor, op.evidence, staleAt))
                 }
                 is Op.FactRefute -> {
                     val fact = next.fact(op.n) ?: return reject("unknown fact", "fact.refute(${op.n})")
@@ -162,15 +174,20 @@ public class Validator(
         private fun words(text: String): Set<String> = text.lowercase().split(Regex("[^a-z0-9_]+")).filter { it.length >= 5 }.toSet()
     }
 
-    private fun opText(op: Op): String? = when (op) {
-        is Op.PlanAdd -> op.text
-        is Op.FactAdd -> op.text
-        is Op.DeadendAdd -> op.text
-        is Op.DecisionAdd -> op.text
-        is Op.OpenAdd -> op.text
-        is Op.AmendPropose -> op.change
-        is Op.Next -> op.text
-        is Op.PlanCancel -> op.reason
-        else -> null
+    /** Every model-controlled string rendered in STATE is an inline field. */
+    private fun opText(op: Op): List<String> = when (op) {
+        is Op.PlanAdd -> listOfNotNull(op.text, op.accept, op.req)
+        is Op.PlanCursor -> emptyList()
+        is Op.PlanTick -> listOfNotNull(op.evidence)
+        is Op.PlanCancel -> listOf(op.reason)
+        is Op.FactAdd -> listOfNotNull(op.text, op.evidence, op.anchor?.path)
+        is Op.FactRefute -> listOf(op.evidence)
+        is Op.DeadendAdd -> listOfNotNull(op.text, op.evidence, op.scope, op.reopen)
+        is Op.DecisionAdd -> listOfNotNull(op.text, op.because, op.rejected, op.probe)
+        is Op.OpenAdd -> listOfNotNull(op.text, op.trip, op.needs)
+        is Op.OpenClose -> listOf(op.evidence)
+        is Op.FocusSet -> listOf(op.dir)
+        is Op.AmendPropose -> listOf(op.change, op.reason)
+        is Op.Next -> listOf(op.text)
     }
 }

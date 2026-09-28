@@ -2,6 +2,8 @@ package io.astrolabe.tool.run
 
 import io.astrolabe.id.Identities
 import io.astrolabe.os.Proc
+import io.astrolabe.tool.EffectClass
+import io.astrolabe.workspace.StampEntry
 import io.astrolabe.store.Migrations
 import io.astrolabe.store.Store
 import kotlinx.serialization.Serializable
@@ -28,6 +30,11 @@ public data class Handle(
     val cursor: Long,
     /** The candidate identity before dispatch; the diff is taken when the process ends. */
     val stampBefore: String,
+    /** Legacy handles lack launch provenance and must stay conservatively unknown. */
+    val effectClass: EffectClass = EffectClass.D,
+    val effectsUnknown: Boolean = true,
+    val membersBefore: Map<String, StampEntry>? = null,
+    val baseCommitBefore: String? = null,
 ) {
     init {
         require(handleId.isNotBlank() && actionId.isNotBlank()) { "handle needs ids" }

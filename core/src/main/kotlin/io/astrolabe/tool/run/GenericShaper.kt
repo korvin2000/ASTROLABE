@@ -11,7 +11,7 @@ import io.astrolabe.evidence.Counts
  */
 public class GenericShaper : Shaper {
     override val id: String = "generic"
-    override val version: String = "1"
+    override val version: String = "2"
 
     /** The registry's last entry: it accepts every capture. */
     override fun applies(capture: RunCapture): Boolean = true
@@ -27,6 +27,7 @@ public class GenericShaper : Shaper {
             limitations += "no shaped parser for '${runner ?: "this command"}': head+tail with error lines only; " +
                 "counts unavailable (§8.3)"
         }
+        if (summary.identityIncomplete) limitations += "some Go cases have no package summary; their identities cannot certify pre-existing failures"
         val status = deriveStatus(
             StatusInputs(
                 capture = capture,
@@ -90,6 +91,7 @@ internal data class GenericSummary(
     /** The recognised runner family, or null when nothing structured was found. */
     val family: String?,
     val nothingRan: Boolean = false,
+    val identityIncomplete: Boolean = false,
 )
 
 /** Cheap summary recognisers for the runners P3.1.4 will parse properly (D-09). */
@@ -99,8 +101,8 @@ internal object GenericSummaries {
     private val GO_CASE = Regex("""^\s*---\s+(PASS|FAIL|SKIP):\s+(\S+)""")
     private val GO_PACKAGE = Regex("""^(ok|FAIL|\?)\s+(\S+)\s+(\[no test files\]|\(cached\)|[\d.]+m?s)""")
     private val UNITTEST_RAN = Regex("""^Ran\s+(\d+)\s+tests?\s+in""")
-    private val UNITTEST_FAILED = Regex("""^FAILED\s*\((.*)\)""")
-    private val UNITTEST_COUNT = Regex("""(failures|errors|skipped)=(\d+)""")
+    private val UNITTEST_FAILED = Regex("""^(?:FAILED|OK)\s*\((.*)\)""")
+    private val UNITTEST_COUNT = Regex("""(?:^|,\s*)(failures|errors|skipped)=(\d+)""")
     private val UNITTEST_CASE = Regex("""^(FAIL|ERROR):\s+(\S+)\s*\((.+)\)""")
     private val DOTNET = Regex("""Failed:\s*(\d+),\s*Passed:\s*(\d+),\s*Skipped:\s*(\d+),\s*Total:\s*(\d+)""")
     private val MOCHA_PASSING = Regex("""^(\d+)\s+passing""")
@@ -118,10 +120,10 @@ internal object GenericSummaries {
     }
 
     private fun cargo(lines: List<String>, checkId: String?): GenericSummary? {
-        val summary = lines.firstNotNullOfOrNull { CARGO.find(it) } ?: return null
-        val passed = summary.groupValues[2].toInt()
-        val failed = summary.groupValues[3].toInt()
-        val ignored = summary.groupValues[4].toInt()
+        val summaries = lines.mapNotNull { CARGO.find(it) }.ifEmpty { return null }
+        val passed = summaries.sumOf { it.groupValues[2].toInt() }
+        val failed = summaries.sumOf { it.groupValues[3].toInt() }
+        val ignored = summaries.sumOf { it.groupValues[4].toInt() }
         val tests = lines.mapNotNull { line ->
             val m = CARGO_CASE.find(line.trim()) ?: return@mapNotNull null
             val path = m.groupValues[1]
@@ -142,20 +144,23 @@ internal object GenericSummaries {
     }
 
     private fun go(lines: List<String>, checkId: String?): GenericSummary? {
-        var module: String? = null
         val tests = ArrayList<TestResult>()
+        val pending = ArrayList<Int>()
         var sawPackageLine = false
         for (line in lines) {
             GO_PACKAGE.find(line)?.let {
-                module = it.groupValues[2]
                 sawPackageLine = true
+                if (it.groupValues[1] != "?") {
+                    val module = it.groupValues[2]
+                    pending.forEach { index -> tests[index] = tests[index].copy(identity = tests[index].identity.copy(module = module)) }
+                    pending.clear()
+                }
             }
             val m = GO_CASE.find(line) ?: continue
             val path = m.groupValues[2]
             tests += TestResult(
                 TestIdentity(
                     check = checkId,
-                    module = module,
                     suite = path.substringBeforeLast('/', "").takeIf { it.isNotEmpty() },
                     name = path.substringAfterLast('/'),
                 ),
@@ -165,13 +170,12 @@ internal object GenericSummaries {
                     else -> TestOutcome.Skipped
                 },
             )
+            pending += tests.lastIndex
         }
         if (tests.isEmpty() && !sawPackageLine) return null
         if (tests.isEmpty()) return GenericSummary(Counts(discovered = 0), emptyList(), "go", nothingRan = true)
-        // The package line is printed after the cases, so re-stamp identities with the module it named.
-        val pkg = module
-        val stamped = if (pkg == null) tests else tests.map { it.copy(identity = it.identity.copy(module = pkg)) }
-        return GenericSummary(TestResults.counts(stamped), stamped, "go")
+        val identified = tests.filter { it.identity.module != null }
+        return GenericSummary(TestResults.counts(tests), identified, "go", identityIncomplete = identified.size != tests.size)
     }
 
     private fun unittest(lines: List<String>, checkId: String?): GenericSummary? {

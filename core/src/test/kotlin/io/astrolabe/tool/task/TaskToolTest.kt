@@ -114,6 +114,41 @@ class TaskToolTest {
 
     private fun status(o: ToolOutcome) = o.header!!.runtime.status
 
+    @Test
+    fun `lease expiry while awaiting an answer prevents its contract amendment`() = runTest {
+        val before = contracts.current(ids.work)
+        var live = true
+        val tool = tool(Answering { question ->
+            live = false
+            Answer(question.id, question.contractRevision, "Change rounding everywhere.", changesRequirements = true)
+        })
+        tool.beforeDispatch = { check(live) { "dispatch lease expired" } }
+
+        try {
+            ask(tool)
+        } catch (refused: IllegalStateException) {
+            assertEquals("dispatch lease expired", refused.message)
+        }
+
+        assertEquals(false, live, "the authority must have returned its answer")
+        assertEquals(before, contracts.current(ids.work), "the expired cell cannot commit a new contract revision")
+        assertTrue(tool.asked.none { it.amendedToVersion != null })
+    }
+
+    @Test
+    fun `wrong question and superseded answers do not amend the contract`() = runTest {
+        val wrong = tool(Answering { q -> Answer("another-question", q.contractRevision, "new requirement", changesRequirements = true) })
+        assertEquals("blocked", status(ask(wrong)))
+        assertEquals(1, contracts.current(ids.work)!!.version)
+        val late = tool(Answering { q ->
+            contracts.amendByUser(ids.work, "new user requirement")
+            Answer(q.id, q.contractRevision, "old answer", changesRequirements = true)
+        })
+        assertEquals("blocked", status(ask(late)))
+        assertEquals(2, contracts.current(ids.work)!!.version)
+        assertTrue(late.asked.none { it.answer?.text == "old answer" })
+    }
+
     private val stamp = CandidateId(Digest.ofUtf8("s0"))
 
     /** A scripted probe child: it records the packet it got and answers with one finding over nothing it was shown. */

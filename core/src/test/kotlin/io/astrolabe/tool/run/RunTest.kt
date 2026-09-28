@@ -21,7 +21,10 @@ import io.astrolabe.event.Question
 import io.astrolabe.event.Resolution
 import io.astrolabe.evidence.Coherence
 import io.astrolabe.evidence.InMemoryIntentJournal
+import io.astrolabe.evidence.IntentJournal
 import io.astrolabe.evidence.IntentStatus
+import io.astrolabe.evidence.Observation
+import io.astrolabe.evidence.Observations
 import io.astrolabe.evidence.SqliteAliases
 import io.astrolabe.evidence.SqliteObservations
 import io.astrolabe.fixtures.FakeClock
@@ -33,11 +36,14 @@ import io.astrolabe.id.Identities
 import io.astrolabe.id.WorkId
 import io.astrolabe.id.WorkspaceId
 import io.astrolabe.os.ChildCommands
+import io.astrolabe.os.Command
+import io.astrolabe.os.IdentityKey
 import io.astrolabe.os.LocalOs
 import io.astrolabe.os.Os
 import io.astrolabe.os.OwnerToken
 import io.astrolabe.os.Poll
 import io.astrolabe.os.Proc
+import io.astrolabe.os.ProcStatus
 import io.astrolabe.provider.ToolCall as ProviderCall
 import io.astrolabe.store.Store
 import io.astrolabe.tool.EffectClass
@@ -57,11 +63,20 @@ import io.astrolabe.workspace.Ranges
 import io.astrolabe.workspace.Stamper
 import io.astrolabe.workspace.VersionRegistry
 import io.astrolabe.workspace.Workspace
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import org.junit.jupiter.api.io.TempDir
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -116,9 +131,9 @@ class RunTest {
         repo.close()
     }
 
-    private fun runner(os: Os = this.os, authority: Authority = AutonomousAuthority(), config: Config = Config(), hostSets: Map<String, CapabilitySet> = emptyMap()) = Run(
-        workspace, registry, stamper, TrustedLocalRunner(os), os, intents, SqliteHandles(store, clock), SqliteObservations(store, clock), SqliteAliases(store, clock),
-        store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, contracts, authority, config, clock, stateRoot.resolve("logs"), hostSets = hostSets,
+    private fun runner(os: Os = this.os, authority: Authority = AutonomousAuthority(), config: Config = Config(), hostSets: Map<String, CapabilitySet> = emptyMap(), ids: Identities = this.ids, workspace: Workspace = this.workspace, handles: Handles = SqliteHandles(store, clock), observations: Observations = SqliteObservations(store, clock), intents: IntentJournal = this.intents) = Run(
+        workspace, registry, stamper, TrustedLocalRunner(os), os, intents, handles, observations, SqliteAliases(store, clock),
+        store.blobs, Redaction(config.redaction), HeuristicEstimator(), idGen, ids, contracts, authority, config, clock, stateRoot.resolve("logs"), hostSets = hostSets,
     )
 
     private fun call(json: String) = (ToolCalls.parse(listOf(ProviderCall("c1", "run", json))) as ParsedCalls.Valid).calls.single()
@@ -130,6 +145,42 @@ class RunTest {
     private fun status(o: ToolOutcome) = o.header!!.runtime.status
 
     private fun shell(windowsLine: String, posixLine: String) = if (windows) windowsLine else posixLine
+
+    @Test
+    fun `foreground output command arguments and terminal polls redact fixture secrets`() = runTest {
+        val secret = "AKIA" + "IOSFODNN7EXAMPLE"
+        repo.write("emit.txt", "$secret\n")
+        val command = shell("type emit.txt", "cat emit.txt")
+        val out = run("""{"cmd":"$command"}""")
+        assertFalse(out.body.contains(secret))
+        assertTrue(out.header!!.runtime.redactionApplied)
+        assertFalse(String(store.blobs.get(io.astrolabe.id.Digest(out.header!!.runtime.artifactRefs.first()))).contains(secret))
+        val echoed = run("""{"cmd":"echo $secret"}""")
+        assertFalse(echoed.body.contains(secret))
+        assertFalse(echoed.header!!.runtime.scope!!.contains(secret))
+        run("""{"cmd":"$command","bg":true}""")
+        val handle = SqliteHandles(store, clock).get("handle-1")!!
+        val terminal = awaitSettled(handle.handleId)
+        assertFalse(terminal.body.contains(secret))
+        assertTrue(terminal.header!!.runtime.redactionApplied)
+    }
+
+    @Test
+    fun `a secret straddling the head width is redacted before the head is cut`() = runTest {
+        val secret = "AKIA" + "IOSFODNN7EXAMPLE"
+        // "git --version " is 14 characters, so the secret starts at column 74 and crosses the 80-column cut.
+        val out = run("""{"argv":["git","--version","${"x".repeat(60)}$secret"]}""")
+        assertFalse(out.body.contains("AKIAIO"), out.body)
+    }
+
+    @Test
+    fun `a redaction scan limit marks the stored log capture incomplete`() = runTest {
+        repo.write("emit.txt", "a".repeat(1000))
+        val config = Config(redaction = io.astrolabe.auth.RedactionConfig(maxBytes = 64))
+        val out = run("""{"cmd":"${shell("type emit.txt", "cat emit.txt")}"}""", runner(config = config))
+        assertFalse(out.header!!.runtime.captureComplete)
+        assertFalse(SqliteObservations(store, clock).get("obs-1")!!.captureComplete)
+    }
 
     /** Polls [handle] until it stops reporting `running`; each poll is itself bounded. */
     private suspend fun awaitSettled(handle: String, polls: Int = 5): ToolOutcome {
@@ -229,6 +280,58 @@ class RunTest {
     }
 
     @Test
+    fun `mismatched and superseded approvals never dispatch a command`() = runTest {
+        contracts.amendByUser(ids.work, "allow git ref mutation") { it.copy(authorization = it.authorization.copy(capabilitySet = "wide")) }
+        val wide = mapOf("wide" to CapabilitySet("wide", Capability.entries.toSet()))
+        var spawned = 0
+        val tracking = object : Os by os {
+            override fun spawn(spec: io.astrolabe.os.SpawnSpec): Proc { spawned++; return os.spawn(spec) }
+        }
+        for (mode in listOf("identity", "revision", "revoked")) {
+            val approving = object : Authority by AutonomousAuthority() {
+                override suspend fun approve(request: DClassRequest): Decision {
+                    if (mode == "revoked") contracts.amendByUser(ids.work, "revoke") { it.copy(authorization = it.authorization.copy(capabilitySet = "workspace-local-test-only")) }
+                    return Decision(if (mode == "identity") "another-request" else request.id,
+                        if (mode == "revision") request.contractRevision - 1 else request.contractRevision, true)
+                }
+            }
+            val out = run("""{"argv":["git","push","origin","main"],"intent":"publish"}""", runner(os = tracking, authority = approving, hostSets = wide))
+            assertEquals("denied", status(out), mode)
+        }
+        assertEquals(0, spawned)
+        assertNull(intents.get("intent-1"))
+    }
+
+    @Test
+    fun `lease expiry during D-class approval prevents process dispatch`() = runTest {
+        contracts.amendByUser(ids.work, "allow git ref mutation") { it.copy(authorization = it.authorization.copy(capabilitySet = "wide")) }
+        var live = true
+        var spawned = 0
+        val chunked = ChunkedLogOs()
+        val tracked = object : Os by chunked {
+            override fun spawn(spec: io.astrolabe.os.SpawnSpec): Proc { spawned++; return chunked.spawn(spec) }
+        }
+        val approving = object : Authority by AutonomousAuthority() {
+            override suspend fun approve(request: DClassRequest): Decision {
+                live = false
+                return Decision(request.id, request.contractRevision, true, "approved after lease expiry")
+            }
+        }
+        val tool = runner(os = tracked, authority = approving, hostSets = mapOf("wide" to CapabilitySet("wide", Capability.entries.toSet())))
+        tool.beforeDispatch = { check(live) { "dispatch lease expired" } }
+
+        try {
+            run("""{"argv":["git","push","origin","main"],"intent":"publish"}""", tool)
+        } catch (refused: IllegalStateException) {
+            assertEquals("dispatch lease expired", refused.message)
+        }
+
+        assertFalse(live, "the authority must have returned its approval")
+        assertEquals(0, spawned, "an approval cannot restore an expired dispatch lease")
+        assertTrue(intents.open().isEmpty(), "a refused dispatch leaves no unreconciled intent to block a later attempt")
+    }
+
+    @Test
     fun `a lost observation is unknown_outcome with an open intent and no relaunch (FX-24)`() = runTest {
         var spawned = 0
         val flaky = object : Os by os {
@@ -242,6 +345,351 @@ class RunTest {
         assertEquals(IntentStatus.Unknown, intents.get("intent-1")!!.status)
         assertEquals(listOf("intent-1"), intents.open().map { it.intentId }, "reconciliation input at resume")
         assertEquals(1, spawned, "never relaunched")
+    }
+
+    @Test
+    fun `foreground run persists all terminal log chunks including the final failure`() = runTest {
+        val chunked = ChunkedLogOs()
+
+        val result = run("""{"cmd":"echo fixture"}""", runner(os = chunked))
+
+        assertEquals("failed", status(result))
+        val log = store.blobs.get(io.astrolabe.id.Digest(result.header!!.runtime.artifactRefs.first()))
+        kotlin.test.assertContentEquals(chunked.output, log)
+        assertTrue(result.body.contains("FINAL FAILURE"), result.body)
+        assertTrue(result.header!!.runtime.captureComplete)
+    }
+
+    @Test
+    fun `a capped foreground capture keeps its exit and commits the intent`() = runTest {
+        val chunk = 1024 * 1024
+        val capped = object : Os by ChunkedLogOs() {
+            override fun poll(proc: Proc, sinceCursorBytes: Long, observationTimeoutSeconds: Long): io.astrolabe.os.Poll {
+                val index = (sinceCursorBytes / chunk).toInt()
+                val bytes = if (index < 9) ByteArray(chunk) { 'x'.code.toByte() } else byteArrayOf()
+                return io.astrolabe.os.Poll(bytes, sinceCursorBytes + bytes.size, ProcStatus.Exited(0), false)
+            }
+        }
+
+        val result = run("""{"cmd":"echo fixture"}""", runner(os = capped))
+
+        assertFalse(status(result) == "unknown_outcome", result.body)
+        assertTrue(result.body.contains("exit 0"), result.body)
+        assertFalse(result.header!!.runtime.captureComplete)
+        assertTrue(intents.open().isEmpty(), "a finished process with a capped log is not an unreconciled effect")
+    }
+
+    @Test
+    fun `poll and cancel deny a handle owned by another work before accessing its process`() = runTest {
+        assertHandleAccessDenied(ids.copy(work = WorkId("W-2")), workspace)
+    }
+
+    @Test
+    fun `poll and cancel deny a handle owned by another workspace before accessing its process`() = runTest {
+        assertHandleAccessDenied(ids, Workspace(WorkspaceId("ws-2"), repo.root, repo.git))
+    }
+
+    private suspend fun assertHandleAccessDenied(caller: Identities, callerWorkspace: Workspace) {
+        val handle = savedHandle()
+        var processAccesses = 0
+        val tracked = object : Os by os {
+            override fun reattach(proc: Proc): Proc { processAccesses++; return proc }
+            override fun poll(proc: Proc, sinceCursorBytes: Long, observationTimeoutSeconds: Long): Poll {
+                processAccesses++
+                return Poll("private campaign output".toByteArray(), sinceCursorBytes + 23, ProcStatus.Running, false)
+            }
+            override fun terminate(proc: Proc): Proc { processAccesses++; return proc.copy(status = ProcStatus.Cancelled) }
+        }
+        val callerRun = runner(os = tracked, ids = caller, workspace = callerWorkspace)
+
+        for (operation in listOf("poll", "cancel")) {
+            val result = run("""{"op":"$operation","handle":"${handle.handleId}"}""", callerRun)
+
+            assertEquals("denied", status(result), operation)
+            assertFalse(result.body.contains("private campaign output"), operation)
+            assertEquals(0, processAccesses, "$operation must authorize before process or log access")
+            assertEquals(handle, SqliteHandles(store, clock).get(handle.handleId), operation)
+        }
+    }
+
+    @Test
+    fun `another attempt of the same work and workspace can poll and cancel a retained handle`() = runTest {
+        val handle = savedHandle()
+        var terminations = 0
+        val resumedOs = object : Os by os {
+            override fun reattach(proc: Proc): Proc = proc
+            override fun poll(proc: Proc, sinceCursorBytes: Long, observationTimeoutSeconds: Long): Poll {
+                val output = "resumed campaign output".toByteArray()
+                return Poll(output, sinceCursorBytes + output.size, ProcStatus.Running, false)
+            }
+            override fun terminate(proc: Proc): Proc { terminations++; return proc.copy(status = ProcStatus.Cancelled) }
+        }
+        val resumed = runner(os = resumedOs, ids = ids.copy(attempt = AttemptId("a2")))
+
+        val polled = run("""{"op":"poll","handle":"${handle.handleId}"}""", resumed)
+        assertEquals("running", status(polled))
+        assertTrue(polled.body.contains("resumed campaign output"))
+        assertTrue(SqliteHandles(store, clock).get(handle.handleId)!!.cursor > handle.cursor)
+
+        val cancelled = run("""{"op":"cancel","handle":"${handle.handleId}"}""", resumed)
+        assertEquals("cancelled", status(cancelled))
+        assertEquals(1, terminations)
+        assertEquals("cancelled", SqliteHandles(store, clock).get(handle.handleId)!!.status)
+    }
+
+    private fun savedHandle(): Handle {
+        val action = "retained-action"
+        val alias = SqliteAliases(store, clock).allocate(ids.work, action, "result", ids.context, workspace.id)
+        val proc = Proc(42, 1000, IdentityKey(42, 1000), token, stateRoot.resolve("retained.log").toString(), 0,
+            ProcStatus.Running, Command.Argv(listOf("echo", "retained")), repo.root.toString())
+        return Handle("retained-handle", ids, action, alias.text, listOf("echo", "retained"), false, null, proc,
+            "running", 0, stamper.report().candidateId.digest.hex).also { SqliteHandles(store, clock).save(it) }
+    }
+
+    @Test
+    fun `foreground observation storage failure keeps the dispatched intent open and blocks replay`() = runTest {
+        val controlled = ControlledOs().also { it.state = ProcStatus.Exited(0) }
+        var fail = true
+        val observations = object : Observations by SqliteObservations(store, clock) {
+            override fun record(observation: Observation) {
+                if (fail) { fail = false; throw IOException("observation storage failed") }
+                SqliteObservations(store, clock).record(observation)
+            }
+        }
+        val tool = runner(os = controlled, observations = observations)
+        val command = """{"argv":["python","fixture.py"]}"""
+
+        try { run(command, tool) } catch (_: IOException) { /* The durable intent must still guard replay. */ }
+
+        assertFalse(fail, "failure must occur after dispatch, at observation persistence")
+        assertEquals(IntentStatus.Unknown, intents.get("intent-1")!!.status)
+        assertEquals(listOf("intent-1"), intents.open().map { it.intentId })
+        assertEquals("unknown_outcome", status(run(command, tool)))
+        assertEquals(1, controlled.spawns)
+    }
+
+    @Test
+    fun `background handle storage failure keeps the dispatched intent open and blocks replay`() = runTest {
+        val controlled = ControlledOs()
+        var fail = true
+        val handles = object : Handles by SqliteHandles(store, clock) {
+            override fun save(handle: Handle) {
+                if (fail) { fail = false; throw IOException("handle storage failed") }
+                SqliteHandles(store, clock).save(handle)
+            }
+        }
+        val tool = runner(os = controlled, handles = handles)
+        val command = """{"argv":["python","fixture.py"],"bg":true}"""
+
+        try { run(command, tool) } catch (_: IOException) { /* The child may still be running. */ }
+
+        assertFalse(fail, "failure must occur after dispatch, at handle persistence")
+        assertEquals(IntentStatus.Unknown, intents.get("intent-1")!!.status)
+        assertEquals(listOf("intent-1"), intents.open().map { it.intentId })
+        assertEquals("unknown_outcome", status(run(command, tool)))
+        assertEquals(1, controlled.spawns)
+    }
+
+    @Test
+    fun `failed intent commit leaves observed effects open and blocks unsafe replay`() = runTest {
+        val controlled = ControlledOs().also { it.state = ProcStatus.Exited(0) }
+        var fail = true
+        val journal = object : IntentJournal by intents {
+            override fun update(intentId: String, status: IntentStatus) {
+                if (status == IntentStatus.Committed && fail) {
+                    fail = false
+                    throw IOException("intent commit failed")
+                }
+                intents.update(intentId, status)
+            }
+        }
+        val tool = runner(os = controlled, intents = journal)
+        val command = """{"argv":["python","fixture.py"]}"""
+
+        try { run(command, tool) } catch (_: IOException) { /* Observation is durable, commit is not. */ }
+
+        assertFalse(fail, "the commit must have been attempted")
+        assertEquals(IntentStatus.Observed, intents.get("intent-1")!!.status)
+        assertNotNull(SqliteObservations(store, clock).get("obs-1"))
+        assertEquals("unknown_outcome", status(run(command, tool)))
+        assertEquals(1, controlled.spawns, "an observed but uncommitted effect cannot be replayed")
+    }
+
+    @Test
+    fun `foreground cancellation settles the process leaves unknown intent and blocks replay`() = runBlocking {
+        val controlled = ControlledOs()
+        val pollStarted = CompletableDeferred<Unit>()
+        val releasePoll = CountDownLatch(1)
+        val terminations = AtomicInteger()
+        val waiting = object : Os by controlled {
+            override fun poll(proc: Proc, sinceCursorBytes: Long, observationTimeoutSeconds: Long): Poll {
+                pollStarted.complete(Unit)
+                releasePoll.await(10, TimeUnit.SECONDS)
+                return Poll(ByteArray(0), sinceCursorBytes, ProcStatus.Exited(0), false)
+            }
+
+            override fun terminate(proc: Proc): Proc {
+                terminations.incrementAndGet()
+                return proc.copy(status = ProcStatus.Cancelled)
+            }
+        }
+        val tool = runner(os = waiting)
+        val command = """{"argv":["python","fixture.py"]}"""
+        val returned = CompletableDeferred<ToolOutcome>()
+        val action = launch(Dispatchers.Default) { returned.complete(run(command, tool)) }
+        try {
+            withTimeout(5_000) { pollStarted.await() }
+            withTimeout(5_000) { action.cancelAndJoin() }
+
+            assertTrue(action.isCancelled)
+            assertFalse(returned.isCompleted, "cancellation must propagate instead of returning success")
+            assertEquals(1, terminations.get(), "the owned process must settle before cancellation returns")
+            assertEquals(IntentStatus.Unknown, intents.get("intent-1")!!.status)
+            assertEquals("unknown_outcome", status(run(command, tool)))
+            assertEquals(1, controlled.spawns)
+        } finally {
+            releasePoll.countDown()
+            action.cancelAndJoin()
+        }
+    }
+
+    @Test
+    fun `background D classification and unknown effects survive persisted running terminal and cancel results`() = runTest {
+        contracts.amendByUser(ids.work, "allow git ref mutation") { it.copy(authorization = it.authorization.copy(capabilitySet = "wide")) }
+        val approving = object : Authority by AutonomousAuthority() {
+            override suspend fun approve(request: DClassRequest) = Decision(request.id, request.contractRevision, true)
+        }
+        val controlled = ControlledOs()
+        val wide = mapOf("wide" to CapabilitySet("wide", Capability.entries.toSet()))
+        val started = run("""{"argv":["python","../outside-script.py"],"intent":"run approved script","bg":true}""",
+            runner(os = controlled, authority = approving, hostSets = wide))
+        assertEquals(EffectClass.D, started.header!!.effectClass)
+        assertTrue(started.header!!.runtime.effectsUnknown)
+        val resumed = runner(os = controlled, ids = ids.copy(attempt = AttemptId("a2")), hostSets = wide)
+
+        val running = run("""{"op":"poll","handle":"handle-1"}""", resumed)
+        assertEquals(EffectClass.D, running.header!!.effectClass)
+        assertTrue(running.header!!.runtime.effectsUnknown)
+        controlled.state = ProcStatus.Exited(0)
+        val terminal = run("""{"op":"poll","handle":"handle-1"}""", resumed)
+        assertEquals(EffectClass.D, terminal.header!!.effectClass)
+        assertTrue(terminal.header!!.runtime.effectsUnknown)
+        val cancelled = run("""{"op":"cancel","handle":"handle-1"}""", resumed)
+        assertEquals(EffectClass.D, cancelled.header!!.effectClass)
+        assertTrue(cancelled.header!!.runtime.effectsUnknown)
+        assertEquals(1, controlled.spawns, "resumed polls never launch the command")
+    }
+
+    @Test
+    fun `background completion excludes pre-existing dirt and does not attribute concurrent edits to the run`() = runTest {
+        repo.write("README.md", "pre-existing user edit\n")
+        val controlled = ControlledOs()
+        val started = run("""{"argv":["git","status"],"bg":true}""", runner(os = controlled))
+        repo.write("src/a.py", "concurrent user edit\n")
+        controlled.state = ProcStatus.Exited(0)
+
+        val result = run("""{"op":"poll","handle":"handle-1"}""", runner(os = controlled))
+
+        assertEquals(started.header!!.runtime.candidateBefore, result.header!!.runtime.candidateBefore)
+        assertEquals(listOf("src/a.py"), result.header!!.runtime.effectsObserved)
+        assertTrue(result.header!!.runtime.effectsUnknown, "a stamp diff cannot identify who changed a file")
+        assertFalse(result.body.contains("touched (by run"), result.body)
+    }
+
+    @Test
+    fun `background completion observes dirty-to-clean changes and invalidates the old read`() = runTest {
+        repo.write("src/a.py", "def a():\n    return 2\n")
+        val old = registry.version("src/a.py")!!
+        workset.register(Entry("src/a.py", Ranges.single(1, 2), old, EntrySource.Look, 1, "#look", 40))
+        val controlled = ControlledOs()
+        val started = run("""{"argv":["git","status"],"bg":true}""", runner(os = controlled))
+        repo.write("src/a.py", "def a():\n    return 1\n")
+        controlled.state = ProcStatus.Exited(0)
+
+        val result = run("""{"op":"poll","handle":"handle-1"}""", runner(os = controlled))
+
+        assertEquals(started.header!!.runtime.candidateBefore, result.header!!.runtime.candidateBefore)
+        assertEquals(listOf("src/a.py"), result.header!!.runtime.effectsObserved)
+        assertTrue(result.header!!.runtime.effectsUnknown)
+        assertFalse(result.body.contains("touched (by run"), result.body)
+        assertFalse(workset.covers("src/a.py", old, LineRange(1, 2)))
+        assertEquals(registry.version("src/a.py"), registry.recorded("src/a.py"))
+    }
+
+    @Test
+    fun `background completion observes a clean HEAD transition and invalidates the old read`() = runTest {
+        val old = registry.version("src/a.py")!!
+        workset.register(Entry("src/a.py", Ranges.single(1, 2), old, EntrySource.Look, 1, "#look", 40))
+        val controlled = ControlledOs()
+        val started = run("""{"argv":["git","status"],"bg":true}""", runner(os = controlled))
+        repo.write("src/a.py", "def a():\n    return 2\n")
+        repo.commit("advance HEAD during background run")
+        assertTrue(stamper.report().members.isEmpty(), "both endpoints are clean trees")
+        controlled.state = ProcStatus.Exited(0)
+
+        val result = run("""{"op":"poll","handle":"handle-1"}""", runner(os = controlled))
+
+        assertEquals(started.header!!.runtime.candidateBefore, result.header!!.runtime.candidateBefore)
+        assertEquals(listOf("src/a.py"), result.header!!.runtime.effectsObserved)
+        assertTrue(result.header!!.runtime.effectsUnknown)
+        assertFalse(workset.covers("src/a.py", old, LineRange(1, 2)))
+        assertEquals(registry.version("src/a.py"), registry.recorded("src/a.py"))
+    }
+
+    @Test
+    fun `terminal background log capture is bounded and stored as incomplete when capped`() = runTest {
+        val controlled = ControlledOs()
+        // Keep redaction above the process capture cap, so it cannot mask an unbounded log read.
+        val config = Config(redaction = io.astrolabe.auth.RedactionConfig(patterns = emptyList(), maxBytes = 10 * 1024 * 1024))
+        val tool = runner(os = controlled, config = config)
+        run("""{"argv":["git","status"],"bg":true}""", tool)
+        val handle = SqliteHandles(store, clock).get("handle-1")!!
+        Files.write(handle.proc.log, ByteArray(9 * 1024 * 1024) { 'x'.code.toByte() })
+        controlled.state = ProcStatus.Exited(0)
+
+        val result = run("""{"op":"poll","handle":"handle-1"}""", tool)
+
+        val blob = store.blobs.get(io.astrolabe.id.Digest(result.header!!.runtime.artifactRefs.first()))
+        assertEquals(8 * 1024 * 1024, blob.size)
+        assertFalse(result.header!!.runtime.captureComplete)
+        assertFalse(SqliteObservations(store, clock).get("obs-2")!!.captureComplete)
+        assertFalse(result.green)
+    }
+
+    @Test
+    fun `missing terminal background log is stored as an incomplete capture`() = runTest {
+        val controlled = ControlledOs()
+        val tool = runner(os = controlled)
+        run("""{"argv":["git","status"],"bg":true}""", tool)
+        val handle = SqliteHandles(store, clock).get("handle-1")!!
+        Files.delete(handle.proc.log)
+        controlled.state = ProcStatus.Exited(0)
+
+        val result = run("""{"op":"poll","handle":"handle-1"}""", tool)
+
+        assertFalse(result.header!!.runtime.captureComplete)
+        assertFalse(SqliteObservations(store, clock).get("obs-2")!!.captureComplete)
+        assertFalse(result.green)
+    }
+
+    /** A process boundary with explicit state; it never launches an external command. */
+    private inner class ControlledOs : Os by os {
+        var state: ProcStatus = ProcStatus.Running
+        var spawns = 0
+
+        override fun spawn(spec: io.astrolabe.os.SpawnSpec): Proc {
+            spawns++
+            Files.write(spec.logPath, ByteArray(0))
+            return Proc(42, 1000, IdentityKey(42, 1000), token, spec.logPath.toString(), 0,
+                ProcStatus.Running, spec.command, spec.workingDirectory.toString())
+        }
+
+        override fun poll(proc: Proc, sinceCursorBytes: Long, observationTimeoutSeconds: Long) =
+            Poll(ByteArray(0), sinceCursorBytes, state, false)
+
+        override fun reattach(proc: Proc): Proc = proc.copy(status = state)
+
+        override fun terminate(proc: Proc): Proc = proc.copy(status = ProcStatus.Cancelled)
     }
 
     @Test

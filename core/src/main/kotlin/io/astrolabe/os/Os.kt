@@ -12,8 +12,9 @@ import kotlin.math.abs
  * Operating-system adapter: owned process launch, durable log capture, atomic file replacement and
  * real-path resolution.
  *
- * A launched process is owned from birth by a kernel container (Windows job object, POSIX session)
- * so that its whole tree is terminable and no descendant can break away (`§13.1`, D-43). Every
+ * Windows owns descendants through a job object. Linux launches each command beneath a separate
+ * kernel subreaper that adopts detached descendants and confirms their termination with waitpid.
+ * On Linux [Proc.pid] identifies that supervisor; the reported exit code is the command's. Every
  * launch is described by a [Proc] record that is persisted next to its log file, independently of
  * the coroutine that requested it, so a resumed harness reads status and log cursor from the
  * filesystem alone.
@@ -30,9 +31,11 @@ import kotlin.math.abs
  *    death). A lost process is never relaunched blindly; this adapter has no relaunch operation.
  *
  * Processes do not survive harness death by default. On Windows the job object is created with
- * `JOB_OBJECT_LIMIT_KILL_ON_CLOSE`, so the tree dies with the JVM that owns it. On POSIX the
- * session survives the owner; such a process resolves to [ProcStatus.Running] but *unowned* — its
- * exit code can no longer be observed, so it becomes [ProcStatus.Lost] once it disappears.
+ * `JOB_OBJECT_LIMIT_KILL_ON_CLOSE`, so the tree dies with the JVM that owns it. On Linux, closing
+ * the host's control pipe (including host death) asks the subreaper to kill and reap descendants.
+ * Abnormal supervisor death or unconfirmed cleanup is Lost, never confirmed quiescence. Linux
+ * requires a local Java launcher at java.home and procfs; each launch uses a helper JVM.
+ * This is trusted-local process ownership, not security confinement against hostile commands.
  *
  * **Native access.** The bundled [LocalOs] binds process-control APIs through `java.lang.foreign`.
  * These are *restricted* methods: JDK 26 runs them under `--illegal-native-access=warn` (a warning
@@ -243,6 +246,7 @@ public sealed interface ProcStatus {
  */
 @Serializable
 public data class Proc(
+    /** The owned process identity: the Linux subreaper PID, or the Windows command PID. */
     public val pid: Long,
     public val startedAtEpochMillis: Long,
     public val identityKey: IdentityKey,

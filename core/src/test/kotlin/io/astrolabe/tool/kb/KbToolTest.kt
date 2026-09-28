@@ -23,6 +23,35 @@ import kotlin.test.assertTrue
 
 /** P1.6.10 `kb` contract: complete-empty results on the S0 base (never "absent"), stale hits labelled, propose needs a queue (P4.1.3). */
 class KbToolTest {
+    @Test
+    fun `knowledge reads redact secrets and page within each admitted budget`() = runTest {
+        val secret = "ghp_" + "a".repeat(36)
+        var body = "credential $secret\n" + "archived decision\n".repeat(300)
+        val kb = object : Kb {
+            override fun search(query: String, kinds: Set<String>?, scope: String?, why: String) =
+                KbHits(listOf(KbHit("STATUS-1", "STATUS", secret, false)), secret, true)
+            override fun get(id: String) = KbEntry(id, "STATUS", body, false)
+            override fun skill(id: String) = get(id)
+        }
+        val tool = KbTool(kb, HeuristicEstimator(), FixedIdGen())
+        suspend fun page(json: String) = tool.execute(call(json), TurnContext(1, Workset().snapshot(), Reservations(Tokens(180))))
+        for (op in listOf("get", "skill")) {
+            val first = page("""{"op":"$op","id":"STATUS-1"}""")
+            assertTrue(first.tokens <= 180)
+            assertTrue(first.header!!.truncated)
+            assertFalse(secret in first.text)
+            assertTrue(first.header!!.runtime.redactionApplied)
+            val cursor = Regex("next_offset=(\\d+) version=([a-f0-9]+)").find(first.body)!!
+            val next = page("""{"op":"$op","id":"STATUS-1","offset":${cursor.groupValues[1]},"version":"${cursor.groupValues[2]}"}""")
+            assertTrue(next.tokens <= 180 && "archived decision" in next.body)
+            body += "new decision"
+            val changed = page("""{"op":"$op","id":"STATUS-1","offset":${cursor.groupValues[1]},"version":"${cursor.groupValues[2]}"}""")
+            assertEquals("changed", changed.header!!.runtime.status)
+        }
+        val search = page("""{"op":"search","query":"$secret","why":"w"}""")
+        assertFalse(secret in search.text || secret in search.header!!.runtime.scope.orEmpty())
+    }
+
     private fun call(json: String) = (ToolCalls.parse(listOf(ProviderCall("c1", "kb", json))) as ParsedCalls.Valid).calls.single()
 
     private suspend fun run(kb: Kb, json: String): ToolOutcome = KbTool(kb, HeuristicEstimator(), FixedIdGen()).execute(call(json), TurnContext(1, Workset().snapshot(), Reservations(Tokens(1_000))))

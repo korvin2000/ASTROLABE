@@ -54,6 +54,7 @@ class CeilingTest {
 
         // git that does not move a ref is not D.
         assertEquals(EffectClass.R, classify("git", "status").effectClass)
+        assertEquals(EffectClass.R, classify("git", "status", "--short").effectClass)
         assertEquals(EffectClass.R, classify("git", "diff", "--stat").effectClass)
     }
 
@@ -75,6 +76,16 @@ class CeilingTest {
         assertTrue(script.effectsUnknown)
         assertContains(script.reasons.toString(), "effects are unknown until the stamp diff")
         assertFalse(script.approximate)
+    }
+
+    @Test
+    fun `unknown local executables and wrappers have unknown write effects`() {
+        for (argv in listOf(listOf("./scripts/deploy-helper"), listOf("mystery-wrapper", "git", "push"), listOf("./ls", "-la"))) {
+            val classification = EffectPolicy.classify(argv, null, root, protectedPaths)
+            assertEquals(EffectClass.W, classification.effectClass)
+            assertTrue(classification.effectsUnknown)
+            assertContains(classification.requiredCapabilities, Capability.WorkspaceWrite)
+        }
     }
 
     @Test

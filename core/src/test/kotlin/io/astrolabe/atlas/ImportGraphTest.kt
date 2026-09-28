@@ -20,6 +20,24 @@ class ImportGraphTest {
         graph.graph.imports.mapTo(HashSet()) { it.importer.path to it.dependency.path }
 
     @Test
+    fun `unresolved TypeScript aliases keep a syntax graph incomplete`() {
+        TempRepo.create().use { repo ->
+            repo.write("package.json", """{"name":"app"}""")
+            repo.write("tsconfig.json", """{"compilerOptions":{"baseUrl":".","paths":{"@app/*":["src/*"]}}}""")
+            repo.write("src/helper.ts", "export function helper() { return 1; }\n")
+            repo.write("tests/helper.test.ts", "import { helper } from '@app/helper';\nhelper();\n")
+            repo.commit("alias fixture")
+            val atlas = Atlas.build(repo.root)
+            val graph = ImportGraph.of(atlas, workspace) { path -> atlas.outline(path).copy(tier = IndexTier.Syntax, complete = true) }
+            assertEquals(IndexTier.Syntax, graph.graph.tier)
+            assertFalse(graph.graph.complete)
+            assertFalse(graph.isComplete("tests/helper.test.ts"))
+            val analysis = Impact.analyze(ImpactRequest(graph.graph, setOf(graph.file("src/helper.ts")), emptyList(), emptyList(), emptyList(), true))
+            assertFalse(analysis.blastComplete, "an unknown alias cannot narrow the test closure")
+        }
+    }
+
+    @Test
     fun `python rows become kernel files with resolved edges, one root package and lexical tier`() {
         FixtureRepos.materialize(Fixture.PythonSmall).use { repo ->
             val graph = graphOf(repo.root)
@@ -90,7 +108,7 @@ class ImportGraphTest {
             assertTrue("src/main/java/app/Main.java" to "src/main/java/app/Loader.java" in edges(graph))
 
             assertEquals(listOf("dynamic import at line 2: import"), graph.unresolved("web/src/lazy.ts"))
-            assertEquals(listOf("dynamic import at line 2: require"), graph.unresolved("web/src/plain.js"))
+            assertTrue("dynamic import at line 2: require" in graph.unresolved("web/src/plain.js"))
             assertTrue(graph.unresolved("web/src/client.ts").single().startsWith("generated file:"))
             assertEquals(listOf("unresolved import ./missing.ts"), graph.unresolved("web/src/index.ts"))
             assertTrue("web/src/index.ts" to "web/src/lazy.ts" in edges(graph))
@@ -157,7 +175,8 @@ class ImportGraphTest {
             assertTrue(graph.isComplete("services/a/main.py"), "requests is clearly external")
             assertEquals(listOf("unresolved import pay.missing"), graph.unresolved("services/b/main.py"))
             assertTrue("packages/app/src/index.ts" to "packages/ui/src/index.ts" in edges)
-            assertTrue(graph.isComplete("packages/app/src/index.ts"), "react is clearly external")
+            assertFalse(graph.isComplete("packages/app/src/index.ts"), "a bare react import can be shadowed by local path aliases")
+            assertEquals(listOf("unresolved bare import react (package or local alias)"), graph.unresolved("packages/app/src/index.ts"))
             assertNull(graph.packageOf("loose.py"), "no manifest covers the root")
             assertEquals(ImpactScope(workspace, null), graph.file("loose.py").scope)
             assertEquals(

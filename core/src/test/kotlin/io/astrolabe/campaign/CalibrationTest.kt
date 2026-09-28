@@ -1,9 +1,12 @@
 package io.astrolabe.campaign
 
 import io.astrolabe.DClassPolicy
+import io.astrolabe.AttemptConfig
+import io.astrolabe.Config
 import io.astrolabe.Defaults
 import io.astrolabe.Flags
 import io.astrolabe.Mode
+import io.astrolabe.ShapePolicy
 import io.astrolabe.auth.Stage
 import io.astrolabe.budget.Budget
 import io.astrolabe.budget.HeuristicEstimator
@@ -22,6 +25,7 @@ import io.astrolabe.event.AgentEvent
 import io.astrolabe.event.Events
 import io.astrolabe.fixtures.EventRecorder
 import io.astrolabe.fixtures.FakeClock
+import io.astrolabe.fixtures.FakeProfiles
 import io.astrolabe.fixtures.TempRepo
 import io.astrolabe.graph.Production
 import io.astrolabe.graph.RequirementGraph
@@ -47,7 +51,10 @@ class CalibrationTest {
     lateinit var stateRoot: Path
 
     private val clock = FakeClock.at("2026-09-24T10:00:00Z")
-    private val series = CalibrationSeries("repo-1", "0.1", "d16-bands-v1")
+    private val series = CalibrationSeries("repo-1", "0.1", Calibration.policy().version)
+
+    private fun frozen(version: String = "0.1", shape: ShapePolicy = ShapePolicy()): AttemptConfig =
+        AttemptConfig.freeze(Config(defaults = Defaults(shapePolicy = shape), profiles = FakeProfiles.all), version)
 
     private fun contract(work: String) = Contract(
         WorkId(work), 1, AttemptId("a1"), Mode.Autonomous, Shape.S1,
@@ -63,15 +70,83 @@ class CalibrationTest {
     /** A failed campaign that needed a continuation (an overrun) and a still-running one (censored). */
     private fun seed(store: Store) {
         val campaigns = SqliteCampaigns(store, clock)
+        val attempts = Attempts(store, clock)
         val failed = contract("W-1")
+        attempts.save(failed.workId, failed.attemptId, frozen())
         var s = Lifecycle.open(failed, graph()).also(campaigns::save)
         for (t in listOf(
             Transition.Reconciled(), Transition.Dispatched("I1", ContextId("c1")), Transition.Lost(ContextId("c1"), null),
             Transition.Dispatched("I1", ContextId("c2")), Transition.Lost(ContextId("c2"), null), Transition.Stopped(CampaignOutcome.Failed, "gave up"),
         )) s = Lifecycle.apply(s, failed, t).also(campaigns::save)
         val running = contract("W-2")
+        attempts.save(running.workId, running.attemptId, frozen())
         var r = Lifecycle.open(running, graph()).also(campaigns::save)
         for (t in listOf(Transition.Reconciled(), Transition.Dispatched("I1", ContextId("c3")))) r = Lifecycle.apply(r, running, t).also(campaigns::save)
+    }
+
+    @Test
+    fun `host cancellation and external stops do not become failed calibration samples`() {
+        TempRepo.create().use { repo ->
+            repo.write("a.txt", "a")
+            repo.commit("initial")
+            Store.open(stateRoot, repo.git, clock).use { store ->
+                seed(store)
+                val campaigns = SqliteCampaigns(store, clock)
+                for ((work, outcome) in listOf("W-3" to CampaignOutcome.Cancelled, "W-4" to CampaignOutcome.BlockedExternal)) {
+                    val contract = contract(work)
+                    Attempts(store, clock).save(contract.workId, contract.attemptId, frozen())
+                    var state = Lifecycle.open(contract, graph()).also(campaigns::save)
+                    for (transition in listOf(
+                        Transition.Reconciled(), Transition.Dispatched("I1", ContextId("cell-$work")),
+                        Transition.Lost(ContextId("cell-$work"), null), Transition.Stopped(outcome, "external stop"),
+                    )) state = Lifecycle.apply(state, contract, transition).also(campaigns::save)
+                }
+                val observations = Calibration.observations(store, series)
+                assertEquals(
+                    listOf(CalibrationOutcome.Failed, CalibrationOutcome.Unfinished, CalibrationOutcome.Cancelled, CalibrationOutcome.Unfinished),
+                    observations.map { it.outcome },
+                )
+                assertEquals(1, CalibrationStats.aggregate(observations, Calibration.policy()).groups.getValue(series).overall.eligible)
+            }
+        }
+    }
+
+    @Test
+    fun `historical calibration keeps each frozen harness and file-band policy`() {
+        TempRepo.create().use { repo ->
+            repo.write("a.txt", "a")
+            repo.commit("initial")
+            Store.open(stateRoot, repo.git, clock).use { store ->
+                seed(store)
+                val campaigns = SqliteCampaigns(store, clock)
+                val changedBands = ShapePolicy(smallMaxFiles = 4, largeMinFiles = 12)
+                for ((work, version, shape) in listOf(
+                    Triple("W-3", "0.2", ShapePolicy()),
+                    Triple("W-4", "0.1", changedBands),
+                )) {
+                    val task = contract(work)
+                    Attempts(store, clock).save(task.workId, task.attemptId, frozen(version, shape))
+                    var state = Lifecycle.open(task, graph()).also(campaigns::save)
+                    state = Lifecycle.apply(state, task, Transition.Reconciled()).also(campaigns::save)
+                    Lifecycle.apply(state, task, Transition.Dispatched("I1", ContextId("cell-$work"))).also(campaigns::save)
+                }
+                val unversioned = contract("W-5")
+                var unversionedState = Lifecycle.open(unversioned, graph()).also(campaigns::save)
+                unversionedState = Lifecycle.apply(unversionedState, unversioned, Transition.Reconciled()).also(campaigns::save)
+                Lifecycle.apply(unversionedState, unversioned, Transition.Dispatched("I1", ContextId("cell-W-5"))).also(campaigns::save)
+                val observations = Calibration.observations(store, series)
+                assertEquals(4, observations.size)
+                assertEquals(
+                    setOf(series, series.copy(harnessVersion = "0.2"), series.copy(sizingPolicyVersion = Calibration.policy(changedBands).version)),
+                    observations.map { it.series }.toSet(),
+                )
+                assertEquals(2, observations.count { it.series == series })
+                assertTrue(Calibration.policy(changedBands).version != series.sizingPolicyVersion)
+                val stats = CalibrationStats.aggregate(observations, Calibration.policy())
+                assertEquals(3, stats.groups.size)
+                assertEquals(1, stats.groups.getValue(series).overall.eligible)
+            }
+        }
     }
 
     @Test

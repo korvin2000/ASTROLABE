@@ -135,6 +135,10 @@ internal class CampaignRecovery(
         repair: Repair,
     ): RepairOutcome {
         val failure = routed.failure
+        val key = key(increment, routed.fingerprint.signature)
+        if ((repairs[key] ?: 0) > 0) {
+            return RepairOutcome.Escalated("repair $OPERATION: scoped repair already spent", "repair spent", 0)
+        }
         val capsule = Capsule(
             intendedOperation = OPERATION,
             acceptanceCriterion = "the increment's acceptance ${acceptance.joinToString(", ")} is green at the current stamp",
@@ -148,13 +152,21 @@ internal class CampaignRecovery(
             allowedFixes = listOf("setup and environment inside the increment's write scope", "never the acceptance, its tests or its checks"),
             remainingBudget = remaining,
         )
-        val outcome = repair.repair(capsule, shape, packet, policy)
-        val key = key(increment, routed.fingerprint.signature)
+        // Reserve before the helper can produce effects; an interrupted repair is never replayed blindly.
+        journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, refs = failure.evidenceRefs,
+            text = "repair of $increment reserved before dispatch",
+            payload = buildJsonObject {
+                put("type", REPAIR)
+                put("key", key)
+                put("increment", increment)
+                put("outcome", "started")
+            }, at = clock.instant()))
         repairs.merge(key, 1, Int::plus)
+        val outcome = repair.repair(capsule, shape, packet, policy)
         pin(increment, outcome.diagnosis)
         journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, refs = failure.evidenceRefs, text = outcome.diagnosis,
             payload = buildJsonObject {
-                put("type", REPAIR)
+                put("type", "recovery-repair-completed")
                 put("key", key)
                 put("increment", increment)
                 put("outcome", outcome::class.simpleName!!.lowercase())

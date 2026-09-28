@@ -16,6 +16,7 @@ import io.astrolabe.auth.RedactionConfig
 import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Contract
 import io.astrolabe.contract.Contracts
+import io.astrolabe.contract.Origin
 import io.astrolabe.evidence.Outcome
 import io.astrolabe.evidence.Receipt
 import io.astrolabe.id.CandidateId
@@ -42,6 +43,7 @@ import io.astrolabe.tool.ToolOps
 import io.astrolabe.tool.ToolOutcome
 import io.astrolabe.tool.TurnContext
 import io.astrolabe.tool.VerifyArgs
+import io.astrolabe.tool.run.JUnitReports
 import io.astrolabe.tool.run.Executions
 import io.astrolabe.tool.run.RunCapture
 import io.astrolabe.tool.run.Runner
@@ -66,6 +68,9 @@ import io.astrolabe.verify.Scheduler
 import io.astrolabe.verify.Selector
 import io.astrolabe.workspace.Stamper
 import io.astrolabe.workspace.Workspace
+import io.astrolabe.workspace.WorkspacePath
+import io.astrolabe.workspace.PathResolution
+import io.astrolabe.workspace.Intent
 import io.astrolabe.delegate.IncrementReview
 import io.astrolabe.delegate.ReviewOutcome
 import java.io.IOException
@@ -109,6 +114,12 @@ public class Verify(
     /** Where the blast selection's import graph takes its outlines: tier 0, or a host tier-1 index (D-251). */
     private val tiers: IndexTiers = IndexTiers.TIER_0,
 ) : ToolExecutor {
+    internal var beforeDispatch: () -> Unit = {}
+        set(value) {
+            field = value
+            checker?.beforeDispatch = value
+            baseline?.beforeDispatch = value
+        }
     init {
         require(ids.context != null) { "verify runs inside a cell: ids.context is its lineage" }
         require(timeoutSeconds > 0 && checkerTimeBoxSeconds > 0) { "timeouts must be positive" }
@@ -206,11 +217,11 @@ public class Verify(
 
     // ------------------------------------------------------------------ ops
 
-    private fun check(args: VerifyArgs, contract: Contract): ToolOutcome {
+    private suspend fun check(args: VerifyArgs, contract: Contract): ToolOutcome {
         val runner = checker ?: return refused(args, "unavailable", "no end-of-turn checker is configured for this cell")
         val paths = args.paths?.takeIf { it.isNotEmpty() } ?: touched
         if (paths.isEmpty()) return refused(args, "ok", "nothing touched: no check to run")
-        val results = runner.run(paths, checkerTimeBoxSeconds)
+        val results = kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { runner.run(paths, checkerTimeBoxSeconds) }
         if (results.isEmpty()) return refused(args, "unavailable", "no type or lint runner is registered for this repository")
         val receipts = results.map { scheduler.record(it, contract.version) }
         val lines = results.zip(receipts).map { (result, receipt) -> result.line(scheduler.aliasOf(receipt.receiptId)) }
@@ -221,7 +232,7 @@ public class Verify(
 
     private suspend fun tests(args: VerifyArgs, contract: Contract): ToolOutcome {
         val selected: List<Check> = when (args.selection ?: "accept") {
-            "accept" -> checks.required().filter { it.kind == CheckKind.Acceptance }
+            "accept" -> return acceptance(args.copy(ids = null), contract)
             "full" -> listOfNotNull(checks[Checks.FULL])
             "ids" -> {
                 val wanted = args.ids ?: return refused(args, "denied", "tests(selection=ids) needs ids")
@@ -243,6 +254,8 @@ public class Verify(
         val wanted = args.ids ?: contract.acceptance.filterIsInstance<Acceptance.Run>().map { it.id }
         val unknown = wanted.filter { id -> contract.acceptance(id) !is Acceptance.Run }
         if (unknown.isNotEmpty()) return refused(args, "denied", "not run: acceptance items of contract v${contract.version}: ${unknown.joinToString(", ")}")
+        val missing = wanted.filter { checks.forAcceptance(it).isEmpty() }
+        if (missing.isNotEmpty()) return refused(args, "unavailable", "no registered check executes ${missing.joinToString(", ")}")
         val selected = wanted.flatMap { checks.forAcceptance(it) }.distinctBy { it.id }
         if (selected.isEmpty()) return refused(args, "unavailable", "no registered check executes ${wanted.joinToString(", ")}")
         return runAll(args, contract, selected)
@@ -316,34 +329,64 @@ public class Verify(
      * receipt citing both), never the favourable one, and nothing reruns again. Every attempt stays a receipt.
      */
     private suspend fun runTriaged(check: Check, contract: Contract): Pair<Receipt, String> {
-        val (first, view) = runOne(check, contract)
+        val (first, view) = checkNotNull(runOne(check, contract))
         if (first.outcome != Outcome.Failed) return first to view
-        val (second, again) = runOne(check, contract)
+        val (second, again) = runOne(check, contract, first)
+            ?: return first to "$view\n  ${check.id}: isolated retry unavailable for the original candidate and environment; first failure retained"
         if (second.outcome == first.outcome) return second to "$view\n$again"
         val flaky = scheduler.flaky(check, contract.version, first, second)
         return flaky to "$view\n$again\n  ${check.id}: flaky — ${first.outcome.name.lowercase()} then ${second.outcome.name.lowercase()} ⇒ inconclusive; record an Open item (state patch open.add) before relying on it"
     }
 
-    private suspend fun runOne(check: Check, contract: Contract): Pair<Receipt, String> {
+    private suspend fun runOne(check: Check, contract: Contract, retryOf: Receipt? = null): Pair<Receipt, String>? {
         val command = check.command ?: return scheduler.runCheck(check, contract.version, inputs) {
             Executed(listOf(check.id), null, false, null, Outcome.Unavailable, null, null, listOf("check ${check.id} declares no command"))
         } to "  ${check.id}: unavailable (no command)"
         var view = ""
-        val receipt = scheduler.runCheck(check, contract.version, inputs) { root ->
+        val execute: suspend (Path) -> Executed = execution@ { root ->
+            val modelAdded = check.acceptanceIds.any { contract.acceptance(it)?.origin is Origin.Model }
+            val approvedCommand = contract.acceptance.filterIsInstance<Acceptance.Run>().any { it.origin !is Origin.Model && it.command == command }
+            // D-262: adding an obligation never grants authority to launch a new executable command.
+            val refusal = when {
+                contracts.current(ids.work)?.version != contract.version -> "contract changed before verification dispatch"
+                modelAdded && !approvedCommand -> "model-added verification command needs explicit host/user authorization"
+                else -> null
+            }
+            if (refusal != null) {
+                view = "  ${check.id}: denied — $refusal"
+                return@execution Executed(command.argv, command.cwd, false, null, Outcome.Denied, null, null, listOf(refusal))
+            }
             val actionId = idGen.next("act")
-            val cwd = command.cwd?.let { root.resolve(it) } ?: root
+            val cwd = when (val path = command.cwd) {
+                null, ".", "./" -> root
+                else -> (WorkspacePath.of(root).resolve(path, Intent.Read) as? PathResolution.Resolved)?.real
+            }
+            if (cwd == null || !Files.isDirectory(cwd)) {
+                view = "  ${check.id}: denied — working directory must be a directory inside the verification workspace"
+                return@execution Executed(command.argv, command.cwd, false, null, Outcome.Denied, null, null, listOf("working directory refused"))
+            }
+            val reports = JUnitReports.forCommand(cwd, command.argv, actionId)
             val proc = try {
+                beforeDispatch()
+                reports?.prepare(logsDir.resolve("reports-$actionId"))
                 runner.start(SpawnSpec(Command.Argv(command.argv), cwd, logPath(check.id, actionId), EnvPolicy(inheritedNames = envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")), timeoutSeconds))
             } catch (failure: IOException) {
                 view = "  ${check.id}: unavailable — cannot start ${command.argv.first()}: ${failure.message}"
-                return@runCheck Executed(command.argv, command.cwd, false, null, Outcome.Unavailable, null, null, listOf("cannot start ${command.argv.first()}: ${failure.message}"))
+                return@execution Executed(command.argv, command.cwd, false, null, Outcome.Unavailable, null, null, listOf("cannot start ${command.argv.first()}: ${failure.message}"))
             }
-            val observed = Executions.observe(os, proc, POLL_SLICE_SECONDS, timeoutSeconds)
-            val blob = blobs.put(redaction.applyBytes(observed.output, ContentClass.ReusableEvidence).text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
+            val observed = Executions.observeCancellable(os, proc, POLL_SLICE_SECONDS, timeoutSeconds)
+            val safeLog = redaction.applyBytes(observed.output, ContentClass.ReusableEvidence)
+            val blob = blobs.put(safeLog.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
+            val collected = try { reports?.collect().orEmpty() } catch (failure: IOException) {
+                view = "  ${check.id}: report capture failed: ${failure.message}"
+                return@execution Executed(command.argv, command.cwd, false, null, Outcome.Inconclusive, null, blob, listOf("report capture failed: ${failure.message}"))
+            }
             val capture = RunCapture(
+                reports = collected,
                 actionId = actionId, argv = command.argv, shell = false, cwd = command.cwd,
+                executionRoot = runCatching { cwd.toRealPath() }.getOrDefault(cwd.toAbsolutePath()).toString(),
                 exitCode = (observed.proc.status as? ProcStatus.Exited)?.exitCode, timedOut = observed.proc.status == ProcStatus.DeadlineExceeded,
-                output = observed.output, captureComplete = !observed.lost && observed.proc.status !is ProcStatus.Lost, checkId = check.id, selector = check.selector.toString(),
+                output = observed.output, captureComplete = !observed.lost && !observed.truncated && observed.proc.status !is ProcStatus.Lost, checkId = check.id, selector = check.selector.toString(),
             )
             val shaped = Shapers.shape(capture, ShapeBudget(estimator = estimator))
             val outcome = when {
@@ -352,8 +395,10 @@ public class Verify(
                 else -> shaped.status
             }
             view = "  ${check.id}: " + shaped.view.lines().joinToString("\n  ")
-            Executed(command.argv, command.cwd, false, capture.exitCode, outcome, shaped.counts, blob, shaped.limitations)
+            Executed(command.argv, command.cwd, false, capture.exitCode, outcome, shaped.counts, blob, shaped.limitations + safeLog.limitations)
         }
+        val receipt = if (retryOf == null) scheduler.runCheck(check, contract.version, inputs, execute)
+            else scheduler.retryIsolated(check, contract.version, retryOf, inputs, execute) ?: return null
         return receipt to view
     }
 
@@ -381,26 +426,32 @@ public class Verify(
     }
 
     private fun outcome(args: VerifyArgs, status: String, body: String, receipts: List<Receipt>, stamp: CandidateId?): ToolOutcome {
+        val safe = redaction.apply(body)
         val moved = receipts.any { it.stampBefore != it.stampAfter }
         val header = EnvelopeHeader(
             resultAlias = receipts.lastOrNull()?.let { scheduler.aliasOf(it.receiptId) } ?: "#-", tool = "verify", effectClass = if (moved) EffectClass.W else EffectClass.R,
-            versions = emptyMap(), stamp = stamp, truncated = false, effects = if (moved) Effects.Observed else Effects.None, flags = InstructionShape.detect(body).flags,
+            versions = emptyMap(), stamp = stamp, truncated = safe.limitations.isNotEmpty(), effects = if (moved) Effects.Observed else Effects.None, flags = InstructionShape.detect(safe.text).flags,
             runtime = RuntimeFields(
                 actionId = idGen.next("act"), status = status, candidateBefore = receipts.firstOrNull()?.stampBefore, candidateAfter = stamp,
                 scope = args.what + (args.selection?.let { "($it)" } ?: "") + (args.ids?.let { " " + it.joinToString(",") } ?: ""), completeness = "complete",
                 artifactRefs = receipts.mapNotNull { it.raw?.hex }, effectsObserved = if (moved) listOf("checks moved the tree") else emptyList(),
                 effectsUnknown = receipts.any { it.outcome == Outcome.UnknownOutcome },
+                redactionApplied = safe.applied, displayTruncated = safe.limitations.isNotEmpty(),
             ),
         )
-        return ToolOutcome(body, header, green = receipts.isNotEmpty() && receipts.all { it.greenForFinalTree }, tokens = estimator.estimate(body).tokens)
+        val green = stamp != null && receipts.isNotEmpty() && receipts.all { receipt ->
+            receipt.greenForFinalTree && checks[receipt.checkId]?.let { scheduler.currency(it, stamp).certifies } == true
+        }
+        return ToolOutcome(safe.text, header, green = green, tokens = estimator.estimate(safe.text).tokens)
     }
 
     private fun refused(args: VerifyArgs, status: String, detail: String): ToolOutcome {
+        val safe = redaction.apply(detail)
         val header = EnvelopeHeader(
-            resultAlias = "#-", tool = "verify", effectClass = null, versions = emptyMap(), stamp = null, truncated = false, effects = Effects.None,
-            runtime = RuntimeFields(idGen.next("act"), status, null, null, args.what + (args.selection?.let { "($it)" } ?: ""), "complete"),
+            resultAlias = "#-", tool = "verify", effectClass = null, versions = emptyMap(), stamp = null, truncated = safe.limitations.isNotEmpty(), effects = Effects.None,
+            runtime = RuntimeFields(idGen.next("act"), status, null, null, args.what + (args.selection?.let { "($it)" } ?: ""), if (safe.limitations.isEmpty()) "complete" else "truncated", redactionApplied = safe.applied),
         )
-        return ToolOutcome(detail, header, tokens = estimator.estimate(detail).tokens)
+        return ToolOutcome(safe.text, header, tokens = estimator.estimate(safe.text).tokens)
     }
 
     private fun logPath(checkId: String, actionId: String): Path {

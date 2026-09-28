@@ -101,7 +101,7 @@ public data class EffectPolicyConfig(
  * Effect-class policy (§4.6, §14.1). `D` covers writes outside the workspace, writes under a protected path,
  * network egress, mutation of the user's git refs, package installation (configurable), privilege escalation
  * and destructive filesystem or git commands. `W` covers known builders, formatters, test runners, scripts and
- * redirects inside the workspace. Everything else is labelled `R` — a label, not proof of read-only execution
+ * redirects inside the workspace. Only known read-only command forms are labelled `R`; unknown executables are `W` with unknown effects — a label, not proof of read-only execution
  * in trusted-local mode (§4.6): post-hoc verification is the stamp diff (P1.6.5).
  */
 public object EffectPolicy {
@@ -202,6 +202,11 @@ public object EffectPolicy {
 
         val program = programName(argv.first())
         val args = argv.drop(1)
+        val recognized = readOnly(argv.first(), program, args) || program in config.scriptInterpreters ||
+            listOf(
+                config.privilegeCommands, config.networkCommands, config.packageInstallCommands,
+                config.gitRefMutations, config.destructiveFileCommands, config.writingCommands,
+            ).any { matchesAny(program, args, it) }
 
         if (matchesAny(program, args, config.privilegeCommands)) {
             effect = EffectClass.D
@@ -271,8 +276,20 @@ public object EffectPolicy {
                 reasons += "path '$token' is under the protected path '$protectedBy'"
             }
         }
+        if (!recognized) {
+            effect = maxOf(effect, EffectClass.W)
+            capabilities += Capability.WorkspaceWrite
+            effectsUnknown = true
+            reasons += "unknown executable '$program': effects cannot be predicted from argv"
+        }
         return Classification(effect, reasons, capabilities, render(tokens), effectsUnknown)
     }
+
+    private fun readOnly(executable: String, program: String, args: List<String>): Boolean =
+        '/' !in executable && '\\' !in executable && (
+            program in setOf("ls", "cat", "type", "pwd", "echo", "true", "false", "whoami", "id") ||
+                (program == "git" && args in listOf(listOf("status"), listOf("status", "--short"), listOf("diff", "--stat")))
+        )
 
     // ---- command patterns -------------------------------------------------------------------------------
 

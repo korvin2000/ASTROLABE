@@ -121,9 +121,9 @@ class ControlsTest {
     @Test
     fun `IX-02 IX-18 the attempt runs under the configuration frozen at its first open`() {
         val first = config(Defaults(anchorMaxTokens = 2_000))
-        open(controller(first)).use { c -> assertEquals(first, c.attempt.config) }
+        open(controller(first)).use { c -> assertEquals(io.astrolabe.AttemptConfig.freeze(first).config, c.attempt.config) }
         open(controller(config(Defaults(anchorMaxTokens = 3_000)))).use { c ->
-            assertEquals(first, c.attempt.config, "an edit during the attempt waits for the next attempt")
+            assertEquals(io.astrolabe.AttemptConfig.freeze(first).config, c.attempt.config, "an edit during the attempt waits for the next attempt")
             assertTrue(c.attempt.controls.allEnabled && c.attempt.production)
         }
     }
@@ -139,12 +139,12 @@ class ControlsTest {
             assertTrue(java.nio.file.Files.readString(view).contains("\"anchorMaxTokens\": 2000") || java.nio.file.Files.readString(view).contains("\"anchorMaxTokens\":2000"))
             val second = io.astrolabe.AttemptConfig.freeze(config(Defaults(anchorMaxTokens = 3_000)))
             attempts.save(request.work, attempts.next(request.work), second)
-            assertEquals(first, attempts.load(request.work, request.attempt)!!.config, "an earlier attempt's snapshot never changes")
+            assertEquals(io.astrolabe.AttemptConfig.freeze(first).config, attempts.load(request.work, request.attempt)!!.config, "an earlier attempt's snapshot never changes")
             assertEquals(second, attempts.load(request.work, io.astrolabe.id.AttemptId("a2")))
             assertEquals(io.astrolabe.id.AttemptId("a3"), attempts.next(request.work))
         }
         open(controller(config(Defaults(anchorMaxTokens = 4_000)))).use { c ->
-            assertEquals(first, c.attempt.config, "the resumed attempt runs under its original snapshot after the config changed")
+            assertEquals(io.astrolabe.AttemptConfig.freeze(first).config, c.attempt.config, "the resumed attempt runs under its original snapshot after the config changed")
         }
     }
 

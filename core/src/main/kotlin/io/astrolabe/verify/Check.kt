@@ -85,6 +85,10 @@ public enum class Applicability {
             if (receipt.checkDefinitionVersion != now.definitionVersion) {
                 return ApplicabilityVerdict(Stale, "check definition changed since ${receipt.receiptId}")
             }
+            if (receipt.verifierVersion != now.verifierVersion) {
+                return ApplicabilityVerdict(Stale, "verifier version changed since ${receipt.receiptId}")
+            }
+            if (now.envId != null && receipt.envId != now.envId) return ApplicabilityVerdict(Stale, "environment moved")
             if (receipt.stampAfter == stamp) return ApplicabilityVerdict(Current)
             val tested = receipt.closureManifest
             val repinned = now.manifest
@@ -179,7 +183,7 @@ public data class Check(
     val trigger: Trigger,
     val acceptanceIds: List<String> = emptyList(),
     val command: Command? = null,
-    val parserPolicy: String = "shaper/1",
+    val parserPolicy: String = "shaper/2",
     val last: LastResult? = null,
 ) {
     init {
@@ -321,6 +325,17 @@ public class Checks private constructor(private val checks: LinkedHashMap<String
         require(check.id !in checks) { "check ${check.id} already registered" }
         checks[check.id] = check
         return check
+    }
+
+    /** Reconcile executable obligations after a committed plan or amendment; old receipts retain their definition identity. */
+    public fun synchronizeAcceptance(contract: Contract) {
+        val current = seed(contract, RunnerCommands()).all()
+        val ids = current.map { it.id }.toSet()
+        checks.keys.removeAll { it.startsWith("CHK-accept-") && it !in ids }
+        for (check in current) {
+            val old = checks[check.id]
+            if (old == null || old.definitionVersion != check.definitionVersion) replace(check)
+        }
     }
 
     public companion object {

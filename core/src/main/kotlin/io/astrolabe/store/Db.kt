@@ -41,6 +41,7 @@ public class Db private constructor(
 
     private val monitor = ReentrantLock()
     private var inTransaction = false
+    private var quarantined = false
 
     /**
      * Runs [block] inside `BEGIN IMMEDIATE … COMMIT`, rolling back on any exception. The write lock
@@ -48,19 +49,35 @@ public class Db private constructor(
      * through. Transactions do not nest: the state machine that owns a table owns the whole
      * transaction (L9).
      */
-    public fun <T> tx(block: (Tx) -> T): T = monitor.withLock {
+    public fun <T> tx(block: (Tx) -> T): T = transaction("BEGIN IMMEDIATE", block)
+
+    /** Composed projections share one SQLite snapshot; nested reads reuse their caller's transaction. */
+    internal fun <T> snapshot(block: () -> T): T = monitor.withLock {
+        if (inTransaction) block() else transaction("BEGIN") { block() }
+    }
+
+    private fun <T> transaction(begin: String, block: (Tx) -> T): T = monitor.withLock {
+        check(!quarantined) { "database connection is quarantined after failed rollback" }
         check(!inTransaction) { "nested transactions are not supported; one writer owns one transaction" }
         inTransaction = true
+        var began = false
         try {
-            statement("BEGIN IMMEDIATE")
-            val result = try {
-                block(Tx(this))
-            } catch (failure: Throwable) {
-                runCatching { statement("ROLLBACK") }
-                throw failure
-            }
+            statement(begin)
+            began = true
+            val result = block(Tx(this))
             statement("COMMIT")
             result
+        } catch (failure: Throwable) {
+            if (began) {
+                try {
+                    statement("ROLLBACK")
+                } catch (cleanup: Throwable) {
+                    quarantined = true
+                    failure.addSuppressed(cleanup)
+                    runCatching { connection.close() }.exceptionOrNull()?.let(failure::addSuppressed)
+                }
+            }
+            throw failure
         } finally {
             inTransaction = false
         }
@@ -96,6 +113,7 @@ public class Db private constructor(
     }
 
     private fun prepare(sql: String, params: Array<out Any?>): PreparedStatement {
+        check(!quarantined) { "database connection is quarantined after failed rollback" }
         val statement = try {
             connection.prepareStatement(sql)
         } catch (failure: SQLException) {

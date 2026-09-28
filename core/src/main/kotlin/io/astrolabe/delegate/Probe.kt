@@ -7,6 +7,9 @@ import io.astrolabe.cell.RoleCompletion
 import io.astrolabe.id.FileVersion
 import io.astrolabe.provider.TokenEstimator
 import io.astrolabe.verify.Verifier
+import io.astrolabe.workspace.LineRange
+import io.astrolabe.workspace.Ranges
+import io.astrolabe.workset.Entry
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -52,7 +55,8 @@ public object Probe {
 
     /** Parses [text] against [shown], the path → version map of what the probe was displayed. */
     @JvmStatic
-    public fun parse(text: String, shown: Map<String, FileVersion>): ProbeOutput {
+    @JvmOverloads
+    public fun parse(text: String, shown: Map<String, FileVersion>, displayed: List<Entry> = emptyList(), aliases: Set<String> = emptySet()): ProbeOutput {
         val start = text.indexOf('{')
         val end = text.lastIndexOf('}')
         if (start < 0 || end <= start) return ProbeOutput.Gaps(listOf(OUTPUT))
@@ -73,7 +77,7 @@ public object Probe {
             }
             val refs = ArrayList<EvidenceRef>()
             for (pointer in fields.texts("evidence")) {
-                when (val ref = pointer(pointer, shown)) {
+                when (val ref = pointer(pointer, shown, displayed, aliases)) {
                     is Pointer.Ok -> refs += ref.ref
                     is Pointer.Gap -> gaps += "finding ${i + 1} ('${claim.take(60)}'): ${ref.reason}"
                 }
@@ -106,7 +110,7 @@ public object Probe {
         require(maxFinalizations >= 1) { "maxFinalizations must be ≥ 1" }
         return RoleCompletion { output, _ ->
             val packet = output.packet
-            when (val parsed = parse(output.text, packet.readVersions)) {
+            when (val parsed = parse(output.text, packet.readVersions, packet.worksetExport, output.shownAliases)) {
                 is ProbeOutput.Gaps ->
                     if (output.refusals + 1 >= maxFinalizations) CompletionDecision.CannotProgress(parsed.gaps) else CompletionDecision.Continue(parsed.gaps)
                 is ProbeOutput.Parsed -> {
@@ -124,7 +128,7 @@ public object Probe {
     /** A range is current while its path is still at the cited version; an alias is a durable record. */
     @JvmStatic
     public fun freshness(ref: EvidenceRef, current: (String) -> FileVersion?): PointerFreshness = when (ref) {
-        is EvidenceRef.Alias -> PointerFreshness.Current
+        is EvidenceRef.Alias -> PointerFreshness.Unknown
         is EvidenceRef.Range -> when (current(ref.path)) {
             null -> PointerFreshness.Unknown
             ref.version -> PointerFreshness.Current
@@ -181,8 +185,8 @@ public object Probe {
         data class Gap(val reason: String) : Pointer
     }
 
-    private fun pointer(text: String, shown: Map<String, FileVersion>): Pointer {
-        if (text.startsWith("#")) return if (text.length > 1) Pointer.Ok(EvidenceRef.Alias(text)) else Pointer.Gap("'#' names no alias")
+    private fun pointer(text: String, shown: Map<String, FileVersion>, displayed: List<Entry>, aliases: Set<String>): Pointer {
+        if (text.startsWith("#")) return if (text in aliases) Pointer.Ok(EvidenceRef.Alias(text)) else Pointer.Gap("$text is not resolved evidence you were shown")
         val at = text.lastIndexOf('@').takeIf { it > 0 }
         val located = if (at == null) text else text.substring(0, at)
         val hash = at?.let { text.substring(it + 1) }
@@ -191,7 +195,12 @@ public object Probe {
         val path = located.substring(0, colon)
         val version = shown[path] ?: return Pointer.Gap("$path was never shown to you: look it before citing it")
         if (hash != null && !version.digest.hex.startsWith(hash)) return Pointer.Gap("$path@$hash is not the version you were shown (@${version.hash8})")
-        return Pointer.Ok(EvidenceRef.Range(path, located.substring(colon + 1), version))
+        val lines = located.substring(colon + 1)
+        val range = runCatching { LineRange(lines.substringBefore('-').toInt(), lines.substringAfter('-', lines).toInt()) }.getOrNull()
+            ?: return Pointer.Gap("$text is not a valid line range")
+        val coverage = displayed.filter { it.path == path && it.version == version }.fold(Ranges.EMPTY) { acc, entry -> acc + (entry.range - entry.hidden) }
+        if (!coverage.covers(range)) return Pointer.Gap("$text includes lines you were not shown")
+        return Pointer.Ok(EvidenceRef.Range(path, lines, version))
     }
 
     private fun JsonObject.text(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }

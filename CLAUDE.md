@@ -51,7 +51,7 @@ Skip at startup: `PREPARE_IMPLEMENTATION_PLAN.md` (historical), `sources/`, `REV
   Anything not derivable from the docs becomes a `D-nn` item. Never redesign silently.
 - Pay each TODO §1 integration debt in its owning task.
 - **Push authority:** `main` only with owner approval. Cloud sessions push their session branch.
-- **Delegation (owner rule):** route complex, non-trivial tasks to Fable worktree agents
+- **Delegation (owner rule):** route complex, non-trivial tasks to opus(or fable) worktree agents according to
   (`.claude/worktrees/agent-*`). Merge with `--no-ff` after reviewing; don't take the work on trust.
   Resolve ABI dump conflicts by regenerating, never by hand. Delegated agents follow the same verification tiers.
 - **Out-of-order work** only on an explicit owner request. An ACTIVE card in TODO §1.2 takes precedence;

@@ -37,7 +37,7 @@ class DeriveS0Test {
     fun `fixture repositories yield their declared suite as a harness-origin touched-scope acceptance`() {
         val expected = mapOf(
             Fixture.PythonSmall to listOf("python", "-m", "pytest", "-q"),
-            Fixture.TsSmall to listOf("node", "--test"),
+            Fixture.TsSmall to listOf("npm", "test"),
             Fixture.GradleSmall to listOf("gradle", "test"),
         )
         for ((fixture, argv) in expected) {

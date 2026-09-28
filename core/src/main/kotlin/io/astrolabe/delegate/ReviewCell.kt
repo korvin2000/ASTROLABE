@@ -90,8 +90,10 @@ public data class ReviewRecord(
     val reused: Boolean = false,
     /** The tiers the judge ran at, in order; `human` for the authority path. */
     val path: List<String> = emptyList(),
+    val failedRequiredChecks: List<String> = emptyList(),
+    val integrity: List<String> = emptyList(),
 ) {
-    val approved: Boolean get() = verdict?.approved == true && unavailable == null
+    val approved: Boolean get() = verdict?.approved == true && unavailable == null && failedRequiredChecks.isEmpty()
 
     /** Whether this assessment still speaks for [contractVersion] at [candidate] with the evidence as it is now. */
     public fun freshness(contractVersion: Int, candidate: CandidateId, current: (String) -> FileVersion?): Freshness = when {
@@ -147,14 +149,15 @@ public class ReviewCell @JvmOverloads constructor(
 
     public suspend fun obtain(packet: EvidencePacket, tier: Tier, current: (String) -> FileVersion?): ReviewOutcome {
         val criteria = packet.criteria.map { it.id }
+        val integrity = packet.testIntegrity.map { it.copy(verdict = null).line + it.originalObligation.orEmpty() }
         records(packet.ids).lastOrNull { r ->
-            r.approved && r.scope == packet.scope && r.incrementId == packet.incrementId && r.criteria.containsAll(criteria) &&
+            r.approved && r.scope == packet.scope && r.incrementId == packet.incrementId && r.criteria.containsAll(criteria) && r.integrity == integrity &&
                 r.freshness(packet.contractVersion, packet.candidate, current) == Freshness.Current
         }?.let { earlier ->
-            val reused = earlier.copy(reused = true)
+            val reused = earlier.copy(reused = true, failedRequiredChecks = packet.failedRequired.map { it.checkId })
             record(packet.ids, reused)
             journal(packet, "reused: ${earlier.verdict!!.signedBy} approved @${packet.candidate.hash8} at contract v${packet.contractVersion}")
-            return ReviewOutcome.Approved(reused)
+            return outcome(packet, reused)
         }
         val ladder = ladder(judge, packet, tier)
         val path = ArrayList(ladder.path)
@@ -164,7 +167,7 @@ public class ReviewCell @JvmOverloads constructor(
             path += "human"
             verdict = authority.review(packet.request())
         }
-        val base = ReviewRecord(packet.id, packet.scope, packet.incrementId, packet.contractVersion, packet.candidate, criteria, packet.evidenceVersions, verdict, path = path)
+        val base = ReviewRecord(packet.id, packet.scope, packet.incrementId, packet.contractVersion, packet.candidate, criteria, packet.evidenceVersions, verdict, path = path, failedRequiredChecks = packet.failedRequired.map { it.checkId }, integrity = integrity)
         val record = when {
             verdict == null -> base.copy(unavailable = "no review cell verdict (${why ?: "the judge published none"}) and no human reviewer: the increment stays unaccepted, the review is never skipped")
             verdict.requestId != packet.id -> base.copy(unavailable = "verdict answers ${verdict.requestId}, not ${packet.id}")

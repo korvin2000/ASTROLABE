@@ -49,6 +49,63 @@ import kotlin.test.assertTrue
 
 /** P2.2.2: the S1 campaign loop — plan cell, then one cell per ready increment, verified and committed in order. */
 class CampaignLoopTest {
+    @Test
+    fun `host answer on reopen unblocks the waiting increment without replaying verified work`() = runBlocking<Unit> {
+        controller().open(repo.root, request, policy).use { c ->
+            val replies = planning() + listOf(
+                Scripted.Reply(listOf(say("I1 is ready"))),
+                Scripted.Reply(listOf(call("question", "task", """{"op":"ask","question":"Which value should b return?"}"""))),
+            )
+            val run = controller().run(c, model(replies))
+            assertEquals(CampaignOutcome.WaitingForInput, run.outcome, run.state?.reason)
+            assertEquals(IncrementStatus.Verified, c.state!!.graph.increments.single { it.id == "I1" }.status)
+            assertEquals(IncrementStatus.Blocked, c.state!!.graph.increments.single { it.id == "I2" }.status)
+            c.contracts.amendByUser(request.work, "Answer to the pending question: b should return 20. Continue I2.")
+        }
+        controller().open(repo.root, request, policy).use { c ->
+            val adapter = FakeAdapter(ScriptedModel.of(*implement(c, "src/b.py", "    return 2", "    return 20", "\"AC-1\",\"AC-2\"").toTypedArray()))
+            val run = controller().run(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator()))
+            assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+            assertEquals(1, c.state!!.cells.count { it.increment == "I1" }, "verified work is retained on resume")
+            assertEquals(2, c.state!!.cells.count { it.increment == "I2" }, "the blocked increment receives a continuation cell")
+            assertTrue("b should return 20" in texts(adapter.calls.first().request))
+        }
+    }
+
+    @Test
+    fun `implementation split reaches the plan role and replaces only unfinished work`() = runBlocking<Unit> {
+        controller().open(repo.root, request, policy).use { c ->
+            val replacement = """{"increments":[
+                {"id":"I1","requirements":["R1"],"accept":["AC-1"],"write_scope":["src/"],"expected_files":1,"produces":"artifact"},
+                {"id":"I2a","requirements":["R2"],"accept":["AC-1","AC-2"],"write_scope":["src/"],"expected_files":1,"depends_on":["I1"],"produces":"artifact"},
+                {"id":"I2b","requirements":["R2"],"accept":["AC-1","AC-2"],"write_scope":["src/"],"expected_files":1,"depends_on":["I2a"],"produces":"artifact"}]}"""
+            val replies = planning() + listOf(
+                Scripted.Reply(listOf(say("I1 is ready"))),
+                Scripted.Reply(listOf(
+                    call("split", "task", """{"op":"propose","kind":"increment_split","proposal":{"increment":"I2","reason":"separate b implementation from its regression review","parts":["implementation","regression review"]}}"""),
+                    call("split-boundary", "state", """{"op":"blocked","blocked":{"reason":"waiting for increment split planning","evidence":[]}}"""),
+                )),
+                Scripted.Reply(listOf(call("replan", "task", """{"op":"propose","kind":"plan","proposal":$replacement}"""))),
+                Scripted.Reply(listOf(say("replacement plan ready"))),
+            ) + implement(c, "src/b.py", "    return 2", "    return 20", "\"AC-1\",\"AC-2\"") +
+                Scripted.Reply(listOf(say("regression review complete")))
+            val adapter = acting(replies, 4) {
+                assertEquals(listOf("I1", "I2"), c.state!!.graph.increments.map { it.id }, "a split proposal alone cannot rewrite the graph")
+            }
+            val run = controller().run(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator()))
+            assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+            val replanRequest = adapter.calls[4].request
+            assertTrue(replanRequest.mask!!.allows("task.propose") && !replanRequest.mask!!.allows("edit.anchored"))
+            assertTrue("separate b implementation from its regression review" in texts(replanRequest))
+            val active = c.state!!.graph.increments.filter { it.status != IncrementStatus.Cancelled }
+            assertEquals(listOf("I1", "I2a", "I2b"), active.map { it.id })
+            assertTrue(active.all { it.status == IncrementStatus.Verified })
+            assertEquals(1, c.state!!.cells.count { it.increment == "I1" })
+            assertEquals(1, c.state!!.cells.count { it.increment == "I2a" })
+            assertEquals(1, c.state!!.cells.count { it.increment == "I2b" })
+        }
+    }
+
     @TempDir
     lateinit var stateRoot: Path
 

@@ -198,6 +198,43 @@ class SchedulerTest {
     private fun isolated() = Scheduler(checks, workspace, registry, stamper, receipts, InMemoryAliases(), idGen, ids, clock, candidates = stateRoot.resolve("candidates"))
 
     @Test
+    fun `new inputs during package and enumerated unknown checks invalidate the receipt`() = runTest {
+        for (id in listOf("CHK-pkg", "CHK-full")) {
+            val check = checks[id]!!
+            val added = "src/pkg/$id.py"
+            val receipt = scheduler.runCheck(check, 1, inputs = listOf("src/a.py")) {
+                repo.write(added, "x = 42\n")
+                passed()
+            }
+            assertTrue(added in receipt.testedInputs.mutatedDuringCheck, receipt.toString())
+            assertFalse(scheduler.currency(check, stamper.stamp().id).certifies)
+        }
+    }
+
+    @Test
+    fun `export refuses bytes that moved after the candidate report`() {
+        val report = stamper.report()
+        repo.write("src/a.py", "changed after stamp\n")
+        val export = Scheduler::class.java.getDeclaredMethod("export", io.astrolabe.workspace.StampReport::class.java, Path::class.java).also { it.isAccessible = true }
+        assertEquals(null, export.invoke(isolated(), report, stateRoot.resolve("stale-export")))
+    }
+
+    @Test
+    fun `isolated export preserves executable mode and rejects mode changes`() = runTest {
+        org.junit.jupiter.api.Assumptions.assumeTrue(Files.getFileStore(repo.root).supportsFileAttributeView("posix"))
+        val launcher = repo.resolve("src/a.py")
+        val permissions = Files.getPosixFilePermissions(launcher) + java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE
+        Files.setPosixFilePermissions(launcher, permissions)
+        val receipt = isolated().runCheck(accept(), 1) { dir ->
+            val copy = dir.resolve("src/a.py")
+            assertTrue(Files.isExecutable(copy))
+            Files.setPosixFilePermissions(copy, Files.getPosixFilePermissions(copy).filterNot { it.name.endsWith("_EXECUTE") }.toSet())
+            passed()
+        }
+        assertFalse(receipt.testedInputs.eligible)
+    }
+
+    @Test
     fun `a slow check runs on an isolated candidate that a concurrent workspace writer cannot touch, scratch output allowed (FX-17)`() = runTest {
         val exported = stamper.stamp().id
         var root: Path? = null

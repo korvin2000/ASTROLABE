@@ -7,6 +7,10 @@ import io.astrolabe.provider.TokenEstimator
 /** Status text of one acceptance item as the scheduler renders it (`green @s41 STALE (closure moved)`, `red #42`, `needs #id`). */
 public data class ObligationStatus(val acceptanceId: String, val text: String)
 
+/** Mandatory digest content cannot fit without dropping requirements or exclusions. */
+public class DigestCapacity(public val requiredTokens: Long, public val capTokens: Int) :
+    IllegalArgumentException("contract digest needs $requiredTokens tokens after reduction; cap is $capTokens; increase the digest cap or split the contract")
+
 /**
  * The ≤ 150-token contract digest at the tail of `[A]` (§5.1, D-17): the current authorized objective
  * (every verbatim request, newest last), requirement and obligation ids with status and currency, and the
@@ -29,14 +33,12 @@ public object ContractDigest {
         var requests = contract.requests.map { it.text }
         var statuses = obligations
         var text = compose(contract, ledger, requests, statuses)
-        var attempts = 0
-        while (estimator.estimate(text).tokens > capTokens && attempts < 64) {
-            attempts++
+        while (estimator.estimate(text).tokens > capTokens) {
             when {
                 requests.size > 1 -> requests = requests.drop(1)
                 requests.single().length > 40 -> requests = listOf(shrink(requests.single()))
                 statuses.isNotEmpty() -> statuses = statuses.dropLast(1)
-                else -> break
+                else -> throw DigestCapacity(estimator.estimate(text).tokens, capTokens)
             }
             val hidden = obligations.size - statuses.size
             text = compose(contract, ledger, requests, statuses, hiddenStatuses = hidden, requestsHidden = contract.requests.size - requests.size)

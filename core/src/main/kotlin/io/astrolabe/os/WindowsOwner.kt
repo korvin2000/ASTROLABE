@@ -19,7 +19,7 @@ import java.util.TreeMap
  * `JOB_OBJECT_LIMIT_KILL_ON_CLOSE` is set and no breakaway flag is set, so descendants cannot
  * leave the job and the whole tree dies when the job handle closes — including when this JVM dies.
  */
-internal class WindowsOwner : ProcessOwner {
+internal class WindowsOwner(private val beforeAssignment: (Long) -> Unit = {}) : ProcessOwner {
 
     override val essentialEnvironmentNames: Set<String> = setOf(
         "SystemRoot", "SystemDrive", "windir", "PATH", "PATHEXT", "COMSPEC", "TEMP", "TMP", "USERPROFILE",
@@ -38,6 +38,7 @@ internal class WindowsOwner : ProcessOwner {
             var log = MemorySegment.NULL
             var nul = MemorySegment.NULL
             var job = MemorySegment.NULL
+            var attributes = MemorySegment.NULL
             try {
                 // Inheritable append handle: every write lands at end of file, so the supervisor and
                 // the child never fight over the file position.
@@ -69,8 +70,22 @@ internal class WindowsOwner : ProcessOwner {
                     fail("SetInformationJobObject", capture)
                 }
 
-                val startupInfo = arena.allocate(Win32.STARTUPINFOW)
-                startupInfo.set(ValueLayout.JAVA_INT, 0L, Win32.STARTUPINFOW.byteSize().toInt())
+                val size = arena.allocate(ValueLayout.JAVA_LONG)
+                Win32.initializeProcThreadAttributeList.callInt(capture, MemorySegment.NULL, 1, 0, size)
+                val allocated = arena.allocate(size.get(ValueLayout.JAVA_LONG, 0L), 8)
+                if (Win32.initializeProcThreadAttributeList.callInt(capture, allocated, 1, 0, size) == 0)
+                    fail("InitializeProcThreadAttributeList", capture)
+                attributes = allocated
+                val handles = arena.allocate(ValueLayout.ADDRESS, 2)
+                handles.setAtIndex(ValueLayout.ADDRESS, 0, nul)
+                handles.setAtIndex(ValueLayout.ADDRESS, 1, log)
+                if (Win32.updateProcThreadAttribute.callInt(
+                        capture, attributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, handles, handles.byteSize(),
+                        MemorySegment.NULL, MemorySegment.NULL,
+                    ) == 0) fail("UpdateProcThreadAttribute(handle list)", capture)
+                val startupInfo = arena.allocate(Win32.STARTUPINFOW.byteSize() + 8, 8)
+                startupInfo.set(ValueLayout.JAVA_INT, 0L, startupInfo.byteSize().toInt())
+                startupInfo.set(ValueLayout.ADDRESS, Win32.STARTUPINFOW.byteSize(), attributes)
                 startupInfo.set(ValueLayout.JAVA_INT, Win32.SI_FLAGS, STARTF_USESTDHANDLES)
                 startupInfo.set(ValueLayout.ADDRESS, Win32.SI_STDIN, nul)
                 startupInfo.set(ValueLayout.ADDRESS, Win32.SI_STDOUT, log)
@@ -83,8 +98,8 @@ internal class WindowsOwner : ProcessOwner {
                     arena.allocateFrom(commandLine, StandardCharsets.UTF_16LE),
                     MemorySegment.NULL,
                     MemorySegment.NULL,
-                    1, // bInheritHandles: only the two handles created above are marked inheritable
-                    CREATE_SUSPENDED or CREATE_UNICODE_ENVIRONMENT or CREATE_NO_WINDOW,
+                    1, // The explicit handle list excludes other simultaneous launches and host handles.
+                    CREATE_SUSPENDED or CREATE_UNICODE_ENVIRONMENT or CREATE_NO_WINDOW or EXTENDED_STARTUPINFO_PRESENT,
                     environmentBlock(arena, start.environment),
                     arena.allocateFrom(start.workingDirectory.toString(), StandardCharsets.UTF_16LE),
                     startupInfo,
@@ -96,6 +111,7 @@ internal class WindowsOwner : ProcessOwner {
                 val thread = info.get(ValueLayout.ADDRESS, Win32.PI_THREAD)
                 val pid = info.get(ValueLayout.JAVA_INT, Win32.PI_PID).toLong() and 0xFFFF_FFFFL
                 try {
+                    beforeAssignment(pid)
                     if (Win32.assignProcessToJobObject.callInt(capture, job, process) == 0) {
                         fail("AssignProcessToJobObject", capture)
                     }
@@ -103,8 +119,16 @@ internal class WindowsOwner : ProcessOwner {
                     if (Win32.resumeThread.callInt(capture, thread) == -1) fail("ResumeThread", capture)
                     WindowsProcess(pid, startedAt, process, job)
                 } catch (failure: Throwable) {
-                    Win32.terminateJobObject.callInt(capture, job, 1)
-                    Win32.closeHandle.callInt(capture, process)
+                    try {
+                        // Assignment may have failed: the suspended child need not belong to the job.
+                        if (Win32.terminateProcess.callInt(capture, process, 1) == 0)
+                            failure.addSuppressed(OsFailure("TerminateProcess", capture.get(ValueLayout.JAVA_INT, Win32.LAST_ERROR), "failed launch cleanup"))
+                        Win32.terminateJobObject.callInt(capture, job, 1)
+                        if (Win32.waitForSingleObject.callInt(capture, process, 5_000) != 0)
+                            failure.addSuppressed(OsFailure("WaitForSingleObject", 0, "failed launch did not exit within 5 seconds"))
+                    } finally {
+                        Win32.closeHandle.callInt(capture, process)
+                    }
                     throw failure
                 } finally {
                     Win32.closeHandle.callInt(capture, thread)
@@ -113,6 +137,7 @@ internal class WindowsOwner : ProcessOwner {
                 if (job.address() != 0L) Win32.closeHandle.callInt(capture, job)
                 throw failure
             } finally {
+                if (attributes.address() != 0L) Win32.deleteProcThreadAttributeList.invokeWithArguments(capture, attributes)
                 // The child holds its own duplicates; ours are no longer needed.
                 if (log.address() != INVALID_HANDLE && log.address() != 0L) Win32.closeHandle.callInt(capture, log)
                 if (nul.address() != INVALID_HANDLE && nul.address() != 0L) Win32.closeHandle.callInt(capture, nul)
@@ -155,7 +180,14 @@ internal class WindowsOwner : ProcessOwner {
     }
 
     private fun renderCommandLine(command: Command): String = when (command) {
-        is Command.Argv -> command.argv.joinToString(" ") { quoteArgument(it) }
+        is Command.Argv -> {
+            val batch = command.argv.first().lowercase().let { it.endsWith(".bat") || it.endsWith(".cmd") }
+            if (batch) {
+                // cmd expands percent/exclamation even inside quotes; refuse argv we cannot preserve exactly.
+                if (command.argv.any { arg -> arg.any { it in "\"%!\r\n" } }) throw java.io.IOException("batch arguments contain unsupported command-interpreter characters")
+                renderCommandLine(Command.Shell(command.argv.joinToString(" ") { "\"$it\"" }))
+            } else command.argv.joinToString(" ") { quoteArgument(it) }
+        }
         // `/s` makes cmd.exe strip exactly the outer quotes and run the rest verbatim.
         is Command.Shell -> "${quoteArgument(comspec())} /d /s /c \"${command.commandLine}\""
     }
@@ -175,6 +207,8 @@ internal class WindowsOwner : ProcessOwner {
         private const val OPEN_ALWAYS = 4
         private const val FILE_ATTRIBUTE_NORMAL = 0x0000_0080
         private const val STARTF_USESTDHANDLES = 0x0000_0100
+        private const val PROC_THREAD_ATTRIBUTE_HANDLE_LIST = 0x00020002L
+        private const val EXTENDED_STARTUPINFO_PRESENT = 0x00080000
         private const val CREATE_SUSPENDED = 0x0000_0004
         private const val CREATE_UNICODE_ENVIRONMENT = 0x0000_0400
         private const val CREATE_NO_WINDOW = 0x0800_0000
@@ -249,8 +283,30 @@ private class WindowsProcess(
     override fun terminateTree() {
         Arena.ofConfined().use { arena ->
             val capture = arena.allocate(Win32.CAPTURE)
-            // A failure means the job is already gone; the supervisor observes the exit regardless.
-            Win32.terminateJobObject.callInt(capture, job, 1)
+            if (Win32.terminateJobObject.callInt(capture, job, 1) == 0) {
+                val code = capture.get(ValueLayout.JAVA_INT, Win32.LAST_ERROR)
+                throw OsFailure("TerminateJobObject", code, "job termination failed (GetLastError=$code)")
+            }
+        }
+    }
+
+    override fun awaitTreeExit(timeoutMillis: Long): Boolean {
+        Arena.ofConfined().use { arena ->
+            val capture = arena.allocate(Win32.CAPTURE)
+            val accounting = arena.allocate(Win32.JOB_BASIC_ACCOUNTING)
+            val deadline = System.nanoTime() + timeoutMillis * 1_000_000L
+            while (true) {
+                if (Win32.queryInformationJobObject.callInt(
+                        capture, job, 1, accounting, accounting.byteSize().toInt(), MemorySegment.NULL,
+                    ) == 0
+                ) {
+                    val code = capture.get(ValueLayout.JAVA_INT, Win32.LAST_ERROR)
+                    throw OsFailure("QueryInformationJobObject", code, "job accounting failed (GetLastError=$code)")
+                }
+                if (accounting.get(ValueLayout.JAVA_INT, Win32.JOB_ACTIVE_PROCESSES) == 0) return true
+                if (System.nanoTime() >= deadline) return false
+                Thread.sleep(10)
+            }
         }
     }
 
@@ -279,6 +335,19 @@ private object Win32 {
 
     val CAPTURE: StructLayout = Linker.Option.captureStateLayout()
     val LAST_ERROR: Long = CAPTURE.byteOffset(MemoryLayout.PathElement.groupElement("GetLastError"))
+
+    // https://learn.microsoft.com/windows/win32/api/winnt/ns-winnt-jobobject_basic_accounting_information
+    val JOB_BASIC_ACCOUNTING: StructLayout = MemoryLayout.structLayout(
+        ValueLayout.JAVA_LONG.withName("TotalUserTime"),
+        ValueLayout.JAVA_LONG.withName("TotalKernelTime"),
+        ValueLayout.JAVA_LONG.withName("ThisPeriodTotalUserTime"),
+        ValueLayout.JAVA_LONG.withName("ThisPeriodTotalKernelTime"),
+        ValueLayout.JAVA_INT.withName("TotalPageFaultCount"),
+        ValueLayout.JAVA_INT.withName("TotalProcesses"),
+        ValueLayout.JAVA_INT.withName("ActiveProcesses"),
+        ValueLayout.JAVA_INT.withName("TotalTerminatedProcesses"),
+    )
+    val JOB_ACTIVE_PROCESSES: Long = JOB_BASIC_ACCOUNTING.byteOffset(MemoryLayout.PathElement.groupElement("ActiveProcesses"))
 
     val SECURITY_ATTRIBUTES: StructLayout = MemoryLayout.structLayout(
         ValueLayout.JAVA_INT.withName("nLength"),
@@ -384,6 +453,13 @@ private object Win32 {
         "AssignProcessToJobObject",
         FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS),
     )
+    val queryInformationJobObject: MethodHandle = bind(
+        "QueryInformationJobObject",
+        FunctionDescriptor.of(
+            ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.ADDRESS,
+            ValueLayout.JAVA_INT, ValueLayout.ADDRESS,
+        ),
+    )
     val createProcessW: MethodHandle = bind(
         "CreateProcessW",
         FunctionDescriptor.of(
@@ -391,6 +467,20 @@ private object Win32 {
             ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS,
             ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS,
         ),
+    )
+    val initializeProcThreadAttributeList: MethodHandle = bind(
+        "InitializeProcThreadAttributeList",
+        FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT,
+            ValueLayout.JAVA_INT, ValueLayout.ADDRESS),
+    )
+    val updateProcThreadAttribute: MethodHandle = bind(
+        "UpdateProcThreadAttribute",
+        FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT,
+            ValueLayout.JAVA_LONG, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG,
+            ValueLayout.ADDRESS, ValueLayout.ADDRESS),
+    )
+    val deleteProcThreadAttributeList: MethodHandle = bind(
+        "DeleteProcThreadAttributeList", FunctionDescriptor.ofVoid(ValueLayout.ADDRESS),
     )
     val resumeThread: MethodHandle = bind(
         "ResumeThread",
@@ -429,6 +519,7 @@ private object Win32 {
     )
 
     init {
+        check(JOB_BASIC_ACCOUNTING.byteSize() == 48L)
         check(SECURITY_ATTRIBUTES.byteSize() == 24L) { "SECURITY_ATTRIBUTES is ${SECURITY_ATTRIBUTES.byteSize()}, expected 24" }
         check(STARTUPINFOW.byteSize() == 104L) { "STARTUPINFOW is ${STARTUPINFOW.byteSize()}, expected 104" }
         check(PROCESS_INFORMATION.byteSize() == 24L) { "PROCESS_INFORMATION is ${PROCESS_INFORMATION.byteSize()}, expected 24" }

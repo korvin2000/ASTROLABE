@@ -95,6 +95,33 @@ class LookTest {
     private fun status(outcome: ToolOutcome) = outcome.header!!.runtime.status
 
     @Test
+    fun `recalling a narrowed recall keeps source line coordinates`() = runTest {
+        look("""{"what":"read","target":"src/a.py:1-10"}""")
+        val narrow = look("""{"what":"recall","id":"#1","range":"5-6"}""")
+        val again = look("""{"what":"recall","id":"${narrow.resultAlias}","range":"5-6"}""")
+        assertTrue(again.body.contains("5|"), again.body)
+        assertFalse(again.body.contains("1|"), again.body)
+    }
+
+    @Test
+    fun `recalling a one-hit search grants no coverage beyond the hit line`() = runTest {
+        repo.write("src/hit.py", "a = 1\nb = 2\nneedle = 3\nd = 4\ne = 5\n")
+        look("""{"what":"find","target":"needle","glob":"src/hit.py"}""")
+        look("""{"what":"recall","id":"#1"}""")
+        assertFalse(workset.covers("src/hit.py", registry.version("src/hit.py")!!, LineRange(4, 4)))
+    }
+
+    @Test
+    fun `redacted lines in the undisplayed tail never grant recalled coverage`() = runTest {
+        repo.write("src/secret.py", (1..30).joinToString("\n") {
+            if (it == 30) "token=abcdefghijklmnopqrstuv" else "line $it padding padding padding"
+        })
+        look("""{"what":"read","target":"src/secret.py:1-30","budget":100}""")
+        look("""{"what":"recall","id":"#1","range":"30-30"}""")
+        assertFalse(workset.covers("src/secret.py", registry.version("src/secret.py")!!, LineRange(30, 30)))
+    }
+
+    @Test
     fun `a range read registers coverage at the read version, repeats dedup, and a broader read executes (IX-07)`() = runTest {
         val first = look("""{"what":"read","target":"src/a.py:1-2"}""")
         val v = registry.version("src/a.py")!!
@@ -140,6 +167,39 @@ class LookTest {
     }
 
     @Test
+    fun `a long source line and large outline cannot exceed the requested budget`() = runTest {
+        repo.write("src/long.py", "value = '" + "x".repeat(10_000) + "'\n")
+        val version = registry.version("src/long.py")!!
+        val narrow = look("""{"what":"read","target":"src/long.py:1-1","budget":30}""")
+        assertEquals("refused", status(narrow))
+        assertTrue(estimator.estimate(narrow.body).tokens <= 30, narrow.body)
+        assertFalse(workset.covers("src/long.py", version, LineRange(1, 1)))
+
+        val full = look("""{"what":"read","target":"src/long.py:1-1","budget":5000}""")
+        assertEquals("ok", status(full))
+        workset.stub(full.resultAlias!!)
+        val recalled = look("""{"what":"recall","id":"${full.resultAlias}","range":"1-1","budget":30}""")
+        assertEquals("refused", status(recalled))
+        assertTrue(estimator.estimate(recalled.body).tokens <= 30, recalled.body)
+        assertFalse(workset.covers("src/long.py", version, LineRange(1, 1)))
+
+        val found = look("""{"what":"find","target":"x{100}","glob":"src/long.py","budget":50}""")
+        assertTrue(estimator.estimate(found.body).tokens <= 50, found.body)
+        assertEquals(estimator.estimate(found.body).tokens, found.tokens)
+        assertFalse(workset.covers("src/long.py", version, LineRange(1, 1)))
+
+        repo.write("src/many.py", (1..200).joinToString("\n") { "def f$it(): return $it" })
+        val outline = look("""{"what":"read","target":"src/many.py","budget":30}""")
+        assertEquals("refused", status(outline))
+        assertTrue(estimator.estimate(outline.body).tokens <= 30, outline.body)
+        val tiny = look("""{"what":"read","target":"src/many.py","budget":1}""")
+        assertTrue(estimator.estimate(tiny.body).tokens <= 1, tiny.body)
+        val structural = look("""{"what":"outline","target":"src/many.py","budget":30}""")
+        assertTrue(estimator.estimate(structural.body).tokens <= 30, structural.body)
+        assertEquals(estimator.estimate(structural.body).tokens, structural.tokens)
+    }
+
+    @Test
     fun `symbol reads use the outline of the bytes just read and near disambiguates`() = runTest {
         val a = look("""{"what":"read","target":"src/a.py::a"}""")
         assertEquals("ok", status(a))
@@ -166,6 +226,8 @@ class LookTest {
         val shownTo = cut.header!!.runtime.scope!!.substringAfter("1-").toInt()
         assertTrue(shownTo in 2..199, cut.header!!.runtime.scope!!)
         assertTrue(cut.body.endsWith("more lines: recall #1 range ${shownTo + 1}-200"), cut.body)
+        assertEquals(estimator.estimate(cut.body).tokens, cut.tokens)
+        assertTrue(cut.tokens <= 60)
         assertTrue(workset.covers("src/big.py", v, LineRange(1, shownTo)))
         assertFalse(workset.covers("src/big.py", v, LineRange(1, shownTo + 1)), "coverage is what was displayed, not what was captured")
         val observation = SqliteObservations(store, clock).get("obs-1")!!

@@ -219,7 +219,9 @@ public class ImportGraph private constructor(
                             if (cleaned.startsWith(".") || cleaned.startsWith("/")) {
                                 reason(path, "unresolved import $cleaned")
                             } else {
-                                resolveScriptPackage(cleaned, scriptPackages, known)?.let { edge(path, it) }
+                                val local = resolveScriptPackage(cleaned, scriptPackages, known)
+                                if (local != null) edge(path, local)
+                                else if (!cleaned.startsWith("node:")) reason(path, "unresolved bare import $cleaned (package or local alias)")
                             }
                         }
                         Language.Kotlin, Language.Java -> {

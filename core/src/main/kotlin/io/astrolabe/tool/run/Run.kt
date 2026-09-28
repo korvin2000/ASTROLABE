@@ -20,7 +20,6 @@ import io.astrolabe.evidence.ActionOutcome
 import io.astrolabe.evidence.Counts
 import io.astrolabe.evidence.Intent
 import io.astrolabe.evidence.IntentJournal
-import io.astrolabe.evidence.IntentStatus
 import io.astrolabe.evidence.Observation
 import io.astrolabe.evidence.Observations
 import io.astrolabe.evidence.Outcome
@@ -64,6 +63,8 @@ import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Clock
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 /** The typed result of one `run` call (§5.4). Status is runner-assigned from exit code **and** parser, never model-authored. */
 public data class RunResult(
@@ -132,6 +133,7 @@ public class Run(
     /** The generated tools active at this attempt's boundary (§12.2); `run(["tool:<name>", …])` resolves only against it. */
     private val tools: ToolSet = ToolSet.EMPTY,
 ) : ToolExecutor {
+    internal var beforeDispatch: () -> Unit = {}
     init {
         require(ids.context != null) { "run runs inside a cell: ids.context is its lineage" }
         require(pollSliceSeconds > 0) { "pollSliceSeconds must be positive" }
@@ -154,7 +156,7 @@ public class Run(
     private sealed interface Launch {
         data class Unavailable(val reason: String) : Launch
         data class Background(val proc: Proc, val firstOutput: ByteArray, val cursor: Long) : Launch
-        data class Finished(val proc: Proc, val output: ByteArray) : Launch
+        data class Finished(val proc: Proc, val output: ByteArray, val captureComplete: Boolean) : Launch
     }
 
     private suspend fun run(args: RunArgs, context: TurnContext): ToolOutcome {
@@ -196,6 +198,9 @@ public class Run(
             deadlineSeconds = args.timeout.toLong(),
         )
         var logBlob: Digest? = null
+        var rendered: ToolOutcome? = null
+        // The fence throws before any intent is recorded, so a lapsed lease never leaves an open intent (§13.1).
+        beforeDispatch()
         val outcome = Consequential.run(
             journal = intents,
             intent = intent,
@@ -208,27 +213,29 @@ public class Run(
                     is Launch.Unavailable -> ByteArray(0)
                 }
                 logBlob = blobs.put(redaction.applyBytes(bytes, ContentClass.ReusableEvidence).text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
+                rendered = when (launch) {
+                    is Launch.Unavailable -> {
+                        val result = RunResult(alias.text, actionId, null, Outcome.Unavailable, "cannot start: ${launch.reason}", false, logBlob, classification.effectClass, before.candidateId, before.candidateId, true, emptyList(), null, null, null, listOf(launch.reason), intent.intentId)
+                        render(args, result, argv, shell, before, before, classification.effectsUnknown)
+                    }
+                    is Launch.Background -> {
+                        val handle = Handle(idGen.next("handle"), ids, actionId, alias.text, argv, shell, args.cwd, launch.proc, wire(launch.proc.status), launch.cursor, before.candidateId.digest.hex,
+                            classification.effectClass, classification.effectsUnknown, before.members, before.baseCommit)
+                        handles.save(handle)
+                        val safe = redaction.applyBytes(launch.firstOutput, ContentClass.ModelFacing)
+                        val slice = safe.text
+                        val view = "background run ${alias.text} handle ${handle.handleId} · ${wire(launch.proc.status)} · poll with run(op=poll, handle=\"${handle.handleId}\")" + (if (slice.isBlank()) "" else "\n$slice")
+                        val result = RunResult(alias.text, actionId, null, Outcome.NotRun, view, false, logBlob, classification.effectClass, before.candidateId, null, false, emptyList(), handle.handleId, null, null, emptyList(), intent.intentId)
+                        render(args, result, argv, shell, before, null, classification.effectsUnknown, statusWire = wire(launch.proc.status), captureMask = safe.mask)
+                    }
+                    is Launch.Finished -> finish(args, alias.text, actionId, argv, shell, before, launch.proc, launch.output, classification.effectClass, classification.effectsUnknown, logBlob, intent.intentId, launch.captureComplete)
+                }
             },
         )
-        val launch = when (outcome) {
-            is ActionOutcome.Completed -> outcome.value
-            is ActionOutcome.Unknown -> return unknown(args, alias.text, actionId, before, intent.intentId, outcome.cause)
-            is ActionOutcome.NotDispatched -> return refused(args, Outcome.Denied, outcome.reason)
-        }
-        return when (launch) {
-            is Launch.Unavailable -> {
-                val result = RunResult(alias.text, actionId, null, Outcome.Unavailable, "cannot start: ${launch.reason}", false, logBlob, classification.effectClass, before.candidateId, before.candidateId, true, emptyList(), null, null, null, listOf(launch.reason), intent.intentId)
-                render(args, result, argv, shell, before, before, classification.effectsUnknown)
-            }
-            is Launch.Background -> {
-                val handle = Handle(idGen.next("handle"), ids, actionId, alias.text, argv, shell, args.cwd, launch.proc, wire(launch.proc.status), launch.cursor, before.candidateId.digest.hex)
-                handles.save(handle)
-                val slice = redaction.applyBytes(launch.firstOutput, ContentClass.ModelFacing).text
-                val view = "background run ${alias.text} handle ${handle.handleId} · ${wire(launch.proc.status)} · poll with run(op=poll, handle=\"${handle.handleId}\")" + (if (slice.isBlank()) "" else "\n$slice")
-                val result = RunResult(alias.text, actionId, null, Outcome.NotRun, view, false, logBlob, classification.effectClass, before.candidateId, null, false, emptyList(), handle.handleId, null, null, emptyList(), intent.intentId)
-                render(args, result, argv, shell, before, null, classification.effectsUnknown, statusWire = wire(launch.proc.status))
-            }
-            is Launch.Finished -> finish(args, alias.text, actionId, argv, shell, before, launch.proc, launch.output, classification.effectClass, classification.effectsUnknown, logBlob, intent.intentId)
+        return when (outcome) {
+            is ActionOutcome.Completed -> checkNotNull(rendered)
+            is ActionOutcome.Unknown -> unknown(args, alias.text, actionId, before, intent.intentId, outcome.cause)
+            is ActionOutcome.NotDispatched -> refused(args, Outcome.Denied, outcome.reason)
         }
     }
 
@@ -250,11 +257,15 @@ public class Run(
             val allowlisted = contract.authorization.dClassAllowlist.any { classification.command == it || classification.command.startsWith("$it ") }
             val request = DClassRequest(idGen.next("dreq"), contract.version, ids, classification.command, argv, args.cwd, classification.reasons.joinToString("; "), reason, allowlisted)
             val approval = authority.approve(request)
+            currentCoroutineContext().ensureActive()
+            if (approval.requestId != request.id || approval.contractRevision != request.contractRevision ||
+                contracts.current(ids.work)?.version != request.contractRevision
+            ) return refused(args, Outcome.Denied, "D-class approval does not match the pending request and current contract; nothing was dispatched")
             if (!approval.approved) return refused(args, Outcome.Denied, "D-class effect denied: ${approval.reason ?: "no approval"} (${classification.reasons.joinToString("; ")})")
         }
 
         val replaySafe = classification.effectClass == EffectClass.R && !classification.effectsUnknown
-        if (!replaySafe) intents.open().firstOrNull { it.ids.work == ids.work && it.status == IntentStatus.Unknown && !it.replaySafe && it.argv == argv && it.cwd == args.cwd }?.let {
+        if (!replaySafe) intents.open().firstOrNull { it.ids.work == ids.work && !it.replaySafe && it.argv == argv && it.cwd == args.cwd }?.let {
             return refused(args, Outcome.UnknownOutcome, "unknown_outcome: intent ${it.intentId} ran this command and its effect is unreconciled; reconcile before any retry (§13.1), never relaunch")
         }
         return null
@@ -291,6 +302,9 @@ public class Run(
         val before = stamper.report()
         val intent = Intent(idGen.next("intent"), ids, actionId, argv, null, classification.toString(), at = clock.instant(), replaySafe = entry.effectClass == EffectClass.R)
         var logBlob: Digest? = null
+        var rendered: ToolOutcome? = null
+        // The fence throws before any intent is recorded, so a lapsed lease never leaves an open intent (§13.1).
+        beforeDispatch()
         val outcome = Consequential.run(
             journal = intents,
             intent = intent,
@@ -298,31 +312,29 @@ public class Run(
             dispatch = { client.call(entry.mount.server, entry.tool.name, arguments) },
             persist = { reply ->
                 logBlob = blobs.put(redaction.applyBytes(reply.content.toByteArray(Charsets.UTF_8), ContentClass.ReusableEvidence).text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
+                val after = stamper.report()
+                val changed = announce(before, after, "run ${alias.text}")
+                val effectClass = observedClass(entry.effectClass, changed)
+                val capture = RunCapture(actionId = actionId, argv = argv, exitCode = if (reply.isError) 1 else 0, output = reply.content.toByteArray(Charsets.UTF_8))
+                val shaped = Shapers.shape(capture, ShapeBudget(args.budget, estimator, alias.text))
+                val touched = if (changed.isEmpty()) "" else "\ntouched (by run ${alias.text} $program: ${changed.size} path${if (changed.size == 1) "" else "s"}) " + changed.take(10).joinToString(", ")
+                val result = RunResult(
+                    alias.text, actionId, capture.exitCode, shaped.status, shaped.view + touched, shaped.viewTruncated, logBlob, effectClass, before.candidateId, after.candidateId,
+                    current = true, changedPaths = changed, handle = null, parsed = shaped.counts, shaped = shaped, limits = shaped.limitations, intentId = intent.intentId,
+                )
+                rendered = render(args, result, argv, false, before, after, classification.effectsUnknown)
             },
         )
-        val reply = when (outcome) {
-            is ActionOutcome.Completed -> outcome.value
-            is ActionOutcome.Unknown -> return unknown(args, alias.text, actionId, before, intent.intentId, outcome.cause)
-            is ActionOutcome.NotDispatched -> return refused(args, Outcome.Denied, outcome.reason)
+        return when (outcome) {
+            is ActionOutcome.Completed -> checkNotNull(rendered)
+            is ActionOutcome.Unknown -> unknown(args, alias.text, actionId, before, intent.intentId, outcome.cause)
+            is ActionOutcome.NotDispatched -> refused(args, Outcome.Denied, outcome.reason)
         }
-        val after = stamper.report()
-        val changed = announce(before, after, "run ${alias.text}")
-        val effectClass = when {
-            entry.effectClass == EffectClass.R && changed.isNotEmpty() -> if (changed.any { workspace.paths.isProtected(it, PathIntent.Mutate) }) EffectClass.D else EffectClass.W
-            else -> entry.effectClass
-        }
-        val capture = RunCapture(actionId = actionId, argv = argv, exitCode = if (reply.isError) 1 else 0, output = reply.content.toByteArray(Charsets.UTF_8))
-        val shaped = Shapers.shape(capture, ShapeBudget(args.budget, estimator, alias.text))
-        val touched = if (changed.isEmpty()) "" else "\ntouched (by run ${alias.text} $program: ${changed.size} path${if (changed.size == 1) "" else "s"}) " + changed.take(10).joinToString(", ")
-        val result = RunResult(
-            alias.text, actionId, capture.exitCode, shaped.status, shaped.view + touched, shaped.viewTruncated, logBlob, effectClass, before.candidateId, after.candidateId,
-            current = true, changedPaths = changed, handle = null, parsed = shaped.counts, shaped = shaped, limits = shaped.limitations, intentId = intent.intentId,
-        )
-        return render(args, result, argv, false, before, after, classification.effectsUnknown)
     }
 
     /** Spawns and, unless backgrounded, observes to the terminal state; the deadline kills the tree, nothing replays. */
-    private fun launch(spec: SpawnSpec, args: RunArgs): Launch {
+    private suspend fun launch(spec: SpawnSpec, args: RunArgs): Launch {
+        currentCoroutineContext().ensureActive()
         val proc = try {
             runner.start(spec)
         } catch (failure: IOException) {
@@ -332,18 +344,9 @@ public class Run(
             val first = os.poll(proc, 0, 0)
             return Launch.Background(proc.copy(status = first.status), first.newBytes, first.nextCursorBytes)
         }
-        var current = proc
-        var cursor = 0L
-        val output = java.io.ByteArrayOutputStream()
-        while (!current.status.isTerminal) {
-            val poll = os.poll(current, cursor, minOf(pollSliceSeconds, args.timeout.toLong() + 5))
-            output.write(poll.newBytes)
-            cursor = poll.nextCursorBytes
-            current = current.copy(status = poll.status)
-        }
-        val tail = os.poll(current, cursor, 0)
-        output.write(tail.newBytes)
-        return Launch.Finished(current, output.toByteArray())
+        val observed = Executions.observeCancellable(os, proc, pollSliceSeconds, args.timeout.toLong() + 5)
+        if (observed.lost) throw IOException("process observation lost; reconcile before retry")
+        return Launch.Finished(observed.proc, observed.output, captureComplete = !observed.truncated)
     }
 
     /** Stamp diff, coherence announcements, reclassification and shaping once a process is terminal (§9.4). */
@@ -360,18 +363,16 @@ public class Run(
         effectsUnknown: Boolean,
         logBlob: Digest?,
         intentId: String?,
+        captureComplete: Boolean,
     ): ToolOutcome {
         val after = stamper.report()
         val changed = announce(before, after, "run $alias")
-        val effectClass = when {
-            label == EffectClass.R && changed.isNotEmpty() -> if (changed.any { workspace.paths.isProtected(it, PathIntent.Mutate) }) EffectClass.D else EffectClass.W
-            else -> label
-        }
+        val effectClass = observedClass(label, changed)
         val status = proc.status
         val capture = RunCapture(
             actionId = actionId, argv = argv, shell = shell, cwd = args.cwd,
             exitCode = (status as? ProcStatus.Exited)?.exitCode, timedOut = status == ProcStatus.DeadlineExceeded,
-            output = output, captureComplete = status !is ProcStatus.Lost,
+            output = output, captureComplete = captureComplete && status !is ProcStatus.Lost,
         )
         val shaped = Shapers.shape(capture, ShapeBudget(args.budget, estimator, alias))
         val outcome = when (status) {
@@ -385,7 +386,15 @@ public class Run(
             alias, actionId, capture.exitCode, outcome, view, shaped.viewTruncated, logBlob, effectClass, before.candidateId, after.candidateId,
             current = true, changedPaths = changed, handle = null, parsed = shaped.counts, shaped = shaped, limits = shaped.limitations, intentId = intentId,
         )
-        return render(args, result, argv, shell, before, after, effectsUnknown || status is ProcStatus.Lost)
+        return render(args, result, argv, shell, before, after, effectsUnknown || status is ProcStatus.Lost,
+            captureMask = redaction.applyBytes(output, ContentClass.ReusableEvidence).mask)
+    }
+
+    /** §4.6 post hoc: a write under a protected path is D whatever the launch label; any other change lifts R to W. */
+    private fun observedClass(label: EffectClass, changed: List<String>): EffectClass = when {
+        changed.isEmpty() -> label
+        changed.any { workspace.paths.isProtected(it, PathIntent.Mutate) } -> EffectClass.D
+        else -> maxOf(label, EffectClass.W)
     }
 
     /** Announces every stamped member that moved; a path nobody read before has `from = null` (conservative marking). */
@@ -401,61 +410,77 @@ public class Run(
 
     // ------------------------------------------------------------ poll · cancel
 
-    private fun poll(args: RunArgs, context: TurnContext): ToolOutcome {
-        val handle = handles.get(args.handle!!) ?: return refused(args, Outcome.Denied, "no handle '${args.handle}' in this campaign")
+    private suspend fun poll(args: RunArgs, context: TurnContext): ToolOutcome {
+        val handle = ownedHandle(args.handle!!) ?: return refused(args, Outcome.Denied, "no handle '${args.handle}' in this campaign workspace")
         val proc = os.reattach(handle.proc)
         val since = args.since ?: handle.cursor
         val poll = try {
-            os.poll(proc, since, args.timeout.toLong())
+            kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { os.poll(proc, since, args.timeout.toLong()) }
         } catch (failure: IOException) {
             handles.save(handle.copy(status = wire(ProcStatus.Lost)))
             return refused(args, Outcome.UnknownOutcome, "handle ${handle.handleId}: the log cannot be read (${failure.message}); the process state is unknown — reconcile, never relaunch")
         }
         val updated = handle.copy(proc = proc.copy(status = poll.status), status = wire(poll.status), cursor = poll.nextCursorBytes)
         handles.save(updated)
-        val slice = redaction.applyBytes(poll.newBytes, ContentClass.ModelFacing).text
+        val safeSlice = redaction.applyBytes(poll.newBytes, ContentClass.ModelFacing)
+        val slice = safeSlice.text
         return when (val status = poll.status) {
             ProcStatus.Running -> {
                 val view = "handle ${handle.handleId} running · cursor ${poll.nextCursorBytes}" + (if (poll.timedOut) " · observation timed out after ${args.timeout}s, the process keeps running (no relaunch)" else "") + (if (slice.isBlank()) "" else "\n$slice")
-                val result = RunResult(handle.alias, handle.actionId, null, Outcome.NotRun, view, false, null, EffectClass.R, CandidateId(Digest(handle.stampBefore)), null, false, emptyList(), handle.handleId, null, null, emptyList())
-                render(args, result, handle.argv, handle.shell, null, null, effectsUnknown = false, statusWire = "running")
+                val result = RunResult(handle.alias, handle.actionId, null, Outcome.NotRun, view, false, null, handle.effectClass, CandidateId(Digest(handle.stampBefore)), null, false, emptyList(), handle.handleId, null, null, emptyList())
+                render(args, result, handle.argv, handle.shell, null, null, effectsUnknown = handle.effectsUnknown, statusWire = "running", captureMask = safeSlice.mask)
             }
             else -> {
-                val before = stamper.report().let { now -> now } // the diff is taken against the tree now; the pre-dispatch stamp is in the handle
+                val after = stamper.report()
+                var complete = true
                 val log = try {
-                    Files.readAllBytes(proc.log)
+                    Files.newInputStream(proc.log).use {
+                        val bytes = it.readNBytes(Executions.MAX_CAPTURE_BYTES)
+                        complete = it.read() == -1
+                        bytes
+                    }
                 } catch (missing: IOException) {
+                    complete = false
                     poll.newBytes
                 }
-                val logBlob = blobs.put(redaction.applyBytes(log, ContentClass.ReusableEvidence).text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
+                val safeLog = redaction.applyBytes(log, ContentClass.ReusableEvidence)
+                val logBlob = blobs.put(safeLog.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
                 val stampBefore = CandidateId(Digest(handle.stampBefore))
-                val changed = if (before.candidateId == stampBefore) emptyList() else announceFromNow(before, "run ${handle.alias}")
-                val capture = RunCapture(handle.actionId, handle.argv, handle.shell, handle.cwd, (status as? ProcStatus.Exited)?.exitCode, status == ProcStatus.DeadlineExceeded, log, status !is ProcStatus.Lost)
+                val changed = announceBackground(handle, after)
+                val capture = RunCapture(handle.actionId, handle.argv, handle.shell, handle.cwd, (status as? ProcStatus.Exited)?.exitCode, status == ProcStatus.DeadlineExceeded, log, complete && status !is ProcStatus.Lost)
                 val shaped = Shapers.shape(capture, ShapeBudget(args.budget, estimator, handle.alias))
                 val outcome = if (status is ProcStatus.Lost || status is ProcStatus.Cancelled) Outcome.UnknownOutcome else shaped.status
-                val view = "handle ${handle.handleId} ${wire(status)}\n" + shaped.view + (if (changed.isEmpty()) "" else "\ntouched (by run ${handle.alias}: ${changed.size} paths) " + changed.take(10).joinToString(", "))
-                val result = RunResult(handle.alias, handle.actionId, capture.exitCode, outcome, view, shaped.viewTruncated, logBlob, if (changed.isEmpty()) EffectClass.R else EffectClass.W, stampBefore, before.candidateId, true, changed, handle.handleId, shaped.counts, shaped, shaped.limitations)
-                render(args, result, handle.argv, handle.shell, null, before, effectsUnknown = status is ProcStatus.Lost)
+                val view = "handle ${handle.handleId} ${wire(status)}\n" + shaped.view + "\nBackground effects cannot be attributed exclusively to this process." + (if (changed.isEmpty()) "" else "\nchanged during background run (${changed.size} paths): " + changed.take(10).joinToString(", "))
+                val effectClass = observedClass(handle.effectClass, changed)
+                val result = RunResult(handle.alias, handle.actionId, capture.exitCode, outcome, view, shaped.viewTruncated, logBlob, effectClass, stampBefore, after.candidateId, true, changed, handle.handleId, shaped.counts, shaped, shaped.limitations)
+                render(args, result, handle.argv, handle.shell, null, after, effectsUnknown = true, captureMask = safeLog.mask)
             }
         }
     }
 
-    /** A background process's writes are only known by their result: every stamped member that differs from the pre-dispatch tree moved. */
-    private fun announceFromNow(now: StampReport, cause: String): List<String> {
-        val changed = ArrayList<String>()
-        for ((path, entry) in now.members) {
-            val to = entry.digest?.let(::FileVersion)
-            val from = registry.recorded(path)
-            if (from != to) {
-                registry.change(path, from, to, cause)
-                changed += path
-            }
+    /** The interval diff invalidates evidence but cannot attribute concurrent edits to a background process. */
+    private fun announceBackground(handle: Handle, now: StampReport): List<String> {
+        val before = handle.membersBefore
+        val baseChanges = if (handle.baseCommitBefore != null && handle.baseCommitBefore != now.baseCommit) {
+            fun tree(commit: String) = if (commit == io.astrolabe.id.Stamp.NO_COMMIT) emptyMap() else
+                workspace.git.lsTree(io.astrolabe.os.ObjectId(commit), recursive = true).associateBy { it.path }
+            val oldTree = tree(handle.baseCommitBefore)
+            val newTree = tree(now.baseCommit)
+            (oldTree.keys + newTree.keys).filter { oldTree[it] != newTree[it] }.toSet()
+        } else emptySet()
+        val changed = ((before?.keys ?: emptySet()) + now.members.keys + baseChanges).sorted().filter {
+            before == null || handle.baseCommitBefore != now.baseCommit || before[it] != now.members[it]
+        }
+        for (path in changed) {
+            val from = before?.get(path)?.digest?.let(::FileVersion) ?: registry.recorded(path)
+            val to = now.members[path]?.digest?.let(::FileVersion) ?: registry.version(path)
+            if (from != to) registry.change(path, from, to, "background interval ${handle.alias}")
         }
         return changed
     }
 
     private fun cancel(args: RunArgs): ToolOutcome {
-        val handle = handles.get(args.handle!!) ?: return refused(args, Outcome.Denied, "no handle '${args.handle}' in this campaign")
+        val handle = ownedHandle(args.handle!!) ?: return refused(args, Outcome.Denied, "no handle '${args.handle}' in this campaign workspace")
         val proc = try {
             os.terminate(os.reattach(handle.proc))
         } catch (failure: IOException) {
@@ -463,41 +488,50 @@ public class Run(
         }
         handles.save(handle.copy(proc = proc, status = wire(proc.status)))
         val view = "cancel requested for handle ${handle.handleId} · status ${wire(proc.status)} · a cancellation is a request and a status, not proof that every effect stopped"
-        val result = RunResult(handle.alias, handle.actionId, (proc.status as? ProcStatus.Exited)?.exitCode, Outcome.UnknownOutcome, view, false, null, EffectClass.R, CandidateId(Digest(handle.stampBefore)), null, false, emptyList(), handle.handleId, null, null, emptyList())
+        val result = RunResult(handle.alias, handle.actionId, (proc.status as? ProcStatus.Exited)?.exitCode, Outcome.UnknownOutcome, view, false, null, handle.effectClass, CandidateId(Digest(handle.stampBefore)), null, false, emptyList(), handle.handleId, null, null, emptyList())
         return render(args, result, handle.argv, handle.shell, null, null, effectsUnknown = true, statusWire = wire(proc.status))
     }
 
     // ---------------------------------------------------------------- render
 
-    private fun refused(args: RunArgs, status: Outcome, detail: String): ToolOutcome {
-        val actionId = idGen.next("act")
-        val header = EnvelopeHeader(
-            resultAlias = "#-", tool = "run", effectClass = null, versions = emptyMap(), stamp = null, truncated = false, effects = Effects.None,
-            runtime = RuntimeFields(actionId, wire(status), null, null, args.argv?.joinToString(" ") ?: args.cmd ?: args.handle, "complete", effectsUnknown = status == Outcome.UnknownOutcome),
-        )
-        return ToolOutcome(detail, header, tokens = estimator.estimate(detail).tokens)
+    /** Attempts may resume their campaign's handles; another work or workspace has no authority over them. */
+    private fun ownedHandle(id: String): Handle? = handles.get(id)?.takeIf {
+        it.ids.work == ids.work && aliases.byCanonical(ids.work, it.actionId)?.workspace == workspace.id
     }
 
-    private fun render(args: RunArgs, result: RunResult, argv: List<String>, shell: Boolean, before: StampReport?, after: StampReport?, effectsUnknown: Boolean, statusWire: String = wire(result.status)): ToolOutcome {
+    private fun refused(args: RunArgs, status: Outcome, detail: String): ToolOutcome {
+        val actionId = idGen.next("act")
+        val safe = redaction.apply(detail)
+        val header = EnvelopeHeader(
+            resultAlias = "#-", tool = "run", effectClass = null, versions = emptyMap(), stamp = null, truncated = safe.limitations.isNotEmpty(), effects = Effects.None,
+            runtime = RuntimeFields(actionId, wire(status), null, null, (args.argv?.joinToString(" ") ?: args.cmd ?: args.handle)?.let { redaction.apply(it).text }, if (safe.limitations.isEmpty()) "complete" else "truncated", redactionApplied = safe.applied, effectsUnknown = status == Outcome.UnknownOutcome),
+        )
+        return ToolOutcome(safe.text, header, tokens = estimator.estimate(safe.text).tokens)
+    }
+
+    private fun render(args: RunArgs, result: RunResult, argv: List<String>, shell: Boolean, before: StampReport?, after: StampReport?, effectsUnknown: Boolean, statusWire: String = wire(result.status), captureMask: io.astrolabe.evidence.RedactionMask = io.astrolabe.evidence.RedactionMask.NONE): ToolOutcome {
         val exit = result.exit?.let { "exit $it · " } ?: ""
-        val head = "run ${result.alias} $statusWire · class ${result.effectClass}" + (if (shell) " · shell wrapper" else "") + " · $exit${argv.joinToString(" ").take(80)}"
-        val body = head + "\n" + result.view
+        val head = "run ${result.alias} $statusWire · class ${result.effectClass}" + (if (shell) " · shell wrapper" else "") + " · $exit${redaction.apply(argv.joinToString(" ")).text.take(80)}"
+        val safe = redaction.apply(head + "\n" + result.view, ContentClass.ReusableEvidence)
+        val body = safe.text
+        val truncated = result.truncated || safe.limitations.isNotEmpty()
+        val captureComplete = result.status != Outcome.UnknownOutcome && result.shaped?.captureTruncated != true && captureMask.limitations.isEmpty()
         observations.record(
             Observation(
                 id = idGen.next("obs"), ids = ids, actionId = result.actionId, candidate = after?.candidateId, contentRef = result.log ?: blobs.put(body.toByteArray(Charsets.UTF_8), BlobKind.OUTPUT, ids),
-                paths = emptyList(), ranges = emptyMap(), complete = !result.truncated, sourceVersions = emptyMap(), captureComplete = result.status != Outcome.UnknownOutcome,
-                truncated = result.truncated,
+                paths = emptyList(), ranges = emptyMap(), complete = !truncated && captureComplete, sourceVersions = emptyMap(), captureComplete = captureComplete,
+                truncated = truncated, redaction = if (result.log != null) captureMask else safe.mask,
             ),
         )
         val header = EnvelopeHeader(
-            resultAlias = result.alias, tool = "run", effectClass = result.effectClass, versions = emptyMap(), stamp = after?.candidateId, truncated = result.truncated,
+            resultAlias = result.alias, tool = "run", effectClass = result.effectClass, versions = emptyMap(), stamp = after?.candidateId, truncated = truncated,
             effects = if (result.changedPaths.isNotEmpty()) Effects.Observed else if (effectsUnknown) Effects.Unknown else Effects.None,
             flags = InstructionShape.detect(body).flags,
             runtime = RuntimeFields(
-                actionId = result.actionId, status = statusWire, candidateBefore = before?.candidateId, candidateAfter = after?.candidateId,
-                scope = argv.joinToString(" ").take(80), completeness = if (result.truncated) "truncated" else "complete",
-                artifactRefs = listOfNotNull(result.log?.hex), captureComplete = result.shaped?.captureTruncated?.not() ?: true, displayTruncated = result.truncated,
-                redactionApplied = false, effectsObserved = result.changedPaths.take(20), effectsUnknown = effectsUnknown,
+                actionId = result.actionId, status = statusWire, candidateBefore = result.stampBefore, candidateAfter = after?.candidateId,
+                scope = redaction.apply(argv.joinToString(" ")).text.take(80), completeness = if (truncated || !captureComplete) "truncated" else "complete",
+                artifactRefs = listOfNotNull(result.log?.hex), captureComplete = captureComplete, displayTruncated = truncated,
+                redactionApplied = safe.applied || captureMask.applied, effectsObserved = result.changedPaths.take(20).map { redaction.apply(it).text }, effectsUnknown = effectsUnknown,
             ),
         )
         return ToolOutcome(body, header, green = result.status == Outcome.Passed, tokens = estimator.estimate(body).tokens)

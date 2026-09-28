@@ -142,7 +142,7 @@ public sealed interface Transition {
      * The controller installs a validated plan (§4.2, P2.2.2): the plan cell's graph, or a replan that keeps every
      * increment already dispatched, verified or cancelled exactly as it was (authorized coverage preserved).
      */
-    public data class Planned(val graph: RequirementGraph) : Transition
+    public data class Planned(val graph: RequirementGraph, val replaced: Set<String> = emptySet()) : Transition
 
     /** The authority answered or amended; the blocked increment resumes. */
     public data class Unblocked(val increment: String, val authorityRef: String) : Transition {
@@ -263,7 +263,10 @@ public object Lifecycle {
                 check(issues.isEmpty()) { "an invalid plan is never installed: ${issues.joinToString { it.detail }}" }
                 val next = transition.graph.increments.associateBy { it.id }
                 for (kept in s.graph.increments.filter { it.cells.isNotEmpty() || it.status != IncrementStatus.Pending }) {
-                    check(next[kept.id] == kept) { "a replan keeps ${kept.id} (${kept.status}) as it was" }
+                    val retired = next[kept.id]
+                    val split = kept.id in transition.replaced && kept.status !in setOf(IncrementStatus.Verified, IncrementStatus.Cancelled) &&
+                        retired?.status == IncrementStatus.Cancelled && retired.copy(status = kept.status, cancelledReason = kept.cancelledReason) == kept
+                    check(next[kept.id] == kept || split) { "a replan keeps ${kept.id} (${kept.status}) as it was" }
                 }
                 val ledger = if (s.graph.increments.any { it.status == IncrementStatus.Verified }) s.ledger else Ledger.initial(contract)
                 s.next(graph = transition.graph, ledger = ledger, contractVersion = v)
@@ -294,9 +297,11 @@ public object Lifecycle {
                 s.next(phase = CampaignPhase.Ended, outcome = transition.outcome, reason = transition.reason, contractVersion = v)
             }
             is Transition.Resumed -> {
-                expect(s, CampaignPhase.Ended)
-                check(s.outcome?.resumable == true) { "a ${s.outcome?.wire} campaign does not resume" }
-                s.next(phase = CampaignPhase.Opened, outcome = null, reason = null, contractVersion = v)
+                expect(s, CampaignPhase.Ended, CampaignPhase.Finishing)
+                val interrupted = s.phase == CampaignPhase.Finishing
+                check(interrupted || s.outcome?.resumable == true) { "a ${s.outcome?.wire} campaign does not resume" }
+                s.next(phase = CampaignPhase.Opened, outcome = null, reason = null, contractVersion = v,
+                    ledger = if (interrupted) Ledger.initial(contract) else s.ledger)
             }
         }
     }

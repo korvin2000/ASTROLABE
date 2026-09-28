@@ -80,14 +80,20 @@ public class Curator @JvmOverloads constructor(
     /** Returns every note of [batchId] to the queue as a candidate; code is untouched, the index is regenerated. */
     @Synchronized
     public fun rollback(batchId: String, ids: Identities): List<String> {
-        val rolled = ArrayList<String>()
-        for (entry in queue.batch(batchId)) {
-            if (entry.status == QueueStatus.Admitted) {
-                val note = checkNotNull(notes.get(entry.noteId))
-                writer.write(note.copy(status = NoteStatus.Candidate, signedBy = null, origin = note.origin.copy(admittedBy = null)), ids)
-                rolled += entry.noteId
+        val rolled = store.db.tx { tx ->
+            val entries = queue.batch(batchId)
+            val expected = LinkedHashMap<String, String>()
+            val before = LinkedHashMap<String, Note>()
+            for (entry in entries) {
+                if (entry.beforeNotes.isEmpty()) throw NoteRefused("$batchId has no durable rollback ownership; cannot restore legacy admission")
+                expected.putAll(entry.appliedVersions)
+                entry.beforeNotes.forEach { before.putIfAbsent(it.id, it) }
             }
-            queue.save(entry.copy(status = QueueStatus.Queued, batch = null, decidedBy = null, reason = "rolled back $batchId", rolledBackFrom = batchId), ids)
+            val versions = notes.versions()
+            if (expected.any { (id, version) -> versions[id] != version }) throw NoteRefused("$batchId conflicts with later note revisions")
+            before.values.forEach { writer.write(tx, it, ids) }
+            entries.forEach { entry -> queue.save(tx, entry.copy(status = QueueStatus.Queued, batch = null, decidedBy = null, reason = "rolled back $batchId", rolledBackFrom = batchId, beforeNotes = emptyList(), appliedVersions = emptyMap()), ids) }
+            entries.filter { it.status == QueueStatus.Admitted }.map { it.noteId }
         }
         regenerate()
         return rolled
@@ -113,7 +119,8 @@ public class Curator @JvmOverloads constructor(
      * superseded or deprecated note is deprecated; the rest stay stale.
      */
     @Synchronized
-    public fun recheck(ids: Identities, currentVersion: (String) -> FileVersion?, stamp: String?): Recheck {
+    @JvmOverloads
+    public fun recheck(ids: Identities, currentVersion: (String) -> FileVersion?, stamp: String?, dependencyVersions: Map<String, String> = emptyMap()): Recheck {
         val all = notes.all()
         val byId = all.associateBy { it.id }
         val readmitted = ArrayList<String>()
@@ -122,7 +129,7 @@ public class Curator @JvmOverloads constructor(
         for (note in all.filter { it.status == NoteStatus.Stale }) {
             val gone = note.validity.dependsOn.mapNotNull { byId[it.substringBeforeLast('@')] }.filter { it.status == NoteStatus.Superseded || it.status == NoteStatus.Deprecated }
             val anchorsCurrent = note.anchors.all { a -> a.version == null || currentVersion(a.path)?.digest?.hex?.startsWith(a.version) == true }
-            val dependenciesCurrent = note.validity.dependsOn.all { dep -> byId[dep.substringBeforeLast('@')]?.let { it.status == NoteStatus.Admitted } ?: true }
+            val dependenciesCurrent = Injection.dependenciesCurrent(note, byId, currentVersion, dependencyVersions + notes.versions())
             when {
                 gone.isNotEmpty() -> {
                     writer.setStatus(note.id, NoteStatus.Deprecated, ids)
@@ -208,14 +215,25 @@ public class Curator @JvmOverloads constructor(
                     val active = note.copy(status = NoteStatus.Admitted, signedBy = decision.signedBy ?: note.signedBy, origin = note.origin.copy(admittedBy = decision.admittedBy))
                     // A delta names the note it replaces (§12.1 supersession): admitting it marks that one superseded, never rewrites it.
                     val replaced = note.supersedes?.takeIf { notes.get(it) != null }
-                    if (replaced != null) writer.supersede(replaced, active, ids) else writer.write(active, ids)
-                    queue.save(entry.copy(status = QueueStatus.Admitted, batch = batchId, decidedBy = decision.admittedBy, findings = emptyList(), reason = null), ids)
+                    if (replaced == note.id) throw NoteRefused("a replacement must have a new note id")
+                    store.db.tx { tx ->
+                        if (notes.get(note.id) != note || queue.entry(entry.id) != entry) throw NoteRefused("${note.id} changed during admission")
+                        val before = listOfNotNull(note, replaced?.let(notes::get))
+                        before.filter { it.id != note.id }.forEach { writer.write(tx, it.copy(status = NoteStatus.Superseded), ids) }
+                        writer.write(tx, active, ids)
+                        queue.save(tx, entry.copy(status = QueueStatus.Admitted, batch = batchId, decidedBy = decision.admittedBy, findings = emptyList(), reason = null,
+                            beforeNotes = before, appliedVersions = notes.versions().filterKeys { key -> before.any { it.id == key } }), ids)
+                    }
                     events?.emit(AgentEvent.Kb.Admitted(ids, note.id))
                     admitted += note.id
                 }
                 is AdmissionDecision.Reject -> {
-                    writer.setStatus(note.id, NoteStatus.Rejected, ids)
-                    queue.save(entry.copy(status = QueueStatus.Rejected, batch = batchId, findings = decision.findings, reason = decision.reason), ids)
+                    store.db.tx { tx ->
+                        if (notes.get(note.id) != note || queue.entry(entry.id) != entry) throw NoteRefused("${note.id} changed during admission")
+                        writer.write(tx, note.copy(status = NoteStatus.Rejected), ids)
+                        queue.save(tx, entry.copy(status = QueueStatus.Rejected, batch = batchId, findings = decision.findings, reason = decision.reason,
+                            beforeNotes = listOf(note), appliedVersions = notes.versions().filterKeys { it == note.id }), ids)
+                    }
                     rejected[note.id] = decision.findings
                 }
                 is AdmissionDecision.Wait -> {

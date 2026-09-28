@@ -17,6 +17,7 @@ import kotlinx.serialization.Serializable
 public data class ArchivedRecord(val cell: ContextId, val kind: String, val n: Int, val text: String, val evidence: String?, val reason: String)
 
 /** The register after one §6.4 pass, what it archived, the stale streaks to feed the next pass and any capacity gap. */
+@Serializable
 public data class Retention(
     val register: Register,
     val archived: List<ArchivedRecord>,
@@ -60,13 +61,15 @@ public object FactCoherence {
                 f = f.copy(staleAt = anchor.version)
             }
             if (f.kind == ClaimKind.Verified && f.staleAt != null) {
-                val cells = (previousStreak[f.n] ?: 0) + 1
+                val cells = maxOf(previousStreak[f.n] ?: 0, f.staleCells) + 1
                 if (cells >= 2 && f.n !in referenced) {
                     archived += archive(register.cell, f, "stale for $cells consecutive cells, unreferenced")
                     continue
                 }
                 streak[f.n] = cells
+                f = f.copy(staleCells = cells)
             }
+            if (f.kind != ClaimKind.Verified || f.staleAt == null) f = f.copy(staleCells = 0)
             kept += f
         }
         var projected = register.copy(facts = kept)

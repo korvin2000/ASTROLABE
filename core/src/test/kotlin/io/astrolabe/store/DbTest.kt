@@ -22,6 +22,47 @@ class DbTest {
     lateinit var root: Path
 
     @Test
+    fun `failed rollback quarantines the connection even if close fails`() {
+        val statement = java.lang.reflect.Proxy.newProxyInstance(java.sql.Statement::class.java.classLoader,
+            arrayOf(java.sql.Statement::class.java)) { _, method, args ->
+            when (method.name) {
+                "execute" -> if (args!![0] == "ROLLBACK") throw java.sql.SQLException("rollback failed") else false
+                "close" -> null
+                else -> error("unexpected statement method ${method.name}")
+            }
+        } as java.sql.Statement
+        val connection = java.lang.reflect.Proxy.newProxyInstance(java.sql.Connection::class.java.classLoader,
+            arrayOf(java.sql.Connection::class.java)) { _, method, _ ->
+            when (method.name) {
+                "createStatement" -> statement
+                "close" -> throw java.sql.SQLException("close failed")
+                else -> error("quarantined connection was used: ${method.name}")
+            }
+        } as java.sql.Connection
+        val constructor = Db::class.java.getDeclaredConstructor(Path::class.java, java.sql.Connection::class.java)
+        constructor.isAccessible = true
+        val db = constructor.newInstance(root.resolve("quarantine.db"), connection)
+        val failure = assertFailsWith<IllegalArgumentException> { db.tx { throw IllegalArgumentException("original failure") } }
+        assertEquals(2, failure.suppressed.size)
+        assertTrue(assertFailsWith<IllegalStateException> { db.tx { } }.message!!.contains("quarantined"))
+        assertTrue(assertFailsWith<IllegalStateException> { db.count("SELECT 1") }.message!!.contains("quarantined"))
+    }
+
+    @Test
+    fun `failed deferred constraint commit rolls back before connection reuse`() {
+        Db.open(Layout(root).create()).use { db ->
+            db.tx { tx ->
+                tx.execute("CREATE TABLE parent (id INTEGER PRIMARY KEY)")
+                tx.execute("CREATE TABLE child (id INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED)")
+            }
+            assertFailsWith<StoreError> { db.tx { it.execute("INSERT INTO child VALUES (1)") } }
+            assertEquals(0L, db.count("SELECT count(*) FROM child"))
+            db.tx { it.execute("INSERT INTO parent VALUES (1)") }
+            assertEquals(1L, db.count("SELECT count(*) FROM parent"))
+        }
+    }
+
+    @Test
     fun `every durability pragma is set and readable back`() {
         val layout = Layout(root).create()
         Db.open(layout).use { db ->

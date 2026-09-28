@@ -4,6 +4,7 @@ import io.astrolabe.evidence.Outcome
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -33,6 +34,27 @@ class GenericShaperTest {
         val subtest = shaped.tests.single { it.identity.name == "tier_3" }
         assertEquals("TestDiscount", subtest.identity.suite)
         assertEquals(2, assertNotNull(shaped.counts).failed)
+    }
+
+    @Test
+    fun `go test stamps cases with their own package summary`() {
+        val output = """
+            --- FAIL: TestSame (0.00s)
+            FAIL example.com/shop/a 0.01s
+            --- FAIL: TestSame (0.00s)
+            FAIL example.com/shop/b 0.01s
+        """.trimIndent().toByteArray()
+        val shaped = Shapers.shape(Recorded.capture(argv = listOf("go", "test", "./..."), exitCode = 1, output = output))
+        assertEquals(listOf("example.com/shop/a", "example.com/shop/b"), shaped.tests.map { it.identity.module })
+        assertNotEquals(shaped.tests[0].identity.canonical, shaped.tests[1].identity.canonical)
+    }
+
+    @Test
+    fun `go test without a package summary gives no reusable failure identity`() {
+        val output = "--- FAIL: TestSame (0.00s)\n".toByteArray()
+        val shaped = Shapers.shape(Recorded.capture(argv = listOf("go", "test", "./..."), exitCode = 1, output = output))
+        assertTrue(shaped.tests.isEmpty())
+        assertTrue(shaped.limitations.any { it.contains("no package summary") })
     }
 
     @Test

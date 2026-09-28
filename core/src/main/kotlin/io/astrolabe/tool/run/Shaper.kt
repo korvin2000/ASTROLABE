@@ -49,7 +49,7 @@ public data class ReportArtifact(
         val parts = path.replace('\\', '/').split('/')
         val at = parts.indexOfFirst { it == "build" || it == "target" }
         if (at <= 0) return null
-        return parts[at - 1].takeIf { it.isNotBlank() && it != "." && it != ".." }
+        return parts.take(at).joinToString("/").takeIf { it.isNotBlank() && it != "." && it != ".." }
     }
 
     override fun equals(other: Any?): Boolean =
@@ -105,6 +105,8 @@ public data class RunCapture(
     val checkId: String? = null,
     /** The selector the runner was given (`-k ctx`, `--tests CartTest`); recorded with the report (D-50). */
     val selector: String? = null,
+    /** The absolute directory the process ran in; report paths are made relative to it (D-27 identities). */
+    val executionRoot: String? = null,
 ) {
     init {
         require(actionId.isNotBlank()) { "a capture needs its action id (D-50)" }
@@ -126,7 +128,7 @@ public data class RunCapture(
                 exitCode == other.exitCode && timedOut == other.timedOut && output.contentEquals(other.output) &&
                 captureComplete == other.captureComplete && reports == other.reports &&
                 runnerVersion == other.runnerVersion && definitionVersion == other.definitionVersion &&
-                checkId == other.checkId && selector == other.selector
+                checkId == other.checkId && selector == other.selector && executionRoot == other.executionRoot
             )
 
     override fun hashCode(): Int {
@@ -143,6 +145,7 @@ public data class RunCapture(
         result = 31 * result + (definitionVersion?.hashCode() ?: 0)
         result = 31 * result + (checkId?.hashCode() ?: 0)
         result = 31 * result + (selector?.hashCode() ?: 0)
+        result = 31 * result + (executionRoot?.hashCode() ?: 0)
         return result
     }
 
@@ -385,9 +388,14 @@ internal fun deriveStatus(inputs: StatusInputs, limitations: MutableList<String>
         limitations += "the runner executed no tests: ${counts.discovered} discovered, 0 executed (D-50)"
         return Outcome.Inconclusive
     }
-    if (wrapper != null || exit == 0) {
+    // A wrapper may turn a failing exit into 0, but a nonzero exit is still observed (`jest && echo ok`).
+    if (exit == 0) {
         if (inputs.evidenceIncomplete) {
             limitations += "the structured evidence could not be read whole: a parse error is never a pass (§8.4)"
+            return Outcome.Inconclusive
+        }
+        if (!capture.captureComplete) {
+            limitations += "the capture limit discarded output: a partial log is never a pass (§8.4)"
             return Outcome.Inconclusive
         }
         return Outcome.Passed

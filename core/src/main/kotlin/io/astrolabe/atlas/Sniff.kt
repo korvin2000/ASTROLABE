@@ -35,9 +35,8 @@ public enum class Manifest(public val fileName: String) {
  * re-parsed by a shell; a `null` field means **the manifest does not declare one** and is rendered
  * `none`. Nothing here is guessed: an absent declaration stays absent (§7.7).
  *
- * The runner resolves the executable: `gradlew` means the wrapper script for the host
- * (`./gradlew` on POSIX, `gradlew.bat` on Windows), and `python` means the interpreter the runner
- * selected.
+ * Wrapper paths are pinned relative to the package directory, including ancestor wrappers.
+ * Windows batch launchers use the OS adapter's explicit command-interpreter path.
  */
 @Serializable
 public data class PackageCommands(
@@ -147,11 +146,7 @@ public object Sniff {
         val devDependencies = (root?.get("devDependencies") as? JsonObject)?.keys.orEmpty() +
             (root?.get("dependencies") as? JsonObject)?.keys.orEmpty()
 
-        val test = scripts["test"]?.let { script ->
-            // Prefer the direct runner when the script is a bare runner: one less process, and the
-            // argv is what a runner can actually own.
-            if (script.trim() == "node --test") listOf("node", "--test") else listOf("npm", "test")
-        }
+        val test = if ("test" in scripts) listOf("npm", "test") else null
         val build = scripts["build"]?.let { listOf("npm", "run", "build") }
         val lint = scripts["lint"]?.let { listOf("npm", "run", "lint") }
         val typecheckScript = listOf("typecheck", "type-check", "check")
@@ -188,7 +183,7 @@ public object Sniff {
     )
 
     private fun gradle(dir: String, manifest: Manifest, paths: Set<String>): PackageCommands {
-        val launcher = if (hasWrapper(dir, paths)) "gradlew" else "gradle"
+        val launcher = wrapper(dir, paths) ?: "gradle"
         return PackageCommands(
             dir = dir,
             manifest = manifest,
@@ -252,13 +247,16 @@ public object Sniff {
      * A Gradle wrapper usable from [dir]: in the package itself or in any ancestor up to the
      * repository root, which is where a monorepo keeps the single wrapper its packages share.
      */
-    private fun hasWrapper(dir: String, paths: Set<String>): Boolean {
+    private fun wrapper(dir: String, paths: Set<String>): String? {
+        val name = if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) "gradlew.bat" else "gradlew"
         var current = if (dir == PackageCommands.ROOT) "" else dir
+        var prefix = "./"
         while (true) {
-            val candidate = if (current.isEmpty()) "gradlew" else "$current/gradlew"
-            if (candidate in paths) return true
-            if (current.isEmpty()) return false
+            val candidate = if (current.isEmpty()) name else "$current/$name"
+            if (candidate in paths) return prefix + name
+            if (current.isEmpty()) return null
             current = current.substringBeforeLast('/', "")
+            prefix = if (prefix == "./") "../" else "../$prefix"
         }
     }
 }

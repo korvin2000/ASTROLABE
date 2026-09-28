@@ -11,6 +11,7 @@ import io.astrolabe.verify.ReviewScope
 import io.astrolabe.verify.Verdict
 import io.astrolabe.verify.VerdictOutcome
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.launch
 import java.util.concurrent.CompletableFuture
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -23,6 +24,48 @@ import kotlin.test.assertTrue
 class AuthorityTest {
     private val ids = Identities(WorkId("W-1"), AttemptId("a1"))
     private val candidate = CandidateId(Digest.ofUtf8("c"))
+
+    @Test
+    fun `cancelling a java authority wait never becomes a normal unanswered reply`() = runTest {
+        val future = CompletableFuture<Answer?>()
+        val java = object : JavaAuthority {
+            override fun ask(question: Question): CompletableFuture<Answer?> = future
+            override fun approve(request: DClassRequest): CompletableFuture<Decision> = CompletableFuture()
+            override fun resolve(proposal: AmendmentProposal): CompletableFuture<Resolution> = CompletableFuture()
+            override fun review(request: ReviewRequest): CompletableFuture<Verdict?> = CompletableFuture()
+        }
+        var returned = false
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            Authorities.fromJava(java).ask(Question("q", 1, ids, "wait"))
+            returned = true
+        }
+        job.cancel()
+        job.join()
+        assertFalse(returned)
+        assertFalse(future.isCancelled)
+    }
+
+    @Test
+    fun `a host that cancels its own future gives no answer and the caller keeps running`() = runTest {
+        val future = CompletableFuture<Answer?>()
+        val java = object : JavaAuthority {
+            override fun ask(question: Question): CompletableFuture<Answer?> = future
+            override fun approve(request: DClassRequest): CompletableFuture<Decision> = CompletableFuture()
+            override fun resolve(proposal: AmendmentProposal): CompletableFuture<Resolution> = CompletableFuture()
+            override fun review(request: ReviewRequest): CompletableFuture<Verdict?> = CompletableFuture()
+        }
+        var returned = false
+        var answer: Answer? = Answer("placeholder", 1, "unset")
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            answer = Authorities.fromJava(java).ask(Question("q", 1, ids, "wait"))
+            returned = true
+        }
+        future.cancel(false)
+        job.join()
+        assertTrue(returned)
+        assertNull(answer)
+        assertFalse(job.isCancelled)
+    }
 
     @Test
     fun `autonomous policy never accepts a weakening, denies non-allowlisted D-class effects and cannot answer`() = runTest {

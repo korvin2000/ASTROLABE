@@ -52,6 +52,16 @@ class RedactionTest {
     private val ids = Identities(WorkId("W-1"), AttemptId("a1"))
 
     @Test
+    fun `overlapping matches hide their entire union`() {
+        val result = redaction.apply("token=Bearer abcdefghijklmnopqrstuvwxyz")
+        assertFalse(result.text.contains("abcdefghijklmnopqrstuvwxyz"), result.text)
+        val chain = Redaction(RedactionConfig(patterns = listOf(
+            RedactionPattern("one", "abc"), RedactionPattern("two", "cde"), RedactionPattern("three", "efg"),
+        ))).apply("abcdefgh")
+        assertEquals("[REDACTED:one]h", chain.text)
+    }
+
+    @Test
     fun `every default pattern is caught and no raw secret survives in the output`() {
         // Each secret on a bare line: a `<label>:` prefix would itself match `secret-assignment` and hide
         // which pattern actually fired.

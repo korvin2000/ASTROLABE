@@ -25,6 +25,8 @@ public data class Intent(
      */
     val replaySafe: Boolean = false,
     @Serializable(with = InstantSerializer::class) val at: Instant,
+    /** Durable authority/evidence reference explaining the disposition of an unknown outcome. */
+    val reconciliation: String? = null,
 ) {
     init {
         require(intentId.isNotBlank() && actionId.isNotBlank()) { "intent needs ids" }
@@ -39,6 +41,10 @@ public interface IntentJournal {
     public fun record(intent: Intent)
 
     public fun update(intentId: String, status: IntentStatus)
+
+    /** Close an unknown outcome only after the host has established and recorded its disposition. */
+    public fun reconcile(intentId: String, evidence: String): Unit =
+        throw UnsupportedOperationException("this journal cannot persist reconciliation")
 
     /** Intents that never reached `committed`, in recording order. */
     public fun open(): List<Intent>
@@ -58,10 +64,16 @@ public class InMemoryIntentJournal : IntentJournal {
     @Synchronized
     override fun update(intentId: String, status: IntentStatus) {
         val current = rows[intentId] ?: throw IllegalArgumentException("unknown intent $intentId")
-        require(status.ordinal >= current.status.ordinal || status == IntentStatus.Unknown) {
+        require(intentTransition(current.status, status)) {
             "intent $intentId cannot move from ${current.status} to $status"
         }
         rows[intentId] = current.copy(status = status)
+    }
+
+    @Synchronized
+    override fun reconcile(intentId: String, evidence: String) {
+        val current = rows[intentId] ?: throw IllegalArgumentException("unknown intent $intentId")
+        rows[intentId] = reconciledIntent(current, evidence)
     }
 
     @Synchronized
@@ -69,6 +81,21 @@ public class InMemoryIntentJournal : IntentJournal {
 
     @Synchronized
     override fun get(intentId: String): Intent? = rows[intentId]
+}
+
+internal fun intentTransition(from: IntentStatus, to: IntentStatus): Boolean = to == from || when (from) {
+    IntentStatus.Recorded -> to in setOf(IntentStatus.Dispatched, IntentStatus.Unknown)
+    IntentStatus.Dispatched -> to in setOf(IntentStatus.Running, IntentStatus.Observed, IntentStatus.Committed, IntentStatus.Unknown)
+    IntentStatus.Running -> to in setOf(IntentStatus.Observed, IntentStatus.Committed, IntentStatus.Unknown)
+    IntentStatus.Observed -> to in setOf(IntentStatus.Committed, IntentStatus.Unknown)
+    IntentStatus.Committed, IntentStatus.Unknown -> false
+}
+
+internal fun reconciledIntent(current: Intent, evidence: String): Intent {
+    require(evidence.isNotBlank()) { "reconciliation needs an authority or evidence reference" }
+    if (current.status == IntentStatus.Committed && current.reconciliation == evidence) return current
+    require(current.status == IntentStatus.Unknown) { "only unknown intents can be reconciled" }
+    return current.copy(status = IntentStatus.Committed, reconciliation = evidence)
 }
 
 /** Outcome of a consequential action as observed by [Consequential.run]. */
@@ -101,17 +128,25 @@ public object Consequential {
         val observed = try {
             dispatch()
         } catch (t: Throwable) {
-            journal.update(intent.intentId, IntentStatus.Unknown)
+            markUnknown(journal, intent.intentId, t)
             return ActionOutcome.Unknown(intent.intentId, t)
         }
         journal.update(intent.intentId, IntentStatus.Observed)
         try {
             persist(observed)
         } catch (t: Throwable) {
-            journal.update(intent.intentId, IntentStatus.Unknown)
+            markUnknown(journal, intent.intentId, t)
             return ActionOutcome.Unknown(intent.intentId, t)
         }
         journal.update(intent.intentId, IntentStatus.Committed)
         return ActionOutcome.Completed(observed)
+    }
+
+    private fun markUnknown(journal: IntentJournal, intentId: String, failure: Throwable) {
+        if (failure is kotlinx.coroutines.CancellationException) {
+            runCatching { journal.update(intentId, IntentStatus.Unknown) }.exceptionOrNull()?.let(failure::addSuppressed)
+            throw failure
+        }
+        journal.update(intentId, IntentStatus.Unknown)
     }
 }

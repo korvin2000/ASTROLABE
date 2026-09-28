@@ -16,12 +16,78 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.test.assertFailsWith
+import io.astrolabe.evidence.Coherence
 
 /**
  * P1.2.1 / IX-05 / FX-51: raw-byte versions, metadata caches as hints only, coverage keyed by the
  * full namespace and change notifications that fire once per transition.
  */
 class VersionRegistryTest {
+    @Test
+    fun `a failed listener is retried before later transitions without repeating acknowledgements`() {
+        val before = FileVersion.of("before".toByteArray())
+        val after = FileVersion.of("after".toByteArray())
+        val last = FileVersion.of("last".toByteArray())
+        val received = mutableListOf<String>()
+        var fails = true
+        registry.addListener { received += "first:${it.to}" }
+        registry.addListener {
+            if (fails) { fails = false; error("injected notification failure") }
+            received += "second:${it.to}"
+        }
+        registry.addListener { received += "third:${it.to}" }
+        assertFailsWith<IllegalStateException> { registry.change("src/a.py", before, after, "first") }
+        assertNull(registry.recorded("src/a.py"), "unacknowledged transitions must remain pending")
+        registry.change("src/a.py", after, last, "second")
+        registry.change("src/a.py", after, last, "duplicate")
+        assertEquals(listOf("first:$after", "second:$after", "third:$after", "first:$last", "second:$last", "third:$last"), received)
+        assertEquals(last, registry.recorded("src/a.py"))
+    }
+
+    @Test
+    fun `a failed listener that unsubscribes is not replayed and no longer blocks changes`() {
+        val before = FileVersion.of("before".toByteArray())
+        val after = FileVersion.of("after".toByteArray())
+        val last = FileVersion.of("last".toByteArray())
+        var calls = 0
+        val handle = registry.addListener { calls++; error("always fails") }
+        assertFailsWith<IllegalStateException> { registry.change("src/a.py", before, after, "first") }
+        handle.close()
+        registry.change("src/a.py", after, last, "second")
+        assertEquals(1, calls)
+        assertEquals(last, registry.recorded("src/a.py"))
+        Coherence(registry).use { coherence ->
+            var horizonCalls = 0
+            val horizon = coherence.register { horizonCalls++; error("horizon always fails") }
+            assertFailsWith<IllegalStateException> { registry.change("src/b.py", before, after, "write") }
+            horizon.close()
+            registry.change("src/b.py", after, last, "next")
+            assertEquals(1, horizonCalls)
+            assertEquals(last, registry.recorded("src/b.py"))
+        }
+    }
+
+    @Test
+    fun `coherence retries only horizons that did not acknowledge a transition`() {
+        Coherence(registry).use { coherence ->
+            var first = 0
+            var last = 0
+            var fails = true
+            coherence.register { first++ }
+            coherence.register { if (fails) { fails = false; error("horizon failure") } }
+            coherence.register { last++ }
+            val before = FileVersion.of("before".toByteArray())
+            val after = FileVersion.of("after".toByteArray())
+            assertFailsWith<IllegalStateException> { registry.change("src/a.py", before, after, "write") }
+            registry.change("src/a.py", before, after, "retry")
+            assertEquals(1, first)
+            assertEquals(1, last)
+            assertEquals(setOf("src/a.py"), coherence.scheduled)
+            assertEquals(after, registry.recorded("src/a.py"))
+        }
+    }
+
 
     private val repo: TempRepo = TempRepo.create().also {
         it.write("src/a.py", "def a():\n    return 1\n")

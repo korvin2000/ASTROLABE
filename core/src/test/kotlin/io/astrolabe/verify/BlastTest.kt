@@ -51,6 +51,14 @@ class BlastTest {
     }
 
     @Test
+    fun `exact blast test paths are relative to the declared working directory`() {
+        val selected = assertIs<BlastSelection.Selected>(Blast.select(analysis(IndexTier.Syntax, true, router), pytest.copy(cwd = "pay"), testsFor, dirs))
+        assertEquals(pytest.argv + "tests/test_api.py", selected.check.command!!.argv)
+        assertEquals("pay", selected.check.command!!.cwd)
+        assertEquals(Closure.Known(sortedSetOf("pay/api.py", "pay/router.py", "pay/tests/test_api.py")), selected.check.inputClosure)
+    }
+
+    @Test
     fun `an incomplete graph widens to the package suite, several packages to the workspace, and a suite-only runner never gets paths`() {
         val widened = assertIs<BlastSelection.Selected>(Blast.select(analysis(IndexTier.Lexical, true, router), pytest, testsFor, dirs))
         assertEquals(Command(pytest.argv, "pay"), widened.check.command)

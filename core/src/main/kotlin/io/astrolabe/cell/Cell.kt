@@ -1,5 +1,7 @@
 package io.astrolabe.cell
 
+import io.astrolabe.telemetry.Accounting
+
 import io.astrolabe.Defaults
 import io.astrolabe.atlas.DefinitionChanges
 import io.astrolabe.atlas.SymbolIndex
@@ -31,6 +33,7 @@ import io.astrolabe.evidence.Outcome
 import io.astrolabe.id.CandidateId
 import io.astrolabe.id.Digest
 import io.astrolabe.id.FileVersion
+import io.astrolabe.id.Generation
 import io.astrolabe.id.IdGen
 import io.astrolabe.provider.BillingDimension
 import io.astrolabe.provider.InvocationId
@@ -50,6 +53,7 @@ import io.astrolabe.provider.UsageItem
 import io.astrolabe.provider.Validation
 import io.astrolabe.provider.estimate
 import io.astrolabe.register.ContractDigest
+import io.astrolabe.register.DigestCapacity
 import io.astrolabe.register.Mark
 import io.astrolabe.register.ObligationStatus
 import io.astrolabe.register.Register
@@ -171,6 +175,8 @@ public class Cell @JvmOverloads constructor(
 
         private var turn = 0
         private var residents: List<Resident> = emptyList()
+        private var sections = ctx.sections
+        private var rebuildGap: String? = null
         private var fired: Set<GateKey> = emptySet()
         private val impact = ImpactNudges()
         private val signatures = ArrayList<CallSignature>()
@@ -197,6 +203,7 @@ public class Cell @JvmOverloads constructor(
 
         /** §8.9 `red_ok_until: increment_end`: while true, a red check is not required in `Open` before `[>]` advances. */
         private var redOkUntilIncrementEnd = false
+        private val shownAliases = LinkedHashSet<String>()
         private val readVersions = LinkedHashMap<String, FileVersion>()
         private val displayed = LinkedHashMap<Pair<String, FileVersion>, Ranges>()
         private val origins = LinkedHashMap<String, ChangeOrigin>()
@@ -214,11 +221,17 @@ public class Cell @JvmOverloads constructor(
         private val register: Register get() = tools.state.register
 
         suspend fun run(): CellExit {
+            tools.edit?.beforeDispatch = ::enforceAuthority
+            (tools.run as? io.astrolabe.tool.run.Run)?.beforeDispatch = ::enforceAuthority
+            tools.verify?.beforeDispatch = ::enforceAuthority
+            tools.task?.beforeDispatch = ::enforceAuthority
+            ws.checker?.beforeDispatch = ::enforceAuthority
             events?.emit(AgentEvent.Cell.Started(ids, increment.id, ctx.role.name))
             // §4.4: the horizons hear every transition in this order — turn, cell, verification — then the Touched ledger.
             subscriptions += ws.coherence.register(ws.workset)
             subscriptions += ws.coherence.register(ChangeListener { tools.state.markStale(it) })
             subscriptions += ws.coherence.register(ws.checks)
+            ctx.noteHorizon?.let { subscriptions += ws.coherence.register(it) }
             subscriptions += ws.coherence.register(ChangeListener { touchedLedger += Touched.of(it) })
             tools.edit?.increment = increment
             tools.verify?.inputs = atlas.rows.map { it.path }
@@ -240,6 +253,11 @@ public class Cell @JvmOverloads constructor(
                 val checkpoint = settle(CellStatus.Failed, error)
                 return CellExit.Failed(budget.turnsTaken, register, checkpoint, persistPacket(packet(PacketStatus.Failed, error)), error)
             } finally {
+                tools.edit?.beforeDispatch = {}
+                (tools.run as? io.astrolabe.tool.run.Run)?.beforeDispatch = {}
+                tools.verify?.beforeDispatch = {}
+                tools.task?.beforeDispatch = {}
+                ws.checker?.beforeDispatch = {}
                 subscriptions.forEach { it.close() }
             }
         }
@@ -264,8 +282,10 @@ public class Cell @JvmOverloads constructor(
                 }
             }
 
+            rebuildGap?.let { return partial(PartialReason.Pressure, it) }
             // Render: [A] first (rebuilt every turn), then the cached regions, then admission.
             val contract = contract()
+            ws.checks.synchronizeAcceptance(contract)
             contractVersion = contract.version
             val refactor = RefactorMode.detect(contract)
             if (refactor.active && !redOkUntilIncrementEnd) {
@@ -279,10 +299,14 @@ public class Cell @JvmOverloads constructor(
                 is SchemaSelection.Supported -> selection.set
                 is SchemaSelection.Unsupported -> return failed("tool schemas unsupported for ${selection.profileId}: ${selection.reason}")
             }
-            val anchor = renderAnchor(contract)
-            val layout = Layout.render(ctx.role, mask, ctx.config.executionMode, ctx.prime, CompiledK(ContractSlice.forIncrement(contract, increment), ctx.preexisting, ctx.sections), transcript(contract))
+            val anchor = try {
+                renderAnchor(contract)
+            } catch (capacity: DigestCapacity) {
+                return partial(PartialReason.Pressure, "replan: ${capacity.message}")
+            }
+            val layout = Layout.render(ctx.role, mask, ctx.config.executionMode, ctx.prime, CompiledK(ContractSlice.forIncrement(contract, increment), ctx.preexisting, sections), transcript(contract))
             val request = Request(layout + anchor.segment(), schemas.schemas, ctx.model.profile, ctx.model.effort, ctx.model.maxOutputTokens, mask)
-            val estimate = request.estimate(estimator)
+            val estimate = estimator.estimate(request)
             when (val validation = ctx.model.adapter.validate(request, estimate)) {
                 Validation.Ok -> Unit
                 is Validation.Rejected -> {
@@ -317,20 +341,58 @@ public class Cell @JvmOverloads constructor(
             // Complete.
             val invocationId = InvocationId(idGen.next("inv"))
             events?.emit(AgentEvent.Cell.ModelRequested(ids, invocationId.value, estimate.tokens, ctx.model.profile.id, anchorTokens = anchor.tokens))
-            val response = try {
-                ctx.model.adapter.start(request, invocationId).await()
-            } catch (error: ProviderError) {
+            val accounting = ctx.accounting
+            if (accounting != null && !accounting.reserve(ids, invocationId.value, ctx.model.profile, admission.estimate.value,
+                    Accounting.estimateCost(ctx.model.profile, estimate.upperBoundTokens, ctx.model.maxOutputTokens.toLong()),
+                    if (spend == Spend.Generation) (contract.budget.tokens.value * (1.0 - contract.budget.reserves.verification - contract.budget.reserves.recoveryAndPersist)).toLong() else contract.budget.tokens.value,
+                    contract.budget.cost)) {
                 admission.release()
-                cost += null
-                ctx.accounting?.record(ids, invocationId.value, ctx.model.profile, request, null)
-                return failed("provider ${error::class.simpleName}: ${error.message}")
+                return partial(PartialReason.TokenBudget, "campaign funding exhausted before provider dispatch")
             }
-            val usage = response.usage
+            var invocation: io.astrolabe.provider.Invocation? = null
+            var received: Response? = null
+            var failure: Throwable? = null
+            var terminal: io.astrolabe.provider.Terminal? = null
+            try {
+                invocation = ctx.model.adapter.start(request, invocationId)
+                received = invocation.await()
+            } catch (error: Throwable) {
+                failure = error
+                invocation?.cancel()
+            } finally {
+                terminal = kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                    try { invocation?.terminal() }
+                    catch (_: Exception) { null }
+                }
+                val settled = terminal
+                val usage = settled?.usage ?: received?.usage
+                val knownInput = usage?.quantities?.filterKeys { it.isInput }?.values?.fold(0L, Accounting::add) ?: 0L
+                val inputKnown = usage != null && usage.quantities.keys.any { it.isInput } && usage.unknown.none { it.isInput }
+                val inputCharge = if (inputKnown) knownInput else maxOf(knownInput, estimate.upperBoundTokens)
+                val outputCharge = usage?.quantities?.get(BillingDimension.OUTPUT) ?: ctx.model.maxOutputTokens.toLong()
+                val charge = Accounting.add(inputCharge, outputCharge)
+                val complete = usage?.isComplete == true && inputKnown && BillingDimension.OUTPUT in usage.quantities
+                val funded = if (complete) charge else maxOf(charge, admission.estimate.value)
+                admission.reconcile(Tokens(funded))
+                cost += usage
+                accounting?.record(ids, invocationId.value, ctx.model.profile, request, usage, funded)
+                if (settled != null && (settled.lateItems.isNotEmpty() || failure != null)) {
+                    val late = settled.lateItems + if (failure != null) settled.response?.items.orEmpty() else emptyList()
+                    ev.journal.append(JournalEvent(idGen.next("ev"), ids, turn, JournalKind.Call,
+                        text = "late terminal evidence archived without dispatch: " + late.joinToString { it.toString() },
+                        payload = JSON.encodeToJsonElement(ITEMS, late), at = clock.instant()))
+                }
+            }
+            failure?.let { error ->
+                if (error is ProviderError) return failed("provider ${error::class.simpleName}: ${error.message}")
+                throw error
+            }
+            val response = checkNotNull(received)
+            val usage = terminal?.usage ?: response.usage
+            if (terminal?.cancelled == true) return cancelled("provider terminal reconciliation confirmed cancellation")
             contextAdmission.observed(estimate, usage?.takeIf { it.isComplete }?.totalInput)
-            cost += usage
-            ctx.accounting?.record(ids, invocationId.value, ctx.model.profile, request, usage)
-            admission.reconcile(Tokens(usage?.let { it.totalInput + (it.quantities[BillingDimension.OUTPUT] ?: 0L) } ?: admission.estimate.value))
             events?.emit(AgentEvent.Cell.ModelResponded(ids, invocationId.value, response.stop, usage))
+            if (response.toolCalls.isNotEmpty()) authority.check(turn)?.let { return if (it.cancelled) cancelled(it.reason) else failed(it.reason) }
 
             // §3.7: the native output is durable before any result exists, then appended (calls before results).
             journalOutput(response)
@@ -344,7 +406,7 @@ public class Cell @JvmOverloads constructor(
             val registerBefore = register
             val certifiedBefore = certified(currencies(before.candidateId))
             val native = response.toolCalls
-            val validated = if (native.isEmpty()) null else validateCalls(native, reserveTurn)
+            val validated = if (native.isEmpty()) null else validateCalls(native, reserveTurn, mask)
             val calls = (validated as? Validated.Calls)?.calls.orEmpty()
 
             // Partition and dispatch — or refuse the whole turn.
@@ -396,7 +458,10 @@ public class Cell @JvmOverloads constructor(
                         inspected.clear()
                         preimagesOf(alias).forEach { p -> batchBefore.getOrPut(p.path) { ev.preimages!!.bytesOf(p) } }
                     }
-                    if (call.family == ToolFamily.Look && outcome.header?.runtime?.status == "ok") {
+                    // D-92: a refs view clears obligations only when every reference found was displayed unredacted.
+                    if (call.family == ToolFamily.Look && outcome.header?.runtime?.status == "ok" &&
+                        outcome.header.runtime.captureComplete && !outcome.header.truncated &&
+                        !outcome.header.runtime.displayTruncated && !outcome.header.runtime.redactionApplied) {
                         (call.args as? Args.Look)?.args?.takeIf { it.what == "refs" }?.target?.let { impact.inspected(it); inspected += it }
                     }
                 }
@@ -410,7 +475,10 @@ public class Cell @JvmOverloads constructor(
 
             // End-of-turn checker on the paths the horizons scheduled; the atlas follows the same set.
             val proposal = native.isEmpty() && (response.stop == StopReason.EndTurn || response.stop == StopReason.ToolUse)
-            val turnEnd = drainScheduled(contract) ?: after
+            val dispatchRefusal = authority.check(turn)
+            if (dispatchRefusal != null && !proposal) return if (dispatchRefusal.cancelled) cancelled(dispatchRefusal.reason) else failed(dispatchRefusal.reason)
+            // Late completion may be archived from existing evidence; revoked authority never launches another check.
+            val turnEnd = (if (dispatchRefusal == null) drainScheduled(contract) else null) ?: after
             if (batchBefore.isNotEmpty()) {
                 val index = SymbolIndex(atlas)
                 val changes = batchBefore.flatMap { (path, bytes) -> DefinitionChanges.of(path, bytes, ws.registry.read(path)?.bytes) }
@@ -420,13 +488,14 @@ public class Cell @JvmOverloads constructor(
             inspected.forEach(impact::inspected)
             impact.rescoped(registerBefore, register)
             // §6.6: the controller may pre-build the next [K] while verify-on-stop runs, if only slow checks remain.
-            if (proposal) ctx.precompile?.completionProposed(turnEnd.candidateId, remainingAcceptance(turnEnd.candidateId))
+            if (proposal && dispatchRefusal == null) ctx.precompile?.completionProposed(turnEnd.candidateId, remainingAcceptance(turnEnd.candidateId))
             // §8.1 layer table: a `[>]` move runs blast ∪ the left step's accept:, a completion proposal verify-on-stop;
             // each runs only missing or stale checks, reused receipts stand.
-            val stepRun = stepLeft(registerBefore, register)?.let { step -> tools.verify?.runLayer(Layer.BlastAndStepAccept, listOfNotNull(step.accept)) }
+            val stepRun = if (dispatchRefusal == null) stepLeft(registerBefore, register)?.let { step -> tools.verify?.runLayer(Layer.BlastAndStepAccept, listOfNotNull(step.accept)) } else null
             // §7.4: an edit batch whose impact risk exceeds θ runs the blast layer now (P4.5.2, D-152).
-            val riskRun = if (stepRun == null && batchBefore.isNotEmpty()) tools.verify?.riskAboveTheta(EditHunks.of(batchBefore) { ws.registry.read(it)?.bytes }) else null
-            val layerRuns = listOfNotNull(stepRun, riskRun, if (proposal) tools.verify?.onStop(increment.accept) else null)
+            val riskRun = if (dispatchRefusal == null && stepRun == null && batchBefore.isNotEmpty()) tools.verify?.riskAboveTheta(EditHunks.of(batchBefore) { ws.registry.read(it)?.bytes }) else null
+            val implementingCompletion = ctx.role.packetKind == PacketKind.Result
+            val layerRuns = listOfNotNull(stepRun, riskRun, if (proposal && implementingCompletion && dispatchRefusal == null) tools.verify?.onStop(increment.accept) else null)
             for (layerRun in layerRuns) {
                 notTested += layerRun.notTested
                 val what = if (layerRun.layer == Layer.IncrementAcceptance) "verify-on-stop" else if (layerRun === riskRun) "risk > θ" else "step boundary"
@@ -443,11 +512,19 @@ public class Cell @JvmOverloads constructor(
             occupancy = current
 
             // Gates on records.
+            if (calls.any { it.family == ToolFamily.State && it.op == "patch" &&
+                    (result?.of(it.opId) as? Disposition.Executed)?.outcome?.applied == true
+                }) signatures.clear()
             val currenciesNow = currencies(stampNow.candidateId)
             uncertified = outstanding(currenciesNow)
             val certifiedAfter = certified(currenciesNow)
             if (Progress.events(registerBefore, register, turn, certifiedBefore, certifiedAfter).isNotEmpty()) lastProgressTurn = turn
-            val unresolved = TestIntegrity.unresolved(flags.values.toList())
+            val completionEvidence = if (proposal && implementingCompletion && dispatchRefusal == null)
+                ctx.completionEvidence?.invoke(flags.values.toList()) else null
+            completionEvidence?.flags?.forEach { flag -> flags[flag.path] = flag }
+            val evidenceStamp = ws.stamper.report().candidateId
+            val validEvidence = completionEvidence?.takeIf { evidenceStamp == stampNow.candidateId && contract().version == contract.version }
+            if (validEvidence == null) flags.replaceAll { _, flag -> flag.copy(verdict = null) }
             val repeated = repeatedFailures(currenciesNow, repaired = calls.any { it.family == ToolFamily.Edit })
             val editedByEdit = editedPaths.filter { origins[it] == ChangeOrigin.Edit }
             val state = GateState(
@@ -456,7 +533,7 @@ public class Cell @JvmOverloads constructor(
                 lastProgressTurn = lastProgressTurn, liveRunOutput = liveRunOutput,
                 contextTokens = current.totalTokens, contextMaxTokens = capabilities.contextLimitTokens.toLong(), rebuilds = rebuilds,
                 reserve = budget.verdict(outstanding(currenciesNow)), turnsMax = budget.turns, completionProposed = proposal,
-                currencies = currenciesNow, flags = unresolved, fired = fired, defaults = defaults,
+                currencies = currenciesNow, assessments = validEvidence?.assessments.orEmpty(), reviews = validEvidence?.reviews.orEmpty(), flags = flags.values.filter { it.kind != TestIntegrity.ADDITIONS_ONLY }, fired = fired, defaults = defaults,
                 impactNudges = impact.unresolved, unresolvedImpactNudges = impact.unresolvedPublic.map { it.missing },
                 outsideIncrement = editedByEdit.filter { p -> contract.scope.covers(p) && increment.writeScope.none { PathPattern.matches(it, p) } },
                 surfaceFlags = flags.values.filter { it.path in editedPaths }, editedPaths = editedPaths.toSet(),
@@ -475,8 +552,8 @@ public class Cell @JvmOverloads constructor(
             // Terminal requests, the completion path, pressure.
             (tools.state.pendingBlock ?: tools.task?.pendingBlock)?.let { return blocked(it) }
             if (proposal) {
-                unavailable(currenciesNow)?.let { return blocked(it) }
-                val output = RoleOutput(turn, response.text, register, certifiedAfter.mapNotNull { currenciesNow.certifiedReceipt(it) }, refusals, packet(PacketStatus.Done, null))
+                if (implementingCompletion) unavailable(currenciesNow)?.let { return blocked(it) }
+                val output = RoleOutput(turn, response.text, register, certifiedAfter.mapNotNull { currenciesNow.certifiedReceipt(it) }, refusals, packet(PacketStatus.Done, null), shownAliases.toSet())
                 when (val decision = completion.assess(output, report)) {
                     is CompletionDecision.Accepted -> return completed(response.text, decision.evidenceRefs)
                     is CompletionDecision.CannotProgress -> {
@@ -485,6 +562,12 @@ public class Cell @JvmOverloads constructor(
                     }
                     is CompletionDecision.Continue -> {
                         recordGaps(decision.gaps)
+                        val gapLines = decision.gaps.take(MAX_NUDGES).map {
+                            "packet validation: ${Boundary.escape(it.replace('\r', ' ').replace('\n', ' ')).take(240)}"
+                        }
+                        // §5.1 order: this turn's hard rejections stay first; the gaps precede the softer nudges.
+                        val rejected = nudges.take(report.rejections.size)
+                        nudges = (rejected + gapLines + nudges.drop(rejected.size)).take(MAX_NUDGES)
                         refusals += 1
                     }
                 }
@@ -545,17 +628,20 @@ public class Cell @JvmOverloads constructor(
          * §3.7 `validate_complete_calls_and_dependencies`: one unparseable call, one forward dependency, a missing
          * required `state` op after the loop gate or an edit on a reserve turn refuses every call of the turn.
          */
-        private fun validateCalls(native: List<NativeCall>, reserveTurn: Boolean): Validated {
+        private fun validateCalls(native: List<NativeCall>, reserveTurn: Boolean, mask: ToolMask): Validated {
             val calls = when (val parsed = ToolCalls.parse(native)) {
                 is ParsedCalls.Invalid -> return Validated.Refused("schema error in call ${parsed.providerCallId}: ${parsed.error}; no call of this turn executed")
                 is ParsedCalls.Valid -> parsed.calls
             }
             (Partition.of(calls) as? Partition.Rejected)?.let { return Validated.Refused("${it.reason}; no call of this turn executed") }
+            if (reserveTurn && calls.any { it.family == ToolFamily.Edit }) return Validated.Refused("${CellBudget.GATE}; the edit refused the whole turn")
+            calls.firstOrNull { call -> call.operationNames.any { !mask.allows(it) } }?.let {
+                return Validated.Refused("${it.name} is masked in this turn; no call of this turn executed")
+            }
             requiredOp?.let { op ->
                 if (calls.none { it.family.wire == op }) return Validated.Refused("the loop gate ended the last turn: a $op op is required before anything else runs; no call of this turn executed")
                 requiredOp = null
             }
-            if (reserveTurn && calls.any { it.family == ToolFamily.Edit }) return Validated.Refused("${CellBudget.GATE}; the edit refused the whole turn")
             return Validated.Calls(calls)
         }
 
@@ -578,6 +664,7 @@ public class Cell @JvmOverloads constructor(
             val pointer = alias?.let(Aliases::parse)?.let { ev.aliases.resolve(ids.work, it) }?.let { resolved ->
                 ev.observations.get(resolved.canonicalId)?.let { RecallPointer(alias, it.id, it.contentRef) }
             }
+            alias?.let(Aliases::parse)?.let { ev.aliases.resolve(ids.work, it) }?.let { shownAliases += alias }
             val item = ToolResult.text(callId, text, isError)
             residents = residents + Resident.result(item, turn, estimator.estimate(text).tokens, resultClass, pointer, label)
         }
@@ -649,6 +736,7 @@ public class Cell @JvmOverloads constructor(
                     ev.journal.append(JournalEvent(idGen.next("ev"), ids, turn, JournalKind.Reconcile, refs = unannounced, text = "$cause: ${unannounced.size} paths moved unannounced · reconciled @${after.candidateId.hash8}", at = clock.instant()))
                 }
             }
+            ctx.noteHorizon?.reconcile(ws.registry::version, mapOf("contract" to "v${ctx.contracts.current(ids.work)?.version}"))
             lastReport = after
             reconciledTurn = turn
             ws.scheduler.refresh(after.candidateId, after.env)
@@ -674,7 +762,7 @@ public class Cell @JvmOverloads constructor(
         }
 
         /** Drains the scheduled paths into the end-of-turn checker and the atlas; returns the stamp after the checks, or `null` when nothing ran. */
-        private fun drainScheduled(contract: Contract): StampReport? {
+        private suspend fun drainScheduled(contract: Contract): StampReport? {
             val scheduled = ws.coherence.takeScheduled()
             if (scheduled.isEmpty()) return null
             touched += scheduled
@@ -684,7 +772,7 @@ public class Cell @JvmOverloads constructor(
             tools.verify?.inputs = atlas.rows.map { it.path }
             tools.verify?.atlas = atlas
             val checker = ws.checker ?: return null
-            val results = checker.run(scheduled, defaults.checkerTimeBoxSeconds.toLong())
+            val results = kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { checker.run(scheduled, defaults.checkerTimeBoxSeconds.toLong()) }
             if (results.isEmpty()) return null
             for (result in results) {
                 val receipt = ws.scheduler.record(result, contract.version)
@@ -741,18 +829,44 @@ public class Cell @JvmOverloads constructor(
          * and a pinned `rebuilt:` note names the generation. Nothing is summarised by a model.
          */
         private fun rebuild(why: String) {
-            rebuilds += 1
-            val kept = Rebuild.tail(residency.items(residents), RebuildReason.Pressure.tailTurns).toSet()
-            residents = residents.filter { it.item in kept }
+            val contract = contract()
             val carry = CarryForward.carry(
-                register, ws.workset.export(), null, { ws.registry.version(it) },
-                { id -> Aliases.parse(id)?.let { ev.aliases.resolve(ids.work, it) } != null }, emptyList(), emptyList(),
+                register, ws.workset.export(), null, ws.registry::version,
+                { id -> Aliases.parse(id)?.let { ev.aliases.resolve(ids.work, it) } != null }, emptyList(), pinned(contract),
             )
-            ws.workset.rebuild(carry.seeds)
-            tools.state.validated(carry.register)
-            val note = "rebuilt: pressure (generation $rebuilds) — $why · ${carry.known}"
+            val seeds = io.astrolabe.context.Seeds.render(carry.seeds, ws.registry::read)
+            val carried = carry.copy(seeds = seeds.shown, notSeen = carry.notSeen + seeds.notSeen)
+            val nextSections = sections.filterNot { it.id.startsWith("seed-") || it.id == "carry-forward" } +
+                KSection("carry-forward", "Carry-forward", carried.render()) +
+                seeds.blocks.mapIndexed { index, text -> KSection("seed-$index", "Seed", text) }
+            val current = io.astrolabe.context.Projection(rebuilds, ctx.role, ctx.model.profile, ctx.prime,
+                CompiledK(ContractSlice.forIncrement(contract, increment), ctx.preexisting, sections), transcript(contract), "")
+            val (next, record) = io.astrolabe.context.Rebuild.run(
+                RebuildReason.Pressure, current, carried, "", ctx.prime,
+                { _, _ -> current.k.copy(sections = nextSections) },
+                object : io.astrolabe.context.RebuildHooks {
+                    override fun checkpoint(old: io.astrolabe.context.Projection, reason: RebuildReason) {
+                        persist(checkpoint(CellStatus.Running, ws.stamper.report().candidateId, null))
+                    }
+                    override fun status(reason: RebuildReason) {}
+                    override fun rehydrate(lost: List<String>) {
+                        contract()
+                        rebuildGap = "replan: pressure rebuild lost required evidence: ${lost.joinToString()}"
+                    }
+                },
+                { projection -> io.astrolabe.context.Compiler(estimator, ctx.config).coverage(contract, increment,
+                    Layout.compiled(projection.k), projection.repository, projection.transcript.pinned, io.astrolabe.context.CompileInputs()) },
+            )
+            if (record.lost.isNotEmpty()) return
+            rebuilds = next.generation
+            sections = next.k.sections
+            residents = residency.tail(residents, RebuildReason.Pressure.tailTurns)
+            ws.workset.rebuild(seeds.shown)
+            tools.state.validated(carried.register)
+            val note = "rebuilt: pressure (generation $rebuilds) - $why - ${carried.known}"
             rebuildNotes += note
             ev.journal.append(JournalEvent(idGen.next("ev"), ids, turn, JournalKind.Boundary, text = note, at = clock.instant()))
+            events?.emit(AgentEvent.Cell.Rebuilt(ids, why, Generation(rebuilds)))
         }
 
         private fun persist(checkpoint: CellCheckpoint) {
@@ -994,7 +1108,12 @@ public class Cell @JvmOverloads constructor(
         }
 
         private fun recording(executor: ToolExecutor): ToolExecutor = ToolExecutor { call, context ->
+            enforceAuthority()
             executor.execute(call, context).also { outcome -> record.record(call, outcome) }
+        }
+
+        private fun enforceAuthority() {
+            authority.check(turn)?.let { error("dispatch refused: ${it.reason}") }
         }
 
         /** What the validator may consult this turn (P1.5.2): store ids, current check status and the turn's own ops. */
@@ -1021,6 +1140,8 @@ public class Cell @JvmOverloads constructor(
                 Aliases.parse(id)?.let { return ev.aliases.resolve(ids.work, it) != null }
                 return ev.observations.get(id) != null || ev.receipts.get(id) != null || ev.journal.get(id) != null
             }
+
+            override fun currentVersion(path: String): io.astrolabe.id.FileVersion? = ws.registry.version(path)
 
             override fun acceptGreen(accept: String): Boolean {
                 val currencies = currencies(ws.stamper.stamp().id)

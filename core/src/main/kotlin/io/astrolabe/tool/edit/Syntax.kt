@@ -55,18 +55,11 @@ public class CliSyntax(
         return try {
             Files.createDirectories(logsDir)
             val log = logsDir.resolve("syntax-${++counter}.log")
-            var proc = os.spawn(SpawnSpec(Command.Argv(argv), workingDirectory, log, deadlineSeconds = timeBoxSeconds))
-            val output = StringBuilder()
-            var cursor = 0L
-            while (!proc.status.isTerminal) {
-                val poll = os.poll(proc, cursor, timeBoxSeconds)
-                output.append(poll.text())
-                cursor = poll.nextCursorBytes
-                proc = proc.copy(status = poll.status)
-            }
-            val tail = os.poll(proc, cursor, 0)
-            output.append(tail.text())
-            when (val status = proc.status) {
+            val proc = os.spawn(SpawnSpec(Command.Argv(argv), workingDirectory, log, deadlineSeconds = timeBoxSeconds))
+            val observed = io.astrolabe.tool.run.Executions.observe(os, proc, timeBoxSeconds, timeBoxSeconds)
+            if (observed.lost) return SyntaxResult.NotRun("syntax checker observation lost")
+            val output = observed.output.toString(Charsets.UTF_8)
+            when (val status = observed.proc.status) {
                 is ProcStatus.Exited -> if (status.exitCode == 0) SyntaxResult.Ok else SyntaxResult.Error(lineOf(output), firstMeaningfulLine(output.toString()))
                 ProcStatus.DeadlineExceeded -> SyntaxResult.NotRun("syntax check exceeded the ${timeBoxSeconds}s time box")
                 else -> SyntaxResult.NotRun("syntax checker ended ${status::class.simpleName?.lowercase()}")

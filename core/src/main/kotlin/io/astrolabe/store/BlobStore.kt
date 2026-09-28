@@ -2,13 +2,16 @@ package io.astrolabe.store
 
 import io.astrolabe.id.AttemptId
 import io.astrolabe.id.Digest
+import io.astrolabe.id.Hashing
 import io.astrolabe.id.Identities
 import io.astrolabe.id.WorkId
 import kotlinx.serialization.json.JsonObject
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
+import java.nio.file.DirectoryStream
 import java.nio.file.Files
+import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
@@ -16,7 +19,7 @@ import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.ThreadLocalRandom
-import kotlin.streams.asSequence
+import java.security.MessageDigest
 
 /** What a blob holds (§4.3). Closed vocabulary, so a `gc` policy can reason about a class of bytes. */
 public enum class BlobKind {
@@ -155,68 +158,120 @@ public class BlobStore internal constructor(
     public fun path(digest: Digest, recovery: Boolean = false): Path =
         directory(recovery).resolve(digest.hex)
 
+    private val scans = listOf(layout.blobsTemp, layout.blobs, layout.blobsRecovery).map(::FileScan)
+    private var rowCursor = ""
+
     /**
-     * Collects what nothing references, adopts what does. In order: abandoned `blobs/tmp` files are
-     * discarded, published files missing their row are adopted when [referenced] names them, every
-     * referenced digest is then checked (a missing one throws [MissingBlob] *before* anything is
-     * deleted, so an integrity failure never compounds), and finally unreferenced blobs older than
-     * [grace] are removed.
-     *
-     * The pass is bounded by [MAX_ORPHANS_PER_PASS] files so a store with a large orphan backlog
-     * still makes progress in bounded time; [BlobGc.bounded] says whether more work remains.
+     * Repairs/checks every referenced digest before deleting anything. This mandatory integrity
+     * work is proportional to [referenced]; orphan adoption hashes bytes with bounded memory.
+     * Cleanup examines at most [MAX_ORPHANS_PER_PASS] directory entries and rows in total, with
+     * separate continuing cursors so young files and referenced rows cannot starve other work.
+     * Cursors last for this store's lifetime; reopening starts a new sweep.
      */
+    @Synchronized
     public fun gc(referenced: Set<Digest>, grace: Duration = DEFAULT_GRACE): BlobGc {
-        val now = clock.instant()
-        val cutoff = now.minus(grace)
-        var budget = MAX_ORPHANS_PER_PASS
-        var bounded = false
-
-        var discardedTemp = 0
-        for (temp in listFiles(layout.blobsTemp)) {
-            if (budget-- <= 0) { bounded = true; break }
-            if (agedOut(temp, cutoff)) {
-                Files.deleteIfExists(temp)
-                discardedTemp++
-            }
-        }
-
-        val known = db.query("SELECT digest FROM blobs") { it.string("digest") }.toHashSet()
+        val cutoff = clock.instant().minus(grace)
         var adopted = 0
-        orphans@ for (recovery in listOf(false, true)) {
-            for (file in listFiles(directory(recovery))) {
-                val name = file.fileName.toString()
-                val digest = runCatching { Digest(name) }.getOrNull() ?: continue
-                if (name in known) continue
-                if (budget-- <= 0) { bounded = true; break@orphans }
-                if (digest in referenced && Digest.of(Files.readAllBytes(file)) == digest) {
-                    // The kind is not recoverable from the filesystem; the row records the recovery
-                    // provenance instead of guessing.
-                    insertRow(digest, Files.size(file), BlobKind.OUTPUT, ADOPTED_IDS, recovery)
-                    adopted++
-                } else if (agedOut(file, cutoff)) {
-                    Files.deleteIfExists(file)
+        for (digest in referenced) {
+            if (recoveryOf(digest) == null) {
+                for (recovery in listOf(false, true)) {
+                    val file = path(digest, recovery)
+                    if (Files.isRegularFile(file, NOFOLLOW_LINKS) && fileDigest(file) == digest) {
+                        insertRow(digest, Files.size(file), BlobKind.OUTPUT, ADOPTED_IDS, recovery)
+                        adopted++
+                        break
+                    }
                 }
             }
-        }
-
-        // §4.3: check integrity before collecting, so a missing artifact is reported rather than
-        // masked by the deletions of the same pass.
-        for (digest in referenced.sortedBy { it.hex }) {
             if (!exists(digest)) throw MissingBlob(digest, "referenced blob ${digest.hex} is missing from ${layout.blobs}")
         }
 
-        val collectable = db.query(
-            "SELECT digest, recovery FROM blobs WHERE created_at <= ? ORDER BY digest",
-            cutoff.toString(),
-        ) { it.string("digest") to it.bool("recovery") }
-        var collected = 0
-        for ((hex, recovery) in collectable) {
-            if (Digest(hex) in referenced) continue
-            Files.deleteIfExists(directory(recovery).resolve(hex))
-            db.tx { it.execute("DELETE FROM blobs WHERE digest = ?", hex) }
-            collected++
+        val share = MAX_ORPHANS_PER_PASS / 4
+        var discardedTemp = 0
+        var bounded = false
+        for ((index, scan) in scans.withIndex()) {
+            val more = scan.visit(share) { file ->
+                if (Files.isRegularFile(file, NOFOLLOW_LINKS)) {
+                    if (index == 0) {
+                        if (agedOut(file, cutoff) && Files.deleteIfExists(file)) discardedTemp++
+                    } else {
+                        val digest = runCatching { Digest(file.fileName.toString()) }.getOrNull()
+                        if (digest != null && digest !in referenced && recoveryOf(digest) == null && agedOut(file, cutoff)) {
+                            Files.deleteIfExists(file)
+                        }
+                    }
+                }
+            }
+            bounded = bounded || more
         }
-        return BlobGc(collected = collected, adopted = adopted, discardedTemp = discardedTemp, bounded = bounded)
+
+        // Keyset pagination uses the primary key; even protected/young rows count toward the cap.
+        val rows = db.query(
+            "SELECT digest, recovery, created_at FROM blobs WHERE digest > ? ORDER BY digest LIMIT ?",
+            rowCursor, share,
+        ) { Triple(it.string("digest"), it.bool("recovery"), it.instant("created_at")) }
+        var collected = 0
+        for ((hex, recovery, createdAt) in rows) {
+            if (Digest(hex) !in referenced && !createdAt.isAfter(cutoff)) {
+                Files.deleteIfExists(directory(recovery).resolve(hex))
+                db.tx { it.execute("DELETE FROM blobs WHERE digest = ?", hex) }
+                collected++
+            }
+            rowCursor = hex
+        }
+        if (rows.size < share) rowCursor = "" else bounded = true
+        return BlobGc(collected, adopted, discardedTemp, bounded)
+    }
+
+    @Synchronized
+    internal fun closeScans() {
+        try { scans.forEach { it.close() } } finally { rowCursor = "" }
+    }
+
+    private fun fileDigest(file: Path): Digest {
+        val hash = MessageDigest.getInstance("SHA-256")
+        Files.newInputStream(file).use { input ->
+            val buffer = ByteArray(8192)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                hash.update(buffer, 0, count)
+            }
+        }
+        return Digest(Hashing.hex(hash.digest()))
+    }
+
+    /** A live directory iterator avoids re-enumeration/sorting on each bounded pass. */
+    private class FileScan(private val directory: Path) {
+        private var stream: DirectoryStream<Path>? = null
+        private var iterator: Iterator<Path>? = null
+
+        fun visit(limit: Int, action: (Path) -> Unit): Boolean {
+            try {
+                val entries = iterator ?: Files.newDirectoryStream(directory).let {
+                    stream = it
+                    it.iterator().also { opened -> iterator = opened }
+                }
+                var visited = 0
+                while (visited < limit && entries.hasNext()) {
+                    action(entries.next())
+                    visited++
+                }
+                if (entries.hasNext()) return true
+                close()
+                return false
+            } catch (failure: Throwable) {
+                try { close() } catch (cleanup: Throwable) { failure.addSuppressed(cleanup) }
+                throw failure
+            }
+        }
+
+        fun close() {
+            val opened = stream
+            stream = null
+            iterator = null
+            opened?.close()
+        }
     }
 
     /**
@@ -230,7 +285,8 @@ public class BlobStore internal constructor(
         val token = java.lang.Long.toUnsignedString(ThreadLocalRandom.current().nextLong(), Character.MAX_RADIX)
         val temp = layout.blobsTemp.resolve("put-$token")
         FileChannel.open(temp, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE).use { channel ->
-            channel.write(ByteBuffer.wrap(bytes))
+            val buffer = ByteBuffer.wrap(bytes)
+            while (buffer.hasRemaining()) channel.write(buffer)
             faults.at(BlobPoint.BEFORE_FSYNC)
             channel.force(true)
         }
@@ -287,18 +343,14 @@ public class BlobStore internal constructor(
         return !modified.isAfter(cutoff)
     }
 
-    private fun listFiles(directory: Path): List<Path> {
-        if (!Files.isDirectory(directory)) return emptyList()
-        return Files.list(directory).use { stream ->
-            stream.asSequence().filter { Files.isRegularFile(it) }.sortedBy { it.fileName.toString() }.toList()
-        }
+    private fun modifiedAt(file: Path): Instant? = try {
+        Files.getLastModifiedTime(file, NOFOLLOW_LINKS).toInstant()
+    } catch (_: java.nio.file.NoSuchFileException) {
+        null
     }
 
-    private fun modifiedAt(file: Path): Instant? =
-        runCatching { Files.getLastModifiedTime(file).toInstant() }.getOrNull()
-
     public companion object {
-        /** Orphans examined per [gc] pass; the bound keeps a large backlog from stalling a campaign. */
+        /** Cleanup directory entries and rows examined per [gc] pass; the bound keeps a large backlog from stalling a campaign. */
         public const val MAX_ORPHANS_PER_PASS: Int = 4_096
 
         /** How long an unreferenced blob survives, so an in-flight writer is never collected under it. */

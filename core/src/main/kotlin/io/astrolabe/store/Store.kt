@@ -7,6 +7,7 @@ import io.astrolabe.os.Git
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import java.nio.file.Path
+import java.nio.file.NoSuchFileException
 import java.time.Clock
 import java.time.Instant
 
@@ -67,7 +68,11 @@ public class Store internal constructor(
     /** Releases the database and then ownership, in that order. */
     override fun close() {
         try {
-            db.close()
+            try {
+                blobs.closeScans()
+            } finally {
+                db.close()
+            }
         } finally {
             lock.close()
         }
@@ -86,7 +91,14 @@ public class Store internal constructor(
             faults: FaultPoints = FaultPoints.NONE,
         ): Store {
             val identity = RepoIdentity.of(git)
-            val layout = Layout.resolve(stateRoot, identity).create()
+            val base = (stateRoot ?: Layout.userStateDirectory()).toAbsolutePath().normalize()
+            val layout = Layout.resolve(base, identity)
+            val worktrees = git.worktreeRoots().map(::canonicalFuturePath)
+            for (path in listOf(base, layout.root)) {
+                val real = canonicalFuturePath(path)
+                require(worktrees.none(real::startsWith)) { "durable state must be outside every workspace: $path" }
+            }
+            layout.create()
             val lock = ProjectLock.acquire(layout, clock)
             try {
                 val db = Db.open(layout)
@@ -111,5 +123,13 @@ public class Store internal constructor(
             clock: Clock,
             faults: FaultPoints = FaultPoints.NONE,
         ): Store = open(config.stateRoot?.let(Path::of), git, clock, faults)
+
+        /** Resolve existing ancestors before creating anything, including directory junctions. */
+        private fun canonicalFuturePath(path: Path): Path = try {
+            path.toRealPath()
+        } catch (missing: NoSuchFileException) {
+            val parent = path.parent ?: throw missing
+            canonicalFuturePath(parent).resolve(path.fileName)
+        }
     }
 }

@@ -8,6 +8,7 @@ import io.astrolabe.id.ContextId
 import io.astrolabe.id.Identities
 import io.astrolabe.id.WorkId
 import io.astrolabe.store.Store
+import io.astrolabe.store.StoreError
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.FileAlreadyExistsException
 import java.nio.file.Files
@@ -17,6 +18,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** P2.6.1: the note model, the one serialized writer, deterministic index regeneration and Markdown export (§4.5). */
@@ -68,6 +70,31 @@ class NotesTest {
         val status = Note("STATUS-W-42", NoteKind.STATUS, NoteStatus.Admitted, "campaign checkpoint", "I1 verified.", "task:W-42", origin = NoteOrigin(work = "W-42", admittedBy = "harness"))
         writer.write(status, ids)
         assertEquals(2, writer.write(status.copy(body = "I1 verified; I2 in progress."), ids), "harness STATUS notes are revised per boundary")
+    }
+
+    @Test
+    fun `invalid replacement leaves the admitted predecessor active`() {
+        val old = Note("LES-1", NoteKind.LES, NoteStatus.Admitted, "clock retry", "Freeze the clock.", "global")
+        writer.write(old, ids)
+        val replacement = old.copy(id = "LES-2", body = (1..200).joinToString(" ") { "word$it" }, supersedes = old.id)
+        assertFailsWith<NoteRefused> { writer.supersede(old.id, replacement, ids) }
+        assertEquals(NoteStatus.Admitted, notes.get(old.id)!!.status)
+        assertEquals(1, notes.revisions(old.id).size)
+        assertNull(notes.get(replacement.id))
+    }
+
+    @Test
+    fun `replacement insert failure rolls back the predecessor revision`() {
+        val old = Note("LES-1", NoteKind.LES, NoteStatus.Admitted, "clock retry", "Freeze the clock.", "global")
+        writer.write(old, ids)
+        store.db.tx { tx ->
+            tx.execute("CREATE TRIGGER reject_replacement BEFORE INSERT ON notes WHEN NEW.note_id = 'LES-2' BEGIN SELECT RAISE(ABORT, 'blocked'); END")
+        }
+        val replacement = old.copy(id = "LES-2", body = "Freeze the clock and RNG.", supersedes = old.id)
+        assertFailsWith<StoreError> { writer.supersede(old.id, replacement, ids) }
+        assertEquals(NoteStatus.Admitted, notes.get(old.id)!!.status)
+        assertEquals(1, notes.revisions(old.id).size)
+        assertNull(notes.get(replacement.id))
     }
 
     @Test

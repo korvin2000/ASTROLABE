@@ -1,4 +1,4 @@
-# ASTROLABE implementation-plan review issues
+# Deprecated: ASTROLABE implementation-plan review issues: all already fixed.
 
 Review date: **2026-09-20**. Reviewed: [TODO.md](TODO.md), [preparation brief](PREPARE_IMPLEMENTATION_PLAN.md), and the current **1.0.1-proposal** documents reached from [README.md](README.md). Answers and recommended defaults are in [ANSWERS.md](ANSWERS.md).
 

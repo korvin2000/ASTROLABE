@@ -158,6 +158,22 @@ class ResultPacketTest {
     }
 
     @Test
+    fun `validator gaps reach the next model request before the corrected packet`() = runTestIn { f ->
+        var attempts = 0
+        val completion = RoleCompletion { _, _ ->
+            if (attempts++ == 0) CompletionDecision.Continue(listOf("packet needs a cited observation"))
+            else CompletionDecision.Accepted(listOf("observation-1"))
+        }
+        val model = ScriptedModel.of(
+            Scripted.Reply(listOf(say("an uncited finding"))),
+            Scripted.Reply(listOf(say("finding with observation-1"))),
+        )
+        assertIs<CellExit.Completed>(f.run(model, role = Roles.probe, completion = completion))
+        assertEquals(2, attempts)
+        assertTrue(f.anchorText(2).contains("packet needs a cited observation"), f.anchorText(2))
+    }
+
+    @Test
     fun `a refused proposal records its gaps and the implementing packet carries them`() = runTestIn { f ->
         val model = ScriptedModel.of(
             Scripted.Reply(listOf(say("planning"), patch("c1", """{"plan.add":"make a return 10"},{"plan.cursor":1},{"next":"edit a"}"""))),
@@ -179,7 +195,9 @@ class ResultPacketTest {
 
         assertEquals(PacketStatus.Failed, failed.packet.status)
         assertEquals(failed.checkpoint.reason, failed.packet.reason)
-        assertEquals(1, failed.packet.cost.callsWithoutUsage, "the refused invocation is a call without usage, never an estimate")
+        // Terminal reconciliation (F-086): the refused call is charged with the usage its terminal reports, never an estimate.
+        assertEquals(1, failed.packet.cost.calls)
+        assertEquals(0, failed.packet.cost.callsWithoutUsage, "the refusal terminal reported usage")
         assertFailsWith<IllegalStateException> { failed.packet.proposal() }
     }
 

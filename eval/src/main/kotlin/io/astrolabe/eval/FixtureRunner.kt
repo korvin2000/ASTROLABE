@@ -71,7 +71,11 @@ public class FixtureSelection @JvmOverloads constructor(
 }
 
 /** A machine-readable fixture run (P6.1.1): results, counts, invariant metrics and the verdicts derived from them. */
-public class FixtureReport internal constructor(public val configuration: String, results: List<FixtureResult>) {
+public class FixtureReport internal constructor(
+    public val configuration: String,
+    results: List<FixtureResult>,
+    internal val containerFailures: List<String> = emptyList(),
+) {
     public val results: List<FixtureResult> = immutable(results.sortedWith(compareBy(FixtureResult::className, FixtureResult::name)))
     public val passed: Int = this.results.count { it.status == FixtureStatus.Passed }
     public val failed: Int = this.results.count { it.status == FixtureStatus.Failed }
@@ -82,10 +86,10 @@ public class FixtureReport internal constructor(public val configuration: String
     })
 
     /** Nothing ran is not green. */
-    public val green: Boolean get() = passed > 0 && failed == 0
+    public val green: Boolean get() = passed > 0 && failed == 0 && containerFailures.isEmpty()
 
     /** Every invariant measured and zero; an unmeasured invariant is not a zero. */
-    public val invariantsZero: Boolean get() = metrics.all { it.violations == 0 }
+    public val invariantsZero: Boolean get() = containerFailures.isEmpty() && metrics.all { it.violations == 0 }
 
     /** Differences from JUnit's own results for the same fixture tests; empty when the run reproduces them. */
     public fun discrepancies(junit: List<FixtureResult>): List<String> {
@@ -111,6 +115,7 @@ public class FixtureReport internal constructor(public val configuration: String
         }
         put("green", green)
         put("invariantsZero", invariantsZero)
+        putJsonArray("containerFailures") { containerFailures.forEach { add(JsonPrimitive(it)) } }
         putJsonArray("invariants") {
             metrics.forEach { m -> add(buildJsonObject {
                 put("invariant", m.invariant.wire); put("tests", m.tests)
@@ -156,7 +161,7 @@ public object FixtureRunner {
             .build()
         val listener = Collector()
         LauncherFactory.create().execute(request, listener)
-        return FixtureReport(configuration, listener.results.values.toList())
+        return FixtureReport(configuration, listener.results.values.toList(), listener.containerFailures.toList())
     }
 
     /** The build's JUnit XML reports (`TEST-*.xml`) as results, for [FixtureReport.discrepancies]. */
@@ -219,6 +224,7 @@ public object FixtureRunner {
             Files.writeString(file, result.json())
         }
         out.println("fixtures: ${result.results.size} tests, ${result.passed} passed, ${result.failed} failed, ${result.skipped} skipped")
+        if (result.containerFailures.isNotEmpty()) out.println("container failures: ${result.containerFailures.size}")
         result.metrics.forEach { out.println("invariant ${it.invariant.wire}: ${it.violations ?: "unmeasured"} (${it.tests} tests)") }
         out.println(when (discrepancies) {
             null -> "junit: not compared"
@@ -230,6 +236,7 @@ public object FixtureRunner {
 
     private class Collector : TestExecutionListener {
         val results = LinkedHashMap<String, FixtureResult>()
+        val containerFailures = ArrayList<String>()
         private var plan: TestPlan? = null
 
         override fun testPlanExecutionStarted(testPlan: TestPlan) { plan = testPlan }
@@ -246,7 +253,13 @@ public object FixtureRunner {
             }
             if (testIdentifier.isTest) record(testIdentifier, status, message)
             // A failed container (e.g. a class-level setup) never started its tests: each of them failed.
-            else if (status == FixtureStatus.Failed) tests(testIdentifier).forEach { if (it.uniqueId !in results) record(it, status, message) }
+            else if (status == FixtureStatus.Failed) {
+                val descendants = tests(testIdentifier)
+                if (fixtureIds(testIdentifier.displayName).isNotEmpty() ||
+                    descendants.any { fixtureIds(it.displayName).isNotEmpty() }
+                ) containerFailures += "${testIdentifier.displayName}: ${message ?: "container failed"}"
+                descendants.forEach { if (it.uniqueId !in results) record(it, status, message) }
+            }
         }
 
         private fun tests(identifier: TestIdentifier): List<TestIdentifier> =

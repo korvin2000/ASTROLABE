@@ -23,7 +23,7 @@ import java.nio.file.Path
 import java.time.Clock
 import kotlin.io.path.relativeTo
 
-/** One characterization output (a CLI golden, an API fixture) as it was at `s0`: its path and the blob of its raw bytes. */
+/** One characterization output at `s0`: its path and protected raw blob, used only for byte-exact comparison. */
 @Serializable
 public data class CharacterizationOutput(val path: String, val blob: Digest, val sizeBytes: Long)
 
@@ -100,7 +100,7 @@ public class BehaviourSnapshots(
                     limits += "$path: ${bytes.size} bytes exceeds the $MAX_OUTPUT_BYTES-byte cap; not recorded"
                     continue
                 }
-                outputs += CharacterizationOutput(path, blobs.put(bytes, BlobKind.OUTPUT, ids), bytes.size.toLong())
+                outputs += CharacterizationOutput(path, blobs.put(bytes, BlobKind.OUTPUT, ids, recovery = true), bytes.size.toLong())
             }
             if (files.size > MAX_OUTPUTS) limits += "${files.size - MAX_OUTPUTS} characterization outputs beyond the $MAX_OUTPUTS cap were not recorded"
         }

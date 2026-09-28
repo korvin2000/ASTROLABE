@@ -42,6 +42,35 @@ class AnchorsTest {
     }
 
     @Test
+    fun `normalized line anchors include their requested indentation and terminal newline`() {
+        for ((original, anchor) in listOf(
+            "    return    1\n" to "    return 1\n",
+            "\treturn    1\r\n" to "    return 1\n",
+            "    return    1  \r\n" to "\treturn 1\r\n",
+        )) {
+            val source = "before\n$original\nafter\n"
+            val one = assertIs<Location.One>(Anchors.locate(source, anchor))
+            assertTrue(!one.span.exact)
+            assertEquals(original, source.substring(one.span.start, one.span.end))
+            assertEquals("before\n    return 2\n\nafter\n", source.replaceRange(one.span.start, one.span.end, "    return 2\n"))
+        }
+    }
+
+    @Test
+    fun `normalized anchors include indentation requested after their final newline`() {
+        val source = "\treturn  1\n\tpass\n"
+        val span = assertIs<Location.One>(Anchors.locate(source, "    return 1\n    ")).span
+        assertEquals("    return 2\n    pass\n", source.replaceRange(span.start, span.end, "    return 2\n    "))
+    }
+
+    @Test
+    fun `normalized inline anchors leave surrounding indentation and newline outside the span`() {
+        val source = "    result = f(  1,   2 )\r\n"
+        val one = assertIs<Location.One>(Anchors.locate(source, "f( 1, 2 )"))
+        assertEquals("    result = g(3)\r\n", source.replaceRange(one.span.start, one.span.end, "g(3)"))
+    }
+
+    @Test
     fun `several sites are reported and near selects among them`() {
         val many = assertIs<Location.Many>(Anchors.locate(text, "def b():"))
         assertEquals(listOf(LineRange(5, 5), LineRange(8, 8)), many.sites.map { it.lines })

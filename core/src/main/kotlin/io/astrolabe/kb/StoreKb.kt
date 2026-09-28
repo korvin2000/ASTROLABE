@@ -52,8 +52,10 @@ public class StoreKb @JvmOverloads constructor(
                 notes.all().filter { n -> tokens.any { t -> t in n.summary.lowercase() || n.anchors.any { a -> t in a.path.lowercase() } } }.map { it to null }
             }
         }
+        val all by lazy { notes.all().associateBy { it.id } }
+        val versions by lazy { notes.versions() }
         val hits = ranked.filter { (note, _) -> visible(note) && (kinds == null || note.kind.name in kinds) && (scope == null || note.scope == scope) }
-            .map { (note, score) -> KbHit(note.id, note.kind.name, note.summary, stale(note), score) }
+            .map { (note, score) -> KbHit(note.id, note.kind.name, note.summary, stale(note, all, versions), score) }
         onSearch(KbSearchLog(query, kinds, scope, why, hits.size, complete = true))
         return KbHits(hits, scope ?: "kb", complete = true, degradation = degradation)
     }
@@ -73,7 +75,10 @@ public class StoreKb @JvmOverloads constructor(
     private fun visible(note: Note): Boolean =
         (note.status == NoteStatus.Admitted || note.status == NoteStatus.Stale) && (note.kind != NoteKind.STATUS || note.scope == "task:${work.value}")
 
-    private fun stale(note: Note): Boolean = note.status == NoteStatus.Stale || note.anchors.any { anchor ->
+    private fun stale(note: Note): Boolean = stale(note, notes.all().associateBy { it.id }, notes.versions())
+
+    private fun stale(note: Note, all: Map<String, Note>, versions: Map<String, String>): Boolean = note.status == NoteStatus.Stale ||
+        !Injection.dependenciesCurrent(note, all, currentVersion, versions) || note.anchors.any { anchor ->
         val recorded = anchor.version ?: return@any false
         val now = currentVersion(anchor.path) ?: return@any true
         !now.digest.hex.startsWith(recorded)

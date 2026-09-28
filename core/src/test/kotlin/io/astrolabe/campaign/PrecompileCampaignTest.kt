@@ -61,14 +61,14 @@ class PrecompileCampaignTest {
     private val files = (1..3).map { "src/f$it.py" }
 
     /**
-     * The acceptance command. A [mutating] one writes a build-artifact-like file into the tree on its second run
+     * The acceptance command. A [mutating] one writes a declared scratch artifact into the tree on its second run
      * (the first run — the plan cell's verify-on-stop — only leaves [sentinel] outside the repository), so the tree
      * moves while I1's checks run and stays put afterwards.
      */
     private fun printing(mutating: Boolean, sentinel: Path): Command = when {
-        WINDOWS && mutating -> Command(listOf("cmd.exe", "/d", "/s", "/c", "type pytest_pass.txt & if exist $sentinel (echo checked> src\\marker.txt) else (echo x> $sentinel)"))
+        WINDOWS && mutating -> Command(listOf("cmd.exe", "/d", "/s", "/c", "type pytest_pass.txt & if exist $sentinel (echo checked> build\\marker.txt) else (echo x> $sentinel)"))
         WINDOWS -> Command(listOf("cmd.exe", "/d", "/s", "/c", "type pytest_pass.txt"))
-        mutating -> Command(listOf("/bin/sh", "-c", "cat pytest_pass.txt; if [ -e $sentinel ]; then echo checked > src/marker.txt; else echo x > $sentinel; fi"))
+        mutating -> Command(listOf("/bin/sh", "-c", "cat pytest_pass.txt; if [ -e $sentinel ]; then echo checked > build/marker.txt; else echo x > $sentinel; fi"))
         else -> Command(listOf("/bin/sh", "-c", "cat pytest_pass.txt"))
     }
 
@@ -85,6 +85,7 @@ class PrecompileCampaignTest {
         files.forEachIndexed { i, path -> repo.write(path, "def f():\n    return ${i + 1}\n") }
         repo.write("pytest_pass.txt", javaClass.getResourceAsStream("/shaper/pytest-pass.txt")!!.use { String(it.readAllBytes(), Charsets.UTF_8) })
         repo.commit("initial")
+        Files.createDirectories(repo.resolve("build"))
         // One sentinel per acceptance: every command runs once in the plan cell, so only AC-1 moves the tree, in I1.
         fun check(i: Int) = printing(mutating, root.resolve("$name-sentinel-$i").toAbsolutePath())
         Store.open(stateRoot, repo.git, clock).use { store ->
@@ -118,7 +119,7 @@ class PrecompileCampaignTest {
                 val run = Controller(config, clock, idGen, precompiles = metrics).run(c, CellModel(FakeAdapter(ScriptedModel.of(*replies.toTypedArray())), FakeProfiles.main, HeuristicEstimator()), maxCells = 6)
                 val boundary = c.journal.events(JournalScope(request.work, kinds = setOf(JournalKind.Boundary, JournalKind.Check))).map { it.text }
                 val manifests = c.store.db.query("SELECT body FROM manifests ORDER BY rowid") { Json.decodeFromString(Manifest.serializer(), it.string("body")) }
-                Outcome(run, boundary, manifests, metrics.report(), metrics.samples().size, Files.exists(repo.root.resolve("src/marker.txt")))
+                Outcome(run, boundary, manifests, metrics.report(), metrics.samples().size, Files.exists(repo.root.resolve("build/marker.txt")))
             }
         }
     }
@@ -146,13 +147,13 @@ class PrecompileCampaignTest {
     fun `FX-44 a tree that moved while the checks ran discards the pre-compiled K and recompiles at the boundary`() {
         val on = campaign("moved", precompile = true, mutating = true)
         assertEquals(CampaignOutcome.Completed, on.run.outcome, on.run.state?.reason)
-        assertTrue(on.marker, "the check wrote src/marker.txt: " + on.boundary.toString())
+        assertTrue(on.marker, "the check wrote build/marker.txt: " + on.boundary.toString())
         val lines = on.boundary.precompile()
-        // I1's check writes src/marker.txt: the stamp at close differs from the stamp the I2 pre-compile was tagged with.
+        // I1's check writes build/marker.txt: the stamp at close differs from the stamp the I2 pre-compile was tagged with.
         assertTrue(lines.any { it.startsWith("precompile I2 started @") }, lines.toString())
         assertTrue(lines.any { it.startsWith("precompile I2 miss: stamp moved (fp ") && it.endsWith("· discarded, recompiled") }, on.boundary.toString())
         assertTrue(lines.none { it.startsWith("precompile I2 hit") }, lines.toString())
-        // I2's check rewrites the same bytes: the tree is stable, so I3's pre-compile is served.
+        // I2 rewrites the same scratch bytes: tested inputs and the stamp stay stable, so I3 reuses its pre-compile.
         assertTrue(lines.any { it.startsWith("precompile I3 hit: [K] reused @") }, lines.toString())
         assertEquals(1, on.report.hits)
         assertEquals(1, on.report.misses)

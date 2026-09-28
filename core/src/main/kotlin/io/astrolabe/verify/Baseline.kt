@@ -153,6 +153,7 @@ public class Baseline(
     private val envAllowlist: Set<String> = RedactionConfig.DEFAULT_ENV_ALLOWLIST,
     private val scratch: ScratchPolicy = ScratchPolicy(),
 ) {
+    internal var beforeDispatch: () -> Unit = {}
     public suspend fun run(check: Check, contractVersion: Int, s0: CandidateId, timeoutSeconds: Long = 600): BaselineResult {
         require(timeoutSeconds > 0) { "timeoutSeconds must be positive" }
         val command = requireNotNull(check.command) { "check ${check.id} declares no command" }
@@ -160,10 +161,8 @@ public class Baseline(
         if (Files.exists(dir)) deleteTree(dir)
         val materialized = shadowRef.materialize(0, dir)
         // The candidate is the whole exported tree (HEAD plus the dirty manifest), so every exported file is a tested input.
-        val inputs = materialized.files.filterNot { scratch.isScratch(it) }.sorted().mapNotNull { path ->
-            val file = dir.resolve(path)
-            if (Files.isRegularFile(file)) path to FileVersion.of(Files.readAllBytes(file)) else null
-        }.toMap()
+        val before = snapshot(dir)
+        val inputs = before.mapValues { it.value.version }
         val limits = ArrayList<Limit>()
         materialized.limitations.forEach { limits += Limit("materialize", it) }
         val actionId = idGen.next("act")
@@ -181,42 +180,31 @@ public class Baseline(
         Files.createDirectories(logsDir)
         val spec = SpawnSpec(Command.Argv(command.argv), cwd, logsDir.resolve("baseline-${check.id}-$actionId.log"), EnvPolicy(inheritedNames = envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")), timeoutSeconds)
         var proc = try {
+            beforeDispatch()
             runner.start(spec)
         } catch (failure: IOException) {
             limits += Limit("runner", "cannot start ${command.argv.first()}: ${failure.message}")
             val receipt = receipt(receiptId, check, contractVersion, s0, command.argv, command.cwd, null, Outcome.Unavailable, null, TestedInputs(inputs, InputStability.Isolated), null, limits)
             return BaselineResult(receipt, null, dir, materialized)
         }
-        val output = java.io.ByteArrayOutputStream()
-        var cursor = 0L
-        var lost = false
-        try {
-            while (!proc.status.isTerminal) {
-                val poll = os.poll(proc, cursor, minOf(POLL_SLICE_SECONDS, timeoutSeconds))
-                output.write(poll.newBytes)
-                cursor = poll.nextCursorBytes
-                proc = proc.copy(status = poll.status)
-            }
-            output.write(os.poll(proc, cursor, 0).newBytes)
-        } catch (failure: IOException) {
-            lost = true
-            limits += Limit("observation", "the observation was lost: ${failure.message}")
-        }
+        val observed = io.astrolabe.tool.run.Executions.observeCancellable(os, proc, POLL_SLICE_SECONDS, timeoutSeconds)
+        proc = observed.proc
+        val lost = observed.lost
+        if (lost) limits += Limit("observation", "the process observation was lost; reconcile before retry")
 
         // D-45 `isolated`: the exported candidate is verified against its manifest after the run as well.
-        val mutated = inputs.keys.filter { path ->
-            val file = dir.resolve(path)
-            !Files.isRegularFile(file) || FileVersion.of(Files.readAllBytes(file)) != inputs.getValue(path)
-        }.toSet()
+        val after = snapshot(dir)
+        val mutated = (before.keys + after.keys).filter { before[it] != after[it] }.toSet()
         if (mutated.isNotEmpty()) limits += Limit("input_mutation", "the suite changed its own inputs in the candidate: ${mutated.sorted().joinToString(", ")}; the receipt cannot certify them")
-        val redacted = redaction.applyBytes(output.toByteArray(), ContentClass.ReusableEvidence)
+        val redacted = redaction.applyBytes(observed.output, ContentClass.ReusableEvidence)
         val blob = blobs.put(redacted.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
         val alias = aliases.allocate(ids.work, receiptId, "receipt", ids.context, null).text
         val capture = RunCapture(
             actionId = actionId, argv = command.argv, shell = false, cwd = command.cwd,
             exitCode = (proc.status as? ProcStatus.Exited)?.exitCode, timedOut = proc.status == ProcStatus.DeadlineExceeded,
-            output = output.toByteArray(), captureComplete = !lost && proc.status !is ProcStatus.Lost,
+            output = observed.output, captureComplete = !lost && !observed.truncated && proc.status !is ProcStatus.Lost,
             reports = reports(dir, started, actionId), checkId = check.id, selector = check.selector.toString(),
+            executionRoot = runCatching { cwd.toRealPath() }.getOrDefault(cwd.toAbsolutePath()).toString(),
         )
         val shaped = Shapers.shape(capture, ShapeBudget(estimator = estimator, recallAlias = alias))
         shaped.limitations.forEach { limits += Limit("shaper", it) }
@@ -227,7 +215,7 @@ public class Baseline(
             else -> shaped.status
         }
         val receipt = receipt(receiptId, check, contractVersion, s0, command.argv, command.cwd, capture.exitCode, outcome, shaped.counts, TestedInputs(inputs, InputStability.Isolated, mutated), blob, limits)
-        val ledger = if (outcome == Outcome.Passed || outcome == Outcome.Failed || outcome == Outcome.Inconclusive) {
+        val ledger = if (receipt.testedInputs.eligible && (outcome == Outcome.Passed || outcome == Outcome.Failed || outcome == Outcome.Inconclusive)) {
             val ledgerLimits = ArrayList<String>()
             if (shaped.tests.isEmpty() && outcome != Outcome.Passed) ledgerLimits += "no test identities parsed by ${shaped.shaper}: nothing can be called pre-existing"
             val ambiguous = TestResults.ambiguous(shaped.tests)
@@ -240,6 +228,16 @@ public class Baseline(
             null
         }
         return BaselineResult(receipt, ledger, dir, materialized)
+    }
+
+    private data class Input(val version: FileVersion, val modified: java.nio.file.attribute.FileTime, val executable: Boolean)
+
+    private fun snapshot(dir: Path): Map<String, Input> = Files.walk(dir).use { files ->
+        files.filter { Files.isRegularFile(it) }.toList().associate { file ->
+            dir.relativize(file).toString().replace('\\', '/') to file
+        }.filterKeys { !scratch.isScratch(it) }.mapValues { (_, file) ->
+            Input(FileVersion.of(Files.readAllBytes(file)), Files.getLastModifiedTime(file), Files.isExecutable(file))
+        }
     }
 
     private fun receipt(

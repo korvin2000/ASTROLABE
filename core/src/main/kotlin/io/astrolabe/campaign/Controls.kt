@@ -92,12 +92,15 @@ public class Leases(private val store: Store, private val clock: Clock) {
         if (existing != null && existing.holder != holder && existing.validAt(now)) {
             throw LeaseHeld(existing)
         }
-        if (existing != null && existing.holder != holder) {
-            Fence.grant(unreconciled)?.let { throw GrantRefused(existing, it) }
+        if (existing == null || existing.holder != holder || !existing.validAt(now)) {
+            Fence.grant(unreconciled)?.let { reason ->
+                if (existing != null) throw GrantRefused(existing, reason)
+                throw IllegalStateException(reason)
+            }
         }
         val generation = when {
             existing == null -> ExecutionGeneration.INITIAL
-            existing.holder == holder -> existing.generation
+            existing.holder == holder && existing.validAt(now) -> existing.generation
             else -> existing.generation.next()
         }
         val lease = Lease(workspace, holder, now.plus(duration), generation)

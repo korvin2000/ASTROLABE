@@ -46,6 +46,14 @@ class ResidencyTest {
     private val estimator = HeuristicEstimator()
     private val residency = Residency(k = 8, rMaxTokens = 16_000, estimator = estimator)
 
+    @Test
+    fun `tail retains only the recent occurrence of equal assistant messages`() {
+        val old = message("same answer", 1)
+        val separator = message("new question", 1, ItemRole.User)
+        val recent = message("same answer", 2)
+        assertEquals(listOf(recent), residency.tail(listOf(old, separator, recent), 1))
+    }
+
     private fun body(alias: String, lines: Int): String =
         (1..lines).joinToString("\n") { "$it  val line$it = route(\"$alias\", $it)" }
 

@@ -81,6 +81,29 @@ class StateToolTest {
     private fun status(o: ToolOutcome) = o.header!!.runtime.status
 
     @Test
+    fun `a failed register save leaves the in-memory state and rejection unchanged`() = runTest {
+        val versions = object : io.astrolabe.register.RegisterVersions by io.astrolabe.register.InMemoryRegisterVersions() {
+            override fun save(ids: Identities, register: Register) { throw java.io.IOException("save failed") }
+        }
+        val before = tool.register
+        tool = StateTool(Validator(HeuristicEstimator()), versions, null, HeuristicEstimator(), FixedIdGen(), ids, clock, before)
+        run("""{"op":"patch","patch":[{"plan.tick":99}]}""")
+        val rejected = tool.lastRejection
+        kotlin.test.assertFailsWith<java.io.IOException> { run("""{"op":"patch","patch":[{"next":"new state"}]}""") }
+        assertEquals(before, tool.register)
+        assertEquals(rejected, tool.lastRejection)
+    }
+
+    @Test
+    fun `schema failures update the gate rejection record and a valid patch clears it`() = runTest {
+        run("""{"op":"patch","patch":[{"nonsense":"invalid"}]}""")
+        assertEquals("schema", tool.lastRejection?.rule)
+        assertTrue(tool.lastRejection!!.sizes.patchTokens > 0)
+        run("""{"op":"patch","patch":[{"next":"read source"}]}""")
+        assertNull(tool.lastRejection)
+    }
+
+    @Test
     fun `raw ops in scalar and object form apply atomically, bump the version and persist`() = runTest {
         val out = run("""{"op":"patch","patch":[{"plan.add":"locate dispatch"},{"plan.add":{"text":"pass ctx","accept":"run: pytest -k ctx","req":"R1/AC-1"}},{"plan.cursor":1},{"fact.add":{"kind":"h","text":"handlers are keyword-only"}},{"next":"read src/router.py"}]}""")
         assertEquals("ok", status(out), out.body)

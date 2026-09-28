@@ -133,6 +133,102 @@ class VerifyTest {
     private fun status(o: ToolOutcome) = o.header!!.runtime.status
 
     @Test
+    fun `JVM verification captures new reports and cannot reuse stale success`() = runTest {
+        repo.write(".gitignore", "build/\ntarget/\n")
+        var writeReport = true
+        val runner = object : io.astrolabe.tool.run.Runner {
+            override val mode = io.astrolabe.auth.ExecutionMode.TrustedLocal
+            override fun start(spec: io.astrolabe.os.SpawnSpec): io.astrolabe.os.Proc {
+                if (writeReport) {
+                    val file = spec.workingDirectory.resolve("build/test-results/test/TEST-demo.xml")
+                    java.nio.file.Files.createDirectories(file.parent)
+                    java.nio.file.Files.writeString(file, """<testsuite tests="1"><testcase classname="Demo" name="works"/></testsuite>""")
+                }
+                return os.spawn(spec.copy(command = io.astrolabe.os.Command.Argv(if (windows) listOf("cmd.exe", "/d", "/c", "exit 0") else listOf("/bin/sh", "-c", "exit 0"))))
+            }
+        }
+        checks.register(Check("CHK-jvm", CheckKind.Full, Selector.All, Closure.Known(setOf("src/a.py")), CostClass.Fast, Trigger.OnDemand, command = Command(listOf("gradle", "test"))))
+        verify = Verify(checks, scheduler, null, null, null, workspace, runner, os, stamper, store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, contracts, stateRoot.resolve("logs"))
+        val first = run("""{"what":"tests","selection":"ids","ids":["CHK-jvm"]}""")
+        assertTrue(first.green, first.body)
+        writeReport = false
+        val stale = run("""{"what":"tests","selection":"ids","ids":["CHK-jvm"]}""")
+        assertFalse(stale.green, stale.body)
+        assertTrue(stale.body.contains("no fresh JUnit XML"), stale.body)
+    }
+
+    @Test
+    fun `model acceptance commands and escaping working directories are denied before launch`() = runTest {
+        var launches = 0
+        val recording = object : io.astrolabe.tool.run.Runner {
+            override val mode = io.astrolabe.auth.ExecutionMode.TrustedLocal
+            override fun start(spec: io.astrolabe.os.SpawnSpec): io.astrolabe.os.Proc {
+                launches++
+                throw java.io.IOException("unexpected launch")
+            }
+        }
+        verify = Verify(checks, scheduler, null, null, null, workspace, recording, os, stamper, store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, contracts, stateRoot.resolve("logs"))
+        val command = Command(listOf("git", "push", "origin", "main"))
+        contracts.strengthen(ids.work, Acceptance.Run("AC-model", command, Origin.Model("R1")))
+        checks.register(Check("CHK-model", CheckKind.Acceptance, Selector.Named(command), Closure.Unknown, CostClass.Fast, Trigger.OnDemand, acceptanceIds = listOf("AC-model"), command = command))
+        val model = run("""{"what":"acceptance","ids":["AC-model"]}""")
+        assertEquals("denied", status(model))
+        for (cwd in listOf("../", stateRoot.toString().replace('\\', '/'))) {
+            checks.replace(Check("CHK-outside", CheckKind.Unit, Selector.All, Closure.Unknown, CostClass.Fast, Trigger.OnDemand, command = printing("pytest_pass.txt", 0).copy(cwd = cwd)))
+            assertEquals("denied", status(run("""{"what":"tests","selection":"ids","ids":["CHK-outside"]}""")))
+        }
+        assertEquals(0, launches)
+    }
+
+    @Test
+    fun `model acceptance can reuse an exact command already authorized by the contract`() = runTest {
+        val command = printing("pytest_pass.txt", 0)
+        contracts.strengthen(ids.work, Acceptance.Run("AC-model", command, Origin.Model("R1")))
+        checks.register(Check("CHK-model", CheckKind.Acceptance, Selector.Named(command), Closure.Known(setOf("src/a.py")), CostClass.Fast, Trigger.OnDemand, acceptanceIds = listOf("AC-model"), command = command))
+        val out = run("""{"what":"acceptance","ids":["AC-model"]}""")
+        assertEquals("passed", status(out), out.body)
+        assertTrue(out.green)
+    }
+
+    @Test
+    fun `a passing batch cannot certify an earlier check invalidated by a later check`() = runTest {
+        val first = Check("CHK-first", CheckKind.Unit, Selector.All, Closure.Known(setOf("src/a.py")), CostClass.Fast, Trigger.OnDemand, command = printing("pytest_pass.txt", 0))
+        val change = Command(if (windows) listOf("cmd.exe", "/d", "/s", "/c", "echo changed>src/a.py&type pytest_pass.txt") else listOf("/bin/sh", "-c", "echo changed > src/a.py; cat pytest_pass.txt"))
+        checks.register(first)
+        checks.register(first.copy(id = "CHK-second", inputClosure = Closure.Known(setOf("pytest_pass.txt")), command = change))
+        val out = run("""{"what":"tests","selection":"ids","ids":["CHK-first","CHK-second"]}""")
+        assertFalse(out.green, out.body)
+        assertTrue(out.body.contains("stale"), out.body)
+    }
+
+    @Test
+    fun `a requested acceptance without a registered check cannot disappear from a green result`() = runTest {
+        contracts.amendByUser(ids.work, "add acceptance") { contract ->
+            contract.copy(acceptance = contract.acceptance + Acceptance.Run("AC-4", printing("pytest_pass.txt", 0), Origin.User))
+        }
+        val out = run("""{"what":"acceptance","ids":["AC-1","AC-4"]}""")
+        assertFalse(out.green, out.body)
+        assertEquals("unavailable", status(out))
+        assertTrue(out.body.contains("AC-4"), out.body)
+        val selected = run("""{"what":"tests","selection":"accept"}""")
+        assertFalse(selected.green, selected.body)
+        assertEquals("unavailable", status(selected))
+        assertTrue(selected.body.contains("AC-4"), selected.body)
+    }
+
+    @Test
+    fun `verification output redacts fixture secrets`() = runTest {
+        val secret = "AKIA" + "IOSFODNN7EXAMPLE"
+        repo.write("pytest_fail.txt", recorded("pytest-fail-param.txt") + "\nE   $secret\n")
+        val out = run("""{"what":"acceptance","ids":["AC-2"]}""")
+        assertFalse(out.body.contains(secret))
+        assertTrue(out.header!!.runtime.redactionApplied)
+        out.header!!.runtime.artifactRefs.forEach {
+            assertFalse(String(store.blobs.get(io.astrolabe.id.Digest(it))).contains(secret))
+        }
+    }
+
+    @Test
     fun `acceptance runs record receipts with stamps and currency, rendered as the Checks block`() = runTest {
         val out = run("""{"what":"acceptance","ids":["AC-1"]}""")
         assertEquals("passed", status(out), out.body)
@@ -177,7 +273,36 @@ class VerifyTest {
     }
 
     @Test
-    fun `a check that fails and then passes on its isolated rerun is inconclusive, never passed, with every attempt kept`() = runTest {
+    fun `a disagreeing retry uses a disposable copy of the original candidate`() = runTest {
+        scheduler = Scheduler(checks, workspace, registry, stamper, SqliteReceipts(store, clock), InMemoryAliases(), idGen, ids, clock, candidates = stateRoot.resolve("candidates"))
+        val roots = ArrayList<Path>()
+        val scripted = object : io.astrolabe.tool.run.Runner {
+            override val mode = io.astrolabe.auth.ExecutionMode.TrustedLocal
+            override fun start(spec: io.astrolabe.os.SpawnSpec): io.astrolabe.os.Proc {
+                roots.add(spec.workingDirectory)
+                val command = if (roots.size == 1) printing("pytest_fail.txt", 1) else printing("pytest_pass.txt", 0)
+                return TrustedLocalRunner(os).start(spec.copy(command = io.astrolabe.os.Command.Argv(command.argv)))
+            }
+        }
+        verify = Verify(checks, scheduler, null, null, null, workspace, scripted, os, stamper, store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, contracts, stateRoot.resolve("logs"))
+        val command = printing("pytest_fail.txt", 1)
+        checks.register(Check("CHK-flaky", CheckKind.Unit, Selector.Named(command), Closure.Known(setOf("src/a.py")), CostClass.Fast, Trigger.OnDemand, command = command))
+        val out = run("""{"what":"tests","selection":"ids","ids":["CHK-flaky"]}""")
+        val attempts = SqliteReceipts(store, clock).forCheck("CHK-flaky")
+        assertEquals("inconclusive", status(out), out.body)
+        assertEquals(listOf(Outcome.Failed, Outcome.Passed, Outcome.Inconclusive), attempts.map { it.outcome })
+        assertEquals(InputStability.Isolated, attempts[1].testedInputs.stability)
+        assertEquals(attempts[0].stampBefore, attempts[1].stampBefore)
+        assertEquals(repo.root, roots[0])
+        assertTrue(roots[1].startsWith(stateRoot.resolve("candidates")))
+        assertFalse(java.nio.file.Files.exists(roots[1]))
+        assertTrue(attempts.last().limits.any { it.kind == "flaky" && it.detail.contains(attempts[0].receiptId) && it.detail.contains(attempts[1].receiptId) })
+    }
+
+    @Test
+    fun `a failed check that changes the original candidate is not rerun`() = runTest {
+        scheduler = Scheduler(checks, workspace, registry, stamper, SqliteReceipts(store, clock), InMemoryAliases(), idGen, ids, clock, candidates = stateRoot.resolve("candidates"))
+        verify = Verify(checks, scheduler, null, null, null, workspace, TrustedLocalRunner(os), os, stamper, store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, contracts, stateRoot.resolve("logs"))
         val flaky = if (windows) {
             Command(listOf("cmd.exe", "/d", "/s", "/c", "if exist flaky.flag (type pytest_pass.txt) else (type nul > flaky.flag & type pytest_fail.txt & exit /b 1)"))
         } else {
@@ -185,11 +310,10 @@ class VerifyTest {
         }
         checks.register(Check("CHK-flaky", CheckKind.Unit, Selector.Named(flaky), Closure.Known(setOf("src/a.py")), CostClass.Fast, Trigger.OnDemand, command = flaky))
         val out = run("""{"what":"tests","selection":"ids","ids":["CHK-flaky"]}""")
-        assertEquals("inconclusive", status(out), out.body)
-        assertTrue(out.body.contains("CHK-flaky: flaky — failed then passed ⇒ inconclusive"), out.body)
+        assertEquals("failed", status(out), out.body)
+        assertTrue(out.body.contains("isolated retry unavailable"), out.body)
         val attempts = SqliteReceipts(store, clock).forCheck("CHK-flaky")
-        assertEquals(listOf(Outcome.Failed, Outcome.Passed, Outcome.Inconclusive), attempts.map { it.outcome })
-        assertTrue(attempts.last().limits.any { it.kind == "flaky" && it.detail.contains(attempts[0].receiptId) && it.detail.contains(attempts[1].receiptId) })
+        assertEquals(listOf(Outcome.Failed), attempts.map { it.outcome })
         assertEquals(attempts.last().receiptId, checks["CHK-flaky"]!!.last!!.receiptId)
         assertFalse(scheduler.currency(checks["CHK-flaky"]!!, stamper.stamp().id).certifies)
     }
@@ -200,7 +324,8 @@ class VerifyTest {
         assertEquals("failed", status(failed), failed.body)
         assertFalse(failed.green)
         assertTrue(failed.body.contains("accept AC-2: now 1 5 pass 1 fail 1 skip @"), failed.body)
-        assertEquals(listOf(Outcome.Failed, Outcome.Failed), SqliteReceipts(store, clock).forCheck("CHK-accept-AC-2").map { it.outcome }, "one isolated rerun; agreeing failures stay red (§8.10)")
+        assertEquals(listOf(Outcome.Failed), SqliteReceipts(store, clock).forCheck("CHK-accept-AC-2").map { it.outcome }, "without candidate isolation the first failure stays red")
+        assertTrue(failed.body.contains("isolated retry unavailable"), failed.body)
 
         val missing = run("""{"what":"acceptance","ids":["AC-3"]}""")
         assertEquals("unavailable", status(missing), missing.body)

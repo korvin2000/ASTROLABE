@@ -25,6 +25,7 @@ public data class Assessment(
     val accepted: Boolean,
     val by: String,
     val contractVersion: Int,
+    val candidate: CandidateId? = null,
 ) {
     init {
         require(acceptanceId.isNotBlank() && criterion.isNotBlank() && evidenceRef.isNotBlank() && by.isNotBlank()) { "an assessment names its item, criterion, evidence and assessor" }
@@ -206,7 +207,7 @@ public class Verifier(public val maxFinalizations: Int = 2) {
                 missing += "acceptance surface ${flag.path}: approval belongs to another contract or candidate"
             }
         }
-        val gate = ExitGate.evaluate(register, contract, increment, currencies, assessments, reviews, flags, unresolvedImpactNudges)
+        val gate = ExitGate.evaluate(register, contract, increment, currencies, assessments.filter { it.candidate == stampNow }, reviews, flags, unresolvedImpactNudges)
         if (gate is GateResult.Refused) missing += gate.missing
         if (missing.isNotEmpty()) {
             val attempts = (finalizations[increment.id] ?: 0) + 1

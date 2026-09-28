@@ -7,6 +7,9 @@ import io.astrolabe.id.InstantSerializer
 import io.astrolabe.os.Os
 import io.astrolabe.store.BlobKind
 import io.astrolabe.store.BlobStore
+import io.astrolabe.store.Store
+import io.astrolabe.store.Migrations
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.Serializable
 import java.nio.charset.StandardCharsets
 import java.time.Clock
@@ -75,15 +78,15 @@ public fun interface WriteStep {
  * preimage would silently discard that work. Reversibility is what lets the model experiment (F6),
  * and it stops at the point where it would overwrite someone else.
  *
- * The records are held in memory keyed by `(editId, path)`; the *bytes* are durable in
- * `blobs/recovery/` from the moment [save] returns. Journaling the records belongs to the evidence
- * store (P1.4).
+ * With [store], associations are durable before mutation and shared across cells and reopen.
+ * A missing postimage remains an explicit refusal; recovery never guesses the result of a crashed write.
  */
-public class Preimages(
+public class Preimages @JvmOverloads constructor(
     private val workspace: Workspace,
     private val blobs: BlobStore,
     private val ids: Identities,
     private val clock: Clock,
+    private val store: Store? = null,
 ) {
 
     private val saved = ConcurrentHashMap<Key, Preimage>()
@@ -101,6 +104,7 @@ public class Preimages(
             preimageDigest = digest,
             savedAt = clock.instant(),
         )
+        persist(preimage)
         saved[Key(editId, path)] = preimage
         return preimage
     }
@@ -124,18 +128,34 @@ public class Preimages(
     /** Records the version the edit produced; `revert:#id` compares current bytes against it. */
     public fun recordPostimage(editId: String, path: String, versionAfter: FileVersion): Preimage {
         val key = Key(editId, path)
-        val existing = saved[key] ?: throw IllegalStateException("no preimage saved for edit '$editId' on '$path'")
+        val existing = of(editId, path) ?: throw IllegalStateException("no preimage saved for edit '$editId' on '$path'")
         val updated = existing.copy(versionAfter = versionAfter)
+        persist(updated)
         saved[key] = updated
         return updated
     }
 
     /** The preimage recorded for this edit and path, if any. */
-    public fun of(editId: String, path: String): Preimage? = saved[Key(editId, path)]
+    public fun of(editId: String, path: String): Preimage? = if (store == null) saved[Key(editId, path)] else of(editId).firstOrNull { it.path == path }
 
     /** Every preimage recorded for [editId], in the order the paths sort. */
     public fun of(editId: String): List<Preimage> =
-        saved.values.filter { it.editId == editId }.sortedWith(compareBy(Stamper.PATH_ORDER) { it.path })
+        (store?.db?.query("SELECT body FROM packets WHERE work_id = ? AND kind = ?", ids.work, kind(editId)) {
+            Json.decodeFromString(Preimage.serializer(), it.string("body"))
+        } ?: saved.values.filter { it.editId == editId }).sortedWith(compareBy(Stamper.PATH_ORDER) { it.path })
+
+    private fun kind(editId: String): String = "preimage:${workspace.id.value}:$editId"
+
+    private fun persist(preimage: Preimage) {
+        val key = Digest.ofUtf8(Json.encodeToString(listOf(ids.work.value, workspace.id.value, preimage.editId, preimage.path))).hex
+        store?.db?.tx { tx ->
+            tx.execute(
+                "INSERT OR REPLACE INTO packets (id, work_id, attempt_id, candidate_id, context_id, kind, schema_version, created_at, body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "preimage-$key", ids.work, ids.attempt, ids.candidate, ids.context, kind(preimage.editId), Migrations.SCHEMA_VERSION,
+                preimage.savedAt, Json.encodeToString(Preimage.serializer(), preimage),
+            )
+        }
+    }
 
     /** The exact bytes saved for [preimage]. */
     public fun bytesOf(preimage: Preimage): ByteArray = blobs.get(preimage.preimageDigest)
@@ -166,7 +186,7 @@ public class Preimages(
         // compare-and-replace against an external writer, and never claims to be.
         val after = workspace.paths.revalidate(resolved)
         if (after is PathResolution.Rejected) {
-            return RevertResult.Refused("'$path' changed identity during publication: ${after.detail}", after)
+            throw java.io.IOException("'$path' changed identity after revert publication: ${after.detail}; preimage ${preimage.preimageDigest.hash8}")
         }
         val counts = changedRegion(current, bytes)
         return RevertResult.Reverted(

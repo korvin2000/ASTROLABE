@@ -8,11 +8,13 @@ import io.astrolabe.id.Stamp
 import io.astrolabe.os.ChangeOrigin
 import io.astrolabe.os.FileMode
 import io.astrolabe.os.GitStatus
+import io.astrolabe.os.LsFilesEntry
 import io.astrolabe.os.StatusEntry
 import io.astrolabe.os.UntrackedFiles
 import io.astrolabe.store.Migrations
 import io.astrolabe.store.Store
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import java.nio.charset.StandardCharsets
 import java.nio.file.FileSystems
@@ -38,6 +40,7 @@ public enum class EntryType {
  * for [EntryType.Deleted]. [sizeBytes] is metadata: it is recorded but does not enter the encoding,
  * because the digest already determines it.
  */
+@Serializable
 public data class StampEntry(
     val path: String,
     val type: EntryType,
@@ -124,10 +127,10 @@ public class Stamper @JvmOverloads public constructor(
     /** [stamp] with the membership and the exclusions that produced it. */
     public fun report(): StampReport {
         val status = workspace.git.status(UntrackedFiles.ALL, includeIgnored = countIgnored)
-        val unreadable = ArrayList<String>()
-        val tracked = trackedDelta(status, unreadable)
-        val untracked = untracked(status, unreadable)
-        val baseCommit = baseCommit()
+        val tracked = trackedDelta(status)
+        val untracked = untracked(status)
+        val baseCommit = status.branch?.let { it.oid?.hex ?: Stamp.NO_COMMIT }
+            ?: throw SnapshotIntegrityError("git status omitted the base commit")
         val stamp = Stamp(
             baseCommit = baseCommit,
             trackedDeltaHash = Digest.ofUtf8(encode("tracked-delta", tracked)),
@@ -141,7 +144,6 @@ public class Stamper @JvmOverloads public constructor(
             untracked = untracked,
             env = env,
             ignoredCount = if (countIgnored) status.entries.count { it is StatusEntry.Ignored } else null,
-            unreadable = unreadable,
         )
     }
 
@@ -216,34 +218,74 @@ public class Stamper @JvmOverloads public constructor(
 
     // ------------------------------------------------------------ internals
 
-    private fun baseCommit(): String =
-        runCatching { workspace.git.revParse("HEAD").hex }.getOrDefault(Stamp.NO_COMMIT)
-
-    private fun trackedDelta(status: GitStatus, unreadable: MutableList<String>): List<StampEntry> {
+    private fun trackedDelta(status: GitStatus): List<StampEntry> {
         val entries = LinkedHashMap<String, StampEntry>()
         for (entry in status.entries) {
             when (entry) {
-                is StatusEntry.Ordinary -> entries[entry.path] = stampEntry(entry.path, entry.worktreeMode, unreadable)
-                is StatusEntry.Unmerged -> entries[entry.path] = stampEntry(entry.path, entry.worktreeMode, unreadable)
+                is StatusEntry.Ordinary -> entries[entry.path] = stampEntry(entry.path, entry.worktreeMode)
+                is StatusEntry.Unmerged -> entries[entry.path] = stampEntry(entry.path, entry.worktreeMode)
                 is StatusEntry.Renamed -> {
-                    entries[entry.path] = stampEntry(entry.path, entry.worktreeMode, unreadable)
+                    entries[entry.path] = stampEntry(entry.path, entry.worktreeMode)
                     // A rename removes its origin from the candidate; a copy leaves it in place.
-                    if (entry.origin == ChangeOrigin.RENAME &&
-                        !Files.exists(workspace.root.resolve(entry.origPath))
-                    ) {
-                        entries[entry.origPath] = deleted(entry.origPath)
+                    if (entry.origin == ChangeOrigin.RENAME) {
+                        val origin = stampEntry(entry.origPath, FileMode.ABSENT)
+                        if (origin.type == EntryType.Deleted) entries[entry.origPath] = origin
                     }
                 }
 
                 is StatusEntry.Untracked, is StatusEntry.Ignored -> Unit
             }
         }
+        // Git status compares filtered content. Even a Git-clean path can have different raw
+        // bytes (or an ignored mode change), so compare every remaining tracked path to its object.
+        val converted = ArrayList<Pair<LsFilesEntry, StampEntry>>()
+        for (row in workspace.git.lsFiles()) {
+            // A gitlink is a directory on disk; git status already reports submodule changes.
+            if (row.stage != 0 || row.path in entries || row.mode == FileMode.GITLINK) continue
+            val entry = captureEntry(row.path, row.mode, row) ?: continue
+            if (entry.type == EntryType.File && entry.mode == row.mode && '\n' !in row.path && '\r' !in row.path) {
+                converted.add(row to entry)
+            } else {
+                entries[row.path] = entry
+            }
+        }
+        for ((row, entry) in checkoutChanged(converted)) entries[row.path] = entry
         return entries.values.sortedWith(compareBy(PATH_ORDER) { it.path })
     }
 
-    private fun untracked(status: GitStatus, unreadable: MutableList<String>): List<StampEntry> =
+    /**
+     * Raw bytes that differ from the index object may still be its clean checkout (autocrlf, eol
+     * attributes, smudge filters). Such a path is unchanged; any other raw difference stays a member,
+     * so a change a clean filter would hide still changes the candidate.
+     */
+    private fun checkoutChanged(converted: List<Pair<LsFilesEntry, StampEntry>>): List<Pair<LsFilesEntry, StampEntry>> {
+        val changed = ArrayList<Pair<LsFilesEntry, StampEntry>>()
+        var start = 0
+        while (start < converted.size) {
+            // Bound each batch's output by the raw sizes it is expected to reproduce.
+            var end = start
+            var budget = 0L
+            while (end < converted.size && (end == start || budget + converted[end].second.sizeBytes <= SMUDGE_BATCH_BYTES)) {
+                budget += converted[end].second.sizeBytes
+                end++
+            }
+            val batch = converted.subList(start, end)
+            val checkout = workspace.git.catFileSmudged(
+                batch.map { (row, _) -> row.id to row.path },
+                batch.map { (_, entry) -> entry.sizeBytes },
+            )
+            batch.forEachIndexed { i, pair ->
+                val bytes = checkout[i]
+                if (bytes == null || Digest.of(bytes) != pair.second.digest) changed.add(pair)
+            }
+            start = end
+        }
+        return changed
+    }
+
+    private fun untracked(status: GitStatus): List<StampEntry> =
         status.entries.filterIsInstance<StatusEntry.Untracked>()
-            .map { stampEntry(it.path, FileMode.ABSENT, unreadable) }
+            .map { stampEntry(it.path, FileMode.ABSENT) }
             .filter { it.type != EntryType.Deleted }
             .sortedWith(compareBy(PATH_ORDER) { it.path })
 
@@ -252,61 +294,51 @@ public class Stamper @JvmOverloads public constructor(
      * which is the only mode that is meaningful on a platform without a POSIX executable bit;
      * [FileMode.ABSENT] means "git did not say", and the mode is then derived from the file itself.
      */
-    private fun stampEntry(path: String, reportedMode: FileMode, unreadable: MutableList<String>): StampEntry {
-        val resolved = workspace.resolve(path, Intent.Read)
+    private fun stampEntry(path: String, reportedMode: FileMode): StampEntry =
+        checkNotNull(captureEntry(path, reportedMode))
+
+    private fun captureEntry(path: String, reportedMode: FileMode, baseline: LsFilesEntry? = null): StampEntry? {
+        val resolved = workspace.paths.resolveCapture(path)
         if (resolved !is PathResolution.Resolved) {
-            unreadable.add(path)
-            return deleted(path)
+            throw SnapshotIntegrityError("cannot stamp '$path': $resolved")
         }
-        return when (WorkspacePath.kindOf(resolved.real)) {
+        return when (resolved.kind) {
             PathKind.Missing -> deleted(path)
             PathKind.Symlink -> {
-                val target = runCatching { Files.readSymbolicLink(resolved.real).toString() }.getOrNull()
-                if (target == null) {
-                    unreadable.add(path)
-                    deleted(path)
-                } else {
-                    val bytes = target.replace('\\', '/').toByteArray(StandardCharsets.UTF_8)
-                    StampEntry(path, EntryType.Symlink, FileMode.SYMLINK, Digest.of(bytes), bytes.size.toLong())
-                }
+                val bytes = linkTarget(resolved.real).toByteArray(StandardCharsets.UTF_8)
+                if (matchesObject(bytes, FileMode.SYMLINK, baseline)) return null
+                StampEntry(path, EntryType.Symlink, FileMode.SYMLINK, Digest.of(bytes), bytes.size.toLong())
             }
-
-            PathKind.Directory -> StampEntry(
-                path = path,
-                type = EntryType.Directory,
-                mode = FileMode.TREE,
-                digest = Digest.ofUtf8(""),
-                sizeBytes = 0,
-            )
-
-            else -> {
+            PathKind.Regular -> {
                 val bytes = workspace.bytes(resolved)
-                if (bytes == null) {
-                    unreadable.add(path)
-                    deleted(path)
-                } else {
-                    StampEntry(
-                        path = path,
-                        type = EntryType.File,
-                        mode = fileMode(resolved, reportedMode),
-                        digest = Digest.of(bytes),
-                        sizeBytes = bytes.size.toLong(),
-                    )
-                }
+                    ?: throw SnapshotIntegrityError("'$path' disappeared during stamping")
+                val mode = fileMode(resolved, reportedMode)
+                if (matchesObject(bytes, mode, baseline)) return null
+                StampEntry(path, EntryType.File, mode, Digest.of(bytes), bytes.size.toLong())
             }
+            PathKind.Directory -> StampEntry(path, EntryType.Directory, FileMode.TREE, Digest.ofUtf8(""), 0)
+            else -> throw SnapshotIntegrityError("unsupported capture kind ${resolved.kind}: $path")
         }
+    }
+
+    private fun matchesObject(bytes: ByteArray, mode: FileMode, baseline: LsFilesEntry?): Boolean {
+        if (baseline == null || mode != baseline.mode) return false
+        val hash = java.security.MessageDigest.getInstance(if (baseline.id.hex.length == 40) "SHA-1" else "SHA-256")
+        hash.update("blob ${bytes.size}\u0000".toByteArray(StandardCharsets.US_ASCII))
+        return io.astrolabe.id.Hashing.hex(hash.digest(bytes)) == baseline.id.hex
     }
 
     /**
-     * The mode git reports is authoritative where it has one: on Windows there is no executable bit
-     * to read, so deriving it from the filesystem would make the same tree stamp differently on the
-     * two supported platforms.
+     * Read actual executable state on POSIX, even if core.fileMode is disabled. On Windows Git's
+     * reported mode carries the executable bit that the filesystem cannot represent.
      */
     private fun fileMode(resolved: PathResolution.Resolved, reportedMode: FileMode): FileMode = when {
+        POSIX -> if (Files.isExecutable(resolved.real)) FileMode.EXECUTABLE else FileMode.REGULAR
         reportedMode == FileMode.EXECUTABLE || reportedMode == FileMode.REGULAR -> reportedMode
-        POSIX && Files.isExecutable(resolved.real) -> FileMode.EXECUTABLE
         else -> FileMode.REGULAR
     }
+
+    private val SMUDGE_BATCH_BYTES: Long = 16L * 1024 * 1024
 
     /** True where the filesystem carries a POSIX executable bit at all; Windows does not. */
     private val POSIX: Boolean =

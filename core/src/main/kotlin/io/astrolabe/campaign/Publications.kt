@@ -74,7 +74,11 @@ internal class Publications(private val idGen: IdGen, private val clock: Clock) 
             return PublicationRun(request, listOf(PublicationResult.Refused(stage, Refusal(PublicationPolicy.wire(stage), RefusalReason.NotApproved, "publication fenced: $fenced"))), finish)
         }
         val contract = c.contract
-        val publisher =Publisher(c.workspace.git, c.ids, contract.authorization, contract.version, authority, idGen, deployer, request.knownRemotes)
+        val publisher = Publisher(c.workspace.git, c.ids, contract.authorization, contract.version, authority, idGen, deployer, request.knownRemotes).also {
+            it.publicationRefusal = {
+                c.refusal() ?: if (c.contract.version != contract.version) "contract revision changed during publication" else null
+            }
+        }
         val current = c.stamper.report().candidateId
         // D-250: L0–L2 are green at the final stamp only for a completed campaign with nothing left unverified.
         val green = finish.stamp.takeIf { finish.status == "completed" && finish.notVerified.isEmpty() }

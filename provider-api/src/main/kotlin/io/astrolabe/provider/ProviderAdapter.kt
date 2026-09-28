@@ -84,8 +84,9 @@ public object Validations {
         if (estimate.unknownHistory) {
             problems += Problem(ProblemKind.UnknownHistorySize, "effective history size unknown; use a fresh lineage")
         } else {
-            val needed = estimate.upperBoundTokens + request.maxOutputTokens
-            if (needed > capabilities.contextLimitTokens) {
+            val needed = saturatedAdd(estimate.upperBoundTokens, request.maxOutputTokens.toLong())
+            val remaining = capabilities.contextLimitTokens - request.maxOutputTokens
+            if (remaining < 0 || estimate.tokens > remaining || estimate.marginTokens > remaining - estimate.tokens) {
                 problems += Problem(
                     ProblemKind.ContextOverflow,
                     "input ${estimate.tokens}+margin ${estimate.marginTokens}+output ${request.maxOutputTokens} = $needed > " +

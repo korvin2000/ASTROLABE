@@ -11,12 +11,55 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /** P1.3.1: the atlas lists every file it did not collapse, and never lies about existence (§7.1). */
 class AtlasTest {
+
+    @Test
+    fun `linked manifests outside the root and in git metadata are excluded`(@TempDir outside: Path) {
+        TempRepo.create().use { repo ->
+            repo.write("linked/package.json", "{}")
+            repo.commit("track manifest")
+            val before = Atlas.build(repo.root)
+            Files.delete(repo.resolve("linked/package.json"))
+            Files.delete(repo.resolve("linked"))
+            for (target in listOf(outside, repo.resolve(".git"))) {
+                Files.writeString(target.resolve("package.json"), """{"scripts":{"test":"echo outside"}}""")
+                val link = repo.resolve("linked")
+                if (System.getProperty("os.name").startsWith("Windows")) {
+                    io.astrolabe.workspace.requireSupported(io.astrolabe.workspace.createJunction(link, target))
+                } else {
+                    Files.createSymbolicLink(link, target)
+                }
+                try {
+                    assertNull(Atlas.build(repo.root).row("linked/package.json"))
+                    assertNull(before.refresh(listOf("linked/package.json")).row("linked/package.json"))
+                    assertTrue(Sniff.commands(repo.root, setOf("linked/package.json")).isEmpty)
+                    assertNull(readRelative(repo.root, "linked/package.json"))
+                    before.save(outside.resolve("cache"))
+                } finally {
+                    Files.delete(link)
+                }
+            }
+            assertTrue(Sniff.commands(repo.root, setOf(".git/package.json", "../package.json",
+                outside.resolve("package.json").toString())).isEmpty)
+        }
+    }
+
+    @Test
+    fun `a tracked link to a regular file inside the root keeps its row`() {
+        TempRepo.create().use { repo ->
+            repo.write("README.md", "# readme\n")
+            val linked = runCatching { Files.createSymbolicLink(repo.resolve("docs-link.md"), Path.of("README.md")) }
+            org.junit.jupiter.api.Assumptions.assumeTrue(linked.isSuccess, "symbolic links are unavailable on this host")
+            repo.commit("track link")
+            assertNotNull(Atlas.build(repo.root).row("docs-link.md"))
+        }
+    }
 
     @Test
     fun `every fixture file has a row with its own size and hash`() {
@@ -144,6 +187,50 @@ class AtlasTest {
             val reopened = Atlas.open(indexes, repo.root)
             assertNotEquals(fresh.repoKey, reopened.repoKey)
             assertEquals(reopened, Atlas.load(indexes, repo.root), "open() stores what it built")
+        }
+    }
+
+    @Test
+    fun `same size rewrite with restored mtime invalidates cached declarations`(@TempDir indexes: Path) {
+        FixtureRepos.materialize(Fixture.PythonSmall).use { repo ->
+            repo.write("symbols.py", "def old(): pass\n")
+            val fresh = Atlas.build(repo.root)
+            fresh.save(indexes)
+            val modified = Files.getLastModifiedTime(repo.resolve("symbols.py"))
+            repo.write("symbols.py", "def new(): pass\n")
+            Files.setLastModifiedTime(repo.resolve("symbols.py"), modified)
+            assertNull(Atlas.load(indexes, repo.root))
+        }
+    }
+
+    @Test
+    fun `an edit between build and save cannot bless old declarations with new metadata`(@TempDir indexes: Path) {
+        FixtureRepos.materialize(Fixture.PythonSmall).use { repo ->
+            repo.write("symbols.py", "def old(): pass\n")
+            val fresh = Atlas.build(repo.root)
+            repo.write("symbols.py", "def new(): pass\n")
+            fresh.save(indexes)
+            assertNull(Atlas.load(indexes, repo.root))
+        }
+    }
+
+    @Test
+    fun `refresh keeps collapsed descendant counts and sizes current`() {
+        FixtureRepos.materialize(Fixture.PythonSmall).use { repo ->
+            repo.write(".gitignore", "")
+            repo.write("build/generated.py", "abc\n")
+            var atlas = Atlas.build(repo.root)
+            assertEquals(1, atlas.collapsed.single { it.path == "build" }.files)
+            repo.write("build/generated.py", "longer output\n")
+            atlas = atlas.refresh(listOf("build/generated.py"))
+            assertEquals(Atlas.build(repo.root).collapsed, atlas.collapsed)
+            repo.write("build/another.py", "extra\n")
+            atlas = atlas.refresh(listOf("build/another.py"))
+            assertEquals(Atlas.build(repo.root).collapsed, atlas.collapsed)
+            Files.delete(repo.resolve("build/generated.py"))
+            Files.delete(repo.resolve("build/another.py"))
+            atlas = atlas.refresh(listOf("build/generated.py", "build/another.py"))
+            assertEquals(Atlas.build(repo.root).collapsed, atlas.collapsed)
         }
     }
 

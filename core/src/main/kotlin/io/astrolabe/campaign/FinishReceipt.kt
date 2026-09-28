@@ -137,6 +137,11 @@ public object FinishReceipts {
                 listOfNotNull(state.reason.takeIf { entry?.status != RequirementStatus.Verified })
             RequirementLine(r.id, entry?.status?.wire ?: RequirementStatus.Pending.wire, blockers)
         }
+        val assessments = c.store.db.query("SELECT body FROM packets WHERE work_id = ? AND attempt_id = ? AND kind = ? ORDER BY rowid DESC",
+            state.work, state.attempt, io.astrolabe.delegate.ReviewCell.KIND) {
+            Json.decodeFromString(io.astrolabe.delegate.ReviewRecord.serializer(), it.string("body"))
+        }.filter { it.approved && it.contractVersion == contract.version && it.candidate == report.candidateId &&
+            it.evidenceVersions.all { (path, version) -> c.registry.version(path) == version } }
         val acceptance = contract.acceptance.map { item ->
             when (item) {
                 is Acceptance.Run -> {
@@ -151,8 +156,12 @@ public object FinishReceipts {
                     }
                     AcceptanceLine(item.id, "run", status, receipt?.stampAfter?.hash8, currency?.applicability?.name?.lowercase(), listOfNotNull(receipt?.raw?.hex))
                 }
-                is Acceptance.Check -> AcceptanceLine(item.id, "check", "not_assessed", null, null, emptyList())
-                is Acceptance.Review -> AcceptanceLine(item.id, "review", "not_reviewed", null, null, emptyList())
+                is Acceptance.Check -> assessments.firstOrNull { item.id in it.criteria }?.let {
+                    AcceptanceLine(item.id, "check", "accepted", it.candidate.hash8, "current", listOf(it.packetId))
+                } ?: AcceptanceLine(item.id, "check", "not_assessed", null, null, emptyList())
+                is Acceptance.Review -> assessments.firstOrNull { item.id in it.criteria }?.let {
+                    AcceptanceLine(item.id, "review", "approved", it.candidate.hash8, "current", listOf(it.packetId))
+                } ?: AcceptanceLine(item.id, "review", "not_reviewed", null, null, emptyList())
             }
         }
         val changes = packets.flatMap { it.changes }

@@ -531,7 +531,21 @@ private fun parseCurly(path: String, language: Language, lines: List<String>, di
         if (!isCommentLine(line) && container(line) != null) containers += index..scanner.end(lines, index)
     }
 
-    fun nestedAt(index: Int): Boolean = containers.any { index in it && index != it.first }
+    fun insideAfterStart(spans: List<IntRange>): BooleanArray {
+        val changes = IntArray(lines.size + 1)
+        for (span in spans) if (span.first < span.last) {
+            changes[span.first + 1]++
+            changes[span.last + 1]--
+        }
+        var active = 0
+        return BooleanArray(lines.size) { index ->
+            active += changes[index]
+            active > 0
+        }
+    }
+
+    val nested = insideAfterStart(containers)
+    fun nestedAt(index: Int): Boolean = nested[index]
 
     val bodies = ArrayList<IntRange>()
     for ((index, line) in lines.withIndex()) {
@@ -540,7 +554,8 @@ private fun parseCurly(path: String, language: Language, lines: List<String>, di
         if (declaration.groupValues.isNotEmpty()) bodies += index..scanner.end(lines, index)
     }
 
-    fun insideBody(index: Int): Boolean = bodies.any { index in it && index != it.first }
+    val insideBodies = insideAfterStart(bodies)
+    fun insideBody(index: Int): Boolean = insideBodies[index]
 
     fun add(kind: DeclarationKind, name: String, index: Int, exported: Boolean) {
         val cleaned = name.trim('`')

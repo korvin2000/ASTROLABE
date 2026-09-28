@@ -8,6 +8,7 @@ import io.astrolabe.id.Identities
 import io.astrolabe.id.WorkId
 import io.astrolabe.provider.StopReason
 import kotlinx.serialization.json.Json
+import kotlinx.coroutines.launch
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.test.Test
@@ -29,6 +30,45 @@ class EventsTest {
         AgentEvent.Budget.Reserved(ids, 3, 500, "model call", Phase.Understand),
         AgentEvent.Kb.Invalidated(ids, "N-1", "anchor moved"),
     )
+
+    @Test
+    fun `concurrent emitters deliver one ordered stream`() {
+        Events(clock, replay = 1000, bufferCapacity = 2000).use { events ->
+            val recorder = EventRecorder()
+            events.subscribe(recorder).use {
+                val pool = java.util.concurrent.Executors.newFixedThreadPool(8)
+                try {
+                    val jobs = (1..8).map { pool.submit { repeat(100) { events.emit(samples[0]) } } }
+                    jobs.forEach { it.get() }
+                    assertTrue(recorder.awaitCount(800))
+                    assertEquals((1L..800L).toList(), recorder.records.map { it.seq })
+                } finally { pool.shutdownNow() }
+            }
+        }
+    }
+
+    @Test
+    fun `a slow flow collector retains the final event after overflow`() = kotlinx.coroutines.runBlocking {
+        Events(clock, replay = 0, bufferCapacity = 1000).use { events ->
+            val held = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val final = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val collector = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                events.records().collect { record ->
+                    if (record.seq == 1L) { held.complete(Unit); release.await() }
+                    if (record.seq == 2001L) final.complete(Unit)
+                }
+            }
+            kotlinx.coroutines.yield()
+            events.emit(samples[0])
+            kotlinx.coroutines.withTimeout(5000) { held.await() }
+            repeat(2000) { events.emit(samples[0]) }
+            // Let the producer fill its buffer before releasing the slow collector.
+            kotlinx.coroutines.delay(200)
+            release.complete(Unit)
+            try { kotlinx.coroutines.withTimeout(5000) { final.await() } } finally { collector.cancel() }
+        }
+    }
 
     @Test
     fun `every event serializes with its discriminator and round trips`() {

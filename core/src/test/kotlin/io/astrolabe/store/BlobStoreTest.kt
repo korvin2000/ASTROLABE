@@ -211,4 +211,43 @@ class BlobStoreTest {
             "raw_blob" to rawBlob,
         )
     }
+
+    @Test
+    fun `gc adopts referenced orphans despite a young temporary backlog and eventually visits later files`() {
+        openStore(root, clock = Clock.systemUTC()).use { store ->
+            repeat(BlobStore.MAX_ORPHANS_PER_PASS + 1) {
+                Files.writeString(store.layout.blobsTemp.resolve("young-$it"), "temporary")
+            }
+            val payload = bytes("referenced orphan beyond cleanup budget")
+            val digest = Digest.of(payload)
+            Files.write(store.blobs.path(digest), payload)
+            val result = store.blobs.gc(setOf(digest))
+            assertEquals(1, result.adopted)
+            assertTrue(result.bounded)
+            assertContentEquals(payload, store.blobs.get(digest))
+
+            // Already-visited young files must not restart the scan and starve the remainder.
+            Files.list(store.layout.blobsTemp).use { paths ->
+                paths.forEach { Files.setLastModifiedTime(it, java.nio.file.attribute.FileTime.fromMillis(0)) }
+            }
+            repeat(12) { store.blobs.gc(setOf(digest)) }
+            assertEquals(emptyList(), StoreInspector(store).temporaryBlobFiles())
+        }
+    }
+
+    @Test
+    fun `gc bounds registered row collection and continues past referenced rows`() {
+        openStore(root, clock = Clock.systemUTC()).use { store ->
+            val digests = (0..BlobStore.MAX_ORPHANS_PER_PASS).map {
+                store.blobs.put(bytes("blob-$it"), BlobKind.OUTPUT, TEST_IDS)
+            }
+            val kept = digests.sortedBy { it.hex }.take(BlobStore.MAX_ORPHANS_PER_PASS / 4).toSet()
+            val first = store.blobs.gc(kept, grace = Duration.ZERO)
+            assertTrue(first.bounded)
+            assertTrue(first.collected <= BlobStore.MAX_ORPHANS_PER_PASS / 4)
+            repeat(8) { store.blobs.gc(kept, grace = Duration.ZERO) }
+            assertEquals(kept.size.toLong(), store.db.count("SELECT count(*) FROM blobs"))
+            kept.forEach { assertTrue(store.blobs.exists(it)) }
+        }
+    }
 }

@@ -10,6 +10,7 @@ public interface Observations {
     /** Records [observation]; its content blob must already be published (artifact before referencing row). */
     public fun record(observation: Observation)
 
+    /** Exact observation ID, or the latest captured result of an action alias. Exact IDs retain historical views. */
     public fun get(id: String): Observation?
 }
 
@@ -23,7 +24,7 @@ public class InMemoryObservations : Observations {
     }
 
     @Synchronized
-    override fun get(id: String): Observation? = rows[id]
+    override fun get(id: String): Observation? = rows[id] ?: rows.values.lastOrNull { it.actionId == id }
 }
 
 /** Observations in the store (`observations` table; the tool layer is the writer). */
@@ -37,7 +38,7 @@ public class SqliteObservations(private val store: Store, private val clock: Clo
     }
 
     override fun get(id: String): Observation? =
-        store.db.query("SELECT body FROM observations WHERE id = ?", id) { JSON.decodeFromString(Observation.serializer(), it.string("body")) }.firstOrNull()
+        store.db.query("SELECT body FROM observations WHERE id = ? OR action_id = ? ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END, rowid DESC LIMIT 1", id, id, id) { JSON.decodeFromString(Observation.serializer(), it.string("body")) }.firstOrNull()
 
     private companion object {
         val JSON = Json { encodeDefaults = true }

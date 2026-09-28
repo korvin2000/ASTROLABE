@@ -202,6 +202,8 @@ public data class Atlas(
      * the next [build] — an incompleteness of tier 0, consistent with `complete = false`. When a
      * touched file is Kotlin or Java the outlines of the repository's *other* JVM files are also
      * consulted (memoized on this instance), because a JVM import names a package, not a path.
+     * Row copying/sorting remains O(repository rows log rows). A collapsed-directory change also
+     * rescans repository metadata to recompute its totals; only parsing is limited to touched files.
      */
     public fun refresh(touched: Collection<String>): Atlas {
         if (touched.isEmpty()) return this
@@ -244,10 +246,15 @@ public data class Atlas(
             for (file in scanned) buildRow(file, parsed, resolver, known)?.let { added += it }
             fresh = parsed.outlines
         }
+        val totals = if (wanted.any { collapsedAncestor("$it/") != null }) {
+            scanRepository(root).collapsed
+        } else {
+            keptCollapsed + addedCollapsed
+        }
         return Atlas(
             root = root,
             rows = (kept + added).sortedBy { it.path },
-            collapsed = (keptCollapsed + addedCollapsed).sortedBy { it.path },
+            collapsed = totals.sortedBy { it.path },
         ).seedOutlines(outlines.filterKeys { it !in wanted } + fresh)
     }
 
@@ -259,7 +266,7 @@ public data class Atlas(
      */
     public fun save(indexesDir: Path): Path {
         Files.createDirectories(indexesDir)
-        val stamps = rows.associate { row -> row.path to mtimeOf(resolveRelative(root, row.path)) }
+        val stamps = rows.associate { row -> row.path to mtimeOf(root, row.path) }
         val cache = AtlasCache(
             schema = CACHE_SCHEMA,
             repoKey = repoKey.hex,
@@ -303,11 +310,9 @@ public data class Atlas(
         /**
          * The cached atlas for [root] when it is still current, else `null`.
          *
-         * The tree is rescanned for `(path, size, mtime)` and a row whose stamp is unchanged keeps
-         * its cached `hash8`; only changed rows are re-read. The resulting [repoKey] must equal the
-         * cached one, so a stale metadata stamp can cost a needless rebuild but can never produce a
-         * cache hit on content that differs. Metadata is a lookup cache here and nothing more
-         * (I-05): the atlas is an orientation index, never the authority on a file version.
+         * Re-reads raw content before reusing declarations. Size and mtime cannot validate a
+         * cache hit: editors may preserve both, and saving may follow an intervening edit.
+         * The short row hashes remain orientation hints, never authoritative file identities.
          */
         @JvmStatic
         public fun load(indexesDir: Path, root: Path): Atlas? {
@@ -321,12 +326,9 @@ public data class Atlas(
             val lines = ArrayList<String>(scan.files.size)
             for (file in scan.files) {
                 val cached = cachedByPath[file.path] ?: return null
-                val hash8 = if (cached.row.bytes == file.size && cached.mtime == file.mtime) {
-                    cached.row.hash8
-                } else {
-                    val bytes = readRelative(canonical, file.path) ?: return null
-                    Digest.of(bytes).hash8
-                }
+                val bytes = readRelative(canonical, file.path) ?: return null
+                val hash8 = Digest.of(bytes).hash8
+                if (bytes.size.toLong() != cached.row.bytes || hash8 != cached.row.hash8) return null
                 lines += "${file.path} $hash8"
             }
             lines.sort()
@@ -366,7 +368,7 @@ internal data class AtlasCache(
     val collapsed: List<Collapsed>,
 )
 
-/** A row plus the metadata stamp that lets [Atlas.load] skip re-hashing it. */
+/** Cached row and legacy metadata; [Atlas.load] always rechecks content. */
 @Serializable
 internal data class CachedRow(val row: AtlasRow, val mtime: Long)
 
@@ -523,13 +525,21 @@ private fun walkFiles(root: Path): List<String> {
 }
 
 /** Resolves a forward-slashed workspace-relative path against [root] on every platform. */
-internal fun resolveRelative(root: Path, relative: String): Path =
-    relative.split('/').filter { it.isNotEmpty() }.fold(root) { path, segment ->
-        require(segment != "..") { "an atlas path may not escape the repository root; got '$relative'" }
-        path.resolve(segment)
-    }
+internal fun resolveRelative(root: Path, relative: String): Path {
+    val resolved = io.astrolabe.workspace.WorkspacePath.of(root).resolve(relative, io.astrolabe.workspace.Intent.Read)
+    if (resolved !is io.astrolabe.workspace.PathResolution.Resolved) throw IOException("atlas path refused: $relative ($resolved)")
+    // A tracked link to a regular file inside the root stays visible (§7.1); resolve already checked containment.
+    val regular = resolved.kind == io.astrolabe.workspace.PathKind.Regular ||
+        resolved.kind == io.astrolabe.workspace.PathKind.Symlink && Files.isRegularFile(resolved.real)
+    if (!regular) throw IOException("atlas path refused: $relative (${resolved.kind})")
+    return resolved.real
+}
 
-internal fun readRelative(root: Path, relative: String): ByteArray? = readBytes(resolveRelative(root, relative))
+internal fun readRelative(root: Path, relative: String): ByteArray? = try {
+    readBytes(resolveRelative(root, relative))
+} catch (_: IOException) {
+    null
+}
 
 internal fun readBytes(path: Path): ByteArray? = try {
     Files.readAllBytes(path)
@@ -539,8 +549,8 @@ internal fun readBytes(path: Path): ByteArray? = try {
     null
 }
 
-private fun mtimeOf(path: Path): Long = try {
-    Files.getLastModifiedTime(path).toMillis()
+private fun mtimeOf(root: Path, relative: String): Long = try {
+    Files.getLastModifiedTime(resolveRelative(root, relative)).toMillis()
 } catch (_: IOException) {
     0L
 }

@@ -4,6 +4,7 @@ import io.astrolabe.evidence.Outcome
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 class JestShaperTest {
@@ -95,10 +96,39 @@ class JestShaperTest {
         assertEquals(Outcome.Failed, shaped.status)
         assertEquals(2, shaped.tests.size)
         val failing = shaped.tests.single { it.failing }
-        assertEquals("discount.test.ts", failing.identity.file)
+        assertEquals("src/discount.test.ts", failing.identity.file)
         assertEquals("discount", failing.identity.suite)
         assertEquals("applies tier 3", failing.identity.name)
         assertEquals(5L, failing.durationMillis)
         assertTrue(shaped.view.contains("applies tier 3"), shaped.view)
+    }
+
+    @Test
+    fun `jest identities are equal when the same suite runs under different roots`() {
+        fun shapedUnder(root: String) = Shapers.shape(Recorded.capture(
+            argv = listOf("npx", "jest"), exitCode = 1,
+            reports = listOf(ReportArtifact("build/act-7/jest.json", ReportKind.JestJson, true, "written by this invocation",
+                """{"numTotalTests":1,"numFailedTests":1,"testResults":[{"name":"$root/services/a/test.ts","assertionResults":[{"title":"fails","status":"failed"}]}]}""".toByteArray())),
+        ).copy(cwd = null, executionRoot = root))
+        val workspace = shapedUnder("/home/dev/shop").tests.single().identity
+        val baseline = shapedUnder("/var/state/candidates/W-1-a1-s0").tests.single().identity
+        assertEquals("services/a/test.ts", workspace.file)
+        assertEquals(workspace.canonical, baseline.canonical)
+    }
+
+    @Test
+    fun `jest json keeps directories for equal test basenames`() {
+        val report = """
+            {"numTotalTests":2,"numFailedTests":2,"testResults":[
+              {"name":"/home/dev/shop/services/a/test.ts","assertionResults":[{"title":"fails","status":"failed"}]},
+              {"name":"/home/dev/shop/services/b/test.ts","assertionResults":[{"title":"fails","status":"failed"}]}
+            ]}
+        """.trimIndent().toByteArray()
+        val shaped = Shapers.shape(Recorded.capture(
+            argv = listOf("npx", "jest"), exitCode = 1,
+            reports = listOf(ReportArtifact("build/act-7/jest.json", ReportKind.JestJson, true, "written by this invocation", report)),
+        ))
+        assertEquals(listOf("services/a/test.ts", "services/b/test.ts"), shaped.tests.map { it.identity.file })
+        assertNotEquals(shaped.tests[0].identity.canonical, shaped.tests[1].identity.canonical)
     }
 }

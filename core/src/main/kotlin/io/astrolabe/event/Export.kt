@@ -40,41 +40,39 @@ public object Export {
         exportsDir: Path,
         contexts: List<ContextId> = emptyList(),
     ): List<Path> {
+        val documents = views.snapshot {
+            val contract = views.contract(work)
+            val ledger = views.ledger(work)
+            val checks = views.checks(work)
+            val budget = views.budget(work)
+            val receipts = views.receipts(work)
+            val finish = views.finishReceipt(work)
+            val ordered = contexts.distinct().sortedBy { it.value }
+            val registers = ordered.map(views::register)
+            val worksets = ordered.map(views::workset)
+            val result = linkedMapOf(
+                "contract.json" to json(ContractView.serializer(), contract),
+                "ledger.json" to json(LedgerView.serializer(), ledger),
+                "checks.json" to json(ChecksView.serializer(), checks),
+                "budget.json" to json(BudgetView.serializer(), budget),
+                "receipts.json" to json(ReceiptView.serializer(), receipts),
+                "finish-receipt.json" to json(FinishReceiptView.serializer(), finish),
+            )
+            for (register in registers) {
+                result["register-${register.context.value}.json"] = json(RegisterView.serializer(), register)
+            }
+            for (workset in worksets) {
+                result["workset-${workset.context.value}.json"] = json(WorksetView.serializer(), workset)
+            }
+            result[SUMMARY] = summary(work, contract, ledger, checks, budget, receipts, finish, registers, worksets)
+            result
+        }
         Files.createDirectories(exportsDir)
-        val written = ArrayList<Path>()
-        val contract = views.contract(work)
-        val ledger = views.ledger(work)
-        val checks = views.checks(work)
-        val budget = views.budget(work)
-        val receipts = views.receipts(work)
-        val finish = views.finishReceipt(work)
-
-        written.add(json(exportsDir, "contract.json", ContractView.serializer(), contract))
-        written.add(json(exportsDir, "ledger.json", LedgerView.serializer(), ledger))
-        written.add(json(exportsDir, "checks.json", ChecksView.serializer(), checks))
-        written.add(json(exportsDir, "budget.json", BudgetView.serializer(), budget))
-        written.add(json(exportsDir, "receipts.json", ReceiptView.serializer(), receipts))
-        written.add(json(exportsDir, "finish-receipt.json", FinishReceiptView.serializer(), finish))
-
-        val ordered = contexts.distinct().sortedBy { it.value }
-        val registers = ordered.map(views::register)
-        val worksets = ordered.map(views::workset)
-        for (register in registers) {
-            val name = "register-${register.context.value}.json"
-            written.add(json(exportsDir, name, RegisterView.serializer(), register))
-        }
-        for (workset in worksets) {
-            val name = "workset-${workset.context.value}.json"
-            written.add(json(exportsDir, name, WorksetView.serializer(), workset))
-        }
-
-        val summary = summary(work, contract, ledger, checks, budget, receipts, finish, registers, worksets)
-        written.add(text(exportsDir, SUMMARY, summary))
-        return written
+        return documents.map { (name, content) -> text(exportsDir, name, content) }
     }
 
-    private fun <T> json(dir: Path, name: String, serializer: KSerializer<T>, value: T): Path =
-        text(dir, name, JSON.encodeToString(serializer, value) + "\n")
+    private fun <T> json(serializer: KSerializer<T>, value: T): String =
+        JSON.encodeToString(serializer, value) + "\n"
 
     private fun text(dir: Path, name: String, content: String): Path {
         val file = dir.resolve(name)

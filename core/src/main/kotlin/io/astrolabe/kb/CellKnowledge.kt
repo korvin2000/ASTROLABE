@@ -62,8 +62,10 @@ public class KnowledgeUse @JvmOverloads constructor(
     estimator: TokenEstimator,
     focusMaxTokens: Int = 300,
     private val negatives: KbNegatives? = null,
+    inputs: (() -> InjectionInputs)? = null,
+    currentNotes: (() -> List<Note>)? = null,
 ) : CellKnowledge {
-    private val focus = FocusNotes(notes, estimator, focusMaxTokens, compiled = injected)
+    private val focus = FocusNotes(notes, estimator, focusMaxTokens, compiled = injected, inputs = inputs, currentNotes = currentNotes)
     private val citedIds = LinkedHashSet<String>()
 
     override fun focusNotes(focus: String?, touched: Set<String>): String? {

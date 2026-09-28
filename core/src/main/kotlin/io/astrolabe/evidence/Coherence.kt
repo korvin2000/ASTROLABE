@@ -3,6 +3,7 @@ package io.astrolabe.evidence
 import io.astrolabe.id.FileVersion
 import io.astrolabe.workspace.CasCheck
 import io.astrolabe.workspace.ChangeListener
+import io.astrolabe.workspace.ChangeDelivery
 import io.astrolabe.workspace.VersionChange
 import io.astrolabe.workspace.VersionRegistry
 import java.util.concurrent.CopyOnWriteArrayList
@@ -35,12 +36,13 @@ public sealed interface Served {
  * accumulate in [scheduled] until the end-of-turn checker takes them, and the same set is what the
  * atlas refreshes its rows from (`Atlas.refresh(touched)`), because a run touches many files at once.
  *
- * Horizons run on the announcing thread and must not throw: the registry has already recorded the
- * transition, so a failed horizon would not hear it again (workspace mutation is serialized, D-26).
+ * Horizons run on the announcing thread. A failed horizon is retried before subsequent transitions;
+ * acknowledged horizons are not repeated. A horizon that throws must tolerate retrying its own effects.
  */
 public class Coherence(private val registry: VersionRegistry) : ChangeListener, AutoCloseable {
     private val horizons = CopyOnWriteArrayList<ChangeListener>()
     private val pending = LinkedHashSet<String>()
+    private var pendingDelivery: ChangeDelivery? = null
     private val subscription: AutoCloseable = registry.addListener(this)
 
     /** Registers a horizon; later changes reach it after every horizon registered before it. */
@@ -51,8 +53,17 @@ public class Coherence(private val registry: VersionRegistry) : ChangeListener, 
 
     /** The registry calls this once per transition; tests and adapters may announce a change directly. */
     override fun onChange(change: VersionChange) {
-        synchronized(pending) { pending.add(change.path) }
-        for (horizon in horizons) horizon.onChange(change)
+        synchronized(horizons) {
+            val previous = pendingDelivery
+            previous?.finish()
+            pendingDelivery = null
+            if (previous?.change == change) return
+            synchronized(pending) { pending.add(change.path) }
+            val delivery = ChangeDelivery(change, horizons.toList()) { it in horizons }
+            pendingDelivery = delivery
+            delivery.finish()
+            pendingDelivery = null
+        }
     }
 
     /** Paths changed since the checker last took them (§4.4 "schedule the end-of-turn checker on path"). */

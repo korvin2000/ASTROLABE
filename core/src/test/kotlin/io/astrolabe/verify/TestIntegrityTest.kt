@@ -56,6 +56,20 @@ class TestIntegrityTest {
     }
 
     @Test
+    fun `reordered assertions and test redefinitions require review`() {
+        val (contract, checks) = s0()
+        val before = "def test_total():\n    assert False\n    return\n"
+        for (after in listOf(
+            "def test_total():\n    return\n    assert False\n",
+            before + "\ndef test_total():\n    pass\n",
+            "def test_total():\n    return\n" + before.substringAfter("\n"),
+        )) {
+            val flag = TestIntegrity.classify(listOf(SurfaceChange("tests/test_total.py", before, after)), "edit", contract, checks).single()
+            assertTrue(flag.blocksCompletion, flag.toString())
+        }
+    }
+
+    @Test
     fun `touching a test file, a check definition, CI config or an acceptance command input is flagged and source is not`() {
         val (contract, checks) = s0()
         val touched = listOf("tests/test_total.py", "pyproject.toml", ".github/workflows/ci.yml", "jest.config.ts", "src/total.py", "tests/conftest.py")
@@ -96,6 +110,26 @@ class TestIntegrityTest {
 
         val cwdScoped = base.strengthen(Acceptance.Run("AC-3", Command(listOf("npm", "test"), cwd = "packages/web"), Origin.Model("R1")))
         assertEquals(AcceptanceSurface.AcceptanceCommand, TestIntegrity.surfaceOf("packages/web/src/index.ts", cwdScoped))
+    }
+
+    @Test
+    fun `editing a repository executable used by acceptance requires review`() {
+        val (base, _) = s0()
+        for ((argv0, cwd, path) in listOf(
+            Triple("./scripts/check.sh", null, "scripts/check.sh"),
+            Triple("./scripts/check.sh", "packages/web", "packages/web/scripts/check.sh"),
+            Triple("./check.sh", null, "check.sh"),
+            Triple(".\\check.bat", "packages/web", "packages/web/check.bat"),
+        )) {
+            val contract = base.strengthen(
+                Acceptance.Run("AC-script", Command(listOf(argv0), cwd = cwd), Origin.Model("R1")),
+            )
+            val checks = Checks.seed(contract, RunnerCommands(test = Command(listOf("python", "-m", "pytest", "-q"))))
+            val flag = TestIntegrity.baseline(listOf(path), "edit script", contract, checks).single()
+            assertEquals(AcceptanceSurface.AcceptanceCommand, flag.surface)
+            assertTrue("CHK-accept-AC-script" in flag.requiredChecks)
+            assertTrue(flag.blocksCompletion)
+        }
     }
 
     @Test
@@ -159,7 +193,7 @@ class TestIntegrityTest {
                 "tests/test_gone.py" to "${TestIntegrity.DELETED_TEST},${TestIntegrity.WEAKENED_ASSERTION}",
                 "tests/__snapshots__/total.snap" to TestIntegrity.SNAPSHOT_UPDATE,
                 "tests/test_tol.py" to TestIntegrity.WEAKENED_ASSERTION,
-                "tests/test_more.py" to TestIntegrity.ADDITIONS_ONLY,
+                "tests/test_more.py" to TestIntegrity.UNCLASSIFIED,
                 "pyproject.toml" to TestIntegrity.CHECK_CONFIG,
                 "tests/test_unknown.py" to TestIntegrity.UNCLASSIFIED,
             ),
@@ -172,7 +206,7 @@ class TestIntegrityTest {
         assertEquals("    assert total([1, 2]) == 3", weakened.originalObligation)
         assertTrue(weakened.line.contains("· weakened-assertion · required:"), weakened.line)
         assertTrue(weakened.blocksCompletion)
-        assertFalse(flags.first { it.path == "tests/test_more.py" }.blocksCompletion, "a pure addition is rendered, not blocking")
+        assertTrue(flags.first { it.path == "tests/test_more.py" }.blocksCompletion, "additions to existing tests require review because they can bypass assertions")
 
         val reviewer = RecordingReviewer(VerdictOutcome.Approve)
         val request = TestIntegrity.reviewRequest("rv-1", TestIntegrity.unresolved(flags), contract, checks, ids, candidate, "packet-1")

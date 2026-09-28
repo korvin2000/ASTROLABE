@@ -28,7 +28,11 @@ import io.astrolabe.os.Os
 import io.astrolabe.os.OsFailure
 import io.astrolabe.provider.ToolCall as ProviderCall
 import io.astrolabe.store.BlobKind
+import io.astrolabe.store.BlobPoint
+import io.astrolabe.store.CrashPoint
+import io.astrolabe.store.FaultPoints
 import io.astrolabe.store.Store
+import io.astrolabe.tool.Effects
 import io.astrolabe.tool.ParsedCalls
 import io.astrolabe.tool.ToolCalls
 import io.astrolabe.tool.ToolOutcome
@@ -40,12 +44,19 @@ import io.astrolabe.workset.Entry
 import io.astrolabe.workset.EntrySource
 import io.astrolabe.workset.Workset
 import io.astrolabe.workspace.LineRange
+import io.astrolabe.workspace.ChangeListener
+import io.astrolabe.workspace.DirtyState
+import io.astrolabe.workspace.EnvFingerprint
+import io.astrolabe.workspace.EnvInputs
 import io.astrolabe.workspace.Preimages
 import io.astrolabe.workspace.Ranges
+import io.astrolabe.workspace.ShadowRef
+import io.astrolabe.workspace.Stamper
 import io.astrolabe.workspace.VersionRegistry
 import io.astrolabe.workspace.Workspace
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.io.TempDir
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.AfterTest
@@ -78,6 +89,7 @@ class EditTest {
     private val ids = Identities(WorkId("W-1"), AttemptId("a1"), context = ContextId("cell-1"))
     private val idGen = FixedIdGen()
     private val syntaxCalls = ArrayList<String>()
+    private var failNextBlob = false
     private val syntax = SyntaxCheck { relative, real, language ->
         syntaxCalls += "$relative:${language.id}"
         if (language == Language.Python && Files.readString(real).contains("def broken(")) SyntaxResult.Error(1, "SyntaxError") else SyntaxResult.Ok
@@ -97,7 +109,12 @@ class EditTest {
         repo.write("docs/readme.md", "# docs\n")
         repo.write("pyproject.toml", "[project]\nname = \"p\"\n\n[tool.pytest.ini_options]\ntestpaths = [\"tests\"]\n")
         repo.commit("initial")
-        store = Store.open(stateRoot, repo.git, clock)
+        store = Store.open(stateRoot, repo.git, clock, FaultPoints(CrashPoint { point ->
+            if (failNextBlob && point == BlobPoint.AFTER_MOVE_BEFORE_ROW) {
+                failNextBlob = false
+                throw IOException("postimage row failure")
+            }
+        }))
         workspace = Workspace(WorkspaceId("ws-1"), repo.root, repo.git)
         registry = VersionRegistry(workspace)
         coherence = Coherence(registry).also { it.register(workset) }
@@ -117,9 +134,9 @@ class EditTest {
         repo.close()
     }
 
-    private fun edit(os: Os = this.os, shadow: io.astrolabe.workspace.ShadowRef? = null) = Edit(
+    private fun edit(os: Os = this.os, shadow: io.astrolabe.workspace.ShadowRef? = null, redaction: Redaction = Redaction()) = Edit(
         workspace, registry, workset, os, preimages, ScopeGuard(workspace), contracts, checks,
-        SqliteObservations(store, clock), SqliteAliases(store, clock), store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, syntax, shadow,
+        SqliteObservations(store, clock), SqliteAliases(store, clock), store.blobs, redaction, HeuristicEstimator(), idGen, ids, syntax, shadow,
     )
 
     /** What a `look` leaves behind: the read registered at its version, its raw bytes published under that version. */
@@ -147,6 +164,64 @@ class EditTest {
     private fun status(o: ToolOutcome) = o.header!!.runtime.status
 
     @Test
+    fun `redacted and omitted edit views grant no new source coverage`() = runTest {
+        val secret = "AKIA" + "IOSFODNN7EXAMPLE"
+        val created = run("""{"ops":[{"create":"src/secret.py","content":"x = '$secret'\n"}],"why":"create fixture"}""")
+        assertTrue(created.applied)
+        assertFalse(workset.covers("src/secret.py", registry.version("src/secret.py")!!, LineRange(1, 1)))
+        assertTrue(SqliteObservations(store, clock).get(SqliteAliases(store, clock).resolve(ids.work, 1)!!.canonicalId)!!.coverage("src/secret.py").isEmpty)
+        val capped = edit(redaction = Redaction(io.astrolabe.auth.RedactionConfig(maxBytes = 48)))
+        val out = run("""{"ops":[{"create":"src/first.py","content":"a = 1\n"},{"create":"src/last.py","content":"b = 2\n"}],"why":"w"}""", capped)
+        assertTrue(out.header!!.truncated)
+        val version = registry.version("src/last.py")!!
+        assertFalse(workset.covers("src/last.py", version, LineRange(1, 1)))
+        val refused = run(anchored("src/last.py", version, hunk("b = 2", "b = 3")))
+        assertEquals("refused", status(refused))
+        assertTrue(refused.body.contains("outside_displayed"))
+    }
+
+    @Test
+    fun `repeated file operations and aliased create targets refuse the entire batch`() = runTest {
+        val v = seen("src/b.py", 1, 2)
+        val repeated = run("""{"ops":[{"path":"src/b.py","expect":"${v.digest.hex}","hunks":[${hunk("x = 1", "x = 3")}]},{"path":"src/b.py","expect":"${v.digest.hex}","hunks":[${hunk("y = 2", "y = 4")}]}],"why":"w"}""")
+        assertEquals("refused", status(repeated))
+        assertEquals("x = 1\ny = 2\n", Files.readString(repo.resolve("src/b.py")))
+        assertTrue(preimages.of("edit-1").isEmpty())
+        val created = run("""{"ops":[{"create":"src/new.py","content":"first"},{"create":"src/./new.py","content":"second"}],"why":"w"}""")
+        assertEquals("refused", status(created))
+        assertFalse(Files.exists(repo.resolve("src/new.py")))
+        val renamed = run("""{"ops":[{"rename":"src/b.py","to":"src/new.py","expect":"${v.digest.hex}"},{"create":"src/new.py","content":"second"}],"why":"w"}""")
+        assertEquals("refused", status(renamed))
+        assertFalse(Files.exists(repo.resolve("src/new.py")))
+        assertTrue(Files.exists(repo.resolve("src/b.py")))
+    }
+
+    @Test
+    fun `creates that differ only in case refuse the batch on a case-insensitive filesystem`() = runTest {
+        org.junit.jupiter.api.Assumptions.assumeTrue(workspace.paths.caseInsensitive)
+        val created = run("""{"ops":[{"create":"src/new.py","content":"first"},{"create":"src/NEW.py","content":"second"}],"why":"w"}""")
+        assertEquals("refused", status(created))
+        assertFalse(Files.exists(repo.resolve("src/new.py")))
+    }
+
+    @Test
+    fun `stale and missing anchor diagnostics redact secrets before returning and storing`() = runTest {
+        val secret = "AKIA" + "IOSFODNN7EXAMPLE"
+        val v = seen("src/b.py", 1, 2)
+        repo.write("src/b.py", "x = '$secret'\ny = 2\n")
+        val stale = run(anchored("src/b.py", v, hunk("x = 1", "x = 3")))
+        assertFalse(stale.body.contains(secret))
+        assertTrue(stale.header!!.runtime.redactionApplied)
+        val current = seen("src/b.py", 1, 2)
+        val missing = run(anchored("src/b.py", current, hunk("x = 'missing'", "x = 3")))
+        assertFalse(missing.body.contains(secret))
+        for (out in listOf(stale, missing)) {
+            val blob = io.astrolabe.id.Digest(out.header!!.runtime.artifactRefs.first())
+            assertFalse(String(store.blobs.get(blob)).contains(secret))
+        }
+    }
+
+    @Test
     fun `an anchored hunk applies under CAS with preimage, postimage, post-edit coverage, syntax and diffstat`() = runTest {
         val v = seen("src/a.py", 1, 10)
         val out = run(anchored("src/a.py", v, hunk("    return 1", "    return 10")))
@@ -169,7 +244,7 @@ class EditTest {
         assertTrue(out.body.contains("✓ 1 anchored src/a.py @${v.hash8}→@${after.hash8} +1 −1 · syntax ok"), out.body)
         assertTrue(out.body.contains("post-edit src/a.py:1-5 @${after.hash8}\n  1| def a():\n  2|     return 10"), out.body)
         assertEquals("edit", SqliteAliases(store, clock).resolve(ids.work, 1)!!.kind)
-        assertNotNull(SqliteObservations(store, clock).get("obs-1"))
+        assertNotNull(SqliteObservations(store, clock).get(SqliteAliases(store, clock).resolve(ids.work, 1)!!.canonicalId))
     }
 
     @Test
@@ -240,6 +315,99 @@ class EditTest {
     }
 
     @Test
+    fun `a postimage persistence failure reports the file already written and its recovery preimage`() = runTest {
+        val version = seen("src/b.py", 1, 2)
+        val failing = object : Os by os {
+            override fun replaceFileAtomically(path: Path, bytes: ByteArray) {
+                os.replaceFileAtomically(path, bytes)
+                failNextBlob = true
+            }
+        }
+
+        val out = run(anchored("src/b.py", version, hunk("x = 1", "x = 3")), edit(os = failing))
+
+        assertEquals("x = 3\ny = 2\n", Files.readString(repo.resolve("src/b.py")))
+        assertEquals("partial", status(out), out.body)
+        assertFalse(out.applied)
+        assertNotEquals(Effects.None, out.header!!.effects)
+        assertTrue(out.header!!.runtime.effectsUnknown)
+        assertTrue(out.body.contains("src/b.py"), out.body)
+        assertFalse(out.body.contains("nothing was written"), out.body)
+        val preimage = preimages.of("edit-1", "src/b.py")!!
+        assertEquals("x = 1\ny = 2\n", String(preimages.bytesOf(preimage)))
+        assertTrue(out.body.contains(preimage.preimageDigest.hash8), out.body)
+    }
+
+    @Test
+    fun `a coherence failure after publication still reports the written file`() = runTest {
+        val version = seen("src/b.py", 1, 2)
+        coherence.register(ChangeListener { throw IOException("coherence storage unavailable") }).use {
+            val out = run(anchored("src/b.py", version, hunk("x = 1", "x = 3")))
+
+            assertEquals("x = 3\ny = 2\n", Files.readString(repo.resolve("src/b.py")))
+            assertEquals("partial", status(out), out.body)
+            assertFalse(out.applied)
+            assertNotEquals(Effects.None, out.header!!.effects)
+            assertTrue(out.header!!.runtime.effectsUnknown)
+            assertTrue(out.body.contains("src/b.py"), out.body)
+            assertFalse(out.body.contains("nothing was written"), out.body)
+        }
+    }
+
+    @Test
+    fun `a rename whose source cannot be deleted reports the published target`() = runTest {
+        val version = seen("src/b.py", 1, 2)
+        val failing = object : Os by os {
+            override fun replaceFileAtomically(path: Path, bytes: ByteArray) {
+                os.replaceFileAtomically(path, bytes)
+                val source = repo.resolve("src/b.py")
+                Files.delete(source)
+                Files.createDirectory(source)
+                Files.writeString(source.resolve("concurrent.txt"), "concurrent writer\n")
+            }
+        }
+
+        val out = run("""{"ops":[{"rename":"src/b.py","to":"src/renamed.py","expect":"${version.digest.hex}"}],"why":"rename"}""", edit(os = failing))
+
+        assertEquals("x = 1\ny = 2\n", Files.readString(repo.resolve("src/renamed.py")))
+        assertEquals("concurrent writer\n", Files.readString(repo.resolve("src/b.py/concurrent.txt")))
+        assertEquals("partial", status(out), out.body)
+        assertFalse(out.applied)
+        assertNotEquals(Effects.None, out.header!!.effects)
+        assertTrue(out.header!!.runtime.effectsUnknown)
+        assertTrue(out.body.contains("src/renamed.py"), out.body)
+        assertTrue(out.header!!.runtime.scope!!.contains("src/renamed.py"), out.header!!.runtime.scope)
+        assertFalse(out.body.contains("nothing was written"), out.body)
+        val preimage = preimages.of("edit-1", "src/b.py")!!
+        assertEquals("x = 1\ny = 2\n", String(preimages.bytesOf(preimage)))
+        assertTrue(out.body.contains(preimage.preimageDigest.hash8), out.body)
+    }
+
+    @Test
+    fun `a selective revert losing path identity after publication reports unknown effects`() = runTest {
+        val version = seen("src/b.py", 1, 2)
+        assertEquals("ok", status(run(anchored("src/b.py", version, hunk("x = 1", "x = 3")))))
+        val changedIdentity = object : Os by os {
+            override fun replaceFileAtomically(path: Path, bytes: ByteArray) {
+                os.replaceFileAtomically(path, bytes)
+                Files.move(path, path.resolveSibling("reverted-bytes.py"))
+                Files.createDirectory(path)
+            }
+        }
+
+        val out = run("""{"ops":[{"revert":"#1"}],"why":"undo"}""", edit(os = changedIdentity), turn = 2)
+
+        assertEquals("x = 1\ny = 2\n", Files.readString(repo.resolve("src/reverted-bytes.py")), "the inverse was published before its path changed")
+        assertTrue(Files.isDirectory(repo.resolve("src/b.py")))
+        assertFalse(out.applied)
+        assertTrue(status(out) in setOf("partial", "unknown_outcome"), out.body)
+        assertNotEquals(Effects.None, out.header!!.effects)
+        assertTrue(out.header!!.runtime.effectsUnknown)
+        assertTrue(out.body.contains("src/b.py"), out.body)
+        assertFalse(out.body.contains("nothing was written"), out.body)
+    }
+
+    @Test
     fun `human edits after an agent patch make the inverse refuse divergent content (FX-05)`() = runTest {
         val v = seen("src/a.py", 1, 10)
         run(anchored("src/a.py", v, hunk("    return 1", "    return 10")))
@@ -259,6 +427,61 @@ class EditTest {
         assertEquals(v, registry.recorded("src/a.py"))
         assertEquals("refused", status(run("""{"ops":[{"revert":"turn:1"}],"why":"undo"}""")), "no shadow ref given ⇒ turn reverts are unsupported here")
         assertEquals("refused", status(run("""{"ops":[{"revert":"#7"}],"why":"undo"}""")))
+    }
+
+    @Test
+    fun `turn revert refuses every effect after the contract narrows`() = runTest {
+        val env = EnvFingerprint.compute(EnvInputs(osName = "test-os", osArch = "test-arch", runnerPolicyId = "trusted-local/v1"))
+        val dirty = DirtyState(workspace, store.blobs, Stamper(workspace, env), ids, clock)
+        val shadow = ShadowRef(ids.work, ids.attempt, workspace, store, dirty, os, clock)
+        shadow.open(dirty.capture(0))
+        repo.write("src/a.py", a.replace("return 1", "return 10"))
+        Files.delete(repo.resolve("src/b.py"))
+        repo.write("src/new.py", "added = 1\n")
+        repo.write("tests/test_a.py", "def test_a():\n    assert a() == 10\n")
+        shadow.snapshot(1)
+        val editor = edit(shadow = shadow)
+        contracts.amendByUser(ids.work, "only tests may change now") {
+            it.copy(scope = it.scope.copy(writePaths = listOf("tests/")))
+        }
+
+        val out = run("""{"ops":[{"revert":"turn:0"}],"why":"undo"}""", editor, turn = 2)
+
+        assertEquals("refused", status(out), out.body)
+        assertFalse(out.applied)
+        assertTrue(out.body.contains("scope"), out.body)
+        for (path in listOf("src/a.py", "src/b.py", "src/new.py")) assertTrue(out.body.contains(path), out.body)
+        assertEquals(a.replace("return 1", "return 10"), Files.readString(repo.resolve("src/a.py")))
+        assertFalse(Files.exists(repo.resolve("src/b.py")), "an excluded deleted file must not be recreated")
+        assertEquals("added = 1\n", Files.readString(repo.resolve("src/new.py")), "an excluded new file must not be deleted")
+        assertEquals("def test_a():\n    assert a() == 10\n", Files.readString(repo.resolve("tests/test_a.py")), "the allowed part must also stay unchanged when the batch refuses")
+        assertTrue(syntaxCalls.isEmpty())
+    }
+
+    @Test
+    fun `turn revert applies the current increment warning and justification rules`() = runTest {
+        val env = EnvFingerprint.compute(EnvInputs(osName = "test-os", osArch = "test-arch", runnerPolicyId = "trusted-local/v1"))
+        val dirty = DirtyState(workspace, store.blobs, Stamper(workspace, env), ids, clock)
+        val shadow = ShadowRef(ids.work, ids.attempt, workspace, store, dirty, os, clock)
+        shadow.open(dirty.capture(0))
+        repo.write("src/b.py", "x = 10\ny = 2\n")
+        shadow.snapshot(1)
+        val editor = edit(shadow = shadow).also {
+            it.increment = Increment("inc-1", listOf("R1"), accept = emptyList(), writeScope = listOf("tests/"), expectedFiles = 1, title = "tests only")
+        }
+
+        val first = run("""{"ops":[{"revert":"turn:0"}],"why":"undo"}""", editor, turn = 2)
+        assertEquals("ok", status(first), first.body)
+        assertTrue(first.body.contains("outside the increment's write scope (inside the contract): src/b.py"), first.body)
+        assertEquals("x = 1\ny = 2\n", Files.readString(repo.resolve("src/b.py")))
+        shadow.snapshot(2)
+
+        val second = run("""{"ops":[{"revert":"turn:1"}],"why":"undo"}""", editor, turn = 3)
+        assertEquals("refused", status(second), second.body)
+        assertEquals("x = 1\ny = 2\n", Files.readString(repo.resolve("src/b.py")))
+        val justified = run("""{"ops":[{"revert":"turn:1"}],"why":"src/b.py restores the implementation"}""", editor, turn = 3)
+        assertEquals("ok", status(justified), justified.body)
+        assertEquals("x = 10\ny = 2\n", Files.readString(repo.resolve("src/b.py")))
     }
 
     @Test
@@ -335,6 +558,19 @@ class EditTest {
         assertTrue(binary.body.contains("unsupported: 'src/blob.bin' is not valid UTF-8 text"), binary.body)
         val transform = run("""{"ops":[{"transform":{"argv":["sed"],"scope_glob":"src/**","why":"w"}}],"why":"w"}""")
         assertTrue(transform.body.contains("unsupported: transform unsupported: this cell has no transform runner (D-41)"), transform.body)
+    }
+
+    @Test
+    fun `normalized line replacements preserve indentation and surrounding bytes`() = runTest {
+        for ((index, ending) in listOf("\n", "\r\n").withIndex()) {
+            val path = "src/normalized$index.py"
+            val before = "def example():${ending}\treturn    1  ${ending}${ending}# untouched${ending}"
+            repo.write(path, before)
+            val version = seen(path, 1, 4)
+            val out = run(anchored(path, version, hunk("    return 1\n", "    return 2\n")))
+            assertEquals("ok", status(out), out.body)
+            assertEquals("def example():${ending}    return 2${ending}${ending}# untouched${ending}", Files.readString(repo.resolve(path)))
+        }
     }
 
     @Test

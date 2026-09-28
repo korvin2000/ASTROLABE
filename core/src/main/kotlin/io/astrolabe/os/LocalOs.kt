@@ -23,9 +23,9 @@ import kotlin.concurrent.withLock
  * the execution deadline, terminates the tree and writes the terminal record to the sidecar. The
  * requesting coroutine may be cancelled at any moment without losing that record (D-26).
  *
- * A launch's descendants never outlive its root process: when the root exits, the supervisor
- * terminates the container (job object / process group) before releasing it, so both platforms
- * behave identically. A survivable, detached mode is a separate later capability (D-43).
+ * When the root exits, the supervisor terminates and confirms quiescence of its owned container
+ * before publishing the outcome. Failed confirmation is Lost. Windows uses a job object;
+ * Linux uses an isolated subreaper whose completion acknowledgment requires ECHILD.
  *
  * Requires `--enable-native-access=ALL-UNNAMED`; see [Os].
  */
@@ -34,7 +34,16 @@ public class LocalOs @JvmOverloads public constructor(
     override val ownerToken: OwnerToken = OwnerToken.random(),
 ) : Os {
 
-    private val owner: ProcessOwner = ProcessOwner.forThisPlatform()
+    private var owner: ProcessOwner = ProcessOwner.forThisPlatform()
+
+    internal constructor(
+        owner: ProcessOwner,
+        clock: Clock = Clock.systemUTC(),
+        ownerToken: OwnerToken = OwnerToken.random(),
+    ) : this(clock, ownerToken) {
+        this.owner = owner
+    }
+
     private val supervised = ConcurrentHashMap<IdentityKey, Supervision>()
 
     override fun spawn(spec: SpawnSpec): Proc {
@@ -88,8 +97,8 @@ public class LocalOs @JvmOverloads public constructor(
         require(observationTimeoutSeconds >= 0) { "observation timeout must not be negative" }
         val deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(observationTimeoutSeconds)
         while (true) {
-            // Status first, then bytes: a terminal status observed before the read guarantees the
-            // read sees everything the process ever wrote.
+            // Status first, then bytes: confirmed container exit precedes the final read.
+            // Lost remains incomplete evidence; its writers may be unobservable.
             val current = reattach(proc)
             val bytes = readLog(current.log, sinceCursorBytes)
             if (bytes.isNotEmpty() || current.status.isTerminal) {
@@ -160,11 +169,15 @@ public class LocalOs @JvmOverloads public constructor(
         val target = path.toAbsolutePath().normalize()
         val directory = target.parent ?: throw OsFailure("replaceFileAtomically", 0, "$target has no parent directory")
         Files.createDirectories(directory)
+        val permissions = if (Files.isRegularFile(target, java.nio.file.LinkOption.NOFOLLOW_LINKS) &&
+            Files.getFileStore(target).supportsFileAttributeView("posix")
+        ) Files.getPosixFilePermissions(target, java.nio.file.LinkOption.NOFOLLOW_LINKS) else null
         val temporary = Files.createTempFile(directory, target.fileName.toString(), TEMPORARY_SUFFIX)
         try {
             FileChannel.open(temporary, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING).use { channel ->
                 val buffer = ByteBuffer.wrap(bytes)
                 while (buffer.hasRemaining()) channel.write(buffer)
+                if (permissions != null) Files.setPosixFilePermissions(temporary, permissions)
                 channel.force(true)
             }
             try {
@@ -222,9 +235,9 @@ public class LocalOs @JvmOverloads public constructor(
         } catch (failure: Throwable) {
             if (failure is InterruptedException) Thread.currentThread().interrupt()
         } finally {
-            settle(supervision, exitCode)
+            val cleaned = supervision.release()
+            settle(supervision, if (cleaned) exitCode else null)
             supervised.remove(identityKey)
-            supervision.release()
         }
     }
 
@@ -335,20 +348,26 @@ public class LocalOs @JvmOverloads public constructor(
         var cause: TerminationCause? = null
         var exited: Boolean = false
         private var released: Boolean = false
+        private val nativeLock = ReentrantLock()
 
         fun snapshot(): Proc = lock.withLock { proc }
 
-        fun terminateTree(): Unit = lock.withLock { if (!released) native.terminateTree() }
+        fun terminateTree(): Unit = nativeLock.withLock { if (!released) native.terminateTree() }
 
         /** Only the supervisor thread releases, so no other thread can use a closed handle. */
-        fun release() {
-            lock.withLock {
-                if (!released) {
-                    released = true
-                    runCatching { native.terminateTree() } // descendants never outlive the root process
-                    runCatching { native.close() }
-                }
+        fun release(): Boolean = nativeLock.withLock {
+            check(!released)
+            released = true
+            var confirmed = false
+            try {
+                native.terminateTree()
+                confirmed = native.awaitTreeExit(TERMINATE_CONFIRM_MILLIS)
+            } catch (failure: Throwable) {
+                if (failure is InterruptedException) Thread.currentThread().interrupt()
+            } finally {
+                try { native.close() } catch (_: Throwable) { confirmed = false }
             }
+            confirmed
         }
     }
 

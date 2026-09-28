@@ -22,25 +22,40 @@ import io.astrolabe.id.WorkId
 import io.astrolabe.provider.Money
 import io.astrolabe.workspace.ProtectedPaths
 import java.time.Clock
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 /** Persistence seam for versioned contract rows; the SQLite implementation lives in the store package. */
 public interface ContractRepository {
     /** All versions of a work's contract in ascending version order; failed attempts are preserved. */
     public fun history(work: WorkId): List<Contract>
 
+    /** Latest authority only; persistent implementations avoid decoding the historical bodies. */
+    public fun latest(work: WorkId): Contract? = history(work).lastOrNull()
+
     /** Appends a new version; rejects a version that is not `latest + 1` (or 1 for a new work). */
     public fun append(contract: Contract)
 
     /** Replaces the latest row at the same version (pending proposals, strengthening). */
     public fun replaceLatest(contract: Contract)
+
+    /** Commits the contract and final amendment provenance in one transaction. */
+    public fun commitResolution(contract: Contract, amendment: Amendment)
+
+    /** Durable resolutions, optionally scoped to one work. */
+    public fun resolved(work: WorkId? = null): List<Amendment>
 }
 
 /** In-memory repository for tests and dry runs. */
 public class InMemoryContractRepository : ContractRepository {
     private val rows = LinkedHashMap<WorkId, MutableList<Contract>>()
+    private val resolutions = LinkedHashMap<Pair<WorkId, String>, Amendment>()
 
     @Synchronized
     override fun history(work: WorkId): List<Contract> = rows[work]?.toList() ?: emptyList()
+
+    @Synchronized
+    override fun latest(work: WorkId): Contract? = rows[work]?.lastOrNull()
 
     @Synchronized
     override fun append(contract: Contract) {
@@ -56,6 +71,17 @@ public class InMemoryContractRepository : ContractRepository {
         require(list.last().version == contract.version) { "replaceLatest must keep version ${list.last().version}" }
         list[list.lastIndex] = contract
     }
+
+    @Synchronized
+    override fun commitResolution(contract: Contract, amendment: Amendment) {
+        require(amendment.status != AmendmentStatus.Pending) { "resolution must be final" }
+        if (amendment.status == AmendmentStatus.Accepted) append(contract) else replaceLatest(contract)
+        resolutions[contract.workId to amendment.id] = amendment
+    }
+
+    @Synchronized
+    override fun resolved(work: WorkId?): List<Amendment> =
+        resolutions.filterKeys { work == null || it.first == work }.values.toList()
 }
 
 /**
@@ -69,28 +95,26 @@ public class Contracts(
     private val clock: Clock,
     private val events: Events? = null,
 ) {
-    private val resolvedHistory = LinkedHashMap<String, Amendment>()
-
-    public fun current(work: WorkId): Contract? = repository.history(work).lastOrNull()
+    public fun current(work: WorkId): Contract? = repository.latest(work)
 
     public fun history(work: WorkId): List<Contract> = repository.history(work)
 
     /** Stores version 1 of a new contract. */
-    public fun open(contract: Contract): Contract {
+    public fun open(contract: Contract): Contract = synchronized(repository) {
         require(contract.version == 1) { "a new contract starts at version 1" }
         repository.append(contract)
         return contract
     }
 
     /** Model-side strengthening: adds an item at the same version (the model may only ADD). */
-    public fun strengthen(work: WorkId, item: Acceptance): Contract {
+    public fun strengthen(work: WorkId, item: Acceptance): Contract = synchronized(repository) {
         val next = requireCurrent(work).strengthen(item)
         repository.replaceLatest(next)
         return next
     }
 
     /** Model proposal (`amend.propose`): recorded as pending; grants nothing until resolved. */
-    public fun propose(work: WorkId, cell: ContextId?, change: String, reason: String, weakening: Boolean): Amendment {
+    public fun propose(work: WorkId, cell: ContextId?, change: String, reason: String, weakening: Boolean): Amendment = synchronized(repository) {
         val current = requireCurrent(work)
         val amendment = Amendment(idGen.next("AM"), Proposer.Model, cell, change, reason, weakening)
         repository.replaceLatest(current.copy(amendmentsPending = current.amendmentsPending + amendment))
@@ -102,7 +126,7 @@ public class Contracts(
      * A user message amends anything: the request is appended verbatim and the version bumps, because the
      * authority is the message itself (§4.1). [apply] derives the amended content from the appended contract.
      */
-    public fun amendByUser(work: WorkId, text: String, apply: (Contract) -> Contract = { it }): Contract {
+    public fun amendByUser(work: WorkId, text: String, apply: (Contract) -> Contract = { it }): Contract = synchronized(repository) {
         val current = requireCurrent(work)
         val request = UserRequest(idGen.next("U"), clock.instant(), text)
         val amended = apply(current.copy(requests = current.requests + request)).copy(version = current.version + 1)
@@ -121,17 +145,26 @@ public class Contracts(
             ?: throw IllegalArgumentException("no pending amendment $amendmentId")
         val proposal = AmendmentProposal(amendment.id, current.version, ids(current), amendment.by, amendment.change, amendment.reason, amendment.weakening)
         val resolution = authority.resolve(proposal)
-        val remaining = current.amendmentsPending.filter { it.id != amendmentId }
-        val next = when (resolution.outcome) {
-            ResolutionOutcome.Accepted -> {
-                resolvedHistory[amendment.id] = amendment.copy(status = AmendmentStatus.Accepted, resolvedBy = resolution.byAuthority)
-                apply(current).copy(version = current.version + 1, amendmentsPending = remaining).also(repository::append)
+        currentCoroutineContext().ensureActive()
+        val next = synchronized(repository) {
+            val latest = requireCurrent(work)
+            if (resolution.proposalId != proposal.id || resolution.contractRevision != proposal.contractRevision ||
+                latest.version != proposal.contractRevision || amendment !in latest.amendmentsPending
+            ) return latest
+            val remaining = latest.amendmentsPending.filter { it.id != amendmentId }
+            when (resolution.outcome) {
+                ResolutionOutcome.Accepted -> {
+                    apply(latest).copy(version = latest.version + 1, amendmentsPending = remaining).also {
+                        repository.commitResolution(it, amendment.copy(status = AmendmentStatus.Accepted, resolvedBy = resolution.byAuthority))
+                    }
+                }
+                ResolutionOutcome.Rejected -> {
+                    latest.copy(amendmentsPending = remaining).also {
+                        repository.commitResolution(it, amendment.copy(status = AmendmentStatus.Rejected, resolvedBy = resolution.byAuthority))
+                    }
+                }
+                ResolutionOutcome.Pending -> latest
             }
-            ResolutionOutcome.Rejected -> {
-                resolvedHistory[amendment.id] = amendment.copy(status = AmendmentStatus.Rejected, resolvedBy = resolution.byAuthority)
-                current.copy(amendmentsPending = remaining).also(repository::replaceLatest)
-            }
-            ResolutionOutcome.Pending -> current
         }
         events?.emit(AgentEvent.Contract.AmendmentResolved(ids(next), amendment.id, resolution.outcome.name))
         if (resolution.outcome == ResolutionOutcome.Accepted) events?.emit(AgentEvent.Contract.Amended(ids(next), next.version, resolution.byAuthority))
@@ -139,7 +172,9 @@ public class Contracts(
     }
 
     /** Resolved amendments, kept for the finish receipt. */
-    public fun resolved(): List<Amendment> = resolvedHistory.values.toList()
+    public fun resolved(): List<Amendment> = repository.resolved()
+
+    public fun resolved(work: WorkId): List<Amendment> = repository.resolved(work)
 
     /**
      * §4.1 auto-derivation for S0 (TODO P1.1.2): the request becomes `R1` verbatim, every package whose manifest

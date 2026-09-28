@@ -568,3 +568,115 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
   D-nn ranges pre-assigned per agent, D rows sorted at merge; P5.8.1 split into two agents (S3 runtime / wiring) and its
   controller conflicts combined by hand. Stale owners (P6.1.1/P6.1.2) re-owned as carried debt. D-112–D-260.
   Gates pushed straight to `main` (owner-authorized): CI 36159227747, 36162949349, 36167689819, 36172349269.
+
+## 2026-09-26 ? feature/bugfix
+- Owner-authorized findings remediation: 24 fixed, 118 open, F-034 previously resolved; P0?P6 still 185/185 implemented, P7 excluded.
+- Regression fixes cover parsing, receipt/review integrity, recall, event ordering/cancellation, redaction, storage, generated tools and scheduling.
+- Full Windows core suite: 1,286 pass, 1 fail, 6 skip; QA HTTP/exit mismatch fixed and final focused 29 passed.
+- Final build -x :core:test passed (other modules + packaging/ABI); full core suite not rerun; no new Linux/CI.
+- Core ABI updated; D-261 conservatively requires review for additions to existing tests. JVM callers must rebuild.
+- Repair ledger: findings.md fix_progress; handoff: CONTINUE-TASK.md and audit/BUGFIX-PROGRESS.md.
+- Existing CLAUDE.md/ISSUES.md changes and untracked todo_findings.txt preserved. Local commits only; no push/PR.
+
+## 2026-09-26 - feature/bugfix continuation
+- 14 additional findings fixed: 38 fixed across sessions, 104 open, F-034 previously resolved; P0-P6 remains 185/185 implemented, P7 excluded.
+- Repairs cover edit conflicts/redaction/coverage, run exposure, verification authority/currency/stable inputs, baseline ledgers, reply binding, final gates and STATE durability/rejection accounting.
+- Independent review corrections landed in da8bc42. D-262/D-263 document conservative authorization/edit rules; D-264 bumps parser policy to shaper/2.
+- Full final Windows JDK 26 build passed: 1314 core tests: 1307 passed, 7 skipped, zero failures/errors; provider-api 17 passed, eval 49 passed, index-treesitter 17 passed; packaging and ABI passed.
+- POSIX executable-mode test skipped on Windows. No new Linux, CI, live provider or P7 validation. No push/PR.
+- Handoff and complete repair ledger updated. Pre-existing CLAUDE.md/ISSUES.md edits and untracked continue_fixing.md/todo_findings.txt preserved.
+
+## 2026-09-26 - third feature/bugfix session
+- Ten further repairs: F-022/F-054/F-056/F-057/F-058/F-062/F-065/F-076/F-088/F-094; 48 fixed, 94 open.
+- Authority replies/dispatch/completion, anchor spans, revert scope, partial effects, recall aliases, handle ownership and log draining corrected.
+- Regression-first batches plus independent review; review corrections and fixture alignment verified.
+- Full Windows JDK 26 build on b13c18d: 1429 passed, 7 skipped, zero failures/errors; packaging/ABI passed.
+- No public signature/schema changes. D-265 records handle resume policy; historical unassociated edit aliases are not migrated.
+- No new Linux/CI/live/P7 validation. Nothing pushed. Existing user edits preserved.
+- Handoff and repair ledger updated; next: F-061/F-063/F-064/F-023.
+
+## 2026-09-27 - fourth feature/bugfix session
+- Six repairs: F-001/F-002/F-023/F-061/F-063/F-064; 54 fixed, 88 open, F-034 previously resolved.
+- Immutable/canonical attempt inputs, atomic amendment resolutions, durable run evidence, honest background provenance and bounded cancellable capture.
+- Regression-first checks plus independent review corrections; final focused batch 48 passed.
+- Full Windows JDK 26 build on b7b74d0: 1453 passed, 7 skipped, zero failures/errors; packaging and ABI passed.
+- D-266/D-267/D-268 document provenance, capture cap and fingerprint compatibility; core ABI updated, no SQL schema bump.
+- Legacy fingerprints invalidate caches; legacy handles default to D/unknown; lost historical amendment resolutions cannot be reconstructed.
+- No new Linux/CI/live/P7 validation. Nothing pushed. Existing user edits preserved.
+- Handoff and repair ledger updated; next F-004, then remaining findings in audit order.
+
+## 2026-09-27 - fifth feature/bugfix session
+- Ten repairs: F-004/F-006/F-010/F-014/F-018/F-020/F-021/F-024/F-025/F-026; 64 fixed, 78 open, F-034 previously resolved.
+- Request accounting/cancellation, coherent bounded projections, external state, Unicode/search boundaries, contract context and retryable coherence delivery.
+- Focused regressions reproduced defects before repair; review correction ensures Cell honors request-estimator overrides.
+- Full Windows JDK 26 build on eccb010: 1471 passed, 8 skipped, zero failures/errors; packaging and ABI passed.
+- D-269/D-270/D-271 record planning margins, digest/slice compatibility and retry acknowledgements. Core ABI updated; no SQL schema bump.
+- Consumers rebuild for ContractSlice changes. Incomplete historical slices require reconstruction from their authoritative increment.
+- No new Linux/CI/live/P7 evidence. Nothing pushed; pre-existing user edits preserved.
+- Updated handoff/ledger; next F-013, F-015/F-016/F-017, F-019, then raw snapshot findings F-027 onward.
+
+## 2026-09-27 ? bugfix sixth continuation
+- `feature/bugfix`: eight fixes (F-013/F-015/F-028/F-029/F-030/F-037/F-038/F-046); 72 fixed, 70 open, F-034 previously resolved.
+- Bounded GC, confirmed process settlement, safe snapshot capture, Atlas freshness/aggregates and STATE field validation. Decisions D-272 through D-276.
+- First full tests: 1637 passed, 13 skipped; corrected the LocalOs constructor ABI in e74302a. Final full Windows build on e74302a passed: 1637 passed, 13 skipped; packaging/ABI passed.
+- Five new symlink tests skip on this Windows host; junction/process tests ran. No new Linux/CI or P7 evidence. Local commits only; user edits preserved.
+
+## 2026-09-27 ? bugfix seventh continuation
+- Out-of-order small fixes: F-040/F-083/F-085/F-090/F-096/F-097/F-099/F-108/F-114/F-141; 82 fixed, 60 open.
+- Focused regressions and core/eval ABI passed. First full core run had two stale/safe-form expectations; focused corrections pass. Final full Windows build on 4604b89 passed: 1645 passed, 13 skipped; packaging/core/eval ABI passed.
+- D-277 through D-284 record npm lifecycle, loop/rebuild, calibration, acceptance executables, await errors, fixture containers, unknown commands and packet feedback.
+- Local commits only; no new Linux/CI or P7 evidence. User edits preserved.
+
+## 2026-09-27 — bugfix eighth continuation (owner approved)
+- Six out-of-order fixes remain unstaged: F-039/F-042/F-052/F-069/F-110/F-115. Ledger: 88 fixed, 54 open.
+- Focused regressions passed; final full Windows JDK 26 build after all six passed (1667 tests, 13 skipped, zero failures/errors; ABI/packaging).
+- F-110 also passed NotesTest, StoreKbTest and CuratorTest. No new Linux/CI or P7 evidence.
+- Earlier local commits were undone at the owner's request so they could review the unstaged fixes. After review, the owner authorized commit and push; six fresh fix commits now end at `fbee771`.
+
+## 2026-09-28 — bugfix ninth continuation
+- Fixed F-084/F-117/F-118/F-119/F-120/F-132/F-134/F-136/F-138/F-142: 98 fixed, 44 open.
+- Eight fix commits through a41a7fa; core/eval API dumps regenerated and checked.
+- Eleven selected classes passed across focused Windows JDK 26 batches; corrected one obsolete import expectation and one invalid fingerprint label. No full suite/build or new Linux/CI/P7 run.
+- Updated handoff, findings and repair ledger; D-285 through D-290 record compatibility and conservative policies.
+- User authorized commit/push to origin/feature/bugfix. Pre-existing CLAUDE.md/ISSUES.md and untracked task files preserved.
+
+## 2026-09-28 — bugfix tenth continuation
+- Fixed F-027/F-031/F-032/F-036/F-087/F-101/F-122/F-143: 106 fixed, 36 open.
+- Eight repair commits through 5d530f0 cover raw candidate fidelity, recoverable snapshots, Atlas containment, partial usage, Windows launch cleanup, isolated retries and promotion provenance.
+- Eleven selected classes and one CellTest method passed on Windows JDK 26, with platform skips. Eval ABI regenerated; core/eval checks passed. No full suite/build or new Linux/CI/P7 run.
+- D-291 through D-296 and the handoff/repair ledger record compatibility and remaining work. User authorized push to origin/feature/bugfix; pre-existing edits preserved.
+
+## 2026-09-28 ? bugfix eleventh continuation
+- Fixed 13 findings: F-044/F-045/F-048/F-091/F-092/F-093/F-102/F-103/F-106/F-111/F-112/F-125/F-126. Ledger: 119 fixed, 23 open.
+- Three repair commits through cdb1f58 cover intent reconciliation, cell authority, finalization recovery, scope binding, compiled coverage and knowledge reads.
+- 79 distinct selected tests passed after the documented recovery sequence correction; core ABI regenerated/checked and dependent module test sources compiled.
+- No full suite/build, Linux/CI or P7 run. D-297 through D-302 record compatibility and conservative defaults.
+- User authorized commit/push to origin/feature/bugfix. Pre-existing edits and untracked task files preserved.
+
+## 2026-09-28 - twelfth bugfix continuation
+- Fixed 12 findings: F-017/F-033/F-041/F-075/F-107/F-109/F-113/F-124/F-128/F-129/F-133/F-137.
+- Ledger: 131 fixed, 11 open, F-034 previously resolved; P0-P6 remains 185/185, P7 excluded.
+- 73 distinct selected tests passed after corrections; core ABI checked and dependent test sources compiled.
+- No full suite/build or Linux/CI run. Code through 0898a57; ABI f232375; D-303 through D-311.
+- Push to origin/feature/bugfix authorized. Existing user edits and untracked task files preserved.
+
+## 2026-09-28: thirteen-continuation bugfix batch
+- Fixed F-019/F-082/F-086/F-089/F-095/F-100/F-104/F-105/F-127/F-135 on feature/bugfix: 141 fixed, 1 open.
+- Added independent completion evidence, durable campaign funding, terminal/extractor accounting, replanning/resume and recoverable integration publication.
+- 32 distinct targeted Windows tests passed after corrections; core ABI checked and dependent test sources compiled. No full suite/build or Linux/CI.
+- F-016 remains open for enforceable Linux detached-process containment; comments corrected. Existing unrelated edits preserved.
+- Source/ABI checkpoint bc742fe; publication to origin/feature/bugfix authorized.
+
+## 2026-09-28: audit repair queue complete
+- F-016 fixed and pushed in e5321f3: isolated Linux subreaper owns detached descendants and confirms ECHILD before settlement.
+- Linux JDK 26 CI: 32 passed, 1 Windows-only skip; all six new lifecycle/PATH regressions passed. https://github.com/korvin2000/ASTROLABE/actions/runs/36364095425
+- Windows: four settlement tests passed; Linux-only class skipped. Core compilation and ABI validation passed. No full suite/build.
+- 142 findings fixed, 0 open; F-034 previously resolved. D-319 records Linux supervisor identity and runtime requirements.
+- Existing unrelated edits preserved. Final documentation-only update uses skip-ci to avoid rerunning unchanged executable code.
+
+## 2026-09-28: bugfix review (`review/bugfix`)
+- Reviewed all 100 code-bearing fix commits in 14 batches with read-only reviewers; verified every DEFECT claim before acting.
+- 28 findings corrected by `review(F-nnn)` commits (e.g. F-027 autocrlf members, F-029 directory/submodule stamps, F-064 capped capture as unknown outcome, F-088 open intent on lapsed lease, F-095 funding wedge); 52 ACCEPT, 62 NOTE, 0 rejected.
+- Bisected two tests already failing at dba6344 (4f6eb64, 1120f89) and fixed them.
+- ABI regenerated (`Observed.truncated`, `RunCapture.executionRoot`); `assemble testClasses checkKotlinAbi` green; only targeted tests run.
+- Merged --no-ff into local main; not pushed (owner approval pending).

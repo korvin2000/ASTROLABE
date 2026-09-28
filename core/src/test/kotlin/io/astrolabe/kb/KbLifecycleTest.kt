@@ -68,7 +68,19 @@ class KbLifecycleTest {
     private fun con(id: String, summary: String, supersedes: String? = null) =
         Note(id, NoteKind.CON, NoteStatus.Admitted, summary, "Callers pass cents.", "src/pay/**", listOf(NoteAnchor("src/pay/api.py", symbol = "charge")), basis = NoteBasis(evidenceRefs = listOf("#1")), supersedes = supersedes)
 
-    private fun inputs() = InjectionInputs(Roles.implementing, work, listOf("src/pay/**"), currentVersion = null)
+    private fun inputs() = InjectionInputs(Roles.implementing, work, listOf("src/pay/**"), currentVersion = null, dependencyVersions = notes.versions())
+
+    @Test
+    fun `recheck refuses unresolved dependencies and validates exact revisions and path hashes`() {
+        val current = FileVersion(Digest.ofUtf8("new"))
+        val deps = listOf("missing@v1", "contract@v1", "src/config.py@${Digest.ofUtf8("old").hex}", "src/config.py@${current.digest.hex}")
+        deps.forEachIndexed { index, dep ->
+            writer.write(Note("LES-dep$index", NoteKind.LES, NoteStatus.Stale, "advice $index", "body", "global", validity = NoteValidity(listOf(dep))), ids)
+        }
+        val result = curator.recheck(ids, { path -> current.takeIf { path == "src/config.py" } }, "stamp", mapOf("contract" to "v2"))
+        assertEquals(listOf("LES-dep3"), result.readmitted)
+        assertEquals(listOf("LES-dep0", "LES-dep1", "LES-dep2"), result.stale)
+    }
 
     @Test
     fun `FX-35 - a note referencing a superseded contract is flagged before injection and deprecated on recheck`() {

@@ -107,6 +107,21 @@ class StamperTest {
         }
     }
 
+    @Test
+    fun `a clean autocrlf checkout has no members and an edit makes only that path a member`(@TempDir state: Path) {
+        WorkspaceFixture.create(state) { repo -> repo.crlfVariant() }.use { fixture ->
+            for (path in listOf("src/a.py", "src/b.py", "README.md")) Files.delete(fixture.repo.resolve(path))
+            fixture.rawGit("checkout", "--", ".")
+            assertTrue(String(fixture.bytes("src/b.py"), Charsets.UTF_8).contains("\r\n"), "checkout converted to CRLF")
+
+            assertEquals(emptySet(), fixture.stamper.report().members.keys)
+            assertTrue(fixture.dirtyState.capture().entries.isEmpty(), "no pre-existing dirty entries")
+
+            fixture.repo.write("src/a.py", "def a():\r\n    return 9\r\n")
+            assertEquals(setOf("src/a.py"), fixture.stamper.report().members.keys)
+        }
+    }
+
     // ---------------------------------------------------------- environment
 
     @Test

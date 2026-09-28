@@ -36,6 +36,7 @@ public data class Carry(
     /** Runtime-owned facts of the previous packet: status, reason, gaps, receipts — never its claims. */
     val packetLine: String?,
     val unresolvedEvidence: List<Int>,
+    val capacityGap: String? = null,
 ) {
     val seedTokens: Long get() = seeds.sumOf { it.tokens }
 

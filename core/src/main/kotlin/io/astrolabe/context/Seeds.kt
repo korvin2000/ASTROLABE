@@ -19,6 +19,10 @@ public data class SeedRender(val text: String, val shown: List<Entry>, val notSe
  * campaign-global (D-46), so a carried `v … [#17]` fact and `recall #17` name the same evidence in every later cell.
  */
 public object Seeds {
+    internal fun selected(seeds: List<Entry>, compiled: Compiled.Ready): List<Entry> = seeds.filterIndexed { index, _ ->
+        ContextUnitId("seed-$index") in compiled.selection.selectedIds && compiled.k.sections.any { it.id == "seed-$index" }
+    }
+
     /** The Workset export at [cell]'s end: the export saved with its latest checkpoint, or none. */
     @JvmStatic
     public fun cellEnd(checkpoints: Checkpoints, cell: ContextId): List<Entry> {

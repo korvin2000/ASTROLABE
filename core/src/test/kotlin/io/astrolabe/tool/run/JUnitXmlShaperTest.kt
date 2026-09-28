@@ -9,6 +9,24 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class JUnitXmlShaperTest {
+    @Test
+    fun `report collection skips an unreadable directory elsewhere in the tree`(@org.junit.jupiter.api.io.TempDir root: java.nio.file.Path) {
+        val posix = java.nio.file.FileSystems.getDefault().supportedFileAttributeViews().contains("posix")
+        org.junit.jupiter.api.Assumptions.assumeTrue(posix, "directory permissions need POSIX")
+        val report = root.resolve("build/test-results/test/TEST-a.xml")
+        java.nio.file.Files.createDirectories(report.parent)
+        java.nio.file.Files.writeString(report, "<testsuite tests=\"0\"/>")
+        val locked = java.nio.file.Files.createDirectories(root.resolve("data/private"))
+        java.nio.file.Files.setPosixFilePermissions(locked, emptySet())
+        try {
+            org.junit.jupiter.api.Assumptions.assumeFalse(java.nio.file.Files.isReadable(locked), "running with privileges")
+            val collected = JUnitReports(root, "act-1").collect()
+            assertEquals(listOf("build/test-results/test/TEST-a.xml"), collected.map { it.path })
+        } finally {
+            java.nio.file.Files.setPosixFilePermissions(locked, java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"))
+        }
+    }
+
     private val gradle = listOf("./gradlew", ":cart-core:test")
 
     @Test
@@ -92,6 +110,22 @@ class JUnitXmlShaperTest {
         assertEquals(listOf("cart-core", "cart-web"), sameName.map { it.identity.module })
         assertNotEquals(sameName[0].identity.canonical, sameName[1].identity.canonical)
         assertTrue(shaped.ambiguousIdentities.isEmpty(), "different modules are different identities, not ambiguity")
+    }
+
+    @Test
+    fun `nested modules with equal leaf names keep distinct identities`() {
+        val shaped = Shapers.shape(Recorded.capture(
+            argv = gradle,
+            exitCode = 1,
+            output = "FAILURE: there were failing tests.\n".toByteArray(),
+            reports = listOf(
+                Recorded.report("junit-module-a.xml", path = "services/a/cart/build/test-results/test/TEST-com.acme.CartTest.xml"),
+                Recorded.report("junit-module-b.xml", path = "services/b/cart/build/test-results/test/TEST-com.acme.CartTest.xml"),
+            ),
+        ))
+        val sameName = shaped.tests.filter { it.identity.name == "handlesEmpty" }
+        assertEquals(listOf("services/a/cart", "services/b/cart"), sameName.map { it.identity.module })
+        assertNotEquals(sameName[0].identity.canonical, sameName[1].identity.canonical)
     }
 
     @Test

@@ -40,6 +40,36 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 class ChecksTest {
+    @Test
+    fun `committed acceptance additions and command changes update the live registry`() {
+        val checks = Checks.seed(contract, RunnerCommands())
+        val before = checks[Checks.acceptId("AC-1")]!!.definitionVersion
+        val command = Command(listOf("new-check"))
+        val changed = contract.copy(acceptance = contract.acceptance.map {
+            if (it.id == "AC-1") Acceptance.Run(it.id, command, Origin.User) else it
+        } + Acceptance.Run("AC-added", command, Origin.User))
+        checks.synchronizeAcceptance(changed)
+        assertEquals(command, checks.forAcceptance("AC-added").single().command)
+        assertTrue(before != checks[Checks.acceptId("AC-1")]!!.definitionVersion)
+    }
+
+    @Test
+    fun `digest capacity refuses mandatory overflow and reduces more than 64 requests`() {
+        val ledger = Ledger.initial(contract)
+        assertFailsWith<io.astrolabe.register.DigestCapacity> { ContractDigest.render(contract, ledger, emptyList(), estimator, capTokens = 1) }
+        val excluded = contract.copy(exclusions = listOf("mandatory exclusion ".repeat(200)))
+        assertFailsWith<io.astrolabe.register.DigestCapacity> { ContractDigest.render(excluded, ledger, emptyList(), estimator) }
+        val many = contract.copy(requests = (1..100).map { UserRequest("history-$it", Instant.EPOCH, "request ".repeat(40)) })
+        val digest = ContractDigest.render(many, ledger, emptyList(), estimator)
+        assertTrue(estimator.estimate(digest).tokens <= 150, digest)
+    }
+
+    @Test
+    fun `audit verification policy invalidates earlier check definitions`() {
+        val check = Check("CHK-policy", CheckKind.Unit, Selector.All, Closure.Unknown, CostClass.Fast, Trigger.OnDemand)
+        assertNotEquals(check.copy(parserPolicy = "shaper/1").definitionVersion, check.definitionVersion)
+    }
+
     private val estimator = HeuristicEstimator()
 
     private val contract = Contract(
@@ -110,6 +140,14 @@ class ChecksTest {
         val coverage = idsOnly.coverage()
         assertFalse(coverage.complete)
         assertEquals(listOf("AC-2"), coverage.missingAcceptance)
+        val extra = ContractSlice.forIncrement(contract, increment.copy(accept = listOf("AC-1")))
+        val incrementOnlyMissing = extra.copy(acceptance = extra.acceptance.filter { it.id != "AC-1" })
+        assertEquals(listOf("AC-1"), incrementOnlyMissing.coverage().missingAcceptance)
+        assertFalse(incrementOnlyMissing.coverage().complete)
+        val decoded = kotlinx.serialization.json.Json.decodeFromString<ContractSlice>(
+            kotlinx.serialization.json.Json.encodeToString(ContractSlice.serializer(), incrementOnlyMissing),
+        )
+        assertEquals(incrementOnlyMissing.coverage(), decoded.coverage())
         assertFailsWith<IllegalArgumentException> { ContractSlice.forIncrement(contract, increment.copy(accept = listOf("AC-9"))) }
     }
 
@@ -123,7 +161,7 @@ class ChecksTest {
         assertEquals(listOf("CHK-accept-AC-1", "CHK-accept-AC-4"), checks.required().map { it.id })
         val accept = checks["CHK-accept-AC-4"]!!
         assertNotEquals(accept.definitionVersion, accept.copy(command = Command(listOf("pytest", "-k", "idempot", "-x"))).definitionVersion)
-        assertNotEquals(accept.definitionVersion, accept.copy(parserPolicy = "shaper/2").definitionVersion)
+        assertNotEquals(accept.definitionVersion, accept.copy(parserPolicy = "shaper/future").definitionVersion)
         assertEquals(accept.definitionVersion, accept.copy(last = LastResult("r", CandidateId(Digest.ofUtf8("s")), accept.definitionVersion, Outcome.Passed, Counts(1), Applicability.Current)).definitionVersion)
 
         val stamp = CandidateId(Digest.ofUtf8("s8"))

@@ -1,0 +1,373 @@
+# Bugfix progress ? 2026-09-27
+
+Branch: `feature/bugfix`. Baseline: `9a80e117445be357285fec2cffffe0fd45290a9a`.
+
+**142 fixed (F-016 in this continuation); 0 open; F-034 previously resolved.**
+The complete remaining queue is `findings.md` ? JSON `fix_progress.remaining_open_ids`.
+
+## Final continuation: Linux detached-process ownership
+
+- **F-016 fixed** in `e5321f3`: each Linux launch has an isolated subreaper JVM. The kernel reparents detached orphans to it; the helper retains and terminates direct children until `waitpid` reports `ECHILD`. Process enumeration is used to signal children, never as proof of quiescence. See [Linux subreaper semantics](https://man7.org/linux/man-pages/man2/PR_SET_CHILD_SUBREAPER.2const.html) and [wait semantics](https://man7.org/linux/man-pages/man2/waitpid.2.html).
+- Root exit and descendant quiescence have separate acknowledgments. Target sessions protect the helper from group signals. Reap batches are bounded so cancellation reaches the kill phase. PATH lookup uses the requested target environment; the helper's JVM environment is cleared.
+- Control-pipe EOF requests cleanup, including host JVM death. Missing acknowledgment, cleanup timeout or abnormal helper failure cannot become a successful terminal record.
+- [Focused Linux CI](https://github.com/korvin2000/ASTROLABE/actions/runs/36364095425) on JDK 26: **32 passed, 1 Windows-only skip, 0 failures**. All **6 new regressions** passed: normal root exit, group SIGKILL, cancellation, execution deadline, adapter close and custom PATH. Existing process, ownership, resolution and settlement cases passed.
+- Local Windows JDK 26: **4 settlement tests passed**; the Linux-only class was skipped. Kotlin/Java compilation and `checkKotlinAbi` passed. No full suite/build or P7 run.
+- Compatibility: no ABI/schema change. On Linux `Proc.pid` now identifies the supervisor and the reported exit code remains the command's. Each launch adds one helper JVM (32 MiB maximum Java heap, additional VM overhead); a normal local Java launcher/classpath and procfs child listings are required. Ownership remains trusted-local lifecycle control, not hostile-code confinement. Windows behavior is unchanged.
+- Existing CLAUDE.md/ISSUES.md edits and untracked continue_fixing.md/todo_findings.txt remain untouched. All audited findings are now resolved; implementation pushed to origin/feature/bugfix.
+
+## Thirteenth continuation: campaign evidence, funding and recovery
+
+- **F-019** (`0ba3658, 745e229`): Search caps patterns at 4096 characters, files at 8 MiB, JVM regex work at 10 million character accesses and 30 seconds, and ripgrep execution at 30 seconds with bounded JSON lines and stderr. Candidate enumeration reuses bounded Git execution and preserves typed failure results. SearchLimitsTest and the broken-index parity regression pass.
+- **F-082** (`1120f89`): Independent host review now produces candidate- and contract-bound Check assessments before cell completion. Persisted review evidence reaches the cell gate, controller verifier, regression refresh and finish receipt. A Check-only contract can complete; absent and wrong-revision approval is refused. AcceptanceEvidenceTest and ExitGateTest pass.
+- **F-086** (`4f6eb64`): The cell retains Invocation, consumes terminal exactly once under NonCancellable after success, failure or cancellation, archives late items without executing them, and settles one accounting row. Unknown usage retains conservative funding. TerminalAccountingTest and the partial-usage regression pass. Cancellation waits for the provider to fulfill its terminal SPI.
+- **F-089** (`1120f89`): Completion obtains independent evidence before evaluating the gate. Required test edits carry their justification and candidate-bound approval, and persisted reviews bind the integrity evidence they assessed. S2 review and required-test-edit completion regressions pass; stale approvals remain refused.
+- **F-095** (`4f6eb64`): Every provider call durably reserves campaign tokens and money in one SQLite transaction before dispatch, shared by main, plan and helper cells. Routing and new-cell budgets deduct persisted charges, including unresolved reservations. Resume token/money tests and AccountingTest pass.
+- **F-100** (`0959ee7`): Windows STARTUPINFOEX now carries PROC_THREAD_ATTRIBUTE_HANDLE_LIST containing only stdin and the combined output handle, with reliable attribute-list cleanup. A native inheritable sentinel remains unavailable to the child while intended stdout/stderr work. WindowsHandleInheritanceTest passes.
+- **F-104** (`1120f89`): Main-line S1+ task.propose has a live intake. The controller consumes split requests at cell boundaries or reopen, pins the reason and current graph into planning, preserves completed definitions/evidence, and retains replaced unfinished nodes as cancelled history. The implementation-split campaign regression passes.
+- **F-105** (`1120f89`): Reopen unblocks parked increments after a host contract amendment; otherwise run reassesses through host authority. Regression refresh derives stale obligations from current graph identity, so prerequisites are recertified without replaying verified work. The host-answer resume regression passes.
+- **F-127** (`4f6eb64`): Extraction declares a token cap and optional monetary bound. The controller reserves it durably, charges reported usage or retains the allowance on failure, and accounts before exporting finish totals. Unaffordable calls are skipped while harness-derived extraction remains available. Extractor and reservation regressions pass.
+- **F-135** (`0fc1dbf`): Integration persists a manifest with preimages and postimages before effects, atomically replaces each file, and restores preimages on publication failure. Controller open and Integrator entry recover pending manifests without temporary worktrees, refusing to overwrite conflicting later edits. Failed-second-write, interrupted-publication and store-reopen regressions pass.
+
+### Verification and compatibility
+
+- 32 distinct selected tests passed on Windows JDK 26 after the corrections recorded in findings.md. No full suite/build or Linux/CI run. Core ABI regenerated and checked; eval and index-treesitter test sources compiled.
+- New JSON fields have defaults; no storage schema bump. JVM consumers should rebuild. Legacy assessments without a candidate must be reassessed; old open integration intents without manifests still require host reconciliation.
+- Terminal accounting waits for the provider terminal SPI even after cancellation. Missing usage remains unknown and consumes conservative funds. Extractor monetary caps require a host-supplied bound; absent monetary evidence is never reported as free.
+- Integration backups survive worktree cleanup. Recovery refuses conflicting later edits and leaves its intent unresolved for host handling.
+- **F-016 remains open:** detached POSIX descendants need enforceable containment and Linux validation. Ownership comments were corrected without claiming this was fixed.
+- Existing CLAUDE.md/ISSUES.md edits and untracked continue_fixing.md/todo_findings.txt preserved. Publication target: origin/feature/bugfix, authorized by the user.
+
+## Twelfth continuation: bounded execution and durable evidence
+
+| Finding | Commit | Change and evidence |
+|---|---|---|
+| F-017 | `c24c4fe` | Git commands now bound pipe pumping and process waiting to a configurable 120-second deadline, with 64 MiB stdout and 1 MiB stderr caps. Oversize capture fails explicitly; interruption and errors terminate the process and observed descendants. Fixture Git calls are also bounded. GitTest passes, including a stalled launcher and output overflow. |
+| F-033 | `7a12c08` | Preimages persists workspace-qualified edit associations in SQLite before mutation and records guarded postimages afterward. New cell instances can resolve the same edit; interrupted writes retain discoverable recovery bytes and refuse an inverse until a postimage is known. PreimagesTest passes. |
+| F-041 | `d99e21a` | Sniff pins the platform-specific Gradle wrapper relative to the package cwd, including ancestor wrappers. Windows native argv launches .bat/.cmd through an explicit interpreter path and refuses arguments that cannot be preserved. SniffTest executes the inferred ancestor wrapper through LocalOs. |
+| F-075 | `b713e83` | Verify archives prior Gradle/Maven JUnit XML before dispatch and collects bounded, newly produced reports from the actual execution cwd, including nested modules. It passes captured reports to the shaper and refuses stale success. The selected VerifyTest regression passes. |
+| F-107 | `0898a57` | Cell boundaries persist one retention decision per cell. Carried facts retain stale-cell counts, missing evidence demotes verified claims, and inactive stale facts become durable STATUS archives. Resume cannot age the same boundary twice; a remaining register-cap gap blocks compilation. FactCoherenceTest, CarryForwardTest and ResumeTest pass. |
+| F-109 | `0898a57` | Pressure rebuild now uses Rebuild.run, checkpoints before replacement, renders carried source seeds into rebuilt K, retains other compiled sections, checks mandatory coverage and refuses a projection with lost evidence. Workset receives only the seeds actually rendered. The selected CellTest pressure regression passes. |
+| F-113 | `0898a57` | The main cell registers NoteHorizon with coherence and reconciles dependency and anchor versions on each workspace reconciliation. Campaign open performs the same durable reconciliation before freezing notes. NoteHorizonTest and a ControllerTest dependency-only reopen regression pass; unknown named versions remain ineligible at serve time. |
+| F-124 | `e68cb48` | Admission records before-state and resulting revisions for every changed note, together with the queue decision, in one transaction. Rollback validates ownership and restores predecessors and candidates atomically; later revisions and legacy batches without ownership records are refused. CuratorTest passes. |
+| F-128 | `6649cec` | Thrown or cancelled child calls with unknown usage consume their reserved allowance instead of returning zero spend. Probe, review and writer null-exit paths use their admitted allowance; known returned spend remains unchanged. DelegatorTest covers exception funding and later-result accounting. |
+| F-129 | `a471bc4` | Probe parsing accepts only resolved aliases delivered by the cell and line ranges covered by its current displayed, unredacted Workset entries. Legacy parse calls without display evidence fail closed. Alias freshness is unknown without a resolver. ProbeTest rejects fabricated aliases and unseen or invalid ranges. |
+| F-133 | `5ae4892` | Integration captures a full candidate identity before checks, rejects changes during checks or review, revalidates before publication and compares the resulting main identity before committing the intent. Corrected the missing Dispatched intent transition. IntegratorTest passes, including mutation outside the patch. |
+| F-137 | `96aa811` | HTTP QA requires a host service launcher bound to the disposable execution root and packet environment. Requests use that service origin and close its lifecycle afterward; an unrelated loopback URL alone is refused. QaDriverTest exercises candidate-file-backed HTTP and CLI checks and confirms service cleanup. |
+
+### Verification and compatibility
+
+- 73 distinct selected tests passed on Windows JDK 26. GitTest initially passed 18/19; its environment-dependent timeout fixture was corrected and the failed test passed. Other new fixture compile/assertion errors were corrected, and the affected selections passed. The integration transition defect found by existing tests was fixed before commit.
+- Core ABI regenerated and checked; eval and index-treesitter test sources compiled. No full suite/build, Linux/CI, live-provider or P7 run. The final focused resume run passed after ensuring interrupted-boundary archives reach STATUS.
+- New defaulted JSON fields keep existing note queue and fact records readable; no schema bump. JVM consumers must rebuild. Historical preimages without durable associations are not reconstructed; legacy admission batches without rollback ownership are refused.
+- Git defaults: 120-second deadline, 64 MiB stdout and 1 MiB stderr; overflow fails without returning truncated authoritative data. Process cleanup terminates the root and observed descendants. Detached-process containment remains F-016; this is not new kernel-containment evidence. No Linux runtime validation.
+- Unknown child usage consumes its admitted allowance conservatively; this is not a claim of exact provider billing. Campaign-wide funding and provider terminal reconciliation remain F-095/F-086. HTTP QA now needs a host launcher that starts/stops a service from the supplied candidate and honors its environment; the default refuses unbound HTTP.
+- Gradle wrapper paths are host-specific and relative to the package cwd. Windows batch arguments containing quotes, percent, exclamation or newlines are refused. Existing reports are preserved under the invocation's log archive; absent fresh reports remain inconclusive, with no inferred build-cache provenance.
+- Pressure rebuild preserves other compiled sections and publishes only rendered seed coverage. Retention decisions and archives survive boundaries/reopen. Unknown named knowledge dependencies remain ineligible. Rollback appends restored note revisions and refuses later ownership conflicts.
+- Integration verifies complete candidate identity around checks, review and publication. Transactional multi-file rollback remains F-135; a final identity mismatch leaves the intent Unknown for explicit reconciliation.
+- D-303 through D-311 record these policies. Push target is origin/feature/bugfix, authorized by the user. Preserve pre-existing CLAUDE.md/ISSUES.md and untracked task files.
+
+## Eleventh continuation: runtime authority, recovery and knowledge reads
+
+| Finding | Commit | Change and evidence |
+|---|---|---|
+| F-044 | `d4d2524` | Explicit intent transitions keep Committed terminal. Unknown outcomes close only through reconcile with a durable nonblank authority/evidence reference; SQLite reopen and terminal-state regressions pass. |
+| F-045 | `d4d2524` | Fact insertion compares anchors with current raw versions through the runtime ValidationContext. Moved and missing anchors are immediately stale; historical evidence cannot reset freshness. |
+| F-048 | `d4d2524` | Cell and Edit check every sub-operation against the role mask. Mixed edit conditions are refused before effects; shared conditions are validated and enforced by the dispatcher. A create-first/delete-second cell regression preserves both paths. |
+| F-091 | `cdb1f58` | Resuming Finishing is an explicit single-sequence transition that invalidates completion currency while retaining execution history. S0 reruns regression acceptance and completes without another model cell; lifecycle and reopen regressions pass. |
+| F-092 | `cdb1f58` | Workspace mutation protection reads the current committed contract at each resolution, including child workspaces. Pending proposals grant nothing; approved changes apply immediately and after reopen. Git metadata remains protected. |
+| F-093 | `cdb1f58` | All open intents, including Unknown, and open handles fence expired/reassigned leases. Expired renewals advance execution generation even for the same holder. Reopen is refused until the prior unknown intent has a durable disposition. |
+| F-102 | `d4d2524, cdb1f58` | The live registry reconciles run obligations after plan admission and before each cell turn. Added/changed commands receive current definitions, removed seeded obligations leave the registry, and historical receipt definition identity is retained. |
+| F-103 | `d4d2524` | Automatic product acceptance and unavailable-product-runner blocking apply only to Result completion. Plan and probe packets reach their bound validator without launching product acceptance. |
+| F-106 | `cdb1f58` | Controller seeds Workset only from entries whose seed unit was selected and whose section is actually present in compiled K. Omitted large seed blocks grant no coverage. |
+| F-111 | `6fcc5a4, cdb1f58` | Every KB result body and scope passes through the configured redaction policy before model return. Search queries, summaries, STATUS bodies and skill reads are covered; masks and scan limits appear in runtime metadata. |
+| F-112 | `d4d2524, 6fcc5a4` | Parallel reads carry their individual admission into the executor. KB renders at most that allowance and 1500 tokens; get/skill expose offset/version paging over the redacted capture and reject changed cursors. Protected raw data remains stored; content beyond the configured redaction scan cap stays explicitly unavailable. |
+| F-125 | `6fcc5a4` | Rechecks and injection resolve admitted note dependencies with exact revision pins and paths with recorded hashes. Unknown named contracts remain stale unless the host supplies their current versions. Cycles, missing targets and moved dependencies cannot readmit or inject advice; explicit KB reads label them stale. |
+| F-126 | `6fcc5a4, cdb1f58` | Focus-note rendering uses shared Injection eligibility, current workspace versions, fresh note revisions and current stored status on every render. Frozen/live bases cannot replay an invalidated captured note; moved, missing-dependency and role-excluded notes remain absent. |
+
+### Verification and compatibility
+
+- 79 distinct selected tests passed on Windows JDK 26. The initial batch had 55 passes and one new finalization failure; correcting the recovery transition passed that regression and ten lifecycle checks. Eleven additional authority/wiring/schema checks and two StoreKb checks passed. No full suite/build or Linux/CI/P7 run.
+- Core ABI regenerated and checked; eval and index-treesitter test sources compiled. New optional serialized fields preserve existing JSON; JVM consumers must rebuild for changed constructors and interfaces. No schema bump.
+- Unknown intents require explicit host reconciliation with an authority/evidence reference. Open handles also require a terminal disposition before expired-writer reassignment. Expired same-holder renewal advances generation.
+- Mixed edit conditions must be split into separate calls. Every operation still requires its own role permission. Missing fact anchors are stale at insertion.
+- Interrupted finalization preserves completed cells but rechecks acceptance; it does not infer completion from the stored intermediate phase. Committed scope protection replaces configurable defaults while retaining Git-metadata denial.
+- KB get/skill paging uses offsets and a digest of the redacted capture. Each page fits its admitted read allowance, capped at 1500 tokens. The configured redaction scan cap still hides unscanned tails; raw canonical notes remain stored. Unknown dependency versions fail closed; hosts can supply named contract versions to Curator.recheck/InjectionInputs.
+- F-113 remains open for durable project-horizon wiring, despite the new serve-time dependency fallback. F-109 pressure rebuild remains separate from initial seed selection. D-297 through D-302 record these choices.
+- User authorized commit/push to origin/feature/bugfix. Pre-existing CLAUDE.md/ISSUES.md and untracked task files were preserved.
+
+## Tenth continuation: candidate fidelity, recovery and evaluation
+
+| Finding | Commit | Change and evidence |
+|---|---|---|
+| F-027 | `2799e18` | Stamping compares every remaining tracked path against its raw Git object and actual supported mode. DirtyState includes filter-hidden members and rechecks the stamp. A real clean-filter regression proves distinct candidate IDs, exact export and restoration for Git-equivalent raw bytes. |
+| F-031 | `2e12762` | Manifest blobs and a pending index are durable before ref movement. Reopen completes a matching publication once, discards an unmoved intent, and refuses unrelated ref movement. Injected index failures at turn zero and a later turn recover and permit subsequent snapshots. |
+| F-032 | `6b7ab81` | Atomic replacement preserves POSIX permissions; snapshots apply executable modes and validate every exported tree path by bytes, type and supported mode. Restore guards mode changes. Clean-path omission regression passes; executable export/edit/restore regression is present but skipped on Windows. |
+| F-036 | `b82a7b2` | Atlas scan, refresh, reads and metadata lookup resolve through WorkspacePath. Sniff shares guarded reads. External and protected Git-directory junction regressions pass on Windows, including explicit path-set command discovery. |
+| F-087 | `ed14e95` | Incomplete usage retains at least the admitted estimate, adds conservative funding for missing input/output dimensions, and includes known overruns. The selected CellTest regression covers input-only, output-only and oversized output usage. Late terminal reconciliation remains F-086. |
+| F-101 | `5d530f0` | Post-create launch failures terminate the child directly as well as its job, wait for exit, then close handles. A real Windows child with an injected failure before job assignment exits without executing its command. |
+| F-122 | `adf8840` | Flaky retries require an isolated export of the original candidate and a matching known environment. Missing isolation or changed input retains the first failure with an explicit unavailable message. VerifyTest covers real isolated disagreeing outcomes and refusal after first-attempt mutation; SchedulerTest passes. |
+| F-143 | `3ffb27c` | Promotion checks exact Final partition membership and frozen task, repetition, repository and stratum identities. Fixture evidence must name the candidate configuration fingerprint. PromotionEvidence needs a validated design to claim independence; legacy calls remain unknown. Altered and wrong-partition trials and foreign fixtures are rejected. |
+
+### Verification and compatibility
+
+- Eleven selected classes and one CellTest method passed across focused Windows JDK 26 batches. The new promotion fixture needed its training stratum corrected to meet the existing quota; a retry fixture compile error was corrected before its tests ran. No full suite/build, Linux/CI or P7 validation.
+- Eval ABI regenerated; core/eval ABI checks passed. Existing PromotionEvidence overloads remain; omitting the design now leaves independence unknown. Promotion fixture labels must be the candidate configuration fingerprint. No schema change.
+- Stamping now reads every tracked path to compare raw Git object identity. Cost is proportional to tracked bytes; large-repository performance was not benchmarked. Filter-hidden changes invalidate old candidate identities and are captured in new snapshots; old incomplete snapshots are not repaired.
+- Shadow publication uses a durable pending index. Historical ref/index gaps without a pending record still require explicit recovery; unrelated ref movements are never overwritten.
+- Export validation checks all tree members. Windows cannot represent POSIX executable bits; the Linux executable regression is present but skipped here. Real Windows junction containment and suspended-child cleanup regressions ran.
+- Ordinary verification without a candidate directory keeps the first failure and reports isolated retry unavailable. Changed candidates or unknown environments also prevent retries. Partial usage is charged conservatively; F-086 terminal reconciliation remains open.
+- D-291 through D-296 record these compatibility and policy details. User authorized push to origin/feature/bugfix. Existing CLAUDE.md/ISSUES.md and untracked task files remain untouched.
+
+## Ninth continuation: authority, evidence and transform repairs
+
+| Finding | Commit | Change and evidence |
+|---|---|---|
+| F-084 | `81ce469` | Cell validates every parsed operation against the advertised effective turn mask before dispatch; probe edits and plan/review runs are refused. CellTest passes. |
+| F-117 | `76d60b5` | Unresolved bare JS/TS imports are incomplete dependency information (except explicit node: builtins), so local aliases cannot support a narrow blast. ImportGraphTest passes with a syntax-tier alias regression. |
+| F-118 | `81ce469` | Only complete, untruncated, unredacted reference results clear impact obligations. Lexical reference views remain incomplete; plan rescoping remains available. CellTest passes. |
+| F-119 | `a41a7fa` | All actual transform changes, including new files, are checked against the current contract and path protection. Refusal triggers the existing guarded inverse; forbidden and contract-protected new files are removed. TransformTest passes. |
+| F-120 | `a41a7fa` | Transform diff blobs use the configured redactor; exact preimages/postimages remain protected. Characterization bytes are stored as protected comparison blobs. TransformTest and BehaviourSnapshotTest pass. |
+| F-132 | `e9d84db` | A durable repair reservation precedes helper effects; completion is a separate event. Interrupted helpers and stale routed grants cannot spend the same repair again after resume. RecoveryCampaignTest passes. |
+| F-134 | `217db66` | Integration reads current contract/generation/authority inside main ownership after staging and before effects. Both contract and generation changes during lock contention refuse publication. IntegratorTest passes. |
+| F-136 | `dc19437` | Publication checks coroutine cancellation and the live campaign fence before each stage and after approval; changed contracts also refuse. PublicationTest and PublicationCampaignTest pass. |
+| F-138 | `c32bc22` | QA redacts CLI/HTTP transcripts before blob storage and observed output before records/finish export; matching still uses original output. QaDriverTest passes. |
+| F-142 | `b9312b0` | Evaluation IDs bind comparator/arm semantics, shape cap and frozen attempt. Designs/trials/evidence use these IDs, and promotion checks manifest membership. CampaignTest and PromotionDecisionTest pass. |
+
+### Verification and compatibility
+
+- Eleven selected classes passed on Windows JDK 26 (nine core, two eval), in focused batches. The import-graph batch initially found an obsolete completeness expectation; evaluation initially rejected an invalid fingerprint-kind label. Both were corrected and their affected classes pass. No full suite/build, Linux/CI or P7 run.
+- Core/eval ABI dumps regenerated and checked. QaDriver adds configurable redaction while retaining explicit Java overloads; Kotlin consumers using default constructor arguments must rebuild. Eval adds configuration fingerprint accessors and PromotionEvidence overloads. No database schema change.
+- Old evaluation manifests and trial tables need regeneration under configuration IDs that include shape and comparator/arm semantics. The legacy attempt-only evidence overload refuses absent or ambiguous configurations.
+- Unresolved bare script imports conservatively widen dependency analysis. Lexical reference views cannot discharge complete-reference obligations; a newly scoped plan remains the supported alternative.
+- Repair reservations consume allowance even when the helper throws; resume does not replay unknown effects. Historical repair completion rows still consume one allowance. Existing leaked/raw artifacts are not migrated or scrubbed by these fixes.
+- Transform validation is after execution under the existing trusted-local model. Guarded recovery restores only matching postimages; external writes or path refusals remain reported partial effects. QA HTTP candidate binding remains open as F-137.
+- D-285 through D-290 record these choices. Eight fix commits run from e9d84db through a41a7fa; API dumps and continuation records follow. Push target: origin/feature/bugfix, authorized by the user.
+
+## Eighth continuation: smaller out-of-order repairs
+
+| Finding | Commit | Change and evidence |
+|---|---|---|
+| F-115 | `fbee771` | Calibration derives each observation's harness and file-band policy from the frozen attempt; campaigns with no frozen provenance are excluded. A historical mixed-series regression failed before and passed after; focused CalibrationTest passes on Windows JDK 26. |
+| F-069 | `cdbe39d` | Jest, Go and JUnit identities retain file/package/module namespaces; unbound Go cases do not yield reusable failure identities. Three collision regressions failed before and passed after; focused JestShaperTest, GenericShaperTest and JUnitXmlShaperTest pass on Windows JDK 26. |
+| F-042 | `c0a2fed` | Journal scope filters run in SQL; store search scans fixed-size text/ref pages and loads full events only for matches. Scoped cross-page test failed before and passed after; StoredEvidenceTest and LookTest pass on Windows JDK 26. DB lock time has not been measured. |
+| F-039 | `05f064b` | Curly-language outline precomputes container/function-body membership with range deltas in O(lines + spans), removing per-line scans of all spans. Existing OutlineTest passes; no throughput benchmark was run. |
+| F-052 | `47e16e7` | Look refuses a selected line that cannot fit, counts the complete rendered body including recall text, and bounds refusal/outline hints. Long-line, recall, find, structural and one-token regressions failed before and pass after; focused LookTest passes on Windows JDK 26. |
+| F-110 | `22709c5` | Note supersession validates both notes and writes both revisions/FTS rows in one transaction. Oversized replacement and injected insert-failure regressions failed before and pass after; NotesTest, StoreKbTest and CuratorTest pass on Windows JDK 26. |
+
+Full Windows JDK 26 build after all six fixes passed: **1667 tests, 13 skipped, zero failures/errors**; compilation, packaging and ABI checks passed. No new Linux/CI or P7 evidence.
+
+## Seventh continuation: ten smaller out-of-order repairs
+
+| Finding | Commit | Change and evidence |
+|---|---|---|
+| F-040 | `9fc57c8, 864cfe0` | Sniff keeps npm test for every declared test script, preserving pretest/posttest and npm script environment. Hooked package regression failed before the fix; SniffTest passes. Npm script order confirmed in official npm documentation. |
+| F-085 | `331c113` | An applied STATE patch clears the cell's historical loop signatures after dispatch. A later unrelated read executes without demanding another patch; focused CellTest failed before and passed after. |
+| F-099 | `f77a20b` | Cell emits AgentEvent.Cell.Rebuilt after the rebuild boundary journal entry, with the actual local generation and reason. The real pressure fixture now observes one event for one checkpoint rebuild. |
+| F-108 | `f2a8e7b` | Residency selects the actual complete-tail occurrences by identity and position instead of value-set membership. Equal old/recent assistant messages retain only the selected recent resident; ResidencyTest and CellTest pass. |
+| F-114 | `b6b1421` | Calibration labels unfinished increments Cancelled after host cancellation and Unfinished after external stops, reserving Failed for failed campaigns. Injected stopped campaigns no longer change the eligible sizing denominator. |
+| F-083 | `ea4cd41` | Acceptance command matching includes explicitly relative argv[0] executables. Root and package-cwd scripts enter the acceptance surface, bind their required check and block completion pending review; TestIntegrityTest passes. |
+| F-096 | `5b6c1a7` | CampaignHandle.await returns Deferred.await directly, preserving the original exceptional failure. A closed-store fault after provider dispatch failed before the fix; Kotlin facade cancellation and failure regressions pass. |
+| F-141 | `2584c17` | FixtureRunner retains relevant failed JUnit containers separately from descendant test results, reports them in JSON/CLI and vetoes green/invariantsZero. AfterAll-after-pass and failed dynamic factory regressions pass. Eval ABI remains compatible. |
+| F-097 | `f564b73, 4604b89` | Unknown executable forms become W with effectsUnknown and WorkspaceWrite capability, so Run cannot mark them replay-safe. Positive bare read-only forms remain R; a local ./ls wrapper stays unknown. CeilingTest and RunTest pass. Historical persisted intents are not rewritten. |
+| F-090 | `3c0ff07` | Accepted role-completion retries place escaped validator gaps into the next model-facing anchor, ahead of stale gate nudges. The first two bounded gaps are shown each retry; full gaps remain in the journal and packet. A corrected second probe response regression passes. |
+
+### Verification and compatibility
+
+- Focused RED/GREEN regressions ran for all ten findings; broader Cell/Residency, Sniff, Calibration, TestIntegrity, facade, Run/Ceiling, ResultPacket and FixtureRunner test classes passed.
+- Core and eval ABI checks passed before the gate. First full Windows run on 3c0ff07: 1572 core tests, 2 failed expectations, 13 skipped. Derived S0 now expects npm test; the known read-only `git status --short` form remains R. Both affected suites pass focused checks. Full corrected build on 4604b89 **passed: 1645 passed, 13 skipped**, zero failures/errors; compilation, packaging and core/eval ABI passed. Ignored log: `build/bugfix-seventh-build-verified.log`.
+- The effect policy now requires W authority for unrecognized executable forms and denies automatic replay. Old persisted intent rows that were previously stamped replay-safe are not rewritten.
+- Fixture-report JSON adds `containerFailures`; descendant fixture result counts retain their existing meaning. Container failures veto green and invariant eligibility.
+- Completion feedback renders two bounded, escaped gap lines per retry; the full list is preserved in the packet/journal. Later validators can surface remaining gaps after earlier ones are repaired.
+- Source changes preserve core/eval ABI and database schema. No new Linux/CI, live-provider or P7 validation. Local commits only; existing user edits remain untouched.
+- npm lifecycle behavior follows the [official npm scripts documentation](https://docs.npmjs.com/cli/v11/using-npm/scripts/#npm-test).
+
+## Sixth continuation: eight further repairs
+
+| Finding | Commit | Change and evidence |
+|---|---|---|
+| F-013 | `0126918` | Referenced orphans are repaired directly before deletion. Cleanup uses three continuing directory iterators and keyset pagination, visiting at most 4096 entries/rows per call; Store.close releases iterators. Backlog/adoption and bounded-row regressions pass. Mandatory integrity work remains proportional to references and adopted bytes; cursors restart on Store reopen. |
+| F-015 | `389634d, e74302a` | The supervisor confirms container quiescence and closes native resources before terminal publication. Windows queries active job processes; POSIX checks the original group. Cleanup failure or timeout becomes Lost. Four deterministic settlement regressions and immediate Windows descendant-liveness assertions pass. Detached POSIX groups remain F-016; no new Linux runtime evidence. |
+| F-028 | `527c95b` | Stamper, DirtyState and ShadowRef use a dedicated final-link metadata resolution path. It validates ancestors, captures exact link spelling without following final targets, and verifies exported link objects. Five symlink capture/export regressions are present but skipped on this Windows host because symbolic-link creation is unavailable. The Windows junction-ancestor refusal regression passes. |
+| F-029 | `527c95b` | PathKind.Missing now represents NoSuchFileException only. Protected/refused or unsupported capture inputs abort authoritative stamps/snapshots; failed staged cat-file reads propagate GitError. Protected-path, staged-corruption and junction-ancestor regressions pass. Existing incomplete snapshots are not repaired. |
+| F-030 | `527c95b` | DirtyState compares immutable captured entries with the stamp report and rechecks base commit, Git status and the staged index. Observed movement aborts with SnapshotIntegrityError. Injected changes to file bytes, index membership and HEAD during blob publication are refused. This detects inconsistent acquisition but does not provide an atomic snapshot against external writers; F-027 remains open. |
+| F-037 | `499addd` | Atlas cache loads re-read raw bytes even when size and mtime match; same-size/restored-mtime rewrites and edits between build and save invalidate declarations. Short row hashes remain orientation hints, not authoritative file identities. Both cache regressions pass. |
+| F-038 | `499addd` | Changes under collapsed directories trigger a metadata rescan that recomputes their totals. Add/delete/resize regressions match a fresh build. KDoc now states repository-sized row copying/sorting and metadata scans; only parsing is limited to touched files. No throughput benchmark or O(touched) total-cost claim. |
+| F-046 | `aff4943` | Validator checks every rendered operation string, including evidence IDs, anchor paths and auxiliary fields, for the 240-character limit, embedded line breaks and both Markdown fence styles. A matrix covers 25 fields with five invalid forms plus valid inline commands; focused register checks pass. |
+
+### Verification and compatibility
+
+- Regression-first checks reproduced GC, process settlement, incomplete/mixed snapshot, Atlas cache/aggregate and STATE-field failures. Focused workspace/Atlas batch: 65 passed, 8 skipped. Other focused batches passed; they overlap and are not additive totals.
+- Review corrected the staged-object test to expect the existing GitError, fixed the collapsed-directory test fixture so its files were not ignored, and added index/HEAD mutation and Windows junction checks. Process tests now assert descendant death immediately at terminal status, without a post-terminal grace wait.
+- First full Windows run on aff4943: **1637 passed, 13 skipped**, no test failures/errors. Its ABI gate exposed a missing no-argument LocalOs constructor in the dump. Restored the original public primary constructor in e74302a; focused process and ABI checks pass. Full corrected build on e74302a **passed: 1637 passed, 13 skipped**, zero failures/errors; compilation, packaging and existing ABI passed. Log: ignored `build/bugfix-sixth-build-verified.log`.
+- No schema or public API change. New snapshot captures fail closed; existing incomplete snapshots are not reconstructed. GC cursors last for the Store lifetime. Referenced integrity checks necessarily cost O(references plus adopted bytes).
+- Five new real-symlink capture/export tests skip because this Windows host lacks symlink creation privileges. Windows junction containment and native job-quiescence tests ran. Linux group confirmation is compiled but has no new Linux/CI runtime evidence; detached POSIX groups remain F-016.
+- D-272 through D-276 record the cleanup budgets, process settlement, snapshot acquisition, Atlas costs and STATE field policy. Git clean-filter membership remains F-027; no atomic external-writer snapshot is claimed.
+- Native confirmation references: [Windows job accounting](https://learn.microsoft.com/windows/win32/api/winnt/ns-winnt-jobobject_basic_accounting_information), [QueryInformationJobObject](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-queryinformationjobobject), [Linux kill](https://man7.org/linux/man-pages/man2/kill.2.html), [Linux process state](https://man7.org/linux/man-pages/man5/proc_pid_stat.5.html).
+- Local commits only. Nothing pushed; pre-existing CLAUDE.md/ISSUES.md edits and untracked task files are preserved.
+
+## Fifth continuation: ten further repairs
+
+| Finding | Commit | Change and evidence |
+|---|---|---|
+| F-004 | `55e86ea, eccb010` | Generic request counts include roles, call/result IDs and explicit planning margins, never claim exactness, and flag native-only replay/non-text content as unknown. Cell dispatch honors profile-specific request-estimator overrides. Exact-text, long-ID, native-context and dispatch regressions pass. Generic framing allowances remain planning estimates, not measured provider limits. |
+| F-006 | `6b7c801` | Cancel and release settle held invocations independently of response waiters; cancellation of await requests provider cancellation and preserves the single terminal usage record. Direct cancellation, cancelled waiter and release-without-waiter regressions pass. |
+| F-010 | `4c99034` | Composed views and all export inputs share one SQLite read transaction. Current register reads use LIMIT 1 plus COUNT; Contracts.current uses repository.latest with a bounded SQL implementation. A commit injected between SELECTs preserves the original snapshot; malformed historical bodies do not affect current reads. |
+| F-014 | `6bb0767` | Store.open canonicalizes existing ancestors of the configured base and final layout, and rejects state inside any registered Git worktree before creating directories. Direct, nested, linked-worktree and Windows junction regressions pass. |
+| F-018 | `c406b7a` | JVM matching uses Unicode character classes and explicit LF/CRLF semantics matching ripgrep, including dot and end anchors. Backend comparisons cover accented words, Arabic digits, Unicode whitespace/boundaries and Unicode/CR line separators. |
+| F-020 | `c406b7a` | Enumeration and binary-probe I/O failures propagate as Failed/Denied. Directory-walk failures are no longer hidden; Git errors inside a detected repository cannot fall back to an unrestricted walk. Corrupt-index regression passes; unreadable-directory regression is present but skipped on Windows. |
+| F-021 | `c406b7a` | Search candidates resolve through WorkspacePath before content probes. Link ancestors and outside-root resolutions are denied for both engines. A tracked directory replaced with an external Windows junction is rejected. Concurrent external-writer races remain the documented best-effort path limitation. |
+| F-024 | `1e3ef70` | Digest reduction terminates by removing optional content, without the 64-step cutoff. Mandatory overflow throws DigestCapacity; Cell checkpoints a pressure exit before provider dispatch. Tiny caps, long exclusions and 100 historical requests are covered. |
+| F-025 | `1e3ef70` | ContractSlice persists incrementAcceptanceIds independently of retained definitions and includes them in coverage. Removing an increment-only acceptance item stays incomplete after copy and JSON round-trip. Legacy slices infer only the IDs still present and should be rebuilt from their authoritative increment. |
+| F-026 | `88ab4f5` | Registry and Coherence retain per-listener delivery progress under serialized transition delivery. Failed callbacks resume before later changes; acknowledged callbacks are skipped; recorded versions advance only after all acknowledgements. Failed listeners must tolerate replay of their own partial effects. Registry/horizon fault regressions and run/edit checks pass. |
+
+### Verification and compatibility
+
+- Focused Windows JDK 26 regressions passed for provider accounting/cancellation, store containment, search, composed projections, current contract reads, context slices/digests and coherence. Failures were reproduced before fixes. Some initial regression attempts required fixture or compilation corrections before reaching the intended behavior.
+- Review found that Cell bypassed the request-estimator override; its dispatch regression failed before the follow-up correction and passed afterward.
+- Full Windows JDK 26 build on `eccb010`: **passed**. Core: 1394 tests, 1386 passed, 8 skipped; provider-api 19, eval 49, index-treesitter 17 passed. Total: **1471 passed, 8 skipped**, zero failures/errors. Compilation, packaging and ABI passed. Log: ignored `build/bugfix-fifth-build.log`.
+- Core ABI regenerated. ContractRepository.latest has a compatible default; SQLite and memory repositories override it. ContractSlice gains a defaulted serialized incrementAcceptanceIds field and changed constructor/copy signatures; consumers must rebuild. DigestCapacity is the explicit failure for an irreducible digest.
+- Existing slice JSON decodes by inferring IDs still present. Missing historical increment-only obligations cannot be reconstructed from an already incomplete slice; rebuild it from the authoritative contract/increment. No database schema bump.
+- Generic framing margins are planning estimates. Native-only replay and non-text content need provider-specific effective accounting; no live provider capacity claim is made. D-269 records the policy.
+- D-270 records contract capacity/serialization compatibility. D-271 records retry semantics: acknowledged listeners are not repeated, failed listeners must tolerate their own partial-effect retry, and an unrecovered failure blocks later transition delivery.
+- Windows junction regressions ran. The new POSIX unreadable-directory regression is skipped on Windows. No new Linux/CI, live-provider or P7 evidence.
+- F-013, F-015/F-016/F-017 and F-019 remain open: bounded GC, process containment/settlement, Git deadlines and search resource limits require further work. Raw snapshot findings F-027 onward also remain open.
+- Local commits only. Nothing pushed; existing CLAUDE.md/ISSUES.md and the two untracked task files are preserved.
+
+## Fourth continuation: six further repairs
+
+| Finding | Commit | Change and evidence |
+|---|---|---|
+| F-001 | `9192a41` | Attempt construction, copy and decoding own immutable nested collections, including provider JSON and default role definitions. Host mutations and exposed-reference mutation attempts cannot change frozen inputs. Controller compares normalized snapshots. |
+| F-002 | `9192a41` | Fingerprint encoding `attempt-config/v2` sorts maps and sets while preserving lists and JSON arrays. Reordered equivalent configurations match; changed prices, permissions and sequence order differ. |
+| F-023 | `8491837` | Contract changes and final amendment provenance commit atomically. Accepted/rejected records, projections and exports survive reopening; injected SQL failures roll back both contract and resolution. |
+| F-061 | `568f6bf` | Handles, foreground/MCP reconciliation and observations persist before intent commit. All open unsafe intents fence replay, including Observed after failed commit updates. Injected handle, observation and commit failures cannot permit a duplicate launch. |
+| F-063 | `568f6bf` | Background handles persist classification, pre-run members and base commit. Poll/cancel retain D/unknown labels. Dirty-to-clean and clean HEAD changes invalidate evidence; pre-existing dirt is excluded. Concurrent changes are reported as interval changes with unknown attribution. |
+| F-064 | `568f6bf` | Cancellation interrupts waiting and continuously producing polls, terminates owned processes and propagates after intent accounting. Shared capture retains at most 8 MiB while draining to terminal EOF; capped/missing logs remain incomplete and cannot certify green. |
+
+### Verification and compatibility
+
+- Regression-first checks reproduced four amendment failures, seven run/capture failures and three configuration failures before their fixes. Two initial compile attempts used tests that were still being completed; those compile issues were corrected before behavioral RED runs.
+- Focused batches passed: 40 initial tests, 100 broader tests, and 48 final configuration/lifecycle/run/capture tests. These batches overlap and are not additive totals.
+- Review corrections cover continuously producing polls, interrupted I/O cleanup, clean HEAD transitions, default-role snapshots and normalized Controller config comparisons.
+- Full Windows JDK 26 build on `b7b74d0`: **passed**. Core: 1377 tests, 1370 passed, 7 skipped, zero failures/errors; provider-api 17, eval 49, index-treesitter 17 passed. Total: **1453 passed, 7 skipped**. Compilation, packaging and ABI checks passed. Log: ignored `build/bugfix-fourth-build.log`.
+- ABI regenerated in `b7b74d0`. `ContractRepository` implementors must provide atomic `commitResolution` and durable `resolved`; `Contracts.resolved(work)` adds work filtering. Handle constructor/copy signatures gain defaulted provenance fields. Consumers must rebuild.
+- AttemptConfig retains constructor/copy/components and JSON field shape, but uses a custom serializer instead of the generated implementation. Existing JSON decodes into immutable inputs. Its v2 fingerprint is intentionally recomputed on old snapshots, invalidating compiled-context caches; stored historical SQL fingerprint values are not rewritten.
+- No database schema bump. Legacy handle JSON loads conservatively as D/unknown without reconstructed launch membership. Legacy amendment rows that were already left Pending are not repaired automatically: their signed resolution provenance was never recorded.
+- D-266 records background interval attribution; D-267 records the 8 MiB capture cap; D-268 records immutable inputs and fingerprint compatibility. Output beyond the cap is unavailable from the captured blob; this is explicit incomplete evidence, not a complete recall log.
+- Local commits only. No push, PR, Linux/CI, live provider or P7 validation. Existing user edits remain preserved.
+
+## Third continuation: ten further repairs
+
+| Finding | Commit | Change and evidence |
+|---|---|---|
+| F-022 | `1316839` | Amendment replies must match the proposal, revision and still-pending amendment after suspension. Serialized mutations use the latest contract, preserving concurrent strengthening/proposals; resolution memory follows successful persistence. Seven regressions pass. |
+| F-054 | `c2f6989` | Normalized anchor spans include requested boundary indentation and line endings, including whitespace after the final newline. Tabs, CRLF/LF, inline surroundings and end-to-end replacements are covered. |
+| F-056 | `742d834` | Turn-revert scope preflight uses the exact snapshot tree difference, including clean-at-target files, creations and deletions. Current contract scope and increment warnings/justification apply before restoration. |
+| F-057 | `742d834` | Publication bookkeeping precedes postimage persistence and coherence. Partial rename targets retain recovery references; failed post-write revalidation and transform observation report partial/unknown effects. Failed symlink restoration cannot claim unchanged bytes. Fault-injection regressions cover persistence, coherence, rename, transform observation and selective revert. |
+| F-058 | `742d834` | New edit observations use their edit alias identity. Observation lookup resolves exact IDs first, then the latest result for an action ID, preserving historical poll observations. Run/edit recall, edit revert and repeated-poll regressions pass for SQL and memory stores. |
+| F-062 | `ff510f7` | Poll/cancel require matching work and workspace alias provenance before accessing the process or log. Same-work, same-workspace resume across attempts remains supported. Foreign work/workspace and resume regressions pass. |
+| F-065 | `ff510f7` | The shared observer drains terminal processes until an empty cursor chunk and treats a nonadvancing nonempty cursor as lost. Run, Verify, Checker, Baseline, QA and inline syntax use it. Initially-terminal, terminal-transition and foreground-run regressions preserve the final failure marker. |
+| F-076 | `c49ca61` | Checker and blast arguments are relative to command cwd while evidence paths remain workspace-relative. Nested checkers ignore unrelated package paths; known file-oriented commands receive selected files and project/unknown commands run as declared. Actual nested-file reading and argument regressions pass. |
+| F-088 | `e769511, 742d834, ff510f7, c49ca61, b13c18d` | Cell rechecks authority after accounted provider responses and before each tool/check dispatch. Built-in mutation, transform/syntax, process, baseline and ask-answer boundaries recheck after preparation or suspension. Expired provider-response, approval and ask-reply regressions prevent effects. Late completion may still be archived using existing evidence; all new scheduled work is skipped and publication remains fenced. |
+| F-094 | `e769511` | After final review, completion revalidates the candidate, full contract and live publication authority. Tree edits, amendments, same-version strengthening, cancellation and lease expiry cannot complete the campaign. |
+
+Windows JDK 26 full build passed on b13c18d: 1353 core tests: 1346 passed, 7 skipped, zero failures/errors; provider-api 17, eval 49, index-treesitter 17 passed. Compilation, packaging and ABI checks passed. No new Linux/remote CI or P7 validation.
+Total: **1,429 passed, 7 skipped**, zero failures/errors. Log: ignored `build/bugfix-third-build-verified.log`.
+
+- Focused repro batches failed before correction. Final focused checks passed after stale test assumptions about observation IDs and generic crash reporting were updated; original coverage/reconciliation checks remain.
+- The first full run had 1,339 core passes, seven failures and seven skips. Its seven unchanged lifecycle tests exposed an overly broad guard: plain late completion must remain archivable from existing evidence. That source correction skips new checks/effects and retains the publication veto; focused lifecycle checks and the final full build passed.
+- Independent review corrections cover trailing anchor indentation, transform/syntax/baseline dispatch fences, selective-revert revalidation and failed symlink restoration.
+- No public signatures or schema changed. Exact observation IDs retain old views; action aliases select the latest captured poll. Old edit aliases without a stored observation association are not migrated.
+- D-265: handle ownership is work plus workspace; later attempts may resume earlier handles, while absent/foreign workspace provenance is denied.
+- F-061 durability, F-063 background effect attribution, F-064 cancellation/unbounded capture and F-023 durable amendment resolutions remain open.
+- Local commits only. No push, PR, new Linux/CI, live-provider or P7 validation.
+
+## Fixed findings
+
+| Finding | Commit | Change and evidence |
+|---|---|---|
+| F-003 | `4e9d774` | Duplicate call IDs and reused completed IDs make protocol pairing invalid; provider regression tests. |
+| F-005 | `4e9d774` | Token sums saturate and admission compares capacity without overflow; maximum-Long regressions. |
+| F-007 | `43f8a15` | Sequence assignment, replay and subscriber enqueue share the event lock; concurrent-emitter regression. |
+| F-008 | `43f8a15` | Flow buffer explicitly drops oldest records; stalled collector receives the final event after overflow. |
+| F-009 | `43f8a15` | Java authority cancellation propagates without cancelling the host future; ordinary failures are logged by type. |
+| F-011 | `24e53e3` | COMMIT is inside rollback protection; failed rollback quarantines even when close fails (`15bfcaa`). Deferred-FK and injected rollback/close failure regressions pass. |
+| F-012 | `24e53e3` | Blob and lock-holder publication drain their ByteBuffers before force/publication. Existing storage tests pass; forced short-write injection was not performed. |
+| F-035 | `75e3280` | InvalidPathException becomes an IllegalCharacter refusal; Windows invalid-name regression. |
+| F-043 | `f060c97` | Passed receipts reject failures/errors and incompatible exits. QA preserves explicit expected CLI exits and keeps HTTP status separate (`3f433f6`); receipt and QA regressions pass. |
+| F-047 | `d7551cc` | Recall with no current file version is Historical and grants no Workset coverage. |
+| F-049 | `d7551cc` | All Workset collection access is synchronized; concurrent registrations and snapshots preserve all entries. |
+| F-050 | `d7551cc` | A narrowed recall persists its selected blob, preserving source coordinates on subsequent recalls. |
+| F-051 | `d7551cc` | Read observations retain the full captured redaction mask; recalling a hidden tail grants no coverage. |
+| F-066 | `9dbf774` | Unittest OK summaries account for skipped cases; all-skipped output stays inconclusive. |
+| F-067 | `9dbf774` | Cargo aggregates all suite summaries, including later failures. |
+| F-068 | `210763d` | Malformed/incomplete Jest and pytest JSON reports, unknown entries and partial pytest XML reports cannot fall back to green terminal output. |
+| F-077 | `f060c97` | Verifier-version validation precedes same-stamp receipt reuse; supplied changed environments also invalidate. |
+| F-098 | `24e53e3` | Overlapping redaction matches redact the full interval union, including transitive overlaps. |
+| F-116 | `43f8a15` | Equivalent root-package spellings pin identical file sets and detect content changes. |
+| F-121 | `f060c97` | Order-aware changed spans detect assertion/control-flow reorderings. Existing test-file additions conservatively require review (D-261). |
+| F-130 | `210763d` | Cached approvals pass through current required-check veto; persisted ReviewRecord includes failedRequiredChecks and approved reflects the veto. |
+| F-131 | `f060c97` | Cache preference is accepted only when remaining unit jobs can meet all deadlines; seeded schedule regressions. |
+| F-139 | `75e3280` | Generated tools deep-copy and freeze script/capability/test collections; capability requirements and unambiguous argv contribute to the digest. |
+| F-140 | `f060c97` | Watcher results render stale when their candidate differs from the current candidate, including unknown current candidates. |
+
+## Continuation fixes
+
+| Finding | Commit | Change and evidence |
+|---|---|---|
+| F-053 | `6e4e671` | Canonical edit paths, including rename targets, cannot appear in multiple operations; reverts run alone. Conflict regressions refuse before any write. |
+| F-055 | `6e4e671, da8bc42` | The entire edit report is redacted before return and persistence. Redacted or capped reports grant no new post-edit coverage; composite observations carry no source ranges. Diagnostic and coverage regressions pass. |
+| F-059 | `b5ae2f3, 2b30ba6` | Run foreground/background/poll/refusal views and Verify output are redacted at their output boundaries. Stored log masks and scan limitations propagate into run capture metadata; secret and bounded-log regressions pass. |
+| F-060 | `e4e23eb` | D-class replies must match request ID, request revision and current contract after the await; coroutine cancellation is checked before proceeding. Wrong identity/revision and authority-change regressions prevent dispatch. |
+| F-070 | `2b30ba6, da8bc42` | Both acceptance selections refuse missing registrations. Aggregate green requires final-stamp Scheduler.currency certification; an earlier pass invalidated by a later check is non-green. |
+| F-071 | `6e1f2ca` | D-262 conservatively denies new model-origin verification commands unless exact argv/cwd also has non-model contract authorization. Working directories resolve inside the execution root; denied-command, escaping-cwd and approved-command regressions pass. |
+| F-072 | `fb6bffc` | STATE persistence precedes publishing the new in-memory register or clearing its last rejection; injected save failure leaves both unchanged. |
+| F-073 | `fb6bffc` | Schema-invalid STATE patches now record a typed rejection with measured sizes for the loop gate. A subsequently saved valid patch clears it. |
+| F-074 | `e4e23eb` | Task answers must name the pending question and match the current contract after the await; wrong and superseded answers cannot amend it. |
+| F-078 | `2b30ba6` | Exclusive checks enumerate under the mutation lock and compare before/after membership and content/metadata. Enumerated unknown closures rescan the workspace, not only a caller-supplied stale path list. |
+| F-079 | `2b30ba6` | Isolated export reads unchanged bytes from immutable Git objects, checks dirty bytes against stamped digests, and checks candidate currency before/after export. A stale report is refused; unsupported entry modes fall back to exclusive execution. |
+| F-080 | `2b30ba6, 6e1f2ca` | Isolated exports restore and validate POSIX executable status; post-run snapshots include executable state. The POSIX runtime regression is present but skipped on this Windows host. |
+| F-081 | `137b89b` | Baseline snapshots compare membership, versions, timestamps and executable state. Mutated, restored or expanded input trees cannot publish a pre-existing-failure ledger. |
+| F-123 | `cf3e80d` | Every declared quality/full-suite gate must have current eligible passing evidence at one final stamp. Missing runners, mutating suites and quality gates stale after the suite remain uncertified. |
+
+## Continuation verification
+
+- Every fix group passed focused Windows JDK 26 tests, including before-fix failures for the new regressions. The POSIX executable-mode test is skipped on Windows.
+- Independent review found two gaps in the first implementation: coverage from hidden edit views and the alternate acceptance selector. Both were corrected and retested (`da8bc42`).
+- The first build was cancelled for review corrections. The next full core run had 1,305 passed, two failed and seven skipped; the two stale test fixtures were corrected and both classes passed focused reruns. Final `./gradlew.bat build -q --console=plain` **passed** on `ae8fa2a`: **1314 core tests: 1307 passed, 7 skipped, zero failures/errors**; provider-api 17 passed, eval 49 passed, index-treesitter 17 passed. Compilation, packaging and ABI checks passed. Log: ignored `build/bugfix-continuation-build-verified.log`.
+- No public signatures changed in this continuation. D-264 changes the default parser policy to `shaper/2`, invalidating older check-definition digests and requiring re-verification.
+- D-262: new model-origin verification commands require exact non-model contract authorization. Interactive approval through Verify is unavailable; a host/user must commit that authorization. D-263: one operation per canonical edit path; multiple hunks stay supported.
+- Isolated export now reads unchanged content from Git's object store, one blob read per file; large-repository export performance was not benchmarked.
+- Local commits only; no push, PR, Linux, CI, live-provider or P7 validation.
+
+## Previous session verification
+
+- Each fix group passed focused tests. Regression tests reproduced the defects before correction, except the short-write loop was verified by inspection and existing storage tests.
+- Initial full Windows JDK 26 core run: **1,293 tests; 1,286 passed, one failed, six skipped**, in 13 minutes. The sole failure was QaDriverTest recording HTTP 200 as a process exit. Fixed in `3f433f6`.
+- Final focused DbTest, QaDriverTest, SchedulerTest and EvidenceTest: **29 passed**, zero failures/errors/skips.
+- `./gradlew.bat build -x :core:test -q --console=plain`: **passed** after the correction; compilation, packaging and ABI checks passed; provider-api 17, eval 49 and index-treesitter 17 tests passed. The full core suite was **not rerun** after the final fixes.
+- Commands used JAVA_HOME=C:/Users/user/.gradle/jdks/eclipse_adoptium-26-amd64-windows.2. Local logs: ignored build/bugfix-build.log and build/bugfix-build-final.log. Two JVM attach pipe diagnostics in the initial log came from progress sampling, not test failures.
+- Core ABI dump regenerated. Provider API signatures did not change.
+- No Linux, remote CI, live provider, or P7 validation in this session.
+
+## Compatibility and decisions
+
+- `ReviewRecord` gains defaulted serialized `failedRequiredChecks`; `Receipt` and `Executed` gain `expectedExitCode` (default zero, nullable for output-only QA). Old ordinary JSON remains readable; JVM callers must rebuild against the changed constructor/copy ABI. Historical HTTP receipts with exitCode=200 need re-verification under the corrected semantics.
+- `Workset.RecallResult.Historical.currentVersion` is nullable when the source file is gone.
+- Generated-tool digests now include capabilities and unambiguous argv; existing digest-based caches may invalidate.
+- D-261: additions to an existing test file require integrity review. New test files without detected skip markers retain the additions-only category. This is a conservative heuristic, not semantic proof.
+- Receipt construction rejects contradictory passed evidence; malformed old persisted receipts may now fail validation. D-264 now bumps the default check parser policy to shaper/2, so old receipt definitions cannot retain currency under the old parser policy.
+
+## Resume order
+
+1. Read findings.md fix_progress; preserve existing CLAUDE.md/ISSUES.md and untracked continuation files.
+2. Continue F-013, F-015/F-016/F-017, F-019, then F-027 onward. Exact queue: fix_progress.remaining_open_ids.
+3. Keep P0-P6 at 185/185 implemented; repair status belongs in findings.md. P7 remains excluded.
+
+## Existing implementation debts
+
+The original plan is still 185/185 implemented. Carry D-254 recovery wiring, D-70/D-71 replanning, D-241 S3 resume, D-252 retrieval, D-113/D-120 behaviour maps, D-124/D-244 review evidence, D-220/D-221 eval arms, D-200 QA scheduling, D-66 S0 suite and D-92 impact checks. Their related findings remain open unless explicitly listed above.
+
+## Workspace provenance
+
+`CLAUDE.md`, `ISSUES.md`, `findings.md` and `todo_findings.txt` were already modified/untracked at session start. The first two and todo_findings.txt were preserved. findings.md is now committed as the requested repair ledger. Local commits only; no push or PR.

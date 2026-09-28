@@ -165,6 +165,13 @@ class ReviewCellTest {
             val reused = assertIs<ReviewOutcome.Approved>(cells.obtain(p.copy(id = "evidence-2"), Tier.Medium, f.registry::version))
             assertTrue(reused.record.reused)
             assertEquals(1, judge.tiers.size, "obtain_required_review_once: the judge is not asked twice")
+            val newlyRed = p.copy(receipts = listOf(ReviewReceipt("red", "CHK-accept", Outcome.Failed, "1 failed", true)))
+            repeat(2) {
+                val vetoed = assertIs<ReviewOutcome.Declined>(cells.obtain(newlyRed, Tier.Medium, f.registry::version))
+                assertFalse(vetoed.record.approved)
+                assertFalse(cells.records(p.ids).last().approved)
+            }
+
 
             f.repo.write("src/a.py", CellFixture.A_PY.replace("return 1", "return 10"))
             assertEquals(Freshness.Stale, reused.record.freshness(p.contractVersion, p.candidate, f.registry::version))

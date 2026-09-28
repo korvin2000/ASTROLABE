@@ -42,6 +42,35 @@ class AccountingTest {
     }
 
     @Test
+    fun `unsettled calls and failed extraction retain campaign funding`() = withStore { store ->
+        val accounting = Accounting(store, clock)
+        val free = io.astrolabe.provider.Money.zero("USD")
+        assertTrue(accounting.reserve(ids, "first", FakeProfiles.main, 60, free, 100, null))
+        assertFalse(accounting.reserve(ids, "second", FakeProfiles.main, 60, free, 100, null))
+        accounting.record(ids, "first", FakeProfiles.main, null,
+            BillableUsage(mapOf(BillingDimension.UNCACHED_INPUT to 10L, BillingDimension.OUTPUT to 10L), provenance))
+        assertTrue(accounting.reserveExtraction(ids, "extraction", 60, null, 100, null, "USD"))
+        accounting.extraction(ids, "extraction", null, 60, null)
+        assertEquals(20L, accounting.remainingTokens(work, 100))
+        assertFalse(accounting.reserveExtraction(ids, "next-extraction", 30, null, 100, null, "USD"))
+    }
+
+    @Test
+    fun `a call settled without usage keeps its reserved money as known funding under a cost cap`() = withStore { store ->
+        val accounting = Accounting(store, clock)
+        val cap = io.astrolabe.provider.Money("USD", BigDecimal("1.00"))
+        val reserved = io.astrolabe.provider.Money("USD", BigDecimal("0.30"))
+        assertTrue(accounting.reserve(ids, "first", FakeProfiles.main, 10, reserved, 100, cap))
+        accounting.record(ids, "first", FakeProfiles.main, null, null)
+        assertEquals(io.astrolabe.provider.Money("USD", BigDecimal("0.70")), accounting.remainingCost(work, cap))
+        assertTrue(accounting.reserve(ids, "second", FakeProfiles.main, 10, reserved, 100, cap))
+        assertTrue(accounting.reserveExtraction(ids, "extraction", 10, reserved, 100, cap, "USD"))
+        accounting.extraction(ids, "extraction", null, 10, null, "USD", reserved)
+        assertFalse(accounting.reserve(ids, "third", FakeProfiles.main, 10, reserved, 100, cap))
+        assertTrue(accounting.reserve(ids, "fourth", FakeProfiles.main, 10, io.astrolabe.provider.Money("USD", BigDecimal("0.10")), 100, cap))
+    }
+
+    @Test
     fun `FX-59 a call without usage is unknown spend, never zero, and poisons the totals honestly`() = withStore { store ->
         val accounting = Accounting(store, clock)
         val priced = accounting.record(ids, "inv-1", FakeProfiles.main, null, BillableUsage(mapOf(BillingDimension.UNCACHED_INPUT to 1_000L, BillingDimension.OUTPUT to 100L), provenance))

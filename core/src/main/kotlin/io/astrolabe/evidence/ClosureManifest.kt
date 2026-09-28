@@ -76,7 +76,7 @@ public data class ClosureManifest(
             val (members, membership) = when (closure) {
                 is Closure.Known -> closure.paths.sorted() to emptyMap()
                 is Closure.Package -> {
-                    val dir = closure.path.trimEnd('/')
+                    val dir = closure.path.replace('\\', '/').split('/').filter { it.isNotEmpty() && it != "." }.joinToString("/")
                     val inside = tree.filter { dir.isEmpty() || it.startsWith("$dir/") }.sorted()
                     inside to mapOf(dir to inside)
                 }

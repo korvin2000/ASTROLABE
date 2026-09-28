@@ -37,7 +37,7 @@ public data class TestIntegrityFlag(
 ) {
     /**
      * Unknown classification is never proof of no weakening: a touched required check needs an approving review.
-     * Only a pure addition (nothing removed, no skip marker) is let through, still rendered.
+     * Only a new test file without skip markers is exempt; additions to existing tests can bypass assertions.
      */
     val blocksCompletion: Boolean get() = requiredChecks.isNotEmpty() && kind != TestIntegrity.ADDITIONS_ONLY && verdict?.approved != true
 
@@ -133,8 +133,12 @@ public object TestIntegrity {
         changes.distinctBy { normalize(it.path) }.mapNotNull { change ->
             val path = normalize(change.path)
             val surface = surfaceOf(path, contract) ?: return@mapNotNull null
-            val removed = multisetMinus(lines(change.before), lines(change.after))
-            val added = multisetMinus(lines(change.after), lines(change.before))
+            val before = lines(change.before)
+            val after = lines(change.after)
+            val prefix = before.zip(after).takeWhile { (a, b) -> a == b }.size
+            val suffix = before.drop(prefix).asReversed().zip(after.drop(prefix).asReversed()).takeWhile { (a, b) -> a == b }.size
+            val removed = before.subList(prefix, before.size - suffix)
+            val added = after.subList(prefix, after.size - suffix)
             val kinds = kindsOf(path, surface, change, removed, added)
             val original = removed.filter { it.isNotBlank() }.take(MAX_ORIGINAL_LINES).joinToString("\n").ifEmpty { null }
             TestIntegrityFlag(path, surface, cause, requiredChecksFor(path, surface, checks), kinds.joinToString(","), originalObligation = original)
@@ -155,7 +159,7 @@ public object TestIntegrity {
         if (weakened(removed, added)) kinds += WEAKENED_ASSERTION
         return when {
             kinds.isNotEmpty() -> kinds
-            removed.all { it.isBlank() } -> listOf(ADDITIONS_ONLY)
+            change.before == null && removed.all { it.isBlank() } -> listOf(ADDITIONS_ONLY)
             else -> listOf(UNCLASSIFIED)
         }
     }
@@ -173,11 +177,6 @@ public object TestIntegrity {
     private fun testNames(text: String): List<String> = TEST_NAME.findAll(text).map { m -> m.groupValues.drop(1).first { it.isNotEmpty() } }.toList()
 
     private fun lines(text: String?): List<String> = text?.lines()?.map { it.trimEnd() } ?: emptyList()
-
-    private fun multisetMinus(a: List<String>, b: List<String>): List<String> {
-        val left = b.groupingBy { it }.eachCount().toMutableMap()
-        return a.filter { line -> (left[line] ?: 0).let { n -> if (n > 0) { left[line] = n - 1; false } else true } }
-    }
 
     private const val MAX_ORIGINAL_LINES = 40
 
@@ -267,7 +266,12 @@ public object TestIntegrity {
     /** True when an argv token (resolved against [cwd]) or [cwd] itself is [path] or a directory above it. */
     private fun namesPath(argv: List<String>, cwd: String?, path: String): Boolean {
         val base = cwd?.let { normalize(it) }?.takeIf { it.isNotEmpty() && it != "." }
-        val candidates = argv.drop(1).map { normalize(it) }.filter { it.isNotEmpty() && !it.startsWith("-") }
+        // Test the raw spelling: normalize strips "./", which would drop a root-level `./check.sh`.
+        val executable = argv.firstOrNull()?.takeIf {
+            val named = it.replace('\\', '/')
+            '/' in named && !named.startsWith('/') && !named.matches(Regex("^[A-Za-z]:.*"))
+        }
+        val candidates = (argv.drop(1) + listOfNotNull(executable)).map { normalize(it) }.filter { it.isNotEmpty() && !it.startsWith("-") }
             .map { if (base != null && !it.startsWith("$base/")) "$base/$it" else it } + listOfNotNull(base)
         return candidates.any { path == it || path.startsWith("$it/") }
     }

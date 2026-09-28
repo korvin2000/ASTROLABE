@@ -219,7 +219,7 @@ class CoherenceTest {
 
         // A changed check definition (argv or parser policy) invalidates the result even on the same candidate.
         val redefined = Checks.empty()
-        redefined.register(types.copy(parserPolicy = "shaper/2", last = green(types, s2)))
+        redefined.register(types.copy(parserPolicy = "shaper/future", last = green(types, s2)))
         val refreshed = redefined.refresh(s2).single().last!!
         assertEquals(Applicability.Stale, refreshed.applicability)
         assertEquals("check definition changed since rcpt-CHK-types-touched", refreshed.staleReason)

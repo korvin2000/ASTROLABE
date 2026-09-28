@@ -13,6 +13,7 @@ import io.astrolabe.os.Identity
 import io.astrolabe.os.IndexEntry
 import io.astrolabe.os.ObjectId
 import io.astrolabe.os.Os
+import io.astrolabe.os.RefUpdateRejected
 import io.astrolabe.os.TreeEntryKind
 import io.astrolabe.store.BlobKind
 import io.astrolabe.store.Store
@@ -22,6 +23,8 @@ import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.LinkOption.NOFOLLOW_LINKS
+import java.nio.file.attribute.PosixFilePermission
 import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
@@ -66,7 +69,7 @@ public data class MaterializeResult(
     val files: List<String>,
     /** Manifest entries whose exported bytes hashed to the recorded digest. */
     val verified: Int,
-    /** Manifest entries whose exported bytes did **not** match; non-empty means do not check it. */
+    /** Tree or manifest paths whose bytes, type or mode did not match; non-empty means do not check it. */
     val mismatches: List<String>,
     val limitations: List<String> = emptyList(),
 ) {
@@ -129,6 +132,8 @@ public class ShadowRef @JvmOverloads public constructor(
         .resolve(attempt.value)
         .resolve("${workspace.id.value}.index")
 
+    private val pendingFile: Path = stateFile.resolveSibling("${stateFile.fileName}.pending")
+
     init {
         for (component in listOf(work.value, attempt.value, workspace.id.value)) {
             require(!component.startsWith(".") && !component.endsWith(".lock") && !component.contains("..")) {
@@ -179,6 +184,13 @@ public class ShadowRef @JvmOverloads public constructor(
 
     // ------------------------------------------------------------ restoring
 
+    /** The exact write/delete set used by restore, including clean files absent from the dirty manifest. */
+    internal fun restorePaths(turn: Int): List<String> {
+        val target = record(turn) ?: return emptyList()
+        val latest = records().lastOrNull() ?: return emptyList()
+        return changedPaths(treeOf(workspace.git, ObjectId.parse(target.commit)), treeOf(workspace.git, ObjectId.parse(latest.commit)))
+    }
+
     /**
      * Restores the working tree to snapshot [turn], writing only the files that differ from the
      * last snapshot and refusing the whole operation when any of them diverged (FX-05).
@@ -194,9 +206,7 @@ public class ShadowRef @JvmOverloads public constructor(
         val latestTree = treeOf(git, ObjectId.parse(latest.commit))
         val targetManifest = manifest(turn)
 
-        val touched = (targetTree.keys + latestTree.keys)
-            .filter { targetTree[it] != latestTree[it] }
-            .sortedWith(Stamper.PATH_ORDER)
+        val touched = changedPaths(targetTree, latestTree)
 
         // FX-05 guard. The guarded set is wider than the set about to be written: it also covers
         // every path the two manifests name, so restoring the newest turn after a human edit
@@ -206,7 +216,9 @@ public class ShadowRef @JvmOverloads public constructor(
         guarded += targetManifest?.paths.orEmpty()
         guarded += manifest(latest.turn)?.paths.orEmpty()
         val divergent = guarded.sortedWith(Stamper.PATH_ORDER).filter { path ->
-            currentDigest(path) != latestTree[path]?.let { digestOfBlob(git, it.id) }
+            val expected = latestTree[path]
+            currentDigest(path) != expected?.let { digestOfBlob(git, it.id) } ||
+                (expected != null && !matchesMode(workspace.paths, path, expected.mode))
         }
         if (divergent.isNotEmpty()) return RestoreResult.Divergent(divergent)
         if (touched.isEmpty()) return RestoreResult.Restored(emptyList(), emptyList())
@@ -248,11 +260,11 @@ public class ShadowRef @JvmOverloads public constructor(
             }
             if (wanted.mode == FileMode.SYMLINK) {
                 if (!writeSymlink(resolved.real, String(bytes, StandardCharsets.UTF_8))) {
-                    limitations.add("'$path' is a symlink this host refuses to create; left unchanged (§9.5)")
-                    continue
+                    throw java.io.IOException("symlink restore failed for '$path'; publication effects unknown")
                 }
             } else {
                 os.replaceFileAtomically(resolved.real, bytes)
+                applyMode(resolved.real, wanted.mode)
             }
             written.add(path)
         }
@@ -276,12 +288,14 @@ public class ShadowRef @JvmOverloads public constructor(
         val exported = WorkspacePath.of(dir, ProtectedPaths(emptySet(), emptySet(), emptySet()))
         val files = ArrayList<String>()
         val limitations = ArrayList<String>()
+        val mismatches = linkedSetOf<String>()
         var fromObjectStore = 0
 
         for ((path, entry) in tree.entries.sortedWith(compareBy(Stamper.PATH_ORDER) { it.key })) {
             val resolved = exported.resolve(path, Intent.Mutate)
             if (resolved !is PathResolution.Resolved) {
                 limitations.add("'$path' refused by the export path contract: $resolved")
+                mismatches.add(path)
                 continue
             }
             val manifestDigest = manifest.entry(path)?.takeIf { it.present }?.digest
@@ -297,8 +311,14 @@ public class ShadowRef @JvmOverloads public constructor(
                 }
             } else {
                 Files.write(resolved.real, bytes)
+                applyMode(resolved.real, entry.mode)
             }
             files.add(path)
+            val digest = runCatching {
+                if (entry.mode == FileMode.SYMLINK) Digest.of(linkTarget(resolved.real).toByteArray(StandardCharsets.UTF_8))
+                else digestOfFile(resolved.real)
+            }.getOrNull()
+            if (digest != Digest.of(bytes) || !matchesMode(exported, path, entry.mode)) mismatches.add(path)
         }
         if (fromObjectStore > 0) {
             limitations.add(
@@ -308,17 +328,30 @@ public class ShadowRef @JvmOverloads public constructor(
         }
 
         var verified = 0
-        val mismatches = ArrayList<String>()
         for (entry in manifest.entries) {
             val file = dir.resolve(entry.path)
             if (!entry.present) {
-                if (Files.exists(file)) mismatches.add(entry.path)
+                if (Files.exists(file, NOFOLLOW_LINKS)) mismatches.add(entry.path)
                 continue
             }
-            val actual = runCatching { digestOfFile(file) }.getOrNull()
-            if (actual == entry.digest) verified++ else mismatches.add(entry.path)
+            val actual = runCatching {
+                val resolved = exported.resolveCapture(entry.path)
+                check(resolved is PathResolution.Resolved)
+                when (entry.kind) {
+                    SnapshotEntryKind.Symlink -> {
+                        check(resolved.kind == PathKind.Symlink)
+                        Digest.of(linkTarget(resolved.real).toByteArray(StandardCharsets.UTF_8))
+                    }
+                    SnapshotEntryKind.File -> {
+                        check(resolved.kind == PathKind.Regular)
+                        digestOfFile(resolved.real)
+                    }
+                    SnapshotEntryKind.Deleted -> null
+                }
+            }.getOrNull()
+            if (actual == entry.digest && matchesMode(exported, entry.path, entry.mode)) verified++ else mismatches.add(entry.path)
         }
-        return MaterializeResult(dir, files, verified, mismatches, limitations)
+        return MaterializeResult(dir, files, verified, mismatches.toList(), limitations)
     }
 
     // ------------------------------------------------------------ internals
@@ -353,9 +386,6 @@ public class ShadowRef @JvmOverloads public constructor(
         val message = "astrolabe snapshot turn ${manifest.turn}\n\n" +
             "manifest ${manifest.manifestDigest.hex}\nstamp ${manifest.stampId.digest.hex}\n"
         val commit = git.commitTree(tree, listOfNotNull(previous), message, identity)
-        // D-04 compare-and-swap: a ref moved by anyone else fails loudly with RefUpdateRejected.
-        git.updateRef(ref, commit, previous)
-
         val manifestBlob = store.blobs.put(
             Snapshot.encodeToBytes(manifest),
             BlobKind.PACKET,
@@ -370,7 +400,17 @@ public class ShadowRef @JvmOverloads public constructor(
             stampId = manifest.stampId,
             capturedAt = manifest.capturedAt,
         )
-        writeIndex(ShadowIndex(ref, index.records + record))
+        val next = ShadowIndex(ref, index.records + record)
+        // Recovery material and the intended index must be durable before moving the ref.
+        writeIndex(next, pendingFile)
+        try {
+            git.updateRef(ref, commit, previous)
+        } catch (conflict: RefUpdateRejected) {
+            Files.deleteIfExists(pendingFile)
+            throw conflict
+        }
+        writeIndex(next)
+        Files.deleteIfExists(pendingFile)
         Files.deleteIfExists(tempIndex)
         return record
     }
@@ -394,6 +434,9 @@ public class ShadowRef @JvmOverloads public constructor(
         }
     }
 
+    private fun changedPaths(target: Map<String, TreeBlob>, latest: Map<String, TreeBlob>): List<String> =
+        (target.keys + latest.keys).filter { target[it] != latest[it] }.sortedWith(Stamper.PATH_ORDER)
+
     private fun treeOf(git: Git, commit: ObjectId): Map<String, TreeBlob> =
         git.lsTree(commit, recursive = true)
             .filter { it.kind == TreeEntryKind.BLOB }
@@ -405,16 +448,30 @@ public class ShadowRef @JvmOverloads public constructor(
 
     private fun digestOfFile(file: Path): Digest = Digest.of(Files.readAllBytes(file))
 
+    private fun applyMode(path: Path, mode: FileMode) {
+        if (!Files.getFileStore(path).supportsFileAttributeView("posix")) return
+        val permissions = Files.getPosixFilePermissions(path)
+        val execute = setOf(PosixFilePermission.OWNER_EXECUTE, PosixFilePermission.GROUP_EXECUTE, PosixFilePermission.OTHERS_EXECUTE)
+        Files.setPosixFilePermissions(path, if (mode == FileMode.EXECUTABLE) permissions + execute else permissions - execute)
+    }
+
+    private fun matchesMode(paths: WorkspacePath, path: String, mode: FileMode): Boolean {
+        val resolved = paths.resolveCapture(path) as? PathResolution.Resolved ?: return false
+        if (mode == FileMode.SYMLINK) return resolved.kind == PathKind.Symlink
+        if (resolved.kind != PathKind.Regular || mode !in setOf(FileMode.REGULAR, FileMode.EXECUTABLE)) return false
+        return !Files.getFileStore(resolved.real).supportsFileAttributeView("posix") ||
+            Files.isExecutable(resolved.real) == (mode == FileMode.EXECUTABLE)
+    }
+
     /** The digest of the working-tree path now, following the same rule the manifest used. */
     private fun currentDigest(path: String): Digest? {
-        val resolved = workspace.resolve(path, Intent.Read)
+        val resolved = workspace.paths.resolveCapture(path)
         if (resolved !is PathResolution.Resolved) return null
-        return when (WorkspacePath.kindOf(resolved.real)) {
+        return when (resolved.kind) {
             PathKind.Missing, PathKind.Directory -> null
             PathKind.Symlink -> runCatching {
                 Digest.of(
-                    Files.readSymbolicLink(resolved.real).toString()
-                        .replace('\\', '/')
+                    linkTarget(resolved.real)
                         .toByteArray(StandardCharsets.UTF_8),
                 )
             }.getOrNull()
@@ -435,14 +492,40 @@ public class ShadowRef @JvmOverloads public constructor(
     }
 
     private fun readIndex(): ShadowIndex {
-        if (!Files.exists(stateFile)) return ShadowIndex(ref)
-        return JSON.decodeFromString(ShadowIndex.serializer(), Files.readString(stateFile, StandardCharsets.UTF_8))
+        val index = if (Files.exists(stateFile)) decodeIndex(stateFile) else ShadowIndex(ref)
+        check(index.ref == ref) { "shadow index belongs to another ref" }
+        if (!Files.exists(pendingFile)) return index
+        val pending = decodeIndex(pendingFile)
+        check(pending.ref == ref && pending.records.isNotEmpty()) { "invalid pending shadow index" }
+        if (pending == index) {
+            Files.deleteIfExists(pendingFile)
+            return index
+        }
+        check(pending.records.dropLast(1) == index.records) { "pending shadow index does not extend the current index" }
+        val record = pending.records.last()
+        val head = workspace.git.readRef(ref)?.hex
+        when (head) {
+            record.commit -> {
+                val manifest = Snapshot.decode(store.blobs.get(record.manifestBlob))
+                check(manifest.turn == record.turn && manifest.manifestDigest == record.manifestDigest &&
+                    manifest.stampId == record.stampId) { "pending snapshot manifest is inconsistent" }
+                writeIndex(pending)
+                Files.deleteIfExists(pendingFile)
+                return pending
+            }
+            index.records.lastOrNull()?.commit -> Files.deleteIfExists(pendingFile)
+            else -> throw SnapshotIntegrityError("shadow ref $ref moved outside its pending publication; recovery refused")
+        }
+        return index
     }
 
-    private fun writeIndex(index: ShadowIndex) {
+    private fun decodeIndex(path: Path): ShadowIndex =
+        JSON.decodeFromString(ShadowIndex.serializer(), Files.readString(path, StandardCharsets.UTF_8))
+
+    private fun writeIndex(index: ShadowIndex, target: Path = stateFile) {
         Files.createDirectories(stateFile.parent)
         os.replaceFileAtomically(
-            stateFile,
+            target,
             JSON.encodeToString(ShadowIndex.serializer(), index).toByteArray(StandardCharsets.UTF_8),
         )
     }

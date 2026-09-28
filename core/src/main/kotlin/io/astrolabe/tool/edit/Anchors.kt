@@ -69,7 +69,32 @@ public object Anchors {
         val normalizedAnchor = normalize(anchor).text.trim()
         if (normalizedAnchor.isEmpty()) return emptyList()
         val file = normalize(text)
-        return exact(file.text, normalizedAnchor).map { (s, e) -> file.origin[s] to file.origin[e - 1] + 1 }
+        val prefix = anchor.takeWhile { it.isWhitespace() }
+        val suffix = anchor.takeLastWhile { it.isWhitespace() }
+        return exact(file.text, normalizedAnchor).map { (s, e) ->
+            boundary(text, file.origin[s], prefix, backwards = true) to
+                boundary(text, file.origin[e - 1] + 1, suffix, backwards = false)
+        }
+    }
+
+    /** Include only boundary whitespace requested by the anchor; inline anchors keep their surroundings. */
+    private fun boundary(text: String, offset: Int, whitespace: String, backwards: Boolean): Int {
+        if (whitespace.isEmpty()) return offset
+        var remainingLines = whitespace.replace("\r\n", "\n").count { it == '\n' || it == '\r' }
+        val farBoundary = if (backwards) whitespace.first() else whitespace.last()
+        var at = offset
+        while (if (backwards) at > 0 else at < text.length) {
+            val c = text[if (backwards) at - 1 else at]
+            if (c == ' ' || c == '\t') {
+                at += if (backwards) -1 else 1
+            } else if ((c == '\n' || c == '\r') && remainingLines > 0) {
+                at += if (backwards) -1 else 1
+                if (backwards && c == '\n' && at > 0 && text[at - 1] == '\r') at--
+                if (!backwards && c == '\r' && at < text.length && text[at] == '\n') at++
+                if (--remainingLines == 0 && farBoundary != ' ' && farBoundary != '\t') break
+            } else break
+        }
+        return at
     }
 
     private class Normalized(val text: String, val origin: IntArray)

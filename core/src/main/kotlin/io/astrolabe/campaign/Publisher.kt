@@ -21,6 +21,9 @@ import io.astrolabe.os.Identity
 import io.astrolabe.os.ObjectId
 import io.astrolabe.workspace.ShadowRef
 import io.astrolabe.workspace.SnapshotRecord
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 /** Where a deploy goes; [production] makes it a human anchor (§14.2). */
 public data class DeployTarget(val name: String, val production: Boolean) {
@@ -82,6 +85,7 @@ public class Publisher @JvmOverloads constructor(
     knownRemotes: Set<String> = emptySet(),
     private val identity: Identity = ShadowRef.HARNESS_IDENTITY,
 ) {
+    internal var publicationRefusal: () -> String? = { null }
     private val known = knownRemotes.toSet()
     private val published = ArrayList<PublicationResult.Published>()
     private var commit: ObjectId? = null
@@ -169,6 +173,8 @@ public class Publisher @JvmOverloads constructor(
         expectedEffect: String,
         perform: () -> Pair<String, String>,
     ): PublicationResult {
+        currentCoroutineContext().ensureActive()
+        publicationRefusal()?.let { return refuse(stage, RefusalReason.NotApproved, "publication fenced: $it") }
         val decision = PublicationPolicy.decide(stage, authorization, evidence.copy(anchors = evidence.anchors + anchors))
         val approval = when (decision) {
             is PublicationDecision.Refused -> {
@@ -194,6 +200,8 @@ public class Publisher @JvmOverloads constructor(
             contractAllowlisted = approval.autonomous,
         )
         val decided = authority.approve(request)
+        currentCoroutineContext().ensureActive()
+        publicationRefusal()?.let { return refuse(stage, RefusalReason.NotApproved, "publication fenced: $it") }
         if (decided.requestId != request.id || Replies.check(decided, contractRevision) != ReplyValidity.Current || !decided.approved) {
             val why = when {
                 decided.requestId != request.id -> "the decision answers ${decided.requestId}, not ${request.id}"
@@ -209,6 +217,7 @@ public class Publisher @JvmOverloads constructor(
         } catch (e: DeployFailed) {
             return PublicationResult.Failed(stage, request.id, e.message ?: "deploy failed")
         } catch (e: RuntimeException) {
+            if (e is CancellationException) throw e
             if (stage != Stage.Deploy) throw e
             return PublicationResult.Failed(stage, request.id, "deployer failed: ${e.message}")
         }

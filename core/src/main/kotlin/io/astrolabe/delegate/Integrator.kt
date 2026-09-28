@@ -189,6 +189,7 @@ public class Integrator @JvmOverloads constructor(
     }
 
     public suspend fun integrate(results: List<WriterResult>): List<Integration> {
+        main.mutation.withLock { IntegrationPublication.recover(main, registry, blobs, intents) }
         val outcomes = ArrayList<Integration>()
         val ready = ArrayList<WriterResult>()
         for (result in results) {
@@ -254,11 +255,14 @@ public class Integrator @JvmOverloads constructor(
             val changes = batch.flatMap { result -> result.packet.changes.map { result to it } }
             apply(candidate, changes)?.let { return outcomes + Integration.Rejected(handles, IntegrationStep.Apply, it) }
             val union = changes.map { it.second.path }.toSortedSet()
+            val tested = Stamper(candidate.workspace, env).report().candidateId
             val combined = checks.verify(candidate.workspace, union, batch)
+            if (Stamper(candidate.workspace, env).report().candidateId != tested) return outcomes + Integration.Rejected(handles, IntegrationStep.CombinedCheck, "combined checks changed the candidate")
             if (combined.failures.isNotEmpty()) return outcomes + Integration.Rejected(handles, IntegrationStep.CombinedCheck, "the combined tree fails", combined.failures, returnsToMainLine = true)
             val gated = gates.verify(candidate.workspace, union, batch)
             if (gated.failures.isNotEmpty()) return outcomes + Integration.Rejected(handles, IntegrationStep.Gates, "contract lint or the required review refuses the combined tree", gated.failures, returnsToMainLine = true)
-            return outcomes + publish(candidate, base.candidateId, batch, changes.map { it.second }, combined.receipts + gated.receipts)
+            if (Stamper(candidate.workspace, env).report().candidateId != tested) return outcomes + Integration.Rejected(handles, IntegrationStep.Gates, "review changed the tested candidate")
+            return outcomes + publish(candidate, base.candidateId, tested, batch, changes.map { it.second }, combined.receipts + gated.receipts)
         } finally {
             workspaces.remove(candidate)
         }
@@ -275,15 +279,12 @@ public class Integrator @JvmOverloads constructor(
         return null
     }
 
-    private suspend fun publish(candidate: Worktree, integrationBase: CandidateId, batch: List<WriterResult>, changes: List<Change>, receipts: List<String>): Integration {
+    private suspend fun publish(candidate: Worktree, integrationBase: CandidateId, tested: CandidateId, batch: List<WriterResult>, changes: List<Change>, receipts: List<String>): Integration {
         val handles = batch.map { it.handle }
-        val now = current()
         val patchHash = patchHash(changes)
         return main.mutation.withLock {
             val before = Stamper(main, env).report().candidateId
             if (before != integrationBase) return@withLock Integration.Rejected(handles, IntegrationStep.Publish, "main moved during integration: @${before.hash8}, integration base @${integrationBase.hash8}")
-            batch.firstNotNullOfOrNull { Fence.publish(it.dispatch.task.executionGeneration, now.generation, now.authority).refusal }
-                ?.let { return@withLock Integration.Rejected(handles, IntegrationStep.Publish, it, archived = archive(batch)) }
             // Every postimage is read and checked before the first byte reaches the main line.
             val staged = changes.map { change ->
                 val bytes = change.after?.let { after ->
@@ -292,14 +293,30 @@ public class Integrator @JvmOverloads constructor(
                 }
                 change to bytes
             }
-            val intent = Intent(idGen.next("intent"), batch.first().dispatch.task.ids, "integrate", listOf("integrate") + handles, null, "publish ${changes.size} paths @${integrationBase.hash8} patch ${patchHash.hash8}", at = clock.instant())
+            if (Stamper(candidate.workspace, env).report().candidateId != tested) return@withLock Integration.Rejected(handles, IntegrationStep.Publish, "the tested candidate changed before publication")
+            val now = current()
+            batch.firstOrNull { it.dispatch.task.contractVersion != now.contractVersion }?.let {
+                return@withLock Integration.Rejected(handles, IntegrationStep.Publish, "contract is v${now.contractVersion}, dispatched under v${it.dispatch.task.contractVersion}", archived = archive(batch))
+            }
+            batch.firstNotNullOfOrNull { Fence.publish(it.dispatch.task.executionGeneration, now.generation, now.authority).refusal }
+                ?.let { return@withLock Integration.Rejected(handles, IntegrationStep.Publish, it, archived = archive(batch)) }
+            val manifest = IntegrationPublication.stage(main, staged.map { it.first.path to it.second }, blobs, batch.first().dispatch.task.ids)
+            val intent = Intent(idGen.next("intent"), batch.first().dispatch.task.ids, "integrate", listOf("integrate", manifest) + handles, null, "publish ${changes.size} paths @${integrationBase.hash8} patch ${patchHash.hash8}", at = clock.instant())
             intents.record(intent)
-            for ((change, bytes) in staged) {
-                write(main, change.path, bytes)?.let { error("publication of ${change.path} refused after the base check: $it") }
-                registry.change(change.path, change.before, change.after, "integrated ${handles.joinToString(",")}")
+            intents.update(intent.intentId, IntentStatus.Dispatched)
+            val resulting = try {
+                for ((change, bytes) in staged) {
+                    IntegrationPublication.replace(main, change.path, bytes)
+                    registry.change(change.path, change.before, change.after, "integrated ${handles.joinToString(",")}")
+                }
+                Stamper(main, env).report().candidateId.also { check(it == tested) { "published tree differs from the tested candidate" } }
+            } catch (failure: Throwable) {
+                val recovery = runCatching { IntegrationPublication.rollback(main, registry, blobs, intents, intent) }.exceptionOrNull()
+                if (recovery != null) failure.addSuppressed(recovery)
+                return@withLock Integration.Rejected(handles, IntegrationStep.Publish,
+                    "publication failed: ${failure.message}; " + if (recovery == null) "original bytes restored" else "recovery required: ${recovery.message}")
             }
             intents.update(intent.intentId, IntentStatus.Committed)
-            val resulting = Stamper(main, env).report().candidateId
             batch.forEach { horizon?.untrack(it.handle) }
             Integration.Published(IntegrationReceipt(integrationBase, patchHash, resulting, env.envId, handles, changes.map { it.path }.sorted(), receipts))
         }

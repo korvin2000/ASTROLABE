@@ -45,6 +45,18 @@ import kotlin.test.assertTrue
 
 /** P2.3.1 full compile: mandatory never dropped, each contribution charged once, index referenced not duplicated, FX-19. */
 class CompilerFullTest {
+    @Test
+    fun `omitted seed sections cannot grant workset coverage`() {
+        val input = inputs(seedCount = 2, seedLines = 5_000)
+        val ready = assertIs<Compiled.Ready>(Compiler(estimator).compile(increment, contract, FakeProfiles.main, Roles.implementing, "repo prime", inputs = input))
+        val selected = Seeds.selected(input.seeds!!.shown, ready)
+        assertTrue(selected.size < input.seeds.shown.size)
+        val workset = io.astrolabe.workset.Workset().also { it.seed(selected) }
+        for (entry in input.seeds.shown.filter { it !in selected }) {
+            assertTrue(!workset.snapshot().covers(entry.path, entry.version, io.astrolabe.workspace.LineRange(1, 1)))
+        }
+    }
+
     private val estimator = HeuristicEstimator()
     private val contract = Contract(
         WorkId("W-c"), 2, AttemptId("a1"), Mode.Autonomous, Shape.S1,

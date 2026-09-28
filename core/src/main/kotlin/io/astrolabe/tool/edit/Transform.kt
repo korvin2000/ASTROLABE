@@ -1,5 +1,7 @@
 package io.astrolabe.tool.edit
 
+import io.astrolabe.auth.ContentClass
+import io.astrolabe.auth.Redaction
 import io.astrolabe.atlas.Language
 import io.astrolabe.auth.CapabilitySet
 import io.astrolabe.auth.Ceiling
@@ -151,8 +153,10 @@ internal class TransformRun(
     private val syntax: SyntaxCheck,
     private val ids: Identities,
     private val exec: TransformExecution,
+    private val redaction: Redaction,
     private val pollSliceSeconds: Long = 5,
 ) {
+    internal var beforeDispatch: () -> Unit = {}
     /** The workspace files the glob names right now, in path order; the scope guard sees this list before dispatch. */
     fun inventory(scopeGlob: String): List<String> {
         val tracked = workspace.git.lsFiles().map { it.path }
@@ -160,7 +164,7 @@ internal class TransformRun(
         return (tracked + untracked).distinct().filter { PathPattern.matches(scopeGlob, it) && registry.read(it) != null }.sortedWith(Stamper.PATH_ORDER)
     }
 
-    fun apply(index: Int, args: TransformArgs, editId: String, alias: String, actionId: String, contract: Contract, inScope: List<String>, turn: Int): TransformOutcome {
+    fun apply(index: Int, args: TransformArgs, editId: String, alias: String, actionId: String, contract: Contract, inScope: List<String>, turn: Int, validateChanged: (Collection<String>) -> String?): TransformOutcome {
         // Authority before any effect (D-41): the capability ceiling and execution mode of `run`, D-class refused outright.
         val argv = args.argv ?: listOf(args.script!!)
         val runArgs = if (args.argv != null) RunArgs(argv = args.argv) else RunArgs(cmd = args.script)
@@ -202,10 +206,16 @@ internal class TransformRun(
             environment = exec.environment,
             deadlineSeconds = exec.timeoutSeconds,
         )
-        val proc = try {
-            observe(exec.runner.start(spec))
+        beforeDispatch()
+        val started = try {
+            exec.runner.start(spec)
         } catch (failure: IOException) {
             return refused(EditError("io", index, null, "transform cannot start: ${failure.message ?: failure::class.simpleName}; nothing was written (preimages ${before.size} recorded)"))
+        }
+        val proc = try {
+            observe(started)
+        } catch (failure: IOException) {
+            return refused(EditError("io", index, null, "transform observation lost: ${failure.message}; effects unknown; reconcile before retry (preimages: ${preimages.of(editId).joinToString { it.path + " @" + it.preimageDigest.hash8 }})"))
         }
         val stampAfter = exec.stamper.report()
 
@@ -218,6 +228,7 @@ internal class TransformRun(
         }
         val changedInScope = changed.filter { PathPattern.matches(args.scopeGlob, it) }.sortedWith(Stamper.PATH_ORDER)
         val outside = changed.filterNot { PathPattern.matches(args.scopeGlob, it) }.sortedWith(Stamper.PATH_ORDER)
+        val scopeRefusal = validateChanged(changed)
         val cause = "transform $alias"
         val postimages = LinkedHashMap<String, FileVersion?>()
         val perFile = ArrayList<TransformFile>()
@@ -258,11 +269,15 @@ internal class TransformRun(
             applied += AppliedOp(index, "transform", path, null, registry.read(path)?.version)
             diffText.append("=== $path outside scope_glob ${args.scopeGlob}: no preimage, no diff\n")
         }
-        val diffRef = blobs.put(diffText.toString().toByteArray(Charsets.UTF_8), BlobKind.DIFF, ids)
+        val safeDiff = redaction.apply(diffText.toString(), ContentClass.ReusableEvidence)
+        limits += safeDiff.limitations
+        val diffRef = blobs.put(safeDiff.text.toByteArray(Charsets.UTF_8), BlobKind.DIFF, ids)
         val syntaxResults = LinkedHashMap<String, SyntaxResult>()
         for (path in changedInScope) {
+            if (scopeRefusal != null) break
             if (postimages[path] == null) continue
             val resolved = workspace.resolve(path, Intent.Read) as? PathResolution.Resolved ?: continue
+            beforeDispatch()
             syntaxResults[path] = syntax.check(path, resolved.real, Language.of(path))
         }
         val matchCount = hunksByFile.values.sumOf { it.size }
@@ -275,6 +290,7 @@ internal class TransformRun(
         val expected = args.expectedMatches
         val rejection = when {
             outside.isNotEmpty() -> "touched outside scope_glob ${args.scopeGlob}: ${outside.joinToString(", ")}"
+            scopeRefusal != null -> "changed paths refused by current scope: $scopeRefusal"
             expected != null && matchCount !in expected.min..expected.max -> "match count $matchCount outside expected ${expected.min}–${expected.max}"
             proc.status == ProcStatus.DeadlineExceeded -> "script exceeded ${exec.timeoutSeconds}s; the process tree was killed"
             proc.status is ProcStatus.Lost || proc.status is ProcStatus.Cancelled -> "script observation lost (${proc.status})"
@@ -344,10 +360,15 @@ internal class TransformRun(
     private fun observe(start: Proc): Proc {
         var current = start
         var cursor = 0L
-        while (!current.status.isTerminal) {
-            val poll = os.poll(current, cursor, minOf(pollSliceSeconds, exec.timeoutSeconds + 5))
-            cursor = poll.nextCursorBytes
-            current = current.copy(status = poll.status)
+        try {
+            while (!current.status.isTerminal) {
+                val poll = os.poll(current, cursor, minOf(pollSliceSeconds, exec.timeoutSeconds + 5))
+                cursor = poll.nextCursorBytes
+                current = current.copy(status = poll.status)
+            }
+        } catch (interrupted: InterruptedException) {
+            runCatching { os.terminate(current) }.exceptionOrNull()?.let(interrupted::addSuppressed)
+            throw interrupted
         }
         return current
     }

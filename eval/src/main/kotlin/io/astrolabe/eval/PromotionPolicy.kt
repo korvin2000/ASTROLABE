@@ -64,22 +64,46 @@ public object Investments {
 /** Campaign facts in the form `PromotionReport` takes (P6.1.2 integrity, P6.1.5 partition, D-48 controls). */
 public object PromotionEvidence {
     /**
-     * Independence passes only when the manifest's partition was validated with repository or task-family grouping
-     * (§19.2), and is unknown for task-only isolation; mandatory controls fail for a research attempt (D-48).
+     * Independence requires an exact projection of the frozen final partition and repository or task-family
+     * grouping (§19.2). Without a design it remains unknown; research controls fail (D-48).
      */
     @JvmStatic
+    @JvmOverloads
     public fun of(
         manifest: CampaignManifest,
         candidate: AttemptConfig,
         integrity: IntegrityVerdict,
         origin: EvaluationOrigin,
         provenance: String,
-    ): EvaluationEvidence = EvaluationEvidence(
-        configuration = candidate.fingerprint,
+        design: EvaluationDesign? = null,
+    ): EvaluationEvidence {
+        val matches = manifest.variants.filter { it.attempt?.fingerprint == candidate.fingerprint }.map { it.fingerprint } +
+            manifest.arms.filter { it.attempt?.fingerprint == candidate.fingerprint }.map { it.fingerprint }
+        require(matches.size == 1) { "select a frozen VariantConfig or ArmConfig: the attempt identifies ${matches.size} evaluation configurations" }
+        return evidence(manifest, candidate, matches.single(), integrity, origin, provenance, design)
+    }
+
+    @JvmStatic
+    @JvmOverloads
+    public fun of(manifest: CampaignManifest, candidate: VariantConfig, integrity: IntegrityVerdict, origin: EvaluationOrigin, provenance: String, design: EvaluationDesign? = null): EvaluationEvidence =
+        evidence(manifest, requireNotNull(candidate.attempt) { "live comparator has no frozen attempt" }, candidate.fingerprint, integrity, origin, provenance, design)
+
+    @JvmStatic
+    @JvmOverloads
+    public fun of(manifest: CampaignManifest, candidate: ArmConfig, integrity: IntegrityVerdict, origin: EvaluationOrigin, provenance: String, design: EvaluationDesign? = null): EvaluationEvidence =
+        evidence(manifest, requireNotNull(candidate.attempt) { "research arm has no frozen attempt" }, candidate.fingerprint, integrity, origin, provenance, design)
+
+    private fun evidence(manifest: CampaignManifest, candidate: AttemptConfig, configuration: Digest, integrity: IntegrityVerdict, origin: EvaluationOrigin, provenance: String, design: EvaluationDesign?): EvaluationEvidence = EvaluationEvidence(
+        configuration = configuration,
         manifest = manifest.fingerprint,
         origin = origin,
         integrity = integrity.evidence,
-        independence = if (manifest.workload.policy.grouping.isEmpty()) EvidenceCheck.Unknown else EvidenceCheck.Pass,
+        independence = when {
+            design == null -> EvidenceCheck.Unknown
+            finalPartitionIssues(design, manifest).isNotEmpty() || configuration !in design.candidates -> EvidenceCheck.Fail
+            manifest.workload.policy.grouping.isEmpty() -> EvidenceCheck.Unknown
+            else -> EvidenceCheck.Pass
+        },
         mandatoryControls = if (candidate.production && candidate.controls.allEnabled) EvidenceCheck.Pass else EvidenceCheck.Fail,
         provenance = provenance,
     )
@@ -103,13 +127,18 @@ public class PromotionDecision private constructor(
         public fun decide(report: PromotionReport, fixtures: FixtureReport?, manifest: CampaignManifest): PromotionDecision {
             val design = report.baseline.design
             val issues = mutableListOf<EvaluationIssue>()
-            if (design.manifest != manifest.fingerprint)
-                issues += EvaluationIssue(EvaluationIssueCode.EvidenceMismatch, "design is not bound to manifest ${manifest.id}")
-            val frozen = (manifest.variants.mapNotNull { it.attempt } + manifest.arms.mapNotNull { it.attempt }).map { it.fingerprint }.toSet()
+            issues += finalPartitionIssues(design, manifest)
+            val frozen = (manifest.variants.filter { it.attempt != null }.map { it.fingerprint } +
+                manifest.arms.filter { it.attempt != null }.map { it.fingerprint }).toSet()
+            (design.candidates + design.baseline - frozen).sortedBy { it.hex }.forEach {
+                issues += EvaluationIssue(EvaluationIssueCode.EvidenceMismatch, "configuration ${it.hex} is not frozen in the manifest")
+            }
             (frozen - design.candidates - design.baseline).sortedBy { it.hex }.forEach {
                 issues += EvaluationIssue(EvaluationIssueCode.MultipleSelection, "frozen candidate ${it.hex} is not declared in the design")
             }
-            val violated = fixtures != null && (fixtures.failed > 0 || fixtures.metrics.any { (it.violations ?: 0) > 0 })
+            if (fixtures != null && fixtures.configuration != report.candidate.configuration.hex)
+                issues += EvaluationIssue(EvaluationIssueCode.EvidenceMismatch, "fixture report is not bound to the candidate configuration")
+            val violated = fixtures != null && (fixtures.failed > 0 || fixtures.containerFailures.isNotEmpty() || fixtures.metrics.any { (it.violations ?: 0) > 0 })
             when {
                 fixtures == null -> issues += EvaluationIssue(EvaluationIssueCode.UnmeasuredInvariant, "no fixture report")
                 violated -> issues += EvaluationIssue(EvaluationIssueCode.InvariantViolation,
@@ -149,6 +178,23 @@ public class PromotionDecision private constructor(
         }
         putJsonArray("issues") { (report.issues + report.investmentIssues + issues).forEach { add(issue(it)) } }
     })
+}
+
+private fun finalPartitionIssues(design: EvaluationDesign, manifest: CampaignManifest): List<EvaluationIssue> = buildList {
+    fun mismatch(detail: String) { add(EvaluationIssue(EvaluationIssueCode.EvidenceMismatch, detail)) }
+    if (design.manifest != manifest.fingerprint) mismatch("design is not bound to manifest ${manifest.id}")
+    val expected = manifest.assignment.filterValues { it == WorkloadPartition.Final }.keys
+    val actual = design.trials.map { WorkloadTrialKey(it.key.task, it.key.repetition) }
+    if (expected.isEmpty() || actual.size != expected.size || actual.toSet() != expected)
+        mismatch("planned trials must contain exactly the frozen final partition")
+    val tasks = manifest.workload.tasks.associateBy { it.id }
+    for (trial in design.trials) {
+        val task = tasks[trial.key.task]
+        if (task == null || task.repository != trial.key.repository || task.stratum != trial.stratum)
+            mismatch("trial ${trial.key} changes its frozen repository or stratum")
+    }
+    if (design.policy.strata.associate { it.id to it.complex } != manifest.strata)
+        mismatch("scoring strata do not match the frozen workload")
 }
 
 private val JSON = Json { prettyPrint = true }

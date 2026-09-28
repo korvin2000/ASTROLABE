@@ -38,12 +38,14 @@ import io.astrolabe.verify.Selector
 import io.astrolabe.verify.Trigger
 import io.astrolabe.workspace.LineRange
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
 import org.junit.jupiter.api.io.TempDir
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
+import java.time.Duration
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -56,6 +58,119 @@ import kotlin.test.assertTrue
 
 /** P1.8.7: the cell turn loop of §3.7 — order, fail-closed validation, gates, every exit kind, and a checkpoint on every path out (fault injection). */
 class CellTest {
+    @Test
+    fun `create permission cannot admit a later delete in the same edit call`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val role = Roles.implementing.copy(toolMask = io.astrolabe.provider.ToolMask.of("look.read", "edit.create"))
+            f.run(ScriptedModel.of(
+                Scripted.Reply(listOf(read("read", "src/a.py"))),
+                Scripted.Reply(listOf(call("mixed", "edit", """{"ops":[{"create":"src/new.py","content":"new"},{"delete":"src/a.py","expect":"${f.version("src/a.py").digest.hex}"}],"why":"mixed"}"""))),
+                Scripted.Reply(listOf(say("stop")), stop = io.astrolabe.provider.StopReason.Refusal),
+            ), role = role)
+            assertTrue(Files.exists(f.repo.root.resolve("src/a.py")))
+            assertFalse(Files.exists(f.repo.root.resolve("src/new.py")))
+        }
+    }
+
+    @Test
+    fun `plan and probe completion reach their validator without running product acceptance`() = runTest {
+        for (role in listOf(Roles.plan, Roles.probe)) {
+            CellFixture(stateRoot.resolve(role.name)).use { f ->
+                var assessed = false
+                val exit = f.run(ScriptedModel.of(Scripted.Reply(listOf(say("packet")))), role = role,
+                    completion = RoleCompletion { _, _ -> assessed = true; CompletionDecision.Accepted(emptyList()) })
+                assertTrue(assessed)
+                assertIs<CellExit.Completed>(exit)
+                assertTrue(f.checks.required().all { it.last == null }, "product checks belong to implementing completion")
+            }
+        }
+    }
+
+    @Test
+    fun `partial usage retains the generation reservation including known overruns`() = runTest {
+        val input = io.astrolabe.provider.BillingDimension.UNCACHED_INPUT
+        val output = io.astrolabe.provider.BillingDimension.OUTPUT
+        for ((index, quantities) in listOf(mapOf(input to 1L), mapOf(output to 1L), mapOf(output to 100_000L)).withIndex()) {
+            CellFixture(stateRoot.resolve("usage-$index")).use { f ->
+                val base = f.context(ScriptedModel.of(Scripted.Reply(listOf(say("refused")), stop = io.astrolabe.provider.StopReason.Refusal)))
+                val budget = f.budget()
+                var held = 0L
+                val adapter = object : io.astrolabe.provider.ProviderAdapter by base.model.adapter {
+                    override fun start(request: io.astrolabe.provider.Request, id: InvocationId): io.astrolabe.provider.Invocation {
+                        held = budget.working.heldTokens.value
+                        val original = base.model.adapter.start(request, id)
+                        return object : io.astrolabe.provider.Invocation by original {
+                            override suspend fun terminal(): io.astrolabe.provider.Terminal = original.terminal().copy(
+                                usage = io.astrolabe.provider.BillableUsage(quantities,
+                                    io.astrolabe.provider.UsageProvenance("fake", "main", "test"), setOf(input, output) - quantities.keys),
+                            )
+                            override suspend fun await(): io.astrolabe.provider.Response = original.await().copy(
+                                usage = io.astrolabe.provider.BillableUsage(quantities,
+                                    io.astrolabe.provider.UsageProvenance("fake", "main", "test"), setOf(input, output) - quantities.keys),
+                            )
+                        }
+                    }
+                }
+                val context = CellContext(base.ids, base.role, base.contracts,
+                    CellModel(adapter, base.model.profile, base.model.estimator), base.tools, base.workspace, base.evidence, base.prime)
+                f.cell().run(context, f.increment, budget)
+                assertTrue(held > 1)
+                assertTrue(budget.working.spent.value >= held, "partial usage released conservative funding")
+                assertTrue(budget.working.spent.value >= quantities.values.sum(), "known overrun was lost")
+            }
+        }
+    }
+
+    @Test
+    fun `role masked edits and runs are refused before dispatch`() = runTest {
+        for (role in listOf(Roles.probe, Roles.plan, Roles.review)) {
+            CellFixture(stateRoot.resolve(role.name)).use { f ->
+                val before = f.version("src/a.py")
+                val masked = if (role == Roles.probe) anchored("c2", "src/a.py", before, "    return 1", "    return 10")
+                    else runCmd("c2", "echo masked > src/forbidden.txt")
+                f.run(ScriptedModel.of(
+                    Scripted.Reply(listOf(read("c1", "src/a.py"))),
+                    Scripted.Reply(listOf(masked)),
+                    Scripted.Reply(listOf(say("done"))),
+                ), role = role)
+                assertEquals(before, f.version("src/a.py"))
+                assertFalse(Files.exists(f.repo.root.resolve("src/forbidden.txt")))
+                assertTrue(f.transcript(3).filterIsInstance<ToolResult>().any { "is masked in this turn" in resultText(it) })
+            }
+        }
+    }
+
+    @Test
+    fun `profile request estimator participates in dispatch admission`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val base = f.context(ScriptedModel.of())
+            var counted = 0
+            val estimator = object : io.astrolabe.provider.TokenEstimator by f.estimator {
+                override fun estimate(request: io.astrolabe.provider.Request): io.astrolabe.provider.Estimate {
+                    counted++
+                    return io.astrolabe.provider.Estimate(Long.MAX_VALUE, true, id, version)
+                }
+            }
+            val context = CellContext(base.ids, base.role, base.contracts,
+                CellModel(base.model.adapter, base.model.profile, estimator), base.tools, base.workspace, base.evidence, base.prime)
+            val exit = assertIs<CellExit.Partial>(f.cell().run(context, f.increment, f.budget()))
+            assertEquals(PartialReason.Pressure, exit.reason)
+            assertTrue(counted > 0)
+            assertTrue(f.adapter.calls.isEmpty())
+        }
+    }
+
+    @Test
+    fun `a digest that cannot fit stops before provider dispatch`() = runTest {
+        CellFixture(stateRoot, defaults = Defaults(digestCapTokens = 1)).use { f ->
+            val exit = assertIs<CellExit.Partial>(f.run(ScriptedModel.of()))
+            assertEquals(PartialReason.Pressure, exit.reason)
+            assertTrue(exit.hint.contains("contract digest needs"), exit.hint)
+            assertTrue(f.adapter.calls.isEmpty())
+            assertEquals(CellStatus.Partial, f.checkpoints.latest(f.ids.context!!)!!.status)
+        }
+    }
+
     @TempDir
     lateinit var stateRoot: Path
 
@@ -141,13 +256,34 @@ class CellTest {
     }
 
     @Test
-    fun `a changed public signature with an uninspected reference nudges once and the exit gate refuses the completion`() = runTest {
+    fun `a fully displayed reference lookup resolves the public signature impact nudge`() = runTest {
         CellFixture(stateRoot).use { f ->
             val v = f.version("src/a.py")
             val model = ScriptedModel.of(
                 Scripted.Reply(listOf(say("reading a"), read("c1", "src/a.py"), patch("c2", """{"plan.add":"make a return 10"},{"plan.cursor":1},{"next":"edit a"}"""))),
                 Scripted.Reply(listOf(say("editing"), anchored("c3", "src/a.py", v, "def a():", "def a(scale=1):"))),
-                Scripted.Reply(listOf(say("ticking"), patch("c4", """{"plan.tick":{"n":1,"evidence":"#2"}},{"next":"done"}"""))),
+                Scripted.Reply(listOf(say("ticking"), patch("c4", """{"plan.tick":{"n":1,"evidence":"#2"}},{"next":"done"}"""),
+                    call("c5", "look", """{"what":"refs","target":"a","budget":400}"""))),
+                Scripted.Reply(listOf(say("done"))),
+                Scripted.Reply(listOf(say("done"))),
+            )
+
+            f.run(model)
+
+            assertTrue((4..f.adapter.calls.size).none { f.anchorText(it).contains("unresolved impact nudge") },
+                (4..f.adapter.calls.size).joinToString("\n---\n") { f.anchorText(it) })
+        }
+    }
+
+    @Test
+    fun `an incomplete reference lookup leaves the public signature impact nudge unresolved`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val v = f.version("src/a.py")
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("reading a"), read("c1", "src/a.py"), patch("c2", """{"plan.add":"make a return 10"},{"plan.cursor":1},{"next":"edit a"}"""))),
+                Scripted.Reply(listOf(say("editing"), anchored("c3", "src/a.py", v, "def a():", "def a(scale=1):"))),
+                Scripted.Reply(listOf(say("ticking"), patch("c4", """{"plan.tick":{"n":1,"evidence":"#2"}},{"next":"done"}"""),
+                    call("c5", "look", """{"what":"refs","target":"a","budget":15}"""))),
                 Scripted.Reply(listOf(say("done"))),
                 Scripted.Reply(listOf(say("done"))),
             )
@@ -243,6 +379,7 @@ class CellTest {
                 Scripted.Reply(listOf(say("and again"), tree("c3"))),
                 Scripted.Reply(listOf(say("once more"), tree("c4"))),
                 Scripted.Reply(listOf(say("recording"), patch("c5", """{"next":"move on"}"""), tree("c6"))),
+                Scripted.Reply(listOf(say("a different source"), read("c7", "src/a.py"))),
             )
 
             val exit = f.run(model)
@@ -254,6 +391,8 @@ class CellTest {
             assertTrue(refused.contains("not executed: the loop gate ended the last turn: a state op is required"), refused)
             val recorded = f.transcript(6).filterIsInstance<ToolResult>().map { resultText(it) }
             assertTrue(recorded.any { it.contains("STATE v1 · applied 1 op") }, recorded.toString())
+            val later = f.transcript(7).filterIsInstance<ToolResult>().map { resultText(it) }
+            assertTrue(later.any { it.contains("src/a.py") && !it.contains("state op is required") }, later.toString())
             assertEquals(1, f.recorder.ofType<AgentEvent.Cell.GateFired>().count { it.text.contains("same result 2 times") })
         }
     }
@@ -271,16 +410,19 @@ class CellTest {
         }
         CellFixture(stateRoot.resolve("gate"), defaults = Defaults(alpha = 0.1)).use { f ->
             val small = Profile("small", FakeProfiles.PROVIDER, "fake-small", FakeProfiles.capabilities(12_000, 500), FakeProfiles.main.priceTable)
-            val deadEnd = """{"deadend.add":{"text":"monkeypatching the clock","evidence":null,"scope":"tests/","reopen":"fixtures isolated"}},{"next":"look again"}"""
-            val model = ScriptedModel.of(Scripted.Reply(listOf(say("look"), tree("c1"), patch("c0", deadEnd))), Scripted.Reply(listOf(say("look again"), tree("c2"))))
+            val deadEnd = """{"deadend.add":{"text":"monkeypatching the clock","evidence":null,"scope":"tests/","reopen":"fixtures isolated"}},{"next":"look again"},{"focus.set":"src/a.py"}"""
+            val model = ScriptedModel.of(Scripted.Reply(listOf(say("look"), read("c1", "src/a.py"), patch("c0", deadEnd))), Scripted.Reply(listOf(say("look again"), tree("c2"))))
             val exit = f.run(model, profile = small, profiles = FakeProfiles.all + (small.id to small))
             val partial = assertIs<CellExit.Partial>(exit)
             assertEquals(PartialReason.Pressure, partial.reason)
             assertTrue(partial.hint.contains("pressure: context") && partial.hint.contains("second pressure"), partial.hint)
             assertEquals(2, f.adapter.calls.size, "the rebuilt projection took one more turn")
+            assertTrue(f.adapter.calls[1].request.segments.any { segment -> segment.kind == io.astrolabe.provider.SegmentKind.K && segment.items.filterIsInstance<io.astrolabe.provider.Message>().any { "SEED src/a.py" in it.text } }, "carried source is rendered into rebuilt K")
             assertEquals(2, partial.checkpoint.turn)
             assertEquals(1, partial.checkpoint.rebuilds)
             assertTrue(f.transcript(2).filterIsInstance<io.astrolabe.provider.Message>().any { it.text.startsWith("rebuilt: pressure (generation 1)") }, "the rebuild is announced in the pinned transcript")
+            assertEquals(1, f.recorder.ofType<AgentEvent.Cell.Rebuilt>().size)
+            assertEquals(1, f.recorder.ofType<AgentEvent.Cell.Rebuilt>().single().generation.value)
             assertTrue(f.journal.events(JournalScope(f.ids.work, kinds = setOf(JournalKind.Boundary))).any { it.text.startsWith("rebuilt: pressure (generation 1)") })
             // FX-11 through pressure: the scoped dead end survives the rebuild and KNOWN is declared as the seeds only.
             assertTrue(f.anchorText(2).contains("monkeypatching the clock") && f.anchorText(2).contains("scope: tests/"), f.anchorText(2))
@@ -395,7 +537,11 @@ class CellTest {
             assertEquals(edited(), Files.readString(f.repo.resolve("src/a.py")), "the mutation happened")
             val after = f.version("src/a.py")
             val result = resultText(f.transcript(3).filterIsInstance<ToolResult>().last())
-            assertTrue(result.contains("failed: InjectedCrash") && result.contains("effects unknown; reconciled at the turn boundary"), result)
+            if (nth == 1) {
+                assertTrue(result.contains("status=partial") && result.contains("already written: src/a.py (preimage"), result)
+            } else {
+                assertTrue(result.contains("failed: InjectedCrash") && result.contains("effects unknown; reconciled at the turn boundary"), result)
+            }
             assertEquals(after, f.registry.recorded("src/a.py"), "the registry knows the new version, announced by the edit or by the boundary reconcile")
             assertTrue(f.workset.entries.none { it.path == "src/a.py" }, "neither the stale read nor an unseen post-edit view stays KNOWN: ${f.workset.entries}")
             val turns = f.checkpoints.turns(f.ids.context!!)
@@ -403,7 +549,8 @@ class CellTest {
             assertEquals(listOf("src/a.py"), turns[1].touched)
             assertEquals(after, f.preimages.of("edit-1").single().versionAfter, "the preimage record survived the crash: the edit is reversible")
             assertEquals(1, f.receipts.forCheck(Checks.TYPES_TOUCHED).size, "the checker ran on the touched path")
-            assertNull(f.observations.get("obs-2"), "no observation was recorded for the crashed edit")
+            if (nth == 1) assertNotNull(f.observations.get("edit-1"), "the partial publication is recorded")
+            else assertNull(f.observations.get("edit-1"), "the rendering crash prevented its observation")
             assertEquals(CellStatus.Completed, f.checkpoints.latest(f.ids.context!!)!!.status)
             val reconciles = f.journal.events(JournalScope(f.ids.work, kinds = setOf(JournalKind.Reconcile)))
             if (nth == 1) assertEquals(listOf("src/a.py"), reconciles.single().refs, "the boundary announced what the crashed edit could not") else assertTrue(reconciles.isEmpty(), "the edit itself announced the move")
@@ -481,6 +628,34 @@ class CellTest {
             assertEquals("execution generation superseded", cancelled.reason)
             assertTrue(f.adapter.calls.isEmpty())
             assertEquals(CellStatus.Cancelled, f.checkpoints.latest(f.ids.context!!)!!.status)
+        }
+    }
+
+    @Test
+    fun `lease expiry while a provider response is held prevents its edit and scheduled checks`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val expiry = f.clock.instant().plusSeconds(30)
+            val authority = DispatchAuthority {
+                if (f.clock.instant().isBefore(expiry)) null else DispatchRefusal("lease expired", cancelled = false)
+            }
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("reading"), read("r1", "src/a.py"))),
+                Scripted.Reply(listOf(say("editing"), anchored("e1", "src/a.py", f.version("src/a.py"), "    return 1", "    return 10"))),
+            )
+            val context = f.context(model, holdResponses = true)
+            val running = async { f.cell(authority = authority).run(context, f.increment, f.budget()) }
+            while (f.adapter.invocation(InvocationId("inv-1")) == null) yield()
+            f.adapter.release(InvocationId("inv-1"))
+            while (f.adapter.invocation(InvocationId("inv-2")) == null) yield()
+
+            f.clock.advance(Duration.ofSeconds(31))
+            f.adapter.release(InvocationId("inv-2"))
+            val exit = running.await()
+
+            assertEquals(CellFixture.A_PY, Files.readString(f.repo.resolve("src/a.py")), "the expired response must not edit the workspace")
+            assertTrue(f.receipts.forCheck(Checks.TYPES_TOUCHED).isEmpty(), "the expired response must not launch end-of-turn checks")
+            assertIs<CellExit.Failed>(exit)
+            assertEquals(CellStatus.Failed, f.checkpoints.latest(f.ids.context!!)!!.status)
         }
     }
 

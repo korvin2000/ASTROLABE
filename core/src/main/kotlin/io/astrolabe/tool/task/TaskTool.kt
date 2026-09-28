@@ -83,6 +83,7 @@ public class TaskTool(
     /** Current file versions, so a probe's pointers are shown current or stale when collected (§10.2, FX-41). */
     private val versions: (String) -> FileVersion? = { null },
 ) : ToolExecutor {
+    internal var beforeDispatch: () -> Unit = {}
     init {
         require(ids.context != null) { "task runs inside a cell: ids.context is its lineage" }
     }
@@ -116,9 +117,12 @@ public class TaskTool(
         val question = Question(idGen.next("q"), contract.version, ids, args.question!!, args.options.orEmpty())
         events?.emit(AgentEvent.Ask.Question(ids, question.id))
         val answer = authority.ask(question)
+        beforeDispatch()
         if (answer == null) return block(question, context, "no answer is available")
-        if (Replies.check(answer, contract.version) == ReplyValidity.Superseded) {
-            return block(question, context, "the answer is for contract v${answer.contractRevision}, superseded by v${contract.version}")
+        if (answer.questionId != question.id) return block(question, context, "the answer names a different question")
+        val current = contracts.current(ids.work)
+        if (current == null || current.version != question.contractRevision || Replies.check(answer, current.version) == ReplyValidity.Superseded) {
+            return block(question, context, "the answer is for contract v${answer.contractRevision}, superseded by v${current?.version}")
         }
         val text = answer.text.ifBlank { answer.chosenOption?.let { question.options.getOrNull(it) } ?: "" }
         if (text.isBlank()) return block(question, context, "the answer is empty")

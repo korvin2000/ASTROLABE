@@ -3,6 +3,9 @@ package io.astrolabe.eval.samples
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.AfterAll
+import org.junit.jupiter.api.DynamicTest
+import org.junit.jupiter.api.TestFactory
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 import kotlin.test.fail
@@ -38,4 +41,19 @@ class RunnerSampleParameterized {
     @ParameterizedTest
     @ValueSource(strings = ["a", "b"])
     fun `a parameterized test that names no fixture`(value: String) {}
+}
+
+@Tag("runner-sample")
+class RunnerSampleAfterAll {
+    @Test fun `FX-01 passes before teardown`() {}
+
+    companion object {
+        @JvmStatic @AfterAll fun teardown() { fail("teardown failed after fixture passed") }
+    }
+}
+
+@Tag("runner-sample")
+class RunnerSampleFactoryFailure {
+    @TestFactory fun `FX-01 factory fails before registering tests`(): List<DynamicTest> =
+        error("factory failed before children existed")
 }
