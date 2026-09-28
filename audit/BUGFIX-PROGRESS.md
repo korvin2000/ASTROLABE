@@ -2,8 +2,30 @@
 
 Branch: `feature/bugfix`. Baseline: `9a80e117445be357285fec2cffffe0fd45290a9a`.
 
-**131 fixed (12 in this continuation); 11 open; F-034 previously resolved.**
+**141 fixed (10 in this continuation); 1 open (F-016); F-034 previously resolved.**
 The complete remaining queue is `findings.md` ? JSON `fix_progress.remaining_open_ids`.
+
+## Thirteenth continuation: campaign evidence, funding and recovery
+
+- **F-019** (`0ba3658, 745e229`): Search caps patterns at 4096 characters, files at 8 MiB, JVM regex work at 10 million character accesses and 30 seconds, and ripgrep execution at 30 seconds with bounded JSON lines and stderr. Candidate enumeration reuses bounded Git execution and preserves typed failure results. SearchLimitsTest and the broken-index parity regression pass.
+- **F-082** (`1120f89`): Independent host review now produces candidate- and contract-bound Check assessments before cell completion. Persisted review evidence reaches the cell gate, controller verifier, regression refresh and finish receipt. A Check-only contract can complete; absent and wrong-revision approval is refused. AcceptanceEvidenceTest and ExitGateTest pass.
+- **F-086** (`4f6eb64`): The cell retains Invocation, consumes terminal exactly once under NonCancellable after success, failure or cancellation, archives late items without executing them, and settles one accounting row. Unknown usage retains conservative funding. TerminalAccountingTest and the partial-usage regression pass. Cancellation waits for the provider to fulfill its terminal SPI.
+- **F-089** (`1120f89`): Completion obtains independent evidence before evaluating the gate. Required test edits carry their justification and candidate-bound approval, and persisted reviews bind the integrity evidence they assessed. S2 review and required-test-edit completion regressions pass; stale approvals remain refused.
+- **F-095** (`4f6eb64`): Every provider call durably reserves campaign tokens and money in one SQLite transaction before dispatch, shared by main, plan and helper cells. Routing and new-cell budgets deduct persisted charges, including unresolved reservations. Resume token/money tests and AccountingTest pass.
+- **F-100** (`0959ee7`): Windows STARTUPINFOEX now carries PROC_THREAD_ATTRIBUTE_HANDLE_LIST containing only stdin and the combined output handle, with reliable attribute-list cleanup. A native inheritable sentinel remains unavailable to the child while intended stdout/stderr work. WindowsHandleInheritanceTest passes.
+- **F-104** (`1120f89`): Main-line S1+ task.propose has a live intake. The controller consumes split requests at cell boundaries or reopen, pins the reason and current graph into planning, preserves completed definitions/evidence, and retains replaced unfinished nodes as cancelled history. The implementation-split campaign regression passes.
+- **F-105** (`1120f89`): Reopen unblocks parked increments after a host contract amendment; otherwise run reassesses through host authority. Regression refresh derives stale obligations from current graph identity, so prerequisites are recertified without replaying verified work. The host-answer resume regression passes.
+- **F-127** (`4f6eb64`): Extraction declares a token cap and optional monetary bound. The controller reserves it durably, charges reported usage or retains the allowance on failure, and accounts before exporting finish totals. Unaffordable calls are skipped while harness-derived extraction remains available. Extractor and reservation regressions pass.
+- **F-135** (`0fc1dbf`): Integration persists a manifest with preimages and postimages before effects, atomically replaces each file, and restores preimages on publication failure. Controller open and Integrator entry recover pending manifests without temporary worktrees, refusing to overwrite conflicting later edits. Failed-second-write, interrupted-publication and store-reopen regressions pass.
+
+### Verification and compatibility
+
+- 32 distinct selected tests passed on Windows JDK 26 after the corrections recorded in findings.md. No full suite/build or Linux/CI run. Core ABI regenerated and checked; eval and index-treesitter test sources compiled.
+- New JSON fields have defaults; no storage schema bump. JVM consumers should rebuild. Legacy assessments without a candidate must be reassessed; old open integration intents without manifests still require host reconciliation.
+- Terminal accounting waits for the provider terminal SPI even after cancellation. Missing usage remains unknown and consumes conservative funds. Extractor monetary caps require a host-supplied bound; absent monetary evidence is never reported as free.
+- Integration backups survive worktree cleanup. Recovery refuses conflicting later edits and leaves its intent unresolved for host handling.
+- **F-016 remains open:** detached POSIX descendants need enforceable containment and Linux validation. Ownership comments were corrected without claiming this was fixed.
+- Existing CLAUDE.md/ISSUES.md edits and untracked continue_fixing.md/todo_findings.txt preserved. Publication target: origin/feature/bugfix, authorized by the user.
 
 ## Twelfth continuation: bounded execution and durable evidence
 

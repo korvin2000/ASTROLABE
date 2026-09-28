@@ -1,6 +1,6 @@
 # Implementation audit findings
 
-**Remediation:** 131 fixed on `feature/bugfix` (12 in this continuation); 11 remain open; F-034 was already resolved. See [bugfix progress](audit/BUGFIX-PROGRESS.md). Original audit evidence remains historical; `fix_progress` is the current repair status.
+**Remediation:** 141 fixed on `feature/bugfix` (10 in this continuation); 1 remains open (F-016); F-034 was already resolved. See [bugfix progress](audit/BUGFIX-PROGRESS.md). Original audit evidence remains historical; `fix_progress` is the current repair status.
 
 ```json
 {
@@ -544,26 +544,6 @@
     "date": "2026-09-28",
     "status": "committed",
     "fixed_this_session": [
-      "F-017",
-      "F-033",
-      "F-041",
-      "F-075",
-      "F-107",
-      "F-109",
-      "F-113",
-      "F-124",
-      "F-128",
-      "F-129",
-      "F-133",
-      "F-137"
-    ],
-    "fixed_this_session_count": 12,
-    "previously_resolved": [
-      "F-034"
-    ],
-    "remaining_open_count": 11,
-    "remaining_open_ids": [
-      "F-016",
       "F-019",
       "F-082",
       "F-086",
@@ -575,48 +555,45 @@
       "F-127",
       "F-135"
     ],
+    "fixed_this_session_count": 10,
+    "previously_resolved": [
+      "F-034"
+    ],
+    "remaining_open_count": 1,
+    "remaining_open_ids": [
+      "F-016"
+    ],
     "next_priority": [
-      "F-016",
-      "F-019",
-      "F-082",
-      "F-086",
-      "F-089",
-      "F-095",
-      "F-100",
-      "F-104",
-      "F-105",
-      "F-127"
+      "F-016"
     ],
     "handoff": "CONTINUE-TASK.md",
     "detail": "audit/BUGFIX-PROGRESS.md",
-    "verification": "73 distinct selected tests passed on Windows JDK 26 after corrections. Core ABI regenerated and checked; eval/index-treesitter test sources compiled. No full suite/build, Linux/CI or P7 run.",
+    "verification": "32 distinct selected tests passed on Windows JDK 26 after documented corrections. Core ABI regenerated and checked; eval and index-treesitter test sources compiled. No full suite/build, Linux/CI or P7 run.",
     "current_build": null,
     "source_changes_allowed": true,
     "verification_results": {
+      "distinct_tests_passed": 32,
       "selected_core_classes": [
-        "DelegatorTest",
-        "IntegratorTest",
-        "ProbeTest",
-        "QaDriverTest",
-        "SniffTest",
-        "PreimagesTest",
-        "CuratorTest",
-        "NoteHorizonTest",
-        "GitTest",
-        "FactCoherenceTest",
-        "CarryForwardTest",
-        "ResumeTest"
+        "WindowsHandleInheritanceTest",
+        "SearchLimitsTest",
+        "TerminalAccountingTest",
+        "AcceptanceEvidenceTest",
+        "ExitGateTest",
+        "AccountingTest"
       ],
       "selected_core_methods": [
-        "VerifyTest.JVM verification captures new reports and cannot reuse stale success",
-        "ControllerTest.reopen durably invalidates notes with only path dependencies",
-        "CellTest.the first pressure rebuilds the projection, a second one ends the cell partial, at admission or from the gate"
+        "ControllerTest: token/money funding on reopen; extractor totals",
+        "CampaignLoopTest: split replanning; host-answer resume",
+        "IntegratorTest: interrupted/failed publication, fresh-store recovery, authority change and late-writer refusal",
+        "CellTest: partial usage funding",
+        "SearchBackendParityTest: broken Git index"
       ],
-      "distinct_tests_passed": 73,
       "corrections": [
-        "Selected integration tests exposed an existing Recorded-to-Committed transition; publication now records Dispatched first.",
-        "Corrected new test API names, report fixture input stability/output and focus.set syntax before passing their checks.",
-        "The Git timeout fixture now uses an absolute Windows ping executable because Git sanitizes its environment."
+        "Exhausted campaigns use a valid minimal local budget and are refused before dispatch by durable campaign funding.",
+        "Resume refresh derives stale prerequisite evidence from the current graph rather than the old ledger.",
+        "Review fixture final-suite setup now follows platform support; Check-only acceptance is tested directly.",
+        "Partial-usage fixture now supplies the same partial usage through await and terminal; assessment fixtures bind candidates.",
+        "Git candidate-enumeration errors retain SearchOutcome.Failed instead of escaping as GitError."
       ],
       "abi": "core regenerated; checkKotlinAbi passed",
       "dependent_modules": "eval and index-treesitter test sources compiled",
@@ -624,144 +601,18 @@
       "linux_ci": "not run",
       "p7": "excluded",
       "logs": [
-        "build/bugfix-twelfth-delegation.log",
-        "build/bugfix-twelfth-evidence.log",
-        "build/bugfix-twelfth-wrapper.log",
-        "build/bugfix-twelfth-reports.log",
-        "build/bugfix-twelfth-preimages.log",
-        "build/bugfix-twelfth-curator.log",
-        "build/bugfix-twelfth-horizon.log",
-        "build/bugfix-twelfth-pressure.log",
-        "build/bugfix-twelfth-git.log",
-        "build/bugfix-twelfth-git-deadline.log",
-        "build/bugfix-twelfth-retention.log",
-        "build/bugfix-twelfth-compatibility.log",
-        "build/bugfix-twelfth-resume.log"
+        "build/remaining-fixes.log",
+        "build/remaining-campaign.log",
+        "build/remaining-recheck.log",
+        "build/final-focused.log",
+        "build/settlement-final.log",
+        "build/search-error-check.log",
+        "build/final-abi.log",
+        "build/final-compatibility.log"
       ]
     },
     "active_processes": [],
     "previous_session_fixed": [
-      "F-001",
-      "F-002",
-      "F-003",
-      "F-004",
-      "F-005",
-      "F-006",
-      "F-007",
-      "F-008",
-      "F-009",
-      "F-010",
-      "F-011",
-      "F-012",
-      "F-013",
-      "F-014",
-      "F-015",
-      "F-018",
-      "F-020",
-      "F-021",
-      "F-022",
-      "F-023",
-      "F-024",
-      "F-025",
-      "F-026",
-      "F-027",
-      "F-028",
-      "F-029",
-      "F-030",
-      "F-031",
-      "F-032",
-      "F-035",
-      "F-036",
-      "F-037",
-      "F-038",
-      "F-039",
-      "F-040",
-      "F-042",
-      "F-043",
-      "F-044",
-      "F-045",
-      "F-046",
-      "F-047",
-      "F-048",
-      "F-049",
-      "F-050",
-      "F-051",
-      "F-052",
-      "F-053",
-      "F-054",
-      "F-055",
-      "F-056",
-      "F-057",
-      "F-058",
-      "F-059",
-      "F-060",
-      "F-061",
-      "F-062",
-      "F-063",
-      "F-064",
-      "F-065",
-      "F-066",
-      "F-067",
-      "F-068",
-      "F-069",
-      "F-070",
-      "F-071",
-      "F-072",
-      "F-073",
-      "F-074",
-      "F-076",
-      "F-077",
-      "F-078",
-      "F-079",
-      "F-080",
-      "F-081",
-      "F-083",
-      "F-084",
-      "F-085",
-      "F-087",
-      "F-088",
-      "F-090",
-      "F-091",
-      "F-092",
-      "F-093",
-      "F-094",
-      "F-096",
-      "F-097",
-      "F-098",
-      "F-099",
-      "F-101",
-      "F-102",
-      "F-103",
-      "F-106",
-      "F-108",
-      "F-110",
-      "F-111",
-      "F-112",
-      "F-114",
-      "F-115",
-      "F-116",
-      "F-117",
-      "F-118",
-      "F-119",
-      "F-120",
-      "F-121",
-      "F-122",
-      "F-123",
-      "F-125",
-      "F-126",
-      "F-130",
-      "F-131",
-      "F-132",
-      "F-134",
-      "F-136",
-      "F-138",
-      "F-139",
-      "F-140",
-      "F-141",
-      "F-142",
-      "F-143"
-    ],
-    "fixed_on_branch": [
       "F-001",
       "F-002",
       "F-003",
@@ -894,7 +745,150 @@
       "F-142",
       "F-143"
     ],
-    "fixed_on_branch_count": 131,
+    "fixed_on_branch": [
+      "F-001",
+      "F-002",
+      "F-003",
+      "F-004",
+      "F-005",
+      "F-006",
+      "F-007",
+      "F-008",
+      "F-009",
+      "F-010",
+      "F-011",
+      "F-012",
+      "F-013",
+      "F-014",
+      "F-015",
+      "F-017",
+      "F-018",
+      "F-019",
+      "F-020",
+      "F-021",
+      "F-022",
+      "F-023",
+      "F-024",
+      "F-025",
+      "F-026",
+      "F-027",
+      "F-028",
+      "F-029",
+      "F-030",
+      "F-031",
+      "F-032",
+      "F-033",
+      "F-035",
+      "F-036",
+      "F-037",
+      "F-038",
+      "F-039",
+      "F-040",
+      "F-041",
+      "F-042",
+      "F-043",
+      "F-044",
+      "F-045",
+      "F-046",
+      "F-047",
+      "F-048",
+      "F-049",
+      "F-050",
+      "F-051",
+      "F-052",
+      "F-053",
+      "F-054",
+      "F-055",
+      "F-056",
+      "F-057",
+      "F-058",
+      "F-059",
+      "F-060",
+      "F-061",
+      "F-062",
+      "F-063",
+      "F-064",
+      "F-065",
+      "F-066",
+      "F-067",
+      "F-068",
+      "F-069",
+      "F-070",
+      "F-071",
+      "F-072",
+      "F-073",
+      "F-074",
+      "F-075",
+      "F-076",
+      "F-077",
+      "F-078",
+      "F-079",
+      "F-080",
+      "F-081",
+      "F-082",
+      "F-083",
+      "F-084",
+      "F-085",
+      "F-086",
+      "F-087",
+      "F-088",
+      "F-089",
+      "F-090",
+      "F-091",
+      "F-092",
+      "F-093",
+      "F-094",
+      "F-095",
+      "F-096",
+      "F-097",
+      "F-098",
+      "F-099",
+      "F-100",
+      "F-101",
+      "F-102",
+      "F-103",
+      "F-104",
+      "F-105",
+      "F-106",
+      "F-107",
+      "F-108",
+      "F-109",
+      "F-110",
+      "F-111",
+      "F-112",
+      "F-113",
+      "F-114",
+      "F-115",
+      "F-116",
+      "F-117",
+      "F-118",
+      "F-119",
+      "F-120",
+      "F-121",
+      "F-122",
+      "F-123",
+      "F-124",
+      "F-125",
+      "F-126",
+      "F-127",
+      "F-128",
+      "F-129",
+      "F-130",
+      "F-131",
+      "F-132",
+      "F-133",
+      "F-134",
+      "F-135",
+      "F-136",
+      "F-137",
+      "F-138",
+      "F-139",
+      "F-140",
+      "F-141",
+      "F-142",
+      "F-143"
+    ],
+    "fixed_on_branch_count": 141,
     "previous_session_verification_results": {
       "initial_full_core": {
         "tests": 1293,
@@ -934,7 +928,7 @@
       },
       "full_core_rerun": false
     },
-    "source_checkpoint": "f232375",
+    "source_checkpoint": "bc742fe",
     "previous_continuation_verification_results": {
       "first_continuation_full_core": {
         "tests": 1314,
@@ -1321,6 +1315,53 @@
         "build/bugfix-eleventh-recovery.log",
         "build/bugfix-eleventh-authority.log",
         "build/bugfix-eleventh-compatibility.log"
+      ]
+    },
+    "previous_twelfth_verification_results": {
+      "selected_core_classes": [
+        "DelegatorTest",
+        "IntegratorTest",
+        "ProbeTest",
+        "QaDriverTest",
+        "SniffTest",
+        "PreimagesTest",
+        "CuratorTest",
+        "NoteHorizonTest",
+        "GitTest",
+        "FactCoherenceTest",
+        "CarryForwardTest",
+        "ResumeTest"
+      ],
+      "selected_core_methods": [
+        "VerifyTest.JVM verification captures new reports and cannot reuse stale success",
+        "ControllerTest.reopen durably invalidates notes with only path dependencies",
+        "CellTest.the first pressure rebuilds the projection, a second one ends the cell partial, at admission or from the gate"
+      ],
+      "distinct_tests_passed": 73,
+      "corrections": [
+        "Selected integration tests exposed an existing Recorded-to-Committed transition; publication now records Dispatched first.",
+        "Corrected new test API names, report fixture input stability/output and focus.set syntax before passing their checks.",
+        "The Git timeout fixture now uses an absolute Windows ping executable because Git sanitizes its environment."
+      ],
+      "abi": "core regenerated; checkKotlinAbi passed",
+      "dependent_modules": "eval and index-treesitter test sources compiled",
+      "full_suite": "not run (user requested selective tests)",
+      "linux_ci": "not run",
+      "p7": "excluded",
+      "logs": [
+        "build/bugfix-twelfth-delegation.log",
+        "build/bugfix-twelfth-evidence.log",
+        "build/bugfix-twelfth-wrapper.log",
+        "build/bugfix-twelfth-reports.log",
+        "build/bugfix-twelfth-preimages.log",
+        "build/bugfix-twelfth-curator.log",
+        "build/bugfix-twelfth-horizon.log",
+        "build/bugfix-twelfth-pressure.log",
+        "build/bugfix-twelfth-git.log",
+        "build/bugfix-twelfth-git-deadline.log",
+        "build/bugfix-twelfth-retention.log",
+        "build/bugfix-twelfth-compatibility.log",
+        "build/bugfix-twelfth-resume.log"
       ]
     }
   }
@@ -1752,6 +1793,8 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Evidence: inspected the group-based launch/kill path; no Linux runtime reproduction in this session. Validate with a child calling setsid before choosing the final remedy.
 - Possible solutions: narrow the supported process-lifecycle contract and reject unsupported daemonizing workloads, or use an OS-supported descendant containment mechanism whose lifecycle matches the promised guarantee. Keep confined-runner work explicitly separate from this ownership decision.
 - Future regression: a grandchild creates a new session, then the root exits or is cancelled; it must be terminated or the outcome must explicitly report unsupported/unknown effects.
+- Follow-up (2026-09-28): still open. Public/internal ownership comments now accurately distinguish a Windows job from a POSIX process group. No Linux runtime was available in this session; detached containment needs an enforceable Linux mechanism (for example delegated cgroups) and a setsid/setpgid regression. Documentation correction does not count as a containment fix.
+
 
 ### F-017 - Git operations can block indefinitely outside the owned-process deadline path
 
@@ -1782,12 +1825,14 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-019 - Search output budgets do not bound regex work or file memory
 
 - Task: [P0.6.3](TODO.md#L655).
-- Severity: high. Confidence: potential. Status: open.
+- Severity: high. Confidence: potential. Status: fixed.
 - Locations: [PatternSubset.scan](core/src/main/kotlin/io/astrolabe/os/search/Search.kt#L314), [JvmSearch.find / scan](core/src/main/kotlin/io/astrolabe/os/search/JvmSearch.kt#L39), [RipgrepSearch.runChunk](core/src/main/kotlin/io/astrolabe/os/search/RipgrepSearch.kt#L83).
 - Problem: the subset admits nested repetition such as `(a+)+$` (admission reproduced). JVM matching runs a backtracking engine synchronously with no work/time bound. The fallback reads each entire file and creates its decoded copy and line strings before result-budget enforcement; ripgrep output processing also allows a single unbounded JSON line. Search processes have no integrated deadline. The TODO explicitly acknowledges whole-file reads but leaves their resource consequences unresolved.
 - Impact: a repository containing huge files or a long near-matching line can consume excessive heap/CPU or overflow the regex stack, even when the model requests a tiny output budget. No adversarial long-running benchmark was executed.
 - Possible solutions: use a bounded/linear-time matcher or a rigorously safer subset; stream input with explicit large-file/line policy and report incompleteness when capped. Execute external search with a deadline. A coroutine timeout alone cannot preempt a synchronous regex loop.
 - Future regression: long near-miss nested-repetition inputs and a large single-line file under a tiny output budget must end within explicit work/memory limits with honest status.
+- Fix (2026-09-28, `0ba3658, 745e229`): Search caps patterns at 4096 characters, files at 8 MiB, JVM regex work at 10 million character accesses and 30 seconds, and ripgrep execution at 30 seconds with bounded JSON lines and stderr. Candidate enumeration reuses bounded Git execution and preserves typed failure results. SearchLimitsTest and the broken-index parity regression pass.
+
 
 ### F-020 - Candidate enumeration hides access/I/O failures as complete search
 
@@ -2590,12 +2635,14 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-082 - Check acceptance assessments have no production path into completion
 
 - Task: [P1.7.7](TODO.md#L930); follow-up P1.8.8/P1.9.3.
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed.
 - Locations: [Assessment and gate](core/src/main/kotlin/io/astrolabe/verify/ExitGate.kt#L21), [assessment requirement](core/src/main/kotlin/io/astrolabe/verify/ExitGate.kt#L77), [Cell GateState construction](core/src/main/kotlin/io/astrolabe/cell/Cell.kt#L454), [Controller completion](core/src/main/kotlin/io/astrolabe/campaign/Controller.kt#L772).
 - Trigger/problem: an increment containing a valid Acceptance.Check requires an accepted Assessment. Production source contains no Assessment construction/recording path; Cell builds GateState without assessments and controller Verifier.accept calls omit them. verify acceptance supports Run items; review verdicts remain separate and are not converted into assessments. Unit tests provide Assessment lists directly.
 - Impact: the built-in campaign cannot complete such an increment even after the criterion is satisfied and the host is willing to assess it. This is an implemented acceptance-kind integration gap, not a P7 transport limitation.
 - Possible solution: provide a host/reviewer evidence path for check assessments, persist their obligation/candidate binding and pass current assessments through cell gates and final verifier. Never satisfy them from a model's unsupported claim.
 - Future regression: a public-facade campaign with one Check obligation must refuse initially, then complete after a valid current assessment; stale or mismatched assessments must remain refused.
+- Fix (2026-09-28, `1120f89`): Independent host review now produces candidate- and contract-bound Check assessments before cell completion. Persisted review evidence reaches the cell gate, controller verifier, regression refresh and finish receipt. A Check-only contract can complete; absent and wrong-revision approval is refused. AcceptanceEvidenceTest and ExitGateTest pass.
+
 
 ### F-083 - Acceptance-surface detection ignores a repository-local executable
 
@@ -2632,10 +2679,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-086 - Provider terminal reconciliation is never consumed by the cell runtime
 
 - Task: [P1.8.7](TODO.md#L986).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed.
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/cell/Cell.kt#L321).
 - Analysis: The loop immediately discards the Invocation handle after start(...).await(). No production caller consumes Invocation.terminal(), although its SPI explicitly delivers late output/usage after cancellation. ProviderError releases the reservation outright; coroutine cancellation skips Accounting.record and reservation reconciliation. A billed cancelled or transport-failed call can disappear from final accounting and its late evidence is never archived. Keep the handle, reconcile terminal state exactly once even after cancellation, archive late items without executing them, and retain unknown-cost reservations until settled. Regression: fake invocation cancelled during await with later nonzero terminal usage; final call accounting must contain that charge once. This concerns the implemented provider-neutral lifecycle, not P7 HTTP transport.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-28, `4f6eb64`): The cell retains Invocation, consumes terminal exactly once under NonCancellable after success, failure or cancellation, archives late items without executing them, and settles one accounting row. Unknown usage retains conservative funding. TerminalAccountingTest and the partial-usage regression pass. Cancellation waits for the provider to fulfill its terminal SPI.
+
 
 ### F-087 - Incomplete provider usage can release the cell's conservative token reservation
 
@@ -2660,10 +2709,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-089 - Required review and test-integrity approvals cannot reach the cell completion gate
 
 - Task: [P1.8.8](TODO.md#L996).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed.
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/cell/Cell.kt#L450).
 - Analysis: GateState is constructed without reviews and with unresolved local test-integrity flags. The loop never reads persisted Verify review verdicts or resolves those flags. Controller.incrementReview, which can obtain the necessary approval, is called only after CellExit.Completed, while RoleCompletion.exitGate refuses completion until the review/flag is approved. A review acceptance item or a justified required test edit can therefore loop to CompletionStalled even after verify.review obtains an approval. Bind current signed review evidence to the cell gate and surface flags, or explicitly sequence review between provisional completion and final acceptance. Regression: an S2 increment with a review item and one with an approved required test edit must progress; wrong candidate/revision approvals remain refused. Related F-082 covers the separate missing Check assessment producer.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-28, `1120f89`): Completion obtains independent evidence before evaluating the gate. Required test edits carry their justification and candidate-bound approval, and persisted reviews bind the integrity evidence they assessed. S2 review and required-test-edit completion regressions pass; stale approvals remain refused.
+
 
 ### F-090 - Role validator feedback is persisted but not returned to the model
 
@@ -2718,10 +2769,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-095 - Each new cell is funded from the original campaign budget without deducting prior spend
 
 - Task: [P1.9.4](TODO.md#L1024).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed.
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/campaign/Controller.kt#L1320).
 - Analysis: runCell constructs a fresh CellBudget.of(contract.budget.tokens, ...) for every main-line, plan and continuation cell. route sets RoutingBudget.remainingCost to the unchanged contract.budget.cost and never subtracts persisted Accounting totals. Neither gate shares a campaign reservation across these cells, so a multi-cell campaign can spend the full token allowance repeatedly and monetary affordability resets on every route. Per-cell limits and maxCells bound individual runs but do not enforce the declared campaign allowance. Introduce campaign-level remaining/reserved accounting and allocate each cell from it, including helpers and unresolved usage. Regression: individually affordable cells whose aggregate exceeds tokens or money must stop before the overspending call; resume must retain previous charges.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-28, `4f6eb64`): Every provider call durably reserves campaign tokens and money in one SQLite transaction before dispatch, shared by main, plan and helper cells. Routing and new-cell budgets deduct persisted charges, including unresolved reservations. Resume token/money tests and AccountingTest pass.
+
 
 ### F-096 - CampaignHandle.await reports internal failures as user cancellation
 
@@ -2766,10 +2819,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-100 - Concurrent Windows launches inherit each other's transient handles
 
 - Task: [P1.12.4](TODO.md#L1120).
-- Severity: medium. Confidence: confirmed_source. Status: open.
+- Severity: medium. Confidence: confirmed_source. Status: fixed.
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/os/WindowsOwner.kt#L32).
 - Analysis: WindowsOwner creates inheritable log/NUL handles and calls CreateProcessW with bInheritHandles=1 using ordinary STARTUPINFOW. It supplies no per-child handle list; LocalOs.spawn/WindowsOwner.start are not serialized. During overlapping starts, the assertion that only this launch's two handles are inheritable is false: a child can inherit another launch's handles or a host's unrelated inheritable handle, retaining access/resources outside its intended stdio set. Use an explicit STARTUPINFOEX handle allowlist and close all temporary handles reliably. Regression: concurrent launches with distinct inheritable sentinel handles; each child must receive only its intended handles. Static finding; concurrent native reproduction not performed.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-28, `0959ee7`): Windows STARTUPINFOEX now carries PROC_THREAD_ATTRIBUTE_HANDLE_LIST containing only stdin and the combined output handle, with reliable attribute-list cleanup. A native inheritable sentinel remains unavailable to the child while intended stdout/stderr work. WindowsHandleInheritanceTest passes.
+
 
 ### F-101 - A failed Windows job assignment leaks the newly created suspended process
 
@@ -2804,18 +2859,22 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-104 - Increment-split proposals have no live controller re-planning path
 
 - Task: [P2.1.5](TODO.md#L1163).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed.
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/campaign/Controller.kt#L929).
 - Analysis: CampaignProposals is installed only for the initial plan cell. Ordinary S1 implementation uses TaskTool with its default S0 mask/no proposal intake; S2 may advertise task.propose but still has no intake. SqliteSplitRequests.forPlanRole is never called in production, and runS1 only plans before any increment has cells. Consequently the rescoping/scope-gate instruction to request increment_split cannot produce a new plan: calls are masked/unavailable, or an inbox record has no consumer. Wire main-line proposal intake, consume pending splits at a safe boundary and replan the remaining authorized work while preserving completed nodes. Regression: an implementing cell submits a split, the plan role receives it and the controller runs the resulting pending nodes; no graph changes happen merely on proposal.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-28, `1120f89`): Main-line S1+ task.propose has a live intake. The controller consumes split requests at cell boundaries or reopen, pins the reason and current graph into planning, preserves completed definitions/evidence, and retains replaced unfinished nodes as cancelled history. The implementation-split campaign regression passes.
+
 
 ### F-105 - A resumed blocked increment never becomes eligible for dispatch
 
 - Task: [P2.2.4](TODO.md#L1195).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed.
 - Location: [execution path](core/src/main/kotlin/io/astrolabe/campaign/Controller.kt#L494).
 - Analysis: Lifecycle.Returned marks a CellExit.Blocked increment Blocked. Reopen changes a resumable Ended campaign to Opened/Running, but does not reassess or unblock its graph nodes. readyFrontier excludes Blocked nodes, and the controller's empty-frontier branch only refreshes Verified regressions before stopping again. Transition.Unblocked exists but has no production caller. Resolving a missing tool or providing the requested host input therefore cannot resume such an increment through the built-in flow without manual lifecycle manipulation. Add an explicit evidence-backed unblock/reassessment step on resume. Regression: stop for a missing executable/question, resolve the prerequisite, reopen and continue the same increment without re-executing verified work.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
+- Fix (2026-09-28, `1120f89`): Reopen unblocks parked increments after a host contract amendment; otherwise run reassesses through host authority. Regression refresh derives stale obligations from current graph identity, so prerequisites are recertified without replaying verified work. The host-answer resume regression passes.
+
 
 ### F-106 - Seeds omitted from the compiled prompt still grant KNOWN edit coverage
 
@@ -3028,10 +3087,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-127 - Extractor token usage is logged without budget reconciliation
 
 - Task: [P4.2.1](TODO.md#L1572).
-- Severity: medium. Confidence: confirmed_source. Status: open.
+- Severity: medium. Confidence: confirmed_source. Status: fixed.
 - Location: [campaign/Controller.kt](core/src/main/kotlin/io/astrolabe/campaign/Controller.kt#L1017).
 - Analysis: ExtractionResult.tokens becomes ExtractionReport.tokens and a journal line saying charged, but Controller.extract discards the report after exporting the finish receipt. No reservation or Accounting call consumes this usage. A supplied Extraction implementation can spend per packet without changing campaign totals/allowance. Reserve and reconcile extraction usage before exporting final totals, including failed calls. Regression: nonzero scripted usage changes billed totals and respects remaining allowance.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; current-source trace and scoped test inspection; no new runtime reproduction claimed.
+- Fix (2026-09-28, `4f6eb64`): Extraction declares a token cap and optional monetary bound. The controller reserves it durably, charges reported usage or retains the allowance on failure, and accounts before exporting finish totals. Unaffordable calls are skipped while harness-derived extraction remains available. Extractor and reservation regressions pass.
+
 
 ### F-128 - Delegation exceptions reconcile real child work as zero spend
 
@@ -3106,10 +3167,12 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 ### F-135 - Multi-file integration can leave a partially published main workspace
 
 - Task: [P5.1.3](TODO.md#L1765).
-- Severity: high. Confidence: confirmed_source. Status: open.
+- Severity: high. Confidence: confirmed_source. Status: fixed.
 - Location: [delegate/Integrator.kt](core/src/main/kotlin/io/astrolabe/delegate/Integrator.kt#L296).
 - Analysis: Publication writes files sequentially with Files.write/delete and then marks the intent committed. If the second write fails, earlier files remain changed; no rollback runs and the intent contains only handles/path count, not durable staged postimages or preimages. S3Round finally removes worktrees, so the private recovery source can also disappear. Stage a recoverable transaction manifest and backups before effects, preserve recovery data until terminal reconciliation, and restore on failed publication. Regression: deny/fail the second of two writes and inject a crash mid-loop; resume restores or completes the exact patch without accepting a mixed tree.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; current-source trace and scoped test inspection; no new runtime reproduction claimed.
+- Fix (2026-09-28, `0fc1dbf`): Integration persists a manifest with preimages and postimages before effects, atomically replaces each file, and restores preimages on publication failure. Controller open and Integrator entry recover pending manifests without temporary worktrees, refusing to overwrite conflicting later edits. Failed-second-write, interrupted-publication and store-reopen regressions pass.
+
 
 ### F-136 - Publication can proceed after cancellation while awaiting approval
 

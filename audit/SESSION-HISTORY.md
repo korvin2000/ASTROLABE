@@ -659,3 +659,10 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - 73 distinct selected tests passed after corrections; core ABI checked and dependent test sources compiled.
 - No full suite/build or Linux/CI run. Code through 0898a57; ABI f232375; D-303 through D-311.
 - Push to origin/feature/bugfix authorized. Existing user edits and untracked task files preserved.
+
+## 2026-09-28: thirteen-continuation bugfix batch
+- Fixed F-019/F-082/F-086/F-089/F-095/F-100/F-104/F-105/F-127/F-135 on feature/bugfix: 141 fixed, 1 open.
+- Added independent completion evidence, durable campaign funding, terminal/extractor accounting, replanning/resume and recoverable integration publication.
+- 32 distinct targeted Windows tests passed after corrections; core ABI checked and dependent test sources compiled. No full suite/build or Linux/CI.
+- F-016 remains open for enforceable Linux detached-process containment; comments corrected. Existing unrelated edits preserved.
+- Source/ABI checkpoint bc742fe; publication to origin/feature/bugfix authorized.
