@@ -166,6 +166,14 @@ class RunTest {
     }
 
     @Test
+    fun `a secret straddling the head width is redacted before the head is cut`() = runTest {
+        val secret = "AKIA" + "IOSFODNN7EXAMPLE"
+        // "git --version " is 14 characters, so the secret starts at column 74 and crosses the 80-column cut.
+        val out = run("""{"argv":["git","--version","${"x".repeat(60)}$secret"]}""")
+        assertFalse(out.body.contains("AKIAIO"), out.body)
+    }
+
+    @Test
     fun `a redaction scan limit marks the stored log capture incomplete`() = runTest {
         repo.write("emit.txt", "a".repeat(1000))
         val config = Config(redaction = io.astrolabe.auth.RedactionConfig(maxBytes = 64))

@@ -511,7 +511,7 @@ public class Run(
 
     private fun render(args: RunArgs, result: RunResult, argv: List<String>, shell: Boolean, before: StampReport?, after: StampReport?, effectsUnknown: Boolean, statusWire: String = wire(result.status), captureMask: io.astrolabe.evidence.RedactionMask = io.astrolabe.evidence.RedactionMask.NONE): ToolOutcome {
         val exit = result.exit?.let { "exit $it · " } ?: ""
-        val head = "run ${result.alias} $statusWire · class ${result.effectClass}" + (if (shell) " · shell wrapper" else "") + " · $exit${argv.joinToString(" ").take(80)}"
+        val head = "run ${result.alias} $statusWire · class ${result.effectClass}" + (if (shell) " · shell wrapper" else "") + " · $exit${redaction.apply(argv.joinToString(" ")).text.take(80)}"
         val safe = redaction.apply(head + "\n" + result.view, ContentClass.ReusableEvidence)
         val body = safe.text
         val truncated = result.truncated || safe.limitations.isNotEmpty()
