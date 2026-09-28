@@ -449,6 +449,7 @@ public class Controller @JvmOverloads public constructor(
         val negatives = KbNegatives(journal, idGen, clock)
         val kb = StoreKb(store, request.work, registry::version) { negatives.retrievalMiss(ids, null, it) }
         val intents = SqliteIntentJournal(store, clock)
+        io.astrolabe.delegate.IntegrationPublication.recover(workspace, registry, store.blobs, intents)
         val contracts = Contracts(SqliteContractRepository(store, clock), idGen, clock, events)
         val campaigns = SqliteCampaigns(store, clock)
         val attempts = Attempts(store, clock)
