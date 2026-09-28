@@ -169,6 +169,19 @@ class CheckerTest {
     }
 
     @Test
+    fun `a touched check that fell back to project-wide scope gets the larger fallback time box`() {
+        val checks = Checks.empty()
+        checks.register(check("CHK-types", shell("ping -n 61 127.0.0.1 >NUL", "sleep 60")))
+        checks.register(check("CHK-lint-touched", shell("echo lint", "echo lint"), kind = CheckKind.Lint, selector = Selector.Touched))
+        val results = checker(checks).run(listOf("src/a.py"), timeBoxSeconds = 1, fallbackTimeBoxSeconds = 60)
+        assertEquals(Outcome.Timeout, results[0].outcome, "a project check keeps the scoped box")
+        assertEquals(Outcome.Inconclusive, results[1].outcome, "the fallback check still had its own box: ${results[1].reason}")
+
+        val boxed = checker(checks).run(listOf("src/a.py"), timeBoxSeconds = 1)
+        assertEquals(Outcome.NotRun, boxed[1].outcome, "without a larger fallback box the batch box is exhausted")
+    }
+
+    @Test
     fun `a missing runner is unavailable and exit 0 without a parser is inconclusive, never green`() {
         val checks = Checks.empty()
         checks.register(check("CHK-types-touched", Command(listOf("no-such-checker-xyz", "--strict"))))

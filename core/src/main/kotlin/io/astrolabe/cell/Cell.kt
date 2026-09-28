@@ -772,7 +772,7 @@ public class Cell @JvmOverloads constructor(
             tools.verify?.inputs = atlas.rows.map { it.path }
             tools.verify?.atlas = atlas
             val checker = ws.checker ?: return null
-            val results = kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { checker.run(scheduled, defaults.checkerTimeBoxSeconds.toLong()) }
+            val results = kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { checker.run(scheduled, defaults.checkerTimeBoxSeconds.toLong(), defaults.checkerFallbackTimeBoxSeconds.toLong()) }
             if (results.isEmpty()) return null
             for (result in results) {
                 val receipt = ws.scheduler.record(result, contract.version)
