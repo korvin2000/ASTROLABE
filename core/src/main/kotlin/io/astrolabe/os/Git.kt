@@ -182,6 +182,62 @@ public class Git @JvmOverloads constructor(
      */
     public fun catFile(id: ObjectId): ByteArray = run(listOf("cat-file", "blob", id.hex))
 
+    /**
+     * The checkout form of each blob as `git cat-file --batch --filters` produces it for its path:
+     * smudge filters and end-of-line conversion applied. One element per request, in order; null
+     * for a missing object or a failed filter. A path containing CR or LF cannot be named on a batch line.
+     *
+     * Git versions differ on whether a batch header reports the filtered or the stored size, so a
+     * record's length is taken from [expectedSizes] or from the header only where the next header
+     * (or the end of output) confirms it. The first unconfirmed record and all later ones are read
+     * one object per command.
+     */
+    internal fun catFileSmudged(requests: List<Pair<ObjectId, String>>, expectedSizes: List<Long>): List<ByteArray?> {
+        require(expectedSizes.size == requests.size) { "one expected size per request" }
+        if (requests.isEmpty()) return emptyList()
+        val input = StringBuilder()
+        for ((id, path) in requests) {
+            require('\n' !in path && '\r' !in path) { "batch path contains a line break: '$path'" }
+            input.append(id.hex).append(' ').append(path).append('\n')
+        }
+        val out = run(listOf("cat-file", "--batch", "--filters"), stdin = input.toString().toByteArray(StandardCharsets.UTF_8))
+        val results = ArrayList<ByteArray?>(requests.size)
+        var pos = 0
+        for (i in requests.indices) {
+            var eol = pos
+            while (eol < out.size && out[eol] != NEWLINE) eol++
+            if (eol >= out.size) break
+            val header = String(out, pos, eol - pos, StandardCharsets.UTF_8).split(' ')
+            if (header.first() != requests[i].first.hex) break
+            if (header.size == 2 && header[1] == "missing") {
+                results.add(null)
+                pos = eol + 1
+                continue
+            }
+            val start = eol + 1
+            val next = requests.getOrNull(i + 1)?.first?.hex
+            val length = listOfNotNull(expectedSizes[i], header.getOrNull(2)?.toLongOrNull())
+                .firstOrNull { recordEnds(out, start, it, next) }?.toInt() ?: break
+            results.add(out.copyOfRange(start, start + length))
+            pos = start + length + 1
+        }
+        for (i in results.size until requests.size) {
+            val (id, path) = requests[i]
+            val single = exec(listOf("cat-file", "--filters", "--path=$path", id.hex))
+            results.add(if (single.exitCode == 0) single.stdout else null)
+        }
+        return results
+    }
+
+    private fun recordEnds(out: ByteArray, start: Int, length: Long, next: String?): Boolean {
+        if (length < 0 || start + length >= out.size) return false
+        val end = (start + length).toInt()
+        if (out[end] != NEWLINE) return false
+        if (next == null) return end + 1 == out.size
+        val prefix = "$next ".toByteArray(StandardCharsets.US_ASCII)
+        return end + 1 + prefix.size <= out.size && prefix.indices.all { out[end + 1 + it] == prefix[it] }
+    }
+
     // ---------------------------------------------------------------- writes
 
     /**
@@ -495,6 +551,8 @@ public class Git @JvmOverloads constructor(
     private companion object {
         /** Exit code stand-in for "the process never ran". */
         const val START_FAILED = -1
+
+        const val NEWLINE: Byte = 0x0A
 
         val INHERITED_ENVIRONMENT = listOf(
             "PATH", "PATHEXT", "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",

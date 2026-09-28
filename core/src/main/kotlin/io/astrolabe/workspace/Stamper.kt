@@ -238,12 +238,49 @@ public class Stamper @JvmOverloads public constructor(
         }
         // Git status compares filtered content. Even a Git-clean path can have different raw
         // bytes (or an ignored mode change), so compare every remaining tracked path to its object.
+        val converted = ArrayList<Pair<LsFilesEntry, StampEntry>>()
         for (row in workspace.git.lsFiles()) {
             // A gitlink is a directory on disk; git status already reports submodule changes.
             if (row.stage != 0 || row.path in entries || row.mode == FileMode.GITLINK) continue
-            captureEntry(row.path, row.mode, row)?.let { entries[row.path] = it }
+            val entry = captureEntry(row.path, row.mode, row) ?: continue
+            if (entry.type == EntryType.File && entry.mode == row.mode && '\n' !in row.path && '\r' !in row.path) {
+                converted.add(row to entry)
+            } else {
+                entries[row.path] = entry
+            }
         }
+        for ((row, entry) in checkoutChanged(converted)) entries[row.path] = entry
         return entries.values.sortedWith(compareBy(PATH_ORDER) { it.path })
+    }
+
+    /**
+     * Raw bytes that differ from the index object may still be its clean checkout (autocrlf, eol
+     * attributes, smudge filters). Such a path is unchanged; any other raw difference stays a member,
+     * so a change a clean filter would hide still changes the candidate.
+     */
+    private fun checkoutChanged(converted: List<Pair<LsFilesEntry, StampEntry>>): List<Pair<LsFilesEntry, StampEntry>> {
+        val changed = ArrayList<Pair<LsFilesEntry, StampEntry>>()
+        var start = 0
+        while (start < converted.size) {
+            // Bound each batch's output by the raw sizes it is expected to reproduce.
+            var end = start
+            var budget = 0L
+            while (end < converted.size && (end == start || budget + converted[end].second.sizeBytes <= SMUDGE_BATCH_BYTES)) {
+                budget += converted[end].second.sizeBytes
+                end++
+            }
+            val batch = converted.subList(start, end)
+            val checkout = workspace.git.catFileSmudged(
+                batch.map { (row, _) -> row.id to row.path },
+                batch.map { (_, entry) -> entry.sizeBytes },
+            )
+            batch.forEachIndexed { i, pair ->
+                val bytes = checkout[i]
+                if (bytes == null || Digest.of(bytes) != pair.second.digest) changed.add(pair)
+            }
+            start = end
+        }
+        return changed
     }
 
     private fun untracked(status: GitStatus): List<StampEntry> =
@@ -300,6 +337,8 @@ public class Stamper @JvmOverloads public constructor(
         reportedMode == FileMode.EXECUTABLE || reportedMode == FileMode.REGULAR -> reportedMode
         else -> FileMode.REGULAR
     }
+
+    private val SMUDGE_BATCH_BYTES: Long = 16L * 1024 * 1024
 
     /** True where the filesystem carries a POSIX executable bit at all; Windows does not. */
     private val POSIX: Boolean =
