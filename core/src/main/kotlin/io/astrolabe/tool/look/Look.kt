@@ -249,7 +249,7 @@ public class Look(
             is SearchOutcome.Unsupported -> return refused(args, "unsupported", "pattern not supported by the search backend: ${outcome.reason}", complete = false, scope = scopeText)
         }
         val actionId = idGen.next("act")
-        val alias = allocate()
+        val alias = allocate(SEARCH_KIND)
         // Hit lines are rendered from bytes hashed now, so the coverage they grant matches their version.
         val files = hits.hits.map { it.path }.distinct().associateWith { readFile(it) }
         val lines = ArrayList<String>()
@@ -324,7 +324,8 @@ public class Look(
         val alias = aliases.resolve(ids.work, number) ?: return refused(args, "refused", "no result #$number in this campaign")
         val observation = observations.get(alias.canonicalId) ?: return refused(args, "refused", "#$number is not a recallable observation (${alias.kind})")
         val stored = String(blobs.get(observation.contentRef), Charsets.UTF_8).lines()
-        val path = observation.paths.singleOrNull()?.takeIf { observation.ranges[it] != null }
+        // A search body is a summary plus hit lines, never raw source: it is recalled by view line and grants no coverage.
+        val path = observation.paths.singleOrNull()?.takeIf { observation.ranges[it] != null && alias.kind != SEARCH_KIND }
         val sourceRange = path?.let { observation.ranges.getValue(it).ranges.singleOrNull() }
         val range = args.range?.let { text ->
             Regex("""^(\d+)-(\d+)$""").matchEntire(text.trim())?.let { LineRange(it.groupValues[1].toInt(), it.groupValues[2].toInt()) }
@@ -547,7 +548,7 @@ public class Look(
     private fun shift(ranges: Ranges, by: Int): Ranges =
         if (by == 0 || ranges.isEmpty) ranges else Ranges.of(ranges.ranges.map { LineRange(it.from + by, it.to + by) })
 
-    private fun allocate() = aliases.allocate(ids.work, idGen.next("obs"), "result", ids.context, workspace.id)
+    private fun allocate(kind: String = "result") = aliases.allocate(ids.work, idGen.next("obs"), kind, ids.context, workspace.id)
 
     private fun show(path: String, version: FileVersion, ranges: Ranges, mask: RedactionMask, alias: String, turn: Int, tokens: Long) {
         registry.show(ids.context!!, generation, workspace.id, path, version, ranges, mask)
@@ -620,6 +621,9 @@ public class Look(
         return ToolOutcome(body, header, tokens = tokens)
     }
 }
+
+/** Alias kind of a `find` result, whose body is not source-aligned. */
+private const val SEARCH_KIND = "search"
 
 /** How many files with unresolved imports `look(importers)` names before eliding. */
 private const val UNRESOLVED_SHOWN = 5

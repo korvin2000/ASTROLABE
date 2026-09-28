@@ -104,6 +104,14 @@ class LookTest {
     }
 
     @Test
+    fun `recalling a one-hit search grants no coverage beyond the hit line`() = runTest {
+        repo.write("src/hit.py", "a = 1\nb = 2\nneedle = 3\nd = 4\ne = 5\n")
+        look("""{"what":"find","target":"needle","glob":"src/hit.py"}""")
+        look("""{"what":"recall","id":"#1"}""")
+        assertFalse(workset.covers("src/hit.py", registry.version("src/hit.py")!!, LineRange(4, 4)))
+    }
+
+    @Test
     fun `redacted lines in the undisplayed tail never grant recalled coverage`() = runTest {
         repo.write("src/secret.py", (1..30).joinToString("\n") {
             if (it == 30) "token=abcdefghijklmnopqrstuv" else "line $it padding padding padding"
