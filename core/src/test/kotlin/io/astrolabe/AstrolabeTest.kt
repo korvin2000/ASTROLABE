@@ -94,6 +94,22 @@ class AstrolabeTest {
     }
 
     @Test
+    fun `closing the sdk while a campaign runs makes await return cancelled`() = runBlocking<Unit> {
+        val adapter = FakeAdapter(
+            ScriptedModel.of(Scripted.Reply(listOf(Message.text(Role.Assistant, "continuing")))),
+            holdResponses = true,
+        )
+        Astrolabe(config, adapter, AutonomousAuthority()).use { sdk ->
+            sdk.open(repo.root).use { project ->
+                val handle = sdk.campaign(project, "make a return 10")
+                withTimeout(10_000) { handle.events.first { it is AgentEvent.Cell.ModelRequested } }
+                sdk.close()
+                assertEquals(CampaignOutcome.Cancelled, withTimeout(10_000) { handle.await() })
+            }
+        }
+    }
+
+    @Test
     fun `await propagates an internal campaign failure instead of reporting cancellation`() = runBlocking<Unit> {
         val adapter = FakeAdapter(
             ScriptedModel.of(Scripted.Reply(listOf(Message.text(Role.Assistant, "continuing")))),

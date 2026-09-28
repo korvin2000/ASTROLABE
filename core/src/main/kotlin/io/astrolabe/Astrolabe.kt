@@ -34,6 +34,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
@@ -173,7 +174,13 @@ public class CampaignHandle internal constructor(
 
     public val events: Flow<AgentEvent> get() = bus.records().filter { it.event.ids.work == workId }.map { it.event }
 
-    public suspend fun await(): CampaignOutcome = job.await()
+    public suspend fun await(): CampaignOutcome = try {
+        job.await()
+    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+        // The caller's own cancellation propagates; a campaign job cancelled by [Astrolabe.close] is an outcome.
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+        if (job.isCancelled) CampaignOutcome.Cancelled else throw cancelled
+    }
 
     /**
      * Cancels the campaign through its token (§3.7, D-26): an in-flight model call is interrupted, the cell settles
