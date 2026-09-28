@@ -217,7 +217,7 @@ public class Git @JvmOverloads constructor(
             val start = eol + 1
             val next = requests.getOrNull(i + 1)?.first?.hex
             val length = listOfNotNull(expectedSizes[i], header.getOrNull(2)?.toLongOrNull())
-                .firstOrNull { recordEnds(out, start, it, next) }?.toInt() ?: break
+                .firstOrNull { recordEnds(out, start, it, next) }?.toInt() ?: resync(out, start, next) ?: break
             results.add(out.copyOfRange(start, start + length))
             pos = start + length + 1
         }
@@ -227,6 +227,22 @@ public class Git @JvmOverloads constructor(
             results.add(if (single.exitCode == 0) single.stdout else null)
         }
         return results
+    }
+
+    /**
+     * A record whose length no size confirms (a raw file that really changed) ends where the next
+     * request's header starts, or at the final newline; without this, one edit would push every
+     * later object of the batch onto its own process.
+     */
+    private fun resync(out: ByteArray, start: Int, next: String?): Int? {
+        if (next == null) return (out.size - 1 - start).takeIf { it >= 0 && out[out.size - 1] == NEWLINE }
+        val marker = "\n$next ".toByteArray(StandardCharsets.US_ASCII)
+        var at = start
+        while (at + marker.size <= out.size) {
+            if (marker.indices.all { out[at + it] == marker[it] }) return at - start
+            at++
+        }
+        return null
     }
 
     private fun recordEnds(out: ByteArray, start: Int, length: Long, next: String?): Boolean {
