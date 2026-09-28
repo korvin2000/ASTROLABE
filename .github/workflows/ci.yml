@@ -47,7 +47,20 @@ jobs:
           git --version
           rg --version
         shell: bash
-      - run: ./gradlew check --console=plain --no-daemon
+      # Windows: the hosted runner lost communication under the parallel module test tasks (process spawns failed
+      # with 0xC0000142, 2026-09-28); run them one module at a time and log resources each minute to the live log.
+      - run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            powershell -NoProfile -ExecutionPolicy Bypass -File .github/scripts/resource-monitor.ps1 &
+            monitor=$!
+            status=0
+            ./gradlew check --console=plain --no-daemon --no-parallel || status=$?
+            touch .resource-monitor.stop
+            kill "$monitor" 2>/dev/null || true
+            exit $status
+          else
+            ./gradlew check --console=plain --no-daemon
+          fi
         shell: bash
       - uses: actions/upload-artifact@v4
         if: always()
