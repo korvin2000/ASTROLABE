@@ -156,7 +156,7 @@ public class Run(
     private sealed interface Launch {
         data class Unavailable(val reason: String) : Launch
         data class Background(val proc: Proc, val firstOutput: ByteArray, val cursor: Long) : Launch
-        data class Finished(val proc: Proc, val output: ByteArray) : Launch
+        data class Finished(val proc: Proc, val output: ByteArray, val captureComplete: Boolean) : Launch
     }
 
     private suspend fun run(args: RunArgs, context: TurnContext): ToolOutcome {
@@ -228,7 +228,7 @@ public class Run(
                         val result = RunResult(alias.text, actionId, null, Outcome.NotRun, view, false, logBlob, classification.effectClass, before.candidateId, null, false, emptyList(), handle.handleId, null, null, emptyList(), intent.intentId)
                         render(args, result, argv, shell, before, null, classification.effectsUnknown, statusWire = wire(launch.proc.status), captureMask = safe.mask)
                     }
-                    is Launch.Finished -> finish(args, alias.text, actionId, argv, shell, before, launch.proc, launch.output, classification.effectClass, classification.effectsUnknown, logBlob, intent.intentId)
+                    is Launch.Finished -> finish(args, alias.text, actionId, argv, shell, before, launch.proc, launch.output, classification.effectClass, classification.effectsUnknown, logBlob, intent.intentId, launch.captureComplete)
                 }
             },
         )
@@ -349,7 +349,7 @@ public class Run(
         }
         val observed = Executions.observeCancellable(os, proc, pollSliceSeconds, args.timeout.toLong() + 5)
         if (observed.lost) throw IOException("process observation lost; reconcile before retry")
-        return Launch.Finished(observed.proc, observed.output)
+        return Launch.Finished(observed.proc, observed.output, captureComplete = !observed.truncated)
     }
 
     /** Stamp diff, coherence announcements, reclassification and shaping once a process is terminal (§9.4). */
@@ -366,6 +366,7 @@ public class Run(
         effectsUnknown: Boolean,
         logBlob: Digest?,
         intentId: String?,
+        captureComplete: Boolean,
     ): ToolOutcome {
         val after = stamper.report()
         val changed = announce(before, after, "run $alias")
@@ -377,7 +378,7 @@ public class Run(
         val capture = RunCapture(
             actionId = actionId, argv = argv, shell = shell, cwd = args.cwd,
             exitCode = (status as? ProcStatus.Exited)?.exitCode, timedOut = status == ProcStatus.DeadlineExceeded,
-            output = output, captureComplete = status !is ProcStatus.Lost,
+            output = output, captureComplete = captureComplete && status !is ProcStatus.Lost,
         )
         val shaped = Shapers.shape(capture, ShapeBudget(args.budget, estimator, alias))
         val outcome = when (status) {

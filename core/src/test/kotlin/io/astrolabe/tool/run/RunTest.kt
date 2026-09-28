@@ -361,6 +361,25 @@ class RunTest {
     }
 
     @Test
+    fun `a capped foreground capture keeps its exit and commits the intent`() = runTest {
+        val chunk = 1024 * 1024
+        val capped = object : Os by ChunkedLogOs() {
+            override fun poll(proc: Proc, sinceCursorBytes: Long, observationTimeoutSeconds: Long): io.astrolabe.os.Poll {
+                val index = (sinceCursorBytes / chunk).toInt()
+                val bytes = if (index < 9) ByteArray(chunk) { 'x'.code.toByte() } else byteArrayOf()
+                return io.astrolabe.os.Poll(bytes, sinceCursorBytes + bytes.size, ProcStatus.Exited(0), false)
+            }
+        }
+
+        val result = run("""{"cmd":"echo fixture"}""", runner(os = capped))
+
+        assertFalse(status(result) == "unknown_outcome", result.body)
+        assertTrue(result.body.contains("exit 0"), result.body)
+        assertFalse(result.header!!.runtime.captureComplete)
+        assertTrue(intents.open().isEmpty(), "a finished process with a capped log is not an unreconciled effect")
+    }
+
+    @Test
     fun `poll and cancel deny a handle owned by another work before accessing its process`() = runTest {
         assertHandleAccessDenied(ids.copy(work = WorkId("W-2")), workspace)
     }

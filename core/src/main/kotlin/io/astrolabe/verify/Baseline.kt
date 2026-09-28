@@ -202,7 +202,7 @@ public class Baseline(
         val capture = RunCapture(
             actionId = actionId, argv = command.argv, shell = false, cwd = command.cwd,
             exitCode = (proc.status as? ProcStatus.Exited)?.exitCode, timedOut = proc.status == ProcStatus.DeadlineExceeded,
-            output = observed.output, captureComplete = !lost && proc.status !is ProcStatus.Lost,
+            output = observed.output, captureComplete = !lost && !observed.truncated && proc.status !is ProcStatus.Lost,
             reports = reports(dir, started, actionId), checkId = check.id, selector = check.selector.toString(),
         )
         val shaped = Shapers.shape(capture, ShapeBudget(estimator = estimator, recallAlias = alias))

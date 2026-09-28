@@ -385,7 +385,7 @@ public class Verify(
                 reports = collected,
                 actionId = actionId, argv = command.argv, shell = false, cwd = command.cwd,
                 exitCode = (observed.proc.status as? ProcStatus.Exited)?.exitCode, timedOut = observed.proc.status == ProcStatus.DeadlineExceeded,
-                output = observed.output, captureComplete = !observed.lost && observed.proc.status !is ProcStatus.Lost, checkId = check.id, selector = check.selector.toString(),
+                output = observed.output, captureComplete = !observed.lost && !observed.truncated && observed.proc.status !is ProcStatus.Lost, checkId = check.id, selector = check.selector.toString(),
             )
             val shaped = Shapers.shape(capture, ShapeBudget(estimator = estimator))
             val outcome = when {

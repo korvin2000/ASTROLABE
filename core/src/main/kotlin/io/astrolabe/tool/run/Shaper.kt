@@ -391,6 +391,10 @@ internal fun deriveStatus(inputs: StatusInputs, limitations: MutableList<String>
             limitations += "the structured evidence could not be read whole: a parse error is never a pass (§8.4)"
             return Outcome.Inconclusive
         }
+        if (!capture.captureComplete) {
+            limitations += "the capture limit discarded output: a partial log is never a pass (§8.4)"
+            return Outcome.Inconclusive
+        }
         return Outcome.Passed
     }
     limitations += "exit $exit disagrees with a summary reporting no failures: the evidence is ambiguous (D-50)"

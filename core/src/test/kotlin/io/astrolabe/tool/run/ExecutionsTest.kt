@@ -57,7 +57,8 @@ class ExecutionsTest {
         val result = Executions.observe(os, os.proc, sliceSeconds = 30, timeoutSeconds = 60)
 
         assertEquals(8 * 1024 * 1024, result.output.size)
-        assertTrue(result.lost, "discarded output must not be reported as a complete capture")
+        assertTrue(result.truncated, "discarded output must not be reported as a complete capture")
+        assertFalse(result.lost, "a capped capture still observed the process to its terminal state")
         assertEquals(ProcStatus.Exited(1), result.proc.status, "capture limit must not stop process observation")
         assertEquals(11, os.polls, "all remaining chunks and terminal EOF must be drained")
         assertEquals(0.toByte(), result.output.first())
@@ -72,6 +73,7 @@ class ExecutionsTest {
 
         assertEquals(8 * 1024 * 1024, result.output.size)
         assertFalse(result.lost)
+        assertFalse(result.truncated)
         assertEquals(ProcStatus.Exited(1), result.proc.status)
         assertEquals(9, os.polls)
     }

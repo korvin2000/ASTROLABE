@@ -9,8 +9,16 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 
-/** A process observed to its terminal state: its output, and whether the observation itself was lost. */
-public class Observed(public val proc: Proc, public val output: ByteArray, public val lost: Boolean)
+/**
+ * A process observed to its terminal state: its output, whether the observation itself was lost, and whether
+ * the capture limit discarded output ([truncated]: the process and its exit status were still observed).
+ */
+public class Observed(
+    public val proc: Proc,
+    public val output: ByteArray,
+    public val lost: Boolean,
+    public val truncated: Boolean = false,
+)
 
 /** The one poll loop of the harness: `run`, `verify` and the checkers observe processes the same way. */
 public object Executions {
@@ -52,15 +60,15 @@ public object Executions {
                 val retained = minOf(poll.newBytes.size, MAX_CAPTURE_BYTES - output.size())
                 output.write(poll.newBytes, 0, retained)
                 truncated = truncated || retained < poll.newBytes.size
-                if (poll.newBytes.isNotEmpty() && poll.nextCursorBytes <= cursor) return Observed(current, output.toByteArray(), lost = true)
+                if (poll.newBytes.isNotEmpty() && poll.nextCursorBytes <= cursor) return Observed(current, output.toByteArray(), lost = true, truncated = truncated)
                 cursor = poll.nextCursorBytes
                 current = current.copy(status = poll.status)
                 if (current.status.isTerminal && poll.newBytes.isEmpty()) break
             }
-            Observed(current, output.toByteArray(), lost = truncated)
+            Observed(current, output.toByteArray(), lost = false, truncated = truncated)
         } catch (failure: IOException) {
             if (Thread.currentThread().isInterrupted) throw InterruptedException("process observation interrupted").also { it.initCause(failure) }
-            Observed(current, output.toByteArray(), lost = true)
+            Observed(current, output.toByteArray(), lost = true, truncated = truncated)
         }
     }
 }
