@@ -648,7 +648,7 @@ internal object Candidates {
                 }
             }
             if (request.since != null && attributes.lastModifiedTime().toInstant() < request.since) continue
-            if (attributes.size() > 8L * 1024 * 1024) return CandidateSet.Failed("search file limit exceeded: $rel")
+            // Binaries are skipped whatever their size; only oversized text exceeds the file limit.
             when (isBinary(abs)) {
                 BinaryProbe.Binary -> continue
                 BinaryProbe.Denied -> {
@@ -657,7 +657,10 @@ internal object Candidates {
                 }
 
                 BinaryProbe.Gone -> continue
-                BinaryProbe.Text -> selected += Candidate(rel, abs)
+                BinaryProbe.Text -> {
+                    if (attributes.size() > 8L * 1024 * 1024) return CandidateSet.Failed("search file limit exceeded: $rel")
+                    selected += Candidate(rel, abs)
+                }
             }
         }
         if (denied.isNotEmpty()) {

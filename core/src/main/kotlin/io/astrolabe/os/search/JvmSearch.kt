@@ -109,7 +109,7 @@ internal class JvmSearch : Search {
             // file is content, not a terminator — which is what `rg --crlf` also does.
             val textEnd = if (newline >= 0 && end > start && content[end - 1] == '\r') end - 1 else end
             val text = content.substring(start, textEnd)
-            work.check()
+            work.line(text.length)
             val matcher = regex.matcher(BoundedText(text, work))
             if (matcher.find() && !collector.offer(Hit(relPath, lineNumber, matcher.start() + 1, text))) {
                 return false
@@ -122,11 +122,22 @@ internal class JvmSearch : Search {
 
     private class SearchLimit : RuntimeException()
 
+    /**
+     * Character accesses are budgeted per line, in proportion to its length, so a pathological
+     * backtracking match stops early while plain scans of a large repository do not; the whole
+     * search keeps one deadline.
+     */
     private class MatchWork {
         private var reads = 0L
+        private var limit = LINE_BASE_READS
         private val deadline = System.nanoTime() + 30_000_000_000L
+        fun line(length: Int) {
+            reads = 0
+            limit = LINE_BASE_READS + LINE_READS_PER_CHAR * length
+            check()
+        }
         fun check() {
-            if (++reads > 10_000_000 || Thread.currentThread().isInterrupted || System.nanoTime() >= deadline) throw SearchLimit()
+            if (++reads > limit || Thread.currentThread().isInterrupted || System.nanoTime() >= deadline) throw SearchLimit()
         }
     }
 
@@ -138,5 +149,9 @@ internal class JvmSearch : Search {
         override fun toString(): String = text
     }
 
-    private companion object { const val MAX_FILE_BYTES = 8 * 1024 * 1024 }
+    private companion object {
+        const val MAX_FILE_BYTES = 8 * 1024 * 1024
+        const val LINE_BASE_READS = 100_000L
+        const val LINE_READS_PER_CHAR = 256L
+    }
 }
