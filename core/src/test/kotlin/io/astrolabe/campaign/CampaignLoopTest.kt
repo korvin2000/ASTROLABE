@@ -73,6 +73,31 @@ class CampaignLoopTest {
     }
 
     @Test
+    fun `a factual host answer unblocks the waiting increment without amending the contract`() = runBlocking<Unit> {
+        controller().open(repo.root, request, policy).use { c ->
+            val replies = planning() + listOf(
+                Scripted.Reply(listOf(say("I1 is ready"))),
+                Scripted.Reply(listOf(call("question", "task", """{"op":"ask","question":"Which value should b return?"}"""))),
+            )
+            assertEquals(CampaignOutcome.WaitingForInput, controller().run(c, model(replies)).outcome)
+        }
+        controller().open(repo.root, request, policy).use { c ->
+            val version = c.contract.version
+            assertEquals(IncrementStatus.Blocked, c.state!!.graph.increments.single { it.id == "I2" }.status, "no amendment, so open leaves I2 blocked")
+            val host = object : io.astrolabe.event.Authority by io.astrolabe.event.AutonomousAuthority() {
+                override suspend fun ask(question: io.astrolabe.event.Question) =
+                    io.astrolabe.event.Answer(question.id, question.contractRevision, "b should return 20", changesRequirements = false)
+            }
+            val adapter = FakeAdapter(ScriptedModel.of(*implement(c, "src/b.py", "    return 2", "    return 20", "\"AC-1\",\"AC-2\"").toTypedArray()))
+            val run = controller().run(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator()), host)
+            assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+            assertEquals(version, c.contracts.current(request.work)!!.version, "a factual answer never bumps the contract")
+            assertTrue("host answer for I2 (factual, contract stays v$version): b should return 20" in texts(adapter.calls.first().request))
+            assertEquals(1, c.state!!.cells.count { it.increment == "I1" }, "verified work is retained on resume")
+        }
+    }
+
+    @Test
     fun `implementation split reaches the plan role and replaces only unfinished work`() = runBlocking<Unit> {
         controller().open(repo.root, request, policy).use { c ->
             val replacement = """{"increments":[

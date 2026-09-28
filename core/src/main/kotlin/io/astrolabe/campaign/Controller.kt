@@ -667,11 +667,22 @@ public class Controller @JvmOverloads public constructor(
                 "May ${increment.id} resume? Resolve its prerequisite and provide the answer or evidence: ${checkpoint?.reason.orEmpty()}")
             val answer = authority.ask(question) ?: continue
             if (answer.questionId != question.id || answer.contractRevision != c.contract.version || answer.text.isBlank()) continue
-            c.contracts.amendByUser(c.ids.work, "Resume ${increment.id}: ${answer.text}")
-            c.journal.append(JournalEvent(idGen.next("ev"), c.ids, null, JournalKind.Reconcile, refs = listOf(question.id), text = "host unblocked ${increment.id}: ${answer.text}", at = clock.instant()))
+            if (answer.changesRequirements) {
+                c.contracts.amendByUser(c.ids.work, "Resume ${increment.id}: ${answer.text}")
+                c.journal.append(JournalEvent(idGen.next("ev"), c.ids, null, JournalKind.Reconcile, refs = listOf(question.id), text = "host unblocked ${increment.id}: ${answer.text}", at = clock.instant()))
+            } else {
+                // D-317 (§4.1): a factual answer is evidence, not an amendment, so assessments bound to this version stay valid.
+                c.journal.append(JournalEvent(idGen.next("ev"), c.ids, null, JournalKind.Reconcile, refs = listOf(question.id, increment.id),
+                    text = "$HOST_ANSWER${increment.id} (factual, contract stays v${c.contract.version}): ${answer.text}", at = clock.instant()))
+            }
             c.advance(Transition.Unblocked(increment.id, question.id))
         }
     }
+
+    /** D-317: the factual host answers that unblocked [increment]; no amendment carries them, so its cells pin them. */
+    private fun hostAnswers(c: OpenedCampaign, increment: Increment): List<String> =
+        c.journal.events(JournalScope(c.ids.work, kinds = setOf(JournalKind.Reconcile)))
+            .filter { increment.id in it.refs && it.text.startsWith(HOST_ANSWER) }.map { it.text }
 
     private suspend fun runS1(c: OpenedCampaign, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?, maxCells: Int, packets: MutableList<ResultPacket>): S0Run {
         c.stop?.let { return S0Run(c.state, null, null, null) }
@@ -752,7 +763,7 @@ public class Controller @JvmOverloads public constructor(
             val resume = resumeNote(c, ready, carry)
             val knowledge = knowledge(c, ready, Roles.implementing, model, touched = carry?.seeds.orEmpty().map { it.path }.toSet())
             val inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) }, notes = knowledge.notes, contractsIndex = knowledge.contractsIndex, skills = knowledge.skills, skillConflicts = knowledge.skillConflicts)
-            val pinned = listOfNotNull(resume, attempts.line(ready.id)) + recovery.lines(ready.id)
+            val pinned = listOfNotNull(resume, attempts.line(ready.id)) + recovery.lines(ready.id) + hostAnswers(c, ready)
             val compiler = Compiler(model.estimator, c.attempt.config)
             // §6.6: a pre-compiled [K] is served for cell_end(next_increment) only, on a full-fingerprint and coverage match.
             val take = precompile?.let { p ->
@@ -1216,7 +1227,7 @@ public class Controller @JvmOverloads public constructor(
         val dispatched = c.advance(Transition.Dispatched(ready.id, cellId))
         val increment = dispatched.graph.increments.first { it.id == ready.id }
         val register = carry?.register?.copy(cell = cellId, increment = increment.id, incrementTitle = increment.title)
-        val run = runCell(c, cellId, increment, Roles.implementing, cellModel, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = listOfNotNull(resume), inputs = inputs)
+        val run = runCell(c, cellId, increment, Roles.implementing, cellModel, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = listOfNotNull(resume) + hostAnswers(c, ready), inputs = inputs)
         routing.selected?.let { router.record(it, outcomeOf(run.exit)) }
         val ids = run.ids
         val scheduler = run.scheduler
@@ -1862,6 +1873,7 @@ public class Controller @JvmOverloads public constructor(
         /** The review brief carries at most this much of the diff; the full diff stays a blob it names (D-124). */
         private const val MAX_REVIEW_DIFF_CHARS: Int = 16_000
         private const val CAMPAIGN_REVIEW: String = "campaign-review"
+        private const val HOST_ANSWER: String = "host answer for "
 
         /** D-170: review and probe cells exist (P4.4), so S2 is selectable; S3 comes from a plan at intake (D-183). */
         private val CAPABILITIES: ShapeCapabilities = ShapeCapabilities(reviewCells = true, probes = true)
