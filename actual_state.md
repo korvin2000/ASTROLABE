@@ -52,9 +52,9 @@ Schema **v4** (no bump this session). `packets` also holds behaviour-snapshot, c
 Local choices D-112–D-113, D-120–D-126, D-135–D-137, D-145–D-155, D-160–D-165, D-170–D-174, D-180–D-183, D-190–D-195,
 D-200–D-202, D-210–D-213, D-220–D-223, D-230–D-233, D-240–D-244, D-250–D-254, D-260 (TODO §3). Owner decision D-175
 (new dependencies allowed under pinned-version rules).
-## Audit remediation and review (2026-09-28)
-`feature/bugfix` fixed 142 findings (F-034 previously resolved); `review/bugfix` reviewed every fix
-(ledger `audit/BUGFIX-REVIEW.md`): 28 corrective review fixes, 52 ACCEPT, 62 NOTE, 0 rejected, merged locally into `main`.
-Two tests that already failed at the fix tip (ResultPacketTest, ControllerTest) are fixed. Public ABI grew:
-`Observed.truncated`, `RunCapture.executionRoot` (dump regenerated). `assemble testClasses checkKotlinAbi` passes.
-Only targeted Windows tests ran (Linux-only regressions compile-verified); full `check` runs when `main` is pushed.
+## Audit remediation, review and fine-tune (2026-09-28)
+`feature/bugfix` fixed 142 findings; `review/bugfix` reviewed every fix (`audit/BUGFIX-REVIEW.md`: 28 review fixes,
+52 ACCEPT, 62 NOTE). `fix/fine-tune` closed 21 owner-selected follow-ups and the red CI of `main` @ 30cc45c (seven
+`fix(ci)` commits). New switches keep safe defaults: `unknownOutcomeReconciliation` Host, `gitDeadlineSeconds` 600,
+`providerTerminalWaitSeconds` 60, `checkerFallbackTimeBoxSeconds` 120, digest cap 150 + 8·requirements ≤ 2000
+(D-321–D-325). Core ABI dump regenerated; Windows `check` green locally; Linux verified by CI after the push.
