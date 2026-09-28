@@ -38,6 +38,7 @@ internal class WindowsOwner(private val beforeAssignment: (Long) -> Unit = {}) :
             var log = MemorySegment.NULL
             var nul = MemorySegment.NULL
             var job = MemorySegment.NULL
+            var attributes = MemorySegment.NULL
             try {
                 // Inheritable append handle: every write lands at end of file, so the supervisor and
                 // the child never fight over the file position.
@@ -69,8 +70,22 @@ internal class WindowsOwner(private val beforeAssignment: (Long) -> Unit = {}) :
                     fail("SetInformationJobObject", capture)
                 }
 
-                val startupInfo = arena.allocate(Win32.STARTUPINFOW)
-                startupInfo.set(ValueLayout.JAVA_INT, 0L, Win32.STARTUPINFOW.byteSize().toInt())
+                val size = arena.allocate(ValueLayout.JAVA_LONG)
+                Win32.initializeProcThreadAttributeList.callInt(capture, MemorySegment.NULL, 1, 0, size)
+                val allocated = arena.allocate(size.get(ValueLayout.JAVA_LONG, 0L), 8)
+                if (Win32.initializeProcThreadAttributeList.callInt(capture, allocated, 1, 0, size) == 0)
+                    fail("InitializeProcThreadAttributeList", capture)
+                attributes = allocated
+                val handles = arena.allocate(ValueLayout.ADDRESS, 2)
+                handles.setAtIndex(ValueLayout.ADDRESS, 0, nul)
+                handles.setAtIndex(ValueLayout.ADDRESS, 1, log)
+                if (Win32.updateProcThreadAttribute.callInt(
+                        capture, attributes, 0, 0x00020002L, handles, handles.byteSize(),
+                        MemorySegment.NULL, MemorySegment.NULL,
+                    ) == 0) fail("UpdateProcThreadAttribute(handle list)", capture)
+                val startupInfo = arena.allocate(Win32.STARTUPINFOW.byteSize() + 8, 8)
+                startupInfo.set(ValueLayout.JAVA_INT, 0L, startupInfo.byteSize().toInt())
+                startupInfo.set(ValueLayout.ADDRESS, Win32.STARTUPINFOW.byteSize(), attributes)
                 startupInfo.set(ValueLayout.JAVA_INT, Win32.SI_FLAGS, STARTF_USESTDHANDLES)
                 startupInfo.set(ValueLayout.ADDRESS, Win32.SI_STDIN, nul)
                 startupInfo.set(ValueLayout.ADDRESS, Win32.SI_STDOUT, log)
@@ -83,8 +98,8 @@ internal class WindowsOwner(private val beforeAssignment: (Long) -> Unit = {}) :
                     arena.allocateFrom(commandLine, StandardCharsets.UTF_16LE),
                     MemorySegment.NULL,
                     MemorySegment.NULL,
-                    1, // bInheritHandles: only the two handles created above are marked inheritable
-                    CREATE_SUSPENDED or CREATE_UNICODE_ENVIRONMENT or CREATE_NO_WINDOW,
+                    1, // The explicit handle list excludes other simultaneous launches and host handles.
+                    CREATE_SUSPENDED or CREATE_UNICODE_ENVIRONMENT or CREATE_NO_WINDOW or 0x00080000,
                     environmentBlock(arena, start.environment),
                     arena.allocateFrom(start.workingDirectory.toString(), StandardCharsets.UTF_16LE),
                     startupInfo,
@@ -122,6 +137,7 @@ internal class WindowsOwner(private val beforeAssignment: (Long) -> Unit = {}) :
                 if (job.address() != 0L) Win32.closeHandle.callInt(capture, job)
                 throw failure
             } finally {
+                if (attributes.address() != 0L) Win32.deleteProcThreadAttributeList.invokeWithArguments(capture, attributes)
                 // The child holds its own duplicates; ours are no longer needed.
                 if (log.address() != INVALID_HANDLE && log.address() != 0L) Win32.closeHandle.callInt(capture, log)
                 if (nul.address() != INVALID_HANDLE && nul.address() != 0L) Win32.closeHandle.callInt(capture, nul)
@@ -449,6 +465,20 @@ private object Win32 {
             ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS,
             ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS,
         ),
+    )
+    val initializeProcThreadAttributeList: MethodHandle = bind(
+        "InitializeProcThreadAttributeList",
+        FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT,
+            ValueLayout.JAVA_INT, ValueLayout.ADDRESS),
+    )
+    val updateProcThreadAttribute: MethodHandle = bind(
+        "UpdateProcThreadAttribute",
+        FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT,
+            ValueLayout.JAVA_LONG, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG,
+            ValueLayout.ADDRESS, ValueLayout.ADDRESS),
+    )
+    val deleteProcThreadAttributeList: MethodHandle = bind(
+        "DeleteProcThreadAttributeList", FunctionDescriptor.ofVoid(ValueLayout.ADDRESS),
     )
     val resumeThread: MethodHandle = bind(
         "ResumeThread",
