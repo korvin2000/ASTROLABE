@@ -27,6 +27,22 @@ class GitTest {
     // ------------------------------------------------------------- version
 
     @Test
+    fun `git has bounded output and a deadline for pipes that never close`() {
+        TempRepo.create().use { repo ->
+            val capped = assertFailsWith<GitError> { Git(repo.root, maxOutputBytes = 4).version() }
+            assertTrue(capped.stderr.contains("capture exceeds"), capped.stderr)
+            val windows = System.getProperty("os.name").startsWith("Windows")
+            val script = scratch.resolve(if (windows) "stalled-git.cmd" else "stalled-git")
+            Files.writeString(script, if (windows) "@echo off\r\n\"${System.getenv("SystemRoot")}\\System32\\ping.exe\" -n 20 127.0.0.1 >nul\r\n" else "#!/bin/sh\nsleep 20\n")
+            script.toFile().setExecutable(true)
+            val start = System.nanoTime()
+            val timed = assertFailsWith<GitError> { Git(repo.root, script.toString(), timeoutMillis = 200).version() }
+            assertTrue(timed.stderr.contains("deadline exceeded"), timed.stderr)
+            assertTrue(System.nanoTime() - start < java.util.concurrent.TimeUnit.SECONDS.toNanos(5))
+        }
+    }
+
+    @Test
     fun `version reports the local git and enforces the tested minimum`() {
         TempRepo.create().use { repo ->
             val version = repo.git.version()

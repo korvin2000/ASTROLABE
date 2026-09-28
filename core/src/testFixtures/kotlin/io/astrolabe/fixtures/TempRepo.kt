@@ -233,8 +233,25 @@ private fun runGit(directory: Path, argv: List<String>) {
     environment["LC_ALL"] = "C"
     val process = builder.start()
     process.outputStream.close()
-    val output = process.inputStream.use { String(it.readAllBytes(), StandardCharsets.UTF_8) }
-    val exitCode = process.waitFor()
+    val capture = java.util.concurrent.FutureTask(java.util.concurrent.Callable {
+        process.inputStream.use {
+            val bytes = it.readNBytes(4 * 1024 * 1024 + 1)
+            check(bytes.size <= 4 * 1024 * 1024) { "fixture git output exceeds 4 MiB" }
+            String(bytes, StandardCharsets.UTF_8)
+        }
+    })
+    Thread.ofVirtual().name("fixture-git-output").start(capture)
+    val output: String
+    val exitCode: Int
+    try {
+        output = capture.get(30, java.util.concurrent.TimeUnit.SECONDS)
+        check(process.waitFor(1, java.util.concurrent.TimeUnit.SECONDS)) { "fixture git deadline exceeded" }
+        exitCode = process.exitValue()
+    } finally {
+        process.descendants().use { children -> children.forEach { it.destroyForcibly() } }
+        if (process.isAlive) process.destroyForcibly()
+        capture.cancel(true)
+    }
     if (exitCode != 0) {
         throw TempRepoError(
             "fixture git exited $exitCode in $directory: ${command.joinToString(" ")}\n$output",
