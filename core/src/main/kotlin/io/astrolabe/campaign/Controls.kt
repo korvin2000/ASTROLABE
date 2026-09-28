@@ -92,11 +92,9 @@ public class Leases(private val store: Store, private val clock: Clock) {
         if (existing != null && existing.holder != holder && existing.validAt(now)) {
             throw LeaseHeld(existing)
         }
-        if (existing == null || existing.holder != holder || !existing.validAt(now)) {
-            Fence.grant(unreconciled)?.let { reason ->
-                if (existing != null) throw GrantRefused(existing, reason)
-                throw IllegalStateException(reason)
-            }
+        // A workspace no writer ever held has no previous owner to fence; an expired lease fences even its own holder.
+        if (existing != null && (existing.holder != holder || !existing.validAt(now))) {
+            Fence.grant(unreconciled)?.let { throw GrantRefused(existing, it) }
         }
         val generation = when {
             existing == null -> ExecutionGeneration.INITIAL
