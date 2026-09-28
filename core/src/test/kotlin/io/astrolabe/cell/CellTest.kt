@@ -11,6 +11,9 @@ import io.astrolabe.cell.CellFixture.Companion.runCmd
 import io.astrolabe.cell.CellFixture.Companion.say
 import io.astrolabe.cell.CellFixture.Companion.tree
 import io.astrolabe.contract.Command
+import io.astrolabe.contract.Contract
+import io.astrolabe.contract.Ledger
+import io.astrolabe.register.ContractDigest
 import io.astrolabe.event.AgentEvent
 import io.astrolabe.evidence.Closure
 import io.astrolabe.evidence.IntentStatus
@@ -168,6 +171,30 @@ class CellTest {
             assertTrue(exit.hint.contains("contract digest needs"), exit.hint)
             assertTrue(f.adapter.calls.isEmpty())
             assertEquals(CellStatus.Partial, f.checkpoints.latest(f.ids.context!!)!!.status)
+        }
+    }
+
+    @Test
+    fun `a 60-requirement contract runs without digest pressure under defaults`() = runTest {
+        val sixty: (Contract) -> Contract = { c ->
+            val r1 = c.requirements.first()
+            c.copy(requirements = (1..60).map { i -> r1.copy(id = "R$i", text = "requirement $i of the contract") })
+        }
+        CellFixture(stateRoot.resolve("scaled"), shapeContract = sixty).use { f ->
+            val estimator = f.estimator
+            fun cost(c: Contract) =
+                estimator.estimate(ContractDigest.render(c, Ledger.initial(c), emptyList(), estimator, 100_000)).tokens
+            val perRequirement = (cost(f.contract) - cost(f.contract.copy(requirements = f.contract.requirements.take(1)))) / 59.0
+            assertTrue(perRequirement <= Defaults().digestTokensPerRequirement, "measured $perRequirement tokens per requirement")
+            val exit = f.run(ScriptedModel.of(Scripted.Reply(listOf(say("done")))))
+            assertFalse(exit is CellExit.Partial && exit.reason == PartialReason.Pressure, exit.toString())
+            assertTrue(f.adapter.calls.isNotEmpty())
+            assertTrue(f.anchorText(1).contains("R60 pending"), f.anchorText(1))
+        }
+        CellFixture(stateRoot.resolve("pinned"), defaults = Defaults(digestTokensPerRequirement = 0), shapeContract = sixty).use { f ->
+            val exit = assertIs<CellExit.Partial>(f.run(ScriptedModel.of()))
+            assertEquals(PartialReason.Pressure, exit.reason)
+            assertTrue(exit.hint.contains("contract digest needs"), exit.hint)
         }
     }
 

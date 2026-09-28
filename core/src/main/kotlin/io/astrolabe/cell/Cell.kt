@@ -597,7 +597,7 @@ public class Cell @JvmOverloads constructor(
         private fun renderAnchor(contract: Contract): AnchorRender {
             val stampNow = lastReport?.candidateId
             val currencies = currencies(stampNow)
-            val digest = ContractDigest.render(contract, ctx.ledger ?: Ledger.initial(contract), obligations(contract, currencies), estimator, defaults.digestCapTokens)
+            val digest = ContractDigest.render(contract, ctx.ledger ?: Ledger.initial(contract), obligations(contract, currencies), estimator, defaults.effectiveDigestCapTokens(contract.requirements.size))
             val worksetLine = ws.workset.render(estimator) + drops.joinToString("") { "; ${it.text}" }
             val focusNotes = ctx.knowledge?.focusNotes(register.focus, editedThisTurn)
             return Anchor.render(
