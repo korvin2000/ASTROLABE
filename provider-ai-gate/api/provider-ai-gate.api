@@ -1,0 +1,28 @@
+public final class io/astrolabe/provider/aigate/AiGateAdapter : io/astrolabe/provider/ObservableAdapter, java/lang/AutoCloseable {
+	public static final field Companion Lio/astrolabe/provider/aigate/AiGateAdapter$Companion;
+	public static final field ID Ljava/lang/String;
+	public fun <init> (Lnet/ai/gate/Llm;)V
+	public fun <init> (Lnet/ai/gate/Llm;Ljava/util/Collection;)V
+	public fun <init> (Lnet/ai/gate/Llm;Ljava/util/Collection;Z)V
+	public synthetic fun <init> (Lnet/ai/gate/Llm;Ljava/util/Collection;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun addListener (Lio/astrolabe/provider/InvocationListener;)Ljava/lang/AutoCloseable;
+	public fun capabilities (Lio/astrolabe/provider/Profile;)Lio/astrolabe/provider/Capabilities;
+	public fun close ()V
+	public final fun estimators (Lio/astrolabe/provider/TokenEstimator;)Lio/astrolabe/provider/EstimatorFactory;
+	public fun getId ()Ljava/lang/String;
+	public fun getNormalizer ()Lio/astrolabe/provider/UsageNormalizer;
+	public fun start (Lio/astrolabe/provider/Request;Lio/astrolabe/provider/InvocationId;)Lio/astrolabe/provider/Invocation;
+	public fun validate (Lio/astrolabe/provider/Request;Lio/astrolabe/provider/Estimate;)Lio/astrolabe/provider/Validation;
+	public static final fun violations (Lnet/ai/gate/Llm;Ljava/util/Collection;)Ljava/util/List;
+	public final fun warnings ()Ljava/util/List;
+}
+
+public final class io/astrolabe/provider/aigate/AiGateAdapter$Companion {
+	public final fun violations (Lnet/ai/gate/Llm;Ljava/util/Collection;)Ljava/util/List;
+}
+
+public final class io/astrolabe/provider/aigate/AiGateProfiles {
+	public static final field INSTANCE Lio/astrolabe/provider/aigate/AiGateProfiles;
+	public static final fun draft (Lnet/ai/gate/Llm;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/time/LocalDate;)Lio/astrolabe/provider/Profile;
+}
+
