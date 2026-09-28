@@ -538,7 +538,19 @@ public class Controller @JvmOverloads public constructor(
             journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Reconcile, refs = listOf(handle.handleId, handle.actionId), text = "open: handle ${handle.handleId} (${handle.argv.joinToString(" ")}) $status · polled, never relaunched", at = clock.instant()))
             "${handle.handleId} $status"
         }
-        val reconciliation = Reconciliation(unknown.map { it.intentId }, external, stamp, handles)
+        // D-321: under Automatic, only outcomes the stamp fully observes close here; D-class, external and live/lost
+        // background effects keep the §13.1 fence for the host.
+        val automatic = if (effective.unknownOutcomeReconciliation != io.astrolabe.UnknownOutcomeReconciliation.Automatic) emptySet() else {
+            val live = handleRows.open().map { it.actionId }.toSet()
+            unknown.filter { (it.replaySafe || it.workspaceConfined) && it.actionId !in live }.map { intent ->
+                val evidence = if (intent.workspaceConfined) "auto: workspace effects observed @${stamp.hash8}" else "auto: replay-safe read-only @${stamp.hash8}"
+                intents.reconcile(intent.intentId, evidence)
+                journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Reconcile, refs = listOf(intent.intentId, intent.actionId), text = "open: intent ${intent.intentId} reconciled automatically · $evidence", at = clock.instant()))
+                events?.emit(AgentEvent.Run.Reconciled(ids, intent.actionId, "auto_reconciled"))
+                intent.intentId
+            }.toSet()
+        }
+        val reconciliation = Reconciliation(unknown.map { it.intentId }.filter { it !in automatic }, external, stamp, handles)
         // A cell still running in the stored state belonged to a controller that stopped mid-cell: it is lost.
         state?.running?.takeIf { state.phase == CampaignPhase.Running }?.let { running ->
             val checkpoint = SqliteCheckpoints(store, clock).latest(running.cell)

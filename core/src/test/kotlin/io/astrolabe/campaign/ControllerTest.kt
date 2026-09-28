@@ -194,6 +194,38 @@ class ControllerTest {
         open().use { assertEquals(CampaignPhase.Running, it.state!!.phase) }
     }
 
+    @Test
+    fun `automatic reconciliation reopens over unknown workspace effects but never over D-class effects`() {
+        val automatic = Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all, unknownOutcomeReconciliation = io.astrolabe.UnknownOutcomeReconciliation.Automatic)
+        controller(automatic).open(repo.root, request, policy).use { c ->
+            c.intents.record(Intent("w-intent", c.ids, "w-action", listOf("make", "fmt"), null, "W make fmt", at = clock.instant(), workspaceConfined = true))
+            c.intents.record(Intent("d-intent", c.ids, "d-action", listOf("git", "push"), null, "D git push", at = clock.instant()))
+        }
+        clock.advance(java.time.Duration.ofDays(1))
+        kotlin.test.assertFailsWith<GrantRefused> { controller(automatic).open(repo.root, request, policy).close() }
+        Store.open(stateRoot, repo.git, clock).use { store ->
+            val intents = io.astrolabe.evidence.SqliteIntentJournal(store, clock)
+            val workspace = intents.get("w-intent")!!
+            assertEquals(IntentStatus.Committed, workspace.status)
+            assertTrue(workspace.reconciliation!!.startsWith("auto: workspace effects observed @"), workspace.reconciliation)
+            assertEquals(IntentStatus.Unknown, intents.get("d-intent")!!.status, "a D-class effect keeps the fence")
+            intents.reconcile("d-intent", "host: confirmed the push did not happen")
+        }
+        controller(automatic).open(repo.root, request, policy).use { assertEquals(CampaignPhase.Running, it.state!!.phase) }
+    }
+
+    @Test
+    fun `host reconciliation leaves even workspace-confined unknown effects to the host`() {
+        open().use { c ->
+            c.intents.record(Intent("w-intent", c.ids, "w-action", listOf("make", "fmt"), null, "W make fmt", at = clock.instant(), workspaceConfined = true))
+        }
+        clock.advance(java.time.Duration.ofDays(1))
+        kotlin.test.assertFailsWith<GrantRefused> { open().close() }
+        Store.open(stateRoot, repo.git, clock).use { store ->
+            assertEquals(IntentStatus.Unknown, io.astrolabe.evidence.SqliteIntentJournal(store, clock).get("w-intent")!!.status)
+        }
+    }
+
     @TempDir
     lateinit var stateRoot: Path
 

@@ -22,3 +22,13 @@ public enum class DClassPolicy { Ask, Deny }
  */
 @Serializable
 public enum class IntegrityApproval { Autonomous, Human }
+
+/**
+ * Who closes an unknown outcome left by a crash (§13.1, D-171, D-321). [Host]: only
+ * [io.astrolabe.evidence.IntentJournal.reconcile] by the host lifts the workspace fence. [Automatic]: at open the
+ * controller itself reconciles, with persisted evidence, this work's replay-safe read-only intents and the
+ * foreground intents whose classified effects stay inside the workspace, now observed by the stamp; D-class,
+ * external and background effects keep the fence.
+ */
+@Serializable
+public enum class UnknownOutcomeReconciliation { Host, Automatic }

@@ -33,7 +33,7 @@ class DefaultsTest {
         "Flaky policy" to listOf("flakyIsolatedReruns"),
         "Memory admission" to listOf("admissionConfidenceMax"),
         "Profiles" to listOf("profileRoles"),
-        "Mode" to listOf("mode", "executionMode", "dClass", "ceiling"),
+        "Mode" to listOf("mode", "executionMode", "dClass", "unknownOutcomeReconciliation", "ceiling"),
         "Timeouts" to listOf("runTimeoutSeconds"),
     )
 

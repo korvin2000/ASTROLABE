@@ -90,6 +90,7 @@ public data class Defaults(
     val executionMode: ExecutionMode = ExecutionMode.TrustedLocal,
     val dClass: DClassPolicy = DClassPolicy.Ask,
     val integrityApproval: IntegrityApproval = IntegrityApproval.Autonomous,
+    val unknownOutcomeReconciliation: UnknownOutcomeReconciliation = UnknownOutcomeReconciliation.Host,
     val ceiling: Stage = Stage.Patch,
     // Timeouts
     val runTimeoutSeconds: Int = 120,
