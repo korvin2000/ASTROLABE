@@ -68,6 +68,23 @@ class CuratorTest {
         Note(id, NoteKind.PIT, NoteStatus.Candidate, "refund retries double-charge on the wall clock", body, scope, listOf(NoteAnchor("src/pay/refund.py")), confidence = confidence, basis = NoteBasis(evidenceRefs = evidence))
 
     @Test
+    fun `rollback restores a superseded predecessor and refuses later ownership`() {
+        val old = pit("PIT-old", confidence = 0.5).copy(status = NoteStatus.Admitted)
+        writer.write(old, ids)
+        curator.queue.enqueue(pit("PIT-new", confidence = 0.5).copy(supersedes = old.id), ids)
+        val batch = curator.admit(ids, AdmissionMode.Autonomous)
+        assertEquals(NoteStatus.Superseded, notes.get(old.id)!!.status)
+        curator.rollback(batch.id, ids)
+        assertEquals(old, notes.get(old.id))
+        assertEquals(NoteStatus.Candidate, notes.get("PIT-new")!!.status)
+        val next = curator.admit(ids, AdmissionMode.Autonomous)
+        writer.setStatus("PIT-new", NoteStatus.Deprecated, ids)
+        kotlin.test.assertFailsWith<NoteRefused> { curator.rollback(next.id, ids) }
+        assertEquals(NoteStatus.Superseded, notes.get(old.id)!!.status)
+        assertEquals(NoteStatus.Deprecated, notes.get("PIT-new")!!.status)
+    }
+
+    @Test
     fun `FX-36 - one failed use stays a scoped conditional PIT candidate, its global generalization is refused, the policy admits only at low confidence`() {
         curator.queue.enqueue(pit("PIT-retry"), ids)
         curator.queue.enqueue(pit("PIT-retry-global", scope = "global"), ids)

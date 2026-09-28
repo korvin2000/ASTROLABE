@@ -44,9 +44,11 @@ public class KbWriter(private val store: Store, private val estimator: TokenEsti
 
     /** Stores [note] as a new note or its next revision; returns the revision number (1-based). */
     @Synchronized
-    public fun write(note: Note, ids: Identities): Int = store.db.tx { tx ->
+    public fun write(note: Note, ids: Identities): Int = store.db.tx { tx -> write(tx, note, ids) }
+
+    internal fun write(tx: Tx, note: Note, ids: Identities): Int {
         validate(note, current(tx, note.id))
-        persist(tx, note, ids)
+        return persist(tx, note, ids)
     }
 
     /** Replaces [oldId] by [replacement] (which names it in `supersedes`); the old note stays, marked superseded. */

@@ -4,6 +4,7 @@ import io.astrolabe.id.IdGen
 import io.astrolabe.id.Identities
 import io.astrolabe.store.Migrations
 import io.astrolabe.store.Store
+import io.astrolabe.store.Tx
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.time.Clock
@@ -33,6 +34,8 @@ public data class QueueEntry(
     val reason: String? = null,
     /** The batch a rollback returned this entry from (a queued entry with a history, D-101). */
     val rolledBackFrom: String? = null,
+    val beforeNotes: List<Note> = emptyList(),
+    val appliedVersions: Map<String, String> = emptyMap(),
 )
 
 /**
@@ -62,14 +65,14 @@ public class Queue(private val store: Store, private val writer: KbWriter, priva
 
     public fun batch(batchId: String): List<QueueEntry> = all().filter { it.batch == batchId }
 
-    internal fun save(entry: QueueEntry, ids: Identities) {
-        val created = store.db.query("SELECT created_at AS c FROM note_queue WHERE id = ?", entry.id) { it.string("c") }.firstOrNull() ?: clock.instant().toString()
-        store.db.tx { tx ->
-            tx.execute(
-                "INSERT OR REPLACE INTO note_queue (id, work_id, attempt_id, candidate_id, context_id, note_id, status, schema_version, created_at, body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                entry.id, ids.work, ids.attempt, ids.candidate, ids.context, entry.noteId, entry.status.wire, Migrations.SCHEMA_VERSION, created, NOTE_JSON.encodeToString(QueueEntry.serializer(), entry),
-            )
-        }
+    internal fun save(entry: QueueEntry, ids: Identities) = store.db.tx { tx -> save(tx, entry, ids) }
+
+    internal fun save(tx: Tx, entry: QueueEntry, ids: Identities) {
+        val created = tx.query("SELECT created_at AS c FROM note_queue WHERE id = ?", entry.id) { it.string("c") }.firstOrNull() ?: clock.instant().toString()
+        tx.execute(
+            "INSERT OR REPLACE INTO note_queue (id, work_id, attempt_id, candidate_id, context_id, note_id, status, schema_version, created_at, body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            entry.id, ids.work, ids.attempt, ids.candidate, ids.context, entry.noteId, entry.status.wire, Migrations.SCHEMA_VERSION, created, NOTE_JSON.encodeToString(QueueEntry.serializer(), entry),
+        )
     }
 
     private fun decode(body: String): QueueEntry = NOTE_JSON.decodeFromString(QueueEntry.serializer(), body)
