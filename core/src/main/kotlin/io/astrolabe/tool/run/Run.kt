@@ -199,11 +199,13 @@ public class Run(
         )
         var logBlob: Digest? = null
         var rendered: ToolOutcome? = null
+        // The fence throws before any intent is recorded, so a lapsed lease never leaves an open intent (§13.1).
+        beforeDispatch()
         val outcome = Consequential.run(
             journal = intents,
             intent = intent,
             reserve = { true }, // §8.1 reserve enforcement arrives in P1.7.6; the turn's budgets are the dispatcher's.
-            dispatch = { beforeDispatch(); launch(spec, args) },
+            dispatch = { launch(spec, args) },
             persist = { launch ->
                 val bytes = when (launch) {
                     is Launch.Finished -> launch.output
@@ -301,11 +303,13 @@ public class Run(
         val intent = Intent(idGen.next("intent"), ids, actionId, argv, null, classification.toString(), at = clock.instant(), replaySafe = entry.effectClass == EffectClass.R)
         var logBlob: Digest? = null
         var rendered: ToolOutcome? = null
+        // The fence throws before any intent is recorded, so a lapsed lease never leaves an open intent (§13.1).
+        beforeDispatch()
         val outcome = Consequential.run(
             journal = intents,
             intent = intent,
             reserve = { true },
-            dispatch = { beforeDispatch(); client.call(entry.mount.server, entry.tool.name, arguments) },
+            dispatch = { client.call(entry.mount.server, entry.tool.name, arguments) },
             persist = { reply ->
                 logBlob = blobs.put(redaction.applyBytes(reply.content.toByteArray(Charsets.UTF_8), ContentClass.ReusableEvidence).text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
                 val after = stamper.report()

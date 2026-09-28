@@ -320,6 +320,7 @@ class RunTest {
 
         assertFalse(live, "the authority must have returned its approval")
         assertEquals(0, spawned, "an approval cannot restore an expired dispatch lease")
+        assertTrue(intents.open().isEmpty(), "a refused dispatch leaves no unreconciled intent to block a later attempt")
     }
 
     @Test
