@@ -265,7 +265,10 @@ public class Edit(
         } catch (refusal: Refusal) {
             return none.copy(error = refusal.error, touchedOutsideScope = outside)
         }
-        val claimed = HashSet<java.nio.file.Path>()
+        // A path that does not exist yet keeps its typed case, so identity folds case where the filesystem does.
+        val claimed = HashSet<String>()
+        fun identity(path: java.nio.file.Path): String =
+            if (workspace.paths.caseInsensitive) path.toString().lowercase(java.util.Locale.ROOT) else path.toString()
         for (plan in plans) {
             val targets = when (plan) {
                 is AnchoredPlan -> listOf(plan.resolved.real)
@@ -274,7 +277,7 @@ public class Edit(
                 is RenamePlan -> listOf(plan.resolved.real, plan.target.real)
                 is RevertEditPlan, is RevertTurnPlan -> emptyList()
             }
-            if (targets.any { !claimed.add(it) }) return none.copy(
+            if (targets.any { !claimed.add(identity(it)) }) return none.copy(
                 error = EditError("overlap", plan.index, plan.path, "multiple operations touch the same canonical path; combine hunks in one operation or send separate batches"),
                 touchedOutsideScope = outside,
             )

@@ -197,6 +197,14 @@ class EditTest {
     }
 
     @Test
+    fun `creates that differ only in case refuse the batch on a case-insensitive filesystem`() = runTest {
+        org.junit.jupiter.api.Assumptions.assumeTrue(workspace.paths.caseInsensitive)
+        val created = run("""{"ops":[{"create":"src/new.py","content":"first"},{"create":"src/NEW.py","content":"second"}],"why":"w"}""")
+        assertEquals("refused", status(created))
+        assertFalse(Files.exists(repo.resolve("src/new.py")))
+    }
+
+    @Test
     fun `stale and missing anchor diagnostics redact secrets before returning and storing`() = runTest {
         val secret = "AKIA" + "IOSFODNN7EXAMPLE"
         val v = seen("src/b.py", 1, 2)
