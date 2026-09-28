@@ -59,7 +59,7 @@ public class Coherence(private val registry: VersionRegistry) : ChangeListener, 
             pendingDelivery = null
             if (previous?.change == change) return
             synchronized(pending) { pending.add(change.path) }
-            val delivery = ChangeDelivery(change, horizons.toList())
+            val delivery = ChangeDelivery(change, horizons.toList()) { it in horizons }
             pendingDelivery = delivery
             delivery.finish()
             pendingDelivery = null

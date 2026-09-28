@@ -46,6 +46,29 @@ class VersionRegistryTest {
     }
 
     @Test
+    fun `a failed listener that unsubscribes is not replayed and no longer blocks changes`() {
+        val before = FileVersion.of("before".toByteArray())
+        val after = FileVersion.of("after".toByteArray())
+        val last = FileVersion.of("last".toByteArray())
+        var calls = 0
+        val handle = registry.addListener { calls++; error("always fails") }
+        assertFailsWith<IllegalStateException> { registry.change("src/a.py", before, after, "first") }
+        handle.close()
+        registry.change("src/a.py", after, last, "second")
+        assertEquals(1, calls)
+        assertEquals(last, registry.recorded("src/a.py"))
+        Coherence(registry).use { coherence ->
+            var horizonCalls = 0
+            val horizon = coherence.register { horizonCalls++; error("horizon always fails") }
+            assertFailsWith<IllegalStateException> { registry.change("src/b.py", before, after, "write") }
+            horizon.close()
+            registry.change("src/b.py", after, last, "next")
+            assertEquals(1, horizonCalls)
+            assertEquals(last, registry.recorded("src/b.py"))
+        }
+    }
+
+    @Test
     fun `coherence retries only horizons that did not acknowledge a transition`() {
         Coherence(registry).use { coherence ->
             var first = 0

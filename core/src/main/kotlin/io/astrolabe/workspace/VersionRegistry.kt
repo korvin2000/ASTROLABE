@@ -87,8 +87,15 @@ public fun interface ChangeListener {
     public fun onChange(change: VersionChange)
 }
 
-/** Acknowledged listeners are not repeated; a listener that throws must tolerate retrying its own effects. */
-internal class ChangeDelivery(val change: VersionChange, private val listeners: List<ChangeListener>) {
+/**
+ * Acknowledged listeners are not repeated; a listener that throws must tolerate retrying its own effects.
+ * A listener that unsubscribed before a resumed delivery is skipped: closing its handle acknowledges it.
+ */
+internal class ChangeDelivery(
+    val change: VersionChange,
+    private val listeners: List<ChangeListener>,
+    private val subscribed: (ChangeListener) -> Boolean,
+) {
     private var next = 0
     private var delivering = false
 
@@ -97,7 +104,8 @@ internal class ChangeDelivery(val change: VersionChange, private val listeners: 
         delivering = true
         try {
             while (next < listeners.size) {
-                listeners[next].onChange(change)
+                val listener = listeners[next]
+                if (subscribed(listener)) listener.onChange(change)
                 next++
             }
         } finally {
@@ -264,7 +272,7 @@ public class VersionRegistry(public val workspace: Workspace) {
         synchronized(current) {
             finishPending()
             if (from == to || current[path] == next) return
-            pendingDelivery = ChangeDelivery(VersionChange(path, from, to, cause), listeners.toList())
+            pendingDelivery = ChangeDelivery(VersionChange(path, from, to, cause), listeners.toList()) { it in listeners }
             finishPending()
         }
     }
