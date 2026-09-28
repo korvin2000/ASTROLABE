@@ -47,6 +47,7 @@ Schema **v4** (no bump this session). `packets` also holds behaviour-snapshot, c
 | P4.4, P4.8 (P4 phase) | 36162949349 |
 | P5.1–P5.7, P6.2 | 36167689819 |
 | P5.8, P6.1, P6.3 (final) | 36172349269 |
+| Fine-tune + CI repair (`c407c24`) | 36468171641 |
 
 ## Recorded deviations
 Local choices D-112–D-113, D-120–D-126, D-135–D-137, D-145–D-155, D-160–D-165, D-170–D-174, D-180–D-183, D-190–D-195,
@@ -57,4 +58,4 @@ D-200–D-202, D-210–D-213, D-220–D-223, D-230–D-233, D-240–D-244, D-250
 52 ACCEPT, 62 NOTE). `fix/fine-tune` closed 21 owner-selected follow-ups and the red CI of `main` @ 30cc45c (seven
 `fix(ci)` commits). New switches keep safe defaults: `unknownOutcomeReconciliation` Host, `gitDeadlineSeconds` 600,
 `providerTerminalWaitSeconds` 60, `checkerFallbackTimeBoxSeconds` 120, digest cap 150 + 8·requirements ≤ 2000
-(D-321–D-325). Core ABI dump regenerated; Windows `check` green locally; Linux verified by CI after the push.
+(D-321–D-325). Core ABI dump regenerated; CI green on both OSes (36468171641).

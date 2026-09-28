@@ -26,10 +26,9 @@ P0–P6 remain 185/185 DONE; P7 stays out of scope.
   repaired with owner approval. Never run fixture tests under `git bisect run`/hooks without unsetting repo env.
 
 ## Next
-1. Watch CI for the pushed `main` on both OSes; fix failures first (Ubuntu was green at d531a9f; Windows is the
-   first run with the descendant fix).
-2. Remove worktrees `bugfix-review`, `fine-tune`, `ft-a`…`ft-d` once CI is green.
-3. Possible later D-rows: per-question blocked-work unblocking (F-105 (1)); cross-version assessment reuse.
+1. CI green on Ubuntu + Windows at `c407c24` (run 36468171641) after two Windows test-spelling fixes (8.3 TEMP
+   paths, Git link-target spelling). Local branches `ft/*`, `ft/*-clean`, `fix/fine-tune` are merged scratch; delete at will.
+2. Possible later D-rows: per-question blocked-work unblocking (F-105 (1)); cross-version assessment reuse.
 
 ## Carried-forward debts (unchanged)
 D-254 recovery, D-70/D-71/D-241 replan and S3 re-selection, D-252 retrieval, D-113/D-120 behaviour maps,
