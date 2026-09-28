@@ -673,3 +673,10 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - Windows: four settlement tests passed; Linux-only class skipped. Core compilation and ABI validation passed. No full suite/build.
 - 142 findings fixed, 0 open; F-034 previously resolved. D-319 records Linux supervisor identity and runtime requirements.
 - Existing unrelated edits preserved. Final documentation-only update uses skip-ci to avoid rerunning unchanged executable code.
+
+## 2026-09-28: bugfix review (`review/bugfix`)
+- Reviewed all 100 code-bearing fix commits in 14 batches with read-only reviewers; verified every DEFECT claim before acting.
+- 28 findings corrected by `review(F-nnn)` commits (e.g. F-027 autocrlf members, F-029 directory/submodule stamps, F-064 capped capture as unknown outcome, F-088 open intent on lapsed lease, F-095 funding wedge); 52 ACCEPT, 62 NOTE, 0 rejected.
+- Bisected two tests already failing at dba6344 (4f6eb64, 1120f89) and fixed them.
+- ABI regenerated (`Observed.truncated`, `RunCapture.executionRoot`); `assemble testClasses checkKotlinAbi` green; only targeted tests run.
+- Merged --no-ff into local main; not pushed (owner approval pending).

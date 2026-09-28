@@ -52,9 +52,9 @@ Schema **v4** (no bump this session). `packets` also holds behaviour-snapshot, c
 Local choices D-112–D-113, D-120–D-126, D-135–D-137, D-145–D-155, D-160–D-165, D-170–D-174, D-180–D-183, D-190–D-195,
 D-200–D-202, D-210–D-213, D-220–D-223, D-230–D-233, D-240–D-244, D-250–D-254, D-260 (TODO §3). Owner decision D-175
 (new dependencies allowed under pinned-version rules).
-## Audit remediation (2026-09-28)
-Branch `feature/bugfix`: 142 fixed, 0 open, F-034 previously resolved. Final code: e5321f3 (pushed).
-F-016 now uses isolated Linux subreapers; all 6 new lifecycle/PATH regressions pass (D-319).
-[Focused Linux CI](https://github.com/korvin2000/ASTROLABE/actions/runs/36364095425): 32 passed, 1 Windows-only skip.
-Windows: 4 settlement tests passed, Linux class skipped; core compilation and ABI check passed.
-No full suite/build or P7 run. Last full Windows build: fbee771, 1667 tests, 13 skipped.
+## Audit remediation and review (2026-09-28)
+`feature/bugfix` fixed 142 findings (F-034 previously resolved); `review/bugfix` reviewed every fix
+(ledger `audit/BUGFIX-REVIEW.md`): 28 corrective review fixes, 52 ACCEPT, 62 NOTE, 0 rejected, merged locally into `main`.
+Two tests that already failed at the fix tip (ResultPacketTest, ControllerTest) are fixed. Public ABI grew:
+`Observed.truncated`, `RunCapture.executionRoot` (dump regenerated). `assemble testClasses checkKotlinAbi` passes.
+Only targeted Windows tests ran (Linux-only regressions compile-verified); full `check` runs when `main` is pushed.

@@ -1,26 +1,32 @@
-# Bugfix completion
-Checkpoint: `feature/bugfix`, 2026-09-28; implementation `e5321f3`, pushed to origin.
-**142 findings fixed; 0 open; F-034 previously resolved.**
-The audit repair queue is complete. P0-P6 remains 185/185 implemented; P7 remains excluded.
+# Handoff — next session
 
-## Final fix: F-016
-Linux commands now run beneath an isolated kernel subreaper. Detached children cannot escape
-ancestry by setsid/setpgid/double-fork. The helper terminates and reaps until waitpid ECHILD;
-only then may LocalOs publish a confirmed terminal status. Errors/timeouts remain Lost.
-Root-exit and quiescence signals are separate, preserving execution deadline classification.
-The target has its own session and requested PATH. Closing the host control pipe requests cleanup.
+Rewritten every session (≤40 lines). Workflow: `CLAUDE.md` § Workflow. State snapshot: `actual_state.md`.
 
-## Verification
-Linux JDK 26: 32 targeted tests passed, 1 Windows-only test skipped, 0 failures.
-All 6 new lifecycle/PATH regressions passed. CI: https://github.com/korvin2000/ASTROLABE/actions/runs/36364095425
-Windows JDK 26: 4 settlement tests passed; Linux-only tests skipped. Core ABI check passed.
-No full suite/build or P7 run. Last full Windows build: fbee771, 1667 tests, 13 skipped.
-Details: audit/BUGFIX-PROGRESS.md; machine-readable status: findings.md fix_progress.
+**Checkpoint (2026-09-28):** the bugfix review is complete. `review/bugfix` (from `feature/bugfix` `dba6344`) was
+merged `--no-ff` into **local** `main`; **not pushed** — pushing `main` needs owner approval and then CI runs the
+full `check` on Ubuntu + Windows. Ledger and per-finding verdicts: `audit/BUGFIX-REVIEW.md`.
+P0–P6 remain 185/185 DONE; P7 stays out of scope.
 
-## Compatibility and existing debts
-No schema or public ABI change. Linux Proc.pid identifies the supervisor; exit codes are the command's.
-One helper JVM per Linux launch; requires local java.home launcher/classpath and procfs. See D-319.
-Unrelated implementation debts remain in TODO.md: D-254 recovery, D-241 S3 resume, D-252 retrieval,
-D-113/D-120 behaviour maps, D-220/D-221 eval arms, D-200 QA scheduling, D-66 S0 suite, D-92 impact checks.
-Preserve pre-existing CLAUDE.md/ISSUES.md and untracked continue_fixing.md/todo_findings.txt.
-continue_fixing.md is an old checkpoint; it does not describe current audit status.
+## Review outcome
+- 142 findings: 28 corrected by `review(F-nnn)` commits, 52 ACCEPT, 62 NOTE (residual risks, no action), 0 rejected,
+  0 reopened. F-034 recheck still holds. `findings.md` carries a `Review fix` line per corrected finding.
+- Two tests that already failed at `dba6344` were fixed (ControllerTest interrupted finalization via F-105;
+  ResultPacketTest assertion obsolete under F-086 terminal usage).
+- Public ABI: `Observed.truncated`, `RunCapture.executionRoot`; core dump regenerated; compile gate green.
+
+## Next (owner)
+1. Approve pushing `main`, then watch CI on both OSes (the review ran only targeted Windows tests; Linux-only
+   regressions for F-016 locale and the POSIX JUnit report walk are compile-verified only).
+2. Decide on the review NOTEs worth follow-up, notably: F-089 (model reviewCell resolves test-integrity flags in S2,
+   D-23 names Authority.review), F-097 (tiny read-only allowlist makes `git log`/`rg` W-class), F-024 (default
+   150-token digest cap vs ~35+ requirements), F-135 (Integrator swallows cancellation), F-086 (no deadline on terminal).
+3. `.github/workflows/process-ownership.yml` triggers only on `feature/bugfix`; retarget or remove after merge.
+4. Remove the `bugfix-review` worktree once the merge is confirmed.
+
+## Carried-forward debts (unchanged)
+D-254 recovery, D-70/D-71/D-241 replan and S3 re-selection, D-252 retrieval, D-113/D-120 behaviour maps,
+D-124/D-244 review evidence, D-220/D-221 eval arms, D-200 QA scheduling, D-66, D-28, D-92.
+Transient: `StamperTest` `git exited -1`; Windows `ProcOwnershipTest` READY timeout; FX-22 `bg-end` order.
+
+## Blockers
+None. `gh` is not installed locally: CI is polled through the public Actions API.
