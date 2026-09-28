@@ -100,6 +100,10 @@ class CellTest {
                         held = budget.working.heldTokens.value
                         val original = base.model.adapter.start(request, id)
                         return object : io.astrolabe.provider.Invocation by original {
+                            override suspend fun terminal(): io.astrolabe.provider.Terminal = original.terminal().copy(
+                                usage = io.astrolabe.provider.BillableUsage(quantities,
+                                    io.astrolabe.provider.UsageProvenance("fake", "main", "test"), setOf(input, output) - quantities.keys),
+                            )
                             override suspend fun await(): io.astrolabe.provider.Response = original.await().copy(
                                 usage = io.astrolabe.provider.BillableUsage(quantities,
                                     io.astrolabe.provider.UsageProvenance("fake", "main", "test"), setOf(input, output) - quantities.keys),

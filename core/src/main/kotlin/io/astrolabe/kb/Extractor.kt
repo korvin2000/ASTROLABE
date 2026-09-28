@@ -103,7 +103,7 @@ public data class ExtractionTrace @JvmOverloads constructor(
 }
 
 /** What one extraction call produced and what it cost, charged to the originating work. */
-public data class ExtractionResult @JvmOverloads constructor(val candidates: List<Candidate> = emptyList(), val tokens: Long = 0) {
+public data class ExtractionResult @JvmOverloads constructor(val candidates: List<Candidate> = emptyList(), val tokens: Long = 0, val money: io.astrolabe.provider.Money? = null) {
     init {
         require(tokens >= 0)
     }
@@ -114,6 +114,10 @@ public data class ExtractionResult @JvmOverloads constructor(val candidates: Lis
  * Tests script it over the fake provider; a provider-backed extractor is P7. Synchronous, so a Java host can supply one.
  */
 public fun interface Extraction {
+    /** Host implementations must bound each call to this allowance. Failures retain the allowance. */
+    public val maxTokens: Long get() = 2048
+    public val maxCost: io.astrolabe.provider.Money? get() = null
+
     public fun extract(trace: ExtractionTrace, tier: Tier, effort: Effort?): ExtractionResult
 
     public companion object {
@@ -129,6 +133,7 @@ public data class ExtractionReport(
     val refused: Map<String, String>,
     val failure: String?,
     val tokens: Long,
+    val money: io.astrolabe.provider.Money? = null,
 )
 
 /**
@@ -159,11 +164,13 @@ public class Extractor @JvmOverloads constructor(
         val enqueued = ArrayList<QueueEntry>()
         val refused = LinkedHashMap<String, String>()
         var tokens = 0L
+        var money: io.astrolabe.provider.Money? = null
         var failure: String? = null
         try {
             for (candidate in Derived.candidates(trace, findings, earlier)) enqueue(candidate.note(origin(ids, HARNESS_DERIVED)), ids, enqueued, refused)
             val result = extraction.extract(trace, row.defaultTier, row.effort)
             tokens = result.tokens
+            money = result.money
             for (candidate in result.candidates) enqueue(candidate.note(origin(ids, EXTRACTOR)), ids, enqueued, refused)
         } catch (e: Exception) {
             failure = "${e::class.simpleName}: ${e.message}"
@@ -176,7 +183,7 @@ public class Extractor @JvmOverloads constructor(
                 at = clock.instant(),
             ),
         )
-        return ExtractionReport(enqueued, refused, failure, tokens)
+        return ExtractionReport(enqueued, refused, failure, tokens, money)
     }
 
     /**

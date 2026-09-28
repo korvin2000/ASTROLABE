@@ -1,5 +1,7 @@
 package io.astrolabe.cell
 
+import io.astrolabe.telemetry.Accounting
+
 import io.astrolabe.Defaults
 import io.astrolabe.atlas.DefinitionChanges
 import io.astrolabe.atlas.SymbolIndex
@@ -339,27 +341,56 @@ public class Cell @JvmOverloads constructor(
             // Complete.
             val invocationId = InvocationId(idGen.next("inv"))
             events?.emit(AgentEvent.Cell.ModelRequested(ids, invocationId.value, estimate.tokens, ctx.model.profile.id, anchorTokens = anchor.tokens))
-            val response = try {
-                ctx.model.adapter.start(request, invocationId).await()
-            } catch (error: ProviderError) {
+            val accounting = ctx.accounting
+            if (accounting != null && !accounting.reserve(ids, invocationId.value, ctx.model.profile, admission.estimate.value,
+                    Accounting.estimateCost(ctx.model.profile, estimate.upperBoundTokens, ctx.model.maxOutputTokens.toLong()),
+                    if (spend == Spend.Generation) (contract.budget.tokens.value * (1.0 - contract.budget.reserves.verification - contract.budget.reserves.recoveryAndPersist)).toLong() else contract.budget.tokens.value,
+                    contract.budget.cost)) {
                 admission.release()
-                cost += null
-                ctx.accounting?.record(ids, invocationId.value, ctx.model.profile, request, null)
-                return failed("provider ${error::class.simpleName}: ${error.message}")
+                return partial(PartialReason.TokenBudget, "campaign funding exhausted before provider dispatch")
             }
-            val usage = response.usage
+            var invocation: io.astrolabe.provider.Invocation? = null
+            var received: Response? = null
+            var failure: Throwable? = null
+            var terminal: io.astrolabe.provider.Terminal? = null
+            try {
+                invocation = ctx.model.adapter.start(request, invocationId)
+                received = invocation.await()
+            } catch (error: Throwable) {
+                failure = error
+                invocation?.cancel()
+            } finally {
+                terminal = kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                    try { invocation?.terminal() }
+                    catch (_: Exception) { null }
+                }
+                val settled = terminal
+                val usage = settled?.usage ?: received?.usage
+                val knownInput = usage?.quantities?.filterKeys { it.isInput }?.values?.fold(0L, Accounting::add) ?: 0L
+                val inputKnown = usage != null && usage.quantities.keys.any { it.isInput } && usage.unknown.none { it.isInput }
+                val inputCharge = if (inputKnown) knownInput else maxOf(knownInput, estimate.upperBoundTokens)
+                val outputCharge = usage?.quantities?.get(BillingDimension.OUTPUT) ?: ctx.model.maxOutputTokens.toLong()
+                val charge = Accounting.add(inputCharge, outputCharge)
+                val complete = usage?.isComplete == true && inputKnown && BillingDimension.OUTPUT in usage.quantities
+                val funded = if (complete) charge else maxOf(charge, admission.estimate.value)
+                admission.reconcile(Tokens(funded))
+                cost += usage
+                accounting?.record(ids, invocationId.value, ctx.model.profile, request, usage, funded)
+                if (settled != null && (settled.lateItems.isNotEmpty() || failure != null)) {
+                    val late = settled.lateItems + if (failure != null) settled.response?.items.orEmpty() else emptyList()
+                    ev.journal.append(JournalEvent(idGen.next("ev"), ids, turn, JournalKind.Call,
+                        text = "late terminal evidence archived without dispatch: " + late.joinToString { it.toString() },
+                        payload = JSON.encodeToJsonElement(ITEMS, late), at = clock.instant()))
+                }
+            }
+            failure?.let { error ->
+                if (error is ProviderError) return failed("provider ${error::class.simpleName}: ${error.message}")
+                throw error
+            }
+            val response = checkNotNull(received)
+            val usage = terminal?.usage ?: response.usage
+            if (terminal?.cancelled == true) return cancelled("provider terminal reconciliation confirmed cancellation")
             contextAdmission.observed(estimate, usage?.takeIf { it.isComplete }?.totalInput)
-            cost += usage
-            ctx.accounting?.record(ids, invocationId.value, ctx.model.profile, request, usage)
-            fun addBounded(a: Long, b: Long): Long = if (b > Long.MAX_VALUE - a) Long.MAX_VALUE else a + b
-            val knownInput = usage?.quantities?.filterKeys { it.isInput }?.values?.fold(0L, ::addBounded) ?: 0L
-            val inputKnown = usage != null && usage.quantities.keys.any { it.isInput } && usage.unknown.none { it.isInput }
-            val inputCharge = if (inputKnown) knownInput else maxOf(knownInput, estimate.upperBoundTokens)
-            val outputCharge = usage?.quantities?.get(BillingDimension.OUTPUT) ?: ctx.model.maxOutputTokens.toLong()
-            val charge = addBounded(inputCharge, outputCharge)
-            // Unknown dimensions retain conservative funding; reported overruns still count.
-            val complete = usage?.isComplete == true && inputKnown && BillingDimension.OUTPUT in usage.quantities
-            admission.reconcile(Tokens(if (complete) charge else maxOf(charge, admission.estimate.value)))
             events?.emit(AgentEvent.Cell.ModelResponded(ids, invocationId.value, response.stop, usage))
             if (response.toolCalls.isNotEmpty()) authority.check(turn)?.let { return if (it.cancelled) cancelled(it.reason) else failed(it.reason) }
 

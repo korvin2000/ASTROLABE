@@ -75,6 +75,60 @@ import kotlin.test.assertTrue
 /** P1.9.2 campaign open and reconciliation: capture, contract, reconcile before dispatch (FX-23 open-time), shape. */
 class ControllerTest {
     @Test
+    fun `reopened campaign deducts earlier token charges before another dispatch`() = runTest {
+        assertPriorSpendBlocksDispatch(money = false)
+    }
+
+    @Test
+    fun `reopened campaign deducts earlier monetary charges before another dispatch`() = runTest {
+        assertPriorSpendBlocksDispatch(money = true)
+    }
+
+    private suspend fun assertPriorSpendBlocksDispatch(money: Boolean) {
+        seedContract()
+        open().use { c ->
+            val usage = io.astrolabe.provider.BillableUsage(
+                mapOf(BillingDimension.UNCACHED_INPUT to 199_900L, BillingDimension.OUTPUT to 100L),
+                io.astrolabe.provider.UsageProvenance("fake", "main", "previous-cell"),
+            )
+            val prior = Accounting(c.store, clock).record(c.ids.copy(context = ContextId("earlier-cell")),
+                "earlier-invocation", FakeProfiles.main, null, usage)
+            c.contracts.amendByUser(request.work, "set remaining campaign allowance") {
+                it.copy(budget = if (money) it.budget.copy(tokens = Tokens(2_000_000), cost = prior.money)
+                    else it.budget.copy(tokens = Tokens(200_000)))
+            }
+        }
+        open().use { c ->
+            val adapter = FakeAdapter(ScriptedModel.of(Scripted.Reply(listOf(say("done")))))
+            val run = controller().runS0(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator()))
+            assertTrue(adapter.calls.isEmpty(), "prior campaign spend must prevent a fresh funded cell")
+            assertTrue(run.outcome != CampaignOutcome.Completed)
+            assertEquals(1, Accounting(c.store, clock).calls(request.work).size)
+        }
+    }
+
+    @Test
+    fun `extractor usage is recorded in campaign accounting before finish`() = runTest {
+        seedContract()
+        var extractions = 0
+        val configured = Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all), clock, idGen,
+            extraction = io.astrolabe.kb.Extraction { _, _, _ ->
+                extractions++
+                io.astrolabe.kb.ExtractionResult(tokens = 120)
+            })
+        configured.open(repo.root, request, policy).use { c ->
+            val adapter = FakeAdapter(ScriptedModel.of(Scripted.Reply(listOf(say("done")))))
+            val run = configured.runS0(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator()))
+            assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+            assertEquals(1, extractions)
+            val providerIds = adapter.calls.map { it.invocation.value }.toSet()
+            val extractionCalls = Accounting(c.store, clock).calls(request.work).filter { it.invocationId !in providerIds }
+            assertEquals(120L, extractionCalls.single().quantities.billedUsage)
+            assertEquals(120L, run.finish!!.budget.byCacheClass["extractor_tokens"])
+        }
+    }
+
+    @Test
     fun `reopen durably invalidates notes with only path dependencies`() {
         open().use { c ->
             val note = io.astrolabe.kb.Note("LES-dependency", io.astrolabe.kb.NoteKind.LES, io.astrolabe.kb.NoteStatus.Admitted,

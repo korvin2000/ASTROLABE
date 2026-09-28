@@ -832,7 +832,7 @@ public class Controller @JvmOverloads public constructor(
         }
         val helper = Repair(router, CellRepairRunner(childCell(c, increment, model, authority, syntax, span), idGen, c.cancellation, model.estimator), acceptance, model.estimator, config.defaults, RoleTexts.worded(Roles.repair, config.role(Roles.repair.name)))
         val tiered = config.tierTable.profiles.isNotEmpty() && config.tierTable.profileIds.all { it in config.profiles }
-        val policy = RoutingPolicy(if (tiered) config.tierTable else TierTable.single(model.profile.id), if (tiered) config.profiles else mapOf(model.profile.id to model.profile), RoutingBudget(remainingCost = c.contract.budget.cost), configuredEffort = model.effort)
+        val policy = RoutingPolicy(if (tiered) config.tierTable else TierTable.single(model.profile.id), if (tiered) config.profiles else mapOf(model.profile.id to model.profile), RoutingBudget(remainingCost = Accounting(c.store, clock).remainingCost(c.ids.work, c.contract.budget.cost)), configuredEffort = model.effort)
         val packet = RoutingPacket(increment.risk ?: c.contract.risk, CellRepairRunner.DEFAULT_BUDGET.tokens.value, model.maxOutputTokens, featureClass = "repair:${increment.id}")
         val versions = c.atlas.rows.map { it.path }.filter { p -> increment.writeScope.any { PathPattern.matches(it, p) } }.mapNotNull { p -> c.registry.version(p)?.let { p to it } }.toMap()
         recovery.repair(ids, increment.id, routed, increment.accept, versions, c.contract.budget.tokens, c.contract.shape, packet, policy, helper)
@@ -1032,26 +1032,37 @@ public class Controller @JvmOverloads public constructor(
         val outcome = result.state?.outcome ?: return result
         val receipts = SqliteReceipts(c.store, clock)
         val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, receipts, SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = candidates(c))
+        extract(c, packets)
         val receipt = FinishReceipts.build(c, packets, currencies(c, scheduler, c.stamper.report().candidateId), receipts::get)
         val (ref, _) = FinishReceipts.export(c, receipt)
         events?.emit(AgentEvent.Campaign.Finished(c.ids, outcome.wire, ref))
-        extract(c, packets)
         return result.copy(finish = receipt)
     }
 
     /**
      * §12.1 post-cell extraction at finish (P4.2.1): each archived packet with its cell's journal goes to the
      * extractor under the originating cell's ids (its cost is charged there), then the §6.7 `CAL-<repo>` delta is
-     * aggregated over every stored campaign. The extractor contains its own failures; the receipt is already exported.
+     * aggregated over every stored campaign before the finish receipt is exported.
      */
     private fun extract(c: OpenedCampaign, packets: List<ResultPacket>) {
-        val extractor = Extractor(c.store, HeuristicEstimator(), idGen, clock, extraction, c.journal, events)
+        val accounting = Accounting(c.store, clock)
+        val bound = extraction.maxTokens.coerceAtLeast(1)
+        val cap = c.contract.budget.cost
+        val currency = cap?.currency ?: c.attempt.config.profiles.values.firstOrNull()?.priceTable?.currency ?: "USD"
+        val extractor = Extractor(c.store, HeuristicEstimator(), idGen, clock, Extraction.NONE, c.journal, events)
         val stamp = c.stamper.report().candidateId.digest.hex
         val findings = reviewFindings(c)
         for ((i, packet) in packets.withIndex()) {
             val trace = ExtractionTrace(packet, c.journal.events(JournalScope(c.ids.work, packet.ids.context)), packet.stamp?.digest?.hex ?: stamp)
             // §8.8 findings are the campaign's, derived once: with the last packet; recurring dead ends see the earlier registers.
-            extractor.run(trace, packet.ids, if (i == packets.lastIndex) findings else emptyList(), packets.take(i).map { it.register })
+            val invocation = "extraction:${packet.ids.context?.value ?: packet.increment}"
+            if (accounting.calls(c.ids.work).any { it.invocationId == invocation }) continue
+            val permitted = extraction !== Extraction.NONE && accounting.reserveExtraction(packet.ids, invocation, bound,
+                extraction.maxCost, c.contract.budget.tokens.value, cap, currency)
+            val active = if (permitted) Extractor(c.store, HeuristicEstimator(), idGen, clock, extraction, c.journal, events) else extractor
+            val report = active.run(trace, packet.ids, if (i == packets.lastIndex) findings else emptyList(), packets.take(i).map { it.register })
+            if (permitted) accounting.extraction(packet.ids, invocation, report.tokens.takeIf { report.failure == null },
+                if (report.failure == null) report.tokens else maxOf(bound, report.tokens), report.money ?: extraction.maxCost?.copy(unknown = true), currency)
         }
         val policy = Calibration.policy(c.attempt.config.defaults.shapePolicy)
         val series = CalibrationSeries(c.workspace.root.fileName?.toString() ?: "repo", c.attempt.harnessVersion, policy.version)
@@ -1175,7 +1186,7 @@ public class Controller @JvmOverloads public constructor(
         val arithmetic = compiled.selection.arithmetic
         val contextTokens = (arithmetic.totalTokens ?: arithmetic.knownFixedTokens + arithmetic.selectedTokens).toLong()
         val reserves = contract.budget.reserves
-        val cost = contract.budget.cost
+        val cost = Accounting(c.store, clock).remainingCost(c.ids.work, contract.budget.cost)
         val budget = RoutingBudget(remainingCost = cost, reservedCost = cost?.let { Money(it.currency, it.amount.multiply(java.math.BigDecimal.valueOf(reserves.verification + reserves.recoveryAndPersist)), it.unknown) })
         val policy = RoutingPolicy(table, candidates, budget, configuredEffort = model.effort)
         val packet = RoutingPacket(increment.risk ?: contract.risk, contextTokens, model.maxOutputTokens, previousTier = previousTier, featureClass = "${contract.shape.name.lowercase()}:${increment.expectedFiles}")
@@ -1362,7 +1373,7 @@ public class Controller @JvmOverloads public constructor(
             noteHorizon = if (tree.workspace === c.workspace) NoteHorizon(KbWriter(c.store, estimator, clock), Notes(c.store), ids) else null,
         )
         val budget = child?.budget?.let { CellBudget.of(it.tokens, it.turns, contract.budget.reserves) }
-            ?: CellBudget.of(contract.budget.tokens, contract.budget.turnsPerCell, contract.budget.reserves)
+            ?: CellBudget.of(Tokens(Accounting(c.store, clock).remainingTokens(c.ids.work, contract.budget.tokens.value).coerceAtLeast(3)), contract.budget.turnsPerCell, contract.budget.reserves)
         val cellSpan = spans?.start(Phase.Edit, ids, span)
         val dispatch = DispatchAuthority { (cancellation.reason?.let { "cancelled: $it" } ?: c.refusal())?.let { DispatchRefusal(it, cancelled = cancellation.cancelled || c.cancellation.cancelled) } }
         // A cell that finished before the cancellation reached it keeps its exit: a late completion, archived below.
