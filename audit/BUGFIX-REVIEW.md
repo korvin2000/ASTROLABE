@@ -106,10 +106,15 @@ Use F-none for commits without findings. Report DEFECT only when you can name a 
 
 ## Checkpoint
 
-- Status: in progress. Next round: B07–B09. Rounds done: 2 (B01–B06). FIXED: 11. REJECTED: 0.
+- Status: in progress. Round 4 (B10–B12) reviewed, verdicts not yet written: verify its DEFECTs (F-093, F-075,
+  F-019 ×2, F-095) and fix; then B13, B14. Rounds done: 3 (B01–B09). FIXED: 22. REJECTED: 0.
 - Round 1 review fixes: 261871f F-066, 1db9a3e F-043, 49f4b8c F-009, 2fcd391 F-053, f15acab F-088, 40950b0 F-059,
-  72d3b3c F-078, f6b3654 F-050. Round 2: b465b26 F-014, 8afc54f F-026, 69cf936 F-064.
-- Public API changed: `Observed` gained `truncated` (69cf936) → Finalize ABI regen needed.
+  72d3b3c F-078, f6b3654 F-050. Round 2: b465b26 F-014, 8afc54f F-026, 69cf936 F-064. Round 3: 43a1d6e F-029,
+  c0b6ddf F-028, ebf1a92+7aa5736 F-027, 8baf840 F-083, 3d224ae F-096, c19aef6 F-097, 4054157 F-069, c924b42 F-036,
+  edf8040 F-125, 82c0615 F-118, f5c39cf F-090.
+- Public API changed: `Observed.truncated` (69cf936), `RunCapture.executionRoot` (4054157) → Finalize ABI regen.
+- Pre-existing failure at dba6344: ResultPacketTest "a failed cell still hands back a packet…" expects
+  `callsWithoutUsage == 1`, gets 0 (suspect 4f6eb64 F-086/F-095, B11). Fix in round 4.
 - 100 code-bearing commits in 14 batches (≤1000 code lines each; `e5321f3`/F-016 alone); 18 docs/ABI-only commits SKIP.
 
 ## Ledger
@@ -165,74 +170,74 @@ Code± = changed lines excluding `*.md` and `*/api/*.api`; Main± = lines under 
 | 043 | B06 | `eccb010` | 22 | 2 | F-004 | fix: honor profile request estimators at cell admission and refresh ABI | F-004 NOTE | Per-item estimates return 0 for native/opaque items (resident accounting undercounts once P7 emits them; admission still rejects via UnknownHistorySize). New margins can reject long transcripts admitted before. |
 | 044 | - | `a7ccc15` | 0 | 0 | - | docs: record ten repairs and passing full Windows validation | SKIP (docs/ABI; covered by final docs+ABI step) |  |
 | 045 | B06 | `0126918` | 212 | 173 | F-013 | fix: bound blob cleanup scans and prioritize referenced orphan repair | F-013 NOTE | DirectoryStream handles stay open between passes until Store.close; cursors restart on reopen. |
-| 046 | B07 | `389634d` | 275 | 139 | F-015 | fix: confirm process container cleanup before publishing terminal outcomes | PENDING |  |
-| 047 | B07 | `527c95b` | 476 | 219 | F-028 F-029 F-030 | fix: preserve snapshot link objects and reject incomplete or mixed captures | PENDING |  |
-| 048 | B07 | `499addd` | 72 | 28 | F-037 F-038 | fix: revalidate atlas cache contents and refresh collapsed totals | PENDING |  |
-| 049 | B07 | `aff4943` | 122 | 33 | F-046 | fix: validate every rendered STATE field for line and fence limits | PENDING |  |
-| 050 | B07 | `e74302a` | 13 | 13 | F-015 | fix: preserve LocalOs constructor ABI with the internal process test seam | PENDING |  |
+| 046 | B07 | `389634d` | 275 | 139 | F-015 | fix: confirm process container cleanup before publishing terminal outcomes | F-015 partial | Final on row 050. |
+| 047 | B07 | `527c95b` | 476 | 219 | F-028 F-029 F-030 | fix: preserve snapshot link objects and reject incomplete or mixed captures | F-028 FIXED (c0b6ddf); F-029 FIXED (43a1d6e); F-030 NOTE | F-028: dropping `replace('\\','/')` everywhere made Git-for-Windows symlinks (`sub\target` on disk) never match Git's object; normalized on Windows only. F-029: Directory kind now threw, so an untracked nested repo, a file replaced by a directory, or (via 2799e18's lsFiles loop) any submodule gitlink failed every stamp; Directory entries restored, gitlinks skipped. F-030: capture throws on a concurrent writer and nothing retries. |
+| 048 | B07 | `499addd` | 72 | 28 | F-037 F-038 | fix: revalidate atlas cache contents and refresh collapsed totals | F-037 NOTE; F-038 ACCEPT | F-037: every load reads all non-collapsed files and compares size + hash8 (adequate for an orientation cache). |
+| 049 | B07 | `aff4943` | 122 | 33 | F-046 | fix: validate every rendered STATE field for line and fence limits | F-046 NOTE | 240-char/no-newline limits now also apply to plan accept/req, anchor paths and evidence ids. |
+| 050 | B07 | `e74302a` | 13 | 13 | F-015 | fix: preserve LocalOs constructor ABI with the internal process test seam | F-015 NOTE | Windows job kill confirmed before settle; POSIX half replaced by e5321f3. terminate() waits 10s like release's tree wait (can return non-terminal); Supervision.terminateTree throws out of close(), leaving later supervisions unterminated. |
 | 051 | - | `48a7313` | 0 | 0 | - | docs: record eight repairs and verified Windows build for continuation | SKIP (docs/ABI; covered by final docs+ABI step) |  |
-| 052 | B07 | `9fc57c8` | 21 | 6 | F-040 | fix: preserve npm test lifecycle in inferred checks | PENDING |  |
-| 053 | B07 | `331c113` | 6 | 3 | F-085 | fix: acknowledge loop episodes after an applied state patch | PENDING |  |
-| 054 | B07 | `f77a20b` | 4 | 2 | F-099 | fix: emit a rebuild event at the durable cell boundary | PENDING |  |
-| 055 | B08 | `f2a8e7b` | 24 | 16 | F-108 | fix: retain actual resident occurrences across pressure rebuild | PENDING |  |
-| 056 | B08 | `b6b1421` | 31 | 5 | F-114 | fix: censor host-cancelled and externally stopped calibration work | PENDING |  |
-| 057 | B08 | `ea4cd41` | 21 | 6 | F-083 | fix: flag local acceptance executables as review surfaces | PENDING |  |
-| 058 | B08 | `5b6c1a7` | 29 | 5 | F-096 | fix: propagate exceptional campaign completion through await | PENDING |  |
-| 059 | B08 | `2584c17` | 60 | 23 | F-141 | fix: retain fixture container failures in runner verdicts | PENDING |  |
-| 060 | B08 | `f564b73` | 29 | 19 | F-097 | fix: classify unknown executables as unpredictable writes | PENDING |  |
-| 061 | B08 | `3c0ff07` | 20 | 4 | F-090 | fix: show packet validation gaps in the next cell request | PENDING |  |
-| 062 | B08 | `864cfe0` | 2 | 0 | F-040 | test: expect npm lifecycle in derived TypeScript acceptance | PENDING |  |
-| 063 | B08 | `4604b89` | 3 | 2 | F-097 | fix: retain read-only classification for git short status | PENDING |  |
+| 052 | B07 | `9fc57c8` | 21 | 6 | F-040 | fix: preserve npm test lifecycle in inferred checks | F-040 partial | Final on row 062. |
+| 053 | B07 | `331c113` | 6 | 3 | F-085 | fix: acknowledge loop episodes after an applied state patch | F-085 NOTE | Any applied patch clears the cell's whole signature history (a same-turn patch can skip the loop gate). |
+| 054 | B07 | `f77a20b` | 4 | 2 | F-099 | fix: emit a rebuild event at the durable cell boundary | F-099 ACCEPT |  |
+| 055 | B08 | `f2a8e7b` | 24 | 16 | F-108 | fix: retain actual resident occurrences across pressure rebuild | F-108 ACCEPT |  |
+| 056 | B08 | `b6b1421` | 31 | 5 | F-114 | fix: censor host-cancelled and externally stopped calibration work | F-114 ACCEPT |  |
+| 057 | B08 | `ea4cd41` | 21 | 6 | F-083 | fix: flag local acceptance executables as review surfaces | F-083 FIXED (8baf840) | `normalize` stripped `./` before the separator test, so a root-level `./check.sh` / `.\check.bat` was still not an acceptance surface. |
+| 058 | B08 | `5b6c1a7` | 29 | 5 | F-096 | fix: propagate exceptional campaign completion through await | F-096 FIXED (3d224ae) | After `Astrolabe.close()` the deferred is cancelled, so `await()` threw CancellationException into a live caller (Java future completed cancelled); now returns Cancelled unless the caller itself is cancelled. |
+| 059 | B08 | `2584c17` | 60 | 23 | F-141 | fix: retain fixture container failures in runner verdicts | F-141 ACCEPT |  |
+| 060 | B08 | `f564b73` | 29 | 19 | F-097 | fix: classify unknown executables as unpredictable writes | F-097 partial | Final on row 063. |
+| 061 | B08 | `3c0ff07` | 20 | 4 | F-090 | fix: show packet validation gaps in the next cell request | F-090 FIXED (f5c39cf) | Gap lines were prepended ahead of this turn's hard rejections and could push them out of MAX_NUDGES (§5.1 order). No dedicated regression (fixture cost); ResultPacketTest gap test still passes. |
+| 062 | B08 | `864cfe0` | 2 | 0 | F-040 | test: expect npm lifecycle in derived TypeScript acceptance | F-040 ACCEPT | Windows npm.cmd launch handled by d99e21a; derived TS acceptance now needs npm on PATH. |
+| 063 | B08 | `4604b89` | 3 | 2 | F-097 | fix: retain read-only classification for git short status | F-097 FIXED (c19aef6) | Unknown executables are now pre-labelled W, but post-hoc escalation of protected-path writes to D only ran for R labels; now for every label. NOTE: tiny read-only allowlist makes `git log`, `rg`, `grep` W/unknown (need WorkspaceWrite). |
 | 064 | - | `7dfb5e9` | 0 | 0 | - | docs: record ten out-of-order repairs and verified Windows build | SKIP (docs/ABI; covered by final docs+ABI step) |  |
-| 065 | B08 | `05f064b` | 19 | 19 | F-039 | perf: precompute outline span membership | PENDING |  |
-| 066 | B08 | `c0a2fed` | 74 | 55 | F-042 | fix: bound journal search to scoped paged views | PENDING |  |
-| 067 | B08 | `47e16e7` | 135 | 100 | F-052 | fix: keep look views within their prompt budgets | PENDING |  |
-| 068 | B08 | `cdbe39d` | 97 | 40 | F-069 | fix: preserve runner namespace in failure identities | PENDING |  |
-| 069 | B08 | `22709c5` | 93 | 66 | F-110 | fix: make note supersession atomic | PENDING |  |
-| 070 | B08 | `fbee771` | 99 | 48 | F-115 | fix: preserve frozen calibration series for historical attempts | PENDING |  |
+| 065 | B08 | `05f064b` | 19 | 19 | F-039 | perf: precompute outline span membership | F-039 NOTE | Semantics preserved; no equivalence/scaling test; repeated BlockScanner cost remains. |
+| 066 | B08 | `c0a2fed` | 74 | 55 | F-042 | fix: bound journal search to scoped paged views | F-042 ACCEPT |  |
+| 067 | B08 | `47e16e7` | 135 | 100 | F-052 | fix: keep look views within their prompt budgets | F-052 NOTE | Refusals after `allocate()` leave alias rows with no observation (never shown). |
+| 068 | B08 | `cdbe39d` | 97 | 40 | F-069 | fix: preserve runner namespace in failure identities | F-069 FIXED (4054157) | Shapers only got the workspace-relative `cwd`, so Jest identities kept absolute host paths and never matched between workspace and isolated baseline; `RunCapture.executionRoot` (public, ABI) now carries the absolute process directory from Verify/Baseline. |
+| 069 | B08 | `22709c5` | 93 | 66 | F-110 | fix: make note supersession atomic | F-110 ACCEPT |  |
+| 070 | B08 | `fbee771` | 99 | 48 | F-115 | fix: preserve frozen calibration series for historical attempts | F-115 ACCEPT |  |
 | 071 | - | `58c01a3` | 0 | 0 | - | docs: record six bugfix repairs and verified Windows build | SKIP (docs/ABI; covered by final docs+ABI step) |  |
-| 072 | B08 | `e9d84db` | 33 | 18 | F-132 | fix: reserve repair allowance before helper side effects | PENDING |  |
-| 073 | B08 | `dc19437` | 24 | 15 | F-136 | fix: fence publication after approval and between stages | PENDING |  |
-| 074 | B08 | `217db66` | 40 | 9 | F-134 | fix: recheck integration authority inside publication lock | PENDING |  |
-| 075 | B08 | `c32bc22` | 19 | 10 | F-138 | fix: redact QA transcripts and observed output before persistence | PENDING |  |
-| 076 | B08 | `81ce469` | 37 | 13 | F-084 F-118 | fix: enforce turn masks and retain incomplete impact obligations | PENDING |  |
-| 077 | B08 | `76d60b5` | 27 | 4 | F-117 | fix: widen impact analysis for unresolved script aliases | PENDING |  |
-| 078 | B08 | `b9312b0` | 75 | 41 | F-142 | fix: bind evaluation identities to comparator semantics and shape | PENDING |  |
-| 079 | B09 | `a41a7fa` | 72 | 25 | F-119 F-120 | fix: validate transform effects and protect reusable artifacts | PENDING |  |
+| 072 | B08 | `e9d84db` | 33 | 18 | F-132 | fix: reserve repair allowance before helper side effects | F-132 ACCEPT |  |
+| 073 | B08 | `dc19437` | 24 | 15 | F-136 | fix: fence publication after approval and between stages | F-136 NOTE | The "cancelled before publish" test was repurposed; the entry fence in Publications has no remaining test. |
+| 074 | B08 | `217db66` | 40 | 9 | F-134 | fix: recheck integration authority inside publication lock | F-134 ACCEPT |  |
+| 075 | B08 | `c32bc22` | 19 | 10 | F-138 | fix: redact QA transcripts and observed output before persistence | F-138 NOTE | QaDriver's public constructor defaults to `Redaction()`, ignoring `config.redaction` when host-built; raw spawn logs stay in `logs/`. |
+| 076 | B08 | `81ce469` | 37 | 13 | F-084 F-118 | fix: enforce turn masks and retain incomplete impact obligations | F-084 ACCEPT; F-118 FIXED (82c0615) | F-118: `look(refs)` always reports `complete: no`, so nothing could clear the obligation although the nudge says "→ look(refs)"; now clears when every found reference was displayed untruncated/unredacted (the finding's own ask). |
+| 077 | B08 | `76d60b5` | 27 | 4 | F-117 | fix: widen impact analysis for unresolved script aliases | F-117 NOTE | Broader than asked: any npm package or builtin import makes the importer incomplete, so no JS/TS repo gets a narrow blast. |
+| 078 | B08 | `b9312b0` | 75 | 41 | F-142 | fix: bind evaluation identities to comparator semantics and shape | F-142 ACCEPT |  |
+| 079 | B09 | `a41a7fa` | 72 | 25 | F-119 F-120 | fix: validate transform effects and protect reusable artifacts | F-119 NOTE; F-120 ACCEPT | F-119: a transform-created file in a gitignored path inside the glob is not a Stamper member, so never revalidated (pre-existing gap). |
 | 080 | - | `3bbdad2` | 0 | 0 | - | chore: update QA and evaluation API signatures | SKIP (docs/ABI; covered by final docs+ABI step) |  |
 | 081 | - | `938a5e6` | 0 | 0 | - | docs: record ten bugfix repairs and selective verification | SKIP (docs/ABI; covered by final docs+ABI step) |  |
-| 082 | B09 | `2e12762` | 81 | 52 | F-031 F-035 F-139 | fix: recover interrupted shadow snapshot publication | PENDING |  |
-| 083 | B09 | `b82a7b2` | 55 | 24 | F-036 | fix: contain Atlas and command discovery filesystem reads | PENDING |  |
-| 084 | B09 | `6b7ab81` | 92 | 53 | F-032 | fix: preserve snapshot modes and verify every exported tree entry | PENDING |  |
-| 085 | B09 | `adf8840` | 68 | 27 | F-122 | fix: require isolated comparable candidates for flaky retries | PENDING |  |
-| 086 | B09 | `3ffb27c` | 92 | 51 | F-143 | fix: bind promotion trials and fixtures to frozen campaign inputs | PENDING |  |
-| 087 | B09 | `2799e18` | 57 | 30 | F-027 | fix: include raw tracked changes hidden by Git filters in candidates | PENDING |  |
-| 088 | B09 | `ed14e95` | 41 | 10 | F-087 | fix: retain conservative funding for partial provider usage | PENDING |  |
-| 089 | B09 | `5d530f0` | 49 | 15 | F-101 | fix: terminate Windows children when job assignment fails | PENDING |  |
+| 082 | B09 | `2e12762` | 81 | 52 | F-031 F-035 F-139 | fix: recover interrupted shadow snapshot publication | F-031 NOTE; F-035 ACCEPT; F-139 NOTE | F-031: read-path recovery (`readIndex`) can delete a writer's pending file between its pending write and updateRef; a crash after updateRef then recreates the F-031 state. F-139: `register()` validates the caller's mutable object before freezing. |
+| 083 | B09 | `b82a7b2` | 55 | 24 | F-036 | fix: contain Atlas and command discovery filesystem reads | F-036 FIXED (c924b42) | Every tracked in-repo symlink to a regular file vanished from the atlas (§7.1); links whose contained target is regular are accepted again. |
+| 084 | B09 | `6b7ab81` | 92 | 53 | F-032 | fix: preserve snapshot modes and verify every exported tree entry | F-032 NOTE | Unprivileged Windows cannot materialize tracked symlinks (unavailable, intended); restored deleted files come back 0600; POSIX fileMode ignores core.fileMode=false. |
+| 085 | B09 | `adf8840` | 68 | 27 | F-122 | fix: require isolated comparable candidates for flaky retries | F-122 NOTE | Without `candidates` (S0–S2 default) no flake retry runs; the removed agreeing-failures assertion has no isolated replacement. |
+| 086 | B09 | `3ffb27c` | 92 | 51 | F-143 | fix: bind promotion trials and fixtures to frozen campaign inputs | F-143 NOTE | Fixture binding compares a caller-supplied label; `FixtureRunner.run` default "as-written" always blocks promotion; fixtures still not per arm (D-220). |
+| 087 | B09 | `2799e18` | 57 | 30 | F-027 | fix: include raw tracked changes hidden by Git filters in candidates | F-027 FIXED (ebf1a92, 7aa5736) | Raw-vs-object comparison made every file a member under autocrlf/smudge/eol attributes (owner's machine has autocrlf=true): whole-tree pre-existing dirty capture. Now raw bytes equal to the smudged checkout (`cat-file --batch --filters`, git ≥2.11) are clean; batch parser resyncs on the next header. NOTE: every stamp still hashes all tracked files. |
+| 088 | B09 | `ed14e95` | 41 | 10 | F-087 | fix: retain conservative funding for partial provider usage | F-087 ACCEPT |  |
+| 089 | B09 | `5d530f0` | 49 | 15 | F-101 | fix: terminate Windows children when job assignment fails | F-101 ACCEPT |  |
 | 090 | - | `52607da` | 0 | 0 | - | docs: record eight repairs and selective verification | SKIP (docs/ABI; covered by final docs+ABI step) |  |
-| 091 | B09 | `d4d2524` | 163 | 88 | F-044 F-045 F-048 F-102 F-103 F-112 | fix: enforce edit permissions and current cell evidence | PENDING |  |
-| 092 | B09 | `6fcc5a4` | 159 | 92 | F-111 F-112 F-125 F-126 | fix: redact and bound knowledge reads and validate note dependencies | PENDING |  |
-| 093 | B10 | `cdb1f58` | 133 | 65 | F-091 F-092 F-093 F-102 F-106 F-111 F-126 | fix: recover finalization and bind workspace authority to committed state | PENDING |  |
+| 091 | B09 | `d4d2524` | 163 | 88 | F-044 F-045 F-048 F-102 F-103 F-112 | fix: enforce edit permissions and current cell evidence | F-044 NOTE; F-045 NOTE; F-048 ACCEPT; F-102 partial; F-103 ACCEPT; F-112 partial | F-044: `reconcile` accepts any non-blank evidence string; Unknown Run intents stay blocked until a host reconciles. F-045: Validator sets staleAt to the new version (others use anchor.version). F-102: cdb1f58 (row 093) needed. |
+| 092 | B09 | `6fcc5a4` | 159 | 92 | F-111 F-112 F-125 F-126 | fix: redact and bound knowledge reads and validate note dependencies | F-111 partial; F-112 NOTE; F-125 FIXED (edf8040); F-126 partial | F-112: STATUS text beyond the redaction scan cap unreachable; a budget smaller than the cursor suffix returns an empty page. F-125: dependency recursion was exponential on diamond DAGs and each search hit reloaded all notes; memoized, notes loaded once per search. NOTE: notes pinned to `contract@vN` are never injected. |
+| 093 | B10 | `cdb1f58` | 133 | 65 | F-091 F-092 F-093 F-102 F-106 F-111 F-126 | fix: recover finalization and bind workspace authority to committed state | IN_REVIEW |  |
 | 094 | - | `2106397` | 0 | 0 | - | docs: record thirteen repairs and selective verification | SKIP (docs/ABI; covered by final docs+ABI step) |  |
-| 095 | B10 | `6649cec` | 10 | 8 | F-128 | fix: retain child funding when terminal usage is unknown | PENDING |  |
-| 096 | B10 | `5ae4892` | 32 | 15 | F-133 | fix: bind integration publication to the complete tested candidate | PENDING |  |
-| 097 | B10 | `a471bc4` | 34 | 29 | F-129 | fix: validate probe citations against delivered evidence | PENDING |  |
-| 098 | B10 | `96aa811` | 49 | 29 | F-137 | fix: require candidate-bound service lifecycle for HTTP QA | PENDING |  |
-| 099 | B10 | `d99e21a` | 43 | 27 | F-041 | fix: resolve ancestor Gradle wrappers and launch Windows batch argv | PENDING |  |
-| 100 | B10 | `b713e83` | 86 | 61 | F-075 | fix: collect invocation-bound JUnit reports during verification | PENDING |  |
-| 101 | B10 | `7a12c08` | 52 | 36 | F-033 | fix: persist edit preimage associations before workspace mutation | PENDING |  |
-| 102 | B10 | `e68cb48` | 81 | 64 | F-124 | fix: roll back knowledge admission atomically with revision ownership | PENDING |  |
-| 103 | B10 | `c24c4fe` | 37 | 0 | F-017 | fix: bound Git command lifetime and captured output | PENDING |  |
-| 104 | B10 | `0898a57` | 169 | 135 | F-107 F-109 F-113 | fix: rebuild carried context and persist fact and note coherence | PENDING |  |
+| 095 | B10 | `6649cec` | 10 | 8 | F-128 | fix: retain child funding when terminal usage is unknown | IN_REVIEW |  |
+| 096 | B10 | `5ae4892` | 32 | 15 | F-133 | fix: bind integration publication to the complete tested candidate | IN_REVIEW |  |
+| 097 | B10 | `a471bc4` | 34 | 29 | F-129 | fix: validate probe citations against delivered evidence | IN_REVIEW |  |
+| 098 | B10 | `96aa811` | 49 | 29 | F-137 | fix: require candidate-bound service lifecycle for HTTP QA | IN_REVIEW |  |
+| 099 | B10 | `d99e21a` | 43 | 27 | F-041 | fix: resolve ancestor Gradle wrappers and launch Windows batch argv | IN_REVIEW |  |
+| 100 | B10 | `b713e83` | 86 | 61 | F-075 | fix: collect invocation-bound JUnit reports during verification | IN_REVIEW |  |
+| 101 | B10 | `7a12c08` | 52 | 36 | F-033 | fix: persist edit preimage associations before workspace mutation | IN_REVIEW |  |
+| 102 | B10 | `e68cb48` | 81 | 64 | F-124 | fix: roll back knowledge admission atomically with revision ownership | IN_REVIEW |  |
+| 103 | B10 | `c24c4fe` | 37 | 0 | F-017 | fix: bound Git command lifetime and captured output | IN_REVIEW |  |
+| 104 | B10 | `0898a57` | 169 | 135 | F-107 F-109 F-113 | fix: rebuild carried context and persist fact and note coherence | IN_REVIEW |  |
 | 105 | - | `f232375` | 0 | 0 | - | chore: update core ABI for recovery and evidence fixes | SKIP (docs/ABI; covered by final docs+ABI step) |  |
 | 106 | - | `01c34b3` | 0 | 0 | - | docs: record twelve fixes and selective verification | SKIP (docs/ABI; covered by final docs+ABI step) |  |
-| 107 | B10 | `0959ee7` | 102 | 38 | F-100 | fix: allowlist inherited Windows process handles | PENDING |  |
-| 108 | B10 | `0ba3658` | 133 | 106 | F-019 | fix: bound search file reads regex work and process output | PENDING |  |
-| 109 | B11 | `0fc1dbf` | 204 | 116 | F-135 | fix: recover interrupted integration publications from durable preimages | PENDING |  |
-| 110 | B11 | `4f6eb64` | 356 | 201 | F-086 F-095 F-127 | fix: persist campaign funding and reconcile provider and extractor usage | PENDING |  |
-| 111 | B11 | `1120f89` | 433 | 201 | F-082 F-089 F-104 F-105 | fix: complete independently assessed work and resume or replan blocked increment | PENDING |  |
-| 112 | B11 | `745e229` | 3 | 3 | F-019 | fix: retain typed failures when search candidate enumeration fails | PENDING |  |
-| 113 | B12 | `0d7ad78` | 21 | 21 | (no finding: review as change) | docs: clarify platform process ownership boundaries | PENDING |  |
+| 107 | B10 | `0959ee7` | 102 | 38 | F-100 | fix: allowlist inherited Windows process handles | IN_REVIEW |  |
+| 108 | B10 | `0ba3658` | 133 | 106 | F-019 | fix: bound search file reads regex work and process output | IN_REVIEW |  |
+| 109 | B11 | `0fc1dbf` | 204 | 116 | F-135 | fix: recover interrupted integration publications from durable preimages | IN_REVIEW |  |
+| 110 | B11 | `4f6eb64` | 356 | 201 | F-086 F-095 F-127 | fix: persist campaign funding and reconcile provider and extractor usage | IN_REVIEW |  |
+| 111 | B11 | `1120f89` | 433 | 201 | F-082 F-089 F-104 F-105 | fix: complete independently assessed work and resume or replan blocked increment | IN_REVIEW |  |
+| 112 | B11 | `745e229` | 3 | 3 | F-019 | fix: retain typed failures when search candidate enumeration fails | IN_REVIEW |  |
+| 113 | B12 | `0d7ad78` | 21 | 21 | (no finding: review as change) | docs: clarify platform process ownership boundaries | IN_REVIEW |  |
 | 114 | - | `bc742fe` | 0 | 0 | - | chore: update core ABI for campaign evidence and funding | SKIP (docs/ABI; covered by final docs+ABI step) |  |
 | 115 | - | `a7189d4` | 0 | 0 | - | docs: record ten fixes and remaining POSIX containment work | SKIP (docs/ABI; covered by final docs+ABI step) |  |
 | 116 | B13 | `e5321f3` | 878 | 657 | F-016 | fix: own detached Linux descendants with an isolated subreaper | PENDING |  |
