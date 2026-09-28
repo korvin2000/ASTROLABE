@@ -1454,7 +1454,9 @@ public class Controller @JvmOverloads public constructor(
             completionEvidence = if (child == null && role.packetKind == io.astrolabe.cell.PacketKind.Result) { flags ->
                 val required = increment.accept.any { c.contract.acceptance(it) is Acceptance.Check || c.contract.acceptance(it) is Acceptance.Review } || flags.any { it.blocksCompletion }
                 if (required) {
-                    val reviewer = if (c.contract.shape >= Shape.S2 && increment.accept.none { c.contract.acceptance(it) is Acceptance.Check } && !humanIntegrity(c, flags))
+                    // D-261/D-320: a flag-only review (no Check/Review item) goes to the review cell in every shape unless Human.
+                    val flagOnly = increment.accept.none { c.contract.acceptance(it) is Acceptance.Check || c.contract.acceptance(it) is Acceptance.Review }
+                    val reviewer = if ((c.contract.shape >= Shape.S2 && increment.accept.none { c.contract.acceptance(it) is Acceptance.Check } || flagOnly) && !humanIntegrity(c, flags))
                         reviewCell(c, increment, model, authority, syntax, span)
                     else hostReviewer(c, authority)
                     reviewer.obtain(evidence(c, increment, listOf("completion acceptance"), flags, compiled.k.ledger, authority), Tier.Medium, c.registry::version)
