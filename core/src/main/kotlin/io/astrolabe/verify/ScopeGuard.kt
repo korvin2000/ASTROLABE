@@ -68,7 +68,7 @@ public class ScopeGuard(private val workspace: Workspace) {
                 is PathResolution.Resolved -> {
                     val relative = resolved.relative
                     when {
-                        contract.scope.protects(relative) ->
+                        contract.scope.protects(relative, workspace.paths.caseInsensitive) ->
                             refusals += ScopeRefusal(path, ScopeRefusalKind.Protected, "'$relative' is protected by contract v${contract.version}")
                         !contract.scope.covers(relative) ->
                             refusals += ScopeRefusal(path, ScopeRefusalKind.OutsideContract, "'$relative' is outside the write scope of contract v${contract.version}: ${contract.scope.writePaths}")
