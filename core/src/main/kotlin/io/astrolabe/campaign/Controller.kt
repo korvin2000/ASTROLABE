@@ -201,6 +201,7 @@ import io.astrolabe.workspace.ShadowRef
 import io.astrolabe.workspace.Snapshot
 import io.astrolabe.workspace.SnapshotEntryKind
 import io.astrolabe.workspace.Stamper
+import io.astrolabe.workspace.movedPathsHint
 import io.astrolabe.workspace.VersionRegistry
 import io.astrolabe.workspace.Workspace
 import java.nio.file.Path
@@ -1758,9 +1759,11 @@ public class Controller @JvmOverloads public constructor(
         val ids = c.ids.copy(context = ContextId(idGen.next("finish")))
         // §8.1: every declared gate must certify the same final candidate as the suite.
         val gates = c.checks.all().filter { it.kind == CheckKind.Quality }.map { it.id }
+        val before = c.stamper.report()
         if (gates.isNotEmpty()) harnessVerify(c, ids, "quality", """{"what":"tests","selection":"ids","ids":[${gates.joinToString(",") { "\"$it\"" }}]}""")
         if (check != null) harnessVerify(c, ids, "full", """{"what":"tests","selection":"full"}""")
-        val stamp = c.stamper.report().candidateId
+        val after = c.stamper.report()
+        val stamp = after.candidateId
         val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, ids, clock)
         val required = (gates + listOfNotNull(check?.id)).mapNotNull { c.checks[it] }
         val currency = required.associate { it.id to scheduler.currency(it, stamp) }
@@ -1768,7 +1771,8 @@ public class Controller @JvmOverloads public constructor(
         val gap = required.firstOrNull { !currency.getValue(it.id).certifies }
         val certification = when {
             red != null -> FullSuite.Red("${red.id} ${red.last?.receiptId} failed at @${stamp.hash8}")
-            gap != null -> FullSuite.NotCertified("${gap.id}: ${currency.getValue(gap.id).reasons.joinToString("; ").ifEmpty { gap.last?.outcome?.name?.lowercase() ?: "not run" }} at @${stamp.hash8}")
+            gap != null -> FullSuite.NotCertified("${gap.id}: ${currency.getValue(gap.id).reasons.joinToString("; ").ifEmpty { gap.last?.outcome?.name?.lowercase() ?: "not run" }} at @${stamp.hash8}" +
+                if (after.candidateId != before.candidateId) " · the gates and suite moved the stamp from @${before.candidateId.hash8}: ${movedPathsHint(before, after)}" else "")
             else -> null
         }
         if (check == null) {
