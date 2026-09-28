@@ -17,6 +17,8 @@ public data class Defaults(
     // Cell turn budget
     val turnsPerCell: Int = 40,
     val turnNudgeFraction: Double = 0.80,
+    // Bounded wait for a provider terminal after the response (D-314)
+    val providerTerminalWaitSeconds: Int = 60,
     // α pressure threshold
     val alpha: Double = 0.65,
     // k eviction batch / m turns kept on rebuild
@@ -33,6 +35,9 @@ public data class Defaults(
     // Register cap / contract digest cap / patch cap
     val registerCapTokens: Int = 1_200,
     val digestCapTokens: Int = 150,
+    // D-270: the digest cap grows per requirement up to a ceiling; 0 per requirement pins [digestCapTokens]
+    val digestTokensPerRequirement: Int = 8,
+    val digestCapCeilingTokens: Int = 2_000,
     val patchCapTokens: Int = 400,
     // Fact line / note body / note summary
     val factLineMaxChars: Int = 240,
@@ -115,6 +120,7 @@ public data class Defaults(
         fraction("turnNudgeFraction", turnNudgeFraction, exclusiveZero = true)
         fraction("admissionConfidenceMax", admissionConfidenceMax, exclusiveZero = false)
         positive("turnsPerCell", turnsPerCell)
+        positive("providerTerminalWaitSeconds", providerTerminalWaitSeconds)
         positive("k", k)
         if (m < 0) v += ConfigViolation("m", "must be ≥ 0")
         positive("rMaxTokens", rMaxTokens)
@@ -124,6 +130,8 @@ public data class Defaults(
         positive("runBudgetTokens", runBudgetTokens)
         positive("registerCapTokens", registerCapTokens)
         positive("digestCapTokens", digestCapTokens)
+        if (digestTokensPerRequirement < 0) v += ConfigViolation("digestTokensPerRequirement", "must be ≥ 0")
+        positive("digestCapCeilingTokens", digestCapCeilingTokens)
         positive("patchCapTokens", patchCapTokens)
         positive("factLineMaxChars", factLineMaxChars)
         positive("noteBodyMaxTokens", noteBodyMaxTokens)
@@ -153,6 +161,16 @@ public data class Defaults(
         if (gitDeadlineSeconds > 3600) v += ConfigViolation("gitDeadlineSeconds", "must be ≤ 3600")
         v += shapePolicy.violations()
         return v
+    }
+
+    /**
+     * The contract digest cap for a contract with [requirements] requirements (D-270): every requirement status
+     * is mandatory, so the cap grows by [digestTokensPerRequirement] each, never below [digestCapTokens] and
+     * never above [digestCapCeilingTokens] unless [digestCapTokens] itself is higher.
+     */
+    public fun effectiveDigestCapTokens(requirements: Int): Int {
+        val scaled = digestCapTokens.toLong() + digestTokensPerRequirement.toLong() * requirements.coerceAtLeast(0)
+        return minOf(scaled, maxOf(digestCapTokens, digestCapCeilingTokens).toLong()).toInt()
     }
 }
 

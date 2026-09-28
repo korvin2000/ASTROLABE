@@ -63,11 +63,11 @@ class ValidatorFieldsTest {
             "tilde fence" to "before ~~~code~~~ after",
             "line feed" to "before\nafter",
             "carriage return" to "before\rafter",
-            "oversized line" to "x".repeat(241),
+            "oversized line" to "",
         )
         return fields.flatMap { (field, op) -> payloads.map { (kind, payload) ->
             DynamicTest.dynamicTest("$field rejects $kind") {
-                val rejected = assertIs<Validation.Rejected>(check(op(payload)))
+                val rejected = assertIs<Validation.Rejected>(check(op(payload.ifEmpty { "x".repeat(maxChars(field) + 1) })))
                 if (kind.endsWith("fence")) assertEquals("no fenced code", rejected.rule)
                 else assertTrue(rejected.rule.contains("line"), "must reject the line rule, got ${rejected.rule}")
             }
@@ -80,6 +80,21 @@ class ValidatorFieldsTest {
             assertIs<Validation.Applied>(check(op("run `pytest -k dispatch`")))
         }
     }
+
+    @org.junit.jupiter.api.Test
+    fun `a long single-line accept command fits the reference cap under default sizes`() {
+        val defaults = Validator(HeuristicEstimator())
+        val command = "pytest " + (1..60).joinToString(" ") { "tests/unit/module_$it.py" }.take(593)
+        assertEquals(600, command.length)
+        assertIs<Validation.Applied>(defaults.check(base, Patch.of(Op.PlanAdd("step", accept = command), Op.Next("continue")), context))
+        val rejected = assertIs<Validation.Rejected>(check(Op.PlanAdd("step", accept = "x".repeat(1_001))))
+        assertEquals("line ≤ 1000 chars", rejected.rule)
+    }
+
+    private fun maxChars(field: String): Int = if (field in references) 1_000 else 240
+
+    private val references = setOf("plan accept", "plan req", "tick evidence", "fact evidence", "fact anchor path",
+        "refute evidence", "deadend evidence", "close evidence", "focus dir")
 
     private fun check(op: Op): Validation = validator.check(
         base,

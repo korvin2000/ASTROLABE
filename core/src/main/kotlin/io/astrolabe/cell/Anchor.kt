@@ -89,7 +89,8 @@ public data class AnchorRender(
  * writes. Blocks appear in a fixed order — contract digest, STATE, Workset, Touched, Checks, focus
  * zoom, focus notes, gauge, nudges, fired trips — and each carries its own cap.
  *
- * **Caps are enforced here even though the producers cap too**, because a caller may hand over an
+ * **Caps are enforced here even though the producers cap too** (except the contract digest, which
+ * [io.astrolabe.register.ContractDigest] bounds or refuses with a typed error), because a caller may hand over an
  * unbounded string and a silently oversized anchor is a cost bug that hides in every turn. Truncation
  * drops whole trailing lines and says how many, and every reduction is named in
  * [AnchorRender.reductions].
@@ -118,7 +119,6 @@ public object Anchor {
         defaults: Defaults = Defaults(),
     ): AnchorRender {
         val reductions = ArrayList<String>()
-        var digestText = cap(estimator, digest, defaults.digestCapTokens, "contract digest", reductions)
         var registerText = cap(estimator, register, defaults.registerCapTokens, "STATE", reductions)
         val worksetText = cap(estimator, workset, WORKSET_CAP_TOKENS, "Workset", reductions)
         var touchedLines = touched.takeLast(defaults.touchedInAnchor)
@@ -128,7 +128,8 @@ public object Anchor {
         val nudgeLines = nudges.take(MAX_NUDGES)
         if (nudgeLines.size < nudges.size) reductions += "nudges: showed ${nudgeLines.size} of ${nudges.size}"
 
-        fun compose() = compose(digestText, registerText, worksetText, touchedLines, checks, zoom, notes, gauge, nudgeLines, firedTrips)
+        // D-270: the digest is mandatory and already bounded by ContractDigest (typed DigestCapacity); never line-capped here.
+        fun compose() = compose(digest, registerText, worksetText, touchedLines, checks, zoom, notes, gauge, nudgeLines, firedTrips)
 
         var text = compose()
         // One pass per lever, in the declared order; each is recorded even when it does not suffice.
@@ -149,11 +150,6 @@ public object Anchor {
         }
         if (estimator.estimate(text).tokens > defaults.anchorMaxTokens) {
             registerText = cap(estimator, registerText, defaults.registerCapTokens / 2, "STATE", reductions)
-            text = compose()
-        }
-        // The digest is the recitation: it shrinks only when nothing else is left, and never vanishes.
-        if (estimator.estimate(text).tokens > defaults.anchorMaxTokens) {
-            digestText = cap(estimator, digestText, defaults.digestCapTokens / 2, "contract digest", reductions)
             text = compose()
         }
 
