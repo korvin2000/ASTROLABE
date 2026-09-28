@@ -522,10 +522,11 @@ public class Cell @JvmOverloads constructor(
             val current = residency.occupancy(prefix(layout), residents, turn, anchor.tokens, pinnedTokens(contract))
             occupancy = current
 
-            // Gates on records.
+            // Gates on records. D-278: only a patch that materially changes the register acknowledges prior loop
+            // signatures; a repeated identical `next` bumps only the version and must not reset the loop gate.
             if (calls.any { it.family == ToolFamily.State && it.op == "patch" &&
                     (result?.of(it.opId) as? Disposition.Executed)?.outcome?.applied == true
-                }) signatures.clear()
+                } && register.copy(version = registerBefore.version) != registerBefore) signatures.clear()
             val currenciesNow = currencies(stampNow.candidateId)
             uncertified = outstanding(currenciesNow)
             val certifiedAfter = certified(currenciesNow)

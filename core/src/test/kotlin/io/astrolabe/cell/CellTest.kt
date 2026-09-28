@@ -398,6 +398,28 @@ class CellTest {
     }
 
     @Test
+    fun `a repeated identical next patch does not reset the loop gate but a material change does`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val next = """{"next":"look around"}"""
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("look"), patch("p1", next), tree("c1"))),
+                Scripted.Reply(listOf(say("look again"), patch("p2", next), tree("c2"))),
+                Scripted.Reply(listOf(say("and again"), patch("p3", next), tree("c3"))),
+                Scripted.Reply(listOf(say("once more"), patch("p4", next), tree("c4"))),
+                Scripted.Reply(listOf(say("recording"), patch("p5", """{"next":"read a.py"}"""), tree("c5"))),
+                Scripted.Reply(listOf(say("look after the change"), tree("c6"))),
+                Scripted.Reply(listOf(say("done"))),
+            )
+
+            f.run(model)
+
+            assertTrue(f.anchorText(4).contains("look.tree returned the same result 2 times"), f.anchorText(4))
+            assertTrue(f.anchorText(5).contains("look.tree returned the same result 3 times — turn ended"), f.anchorText(5))
+            assertFalse(f.anchorText(7).contains("loop: look.tree"), f.anchorText(7))
+        }
+    }
+
+    @Test
     fun `the first pressure rebuilds the projection, a second one ends the cell partial, at admission or from the gate`() = runTest {
         CellFixture(stateRoot).use { f ->
             val overflow = f.run(ScriptedModel.of(Scripted.Reply(listOf(say("look"), tree("c1")))), profile = FakeProfiles.tiny)
