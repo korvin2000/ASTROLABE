@@ -93,6 +93,8 @@ public data class Defaults(
     val ceiling: Stage = Stage.Patch,
     // Timeouts
     val runTimeoutSeconds: Int = 120,
+    /** Deadline of one git command (D-303); at most one hour, the [io.astrolabe.os.Git] bound. */
+    val gitDeadlineSeconds: Int = 600,
 ) {
     /** Values that would disable a mandatory control or make a bound meaningless (D-48, IX-18). */
     public fun violations(): List<ConfigViolation> {
@@ -146,6 +148,8 @@ public data class Defaults(
         positive("campaignCells", campaignCells)
         if (flakyIsolatedReruns < 0) v += ConfigViolation("flakyIsolatedReruns", "must be ≥ 0")
         positive("runTimeoutSeconds", runTimeoutSeconds)
+        positive("gitDeadlineSeconds", gitDeadlineSeconds)
+        if (gitDeadlineSeconds > 3600) v += ConfigViolation("gitDeadlineSeconds", "must be ≤ 3600")
         v += shapePolicy.violations()
         return v
     }

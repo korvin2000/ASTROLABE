@@ -417,7 +417,7 @@ public class Controller @JvmOverloads public constructor(
      * pre-scan stub and the shape. A reopen of a campaign that stopped on something outside it resumes it.
      */
     public fun open(repo: Path, request: CampaignRequest, policy: CampaignPolicy): OpenedCampaign {
-        val git = Git(repo)
+        val git = Git(repo, timeoutMillis = config.defaults.gitDeadlineSeconds * 1000L)
         val store = Store.open(config, git, clock, faults)
         val os = try {
             LocalOs(clock)

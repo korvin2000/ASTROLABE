@@ -74,7 +74,7 @@ public class Astrolabe @JvmOverloads public constructor(
 
     /** Opens [repo]: the state root, the project lock, the store and the (read-only, empty until P2.6) KB. */
     public fun open(repo: Path): Project {
-        val git = Git(repo)
+        val git = Git(repo, timeoutMillis = config.defaults.gitDeadlineSeconds * 1000L)
         val store = Store.open(config, git, clock)
         val os = try {
             LocalOs(clock)
