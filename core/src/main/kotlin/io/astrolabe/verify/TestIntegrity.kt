@@ -266,8 +266,9 @@ public object TestIntegrity {
     /** True when an argv token (resolved against [cwd]) or [cwd] itself is [path] or a directory above it. */
     private fun namesPath(argv: List<String>, cwd: String?, path: String): Boolean {
         val base = cwd?.let { normalize(it) }?.takeIf { it.isNotEmpty() && it != "." }
+        // Test the raw spelling: normalize strips "./", which would drop a root-level `./check.sh`.
         val executable = argv.firstOrNull()?.takeIf {
-            val named = normalize(it)
+            val named = it.replace('\\', '/')
             '/' in named && !named.startsWith('/') && !named.matches(Regex("^[A-Za-z]:.*"))
         }
         val candidates = (argv.drop(1) + listOfNotNull(executable)).map { normalize(it) }.filter { it.isNotEmpty() && !it.startsWith("-") }

@@ -115,9 +115,14 @@ class TestIntegrityTest {
     @Test
     fun `editing a repository executable used by acceptance requires review`() {
         val (base, _) = s0()
-        for ((cwd, path) in listOf(null to "scripts/check.sh", "packages/web" to "packages/web/scripts/check.sh")) {
+        for ((argv0, cwd, path) in listOf(
+            Triple("./scripts/check.sh", null, "scripts/check.sh"),
+            Triple("./scripts/check.sh", "packages/web", "packages/web/scripts/check.sh"),
+            Triple("./check.sh", null, "check.sh"),
+            Triple(".\\check.bat", "packages/web", "packages/web/check.bat"),
+        )) {
             val contract = base.strengthen(
-                Acceptance.Run("AC-script", Command(listOf("./scripts/check.sh"), cwd = cwd), Origin.Model("R1")),
+                Acceptance.Run("AC-script", Command(listOf(argv0), cwd = cwd), Origin.Model("R1")),
             )
             val checks = Checks.seed(contract, RunnerCommands(test = Command(listOf("python", "-m", "pytest", "-q"))))
             val flag = TestIntegrity.baseline(listOf(path), "edit script", contract, checks).single()
