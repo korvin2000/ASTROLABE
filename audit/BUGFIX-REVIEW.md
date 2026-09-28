@@ -283,3 +283,6 @@ git spawn failures `0xC0000142`). Fixed first, one commit each: afc3453 (Default
 b6fe739 (a never-held workspace is not fenced), f16fd4d (ShapedViewTest vs F-064), 9d476c7 (RequirementGraphTest vs
 D-313), 148e3eb (VerticalSliceTest vs the extraction account), b29cc88 (FX-44 vs d4d2524), 25599e4 (LongRefactorTest:
 a handled `ContextOverflow` is not a pairing error); StageCCampaignTest is fixed by F-122.
+The Windows runner loss ("lost communication" after 0xC0000142 spawns, runs 36425677646/36448668656/36461214806)
+was caused by post-exit `Process.descendants()` kills from c24c4fe (F-017) in Git.kt and TempRepo: on Windows the
+snapshot names unrelated orphans whose dead parent had the same PID. Fixed by 53fffd5 and e03fb7b.
