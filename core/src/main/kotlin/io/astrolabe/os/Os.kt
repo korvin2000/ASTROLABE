@@ -31,9 +31,11 @@ import kotlin.math.abs
  *    death). A lost process is never relaunched blindly; this adapter has no relaunch operation.
  *
  * Processes do not survive harness death by default. On Windows the job object is created with
- * `JOB_OBJECT_LIMIT_KILL_ON_CLOSE`, so the tree dies with the JVM that owns it. On POSIX the
- * session survives the owner; such a process resolves to [ProcStatus.Running] but *unowned* — its
- * exit code can no longer be observed, so it becomes [ProcStatus.Lost] once it disappears.
+ * `JOB_OBJECT_LIMIT_KILL_ON_CLOSE`, so the tree dies with the JVM that owns it. On Linux, closing
+ * the host's control pipe (including host death) asks the subreaper to kill and reap descendants.
+ * Abnormal supervisor death or unconfirmed cleanup is Lost, never confirmed quiescence. Linux
+ * requires a local Java launcher at java.home and procfs; each launch uses a helper JVM.
+ * This is trusted-local process ownership, not security confinement against hostile commands.
  *
  * **Native access.** The bundled [LocalOs] binds process-control APIs through `java.lang.foreign`.
  * These are *restricted* methods: JDK 26 runs them under `--illegal-native-access=warn` (a warning
@@ -244,6 +246,7 @@ public sealed interface ProcStatus {
  */
 @Serializable
 public data class Proc(
+    /** The owned process identity: the Linux subreaper PID, or the Windows command PID. */
     public val pid: Long,
     public val startedAtEpochMillis: Long,
     public val identityKey: IdentityKey,

@@ -2,8 +2,18 @@
 
 Branch: `feature/bugfix`. Baseline: `9a80e117445be357285fec2cffffe0fd45290a9a`.
 
-**141 fixed (10 in this continuation); 1 open (F-016); F-034 previously resolved.**
+**142 fixed (F-016 in this continuation); 0 open; F-034 previously resolved.**
 The complete remaining queue is `findings.md` ? JSON `fix_progress.remaining_open_ids`.
+
+## Final continuation: Linux detached-process ownership
+
+- **F-016 fixed** in `e5321f3`: each Linux launch has an isolated subreaper JVM. The kernel reparents detached orphans to it; the helper retains and terminates direct children until `waitpid` reports `ECHILD`. Process enumeration is used to signal children, never as proof of quiescence. See [Linux subreaper semantics](https://man7.org/linux/man-pages/man2/PR_SET_CHILD_SUBREAPER.2const.html) and [wait semantics](https://man7.org/linux/man-pages/man2/waitpid.2.html).
+- Root exit and descendant quiescence have separate acknowledgments. Target sessions protect the helper from group signals. Reap batches are bounded so cancellation reaches the kill phase. PATH lookup uses the requested target environment; the helper's JVM environment is cleared.
+- Control-pipe EOF requests cleanup, including host JVM death. Missing acknowledgment, cleanup timeout or abnormal helper failure cannot become a successful terminal record.
+- [Focused Linux CI](https://github.com/korvin2000/ASTROLABE/actions/runs/36364095425) on JDK 26: **32 passed, 1 Windows-only skip, 0 failures**. All **6 new regressions** passed: normal root exit, group SIGKILL, cancellation, execution deadline, adapter close and custom PATH. Existing process, ownership, resolution and settlement cases passed.
+- Local Windows JDK 26: **4 settlement tests passed**; the Linux-only class was skipped. Kotlin/Java compilation and `checkKotlinAbi` passed. No full suite/build or P7 run.
+- Compatibility: no ABI/schema change. On Linux `Proc.pid` now identifies the supervisor and the reported exit code remains the command's. Each launch adds one helper JVM (32 MiB maximum Java heap, additional VM overhead); a normal local Java launcher/classpath and procfs child listings are required. Ownership remains trusted-local lifecycle control, not hostile-code confinement. Windows behavior is unchanged.
+- Existing CLAUDE.md/ISSUES.md edits and untracked continue_fixing.md/todo_findings.txt remain untouched. All audited findings are now resolved; implementation pushed to origin/feature/bugfix.
 
 ## Thirteenth continuation: campaign evidence, funding and recovery
 

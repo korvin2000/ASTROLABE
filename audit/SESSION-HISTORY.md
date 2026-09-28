@@ -666,3 +666,10 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - 32 distinct targeted Windows tests passed after corrections; core ABI checked and dependent test sources compiled. No full suite/build or Linux/CI.
 - F-016 remains open for enforceable Linux detached-process containment; comments corrected. Existing unrelated edits preserved.
 - Source/ABI checkpoint bc742fe; publication to origin/feature/bugfix authorized.
+
+## 2026-09-28: audit repair queue complete
+- F-016 fixed and pushed in e5321f3: isolated Linux subreaper owns detached descendants and confirms ECHILD before settlement.
+- Linux JDK 26 CI: 32 passed, 1 Windows-only skip; all six new lifecycle/PATH regressions passed. https://github.com/korvin2000/ASTROLABE/actions/runs/36364095425
+- Windows: four settlement tests passed; Linux-only class skipped. Core compilation and ABI validation passed. No full suite/build.
+- 142 findings fixed, 0 open; F-034 previously resolved. D-319 records Linux supervisor identity and runtime requirements.
+- Existing unrelated edits preserved. Final documentation-only update uses skip-ci to avoid rerunning unchanged executable code.

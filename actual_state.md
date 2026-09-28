@@ -53,8 +53,8 @@ Local choices D-112–D-113, D-120–D-126, D-135–D-137, D-145–D-155, D-160�
 D-200–D-202, D-210–D-213, D-220–D-223, D-230–D-233, D-240–D-244, D-250–D-254, D-260 (TODO §3). Owner decision D-175
 (new dependencies allowed under pinned-version rules).
 ## Audit remediation (2026-09-28)
-Branch `feature/bugfix`: 141 fixed (10 this continuation), 1 open (F-016), F-034 previously resolved.
-See `findings.md` and `audit/BUGFIX-PROGRESS.md`; historical CI gates above predate these fixes.
-32 distinct selected tests passed on Windows JDK 26. Core ABI regenerated/checked; dependent tests compiled.
-No full suite/build or Linux/CI. Last full Windows build: fbee771, 1667 tests, 13 skipped.
-Source/ABI through bc742fe; D-312 through D-318 record current repairs; no schema bump.
+Branch `feature/bugfix`: 142 fixed, 0 open, F-034 previously resolved. Final code: e5321f3 (pushed).
+F-016 now uses isolated Linux subreapers; all 6 new lifecycle/PATH regressions pass (D-319).
+[Focused Linux CI](https://github.com/korvin2000/ASTROLABE/actions/runs/36364095425): 32 passed, 1 Windows-only skip.
+Windows: 4 settlement tests passed, Linux class skipped; core compilation and ABI check passed.
+No full suite/build or P7 run. Last full Windows build: fbee771, 1667 tests, 13 skipped.
