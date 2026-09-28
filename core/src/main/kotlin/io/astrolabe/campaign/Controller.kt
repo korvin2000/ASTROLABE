@@ -936,7 +936,7 @@ public class Controller @JvmOverloads public constructor(
         }
         reaccept(c, scheduler)
         val state = checkNotNull(c.state)
-        val stale = state.graph.ledger(c.contract, c.stamper.report().candidateId).unfinished().toSet()
+        val stale = stale(c)
         val runs = c.contract.acceptance.filterIsInstance<Acceptance.Run>().map { it.id }.toSet()
         val obligations = state.graph.increments.filter { it.status == IncrementStatus.Verified && it.requirementIds.any { r -> r in stale } }
             .flatMap { it.accept }.filter { it in runs }.distinct()
@@ -947,10 +947,19 @@ public class Controller @JvmOverloads public constructor(
         reaccept(c, scheduler)
     }
 
+    /**
+     * Requirements whose verification no longer holds: unfinished in the durable ledger (reset when an interrupted
+     * finalization resumes) or in the ledger derived from the current graph identity (a contract amendment).
+     */
+    private fun stale(c: OpenedCampaign): Set<String> {
+        val state = checkNotNull(c.state)
+        return state.ledger.unfinished().toSet() + state.graph.ledger(c.contract, c.stamper.report().candidateId).unfinished()
+    }
+
     private fun reaccept(c: OpenedCampaign, scheduler: Scheduler) {
         val report = c.stamper.report()
         val state = checkNotNull(c.state)
-        val stale = state.graph.ledger(c.contract, c.stamper.report().candidateId).unfinished().toSet()
+        val stale = stale(c)
         for (increment in state.graph.increments.filter { it.status == IncrementStatus.Verified && it.requirementIds.any { r -> r in stale } }) {
             val cell = increment.cells.lastOrNull() ?: continue
             val proposal = CompletionProposal(increment.id, PacketStatus.Done.wire, c.contract.version, report.candidateId, report.candidateId, null, report.env.envId)
