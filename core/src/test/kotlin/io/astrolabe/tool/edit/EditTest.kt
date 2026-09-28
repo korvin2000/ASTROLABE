@@ -593,6 +593,12 @@ class EditTest {
         assertEquals("ok", status(run(anchored("src/tabs.py", tabs, hunk("\tif x:\n\t\treturn 1\n", "    if y:\n        return 2\n")))))
         assertEquals("def t():\n\tif y:\n\t\treturn 2\n", Files.readString(repo.resolve("src/tabs.py")))
 
+        // A nested replacement uniformly at 8 spaces over two-tab lines is two 4-wide levels, not one 8-wide level.
+        repo.write("src/nested.py", "def n():\n\tif x:\n\t\tlog()\n\t\treturn 1\n")
+        val nested = seen("src/nested.py", 1, 4)
+        assertEquals("ok", status(run(anchored("src/nested.py", nested, hunk("\t\tlog()\n\t\treturn 1\n", "        log()\n        return 2\n")))))
+        assertEquals("def n():\n\tif x:\n\t\tlog()\n\t\treturn 2\n", Files.readString(repo.resolve("src/nested.py")))
+
         repo.write("src/mixed.py", "def m():\n\tif x:\n        return 1\n")
         val mixed = seen("src/mixed.py", 1, 3)
         assertEquals("ok", status(run(anchored("src/mixed.py", mixed, hunk("        return 1\n", "    return 2\n")))))

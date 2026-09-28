@@ -351,7 +351,8 @@ public class Edit(
                 is Location.One -> {
                     val atLineStart = location.span.start == 0 || text[location.span.start - 1] == '\n'
                     val lf = hunk.new.replace("\r\n", "\n")
-                    location.span to (if (tabIndented) tabsFor(lf, atLineStart) else lf).replace("\n", eol)
+                    val replaced = text.substring(location.span.start, location.span.end).replace("\r\n", "\n")
+                    location.span to (if (tabIndented) tabsFor(lf, replaced, atLineStart) else lf).replace("\n", eol)
                 }
                 is Location.None -> throw Refusal(EditError("anchor", index, path, "anchor 0× in '$path'" + (if (location.candidates.isEmpty()) "" else "; nearest: " + location.candidates.joinToString(" · ") { "${it.line}: ${it.text}" }), candidates = location.candidates))
                 is Location.Many -> throw Refusal(EditError("anchor", index, path, "anchor ${location.sites.size}× in '$path': sites " + location.sites.joinToString(", ") { "${it.lines}" } + " — add near=", sites = location.sites.map { it.lines }))
@@ -701,16 +702,22 @@ public class Edit(
     }
 
     /**
-     * D-324: a replacement indented with spaces of one consistent width becomes tab-indented for a tab-indented
-     * file; anything ambiguous (tabs, mixed or inconsistent widths) is left as written. A first line that
-     * continues a line of the file ([atLineStart] false) has no indentation of its own.
+     * D-324: a replacement indented with spaces becomes tab-indented for a tab-indented file when one tab's width
+     * follows from the [replaced] lines: the smallest space indent of the replacement over the smallest tab depth
+     * of the replaced text (8 spaces over two tabs is 4, never one 8-wide level). Anything ambiguous (tabs, mixed
+     * or inconsistent widths, no indented replaced line) is left as written. A first line that continues a line
+     * of the file ([atLineStart] false) has no indentation of its own.
      */
-    private fun tabsFor(replacement: String, atLineStart: Boolean): String {
+    private fun tabsFor(replacement: String, replaced: String, atLineStart: Boolean): String {
+        fun ownLines(block: String) = block.split('\n').withIndex().filter { (i, line) -> (i > 0 || atLineStart) && line.isNotBlank() }
         val lines = replacement.split('\n')
-        val own = lines.withIndex().filter { (i, line) -> (i > 0 || atLineStart) && line.isNotBlank() }
+        val own = ownLines(replacement)
         val indents = own.map { (_, line) -> line.takeWhile { it == ' ' || it == '\t' } }.filter { it.isNotEmpty() }
         if (indents.isEmpty() || indents.any { indent -> indent.any { it == '\t' } }) return replacement
-        val width = indents.minOf { it.length }
+        val depth = ownLines(replaced).map { (_, line) -> line.takeWhile { it == '\t' }.length }.filter { it > 0 }.minOrNull() ?: return replacement
+        val smallest = indents.minOf { it.length }
+        if (smallest % depth != 0) return replacement
+        val width = smallest / depth
         if (indents.any { it.length % width != 0 }) return replacement
         val converted = own.map { it.index }.toSet()
         return lines.mapIndexed { i, line ->
