@@ -209,4 +209,33 @@ class DirtyStateTest {
             assertNotNull(separated.sourceOf("src/a.py"))
         }
     }
+
+    @Test
+    fun `a capture whose first attempt sees a concurrent change succeeds on retry`(@TempDir state: Path) {
+        WorkspaceFixture.create(state).use { fixture ->
+            fixture.repo.modify("src/a.py", "def a():\n    return 2\n")
+            val attempts = ArrayList<Int>()
+            fixture.dirtyState.beforeRecheck = { attempt ->
+                attempts += attempt
+                if (attempt == 1) fixture.repo.modify("src/a.py", "def a():\n    return 3\n")
+            }
+
+            val snapshot = fixture.dirtyState.capture()
+
+            assertEquals(listOf(1, 2), attempts)
+            val entry = snapshot.entries.single { it.path == "src/a.py" }
+            assertContentEquals("def a():\n    return 3\n".toByteArray(), fixture.dirtyState.bytesOf(entry))
+        }
+    }
+
+    @Test
+    fun `a writer that never settles still fails capture after the last attempt`(@TempDir state: Path) {
+        WorkspaceFixture.create(state).use { fixture ->
+            var n = 0
+            fixture.dirtyState.beforeRecheck = { fixture.repo.modify("src/a.py", "writer ${++n}\n") }
+
+            assertFailsWith<SnapshotIntegrityError> { fixture.dirtyState.capture() }
+            assertEquals(3, n)
+        }
+    }
 }

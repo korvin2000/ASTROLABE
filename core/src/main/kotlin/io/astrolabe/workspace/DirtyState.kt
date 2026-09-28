@@ -182,6 +182,8 @@ public data class Separated(
     }
 }
 
+private const val CAPTURE_ATTEMPTS = 3
+
 /**
  * The initial dirty-state record (§4.6, D-53, FX-06).
  *
@@ -215,6 +217,22 @@ public class DirtyState(
         workspace.git.unsupportedForms().firstOrNull()?.let {
             throw UnsupportedRepositoryForm(it, "dirty-state capture")
         }
+        // D-274: a concurrent writer (dev server, IDE autosave) gets a bounded, immediate retry; the last failure stands.
+        var attempt = 1
+        while (true) {
+            try {
+                return captureOnce(turn, attempt)
+            } catch (changed: SnapshotIntegrityError) {
+                if (attempt >= CAPTURE_ATTEMPTS) throw changed
+                attempt++
+            }
+        }
+    }
+
+    /** Test seam: runs after an attempt's reads and before its integrity recheck, with the attempt number. */
+    internal var beforeRecheck: (attempt: Int) -> Unit = {}
+
+    private fun captureOnce(turn: Int, attempt: Int): Snapshot {
         val status = workspace.git.status(UntrackedFiles.ALL, includeIgnored = true)
         val index = workspace.git.lsFiles()
         val entries = LinkedHashMap<String, SnapshotEntry>()
@@ -253,6 +271,7 @@ public class DirtyState(
         val base = status.branch?.let { it.oid?.hex ?: io.astrolabe.id.Stamp.NO_COMMIT }
         // A directory member (nested repository, submodule) carries no bytes to recover.
         val recoverable = report.members.filterValues { it.type != EntryType.Directory }
+        beforeRecheck(attempt)
         if (captured != recoverable || base != report.baseCommit || stamper.stamp().id != report.candidateId ||
             workspace.git.lsFiles() != index ||
             workspace.git.status(UntrackedFiles.ALL, includeIgnored = true) != status
