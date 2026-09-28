@@ -266,10 +266,11 @@ internal object JestJson {
         val total = requireNotNull(intField(root, "numTotalTests"))
         require(total == out.size)
         val counts = TestResults.counts(out)
-        for ((field, actual) in listOf("numPassedTests" to counts.passed, "numFailedTests" to counts.failed,
-            "numPendingTests" to counts.skipped)) {
+        for ((field, actual) in listOf("numPassedTests" to counts.passed, "numFailedTests" to counts.failed)) {
             if (field in root) require(intField(root, field) == actual)
         }
+        // Jest reports `todo` apart from `pending`; both parse as skipped.
+        if ("numPendingTests" in root) require((intField(root, "numPendingTests") ?: -1) + (intField(root, "numTodoTests") ?: 0) == counts.skipped)
         require(root["success"]?.jsonPrimitive?.content != "false" || counts.failed > 0)
         return XmlParse(out, total, emptyList())
     }

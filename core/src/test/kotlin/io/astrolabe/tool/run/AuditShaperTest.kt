@@ -16,6 +16,28 @@ class AuditShaperTest {
     }
 
     @Test
+    fun `unittest expected failures are not counted as failures`() {
+        val ok = Shapers.shape(Recorded.capture(argv = listOf("python", "-m", "unittest"), exitCode = 0,
+            output = "Ran 2 tests in 0.1s\nOK (expected failures=1)\n".toByteArray()))
+        assertEquals(0, ok.counts!!.failed)
+        assertEquals(Outcome.Passed, ok.status)
+        val failed = Shapers.shape(Recorded.capture(argv = listOf("python", "-m", "unittest"), exitCode = 1,
+            output = "Ran 4 tests in 0.1s\nFAILED (failures=1, expected failures=2)\n".toByteArray()))
+        assertEquals(1, failed.counts!!.failed)
+    }
+
+    @Test
+    fun `jest todo tests are counted apart from pending`() {
+        val report = """{"numTotalTests":2,"numPassedTests":1,"numFailedTests":0,"numPendingTests":0,"numTodoTests":1,"success":true,""" +
+            """"testResults":[{"assertionResults":[{"title":"ok","status":"passed"},{"title":"later","status":"todo"}]}]}"""
+        val result = Shapers.shape(Recorded.capture(argv = listOf("jest"), exitCode = 0,
+            output = "Tests: 1 todo, 1 passed, 2 total\n".toByteArray(),
+            reports = listOf(ReportArtifact("report.json", ReportKind.JestJson, true, "this invocation", report.toByteArray()))))
+        assertEquals(Outcome.Passed, result.status)
+        assertEquals(1, result.counts!!.skipped)
+    }
+
+    @Test
     fun `cargo aggregates every suite including later failures`() {
         val result = Shapers.shape(Recorded.capture(argv = listOf("cargo", "test"), exitCode = 0,
             output = ("test result: ok. 2 passed; 0 failed; 0 ignored\n" +

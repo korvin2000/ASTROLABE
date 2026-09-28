@@ -102,7 +102,7 @@ internal object GenericSummaries {
     private val GO_PACKAGE = Regex("""^(ok|FAIL|\?)\s+(\S+)\s+(\[no test files\]|\(cached\)|[\d.]+m?s)""")
     private val UNITTEST_RAN = Regex("""^Ran\s+(\d+)\s+tests?\s+in""")
     private val UNITTEST_FAILED = Regex("""^(?:FAILED|OK)\s*\((.*)\)""")
-    private val UNITTEST_COUNT = Regex("""(failures|errors|skipped)=(\d+)""")
+    private val UNITTEST_COUNT = Regex("""(?:^|,\s*)(failures|errors|skipped)=(\d+)""")
     private val UNITTEST_CASE = Regex("""^(FAIL|ERROR):\s+(\S+)\s*\((.+)\)""")
     private val DOTNET = Regex("""Failed:\s*(\d+),\s*Passed:\s*(\d+),\s*Skipped:\s*(\d+),\s*Total:\s*(\d+)""")
     private val MOCHA_PASSING = Regex("""^(\d+)\s+passing""")
