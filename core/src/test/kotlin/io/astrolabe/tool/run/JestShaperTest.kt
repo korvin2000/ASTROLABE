@@ -104,6 +104,19 @@ class JestShaperTest {
     }
 
     @Test
+    fun `jest identities are equal when the same suite runs under different roots`() {
+        fun shapedUnder(root: String) = Shapers.shape(Recorded.capture(
+            argv = listOf("npx", "jest"), exitCode = 1,
+            reports = listOf(ReportArtifact("build/act-7/jest.json", ReportKind.JestJson, true, "written by this invocation",
+                """{"numTotalTests":1,"numFailedTests":1,"testResults":[{"name":"$root/services/a/test.ts","assertionResults":[{"title":"fails","status":"failed"}]}]}""".toByteArray())),
+        ).copy(cwd = null, executionRoot = root))
+        val workspace = shapedUnder("/home/dev/shop").tests.single().identity
+        val baseline = shapedUnder("/var/state/candidates/W-1-a1-s0").tests.single().identity
+        assertEquals("services/a/test.ts", workspace.file)
+        assertEquals(workspace.canonical, baseline.canonical)
+    }
+
+    @Test
     fun `jest json keeps directories for equal test basenames`() {
         val report = """
             {"numTotalTests":2,"numFailedTests":2,"testResults":[

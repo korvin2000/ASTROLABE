@@ -30,7 +30,7 @@ public class JestShaper : Shaper {
         capture.rejectedReports.forEach { limitations += "report '${it.path}' ignored: ${it.rejectionReason} (D-50)" }
 
         val report = capture.evidenceReports.firstOrNull { it.kind == ReportKind.JestJson }
-        val fromReport = report?.let { JestJson.parse(it.content ?: ByteArray(0), capture.checkId, capture.cwd) }
+        val fromReport = report?.let { JestJson.parse(it.content ?: ByteArray(0), capture.checkId, capture.executionRoot ?: capture.cwd) }
         fromReport?.problems?.forEach { limitations += "report '${report.path}': $it" }
 
         val terminal = JestTerminal.parse(capture.text(), capture.checkId)

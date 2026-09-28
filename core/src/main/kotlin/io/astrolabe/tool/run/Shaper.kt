@@ -105,6 +105,8 @@ public data class RunCapture(
     val checkId: String? = null,
     /** The selector the runner was given (`-k ctx`, `--tests CartTest`); recorded with the report (D-50). */
     val selector: String? = null,
+    /** The absolute directory the process ran in; report paths are made relative to it (D-27 identities). */
+    val executionRoot: String? = null,
 ) {
     init {
         require(actionId.isNotBlank()) { "a capture needs its action id (D-50)" }
@@ -126,7 +128,7 @@ public data class RunCapture(
                 exitCode == other.exitCode && timedOut == other.timedOut && output.contentEquals(other.output) &&
                 captureComplete == other.captureComplete && reports == other.reports &&
                 runnerVersion == other.runnerVersion && definitionVersion == other.definitionVersion &&
-                checkId == other.checkId && selector == other.selector
+                checkId == other.checkId && selector == other.selector && executionRoot == other.executionRoot
             )
 
     override fun hashCode(): Int {
@@ -143,6 +145,7 @@ public data class RunCapture(
         result = 31 * result + (definitionVersion?.hashCode() ?: 0)
         result = 31 * result + (checkId?.hashCode() ?: 0)
         result = 31 * result + (selector?.hashCode() ?: 0)
+        result = 31 * result + (executionRoot?.hashCode() ?: 0)
         return result
     }
 

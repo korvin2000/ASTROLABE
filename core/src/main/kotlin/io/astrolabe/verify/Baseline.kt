@@ -204,6 +204,7 @@ public class Baseline(
             exitCode = (proc.status as? ProcStatus.Exited)?.exitCode, timedOut = proc.status == ProcStatus.DeadlineExceeded,
             output = observed.output, captureComplete = !lost && !observed.truncated && proc.status !is ProcStatus.Lost,
             reports = reports(dir, started, actionId), checkId = check.id, selector = check.selector.toString(),
+            executionRoot = runCatching { cwd.toRealPath() }.getOrDefault(cwd.toAbsolutePath()).toString(),
         )
         val shaped = Shapers.shape(capture, ShapeBudget(estimator = estimator, recallAlias = alias))
         shaped.limitations.forEach { limits += Limit("shaper", it) }

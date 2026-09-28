@@ -384,6 +384,7 @@ public class Verify(
             val capture = RunCapture(
                 reports = collected,
                 actionId = actionId, argv = command.argv, shell = false, cwd = command.cwd,
+                executionRoot = runCatching { cwd.toRealPath() }.getOrDefault(cwd.toAbsolutePath()).toString(),
                 exitCode = (observed.proc.status as? ProcStatus.Exited)?.exitCode, timedOut = observed.proc.status == ProcStatus.DeadlineExceeded,
                 output = observed.output, captureComplete = !observed.lost && !observed.truncated && observed.proc.status !is ProcStatus.Lost, checkId = check.id, selector = check.selector.toString(),
             )
