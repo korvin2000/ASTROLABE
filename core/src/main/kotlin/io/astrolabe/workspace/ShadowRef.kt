@@ -315,7 +315,7 @@ public class ShadowRef @JvmOverloads public constructor(
             }
             files.add(path)
             val digest = runCatching {
-                if (entry.mode == FileMode.SYMLINK) Digest.of(Files.readSymbolicLink(resolved.real).toString().toByteArray(StandardCharsets.UTF_8))
+                if (entry.mode == FileMode.SYMLINK) Digest.of(linkTarget(resolved.real).toByteArray(StandardCharsets.UTF_8))
                 else digestOfFile(resolved.real)
             }.getOrNull()
             if (digest != Digest.of(bytes) || !matchesMode(exported, path, entry.mode)) mismatches.add(path)
@@ -340,7 +340,7 @@ public class ShadowRef @JvmOverloads public constructor(
                 when (entry.kind) {
                     SnapshotEntryKind.Symlink -> {
                         check(resolved.kind == PathKind.Symlink)
-                        Digest.of(Files.readSymbolicLink(resolved.real).toString().toByteArray(StandardCharsets.UTF_8))
+                        Digest.of(linkTarget(resolved.real).toByteArray(StandardCharsets.UTF_8))
                     }
                     SnapshotEntryKind.File -> {
                         check(resolved.kind == PathKind.Regular)
@@ -471,7 +471,7 @@ public class ShadowRef @JvmOverloads public constructor(
             PathKind.Missing, PathKind.Directory -> null
             PathKind.Symlink -> runCatching {
                 Digest.of(
-                    Files.readSymbolicLink(resolved.real).toString()
+                    linkTarget(resolved.real)
                         .toByteArray(StandardCharsets.UTF_8),
                 )
             }.getOrNull()

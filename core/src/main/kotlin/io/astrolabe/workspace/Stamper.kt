@@ -268,7 +268,7 @@ public class Stamper @JvmOverloads public constructor(
         return when (resolved.kind) {
             PathKind.Missing -> deleted(path)
             PathKind.Symlink -> {
-                val bytes = Files.readSymbolicLink(resolved.real).toString().toByteArray(StandardCharsets.UTF_8)
+                val bytes = linkTarget(resolved.real).toByteArray(StandardCharsets.UTF_8)
                 if (matchesObject(bytes, FileMode.SYMLINK, baseline)) return null
                 StampEntry(path, EntryType.Symlink, FileMode.SYMLINK, Digest.of(bytes), bytes.size.toLong())
             }

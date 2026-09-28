@@ -316,7 +316,7 @@ public class DirtyState(
         return when (resolved.kind) {
             PathKind.Missing -> deleted(path)
             PathKind.Symlink -> {
-                val bytes = Files.readSymbolicLink(resolved.real).toString().toByteArray(StandardCharsets.UTF_8)
+                val bytes = linkTarget(resolved.real).toByteArray(StandardCharsets.UTF_8)
                 SnapshotEntry(path, SnapshotEntryKind.Symlink, FileMode.SYMLINK,
                     blobs.put(bytes, BlobKind.PREIMAGE, ids, recovery = true), bytes.size.toLong())
             }

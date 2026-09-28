@@ -239,6 +239,15 @@ class SnapshotCaptureRegressionTest {
         }
     }
 
+    @Test
+    fun `a symlink target uses Git's forward slashes only where backslash is the separator`() {
+        assertEquals("sub/target", gitLinkTarget("sub\\target", separator = '\\'))
+        assertEquals("sub\\target", gitLinkTarget("sub\\target", separator = '/'))
+        assertEquals("sub/target", gitLinkTarget("sub/target", separator = '/'))
+        val expected = if (java.io.File.separatorChar == '\\') "a/b" else "a\\b"
+        assertEquals(expected, gitLinkTarget("a\\b"))
+    }
+
     private fun assertLinkCaptured(fixture: WorkspaceFixture, path: String) {
         val targetBytes = Files.readSymbolicLink(fixture.repo.resolve(path)).toString().toByteArray(Charsets.UTF_8)
         val report = fixture.stamper.report()

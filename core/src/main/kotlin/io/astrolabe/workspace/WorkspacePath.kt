@@ -482,3 +482,12 @@ public class WorkspacePath private constructor(
         }
     }
 }
+
+/**
+ * The target of the symlink at [link] in Git's spelling. Git for Windows writes a tracked target
+ * `a/b` to disk as `a\b`; on POSIX a backslash is an ordinary name character and is kept.
+ */
+internal fun linkTarget(link: Path): String = gitLinkTarget(Files.readSymbolicLink(link).toString())
+
+internal fun gitLinkTarget(raw: String, separator: Char = java.io.File.separatorChar): String =
+    if (separator == '\\') raw.replace('\\', '/') else raw
