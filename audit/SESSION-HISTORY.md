@@ -691,3 +691,11 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - Windows CI lost its runner since c24c4fe: post-exit `descendants()` kills hit unrelated orphans with a reused parent
   PID (JDK cannot bound them once the root exited). Fixed in Git.kt and the fixtures; my bisect shells died the same way.
 - Core ABI regenerated; Windows `gradlew check` run locally; merged into `main` and pushed with owner approval.
+
+## 2026-09-28: real LLM transport over AI Gate (`feat/ai-gate-transport`, owner request, out of order P7)
+- Implemented `ASTROLABE_CHANGES_FOR_LLM_TRANSPORT_SDK.md` against `llm-transport-sdk` (S-01…S-17 landed), checking
+  each claim in source first; corrections are tabled in `audit/OUT-OF-ORDER-P7-AIGATE.md` (D-326–D-335).
+- Core/provider-api seams A-01…A-09; new `:provider-ai-gate` (composite build, present only with the SDK checkout).
+- Tests: FakeProvider-backed adapter tests, recorded Anthropic/Responses SSE fixtures through the real codecs, an
+  `Astrolabe` campaign end to end. Two Fable 5.1 reviews (core seams; adapter): all findings fixed.
+- ABI dumps regenerated; full Windows build at the end of the session (journal). Local commits only; not merged or pushed.

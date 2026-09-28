@@ -8,7 +8,9 @@ public final class io/astrolabe/Astrolabe : java/lang/AutoCloseable {
 	public fun <init> (Lio/astrolabe/Config;Lio/astrolabe/provider/ProviderAdapter;Lio/astrolabe/event/Authority;Ljava/time/Clock;Lio/astrolabe/id/IdGen;)V
 	public fun <init> (Lio/astrolabe/Config;Lio/astrolabe/provider/ProviderAdapter;Lio/astrolabe/event/Authority;Ljava/time/Clock;Lio/astrolabe/id/IdGen;Lio/astrolabe/campaign/OptionalLayers;)V
 	public fun <init> (Lio/astrolabe/Config;Lio/astrolabe/provider/ProviderAdapter;Lio/astrolabe/event/Authority;Ljava/time/Clock;Lio/astrolabe/id/IdGen;Lio/astrolabe/campaign/OptionalLayers;Lio/astrolabe/campaign/Deployer;)V
-	public synthetic fun <init> (Lio/astrolabe/Config;Lio/astrolabe/provider/ProviderAdapter;Lio/astrolabe/event/Authority;Ljava/time/Clock;Lio/astrolabe/id/IdGen;Lio/astrolabe/campaign/OptionalLayers;Lio/astrolabe/campaign/Deployer;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Lio/astrolabe/Config;Lio/astrolabe/provider/ProviderAdapter;Lio/astrolabe/event/Authority;Ljava/time/Clock;Lio/astrolabe/id/IdGen;Lio/astrolabe/campaign/OptionalLayers;Lio/astrolabe/campaign/Deployer;Lio/astrolabe/provider/EstimatorFactory;)V
+	public fun <init> (Lio/astrolabe/Config;Lio/astrolabe/provider/ProviderAdapter;Lio/astrolabe/event/Authority;Ljava/time/Clock;Lio/astrolabe/id/IdGen;Lio/astrolabe/campaign/OptionalLayers;Lio/astrolabe/campaign/Deployer;Lio/astrolabe/provider/EstimatorFactory;Z)V
+	public synthetic fun <init> (Lio/astrolabe/Config;Lio/astrolabe/provider/ProviderAdapter;Lio/astrolabe/event/Authority;Ljava/time/Clock;Lio/astrolabe/id/IdGen;Lio/astrolabe/campaign/OptionalLayers;Lio/astrolabe/campaign/Deployer;Lio/astrolabe/provider/EstimatorFactory;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun campaign (Lio/astrolabe/Project;Ljava/lang/String;Lio/astrolabe/campaign/CampaignPolicy;Lio/astrolabe/campaign/PublicationRequest;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public final fun campaign (Lio/astrolabe/Project;Ljava/lang/String;Lio/astrolabe/campaign/CampaignPolicy;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public final fun campaign (Lio/astrolabe/Project;Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
@@ -3406,7 +3408,8 @@ public final class io/astrolabe/campaign/Controller {
 	public fun <init> (Lio/astrolabe/Config;Ljava/time/Clock;Lio/astrolabe/id/IdGen;Lio/astrolabe/event/Events;Lio/astrolabe/workspace/EnvInputs;Lio/astrolabe/store/FaultPoints;Lio/astrolabe/telemetry/Spans;Ljava/time/Duration;Lio/astrolabe/telemetry/PrecompileMetrics;Lio/astrolabe/route/Router;)V
 	public fun <init> (Lio/astrolabe/Config;Ljava/time/Clock;Lio/astrolabe/id/IdGen;Lio/astrolabe/event/Events;Lio/astrolabe/workspace/EnvInputs;Lio/astrolabe/store/FaultPoints;Lio/astrolabe/telemetry/Spans;Ljava/time/Duration;Lio/astrolabe/telemetry/PrecompileMetrics;Lio/astrolabe/route/Router;Lio/astrolabe/kb/Extraction;)V
 	public fun <init> (Lio/astrolabe/Config;Ljava/time/Clock;Lio/astrolabe/id/IdGen;Lio/astrolabe/event/Events;Lio/astrolabe/workspace/EnvInputs;Lio/astrolabe/store/FaultPoints;Lio/astrolabe/telemetry/Spans;Ljava/time/Duration;Lio/astrolabe/telemetry/PrecompileMetrics;Lio/astrolabe/route/Router;Lio/astrolabe/kb/Extraction;Lio/astrolabe/campaign/OptionalLayers;)V
-	public synthetic fun <init> (Lio/astrolabe/Config;Ljava/time/Clock;Lio/astrolabe/id/IdGen;Lio/astrolabe/event/Events;Lio/astrolabe/workspace/EnvInputs;Lio/astrolabe/store/FaultPoints;Lio/astrolabe/telemetry/Spans;Ljava/time/Duration;Lio/astrolabe/telemetry/PrecompileMetrics;Lio/astrolabe/route/Router;Lio/astrolabe/kb/Extraction;Lio/astrolabe/campaign/OptionalLayers;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Lio/astrolabe/Config;Ljava/time/Clock;Lio/astrolabe/id/IdGen;Lio/astrolabe/event/Events;Lio/astrolabe/workspace/EnvInputs;Lio/astrolabe/store/FaultPoints;Lio/astrolabe/telemetry/Spans;Ljava/time/Duration;Lio/astrolabe/telemetry/PrecompileMetrics;Lio/astrolabe/route/Router;Lio/astrolabe/kb/Extraction;Lio/astrolabe/campaign/OptionalLayers;Lio/astrolabe/provider/EstimatorFactory;)V
+	public synthetic fun <init> (Lio/astrolabe/Config;Ljava/time/Clock;Lio/astrolabe/id/IdGen;Lio/astrolabe/event/Events;Lio/astrolabe/workspace/EnvInputs;Lio/astrolabe/store/FaultPoints;Lio/astrolabe/telemetry/Spans;Ljava/time/Duration;Lio/astrolabe/telemetry/PrecompileMetrics;Lio/astrolabe/route/Router;Lio/astrolabe/kb/Extraction;Lio/astrolabe/campaign/OptionalLayers;Lio/astrolabe/provider/EstimatorFactory;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun getPrecompiles ()Lio/astrolabe/telemetry/PrecompileMetrics;
 	public final fun getRouter ()Lio/astrolabe/route/Router;
 	public final fun open (Lio/astrolabe/Project;Lio/astrolabe/campaign/CampaignRequest;Lio/astrolabe/campaign/CampaignPolicy;)Lio/astrolabe/campaign/OpenedCampaign;
@@ -4978,12 +4981,15 @@ public final class io/astrolabe/cell/CellModel {
 	public fun <init> (Lio/astrolabe/provider/ProviderAdapter;Lio/astrolabe/provider/Profile;Lio/astrolabe/provider/TokenEstimator;)V
 	public fun <init> (Lio/astrolabe/provider/ProviderAdapter;Lio/astrolabe/provider/Profile;Lio/astrolabe/provider/TokenEstimator;Lio/astrolabe/provider/Effort;)V
 	public fun <init> (Lio/astrolabe/provider/ProviderAdapter;Lio/astrolabe/provider/Profile;Lio/astrolabe/provider/TokenEstimator;Lio/astrolabe/provider/Effort;I)V
-	public synthetic fun <init> (Lio/astrolabe/provider/ProviderAdapter;Lio/astrolabe/provider/Profile;Lio/astrolabe/provider/TokenEstimator;Lio/astrolabe/provider/Effort;IILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Lio/astrolabe/provider/ProviderAdapter;Lio/astrolabe/provider/Profile;Lio/astrolabe/provider/TokenEstimator;Lio/astrolabe/provider/Effort;IZ)V
+	public synthetic fun <init> (Lio/astrolabe/provider/ProviderAdapter;Lio/astrolabe/provider/Profile;Lio/astrolabe/provider/TokenEstimator;Lio/astrolabe/provider/Effort;IZILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun getAdapter ()Lio/astrolabe/provider/ProviderAdapter;
 	public final fun getEffort ()Lio/astrolabe/provider/Effort;
 	public final fun getEstimator ()Lio/astrolabe/provider/TokenEstimator;
 	public final fun getMaxOutputTokens ()I
+	public final fun getNarrowedOutput ()Z
 	public final fun getProfile ()Lio/astrolabe/provider/Profile;
+	public final fun rebind (Lio/astrolabe/provider/Profile;Lio/astrolabe/provider/Effort;Lio/astrolabe/provider/EstimatorFactory;)Lio/astrolabe/cell/CellModel;
 }
 
 public final class io/astrolabe/cell/CellStatus : java/lang/Enum {
@@ -5499,6 +5505,8 @@ public final class io/astrolabe/cell/Layout {
 	public static final field INSTANCE Lio/astrolabe/cell/Layout;
 	public static final fun compiled (Lio/astrolabe/cell/CompiledK;)Ljava/lang/String;
 	public static final fun render (Lio/astrolabe/cell/Role;Lio/astrolabe/provider/ToolMask;Lio/astrolabe/auth/ExecutionMode;Ljava/lang/String;Lio/astrolabe/cell/CompiledK;Lio/astrolabe/cell/Transcript;)Ljava/util/List;
+	public static final fun render (Lio/astrolabe/cell/Role;Lio/astrolabe/provider/ToolMask;Lio/astrolabe/auth/ExecutionMode;Ljava/lang/String;Lio/astrolabe/cell/CompiledK;Lio/astrolabe/cell/Transcript;Z)Ljava/util/List;
+	public static synthetic fun render$default (Lio/astrolabe/cell/Role;Lio/astrolabe/provider/ToolMask;Lio/astrolabe/auth/ExecutionMode;Ljava/lang/String;Lio/astrolabe/cell/CompiledK;Lio/astrolabe/cell/Transcript;ZILjava/lang/Object;)Ljava/util/List;
 	public static final fun system (Lio/astrolabe/cell/Role;Lio/astrolabe/provider/ToolMask;Lio/astrolabe/auth/ExecutionMode;)Ljava/lang/String;
 }
 
@@ -10373,6 +10381,50 @@ public final class io/astrolabe/event/AgentEvent$Cell$GateFired$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
 }
 
+public final class io/astrolabe/event/AgentEvent$Cell$ModelProgress : io/astrolabe/event/AgentEvent$Cell {
+	public static final field Companion Lio/astrolabe/event/AgentEvent$Cell$ModelProgress$Companion;
+	public fun <init> (Lio/astrolabe/id/Identities;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Integer;Lio/astrolabe/event/Phase;Lio/astrolabe/event/SpanId;Lio/astrolabe/event/SpanId;)V
+	public synthetic fun <init> (Lio/astrolabe/id/Identities;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Integer;Lio/astrolabe/event/Phase;Lio/astrolabe/event/SpanId;Lio/astrolabe/event/SpanId;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lio/astrolabe/id/Identities;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/lang/Long;
+	public final fun component5 ()Ljava/lang/Long;
+	public final fun component6 ()Ljava/lang/Integer;
+	public final fun component7 ()Lio/astrolabe/event/Phase;
+	public final fun component8 ()Lio/astrolabe/event/SpanId;
+	public final fun component9 ()Lio/astrolabe/event/SpanId;
+	public final fun copy (Lio/astrolabe/id/Identities;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Integer;Lio/astrolabe/event/Phase;Lio/astrolabe/event/SpanId;Lio/astrolabe/event/SpanId;)Lio/astrolabe/event/AgentEvent$Cell$ModelProgress;
+	public static synthetic fun copy$default (Lio/astrolabe/event/AgentEvent$Cell$ModelProgress;Lio/astrolabe/id/Identities;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Integer;Lio/astrolabe/event/Phase;Lio/astrolabe/event/SpanId;Lio/astrolabe/event/SpanId;ILjava/lang/Object;)Lio/astrolabe/event/AgentEvent$Cell$ModelProgress;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAttempt ()Ljava/lang/Integer;
+	public fun getIds ()Lio/astrolabe/id/Identities;
+	public final fun getInvocationId ()Ljava/lang/String;
+	public final fun getOutputTokens ()Ljava/lang/Long;
+	public fun getParent ()Lio/astrolabe/event/SpanId;
+	public fun getPhase ()Lio/astrolabe/event/Phase;
+	public fun getSpan ()Lio/astrolabe/event/SpanId;
+	public final fun getStage ()Ljava/lang/String;
+	public final fun getTextChars ()Ljava/lang/Long;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/event/AgentEvent$Cell$ModelProgress$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/event/AgentEvent$Cell$ModelProgress$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/event/AgentEvent$Cell$ModelProgress;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/event/AgentEvent$Cell$ModelProgress;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/event/AgentEvent$Cell$ModelProgress$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
 public final class io/astrolabe/event/AgentEvent$Cell$ModelRequested : io/astrolabe/event/AgentEvent$Cell {
 	public static final field Companion Lio/astrolabe/event/AgentEvent$Cell$ModelRequested$Companion;
 	public fun <init> (Lio/astrolabe/id/Identities;Ljava/lang/String;JLjava/lang/String;Lio/astrolabe/event/Phase;Lio/astrolabe/event/SpanId;Lio/astrolabe/event/SpanId;Ljava/lang/Long;)V
@@ -14128,6 +14180,12 @@ public final class io/astrolabe/java/AstrolabeJava : java/lang/AutoCloseable {
 	public fun <init> (Lio/astrolabe/Config;Lio/astrolabe/provider/JavaProviderAdapter;Lio/astrolabe/java/JavaAuthority;Ljava/time/Clock;Lio/astrolabe/campaign/OptionalLayers;)V
 	public fun <init> (Lio/astrolabe/Config;Lio/astrolabe/provider/JavaProviderAdapter;Lio/astrolabe/java/JavaAuthority;Ljava/time/Clock;Lio/astrolabe/campaign/OptionalLayers;Lio/astrolabe/campaign/Deployer;)V
 	public synthetic fun <init> (Lio/astrolabe/Config;Lio/astrolabe/provider/JavaProviderAdapter;Lio/astrolabe/java/JavaAuthority;Ljava/time/Clock;Lio/astrolabe/campaign/OptionalLayers;Lio/astrolabe/campaign/Deployer;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Lio/astrolabe/Config;Lio/astrolabe/provider/ProviderAdapter;Lio/astrolabe/java/JavaAuthority;Lio/astrolabe/provider/EstimatorFactory;)V
+	public fun <init> (Lio/astrolabe/Config;Lio/astrolabe/provider/ProviderAdapter;Lio/astrolabe/java/JavaAuthority;Lio/astrolabe/provider/EstimatorFactory;Ljava/time/Clock;)V
+	public fun <init> (Lio/astrolabe/Config;Lio/astrolabe/provider/ProviderAdapter;Lio/astrolabe/java/JavaAuthority;Lio/astrolabe/provider/EstimatorFactory;Ljava/time/Clock;Lio/astrolabe/campaign/OptionalLayers;)V
+	public fun <init> (Lio/astrolabe/Config;Lio/astrolabe/provider/ProviderAdapter;Lio/astrolabe/java/JavaAuthority;Lio/astrolabe/provider/EstimatorFactory;Ljava/time/Clock;Lio/astrolabe/campaign/OptionalLayers;Lio/astrolabe/campaign/Deployer;)V
+	public fun <init> (Lio/astrolabe/Config;Lio/astrolabe/provider/ProviderAdapter;Lio/astrolabe/java/JavaAuthority;Lio/astrolabe/provider/EstimatorFactory;Ljava/time/Clock;Lio/astrolabe/campaign/OptionalLayers;Lio/astrolabe/campaign/Deployer;Z)V
+	public synthetic fun <init> (Lio/astrolabe/Config;Lio/astrolabe/provider/ProviderAdapter;Lio/astrolabe/java/JavaAuthority;Lio/astrolabe/provider/EstimatorFactory;Ljava/time/Clock;Lio/astrolabe/campaign/OptionalLayers;Lio/astrolabe/campaign/Deployer;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun campaign (Lio/astrolabe/Project;Ljava/lang/String;)Ljava/util/concurrent/CompletableFuture;
 	public final fun campaign (Lio/astrolabe/Project;Ljava/lang/String;Lio/astrolabe/campaign/CampaignPolicy;)Ljava/util/concurrent/CompletableFuture;
 	public final fun campaign (Lio/astrolabe/Project;Ljava/lang/String;Lio/astrolabe/campaign/CampaignPolicy;Lio/astrolabe/campaign/PublicationRequest;)Ljava/util/concurrent/CompletableFuture;

@@ -93,6 +93,15 @@ public sealed interface AgentEvent {
         @SerialName("cell.model_responded")
         public data class ModelResponded(override val ids: Identities, val invocationId: String, val stop: StopReason, val usage: BillableUsage?, override val phase: Phase = Phase.Understand, override val span: SpanId? = null, override val parent: SpanId? = null) : Cell
 
+        /**
+         * Content-free progress of an in-flight model call (D-330), from an `ObservableAdapter`: [stage] is `started`,
+         * `output` (with [textChars] and, when streamed, [outputTokens]) or `retrying` (with the next [attempt]). The
+         * journal stays the record of model text.
+         */
+        @Serializable
+        @SerialName("cell.model_progress")
+        public data class ModelProgress(override val ids: Identities, val invocationId: String, val stage: String, val textChars: Long? = null, val outputTokens: Long? = null, val attempt: Int? = null, override val phase: Phase = Phase.Understand, override val span: SpanId? = null, override val parent: SpanId? = null) : Cell
+
         @Serializable
         @SerialName("cell.tool_called")
         public data class ToolCalled(override val ids: Identities, val opId: Int, val family: String, val op: String, override val phase: Phase, override val span: SpanId? = null, override val parent: SpanId? = null) : Cell

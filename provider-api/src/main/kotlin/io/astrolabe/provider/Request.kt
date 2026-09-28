@@ -103,8 +103,9 @@ public data class Request(
 public enum class StopReason { EndTurn, ToolUse, OutputLimit, Refusal, Cancelled, Truncated }
 
 /**
- * One model response. A truncated or cancelled response never carries an executable [ToolCall]
- * (§15.1 "never execute a half-generated tool call"; AX-01, AX-08) — enforced at construction.
+ * One model response. A truncated, cancelled or output-limited response never carries an executable [ToolCall]
+ * (§15.1 "never execute a half-generated tool call"; AX-01, AX-03, AX-08) — enforced at construction: the call a
+ * reply was writing when it hit the output limit may look complete and still be cut.
  */
 @Serializable
 public data class Response(
@@ -114,7 +115,7 @@ public data class Response(
     val continuation: OpaqueContinuation? = null,
 ) {
     init {
-        if (stop == StopReason.Truncated || stop == StopReason.Cancelled) {
+        if (stop == StopReason.Truncated || stop == StopReason.Cancelled || stop == StopReason.OutputLimit) {
             require(items.none { it is ToolCall }) { "a $stop response cannot expose tool calls" }
         }
     }

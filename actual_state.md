@@ -4,7 +4,8 @@ Snapshot: TODO owns task status; CONTINUE-TASK.md owns next work; audit/SESSION-
 
 ## Counts (2026-09-26, from `#### P… · STATUS` headings)
 **185/185 DONE, 0 IN_PROGRESS, 0 TODO.** P0 19/19 · P1 64/64 · P2 30/30 · P3 25/25 · P4 25/25 · P5 15/15 · P6 7/7.
-Recount: `rg -c '^#### P\d+\.\d+\.\d+ .*· DONE' TODO.md`. P7 (live transports, hosts, live evaluation) is out of scope.
+Recount: `rg -c '^#### P\d+\.\d+\.\d+ .*· DONE' TODO.md`. P7 is out of scope except the owner-requested AI Gate
+transport (2026-09-28, branch `feat/ai-gate-transport`, D-326–D-335).
 
 ## Completion levels
 - **P0–P6:** `FIXTURE_VALIDATED` on Windows + Linux CI (JDK 26). Every live gate is `UNMEASURED` (P7).
@@ -34,20 +35,16 @@ Recount: `rg -c '^#### P\d+\.\d+\.\d+ .*· DONE' TODO.md`. P7 (live transports, 
   `PromotionProposals`. **`tool`:** `Look`, `Edit`, `Run`, `Verify`, `TaskTool`, `KbTool`, `Mount`/`Catalog`, `GeneratedTools`.
 - **`workspace`:** `Worktrees`, `Ownership`, `ScopeAlgebra`. **`atlas`:** `ImportGraph`, `OutlineSource`/`OutlineIndex`,
   `LanguageService`. **`verify`:** `Scheduler`, `Measurement`, `Watcher`, `CampaignReview`.
-- **Modules:** `provider-api`, `core`, `eval`, `index-treesitter` (tree-sitter-ng 0.26.6 + grammar jars, D-175/D-210).
+- **Modules:** `provider-api`, `core`, `eval`, `index-treesitter` (tree-sitter-ng 0.26.6 + grammar jars, D-175/D-210),
+  `provider-ai-gate` (`AiGateAdapter` over `net.ai.gate:ai-gate`; present only with the SDK checkout, D-332).
 
 ## Store
 Schema **v4** (no bump this session). `packets` also holds behaviour-snapshot, campaign-review, increment-review and
 `integration` rows; skills and behaviour maps are `BlobKind.MODULE` blobs linked as a note's `procedure` module.
 
 ## Last verification
-| Gate (Ubuntu + Windows green) | CI run |
-|---|---|
-| P4.3, P4.5, P4.6, P4.7 | 36159227747 |
-| P4.4, P4.8 (P4 phase) | 36162949349 |
-| P5.1–P5.7, P6.2 | 36167689819 |
-| P5.8, P6.1, P6.3 (final) | 36172349269 |
-| Fine-tune + CI repair (`c407c24`) | 36468171641 |
+Ubuntu + Windows CI green: P4–P6 gates 36159227747, 36162949349, 36167689819, 36172349269; fine-tune + CI repair
+(`c407c24`) 36468171641. The AI Gate branch is verified locally only (Windows, JDK 26; journal).
 
 ## Recorded deviations
 Local choices D-112–D-113, D-120–D-126, D-135–D-137, D-145–D-155, D-160–D-165, D-170–D-174, D-180–D-183, D-190–D-195,
@@ -58,3 +55,6 @@ D-200–D-202, D-210–D-213, D-220–D-223, D-230–D-233, D-240–D-244, D-250
 `fix(ci)` commits). New switches keep safe defaults: `unknownOutcomeReconciliation` Host, `gitDeadlineSeconds` 600,
 `providerTerminalWaitSeconds` 60, `checkerFallbackTimeBoxSeconds` 120, digest cap 150 + 8·requirements ≤ 2000
 (D-321–D-325). Core ABI dump regenerated; CI green on both OSes (36468171641).
+## AI Gate transport (2026-09-28, not merged)
+Real transport: `AiGateAdapter(llm, profiles)` + `Astrolabe(…, estimators = adapter.estimators(HeuristicEstimator()))`;
+profiles bind via `Profile.config.gate` (D-333); AX-01..10 pass offline (recorded frames, SDK fake); live smoke pending.

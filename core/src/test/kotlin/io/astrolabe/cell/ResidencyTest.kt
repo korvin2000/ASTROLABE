@@ -1,6 +1,7 @@
 package io.astrolabe.cell
 
 import io.astrolabe.budget.HeuristicEstimator
+import io.astrolabe.context.RebuildReason
 import io.astrolabe.evidence.InMemoryObservations
 import io.astrolabe.evidence.Observation
 import io.astrolabe.fixtures.FakeAdapter
@@ -19,6 +20,8 @@ import io.astrolabe.provider.Items
 import io.astrolabe.provider.Message
 import io.astrolabe.provider.ProblemKind
 import io.astrolabe.provider.Request
+import io.astrolabe.provider.Validations
+import io.astrolabe.provider.ReasoningRef
 import io.astrolabe.provider.Segment
 import io.astrolabe.provider.SegmentKind
 import io.astrolabe.provider.ToolCall
@@ -31,6 +34,7 @@ import io.astrolabe.workset.Workset
 import io.astrolabe.workspace.Ranges
 import io.astrolabe.workspace.VersionChange
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -103,6 +107,32 @@ class ResidencyTest {
         effort = Effort.Medium,
         maxOutputTokens = 1_000,
     )
+
+    @Test
+    fun `reasoning stays with its tool calls through eviction, trimming and the rebuild tail`() {
+        // Anthropic thinking with tool use and Gemini thought signatures replay only together with their calls (A-06).
+        val reasoning = ReasoningRef("anthropic/claude@anthropic-messages", JsonPrimitive("signed thinking"))
+        val thinking = listOf(
+            Resident(reasoning, 1, 12),
+            message("turn 1: reading two files\nthen deciding", 1),
+            call("r1", 1), call("r2", 1),
+            result("r1", "#901", 1, 20), result("r2", "#902", 1, 20),
+        )
+        val residents = thinking + (2..30).flatMap { turn(it, results = 1, lines = 5) }
+        val evicted = residency.batch(residents, 30)
+        assertTrue(evicted.stubbed.any { it.alias == "#901" } && evicted.trimmed > 0, "the turn-1 results were stubbed and its message trimmed")
+        val items = evicted.items
+        assertTrue(items.indexOf(reasoning) in 0 until items.indexOfFirst { it is ToolCall && it.id == "r1" }, "the reasoning item is kept before its calls")
+        assertFalse(Items.pairs(items).broken)
+        assertTrue(Validations.standard(request(items), request(items).estimate(estimator), FakeProfiles.main.capabilities) is Validation.Ok)
+        // The rebuild tail (§5.8, m turns) keeps or drops a turn whole: never reasoning without its calls, or calls without it.
+        val dropped = residency.items(residency.tail(evicted.residents, RebuildReason.Pressure.tailTurns))
+        assertTrue(dropped.none { it == reasoning || it is ToolCall && it.id in setOf("r1", "r2") })
+        val late = (2..30).flatMap { turn(it, results = 1, lines = 5) } + thinking.map { it.copy(turn = 31) } + turn(32, results = 1, lines = 5)
+        val kept = residency.items(residency.tail(late, 2))
+        assertEquals(reasoning, kept.first(), "the kept turn starts with its reasoning")
+        assertEquals(listOf("r1", "r2"), kept.filterIsInstance<ToolCall>().map { it.id }.take(2))
+    }
 
     @Test
     fun `results live k turns then become stubs in place and every call-result unit stays complete`() {

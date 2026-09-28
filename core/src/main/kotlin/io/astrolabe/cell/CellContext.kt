@@ -16,6 +16,7 @@ import io.astrolabe.evidence.Receipts
 import io.astrolabe.id.ExecutionGeneration
 import io.astrolabe.id.Identities
 import io.astrolabe.provider.Effort
+import io.astrolabe.provider.EstimatorFactory
 import io.astrolabe.provider.Profile
 import io.astrolabe.provider.ProviderAdapter
 import io.astrolabe.provider.TokenEstimator
@@ -50,11 +51,23 @@ public class CellModel @JvmOverloads constructor(
     public val effort: Effort = Effort.Medium,
     /** Output headroom of every request; the provider's own limit unless the caller narrows it. */
     public val maxOutputTokens: Int = profile.capabilities.outputLimitTokens,
+    /** Whether the caller narrowed [maxOutputTokens] below the profile limit; [rebind] keeps a narrowing. */
+    public val narrowedOutput: Boolean = maxOutputTokens != profile.capabilities.outputLimitTokens,
 ) {
     init {
         require(maxOutputTokens in 1..profile.capabilities.outputLimitTokens) {
             "maxOutputTokens must be within 1..${profile.capabilities.outputLimitTokens}, got $maxOutputTokens"
         }
+    }
+
+    /**
+     * The same adapter bound to a routed profile (D-327): that profile's estimator from [estimators] and its own output
+     * headroom, or the caller's narrowing capped by the routed limit.
+     */
+    public fun rebind(routed: Profile, effort: Effort, estimators: EstimatorFactory): CellModel {
+        val limit = routed.capabilities.outputLimitTokens
+        val headroom = if (narrowedOutput) minOf(maxOutputTokens, limit) else limit
+        return CellModel(adapter, routed, estimators.estimatorFor(routed), effort, headroom, narrowedOutput)
     }
 }
 

@@ -70,11 +70,21 @@ class RequestTest {
     }
 
     @Test
-    fun `truncated and cancelled responses never expose tool calls`() {
+    fun `truncated, cancelled and output-limited responses never expose tool calls`() {
         assertFailsWith<IllegalArgumentException> { Response(listOf(ToolCall("c", "look", "{}")), StopReason.Truncated) }
         assertFailsWith<IllegalArgumentException> { Response(listOf(ToolCall("c", "look", "{}")), StopReason.Cancelled) }
+        assertFailsWith<IllegalArgumentException> { Response(listOf(ToolCall("c", "look", "{}")), StopReason.OutputLimit) }
+        Response(listOf(Message.text(Role.Assistant, "cut")), StopReason.OutputLimit)
         val ok = Response(listOf(ToolCall("c", "look", "{}")), StopReason.ToolUse)
         assertEquals(listOf("c"), ok.toolCalls.map { it.id })
+    }
+
+    @Test
+    fun `a reasoning origin parses provider, model and api even when the model id has slashes and at-signs`() {
+        val origin = ReasoningRef("vertex/claude-sonnet@20250101/x@anthropic-messages").origin()!!
+        assertEquals(ReasoningRef.Origin("vertex", "claude-sonnet@20250101/x", "anthropic-messages"), origin)
+        assertEquals("vertex/claude-sonnet@20250101/x@anthropic-messages", origin.tag)
+        for (tag in listOf("fake", "a/b", "a@b", "/m@api", "p/@api", "p/m@", " /m@api", "p/ @api", "p/m@ ")) assertEquals(null, ReasoningRef(tag).origin(), tag)
     }
 
     @Test

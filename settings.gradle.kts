@@ -20,3 +20,14 @@ dependencyResolutionManagement {
 rootProject.name = "astrolabe"
 
 include(":provider-api", ":core", ":eval", ":index-treesitter")
+
+// D-332: the AI Gate transport (llm-transport-sdk) builds from its checkout as a composite build until it is published.
+// `:provider-ai-gate` exists only where that checkout is present (default: the sibling `../llm-transport-sdk/llm`,
+// or `-Pastrolabe.aiGateBuild=<path>`), so a checkout without it builds and tests everything else unchanged.
+val aiGateBuild = file(providers.gradleProperty("astrolabe.aiGateBuild").getOrElse("../llm-transport-sdk/llm"))
+if (aiGateBuild.resolve("settings.gradle.kts").isFile) {
+    includeBuild(aiGateBuild)
+    include(":provider-ai-gate")
+} else {
+    logger.lifecycle("provider-ai-gate skipped: no AI Gate build at $aiGateBuild")
+}
