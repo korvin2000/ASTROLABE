@@ -5,6 +5,8 @@ import io.astrolabe.verify.ReviewRequest
 import io.astrolabe.verify.Verdict
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import org.slf4j.LoggerFactory
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionException
@@ -25,7 +27,10 @@ public object Authorities {
     private suspend fun <T> CompletableFuture<T?>.awaitNullable(): T? = try {
         awaitRequired()
     } catch (e: CancellationException) {
-        throw e
+        // Only our own job's cancellation propagates; a host that cancels its future gave no answer.
+        currentCoroutineContext().ensureActive()
+        LoggerFactory.getLogger(Authorities::class.java).warn("host authority cancelled its future")
+        null
     } catch (e: RuntimeException) {
         LoggerFactory.getLogger(Authorities::class.java).warn("host authority completed exceptionally: {}", e.javaClass.simpleName)
         null

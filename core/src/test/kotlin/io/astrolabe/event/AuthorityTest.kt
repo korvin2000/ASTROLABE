@@ -46,6 +46,28 @@ class AuthorityTest {
     }
 
     @Test
+    fun `a host that cancels its own future gives no answer and the caller keeps running`() = runTest {
+        val future = CompletableFuture<Answer?>()
+        val java = object : JavaAuthority {
+            override fun ask(question: Question): CompletableFuture<Answer?> = future
+            override fun approve(request: DClassRequest): CompletableFuture<Decision> = CompletableFuture()
+            override fun resolve(proposal: AmendmentProposal): CompletableFuture<Resolution> = CompletableFuture()
+            override fun review(request: ReviewRequest): CompletableFuture<Verdict?> = CompletableFuture()
+        }
+        var returned = false
+        var answer: Answer? = Answer("placeholder", 1, "unset")
+        val job = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            answer = Authorities.fromJava(java).ask(Question("q", 1, ids, "wait"))
+            returned = true
+        }
+        future.cancel(false)
+        job.join()
+        assertTrue(returned)
+        assertNull(answer)
+        assertFalse(job.isCancelled)
+    }
+
+    @Test
     fun `autonomous policy never accepts a weakening, denies non-allowlisted D-class effects and cannot answer`() = runTest {
         val authority = AutonomousAuthority()
         assertNull(authority.ask(Question("q1", 1, ids, "which DB?")))
