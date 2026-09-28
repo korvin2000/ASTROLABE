@@ -1,6 +1,6 @@
 # Implementation audit findings
 
-**Remediation:** 142 fixed on `feature/bugfix` (F-016 in this continuation); **0 remain open**; F-034 was already resolved. See [bugfix progress](audit/BUGFIX-PROGRESS.md). Original audit evidence remains historical; `fix_progress` is the current repair status.
+**Remediation:** 142 fixed on `feature/bugfix` (F-016 in this continuation); **0 remain open**; F-034 was already resolved. See [bugfix progress](audit/BUGFIX-PROGRESS.md). Original audit evidence remains historical; `fix_progress` is the current repair status. **Review (2026-09-28, `review/bugfix`):** every fix was reviewed ([ledger](audit/BUGFIX-REVIEW.md)); 28 findings received corrective `Review fix` commits, none were rejected or reopened.
 
 ```json
 {
@@ -1731,6 +1731,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Possible solutions: rethrow CancellationException before mapping ordinary host failures to no answer; distinguish and log genuine host completion failures without cancelling its future.
 - Future regression: cancel a job awaiting an incomplete host future; the coroutine must exit cancelled, the future must remain uncancelled, and the caller must not observe a normal null reply.
 - Fix (2026-09-26, `43f8a15`): Java authority cancellation propagates without cancelling the host future; ordinary failures are logged by type.
+- Review fix (2026-09-28, `49f4b8c`): a host-cancelled authority future is no answer; only the caller's own cancellation propagates.
 
 
 ### F-010 - UI resynchronization has inconsistent multi-query snapshots and growing history cost
@@ -1798,6 +1799,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Possible solutions: canonicalize both roots and reject durable state under any relevant workspace before creating directories; alternatively require and validate an explicit external-storage policy at Project/Store open.
 - Future regression: direct and symlinked in-workspace state roots must fail before any store file is created; an external root shared by linked worktrees remains valid.
 - Fix (2026-09-27, `6bb0767`): Store.open canonicalizes existing ancestors of the configured base and final layout, and rejects state inside any registered Git worktree before creating directories. Direct, nested, linked-worktree and Windows junction regressions pass.
+- Review fix (2026-09-28, `b465b26`): worktree roots are listed without `-z` so git before 2.36 works.
 
 
 ### F-015 - Terminal process status is published before descendant cleanup
@@ -1824,6 +1826,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Future regression: a grandchild creates a new session, then the root exits or is cancelled; it must be terminated or the outcome must explicitly report unsupported/unknown effects.
 - Follow-up (2026-09-28): still open. Public/internal ownership comments now accurately distinguish a Windows job from a POSIX process group. No Linux runtime was available in this session; detached containment needs an enforceable Linux mechanism (for example delegated cgroups) and a setsid/setpgid regression. Documentation correction does not count as a containment fix.
 - Fix (2026-09-28, `e5321f3`): Linux launches commands beneath a separate JVM configured as PR_SET_CHILD_SUBREAPER before spawn. Detached and double-forked descendants stay within its ancestry and are adopted when orphaned. The helper alone reaps; cancellation/control-pipe EOF triggers repeated direct-child termination, and only waitpid ECHILD permits the final acknowledgment. Root exit has a separate acknowledgment to preserve deadline classification. Target sessions isolate group signals from the owner; startup/cleanup failures remain explicit or Lost. Executable resolution uses the requested PATH. [Linux CI](https://github.com/korvin2000/ASTROLABE/actions/runs/36364095425) passed 32 selected tests (1 Windows-only skip), including all 6 new lifecycle/PATH regressions. Windows settlement tests and core ABI check passed. No privileged cgroup/user-namespace setup or new dependencies; Linux now uses a helper JVM per launch and Proc.pid identifies that supervisor.
+- Review fix (2026-09-28, `d8e5918`): the Linux supervisor starts with the host locale variables (non-ASCII classpath/PATH).
 
 
 ### F-017 - Git operations can block indefinitely outside the owned-process deadline path
@@ -1862,6 +1865,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Possible solutions: use a bounded/linear-time matcher or a rigorously safer subset; stream input with explicit large-file/line policy and report incompleteness when capped. Execute external search with a deadline. A coroutine timeout alone cannot preempt a synchronous regex loop.
 - Future regression: long near-miss nested-repetition inputs and a large single-line file under a tiny output budget must end within explicit work/memory limits with honest status.
 - Fix (2026-09-28, `0ba3658, 745e229`): Search caps patterns at 4096 characters, files at 8 MiB, JVM regex work at 10 million character accesses and 30 seconds, and ripgrep execution at 30 seconds with bounded JSON lines and stderr. Candidate enumeration reuses bounded Git execution and preserves typed failure results. SearchLimitsTest and the broken-index parity regression pass.
+- Review fix (2026-09-28, `829997b`): regex work is budgeted per line under one search deadline; binaries are skipped whatever their size.
 
 
 ### F-020 - Candidate enumeration hides access/I/O failures as complete search
@@ -1950,6 +1954,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Future regression: first listener throws once, second tracks staleness; retry/reconciliation must reach every horizon and never certify stale data as current.
 - P1.4.4 follow-up: Coherence.onChange adds the pending path then invokes horizons without error isolation/retry. Its KDoc requires horizons not to throw; that documents the precondition but does not enforce cleanup if a real horizon violates it. Assess the actual failing-horizon path before assigning an end-to-end stale-acceptance consequence.
 - Fix (2026-09-27, `88ab4f5`): Registry and Coherence retain per-listener delivery progress under serialized transition delivery. Failed callbacks resume before later changes; acknowledged callbacks are skipped; recorded versions advance only after all acknowledgements. Failed listeners must tolerate replay of their own partial effects. Registry/horizon fault regressions and run/edit checks pass.
+- Review fix (2026-09-28, `8afc54f`): a resumed delivery skips listeners/horizons that have unsubscribed.
 
 
 ### F-027 - Raw-byte candidate changes can disappear behind Git clean filters
@@ -1963,6 +1968,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Possible solutions: derive consequential candidate membership from a raw baseline/manifest rather than Git's normalized dirty list alone; capture exact raw content for clean tracked paths when filters or checkout conversion can change it. Fail closed or explicitly exclude unsupported filtered repositories until fidelity is established.
 - Future regression: normalization-equivalent raw changes under a real clean filter must alter candidate identity and survive snapshot/materialization. The preliminary LF-to-CRLF probe did change the stamp on this machine; it is not the reproduced counterexample.
 - Fix (2026-09-28, `2799e18`): Stamping compares every remaining tracked path against its raw Git object and actual supported mode. DirtyState includes filter-hidden members and rechecks the stamp. A real clean-filter regression proves distinct candidate IDs, exact export and restoration for Git-equivalent raw bytes.
+- Review fix (2026-09-28, `ebf1a92, 7aa5736`): raw bytes equal to the smudged checkout (autocrlf/eol/smudge) are clean; batch parsing resyncs on the next header.
 
 
 ### F-028 - Snapshot code follows symlinks before deciding what object to capture
@@ -1975,6 +1981,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Possible solutions: introduce an explicit no-follow metadata capture path that validates ancestors/containment and reads the final link object/target text; reserve follow-target reads for ordinary content observations. Preserve exact link target spelling on POSIX rather than unconditionally replacing backslashes.
 - Future regression: tracked/untracked valid, dangling, relative and directory symlinks must preserve type and link target through stamping and snapshot export; target contents must not stand in for link identity.
 - Fix (2026-09-27, `527c95b`): Stamper, DirtyState and ShadowRef use a dedicated final-link metadata resolution path. It validates ancestors, captures exact link spelling without following final targets, and verifies exported link objects. Five symlink capture/export regressions are present but skipped on this Windows host because symbolic-link creation is unavailable. The Windows junction-ancestor refusal regression passes.
+- Review fix (2026-09-28, `c0b6ddf`): symlink targets are read in Git's spelling ('\' to '/' on Windows only).
 
 
 ### F-029 - Unreadable entries can produce ordinary candidate identities indistinguishable from deletion
@@ -1987,6 +1994,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Possible solutions: distinguish absent from denied/error/unsupported at capture boundaries and refuse issuance of an authoritative complete stamp/snapshot when required inputs are unresolved; propagate typed incompleteness into verification/reuse. Record failed staged reads as explicit limitations or abort capture.
 - Future regression: deny a tracked path, refuse an external link, and inject cat-file failure; no complete candidate or successful recoverable snapshot may result from silently substituted deletions.
 - Fix (2026-09-27, `527c95b`): PathKind.Missing now represents NoSuchFileException only. Protected/refused or unsupported capture inputs abort authoritative stamps/snapshots; failed staged cat-file reads propagate GitError. Protected-path, staged-corruption and junction-ancestor regressions pass. Existing incomplete snapshots are not repaired.
+- Review fix (2026-09-28, `43a1d6e`): directories are stamp members again; submodule gitlinks are skipped in the raw tracked scan.
 
 
 ### F-030 - Dirty manifest and its recorded stamp are captured from different reads
@@ -2073,6 +2081,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Possible solutions: bind Atlas/Sniff to WorkspacePath and an explicit read policy; preserve a visible unavailable/unsupported entry when safe access cannot be established. Do not follow a manifest link and silently treat its target as trusted in-repository configuration.
 - Future regression: tracked link/ancestor pointing outside or at .git must not expose external declarations or commands; permitted internal aliases must use canonical identity.
 - Fix (2026-09-28, `b82a7b2`): Atlas scan, refresh, reads and metadata lookup resolve through WorkspacePath. Sniff shares guarded reads. External and protected Git-directory junction regressions pass on Windows, including explicit path-set command discovery.
+- Review fix (2026-09-28, `c924b42`): tracked in-repo links to regular files stay in the atlas.
 
 
 ### F-037 - Atlas cache can return stale declarations after a same-size, same-time rewrite
@@ -2159,6 +2168,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Possible solutions: validate universally contradictory pass/failure fields at receipt construction; where checker counts differ from test counts, model that distinction explicitly instead of inferring success merely from discovered>0. Preserve intentionally inconclusive/unknown inputs as non-green.
 - Future regression: failed/errors>0 or an incompatible nonzero exit cannot produce a Passed final-tree receipt; legitimate compiler/linter passes with discovered files remain supported.
 - Fix (2026-09-26, `f060c97`): Passed receipts reject failures, errors and exits contradicting the declared expected exit. QA persists expected CLI exits and keeps HTTP status out of process-exit metadata (follow-up `3f433f6`); receipt and QA regressions pass.
+- Review fix (2026-09-28, `1db9a3e`): a wrapped runner with a nonzero exit is Inconclusive, never Passed (Receipt init no longer throws in recordRun).
 
 
 ### F-044 - Unknown intents cannot transition to reconciled completion
@@ -2254,6 +2264,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Future regression: repeated recalls of partial recalls, one-hit searches, sparse/multi-file search results and cropped redacted views must show exactly the source lines they grant coverage for.
 - Current-source recheck (2026-09-25, 9a80e117): Look.recall derives blob origin from observation.ranges and reuses the original contentRef on the narrowed recalled observation (318?395). Earlier runtime evidence retains its original baseline; this recheck is source inspection.
 - Fix (2026-09-26, `d7551cc`): A narrowed recall persists its selected blob, preserving source coordinates on subsequent recalls.
+- Review fix (2026-09-28, `f6b3654`): find results are aliased as `search` and recalled by view line without source coverage.
 
 
 ### F-051 - Redaction masks beyond the initial display are lost before recall
@@ -2294,6 +2305,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Future regression: disjoint anchored operations on the same file, overlapping aliases/case spellings, duplicate create targets and rename-target conflicts must be combined correctly or rejected atomically.
 - Current-source recheck (2026-09-25, 9a80e117): Edit preflights all operations before mutation (247), applies each complete plan.oldText (379) and revalidate checks path identity only (522), so same-path snapshot clobber remains. Earlier runtime evidence retains its original baseline; this recheck is source inspection.
 - Fix (2026-09-26, `6e4e671`): Canonical edit paths, including rename targets, cannot appear in multiple operations; reverts run alone. Conflict regressions refuse before any write.
+- Review fix (2026-09-28, `2fcd391`): overlap detection folds case on case-insensitive filesystems.
 
 
 ### F-054 - Normalized anchor mapping duplicates indentation and trailing newlines on replacement
@@ -2378,6 +2390,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - P1.6.7 follow-up: Verify.runOne repeats the same pattern (redacts only the saved blob, then shapes observed.output and returns the raw shaped view). Include acceptance/baseline verification output in the fix scope, not only Run.
 - Current-source recheck (2026-09-25, 9a80e117): Run.finish and terminal poll shape raw capture; render concatenates result.view unchanged and hard-codes redactionApplied=false (354?511). Earlier runtime evidence retains its original baseline; this recheck is source inspection.
 - Fix (2026-09-26, `b5ae2f3, 2b30ba6`): Run foreground/background/poll/refusal views and Verify output are redacted at their output boundaries. Stored log masks and scan limitations propagate into run capture metadata; secret and bounded-log regressions pass.
+- Review fix (2026-09-28, `40950b0`): the run head is redacted before the 80-column cut.
 
 
 ### F-060 - D-class approval is accepted without matching identity or rechecking current authority
@@ -2443,6 +2456,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Future regression: cancel a long foreground process immediately and verify bounded termination/settlement latency; stream output larger than the memory budget and preserve bounded heap plus honest recall/capture semantics.
 - Current-source recheck (2026-09-25, 9a80e117): Run.launch still blocks in a polling loop with ByteArrayOutputStream and no cancellation check; only process deadline/exit ends it (333?346). Earlier runtime evidence retains its original baseline; this recheck is source inspection.
 - Fix (2026-09-27, `568f6bf`): Foreground observation is interruptible and cancellation terminates owned processes before propagating. The shared observer retains at most 8 MiB while draining the log and marks discarded capture unknown. Terminal background reads are capped and missing logs are incomplete. Waiting/noisy-poll, interrupted-I/O, terminal-cap and end-to-end run cancellation regressions pass.
+- Review fix (2026-09-28, `69cf936`): a capped capture is `Observed.truncated` (incomplete, never a pass), not a lost observation; the exit is kept and the intent commits.
 
 
 ### F-065 - Terminal process status stops log draining before all cursor chunks are read
@@ -2469,6 +2483,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Possible solutions: parse the successful completion breakdown as well as failure breakdowns; retain expected-failure/skip categories explicitly and derive executed counts conservatively.
 - Future regression: all-skipped, partially skipped, expected-failure and ordinary successful unittest outputs must produce truthful counts; all-skipped never becomes green.
 - Fix (2026-09-26, `9dbf774`): Unittest OK summaries account for skipped cases; all-skipped output stays inconclusive.
+- Review fix (2026-09-28, `261871f`): unittest `expected failures=` no longer counts as failures; Jest `todo` is compared with numPendingTests+numTodoTests.
 
 
 ### F-067 - Cargo shaping ignores later suite failures after the first summary
@@ -2507,6 +2522,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Possible solutions: preserve normalized repository/project-relative runner identities separately from display shortening; associate Go case groups with their own package records or consume structured events. Treat unresolved namespace as ambiguous rather than guessing.
 - Future regression: same basename/suite/test under two packages, reordered/appended Go packages, and nested modules with equal leaf names must remain distinct across baseline and current runs.
 - Fix (2026-09-27, `cdbe39d`): Jest JSON keeps project-relative paths where the capture cwd is known, Go binds each case group to its own package summary and withholds identities for unbound cases, and JUnit keeps nested module prefixes. All three collision regressions failed before and passed after; focused shaper tests pass.
+- Review fix (2026-09-28, `4054157`): Jest report paths are made relative to the new absolute `RunCapture.executionRoot`.
 
 ### F-070 - Verify's green flag does not prove the requested checks certify the final tree
 
@@ -2585,6 +2601,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Possible solution: collect invocation-bound JUnit reports from the actual execution root, with explicit freshness/cache provenance, and pass them to the existing shaper.
 - Future regression: successful and failing Gradle/Maven fixtures through Verify, including isolated roots and stale prior reports; success requires fresh parsed tests, never exit code alone.
 - Fix (2026-09-28, `b713e83`): Verify archives prior Gradle/Maven JUnit XML before dispatch and collects bounded, newly produced reports from the actual execution cwd, including nested modules. It passes captured reports to the shaper and refuses stale success. The selected VerifyTest regression passes.
+- Review fix (2026-09-28, `53ab668`): JUnit report collection uses walkFileTree and skips unreadable directories.
 
 
 ### F-076 - Touched checker paths are resolved twice for nested package commands
@@ -2622,6 +2639,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Possible solution: enumerate under the lock and compare before/after membership as well as versions/metadata across the full applicable input scope, excluding only declared scratch outputs.
 - Future regression: add/delete/rename package and unknown-closure inputs during execution, including additions before lock acquisition; every unexplained input change makes the receipt ineligible.
 - Fix (2026-09-26, `2b30ba6`): Exclusive checks enumerate under the mutation lock and compare before/after membership and content/metadata. Enumerated unknown closures rescan the workspace, not only a caller-supplied stale path list.
+- Review fix (2026-09-28, `72d3b3c`): inputs mutated during a check are found with hash sets (was O(n^2) under the workspace mutation lock).
 
 
 ### F-079 - Isolated export accepts bytes that no longer match its candidate stamp
@@ -2684,6 +2702,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Possible solution: include argv[0] when it resolves to a workspace-local executable, preserving the distinction from externally resolved runner names; resolve cwd and path spellings canonically.
 - Future regression: rewrite a required ./scripts/check.sh at repository root and in a package cwd; both must flag the relevant acceptance obligation and require review before completion.
 - Fix (2026-09-27, `ea4cd41`): Acceptance command matching includes explicitly relative argv[0] executables. Root and package-cwd scripts enter the acceptance surface, bind their required check and block completion pending review; TestIntegrityTest passes.
+- Review fix (2026-09-28, `8baf840`): `./check.sh`-style root executables are detected before normalization.
 
 
 ### F-084 - Masked role operations still reach executors with the implementing role's defaults
@@ -2714,6 +2733,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Analysis: The loop immediately discards the Invocation handle after start(...).await(). No production caller consumes Invocation.terminal(), although its SPI explicitly delivers late output/usage after cancellation. ProviderError releases the reservation outright; coroutine cancellation skips Accounting.record and reservation reconciliation. A billed cancelled or transport-failed call can disappear from final accounting and its late evidence is never archived. Keep the handle, reconcile terminal state exactly once even after cancellation, archive late items without executing them, and retain unknown-cost reservations until settled. Regression: fake invocation cancelled during await with later nonzero terminal usage; final call accounting must contain that charge once. This concerns the implemented provider-neutral lifecycle, not P7 HTTP transport.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
 - Fix (2026-09-28, `4f6eb64`): The cell retains Invocation, consumes terminal exactly once under NonCancellable after success, failure or cancellation, archives late items without executing them, and settles one accounting row. Unknown usage retains conservative funding. TerminalAccountingTest and the partial-usage regression pass. Cancellation waits for the provider to fulfill its terminal SPI.
+- Review fix (2026-09-28, `4988bd7`): the ResultPacketTest refused-call assertion was obsolete under terminal-reported usage and is updated (test only).
 
 
 ### F-087 - Incomplete provider usage can release the cell's conservative token reservation
@@ -2734,6 +2754,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Analysis: DispatchAuthority is checked at turn entry, before awaiting the provider. After await, calls and scheduler-owned checks execute without another authority check; Dispatcher has no authority callback. Controller dispatch reads lease expiry/generation, but expiry itself does not cancel the coroutine. A lease expiring during a long model request can therefore be followed by edits/process effects; later publication refusal cannot undo them. Recheck authority after await and at consequential dispatch boundaries, fencing effects against current generation. Regression: advance the fake clock beyond lease expiry while the provider is held, then release an editing response; no effect may execute. User cancellation does have a controller coroutine hook; this finding specifically covers expiry/supersession without that signal.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
 - Fix (2026-09-26, `e769511, 742d834, ff510f7, c49ca61, b13c18d`): Cell rechecks authority after accounted provider responses and before each tool/check dispatch. Built-in mutation, transform/syntax, process, baseline and ask-answer boundaries recheck after preparation or suspension. Expired provider-response, approval and ask-reply regressions prevent effects. Late completion may still be archived using existing evidence; all new scheduled work is skipped and publication remains fenced.
+- Review fix (2026-09-28, `f15acab`): the run/mcp dispatch fence runs before the intent is recorded, so a lapsed lease leaves no open intent.
 
 
 ### F-089 - Required review and test-integrity approvals cannot reach the cell completion gate
@@ -2754,6 +2775,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Analysis: When a packet validator returns CompletionDecision.Continue(gaps), Cell only calls recordGaps, which appends to an in-memory packet list and Journal. The next Anchor uses nudges computed before completion.assess, not those gaps; no feedback message is appended to residents or pinned context. Non-implementing roles can therefore be asked to retry an invalid packet without being told which fields/evidence failed, then terminate after the refusal limit. Feed validator gaps into the next rendered request while retaining the journal record. Regression: a first invalid plan/review/probe packet and a corrected second response; the second request must contain the validator's specific rejection.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
 - Fix (2026-09-27, `3c0ff07`): Accepted role-completion retries place escaped validator gaps into the next model-facing anchor, ahead of stale gate nudges. The first two bounded gaps are shown each retry; full gaps remain in the journal and packet. A corrected second probe response regression passes.
+- Review fix (2026-09-28, `f5c39cf`): hard rejections stay ahead of packet validation gaps in the anchor.
 
 
 ### F-091 - A crash after the Finishing transition leaves the campaign unrecoverable on reopen
@@ -2784,6 +2806,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Analysis: Open marks all uncommitted campaign intents Unknown and merely polls existing process handles. The unreconciled list passed to Leases.acquire is then intents.open().filter { status != Unknown }, excluding precisely those unresolved effects. Fence.grant requires previous-owner unknown effects to be reconciled before another writer receives the workspace. An expired previous holder can thus be replaced while a background process is still running or its effects remain unknown; marking an intent Unknown is not terminal reconciliation. Include unresolved unknown intents and live/lost handles in the handoff fence, and grant only after a safe disposition. Regression: reopen after lease expiry with a live old process/Unknown intent; new write authority must remain denied until reconciliation. Same-command replay suppression in Run does not fence a different new command.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
 - Fix (2026-09-28, `cdb1f58`): All open intents, including Unknown, and open handles fence expired/reassigned leases. Expired renewals advance execution generation even for the same holder. Reopen is refused until the prior unknown intent has a durable disposition.
+- Review fix (2026-09-28, `5f043fc`): open persists terminal handle states it polls, so finished processes stop fencing reopen.
 
 
 ### F-094 - Final review can approve an old tree while the controller completes the changed campaign
@@ -2804,6 +2827,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Analysis: runCell constructs a fresh CellBudget.of(contract.budget.tokens, ...) for every main-line, plan and continuation cell. route sets RoutingBudget.remainingCost to the unchanged contract.budget.cost and never subtracts persisted Accounting totals. Neither gate shares a campaign reservation across these cells, so a multi-cell campaign can spend the full token allowance repeatedly and monetary affordability resets on every route. Per-cell limits and maxCells bound individual runs but do not enforce the declared campaign allowance. Introduce campaign-level remaining/reserved accounting and allocate each cell from it, including helpers and unresolved usage. Regression: individually affordable cells whose aggregate exceeds tokens or money must stop before the overspending call; resume must retain previous charges.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
 - Fix (2026-09-28, `4f6eb64`): Every provider call durably reserves campaign tokens and money in one SQLite transaction before dispatch, shared by main, plan and helper cells. Routing and new-cell budgets deduct persisted charges, including unresolved reservations. Resume token/money tests and AccountingTest pass.
+- Review fix (2026-09-28, `9469e27`): an unsettled call keeps its reserved money as known funding, so later reservations stay affordable.
 
 
 ### F-096 - CampaignHandle.await reports internal failures as user cancellation
@@ -2814,6 +2838,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Analysis: await calls Deferred.join and returns Cancelled whenever job.isCancelled. A Deferred completed exceptionally is also cancelled in coroutine state, so exceptions from controller persistence, compiler/wiring or final export are silently converted to CampaignOutcome.Cancelled instead of being propagated or reported Failed. The Java facade inherits this result. Await the Deferred result and distinguish deliberate cancellation from exceptional failure, retaining the original cause. Regression: force a controller/export exception and assert an exceptional future or Failed outcome, while host cancellation still yields Cancelled.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
 - Fix (2026-09-27, `5b6c1a7`): CampaignHandle.await returns Deferred.await directly, preserving the original exceptional failure. A closed-store fault after provider dispatch failed before the fix; Kotlin facade cancellation and failure regressions pass.
+- Review fix (2026-09-28, `3d224ae`): await returns Cancelled after Astrolabe.close() unless the caller itself is cancelled.
 
 
 ### F-097 - Unknown executables are classified as read-only and safe to replay
@@ -2824,6 +2849,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Analysis: Pure runtime probe: classify([./scripts/deploy-helper], cwd=null, workspaceRoot=C:/repo) returns effect=R, effectsUnknown=false. classifyOne starts at R/known and only promotes recognized command families; an arbitrary repository executable matches none. Run derives replaySafe directly from R && !effectsUnknown, so a lost acknowledgement permits relaunch of that same unknown executable. It may write, delete or publish despite the harness describing it as read-only/predictable. Default unknown commands to unknown effects and non-replay-safe, and recognize safe argv forms positively. Regression: an unrecognized executable and a wrapper around a mutating command must never be automatically replayable. No executable was launched by the probe.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; successful stdin JShell probe against current compiled classes; synthetic inputs only.
 - Fix (2026-09-27, `f564b73, 4604b89`): Unknown executable forms become W with effectsUnknown and WorkspaceWrite capability, so Run cannot mark them replay-safe. Positive bare read-only forms remain R; a local ./ls wrapper stays unknown. CeilingTest and RunTest pass. Historical persisted intents are not rewritten.
+- Review fix (2026-09-28, `c19aef6`): post-hoc protected-path writes escalate to D for every launch label.
 
 
 ### F-098 - Overlapping redaction matches can expose a secret recognized by the default rules
@@ -2904,6 +2930,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Analysis: Lifecycle.Returned marks a CellExit.Blocked increment Blocked. Reopen changes a resumable Ended campaign to Opened/Running, but does not reassess or unblock its graph nodes. readyFrontier excludes Blocked nodes, and the controller's empty-frontier branch only refreshes Verified regressions before stopping again. Transition.Unblocked exists but has no production caller. Resolving a missing tool or providing the requested host input therefore cannot resume such an increment through the built-in flow without manual lifecycle manipulation. Add an explicit evidence-backed unblock/reassessment step on resume. Regression: stop for a missing executable/question, resolve the prerequisite, reopen and continue the same increment without re-executing verified work.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
 - Fix (2026-09-28, `1120f89`): Reopen unblocks parked increments after a host contract amendment; otherwise run reassesses through host authority. Regression refresh derives stale obligations from current graph identity, so prerequisites are recertified without replaying verified work. The host-answer resume regression passes.
+- Review fix (2026-09-28, `36c589f`): stale requirements are the union of the durable and graph ledgers, so an interrupted finalization re-accepts.
 
 
 ### F-106 - Seeds omitted from the compiled prompt still grant KNOWN edit coverage
@@ -3032,6 +3059,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Analysis: Cell calls impact.inspected(target) for every look(refs) outcome with status=ok, without requiring complete, untruncated results or any displayed reference coverage. ImpactNudges.inspected removes all pending definitions sharing that symbol. A tiny-budget lookup can thus show only a fraction of the callers, yet remove the public-definition exit-gate requirement for all of them. Track inspected reference identities/ranges and preserve missing obligations when a result is incomplete/truncated. Regression: change a public symbol with more callers than fit the reference result; one small lookup must not clear every caller obligation.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; source trace and cited existing tests, no new runtime reproduction claimed.
 - Remediation (2026-09-28, `81ce469`): Only complete, untruncated, unredacted reference results clear impact obligations. Lexical reference views remain incomplete; plan rescoping remains available. CellTest passes.
+- Review fix (2026-09-28, `82c0615`): a refs view that lists every found reference untruncated and unredacted clears the obligation.
 
 
 ### F-119 - A transform can create unauthorized files inside its declared glob and still be accepted
@@ -3102,6 +3130,7 @@ Coverage: `pending`, `in_progress`, `reviewed`, `skimmed_trivial`, `deferred_uni
 - Analysis: recheck strips @version, resolves only note IDs and treats missing dependencies as true. A stale note depending on a changed source path or contract version, without versioned anchors, is immediately readmitted. Injection.eligibility repeats the missing-target/stripped-version logic. Resolve typed note/path/contract dependencies and recorded versions; unknown resolution must retain stale status. Regression: moved path, missing contract and newer contract revision cannot readmit or inject old advice.
 - Evidence baseline: 9a80e117445be357285fec2cffffe0fd45290a9a; current-source trace and scoped test inspection; no new runtime reproduction claimed.
 - Fix (2026-09-28, `6fcc5a4`): Rechecks and injection resolve admitted note dependencies with exact revision pins and paths with recorded hashes. Unknown named contracts remain stale unless the host supplies their current versions. Cycles, missing targets and moved dependencies cannot readmit or inject advice; explicit KB reads label them stale.
+- Review fix (2026-09-28, `edf8040`): dependency checks are memoized and notes are loaded once per search.
 
 
 ### F-126 - Focus notes bypass freshness and role eligibility
