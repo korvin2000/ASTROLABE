@@ -13,3 +13,11 @@ public enum class Mode { Interactive, Autonomous }
  */
 @Serializable
 public enum class DClassPolicy { Ask, Deny }
+
+/**
+ * Who may approve a blocking test-integrity flag (§8.6, D-23, D-320). [Autonomous]: in S2+ the review cell's
+ * approval suffices, with the human path as fallback, so long autonomous campaigns can proceed. [Human]: only
+ * a verdict from [io.astrolabe.event.Authority.review] resolves the flag; the review cell is not asked.
+ */
+@Serializable
+public enum class IntegrityApproval { Autonomous, Human }

@@ -1451,9 +1451,9 @@ public class Controller @JvmOverloads public constructor(
             completionEvidence = if (child == null && role.packetKind == io.astrolabe.cell.PacketKind.Result) { flags ->
                 val required = increment.accept.any { c.contract.acceptance(it) is Acceptance.Check || c.contract.acceptance(it) is Acceptance.Review } || flags.any { it.blocksCompletion }
                 if (required) {
-                    val reviewer = if (c.contract.shape >= Shape.S2 && increment.accept.none { c.contract.acceptance(it) is Acceptance.Check })
+                    val reviewer = if (c.contract.shape >= Shape.S2 && increment.accept.none { c.contract.acceptance(it) is Acceptance.Check } && !humanIntegrity(c, flags))
                         reviewCell(c, increment, model, authority, syntax, span)
-                    else ReviewCell(io.astrolabe.delegate.ReviewJudge { _, _ -> io.astrolabe.delegate.JudgeRun(null, Tokens(0), "host assessment required") }, authority, c.store, idGen, clock, c.journal)
+                    else hostReviewer(c, authority)
                     reviewer.obtain(evidence(c, increment, listOf("completion acceptance"), flags, compiled.k.ledger, authority), Tier.Medium, c.registry::version)
                 }
                 completionEvidence(c, increment, flags)
@@ -1573,8 +1573,16 @@ public class Controller @JvmOverloads public constructor(
         val triggers = ReviewTriggers.increment(IncrementReviewInput(c.contract, increment, Roles.implementing, tier, flags, exit.packet.changes.map { it.path }, c.kb.contractAnchors(), impact))
         if (triggers.isEmpty()) return null
         val row = FunctionTable.DEFAULT.row(ReviewTriggers.function(triggers))
-        return reviewCell(c, increment, model, authority, syntax, span).obtain(evidence(c, increment, triggers, flags, compiled.k.ledger, authority), row.defaultTier, c.registry::version)
+        val reviewer = if (humanIntegrity(c, flags)) hostReviewer(c, authority) else reviewCell(c, increment, model, authority, syntax, span)
+        return reviewer.obtain(evidence(c, increment, triggers, flags, compiled.k.ledger, authority), row.defaultTier, c.registry::version)
     }
+
+    /** D-320: under [IntegrityApproval.Human] a blocking test-integrity flag is resolved only through `Authority.review`. */
+    private fun humanIntegrity(c: OpenedCampaign, flags: List<io.astrolabe.verify.TestIntegrityFlag>): Boolean =
+        c.attempt.config.integrityApproval == io.astrolabe.IntegrityApproval.Human && flags.any { it.blocksCompletion }
+
+    private fun hostReviewer(c: OpenedCampaign, authority: Authority): ReviewCell =
+        ReviewCell(io.astrolabe.delegate.ReviewJudge { _, _ -> io.astrolabe.delegate.JudgeRun(null, Tokens(0), "host assessment required") }, authority, c.store, idGen, clock, c.journal)
 
     /**
      * Campaign scope (§8.8, D-124): in S2+ the campaign gate's review request is answered by the review cell over the
@@ -1617,11 +1625,13 @@ public class Controller @JvmOverloads public constructor(
                 it.criteria.containsAll(increment.accept) && (flags.isEmpty() || it.integrity == integrity) &&
                 it.evidenceVersions.all { (path, version) -> c.registry.version(path) == version } }
         val verdict = record?.verdict ?: return io.astrolabe.cell.CompletionEvidence(flags = flags.map { it.copy(verdict = null) })
+        // D-320: a review-cell approval still certifies Check/Review items, but under Human it never resolves a flag.
+        val flagVerdict = verdict.takeUnless { humanIntegrity(c, flags) && record.path.lastOrNull() != "human" }
         return io.astrolabe.cell.CompletionEvidence(
             increment.accept.mapNotNull { id -> (contract.acceptance(id) as? Acceptance.Check)?.let {
                 io.astrolabe.verify.Assessment(id, it.text, record.packetId, true, verdict.signedBy, contract.version, stamp)
             } }, increment.accept.filter { contract.acceptance(it) is Acceptance.Review }.associateWith { verdict },
-            flags.map { it.copy(verdict = verdict) },
+            flags.map { it.copy(verdict = flagVerdict) },
         )
     }
 

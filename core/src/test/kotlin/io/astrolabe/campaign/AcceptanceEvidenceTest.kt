@@ -153,6 +153,29 @@ class AcceptanceEvidenceTest {
     }
 
     @Test
+    fun `human integrity approval routes a required test edit to the host instead of the review cell`() = runBlocking<Unit> {
+        seed(Acceptance.Review("AC-R", "a maintainer approves a", Origin.User))
+        val human = Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all, integrityApproval = io.astrolabe.IntegrityApproval.Human), clock, idGen)
+        human.open(repo.root, request, policy).use { c ->
+            val path = "tests/test_a.py"
+            val plan = """{"increments":[{"id":"I1","requirements":["R1"],"accept":["AC-1","AC-R"],"write_scope":["src/","tests/"],"expected_files":1,"produces":"artifact"}]}"""
+            val reviewer = Reviewer()
+            val result = human.run(c, model(
+                Scripted.Reply(listOf(call("plan", "task", """{"op":"propose","kind":"plan","proposal":$plan}"""))),
+                Scripted.Reply(listOf(say("plan ready"))),
+                Scripted.Reply(listOf(read("read-test", path))),
+                Scripted.Reply(listOf(anchored("edit-test", path, c.registry.version(path)!!, "    assert 1 == 1", "    assert (1 == 1)"))),
+                Scripted.Reply(listOf(say("done"))),
+                // Offered to a review cell; under Human it must not be the flag's approver.
+                Scripted.Reply(listOf(say("""{"verdict":"approve","confidence":0.9,"findings":[]}"""))),
+            ), reviewer, maxCells = 1)
+            assertTrue(reviewer.requests.isNotEmpty(), result.state?.reason)
+            val flag = assertNotNull(result.exit, result.state?.reason).packet.flags.testIntegrity.single { it.path == path }
+            assertEquals("host:alice", assertNotNull(flag.verdict, "the flag must be resolved").signedBy)
+        }
+    }
+
+    @Test
     fun `an approved increment review reaches the implementing cell completion gate`() = runBlocking<Unit> {
         seed(Acceptance.Review("AC-R", "a maintainer approves a", Origin.User))
         controller().open(repo.root, request, policy).use { c ->
