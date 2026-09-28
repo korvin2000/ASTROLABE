@@ -293,7 +293,7 @@ class VerifyTest {
         assertEquals(listOf(Outcome.Failed, Outcome.Passed, Outcome.Inconclusive), attempts.map { it.outcome })
         assertEquals(InputStability.Isolated, attempts[1].testedInputs.stability)
         assertEquals(attempts[0].stampBefore, attempts[1].stampBefore)
-        assertEquals(repo.root, roots[0])
+        assertEquals(repo.root.toRealPath(), roots[0].toRealPath())
         assertTrue(roots[1].startsWith(stateRoot.resolve("candidates")))
         assertFalse(java.nio.file.Files.exists(roots[1]))
         assertTrue(attempts.last().limits.any { it.kind == "flaky" && it.detail.contains(attempts[0].receiptId) && it.detail.contains(attempts[1].receiptId) })
@@ -318,7 +318,7 @@ class VerifyTest {
         val out = run("""{"what":"tests","selection":"ids","ids":["CHK-slow"]}""")
         val attempts = SqliteReceipts(store, clock).forCheck("CHK-slow")
         assertEquals(listOf(Outcome.Failed, Outcome.Passed, Outcome.Inconclusive), attempts.map { it.outcome }, out.body)
-        assertEquals(repo.root, roots[0], "the first run is not isolated")
+        assertEquals(repo.root.toRealPath(), roots[0].toRealPath(), "the first run is not isolated")
         assertTrue(roots[1].startsWith(stateRoot.resolve("candidates")))
         assertEquals(InputStability.Isolated, attempts[1].testedInputs.stability)
 

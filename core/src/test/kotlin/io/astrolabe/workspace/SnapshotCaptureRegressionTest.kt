@@ -254,7 +254,8 @@ class SnapshotCaptureRegressionTest {
     }
 
     private fun assertLinkCaptured(fixture: WorkspaceFixture, path: String) {
-        val targetBytes = Files.readSymbolicLink(fixture.repo.resolve(path)).toString().toByteArray(Charsets.UTF_8)
+        // Git's spelling: a link to `a/b` reads back as `a\b` on Windows, and the stamp hashes what Git would.
+        val targetBytes = linkTarget(fixture.repo.resolve(path)).toByteArray(Charsets.UTF_8)
         val report = fixture.stamper.report()
         val stamped = assertNotNull(report.members[path], "link must be a candidate member")
         assertEquals(EntryType.Symlink, stamped.type)
@@ -275,7 +276,7 @@ class SnapshotCaptureRegressionTest {
         assertTrue(materialized.ok, "materialization mismatches: ${materialized.mismatches}")
         val exportedLink = exported.resolve(path)
         assertTrue(Files.isSymbolicLink(exportedLink), "materialization must retain the symlink object")
-        assertContentEquals(targetBytes, Files.readSymbolicLink(exportedLink).toString().toByteArray(Charsets.UTF_8))
+        assertContentEquals(targetBytes, linkTarget(exportedLink).toByteArray(Charsets.UTF_8))
     }
 
     private fun protectedWorkspace(fixture: WorkspaceFixture): Workspace = Workspace(
