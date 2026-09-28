@@ -2,7 +2,7 @@ name: process-ownership
 
 on:
   push:
-    branches: [feature/bugfix]
+    branches: [main]
     paths:
       - 'core/src/main/kotlin/io/astrolabe/os/**'
       - 'core/src/main/java/io/astrolabe/os/**'
