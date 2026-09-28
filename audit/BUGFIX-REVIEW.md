@@ -88,33 +88,34 @@ Use F-none for commits without findings. Report DEFECT only when you can name a 
 
 ## Finalize (tick when done)
 
-- [ ] F-034 (`resolved_on_recheck`, no fix commit): confirm its recheck note still holds at the tip; verdict in Checkpoint.
-- [ ] Docs: review `git diff main...review/bugfix -- '*.md' ':!findings.md' ':!audit/*'` (CLAUDE.md, ISSUES.md,
+- [x] F-034 (`resolved_on_recheck`, no fix commit): confirm its recheck note still holds at the tip; verdict in Checkpoint.
+- [x] Docs: review `git diff main...review/bugfix -- '*.md' ':!findings.md' ':!audit/*'` (CLAUDE.md, ISSUES.md,
       TODO.md D-rows, CHANGELOG, eval/README). Keep accurate D-rows; revert unintended `CLAUDE.md`/`ISSUES.md` edits.
-- [ ] If a FIXED/REJECTED changed public API: `./gradlew :core:updateKotlinAbi` (plus `:provider-api:`/`:eval:` if
+- [x] If a FIXED/REJECTED changed public API: `./gradlew :core:updateKotlinAbi` (plus `:provider-api:`/`:eval:` if
       touched) and commit the dumps. Regenerate, never hand-edit.
-- [ ] Compile once, no tests: `./gradlew assemble testClasses checkKotlinAbi -q --console=plain`.
-- [ ] `findings.md`: each FIXED adds ``- Review fix (date, `sha`): …``; each REJECTED is `Status: open`.
-- [ ] Rewrite `CONTINUE-TASK.md` (≤40 lines: review outcome, reopened findings, debts), refresh `actual_state.md`,
+- [x] Compile once, no tests: `./gradlew assemble testClasses checkKotlinAbi -q --console=plain`.
+- [x] `findings.md`: each FIXED adds ``- Review fix (date, `sha`): …``; each REJECTED is `Status: open`.
+- [x] Rewrite `CONTINUE-TASK.md` (≤40 lines: review outcome, reopened findings, debts), refresh `actual_state.md`,
       append ≤10 lines to `audit/SESSION-HISTORY.md`. Commit.
-- [ ] Merge in the main checkout `C:/work.ai/ASTROLABE`: its untracked `findings.md` must be byte-identical to
+- [x] Merge in the main checkout `C:/work.ai/ASTROLABE`: its untracked `findings.md` must be byte-identical to
       `feature/bugfix:findings.md` (`git hash-object findings.md` = `git rev-parse feature/bugfix:findings.md`); if so,
       delete it, then `git merge --no-ff review/bugfix -m "Merge reviewed bugfixes (findings.md F-001..F-143)"`.
       ABI dump conflicts: regenerate. Do **not** push: the owner approves pushing `main` (CI then runs the full check
       on both OSes).
-- [ ] Leave the worktree in place until the owner confirms the merge.
+- [x] Leave the worktree in place until the owner confirms the merge.
 
 ## Checkpoint
 
-- Status: all batches reviewed. Open: rows 110 (4f6eb64: F-095 funding wedge + ResultPacketTest regression) and
-  111 (1120f89: ControllerTest "interrupted finalization" regression) — a worker is fixing them; then Finalize.
-  FIXED: 26 so far. REJECTED: 0. F-034 recheck: still resolved at the tip (Controller passes `shadowRef =
+- Status: COMPLETE. All 118 ledger rows and 142 findings have final verdicts (FIXED 28, ACCEPT 52, NOTE 62).
+  Finalize done; merged --no-ff into local main (not pushed); worktree kept until the owner confirms.
+  FIXED: 28. REJECTED: 0. F-034 recheck: still resolved at the tip (Controller passes `shadowRef =
   tree.shadow`; Edit accepts `turn:N`). Docs: owner's dba6344 CLAUDE.md/ISSUES.md edits kept (intentional);
   D-rows aligned in 66a192d.
 - Round 1 review fixes: 261871f F-066, 1db9a3e F-043, 49f4b8c F-009, 2fcd391 F-053, f15acab F-088, 40950b0 F-059,
   72d3b3c F-078, f6b3654 F-050. Round 2: b465b26 F-014, 8afc54f F-026, 69cf936 F-064. Round 3: 43a1d6e F-029,
   c0b6ddf F-028, ebf1a92+7aa5736 F-027, 8baf840 F-083, 3d224ae F-096, c19aef6 F-097, 4054157 F-069, c924b42 F-036,
-  edf8040 F-125, 82c0615 F-118, f5c39cf F-090. Round 4: 829997b F-019, 53ab668 F-075, 5f043fc F-093. B13: d8e5918 F-016.
+  edf8040 F-125, 82c0615 F-118, f5c39cf F-090. Round 4: 829997b F-019, 53ab668 F-075, 5f043fc F-093, 9469e27 F-095, 36c589f F-105 (+ 4988bd7 obsolete F-086
+  assertion). B13: d8e5918 F-016. ABI dump: regenerated after review fixes.
 - Public API changed: `Observed.truncated` (69cf936), `RunCapture.executionRoot` (4054157) → Finalize ABI regen.
 - Pre-existing failures at dba6344 (bisected): ResultPacketTest "a failed cell still hands back a packet…"
   (broken by 4f6eb64) and ControllerTest "interrupted finalization rechecks acceptance…" (broken by 1120f89).
