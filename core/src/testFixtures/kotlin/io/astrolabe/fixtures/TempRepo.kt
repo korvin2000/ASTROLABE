@@ -226,24 +226,6 @@ public class TempRepoError(message: String) : RuntimeException(message)
  * must never grow `add`/`commit`/`init`, and fixtures need exactly those.
  */
 private fun runGit(directory: Path, argv: List<String>) {
-    // A Windows CI runner under process pressure can fail a spawn in DLL initialization (0xC0000142): that git
-    // never ran, so a bounded, backed-off retry is safe; every other exit code fails at once.
-    var attempt = 1
-    while (true) {
-        val (exitCode, output) = runGitOnce(directory, argv)
-        if (exitCode == 0) return
-        if (exitCode != STATUS_DLL_INIT_FAILED || attempt >= SPAWN_ATTEMPTS) {
-            throw TempRepoError("fixture git exited $exitCode in $directory: ${(listOf("git") + argv).joinToString(" ")}\n$output")
-        }
-        Thread.sleep(250L * attempt * attempt)
-        attempt++
-    }
-}
-
-private const val STATUS_DLL_INIT_FAILED = -1073741502
-private const val SPAWN_ATTEMPTS = 4
-
-private fun runGitOnce(directory: Path, argv: List<String>): Pair<Int, String> {
     val command = listOf("git") + argv
     val builder = ProcessBuilder(command).directory(directory.toFile()).redirectErrorStream(true)
     val environment = builder.environment()
@@ -275,7 +257,11 @@ private fun runGitOnce(directory: Path, argv: List<String>): Pair<Int, String> {
         }
         capture.cancel(true)
     }
-    return exitCode to output
+    if (exitCode != 0) {
+        throw TempRepoError(
+            "fixture git exited $exitCode in $directory: ${command.joinToString(" ")}\n$output",
+        )
+    }
 }
 
 /**
