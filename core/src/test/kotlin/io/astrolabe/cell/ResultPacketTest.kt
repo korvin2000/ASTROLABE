@@ -195,7 +195,9 @@ class ResultPacketTest {
 
         assertEquals(PacketStatus.Failed, failed.packet.status)
         assertEquals(failed.checkpoint.reason, failed.packet.reason)
-        assertEquals(1, failed.packet.cost.callsWithoutUsage, "the refused invocation is a call without usage, never an estimate")
+        // Terminal reconciliation (F-086): the refused call is charged with the usage its terminal reports, never an estimate.
+        assertEquals(1, failed.packet.cost.calls)
+        assertEquals(0, failed.packet.cost.callsWithoutUsage, "the refusal terminal reported usage")
         assertFailsWith<IllegalStateException> { failed.packet.proposal() }
     }
 
