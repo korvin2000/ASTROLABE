@@ -21,6 +21,7 @@ import io.astrolabe.workspace.EnvFingerprint
 import io.astrolabe.workspace.Intent as PathIntent
 import io.astrolabe.workspace.PathResolution
 import io.astrolabe.workspace.Stamper
+import io.astrolabe.workspace.movedPathsHint
 import io.astrolabe.workspace.VersionChange
 import io.astrolabe.workspace.VersionRegistry
 import io.astrolabe.workspace.Workspace
@@ -255,13 +256,18 @@ public class Integrator @JvmOverloads constructor(
             val changes = batch.flatMap { result -> result.packet.changes.map { result to it } }
             apply(candidate, changes)?.let { return outcomes + Integration.Rejected(handles, IntegrationStep.Apply, it) }
             val union = changes.map { it.second.path }.toSortedSet()
-            val tested = Stamper(candidate.workspace, env).report().candidateId
+            val testedReport = Stamper(candidate.workspace, env).report()
+            val tested = testedReport.candidateId
             val combined = checks.verify(candidate.workspace, union, batch)
-            if (Stamper(candidate.workspace, env).report().candidateId != tested) return outcomes + Integration.Rejected(handles, IntegrationStep.CombinedCheck, "combined checks changed the candidate")
+            Stamper(candidate.workspace, env).report().takeIf { it.candidateId != tested }?.let { moved ->
+                return outcomes + Integration.Rejected(handles, IntegrationStep.CombinedCheck, "combined checks changed the candidate: ${movedPathsHint(testedReport, moved)}")
+            }
             if (combined.failures.isNotEmpty()) return outcomes + Integration.Rejected(handles, IntegrationStep.CombinedCheck, "the combined tree fails", combined.failures, returnsToMainLine = true)
             val gated = gates.verify(candidate.workspace, union, batch)
             if (gated.failures.isNotEmpty()) return outcomes + Integration.Rejected(handles, IntegrationStep.Gates, "contract lint or the required review refuses the combined tree", gated.failures, returnsToMainLine = true)
-            if (Stamper(candidate.workspace, env).report().candidateId != tested) return outcomes + Integration.Rejected(handles, IntegrationStep.Gates, "review changed the tested candidate")
+            Stamper(candidate.workspace, env).report().takeIf { it.candidateId != tested }?.let { moved ->
+                return outcomes + Integration.Rejected(handles, IntegrationStep.Gates, "review changed the tested candidate: ${movedPathsHint(testedReport, moved)}")
+            }
             return outcomes + publish(candidate, base.candidateId, tested, batch, changes.map { it.second }, combined.receipts + gated.receipts)
         } finally {
             workspaces.remove(candidate)

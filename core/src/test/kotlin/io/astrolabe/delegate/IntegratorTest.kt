@@ -213,7 +213,8 @@ class IntegratorTest {
                 Files.writeString(tree.root.resolve("README.md"), "unreviewed dependency")
                 IntegrationCheck(emptyList())
             })
-            assertIs<Integration.Rejected>(integrator.integrate(listOf(result)).single())
+            val rejected = assertIs<Integration.Rejected>(integrator.integrate(listOf(result)).single())
+            assertTrue(rejected.reason.contains("moved non-ignored paths: README.md") && rejected.reason.contains("gitignore build and test artifacts"), rejected.reason)
             assertEquals(before, rig.stamp())
             assertTrue(rig.intents.open().isEmpty())
         }
