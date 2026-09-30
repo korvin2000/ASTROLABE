@@ -23,6 +23,7 @@ import net.ai.gate.chat.options.ChatOptions
 import net.ai.gate.chat.options.HistoryPolicy
 import net.ai.gate.chat.options.ReasoningHandoff
 import net.ai.gate.event.LlmListener
+import net.ai.gate.json.JsonObject as GateObject
 import net.ai.gate.model.Capability
 import net.ai.gate.model.Model
 import net.ai.gate.model.ReasoningLevel
@@ -38,6 +39,7 @@ import java.util.Locale
  *   "v": 1,
  *   "api": "anthropic-messages",           // must match the wire API the SDK resolves for the model
  *   "options": { … },                      // ChatOptions JSON form: timeouts, retry, sessionId, strict, headers, …
+ *   "body": { … },                         // vendor pass-through deep-merged into the wire body (OpenRouter `provider`, …)
  *   "reasoningHandoff": "reject",          // reject | drop — foreign reasoning in the transcript (AX-07)
  *   "outputCap": "enforced",               // enforced | unsupported — whether maxOutputTokens is sent (Codex: unsupported)
  *   "catalogCheck": "fail",                // fail | warn | off — profile limits against the SDK catalog
@@ -46,6 +48,10 @@ import java.util.Locale
  *   "effort": "map"                        // map | off — Effort as the SDK reasoning level
  * }
  * ```
+ *
+ * `body` is merged into the encoded request last: objects merge member by member, any other value replaces the wire
+ * value. It is part of the profile fingerprint like the rest of `gate`; `model`, `messages`, `tools` and `stream` are
+ * reserved because they carry what ASTROLABE owns.
  */
 internal data class GateSettings(
     val api: String? = null,
@@ -56,9 +62,11 @@ internal data class GateSettings(
     val prefixRetention: CacheRetention? = null,
     val endpointCounts: Boolean = false,
     val mapEffort: Boolean = true,
+    val body: JsonObject? = null,
 ) {
     companion object {
-        private val MEMBERS = setOf("v", "api", "options", "reasoningHandoff", "outputCap", "catalogCheck", "prefixRetention", "tokenCount", "effort")
+        private val MEMBERS = setOf("v", "api", "options", "reasoningHandoff", "outputCap", "catalogCheck", "prefixRetention", "tokenCount", "effort", "body")
+        private val RESERVED_BODY = setOf("model", "messages", "tools", "stream")
         private const val OPTIONS_SCHEMA = "ai-gate.options/3"
 
         fun parse(config: JsonObject, problems: MutableList<String>): GateSettings {
@@ -84,6 +92,11 @@ internal data class GateSettings(
                 }
                 else -> { problems += "gate.options: must be an object"; ChatOptions.none() }
             }
+            val body = when (val o = gate["body"]) {
+                null, is JsonNull -> null
+                is JsonObject -> o.takeIf { it.isNotEmpty() }.also { o.keys.filter { it in RESERVED_BODY }.forEach { problems += "gate.body.$it: reserved" } }
+                else -> { problems += "gate.body: must be an object"; null }
+            }
             return GateSettings(
                 api = (gate["api"] as? JsonPrimitive)?.content,
                 options = options,
@@ -97,6 +110,7 @@ internal data class GateSettings(
                 },
                 endpointCounts = choice("tokenCount", setOf("local", "endpoint")) == "endpoint",
                 mapEffort = choice("effort", setOf("map", "off")) != "off",
+                body = body,
             )
         }
     }
@@ -133,6 +147,9 @@ internal class ProfileBinding private constructor(
         !(support == SupportLevel.UNSUPPORTED || model.reasoningLevels().isEmpty() && support != SupportLevel.SUPPORTED && model.source() != Model.Source.UNLISTED)
     }
 
+    /** `gate.body` in the SDK's JSON form, converted once. */
+    private val body: GateObject? = settings.body?.let(JsonBridge::toGateObject)
+
     /** The SDK level for [effort], already the nearest supported one, so no call is adapted; `null` sends none. */
     fun reasoning(effort: Effort): ReasoningLevel? {
         if (!settings.mapEffort || !reasoningControl) return null
@@ -163,6 +180,7 @@ internal class ProfileBinding private constructor(
         b.tag("astrolabe.profile", profile.id)
         id?.let { b.tag("astrolabe.invocation", it.value) }
         listener?.let(b::listener)
+        body?.let { extra -> b.payload { wire -> merged(wire, extra) } }
         return b.build()
     }
 
@@ -197,6 +215,16 @@ internal class ProfileBinding private constructor(
             BillingDimension.CACHE_WRITE_1H to setOf("cache_write_1h", "cache_write"),
             BillingDimension.OUTPUT to setOf("output"),
         )
+
+        /** [extra] deep-merged into [wire]: objects merge recursively, any other value of [extra] replaces the wire value. */
+        fun merged(wire: GateObject, extra: GateObject): GateObject {
+            val members = LinkedHashMap(wire.members())
+            for ((name, value) in extra.members()) {
+                val current = members[name]
+                members[name] = if (current is GateObject && value is GateObject) merged(current, value) else value
+            }
+            return GateObject.of(members)
+        }
 
         /** Compiles [profile]; every contradiction is collected into [problems] and the binding is `null` if there is any. */
         fun compile(llm: Llm, profile: Profile, problems: MutableList<String>): ProfileBinding? {

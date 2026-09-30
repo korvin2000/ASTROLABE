@@ -281,6 +281,19 @@ class AiGateAdapterTest {
     }
 
     @Test
+    fun `gate body accepts an object and refuses other values and reserved members`() {
+        fun parse(json: String) = ArrayList<String>().let { problems -> GateSettings.parse(GateTestKit.gate(json), problems) to problems }
+        val (accepted, none) = parse("""{"body":{"provider":{"order":["Z.AI"],"allow_fallbacks":false}}}""")
+        assertEquals(emptyList(), none)
+        assertEquals("""{"provider":{"order":["Z.AI"],"allow_fallbacks":false}}""", accepted.body.toString())
+        assertEquals(listOf("gate.body: must be an object"), parse("""{"body":["provider"]}""").second)
+        assertEquals(listOf("gate.body.model: reserved", "gate.body.stream: reserved"), parse("""{"body":{"model":"x","stream":false,"top_k":3}}""").second)
+        val wire = Json.parse("""{"model":"m","provider":{"order":["A"],"sort":"price"},"n":1}""") as net.ai.gate.json.JsonObject
+        val extra = Json.parse("""{"provider":{"order":["B"],"ignore":["C"]},"n":{"x":2}}""") as net.ai.gate.json.JsonObject
+        assertEquals("""{"model":"m","provider":{"order":["B"],"sort":"price","ignore":["C"]},"n":{"x":2}}""", ProfileBinding.merged(wire, extra).toJson())
+    }
+
+    @Test
     fun `an unknown provider is a configuration error, not a transport failure`() {
         runtime(FakeProvider.create()).use { llm ->
             val problems = AiGateAdapter.violations(llm, listOf(GateTestKit.fakeProfile().copy(provider = "nowhere")))
