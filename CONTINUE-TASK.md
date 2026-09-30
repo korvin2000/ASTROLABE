@@ -2,29 +2,34 @@
 
 Rewritten every session (≤40 lines). Workflow: `CLAUDE.md` § Workflow. State snapshot: `actual_state.md`.
 
-**Checkpoint (2026-09-28):** owner-requested out-of-order P7 work — a real LLM transport over AI Gate
-(`../llm-transport-sdk/llm`, SDK S-01…S-17 landed) per `ASTROLABE_CHANGES_FOR_LLM_TRANSPORT_SDK.md`, its claims
-checked against the source. First release merged `--no-ff` into local `main` (`500c94f`) after a green full build;
-follow-up on `feat/ai-gate-qualification`, merged the same way once green. Nothing pushed.
-Journal: `audit/OUT-OF-ORDER-P7-AIGATE.md`. D-326–D-336. P0–P6 remain 185/185 DONE.
+**Checkpoint (2026-09-30):** owner-requested out-of-order **phase 0** (`../next-goal.md`): the owner's acceptance rule
+in the core — every obligation is passed, failed or unverified; unverified never becomes blocked or failed; the user
+(or the host's policy) decides. Branch `phase0/acceptance`, fast-forwarded into `main` and pushed on the owner's request.
+Journal: `audit/OUT-OF-ORDER-PHASE0.md`. Decisions D-337–D-355. P0–P6 remain 185/185 DONE.
 
 ## This session
-- Core seams A-01…A-09: `EstimatorFactory` (provider-api) + `CellModel.rebind`, `ProviderError.ContextOverflow/
-  Authentication/Timeout`, capability-driven breakpoints, `OutputLimit` without calls, `ObservableAdapter` →
-  `cell.model_progress`, `Astrolabe(estimators, ownsAdapter)`, `AstrolabeJava` with a provider-module adapter.
-- `:provider-ai-gate`: `AiGateAdapter` (+ `gate` block v1), translators, D-51 invocation over `LlmCall`, usage from SDK
-  buckets, wire-body estimator, `AiGateProfiles.draft`/`qualify`, `LiveSmokeTest` + `liveTest` (opt-in, billable).
-- Offline evidence: AX-01..10 against recorded Anthropic/Responses frames and the SDK fake; gateway, Gemini, Codex
-  fixtures; one `Astrolabe` campaign end to end. Three Fable 5.1 reviews; findings fixed.
-- Full Windows build (first release): 1,803 tests, 0 failures, ABI checks pass.
-- CI: optional checkout of `korvin2000/llm-transport-sdk` beside the repository (`continue-on-error`).
+- A1–A7 (D-337–D-343): `verify/Resolution.kt` (`Resolver`, `ObligationResult`, `Resolved`, `AcceptanceDecision*`,
+  `StopCode`), cell `Defer` → `CellExit.Completed(pending)`, durable `PendingCompletion` + `acceptance_decisions`
+  (schema v5), resume without a cell, per-item provenance in ledger and finish receipt, campaign-level resolution,
+  `Authority.decide` (default null) and `JavaAuthority.decide`.
+- A8/A9 (D-344/D-345): `answered` outcome via `task` op `answer` (only when nothing changed); host notes
+  (`CampaignPolicy.hostNotes`) and `Contracts.amendByHost`.
+- Part E (D-346–D-352) and follow-ups (D-353–D-355): `expect` from shown versions, JSON-string `ops`/`patch`, empty
+  placeholders, state forms named, harmless register normalisation, plain run exit 0 reads `completed` (header too;
+  outcome stays inconclusive), `cwd` "."/"" = root, optional dead-end evidence / rejected alternative, sibling fields
+  merged into the one op key; the answer denial names the no-call turn.
+- Live crash fixed (`8f17590`): a generic outline name cut at 80 chars kept a trailing space and failed `impactLabel`;
+  a cell's failure reason now names its innermost harness frames.
+- Live acceptance through Studio on `openai-codex/gpt-6-luna` and `openrouter/z-ai/glm-5.3-flash` (numbers in
+  `../phase0-report.md`). SDK fix for Codex `complete()` (untyped SSE) lives in `../llm-transport-sdk`.
 
 ## Next
-1. Owner: push `main` when approved; CI then builds `:provider-ai-gate` if the SDK repository is reachable (a private
-   one needs the `LLM_TRANSPORT_SDK_TOKEN` secret; otherwise the module is skipped, D-332/D-336).
-2. Owner-authorised live smoke: set `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY`, then run
-   `./gradlew :provider-ai-gate:liveTest`; record usage/cancellation evidence in the journal. Gates stay `UNMEASURED`.
-3. Before using a gateway profile, run `AiGateProfiles.qualify(llm, draft)` against it and freeze the narrowed profile.
+1. Full `./gradlew build` on Windows and Linux CI (owner: targeted tests only this session; ~40 min locally).
+2. Residual (journal): a crash between the cell's return and the pending save re-proposes with a new cell; explicit
+   model `verify` and harness regression/full-suite reruns are not suppressed on the same candidate; a fact anchor
+   `version` still needs the full 64-hex digest (models send 4); `deadend.add.evidence` is not checked for existence.
+3. Owner decision (report): S3/S4 still 5–10 calls — Next from `[>]` when STATE has none, short anchor versions.
+4. F-5 (Studio): the core review cell for `check:` items in the simple shape — out of phase 0 scope.
 
 ## Carried-forward debts (unchanged)
 D-254 recovery, D-70/D-71/D-241 replan and S3 re-selection, D-252 retrieval, D-113/D-120 behaviour maps,

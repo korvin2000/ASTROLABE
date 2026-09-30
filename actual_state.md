@@ -39,7 +39,7 @@ transport (2026-09-28, merged into local `main`, D-326–D-336).
   `provider-ai-gate` (`AiGateAdapter` over `net.ai.gate:ai-gate`; present only with the SDK checkout, D-332).
 
 ## Store
-Schema **v4** (no bump this session). `packets` also holds behaviour-snapshot, campaign-review, increment-review and
+Schema **v5** (phase 0: `pending_completions`, `acceptance_decisions`); `packets` holds behaviour-snapshot, campaign-review, increment-review and
 `integration` rows; skills and behaviour maps are `BlobKind.MODULE` blobs linked as a note's `procedure` module.
 
 ## Last verification
@@ -50,11 +50,11 @@ Ubuntu + Windows CI green: P4–P6 gates 36159227747, 36162949349, 36167689819, 
 Local choices D-112–D-113, D-120–D-126, D-135–D-137, D-145–D-155, D-160–D-165, D-170–D-174, D-180–D-183, D-190–D-195,
 D-200–D-202, D-210–D-213, D-220–D-223, D-230–D-233, D-240–D-244, D-250–D-254, D-260 (TODO §3); owner D-175 (deps).
 ## Audit remediation, review and fine-tune (2026-09-28)
-`feature/bugfix` fixed 142 findings; `review/bugfix` reviewed every fix (`audit/BUGFIX-REVIEW.md`: 28 review fixes,
-52 ACCEPT, 62 NOTE). `fix/fine-tune` closed 21 owner-selected follow-ups and the red CI of `main` @ 30cc45c (seven
-`fix(ci)` commits). New switches keep safe defaults: `unknownOutcomeReconciliation` Host, `gitDeadlineSeconds` 600,
-`providerTerminalWaitSeconds` 60, `checkerFallbackTimeBoxSeconds` 120, digest cap 150 + 8·requirements ≤ 2000
-(D-321–D-325). Core ABI dump regenerated; CI green on both OSes (36468171641).
+142 findings fixed and reviewed (`audit/BUGFIX-REVIEW.md`); 21 follow-ups and CI repair (D-321–D-325); CI green 36468171641.
 ## AI Gate transport (2026-09-28, merged into local `main`)
 `AiGateAdapter(llm, profiles)` + `Astrolabe(…, estimators = adapter.estimators(HeuristicEstimator()))`; profiles bind via
 `Profile.config.gate`, drafts/probes via `AiGateProfiles` (D-326–D-336); AX-01..10 pass offline; `liveTest` not yet run.
+## Phase 0 — acceptance rule (2026-09-30, owner request, D-337–D-355)
+`verify/Resolution.kt` resolves every obligation to passed/failed/unverified; unverified waits for `Authority.decide`
+(stop code `acceptance_decision` / `review_rejected`), resumes without a cell, records per-item provenance; `answered`
+outcome, host notes, tool ergonomics (E1–E7). Targeted tests only (journal); full build pending (CONTINUE-TASK).

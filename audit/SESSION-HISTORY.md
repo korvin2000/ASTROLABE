@@ -702,3 +702,11 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - Owner asked to merge when green: merged `--no-ff` into local `main` (`500c94f`, not pushed). Follow-up
   (`feat/ai-gate-qualification`, D-336): `AiGateProfiles.qualify`, opt-in `liveTest`, gateway/Gemini/Codex fixtures,
   optional SDK checkout in CI; a third Fable review. Live smoke not run (no keys; billable, needs owner authorisation).
+
+## 2026-09-30: phase 0 — acceptance rule in the core (`phase0/acceptance`, owner request, out of order)
+- Owner's rule: every obligation is passed, failed or unverified; unverified never blocks or fails; the user or the host
+  policy decides (`Authority.decide`); waiting and "done" cost no model call. D-337–D-345 (A1–A9), D-346–D-355 (part E).
+- Live diagnosis first: Codex review failures were the SDK reading untyped SSE as JSON (fixed in `llm-transport-sdk`).
+- A Codex review of A1–A7 and a Fable + Codex consult (owner questions on E6/E4); findings applied, residuals in the journal.
+- Live acceptance through Studio on gpt-6-luna and glm-5.3-flash (numbers in `../phase0-report.md`); targeted tests only
+  (owner: no 40-minute full build). Fast-forwarded into `main` and pushed on the owner's request.
