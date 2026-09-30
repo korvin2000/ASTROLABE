@@ -72,7 +72,11 @@ public class Validator(
             }
             if (met) eligible += po.op else dropped += po
         }
-        if (eligible.count { it is Op.Next } != 1) return reject("exactly one Next", "patch carries ${eligible.count { it is Op.Next }} next ops")
+        val nextOps = eligible.count { it is Op.Next }
+        // D-350: a patch without `next` keeps the Next STATE already has; none at all, or two, still refuse.
+        if (nextOps > 1 || (nextOps == 0 && register.next == null)) {
+            return reject("exactly one Next", "patch carries $nextOps next ops" + if (nextOps == 0) " and STATE has no Next yet: add {\"next\": \"…\"}" else "")
+        }
 
         var next = register
         val flags = ArrayList<String>()
@@ -98,7 +102,12 @@ public class Validator(
                     if (step.mark == Mark.Done) return reject("tick needs an open step", "step ${op.n} already done")
                     val evidenceOk = op.evidence != null && context.evidenceExists(op.evidence)
                     val greenOk = step.accept != null && context.acceptGreen(step.accept)
-                    if (!evidenceOk && !greenOk) return reject("tick needs green accept or an evidence id", "step ${op.n}: evidence=${op.evidence} accept=${step.accept}")
+                    if (!evidenceOk && !greenOk) {
+                        return reject(
+                            "tick needs green accept or an evidence id",
+                            "step ${op.n}: ${evidenceForm(op.evidence)}; " + (step.accept?.let { "or tick once its accept '$it' is green" } ?: "the step has no accept to be green"),
+                        )
+                    }
                     if (step.mark == Mark.Cursor) cursorMoved = true
                     next.copy(plan = next.plan.map { s -> if (s.n == op.n) s.copy(mark = Mark.Done, evidence = op.evidence ?: s.evidence) else s })
                 }
@@ -110,7 +119,7 @@ public class Validator(
                 }
                 is Op.FactAdd -> {
                     if (op.kind == ClaimKind.Verified && (op.evidence == null || !context.evidenceExists(op.evidence))) {
-                        return reject("v needs an existing evidence id", "fact.add(v): evidence=${op.evidence}")
+                        return reject("v needs an existing evidence id", "fact.add(v): ${evidenceForm(op.evidence)}")
                     }
                     val staleAt = op.anchor?.let { anchor ->
                         val current = context.currentVersion(anchor.path)
@@ -125,9 +134,9 @@ public class Validator(
                 }
                 is Op.DeadendAdd -> {
                     if (op.scope.isBlank() || op.reopen.isBlank()) return reject("dead ends need scope and reopen", "deadend.add")
-                    next.copy(deadEnds = next.deadEnds + DeadEnd(nextN(next.deadEnds.map { it.n }), op.text, op.evidence, op.scope, op.reopen))
+                    next.copy(deadEnds = next.deadEnds + DeadEnd(nextN(next.deadEnds.map { it.n }), op.text, op.evidence?.takeIf { it.isNotBlank() }, op.scope, op.reopen))
                 }
-                is Op.DecisionAdd -> next.copy(decisions = next.decisions + Decision(nextN(next.decisions.map { it.n }), op.text, op.because, op.rejected, op.probe, op.adrCandidate))
+                is Op.DecisionAdd -> next.copy(decisions = next.decisions + Decision(nextN(next.decisions.map { it.n }), op.text, op.because, op.rejected?.takeIf { it.isNotBlank() }, op.probe, op.adrCandidate))
                 is Op.OpenAdd -> next.copy(open = next.open + OpenItem(nextN(next.open.map { it.n }), op.text, op.trip, op.needs))
                 is Op.OpenClose -> {
                     val item = next.openItem(op.n) ?: return reject("unknown open item", "open.close(${op.n})")
@@ -141,10 +150,20 @@ public class Validator(
         }
 
         if (next.cursors > 1) return reject("exactly one [>]", "${next.cursors} cursors")
-        if (next.cursors == 0 && next.todos > 0) return reject("one [>] while [ ] exists", "no cursor with ${next.todos} open steps")
+        // D-350: open steps left without [>] get it on the first open step; placing it advances [>], so the red rule below applies.
+        val placed = if (next.cursors == 0) next.plan.firstOrNull { it.mark == Mark.Todo } else null
+        if (placed != null) {
+            next = next.copy(plan = next.plan.map { s -> if (s.n == placed.n) s.copy(mark = Mark.Cursor) else s })
+            cursorMoved = true
+        }
         if (cursorMoved && context.redChecks.isNotEmpty()) {
             val unrecorded = context.redChecks.filter { red -> next.open.none { !it.closed && it.text.contains(red) } }
-            if (unrecorded.isNotEmpty()) return reject("red not recorded", "red ${unrecorded} without an Open item before [>] advances")
+            if (unrecorded.isNotEmpty()) {
+                return reject(
+                    "red not recorded",
+                    "red ${unrecorded} without an Open item before [>] advances" + (placed?.let { " (the patch left no [>]; it would go to step ${it.n}, the first open step)" } ?: ""),
+                )
+            }
         }
         next = next.copy(version = register.version + 1)
         val registerTokens = RegisterRender.tokens(next, estimator)
@@ -155,6 +174,13 @@ public class Validator(
     }
 
     private fun nextN(existing: List<Int>): Int = (existing.maxOrNull() ?: 0) + 1
+
+    /** Names the allowed evidence forms in a refusal (D-349): `op:N` resolves only within its own turn. */
+    private fun evidenceForm(evidence: String?): String = when {
+        evidence == null -> "no evidence given — name a stored result by its alias #N, or a run or verify call of this turn as op:N"
+        evidence.startsWith("op:") -> "evidence '$evidence' names no run or verify call of this turn with a result — op:N is a call of the same turn; a result of an earlier turn is named by its alias #N"
+        else -> "evidence '$evidence' is not a stored result — name one by its alias #N (as the result header shows it), or a run or verify call of this turn as op:N"
+    }
 
     public companion object {
         /**

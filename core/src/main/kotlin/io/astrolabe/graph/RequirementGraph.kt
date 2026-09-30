@@ -213,6 +213,7 @@ public class RequirementGraph(
             contract.workId, contract.attemptId, contract.version, result.resultingStamp, result.contextId,
             increment.definitionDigest(),
             result.evidenceRefs.distinct().sorted(),
+            result.provenance,
         )
         return replace(increment.copy(status = IncrementStatus.Verified)).copy(evidence = evidence + (increment.id to record))
     }
@@ -248,7 +249,8 @@ public class RequirementGraph(
                 assigned.any { it.status == IncrementStatus.InProgress || it.status == IncrementStatus.Verified } -> RequirementStatus.InProgress
                 else -> RequirementStatus.Pending
             }
-            requirement.id to LedgerEntry(requirement.id, status, records.flatMap { it.evidenceRefs }.distinct().sorted(), verified)
+            val provenance = records.flatMap { it.provenance }.filter { it.item in requirement.acceptance }.distinctBy { it.item }
+            requirement.id to LedgerEntry(requirement.id, status, records.flatMap { it.evidenceRefs }.distinct().sorted(), verified, provenance)
         }.toMutableMap()
         // An invalid prerequisite invalidates its transitive dependents, including requirement cycles.
         val dependents = contract.requirements.flatMap { r -> r.dependsOn.map { it to r.id } }

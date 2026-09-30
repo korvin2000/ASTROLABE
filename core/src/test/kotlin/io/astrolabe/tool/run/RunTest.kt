@@ -198,7 +198,10 @@ class RunTest {
         assertTrue(status(out) != "denied" && status(out) != "unknown_outcome", status(out))
         assertEquals("#1", out.resultAlias)
         assertTrue(out.body.contains("hello-run"), out.body)
-        assertTrue(out.body.startsWith("run #1 ${status(out)} · class R · shell wrapper · exit 0 · echo hello-run"), out.body)
+        // D-351/D-353: a plain command's exit 0 reads as such, header status included; it is never green (D-50).
+        assertTrue(out.body.startsWith("run #1 completed, exit code 0 · class R · shell wrapper · echo hello-run"), out.body)
+        assertTrue(out.body.contains("\ngeneric · completed, exit code 0\n"), out.body)
+        assertEquals("completed", status(out))
         assertEquals(out.header!!.runtime.candidateBefore, out.header!!.runtime.candidateAfter, "nothing moved")
         assertEquals(out.header!!.runtime.candidateAfter, out.header!!.stamp)
         assertEquals(EffectClass.R, out.header!!.effectClass)
@@ -207,6 +210,33 @@ class RunTest {
         assertTrue(intents.open().isEmpty())
         assertFalse(out.green, "exit 0 alone is never green")
         assertNotNull(SqliteObservations(store, clock).get("obs-1"))
+    }
+
+    @Test
+    fun `an exit-hiding wrapper keeps the inconclusive header and a completed background run is still not green`() = runTest {
+        // D-353: `completed` only where the D-351 predicate holds; a wrapper hides the exit, so the verdict wording stays.
+        val wrapped = run("""{"cmd":"echo wrapped || true"}""")
+        assertEquals("inconclusive", status(wrapped), wrapped.body)
+        assertFalse(wrapped.body.lineSequence().first().contains("completed"), wrapped.body)
+        assertFalse(wrapped.green)
+        run("""{"cmd":"echo settled","bg":true}""")
+        val settled = awaitSettled("handle-1")
+        assertEquals("completed", status(settled), settled.body)
+        assertFalse(settled.green, "the background completion path is presentation only too")
+    }
+
+    @Test
+    fun `a cwd that is blank, a dot or dot-slash runs in the workspace root`() = runTest {
+        val list = shell("dir /b", "ls")
+        for (cwd in listOf("", " ", ".", "./")) {
+            val out = run("""{"cmd":"$list","cwd":"$cwd"}""")
+            assertTrue(status(out) != "denied", "cwd '$cwd': ${out.body}")
+            assertTrue(out.body.contains("README.md"), out.body)
+        }
+        assertTrue((1..4).all { intents.get("intent-$it")!!.cwd == null }, "one command for the unknown-outcome guard, whatever spelling named the root")
+        val sub = run("""{"cmd":"$list","cwd":"src"}""")
+        assertTrue(sub.body.contains("a.py") && !sub.body.contains("README.md"), sub.body)
+        assertEquals("denied", status(run("""{"cmd":"$list","cwd":"src/.."}""")), "only the named spellings mean the root")
     }
 
     @Test

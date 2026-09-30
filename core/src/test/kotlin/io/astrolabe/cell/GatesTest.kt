@@ -97,12 +97,14 @@ class GatesTest {
     }
 
     @Test
-    fun `exit calls the P1 7 7 gate and refuses every proposal with exactly what is missing`() {
+    fun `exit calls the D-337 resolver and refuses a rework with exactly what is missing`() {
         val proposed = state(5).copy(completionProposed = true)
         val refused = assertIs<GateOutcome.Rejection>(gates.evaluate(proposed).outcomes.single())
         assertEquals(Gates.EXIT, refused.key.gate)
-        assertEquals(listOf("AC-1: run: pytest -q (scope touched) — no receipt", "step 1 [>] 'round half-up' has no disposition (done, cancelled or an explicit non-completed exit)"), refused.details)
-        assertEquals("exit refused: 2 missing — escape only via state(blocked) or task.ask with evidence", refused.line)
+        assertEquals(listOf("step 1 [>] 'round half-up' has no disposition (done, cancelled or an explicit non-completed exit)", "AC-1: run: pytest -q (scope touched) — no receipt"), refused.details)
+        assertEquals("exit refused: 2 to fix — fix them and propose completion again", refused.line)
+        val undisposedOnly = register.copy(plan = listOf(Step(1, Mark.Done, "round half-up", evidence = "rcpt-1")))
+        assertEquals(emptyList(), gates.evaluate(state(5, undisposedOnly).copy(completionProposed = true)).rejections, "an unverified item alone awaits a decision: no refusal (I1)")
         val again = gates.evaluate(proposed.copy(fired = gates.evaluate(proposed).fired))
         assertEquals(1, again.rejections.size, "a hard gate refuses the same proposal again; it is never deduplicated")
 

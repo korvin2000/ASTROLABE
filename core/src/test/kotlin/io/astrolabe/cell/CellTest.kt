@@ -53,7 +53,6 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
-import kotlin.test.assertIsNot
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -317,7 +316,8 @@ class CellTest {
 
             val exit = f.run(model)
 
-            assertIsNot<CellExit.Completed>(exit)
+            // Past its rework round the unresolved nudge goes to the decider (I2): never accepted without a word.
+            assertEquals(io.astrolabe.verify.StopCode.AcceptanceDecision, assertIs<CellExit.Completed>(exit).pending?.code)
             val line = "impact: `a` (src/a.py) signature changed; 1 reference not inspected → look(refs) or scope the plan"
             assertTrue(f.anchorText(3).contains(line), f.anchorText(3))
             assertFalse(f.anchorText(4).contains(line), "once per changed symbol: " + f.anchorText(4))

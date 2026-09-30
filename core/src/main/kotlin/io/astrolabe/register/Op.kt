@@ -32,13 +32,15 @@ public sealed interface Op {
     @SerialName("fact.refute")
     public data class FactRefute(val n: Int, val evidence: String) : Op
 
+    /** `evidence` is optional (D-354); scope and reopen stay required (§7.3). */
     @Serializable
     @SerialName("deadend.add")
-    public data class DeadendAdd(val text: String, val evidence: String?, val scope: String, val reopen: String) : Op
+    public data class DeadendAdd(val text: String, val evidence: String? = null, val scope: String, val reopen: String) : Op
 
+    /** `rejected` is optional (D-354). */
     @Serializable
     @SerialName("decision.add")
-    public data class DecisionAdd(val text: String, val because: String, val rejected: String?, val probe: String? = null, val adrCandidate: Boolean = false) : Op
+    public data class DecisionAdd(val text: String, val because: String, val rejected: String? = null, val probe: String? = null, val adrCandidate: Boolean = false) : Op
 
     @Serializable
     @SerialName("open.add")

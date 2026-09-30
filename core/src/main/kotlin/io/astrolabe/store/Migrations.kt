@@ -18,7 +18,7 @@ import java.time.Clock
  * ## One writer per table (L9)
  * | Writer | Tables |
  * |---|---|
- * | controller | `contracts`, `requests`, `requirements`, `acceptance`, `constraints`, `amendments`, `increments`, `ledger`, `sizing`, `leases`, `campaigns`, `attempts` |
+ * | controller | `contracts`, `requests`, `requirements`, `acceptance`, `constraints`, `amendments`, `increments`, `ledger`, `sizing`, `leases`, `campaigns`, `attempts`, `pending_completions`, `acceptance_decisions` |
  * | verifier | `receipts` |
  * | runner | `journal` (call/result kinds), `intents`, `handles`, `usage` |
  * | cell runtime | `cells`, `turns`, `manifests`, `register_versions`, `workset_exports`, `observations`, `claims`, `packets` |
@@ -44,7 +44,7 @@ import java.time.Clock
  */
 public object Migrations {
     /** The schema version this build writes; every row records it. */
-    public const val SCHEMA_VERSION: Int = 4
+    public const val SCHEMA_VERSION: Int = 5
 
     /** Every table of the current schema, in creation order (`notes_fts` is the FTS5 virtual table). */
     public val TABLES: List<String> = listOf(
@@ -83,6 +83,8 @@ public object Migrations {
         "campaigns",
         "attempts",
         "note_revisions",
+        "pending_completions",
+        "acceptance_decisions",
     )
 
     /**
@@ -295,6 +297,18 @@ public object Migrations {
                 "CREATE TABLE note_revisions (" +
                     "note_id TEXT NOT NULL REFERENCES notes (note_id), revision INTEGER NOT NULL, $IDS, $META, " +
                     "PRIMARY KEY (note_id, revision))",
+            ),
+        ),
+        Migration(
+            version = 5,
+            statements = listOf(
+                // ---- acceptance decisions (D-339, D-340): a completion waiting for an authority, and the decisions made ----
+                "CREATE TABLE pending_completions (" +
+                    "id TEXT PRIMARY KEY NOT NULL, $IDS, increment_id TEXT, status TEXT NOT NULL, $META)",
+                "CREATE INDEX pending_completions_by_work ON pending_completions (work_id, attempt_id, status)",
+                "CREATE TABLE acceptance_decisions (" +
+                    "id TEXT PRIMARY KEY NOT NULL, $IDS, increment_id TEXT, request_id TEXT NOT NULL, kind TEXT NOT NULL, spent INTEGER NOT NULL, $META)",
+                "CREATE INDEX acceptance_decisions_by_work ON acceptance_decisions (work_id, attempt_id, created_at)",
             ),
         ),
     )

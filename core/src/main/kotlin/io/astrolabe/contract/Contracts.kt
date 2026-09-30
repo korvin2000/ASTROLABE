@@ -136,6 +136,22 @@ public class Contracts(
     }
 
     /**
+     * A structural change the host makes to the contract (D-345) — an acceptance item, protected paths — with the host
+     * as its author: the version bumps, but no request is appended, so the objective and the pinned requests stay the
+     * user's own words. [reason] is what the host did, for the event.
+     */
+    public fun amendByHost(work: WorkId, reason: String, apply: (Contract) -> Contract): Contract = synchronized(repository) {
+        require(reason.isNotBlank()) { "a host amendment says what it changes" }
+        val current = requireCurrent(work)
+        val changed = apply(current)
+        require(changed.requests == current.requests) { "a host amendment never writes the user's requests" }
+        val amended = changed.copy(version = current.version + 1)
+        repository.append(amended)
+        events?.emit(AgentEvent.Contract.Amended(ids(amended), amended.version, "host: $reason"))
+        return amended
+    }
+
+    /**
      * Resolves a pending proposal through [authority]: accepted ⇒ [apply] derives the new content and the
      * version bumps; rejected ⇒ recorded and dropped from the pending list; pending ⇒ unchanged.
      */

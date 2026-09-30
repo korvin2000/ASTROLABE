@@ -199,18 +199,19 @@ class RefactorCampaignTest {
     }
 
     @Test
-    fun `without a reviewer the refactor campaign is blocked, never completed, and the receipt says why`() = runBlocking<Unit> {
+    fun `without a reviewer the refactor campaign waits for a decision, never completed, and the receipt says why (D-343)`() = runBlocking<Unit> {
         controller().open(repo.root, request, policy).use { c ->
             val replies = planning() +
                 implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"") +
                 implement(c, "src/b.py", "    return 2", "    return 20", "\"AC-1\",\"AC-2\"")
             val run = controller().run(c, CellModel(FakeAdapter(ScriptedModel.of(*replies.toTypedArray())), FakeProfiles.main, HeuristicEstimator()))
 
-            assertEquals(CampaignOutcome.BlockedExternal, run.outcome, run.state?.reason)
+            assertEquals(CampaignOutcome.WaitingForInput, run.outcome, run.state?.reason)
+            assertEquals(io.astrolabe.verify.StopCode.AcceptanceDecision, run.state!!.stopCode, "an unavailable review is unverified, never a block (I1)")
             val reason = run.state!!.reason!!
-            assertTrue(reason.startsWith("campaign review required: refactor mode") && reason.contains("no reviewer answered") && reason.contains("never skipped (D-23)"), reason)
+            assertTrue(reason.contains("campaign review required: refactor mode") && reason.contains("no reviewer answered"), reason)
             val finish = run.finish!!
-            assertEquals("blocked_external", finish.status)
+            assertEquals("waiting_for_input", finish.status)
             val review = assertNotNull(finish.review)
             assertNull(review.verdict)
             assertTrue(review.unavailable!!.contains("no reviewer answered"), review.unavailable)
@@ -221,15 +222,15 @@ class RefactorCampaignTest {
     }
 
     @Test
-    fun `a rejecting verdict never completes the campaign`() = runBlocking<Unit> {
+    fun `a rejecting verdict never completes the campaign - the rejection goes to the decider (D-343)`() = runBlocking<Unit> {
         controller().open(repo.root, request, policy).use { c ->
             val replies = planning() +
                 implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"") +
                 implement(c, "src/b.py", "    return 2", "    return 20", "\"AC-1\",\"AC-2\"")
             val run = controller().run(c, CellModel(FakeAdapter(ScriptedModel.of(*replies.toTypedArray())), FakeProfiles.main, HeuristicEstimator()), authority = Reviewer(VerdictOutcome.Reject, "bob"))
 
-            assertEquals(CampaignOutcome.Failed, run.outcome, run.state?.reason)
-            assertTrue(run.state!!.reason!!.contains("campaign review reject by bob"), run.state!!.reason)
+            assertEquals(CampaignOutcome.WaitingForInput, run.outcome, run.state?.reason)
+            assertTrue(run.state!!.reason!!.contains("reject without a blocker or major finding"), run.state!!.reason)
             assertEquals("reject" to "bob", run.finish!!.review!!.verdict to run.finish!!.review!!.signedBy)
         }
     }

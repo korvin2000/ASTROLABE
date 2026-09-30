@@ -445,11 +445,13 @@ internal fun buildView(
     extraSections: List<ViewSection> = emptyList(),
     headLines: Int = HEAD_LINES,
     tailLines: Int = TAIL_LINES,
+    /** Replaces `status · exit N` in the first line; presentation only (D-351). */
+    statusText: String? = null,
 ): ViewResult {
     val head = ArrayList<String>()
     val runner = listOfNotNull(shaperId, capture.runnerVersion).joinToString(" ")
     // §8.3: the line names the invocation scope, never a bare verdict.
-    head += "$runner · ${status.name.lowercase()} · exit ${capture.exitCode?.toString() ?: "none"}" +
+    head += "$runner · ${statusText ?: "${status.name.lowercase()} · exit ${capture.exitCode?.toString() ?: "none"}"}" +
         (if (capture.timedOut) " · timed out" else "") +
         (capture.selector?.let { " · selector $it" } ?: "")
     head += counts?.let {

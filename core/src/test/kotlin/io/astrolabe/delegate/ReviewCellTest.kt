@@ -19,10 +19,10 @@ import io.astrolabe.register.Register
 import io.astrolabe.route.RoutingFunction
 import io.astrolabe.route.Tier
 import io.astrolabe.verify.AcceptanceSurface
-import io.astrolabe.verify.ExitGate
 import io.astrolabe.verify.Finding
 import io.astrolabe.verify.FindingKind
-import io.astrolabe.verify.GateResult
+import io.astrolabe.verify.Resolution
+import io.astrolabe.verify.Resolver
 import io.astrolabe.verify.ReviewRequest
 import io.astrolabe.verify.ReviewScope
 import io.astrolabe.verify.Severity
@@ -115,8 +115,9 @@ class ReviewCellTest {
             val contract = f.contract.copy(acceptance = f.contract.acceptance + review)
             val increment = f.increment.copy(accept = listOf(review.id))
             val register = Register.empty(f.ids.context!!, increment.id, increment.title)
-            val gate = assertIs<GateResult.Refused>(ExitGate.evaluate(register, contract, increment, emptyMap(), reviews = mapOf(review.id to outcome.record.verdict!!)))
-            assertTrue(gate.missing.single().contains("review revise by review-cell:judge"), gate.missing.toString())
+            val gate = Resolver.increment(register, contract, increment, emptyMap(), verdicts = mapOf(review.id to outcome.record.verdict!!), candidate = p.candidate)
+            assertEquals(Resolution.Rework, gate.resolution, "a substantive rejection is reworked (D-341)")
+            assertTrue(gate.missing.single().contains("revise by review-cell:judge"), gate.missing.toString())
             val steered = outcome.steer(register)
             assertEquals(listOf("review major: the migration has no down step at src/a.py:2"), steered.open.map { it.text })
             assertEquals(1, outcome.pits.size, "findings at or above major are PIT candidates")
@@ -131,10 +132,17 @@ class ReviewCellTest {
             val none = assertIs<ReviewOutcome.Unavailable>(ReviewCell(silent, AutonomousAuthority(), f.store, f.idGen, f.clock, f.journal).obtain(p, Tier.Medium, f.registry::version))
             assertEquals(listOf(Tier.Medium), silent.tiers)
             assertEquals(listOf("medium", "human"), none.record.path)
-            assertTrue(none.reason.contains("provider unavailable") && none.reason.contains("never skipped"), none.reason)
+            assertTrue(none.reason.contains("provider unavailable") && none.reason.contains("unverified"), none.reason)
 
-            val escalating = ScriptedJudge(*Array(3) { JudgeRun(verdict(p, VerdictOutcome.Escalate), Tokens(100)) })
-            val escalated = assertIs<ReviewOutcome.Unavailable>(ReviewCell(escalating, AutonomousAuthority(), f.store, f.idGen, f.clock, f.journal).obtain(p, Tier.Medium, f.registry::version))
+            // I3 (D-341): the same candidate is never reviewed twice — the unverified result is reused, the judge is not asked.
+            val again = ScriptedJudge(JudgeRun(verdict(p, VerdictOutcome.Approve), Tokens(100)))
+            val reused = assertIs<ReviewOutcome.Unavailable>(ReviewCell(again, AutonomousAuthority(), f.store, f.idGen, f.clock, f.journal).obtain(p, Tier.Medium, f.registry::version))
+            assertEquals(emptyList(), again.tiers)
+            assertTrue(reused.record.reused)
+
+            val other = p.copy(id = "evidence-2", criteria = p.criteria + ReviewCriterion("AC-extra", "review: rollback documented", "user", 1))
+            val escalating = ScriptedJudge(*Array(3) { JudgeRun(verdict(other, VerdictOutcome.Escalate), Tokens(100)) })
+            val escalated = assertIs<ReviewOutcome.Unavailable>(ReviewCell(escalating, AutonomousAuthority(), f.store, f.idGen, f.clock, f.journal).obtain(other, Tier.Medium, f.registry::version))
             assertEquals(listOf(Tier.Medium, Tier.High, Tier.ExtraHigh), escalating.tiers, "escalate goes one tier up, then to a human")
             assertEquals(listOf("medium", "high", "extrahigh", "human"), escalated.record.path)
         }
@@ -175,7 +183,8 @@ class ReviewCellTest {
 
             f.repo.write("src/a.py", CellFixture.A_PY.replace("return 1", "return 10"))
             assertEquals(Freshness.Stale, reused.record.freshness(p.contractVersion, p.candidate, f.registry::version))
-            assertEquals(Freshness.Unknown, reused.record.copy(evidenceVersions = emptyMap()).freshness(p.contractVersion, p.candidate, f.registry::version))
+            // D-341: the candidate stamp covers the tree, so an empty diff at the same candidate is current, never re-reviewed.
+            assertEquals(Freshness.Current, reused.record.copy(evidenceVersions = emptyMap()).freshness(p.contractVersion, p.candidate, f.registry::version))
             assertIs<ReviewOutcome.Approved>(cells.obtain(p, Tier.Medium, f.registry::version))
             assertEquals(2, judge.tiers.size, "a changed dependency needs a fresh assessment")
 

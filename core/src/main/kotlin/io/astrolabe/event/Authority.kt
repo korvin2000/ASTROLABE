@@ -1,6 +1,8 @@
 package io.astrolabe.event
 
 import io.astrolabe.id.Identities
+import io.astrolabe.verify.AcceptanceDecision
+import io.astrolabe.verify.AcceptanceDecisionRequest
 import io.astrolabe.verify.ReviewRequest
 import io.astrolabe.verify.Verdict
 import kotlinx.serialization.Serializable
@@ -85,7 +87,9 @@ public data class Resolution(
 /**
  * Inbound host authority (TODO P0.4.2): who answers `blocked` is a policy (§1.2). Every reply names the pending
  * item and the contract revision it answers; the runtime revalidates late replies with [Replies] before use.
- * Returning `null` from [ask] or [review] means no answer is available: the cell ends `blocked`.
+ * Returning `null` from [ask] means no answer is available: the cell ends `blocked`. [review] is a verification — its
+ * `null` is an unverified result; [decide] is the decision on what verification could not settle — its `null` makes
+ * the campaign wait for one (D-338).
  */
 public interface Authority {
     public suspend fun ask(question: Question): Answer?
@@ -96,6 +100,13 @@ public interface Authority {
 
     /** Human review path (D-23): a signed verdict, or `null` when no reviewer is available. */
     public suspend fun review(request: ReviewRequest): Verdict?
+
+    /**
+     * The acceptance decision (D-338): `accept` or `rework` for the unverified and review-rejected obligations of
+     * [request], or `null` when no decision is available now — the campaign then waits (`waiting_for_input`). An
+     * authority that makes no acceptance decisions keeps the default.
+     */
+    public suspend fun decide(request: AcceptanceDecisionRequest): AcceptanceDecision? = null
 }
 
 /**
@@ -127,6 +138,9 @@ public class AutonomousAuthority(private val policy: AutonomousPolicy = Autonomo
 
     override suspend fun review(request: ReviewRequest): Verdict? = null
 
+    /** Autonomous policy never accepts unverified work on its own: the campaign waits for a host decision (D-338). */
+    override suspend fun decide(request: AcceptanceDecisionRequest): AcceptanceDecision? = null
+
     public companion object {
         public const val AUTHORITY: String = "policy:autonomous"
     }
@@ -151,4 +165,7 @@ public object Replies {
 
     @JvmStatic
     public fun check(verdict: Verdict, currentRevision: Int): ReplyValidity = check(verdict.contractRevision, currentRevision)
+
+    @JvmStatic
+    public fun check(decision: AcceptanceDecision, currentRevision: Int): ReplyValidity = check(decision.contractRevision, currentRevision)
 }

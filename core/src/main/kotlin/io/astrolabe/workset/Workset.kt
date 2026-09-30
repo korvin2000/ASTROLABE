@@ -66,6 +66,10 @@ public class WorksetView internal constructor(private val entries: List<Entry>) 
         entries.filter { it.path == path && it.version == version }.fold(Ranges.EMPTY) { acc, e -> acc + e.coverage }
 
     public val paths: Set<String> get() = entries.map { it.path }.toSet()
+
+    /** The versions of [path] KNOWN in this snapshot: live entries that display at least one line (D-346). */
+    internal fun versions(path: String): Set<FileVersion> =
+        entries.filter { it.path == path && !it.coverage.isEmpty }.mapTo(LinkedHashSet()) { it.version }
 }
 
 /**
@@ -150,6 +154,11 @@ public class Workset(
 
     @Synchronized
     public fun takeAnnouncements(): List<StaleDrop> = drops.toList().also { drops.clear() }
+
+    /** Versions of [path] shown in this cell and since dropped as stale, not yet stubbed (D-346: short `expect`). */
+    @Synchronized
+    internal fun history(path: String): Set<FileVersion> =
+        stale.filter { it.path == path && !it.coverage.isEmpty }.mapTo(LinkedHashSet()) { it.version }
 
     /** Cell-end export (re-served as seeds by the compiler, §6.2). */
     @Synchronized

@@ -95,10 +95,13 @@ public data class ReviewRecord(
 ) {
     val approved: Boolean get() = verdict?.approved == true && unavailable == null && failedRequiredChecks.isEmpty()
 
-    /** Whether this assessment still speaks for [contractVersion] at [candidate] with the evidence as it is now. */
+    /**
+     * Whether this assessment still speaks for [contractVersion] at [candidate] with the evidence as it is now. The
+     * candidate stamp covers the whole tree, so an equal candidate with no changed paths (an empty diff) is current
+     * (D-341): an unchanged candidate is never reviewed twice.
+     */
     public fun freshness(contractVersion: Int, candidate: CandidateId, current: (String) -> FileVersion?): Freshness = when {
         this.contractVersion != contractVersion || this.candidate != candidate -> Freshness.Stale
-        evidenceVersions.isEmpty() -> Freshness.Unknown
         evidenceVersions.any { (path, version) -> current(path) != version } -> Freshness.Stale
         else -> Freshness.Current
     }
@@ -150,13 +153,15 @@ public class ReviewCell @JvmOverloads constructor(
     public suspend fun obtain(packet: EvidencePacket, tier: Tier, current: (String) -> FileVersion?): ReviewOutcome {
         val criteria = packet.criteria.map { it.id }
         val integrity = packet.testIntegrity.map { it.copy(verdict = null).line + it.originalObligation.orEmpty() }
+        // I3 (D-341): a review of this candidate, contract, criteria and integrity evidence is a stored result — an
+        // approval, a rejection or no verdict alike — reused, never asked for again.
         records(packet.ids).lastOrNull { r ->
-            r.approved && r.scope == packet.scope && r.incrementId == packet.incrementId && r.criteria.containsAll(criteria) && r.integrity == integrity &&
+            r.scope == packet.scope && r.incrementId == packet.incrementId && r.criteria.containsAll(criteria) && r.integrity == integrity &&
                 r.freshness(packet.contractVersion, packet.candidate, current) == Freshness.Current
         }?.let { earlier ->
             val reused = earlier.copy(reused = true, failedRequiredChecks = packet.failedRequired.map { it.checkId })
             record(packet.ids, reused)
-            journal(packet, "reused: ${earlier.verdict!!.signedBy} approved @${packet.candidate.hash8} at contract v${packet.contractVersion}")
+            journal(packet, "reused: " + (earlier.verdict?.let { "${it.signedBy} ${wire(it.outcome)}" } ?: "no verdict (${earlier.unavailable})") + " @${packet.candidate.hash8} at contract v${packet.contractVersion}")
             return outcome(packet, reused)
         }
         val ladder = ladder(judge, packet, tier)
@@ -169,7 +174,7 @@ public class ReviewCell @JvmOverloads constructor(
         }
         val base = ReviewRecord(packet.id, packet.scope, packet.incrementId, packet.contractVersion, packet.candidate, criteria, packet.evidenceVersions, verdict, path = path, failedRequiredChecks = packet.failedRequired.map { it.checkId }, integrity = integrity)
         val record = when {
-            verdict == null -> base.copy(unavailable = "no review cell verdict (${why ?: "the judge published none"}) and no human reviewer: the increment stays unaccepted, the review is never skipped")
+            verdict == null -> base.copy(unavailable = "the reviewer gave no verdict (${why ?: "the judge published none"}); the result is unverified")
             verdict.requestId != packet.id -> base.copy(unavailable = "verdict answers ${verdict.requestId}, not ${packet.id}")
             Replies.check(verdict, packet.contractVersion) != ReplyValidity.Current -> base.copy(unavailable = "verdict signed for contract v${verdict.contractRevision}, not v${packet.contractVersion}")
             verdict.reviewedCandidate != packet.candidate -> base.copy(unavailable = "verdict reviewed @${verdict.reviewedCandidate.hash8}, not @${packet.candidate.hash8}")

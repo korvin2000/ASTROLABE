@@ -8,9 +8,11 @@ import io.astrolabe.id.CandidateId
 import io.astrolabe.id.Digest
 import io.astrolabe.id.FileVersion
 import io.astrolabe.provider.ToolCall as ProviderCall
+import kotlinx.serialization.descriptors.elementDescriptors
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ToolContractsTest {
@@ -54,10 +56,57 @@ class ToolContractsTest {
         assertIs<ParsedCalls.Invalid>(badJson)
         val unknownField = ToolCalls.parse(listOf(ProviderCall("c1", "look", """{"what":"read","targt":"x"}""")))
         assertIs<ParsedCalls.Invalid>(unknownField)
+        // D-346: an omitted expect is resolved by the edit tool against the versions shown in the cell; hunks stay mandatory.
         val missingExpect = ToolCalls.parse(listOf(ProviderCall("c1", "edit", """{"ops":[{"path":"a","hunks":[{"anchor":"x","new":"y"}]}],"why":"w"}""")))
-        assertTrue(assertIs<ParsedCalls.Invalid>(missingExpect).error.contains("expect"))
+        assertNull(assertIs<ParsedCalls.Valid>(missingExpect).calls.single().let { (it.args as Args.Edit).args.ops.single().expect })
+        val missingHunks = ToolCalls.parse(listOf(ProviderCall("c1", "edit", """{"ops":[{"path":"a","expect":"c02e"}],"why":"w"}""")))
+        assertTrue(assertIs<ParsedCalls.Invalid>(missingHunks).error.contains("hunks"))
         val partial = ToolCalls.parse(listOf(ProviderCall("c1", "look", """{"what":"tree"}"""), ProviderCall("c2", "run", """{"cmd":""}""")))
         assertIs<ParsedCalls.Invalid>(partial)
+    }
+
+    private fun parse(tool: String, json: String): ParsedCalls = ToolCalls.parse(listOf(ProviderCall("c1", tool, json)))
+
+    private fun editOp(json: String): EditOpArgs = (assertIs<ParsedCalls.Valid>(parse("edit", json)).calls.single().args as Args.Edit).args.ops.single()
+
+    @Test
+    fun `ops and patch sent as a JSON string holding an array are parsed before typed decoding`() {
+        val edit = parse("edit", """{"ops":"[{\"create\":\"src/n.py\",\"content\":\"x = 1\\n\"}]","why":"w"}""")
+        assertEquals("edit.create", assertIs<ParsedCalls.Valid>(edit).calls.single().name)
+        val state = parse("state", """{"op":"patch","patch":"[{\"plan.add\":\"a\"},{\"next\":\"go\"}]"}""")
+        assertEquals(2, ((assertIs<ParsedCalls.Valid>(state).calls.single().args as Args.State).args.patch!!.size))
+        assertIs<ParsedCalls.Invalid>(parse("state", """{"op":"patch","patch":"next: go"}"""), "a string that is not an array still refuses")
+        assertIs<ParsedCalls.Invalid>(parse("edit", """{"ops":"[{\"create\":","why":"w"}"""), "a string that is not JSON still refuses")
+    }
+
+    @Test
+    fun `empty placeholders of the other edit forms are ignored while meaningful empty values and unknown keys are kept`() {
+        val placeholders = """"create":"","content":"","delete":"","rename":"","to":"","revert":"","transform":{"script":"","argv":[],"scope_glob":"","why":"","expected_matches":{"min":0,"max":0}},"if":"""""
+        val anchored = editOp("""{"ops":[{"path":"src/a.py","expect":"","hunks":[{"anchor":"x = 1","new":""}],$placeholders}],"why":"w"}""")
+        assertEquals("anchored", anchored.kind)
+        assertEquals("", anchored.hunks!!.single().new, "new: \"\" deletes the matched text")
+        assertEquals("", anchored.expect, "a form's own empty field is kept (an empty expect is an omitted one)")
+        assertNull(anchored.condition)
+        val created = editOp("""{"ops":[{"create":"src/empty.py","content":"","path":"","expect":"","hunks":[],"delete":"","transform":{"script":""}}],"why":"w"}""")
+        assertEquals("create", created.kind)
+        assertEquals("", created.content, "content: \"\" creates an empty file")
+        val deleted = editOp("""{"ops":[{"delete":"src/a.py","expect":"c02e","path":"","hunks":[{"anchor":"","new":""}],"create":"","content":""}],"why":"w"}""")
+        assertEquals("delete", deleted.kind)
+        assertEquals("c02e", deleted.expect)
+        assertIs<ParsedCalls.Invalid>(parse("edit", """{"ops":[{"delete":"src/a.py","create":"src/b.py","content":"x"}],"why":"w"}"""), "two real forms still refuse")
+        assertIs<ParsedCalls.Invalid>(parse("edit", """{"ops":[{"delete":"src/a.py","colour":""}],"why":"w"}"""), "an unknown key still refuses, empty or not")
+    }
+
+    @Test
+    fun `the state schema and description name every op form of the typed vocabulary`() {
+        val serialNames = io.astrolabe.register.Op.serializer().descriptor.getElementDescriptor(1).elementDescriptors.map { it.serialName }.toSet()
+        assertEquals(serialNames, io.astrolabe.tool.state.PatchParser.FORMS.keys)
+        val state = ToolSchemas.schema(ToolFamily.State)
+        for (name in serialNames) {
+            assertTrue(state.description.contains("$name{"), "description names $name: ${state.description}")
+            assertTrue(state.jsonSchema.toString().contains(name), "schema names $name")
+        }
+        assertTrue(state.description.contains("op:N"), state.description)
     }
 
     @Test

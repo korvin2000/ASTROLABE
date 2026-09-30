@@ -13,12 +13,16 @@ import io.astrolabe.id.CandidateId
 import io.astrolabe.id.ContextId
 import io.astrolabe.id.WorkId
 import io.astrolabe.verify.CompletionResult
+import io.astrolabe.verify.StopCode
 import kotlinx.serialization.Serializable
 
 /** Campaign-level outcomes (§5.9, invariant 11): distinct from each other, and only [Completed] is a supported state. */
 @Serializable
 public enum class CampaignOutcome(public val wire: String) {
     Completed("completed"),
+
+    /** The request needed no change and the model answered it; the harness confirmed the tree unchanged (D-344). Not `completed`. */
+    Answered("answered"),
     WaitingForProcess("waiting_for_process"),
     WaitingForInput("waiting_for_input"),
     BlockedExternal("blocked_external"),
@@ -73,6 +77,8 @@ public data class CampaignState private constructor(
     val reason: String?,
     /** The number of applied transitions; a store save must extend the stored state by exactly one. */
     val seq: Long,
+    /** Why an ended campaign waits for a person, machine-readable (D-339); `null` for every other stop. */
+    val stopCode: StopCode? = null,
 ) {
     init {
         require(seq >= 0 && contractVersion >= 1) { "seq ≥ 0 and a committed contract version" }
@@ -80,6 +86,7 @@ public data class CampaignState private constructor(
         require(outcome != CampaignOutcome.Completed || ledger.unfinished().isEmpty()) { "completed needs a verified ledger" }
         require(cells.count { it.status == CellStatus.Running } <= 1) { "one running cell per campaign (S0 single writer)" }
         require(cells.map { it.cell }.toSet().size == cells.size) { "a cell is dispatched once" }
+        require(stopCode == null || outcome == CampaignOutcome.WaitingForInput) { "a stop code marks a campaign waiting for input" }
     }
 
     /** The cell in flight, if any; no terminal transition is legal while one runs. */
@@ -93,7 +100,8 @@ public data class CampaignState private constructor(
         outcome: CampaignOutcome? = this.outcome,
         reason: String? = this.reason,
         contractVersion: Int = this.contractVersion,
-    ): CampaignState = CampaignState(work, attempt, contractVersion, phase, graph, ledger, cells, outcome, reason, seq + 1)
+        stopCode: StopCode? = this.stopCode,
+    ): CampaignState = CampaignState(work, attempt, contractVersion, phase, graph, ledger, cells, outcome, reason, seq + 1, stopCode)
 
     internal companion object {
         fun opened(contract: Contract, graph: RequirementGraph): CampaignState = CampaignState(
@@ -157,6 +165,16 @@ public sealed interface Transition {
     /** Every requirement is verified at [stamp]: final acceptance begins. */
     public data class Finishing(val stamp: CandidateId) : Transition
 
+    /**
+     * The model answered a request that needed no change (D-344): the tree is still the campaign's snapshot 0 at
+     * [stamp] and no effect ran. The only way to `answered`; the requirements stay unverified.
+     */
+    public data class Answered(val stamp: CandidateId, val text: String) : Transition {
+        init {
+            require(text.isNotBlank()) { "an answer has text" }
+        }
+    }
+
     /** Final acceptance held at [stamp] with [receipts] (§3.7 `finish`); the only way to `completed`. */
     public data class Finished(val stamp: CandidateId, val receipts: List<String>) : Transition {
         init {
@@ -164,11 +182,16 @@ public sealed interface Transition {
         }
     }
 
-    /** An honest non-completed outcome, never disguised as completion (invariant 11). */
-    public data class Stopped(val outcome: CampaignOutcome, val reason: String) : Transition {
+    /**
+     * An honest non-completed outcome, never disguised as completion (invariant 11). [code] says, for a host, why a
+     * campaign waits for a person (D-339); it marks `waiting_for_input` only.
+     */
+    public data class Stopped @JvmOverloads constructor(val outcome: CampaignOutcome, val reason: String, val code: StopCode? = null) : Transition {
         init {
             require(outcome != CampaignOutcome.Completed) { "completed is reached only through Finished" }
+            require(outcome != CampaignOutcome.Answered) { "answered is reached only through Answered" }
             require(reason.isNotBlank()) { "a stop records why" }
+            require(code == null || outcome == CampaignOutcome.WaitingForInput) { "a stop code marks waiting_for_input only" }
         }
     }
 
@@ -187,8 +210,8 @@ public sealed interface Disposition {
      */
     public data class Continue(val reason: String, val fallback: CampaignOutcome) : Disposition
 
-    /** The campaign ends with [outcome]. */
-    public data class Stop(val outcome: CampaignOutcome, val reason: String) : Disposition
+    /** The campaign ends with [outcome]; [code] is the machine-readable reason a person is waited for (D-339). */
+    public data class Stop @JvmOverloads constructor(val outcome: CampaignOutcome, val reason: String, val code: StopCode? = null) : Disposition
 }
 
 /** Pure transition and disposition functions of the controller's state machine (§3.2, §3.7, §5.9). */
@@ -289,18 +312,23 @@ public object Lifecycle {
             is Transition.Finished -> {
                 expect(s, CampaignPhase.Finishing)
                 val ledger = verifiedLedger(s, contract, transition.stamp)
-                s.next(phase = CampaignPhase.Ended, ledger = ledger, outcome = CampaignOutcome.Completed, reason = null, contractVersion = v)
+                s.next(phase = CampaignPhase.Ended, ledger = ledger, outcome = CampaignOutcome.Completed, reason = null, contractVersion = v, stopCode = null)
+            }
+            is Transition.Answered -> {
+                expect(s, CampaignPhase.Running)
+                check(s.running == null) { "reconcile the running cell ${s.running?.cell} before the answer ends the campaign" }
+                s.next(phase = CampaignPhase.Ended, outcome = CampaignOutcome.Answered, reason = null, contractVersion = v, stopCode = null)
             }
             is Transition.Stopped -> {
                 expect(s, CampaignPhase.Opened, CampaignPhase.Running, CampaignPhase.Finishing)
                 check(s.running == null) { "reconcile the running cell ${s.running?.cell} before a terminal outcome" }
-                s.next(phase = CampaignPhase.Ended, outcome = transition.outcome, reason = transition.reason, contractVersion = v)
+                s.next(phase = CampaignPhase.Ended, outcome = transition.outcome, reason = transition.reason, contractVersion = v, stopCode = transition.code)
             }
             is Transition.Resumed -> {
                 expect(s, CampaignPhase.Ended, CampaignPhase.Finishing)
                 val interrupted = s.phase == CampaignPhase.Finishing
                 check(interrupted || s.outcome?.resumable == true) { "a ${s.outcome?.wire} campaign does not resume" }
-                s.next(phase = CampaignPhase.Opened, outcome = null, reason = null, contractVersion = v,
+                s.next(phase = CampaignPhase.Opened, outcome = null, reason = null, contractVersion = v, stopCode = null,
                     ledger = if (interrupted) Ledger.initial(contract) else s.ledger)
             }
         }
@@ -326,6 +354,8 @@ public object Lifecycle {
                     } else {
                         Disposition.Continue("completion refused: ${completion.missing.joinToString("; ")}", CampaignOutcome.Failed)
                     }
+                // D-339: done, awaiting an authority's decision — neither blocked nor failed (I1).
+                is CompletionResult.Pending -> Disposition.Stop(CampaignOutcome.WaitingForInput, pendingReason(completion), completion.code)
                 is CompletionResult.NotCompleted, null -> throw IllegalArgumentException("a completed cell's done proposal must be verified first")
             }
             is CellExit.Blocked ->
@@ -342,6 +372,13 @@ public object Lifecycle {
             is CellExit.Cancelled -> Disposition.Stop(CampaignOutcome.Cancelled, exit.reason)
         }
     }
+
+    /** The stop reason of a pending completion: what the authority is asked, one line per gap. */
+    @JvmStatic
+    public fun pendingReason(pending: CompletionResult.Pending): String = when (pending.code) {
+        StopCode.AcceptanceDecision -> "acceptance needs a decision: "
+        StopCode.ReviewRejected -> "review rejected the change after its rework round: "
+    } + pending.missing.joinToString("; ")
 
     private fun expect(state: CampaignState, vararg phases: CampaignPhase) =
         check(state.phase in phases) { "illegal in ${state.phase}; expected ${phases.joinToString()}" }

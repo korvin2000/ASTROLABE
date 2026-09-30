@@ -261,6 +261,76 @@ class EditTest {
         assertTrue(syntaxCalls.isEmpty())
     }
 
+    private fun anchoredBy(path: String, expect: String?, vararg hunks: String) =
+        """{"ops":[{"path":"$path"${expect?.let { ""","expect":"$it"""" } ?: ""},"hunks":[${hunks.joinToString(",")}]}],"why":"w"}"""
+
+    @Test
+    fun `an omitted or short expect resolves only to a version shown in this cell and never throws`() = runTest {
+        val unseen = run(anchoredBy("src/b.py", null, hunk("x = 1", "x = 3")))
+        assertEquals("refused", status(unseen))
+        assertTrue(unseen.body.contains("expect: expect omitted and no version of 'src/b.py' is KNOWN: read it first"), unseen.body)
+        val v = seen("src/b.py", 1, 2)
+        val malformed = run(anchoredBy("src/b.py", "xyz", hunk("x = 1", "x = 3")))
+        assertTrue(malformed.body.contains("expect: expect 'xyz' is not a content hash"), malformed.body)
+        val tooShort = run(anchoredBy("src/b.py", v.hash8.take(3), hunk("x = 1", "x = 3")))
+        assertTrue(tooShort.body.contains("is not a content hash"), tooShort.body)
+        val other = if (v.digest.hex.startsWith("0000")) "ffff" else "0000"
+        val unknown = run(anchoredBy("src/b.py", other, hunk("x = 1", "x = 3")))
+        assertTrue(unknown.body.contains("expect @$other names no version of 'src/b.py' shown in this cell (shown: @${v.hash8}); read it first"), unknown.body)
+        assertEquals("x = 1\ny = 2\n", Files.readString(repo.resolve("src/b.py")), "every refusal wrote nothing")
+
+        // The four characters a header shows (any case, with or without @) name the shown version.
+        val short = run(anchoredBy("src/b.py", "@" + v.hash8.take(4).uppercase(), hunk("x = 1", "x = 3")))
+        assertEquals("ok", status(short), short.body)
+        val after = registry.version("src/b.py")!!
+        // The old version was dropped as stale: its short hash still names it, and the CAS refuses with the diff.
+        val stale = run(anchoredBy("src/b.py", v.hash8.take(4), hunk("y = 2", "y = 4")))
+        assertTrue(stale.body.contains("stale_expect: 'src/b.py' is @${after.hash8} now, not @${v.hash8}; diff since expect:"), stale.body)
+        // Omitted, it is the one version KNOWN now: the post-edit view.
+        val omitted = run(anchoredBy("src/b.py", null, hunk("y = 2", "y = 4")))
+        assertEquals("ok", status(omitted), omitted.body)
+        assertEquals("x = 3\ny = 4\n", Files.readString(repo.resolve("src/b.py")))
+
+        val current = registry.version("src/b.py")!!
+        workset.register(Entry("src/b.py", Ranges.single(1, 1), FileVersion.of("other bytes".toByteArray()), EntrySource.Look, 2, "#other", 5))
+        val ambiguous = run(anchoredBy("src/b.py", null, hunk("x = 3", "x = 5")))
+        assertTrue(ambiguous.body.contains("expect omitted and 2 versions of 'src/b.py' are KNOWN"), ambiguous.body)
+        assertEquals(current, registry.version("src/b.py"))
+    }
+
+    @Test
+    fun `an omitted or short expect keeps the stale-write protection and the displayed-ranges check (FX-01)`() = runTest {
+        val shown = seen("src/a.py", 1, 2)
+        val outside = run(anchoredBy("src/a.py", null, hunk("    return 2", "    return 20")))
+        assertTrue(outside.body.contains("outside_displayed: hunk at 'src/a.py:6' lies outside the displayed ranges of @${shown.hash8} (1-2)"), outside.body)
+        // A change the harness has not heard of: the expect names the shown version, never the current bytes.
+        repo.write("src/a.py", a.replace("return 1", "return 99"))
+        for (expect in listOf(null, shown.hash8.take(4), shown.hash8)) {
+            val out = run(anchoredBy("src/a.py", expect, hunk("    return 1", "    return 10")))
+            assertEquals("refused", status(out))
+            assertTrue(out.body.contains("stale_expect: 'src/a.py' is @"), out.body)
+            assertTrue(out.body.contains("-    return 1\n+    return 99"), "diff since expect: ${out.body}")
+        }
+        assertEquals(a.replace("return 1", "return 99"), Files.readString(repo.resolve("src/a.py")), "no write on a stale expect")
+        assertTrue((1..4).all { preimages.of("edit-$it").isEmpty() })
+    }
+
+    @Test
+    fun `delete and rename resolve an omitted or short expect like an anchored edit`() = runTest {
+        val refused = run("""{"ops":[{"delete":"src/b.py"}],"why":"rm"}""")
+        assertEquals("refused", status(refused))
+        assertTrue(refused.body.contains("expect omitted and no version of 'src/b.py' is KNOWN"), refused.body)
+        assertTrue(Files.exists(repo.resolve("src/b.py")))
+        val vb = seen("src/b.py", 1, 1)
+        val renamed = run("""{"ops":[{"rename":"src/b.py","to":"src/b2.py","expect":"${vb.hash8.take(4)}"}],"why":"mv"}""")
+        assertEquals("ok", status(renamed), renamed.body)
+        assertEquals("x = 1\ny = 2\n", Files.readString(repo.resolve("src/b2.py")))
+        seen("src/b2.py", 1, 2)
+        val deleted = run("""{"ops":[{"delete":"src/b2.py"}],"why":"rm"}""")
+        assertEquals("ok", status(deleted), deleted.body)
+        assertFalse(Files.exists(repo.resolve("src/b2.py")))
+    }
+
     @Test
     fun `a hunk outside the displayed range is refused with the outline and the displayed ranges (FX-02)`() = runTest {
         val v = seen("src/a.py", 1, 2)

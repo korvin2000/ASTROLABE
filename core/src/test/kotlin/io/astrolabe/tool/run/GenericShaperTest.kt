@@ -10,6 +10,25 @@ import kotlin.test.assertTrue
 
 class GenericShaperTest {
     @Test
+    fun `a plain command outside acceptance that exits 0 without counts reads completed but stays inconclusive`() {
+        val plain = RunCapture("act-1", listOf("javac", "Main.java"), exitCode = 0)
+        val shaped = Shapers.shape(plain)
+        assertEquals(Outcome.Inconclusive, shaped.status, "presentation only: never a pass without counts (D-50)")
+        assertNull(shaped.counts)
+        assertEquals("generic · completed, exit code 0", shaped.view.lines().first())
+        for (capture in listOf(
+            plain.copy(checkId = "CHK-1"),
+            plain.copy(exitCode = 2),
+            plain.copy(argv = listOf("mcp:docs/search", "{}")),
+            RunCapture("act-2", listOf("sh", "-c", "javac Main.java || true"), exitCode = 0),
+        )) {
+            val other = Shapers.shape(capture)
+            assertTrue(!other.view.lines().first().contains("completed"), "${capture.argv} ${capture.checkId}: ${other.view.lines().first()}")
+        }
+        assertEquals("generic · inconclusive · exit 0", Shapers.shape(plain.copy(checkId = "CHK-1")).view.lines().first(), "acceptance keeps the verdict wording")
+    }
+
+    @Test
     fun `cargo test summary and per-test lines`() {
         val shaped = Shapers.shape(Recorded.capture("cargo-fail.txt", listOf("cargo", "test"), exitCode = 101))
         assertEquals("generic/cargo", shaped.shaper)

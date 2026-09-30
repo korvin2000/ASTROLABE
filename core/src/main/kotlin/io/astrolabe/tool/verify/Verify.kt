@@ -49,6 +49,7 @@ import io.astrolabe.tool.run.RunCapture
 import io.astrolabe.tool.run.Runner
 import io.astrolabe.tool.run.ShapeBudget
 import io.astrolabe.tool.run.Shapers
+import io.astrolabe.tool.run.namesWorkspaceRoot
 import io.astrolabe.verify.Applicability
 import io.astrolabe.verify.Baseline
 import io.astrolabe.verify.CampaignReview
@@ -284,7 +285,7 @@ public class Verify(
         val blast = if (layer == Layer.BlastAndStepAccept || layer == Layer.IntegrationReverification) selectBlast() else null
         val selection = Layers.select(layer, checks, acceptanceIds, (blast as? BlastSelection.NotSelected)?.reason ?: "blast radius: not selected") { check ->
             val currency = scheduler.currency(check, stampNow)
-            currency.receiptId == null || currency.applicability != Applicability.Current || !currency.eligible
+            currency.receiptId == null || currency.applicability != Applicability.Current || (!currency.eligible && !settledUnverified(check, stampNow))
         }
         return LayerRun(layer, selection.run.map { runTriaged(it, contract).first }, selection.notTested)
     }
@@ -302,6 +303,16 @@ public class Verify(
         val risk = ImpactAssembly(graph, SymbolIndex(atlas)).analyze(edits, checks.all(), contracts = null).analysis.risk
         val above = risk.exceedsThreshold == true || (risk.estimate ?: 0.0) > risk.threshold
         return if (above) runLayer(Layer.BlastAndStepAccept) else null
+    }
+
+    /**
+     * I3 (D-341): a check that already ran on this very candidate and could not verify it — timed out, found no runner,
+     * hit an infrastructure error, was denied or inconclusive — is a stored unverified result; the harness does not
+     * schedule it again for the same tree. An explicit `verify` call by the model still runs it.
+     */
+    private fun settledUnverified(check: Check, stampNow: CandidateId): Boolean {
+        val last = checks[check.id]?.last ?: return false
+        return last.stamp == stampNow && last.outcome in SETTLED_UNVERIFIED
     }
 
     /** Verify-on-stop (§8.1, P3.1.3): the increment's acceptance on a completion proposal; never the full suite. */
@@ -359,8 +370,8 @@ public class Verify(
             }
             val actionId = idGen.next("act")
             val cwd = when (val path = command.cwd) {
-                null, ".", "./" -> root
-                else -> (WorkspacePath.of(root).resolve(path, Intent.Read) as? PathResolution.Resolved)?.real
+                null -> root
+                else -> if (namesWorkspaceRoot(path)) root else (WorkspacePath.of(root).resolve(path, Intent.Read) as? PathResolution.Resolved)?.real
             }
             if (cwd == null || !Files.isDirectory(cwd)) {
                 view = "  ${check.id}: denied — working directory must be a directory inside the verification workspace"
@@ -467,6 +478,9 @@ public class Verify(
 
         /** Worst first: an unknown outcome outranks a missing runner, which outranks a plain failure. */
         val SEVERITY = listOf(Outcome.UnknownOutcome, Outcome.Unavailable, Outcome.Timeout, Outcome.InfraError, Outcome.Failed, Outcome.Denied, Outcome.Inconclusive, Outcome.NotRun)
+
+        /** Outcomes that are a final unverified result for their candidate (D-341); `NotRun` and `UnknownOutcome` are not. */
+        val SETTLED_UNVERIFIED = setOf(Outcome.Timeout, Outcome.Unavailable, Outcome.InfraError, Outcome.Denied, Outcome.Inconclusive)
     }
 }
 

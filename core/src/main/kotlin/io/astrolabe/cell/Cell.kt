@@ -88,7 +88,9 @@ import io.astrolabe.verify.ChecksRender
 import io.astrolabe.verify.Currency
 import io.astrolabe.verify.Layer
 import io.astrolabe.verify.Layers
+import io.astrolabe.verify.ObligationResult
 import io.astrolabe.verify.RefactorMode
+import io.astrolabe.verify.Resolver
 import io.astrolabe.verify.Selector
 import io.astrolabe.verify.TestIntegrity
 import io.astrolabe.verify.TestIntegrityFlag
@@ -196,6 +198,9 @@ public class Cell @JvmOverloads constructor(
         private var atlas = ws.atlas
         private var rebuilds = 0
         private val rebuildNotes = ArrayList<String>()
+
+        /** Reviewer rejections pinned verbatim for the rest of the cell (D-341). */
+        private val reviewNotes = LinkedHashSet<String>()
         /** The previous turn's edits: what the §6.3 focus notes anchor on beside the register's focus. */
         private var editedThisTurn: Set<String> = emptySet()
 
@@ -251,7 +256,7 @@ public class Cell @JvmOverloads constructor(
                 withContext(NonCancellable) { settle(CellStatus.Cancelled, "cancelled: ${cancelled.message ?: "coroutine cancelled"}") }
                 throw cancelled
             } catch (failure: Exception) {
-                val error = "${failure::class.simpleName}: ${failure.message}"
+                val error = "${failure::class.simpleName}: ${failure.message}${site(failure)}"
                 val checkpoint = settle(CellStatus.Failed, error)
                 return CellExit.Failed(budget.turnsTaken, register, checkpoint, persistPacket(packet(PacketStatus.Failed, error)), error)
             } finally {
@@ -554,6 +559,14 @@ public class Cell @JvmOverloads constructor(
             val evidenceStamp = ws.stamper.report().candidateId
             val validEvidence = completionEvidence?.takeIf { evidenceStamp == stampNow.candidateId && contract().version == contract.version }
             if (validEvidence == null) flags.replaceAll { _, flag -> flag.copy(verdict = null) }
+            val gateFlags = flags.values.filter { it.kind != TestIntegrity.ADDITIONS_ONLY }
+            // D-337: the proposal resolved once, by the rule the controller's verifier applies to the same records.
+            val acceptance = if (proposal && implementingCompletion) Resolver.increment(
+                register, contract, increment, currenciesNow, validEvidence?.verdicts.orEmpty(), validEvidence?.unavailable.orEmpty(), gateFlags,
+                impact.unresolvedPublic.map { it.missing }, stampNow.candidateId,
+                validEvidence?.decision?.takeIf { it.appliesTo(stampNow.candidateId, contract.version) && it.incrementId == increment.id },
+                reworkSpent = validEvidence?.reworkSpent == true,
+            ) else null
             val repeated = repeatedFailures(currenciesNow, repaired = calls.any { it.family == ToolFamily.Edit })
             val editedByEdit = editedPaths.filter { origins[it] == ChangeOrigin.Edit }
             val state = GateState(
@@ -562,11 +575,11 @@ public class Cell @JvmOverloads constructor(
                 lastProgressTurn = lastProgressTurn, liveRunOutput = liveRunOutput,
                 contextTokens = current.totalTokens, contextMaxTokens = capabilities.contextLimitTokens.toLong(), rebuilds = rebuilds,
                 reserve = budget.verdict(outstanding(currenciesNow)), turnsMax = budget.turns, completionProposed = proposal,
-                currencies = currenciesNow, assessments = validEvidence?.assessments.orEmpty(), reviews = validEvidence?.reviews.orEmpty(), flags = flags.values.filter { it.kind != TestIntegrity.ADDITIONS_ONLY }, fired = fired, defaults = defaults,
+                currencies = currenciesNow, verdicts = validEvidence?.verdicts.orEmpty(), unavailable = validEvidence?.unavailable.orEmpty(), flags = gateFlags, fired = fired, defaults = defaults,
                 impactNudges = impact.unresolved, unresolvedImpactNudges = impact.unresolvedPublic.map { it.missing },
                 outsideIncrement = editedByEdit.filter { p -> contract.scope.covers(p) && increment.writeScope.none { PathPattern.matches(it, p) } },
                 surfaceFlags = flags.values.filter { it.path in editedPaths }, editedPaths = editedPaths.toSet(),
-                contractAnchors = (tools.kb as? KbTool)?.contractAnchors().orEmpty(), repeatedFailures = repeated,
+                contractAnchors = (tools.kb as? KbTool)?.contractAnchors().orEmpty(), repeatedFailures = repeated, acceptance = acceptance,
             )
             val report = gates.evaluate(state)
             fired = report.fired
@@ -580,17 +593,26 @@ public class Cell @JvmOverloads constructor(
 
             // Terminal requests, the completion path, pressure.
             (tools.state.pendingBlock ?: tools.task?.pendingBlock)?.let { return blocked(it) }
+            // D-344: an answer to a request that needed no change ends the cell before any acceptance is attempted.
+            tools.task?.takeAnswer()?.let { return answered(it) }
             if (proposal) {
-                if (implementingCompletion) unavailable(currenciesNow)?.let { return blocked(it) }
-                val output = RoleOutput(turn, response.text, register, certifiedAfter.mapNotNull { currenciesNow.certifiedReceipt(it) }, refusals, packet(PacketStatus.Done, null), shownAliases.toSet())
+                // D-338: an unavailable runner is an unverified result like any other (FX-13 no longer blocks).
+                val output = RoleOutput(turn, response.text, register, certifiedAfter.mapNotNull { currenciesNow.certifiedReceipt(it) }, refusals, packet(PacketStatus.Done, null), shownAliases.toSet(), acceptance)
                 when (val decision = completion.assess(output, report)) {
                     is CompletionDecision.Accepted -> return completed(response.text, decision.evidenceRefs)
+                    is CompletionDecision.Defer -> {
+                        // D-339: the work is done; its acceptance is decided outside the cell, so no further turn is spent.
+                        recordGaps(decision.gaps, "completion awaits ${decision.code.wire} at turn $turn")
+                        return completed(response.text, acceptance?.evidenceRefs.orEmpty(), PendingAcceptance(decision.code, decision.gaps))
+                    }
                     is CompletionDecision.CannotProgress -> {
                         recordGaps(decision.gaps)
                         return partial(PartialReason.CompletionStalled, "gaps this cell cannot close: ${decision.gaps.joinToString("; ")}")
                     }
                     is CompletionDecision.Continue -> {
                         recordGaps(decision.gaps)
+                        // D-341: a reviewer's findings reach this cell whole, pinned with their author, never cut into a nudge line.
+                        acceptance?.rejections?.forEach(::pinReview)
                         val gapLines = decision.gaps.take(MAX_NUDGES).map {
                             "packet validation: ${Boundary.escape(it.replace('\r', ' ').replace('\n', ' ')).take(240)}"
                         }
@@ -630,7 +652,7 @@ public class Cell @JvmOverloads constructor(
         private fun pinned(contract: Contract): List<String> =
             contract.requests.map { it.text } + ctx.pinned + tools.task?.asked.orEmpty().map { asked ->
                 "question ${asked.question.id}: ${asked.question.text}" + (asked.answer?.let { "\nanswer: ${it.text}" } ?: "\nanswer: none")
-            } + rebuildNotes
+            } + reviewNotes + rebuildNotes
 
         private fun pinnedTokens(contract: Contract): Long = pinned(contract).sumOf { estimator.estimate(it).tokens }
 
@@ -946,7 +968,11 @@ public class Cell @JvmOverloads constructor(
         private fun cancelled(reason: String) = Exit(CellStatus.Cancelled, reason) { t, r, cp, p -> CellExit.Cancelled(t, r, cp, p, reason) }
         private fun partial(reason: PartialReason, hint: String) = Exit(CellStatus.Partial, "${reason.name}: $hint") { t, r, cp, p -> CellExit.Partial(t, r, cp, p, reason, hint) }
         private fun blocked(request: BlockedRequest) = Exit(CellStatus.Blocked, request.reason, blocked = request) { t, r, cp, p -> CellExit.Blocked(t, r, cp, p, request) }
-        private fun completed(text: String, refs: List<String>) = Exit(CellStatus.Completed, null, evidenceRefs = refs) { t, r, cp, p -> CellExit.Completed(t, r, cp, p, text, refs) }
+        private fun answered(text: String) = Exit(CellStatus.Completed, null) { t, r, cp, p -> CellExit.Completed(t, r, cp, p, text, emptyList(), answer = text) }
+
+        // A pending acceptance keeps the `done` packet reason-free (§5.9): its gaps are the packet's recorded gaps.
+        private fun completed(text: String, refs: List<String>, pending: PendingAcceptance? = null) =
+            Exit(CellStatus.Completed, null, evidenceRefs = refs) { t, r, cp, p -> CellExit.Completed(t, r, cp, p, text, refs, pending) }
 
         // ----------------------------------------------------------- packet
 
@@ -1004,9 +1030,21 @@ public class Cell @JvmOverloads constructor(
         }
 
         /** §3.7 `record_completion_gaps`: journaled and carried into the packet; `[A]` shows them through the exit gate's line. */
-        private fun recordGaps(found: List<String>) {
+        private fun recordGaps(found: List<String>, what: String = "completion refused at turn $turn") {
             gaps += found
-            ev.journal.append(JournalEvent(idGen.next("ev"), ids, turn, JournalKind.Nudge, text = "completion refused at turn $turn: ${found.joinToString("; ")}", at = clock.instant()))
+            ev.journal.append(JournalEvent(idGen.next("ev"), ids, turn, JournalKind.Nudge, text = "$what: ${found.joinToString("; ")}", at = clock.instant()))
+        }
+
+        /** One reviewer rejection as a pinned block (D-341): the author and every finding, in full. */
+        private fun pinReview(rejection: ObligationResult) {
+            reviewNotes += buildString {
+                append("review of ").append(rejection.obligation).append(" by ").append(rejection.by ?: "the reviewer")
+                append(" rejected the change; fix every finding below, then propose completion again:")
+                rejection.findings.forEach { f ->
+                    append("\n- ").append(f.severity.name.lowercase()).append(' ').append(f.location).append(": ").append(f.issue)
+                    f.suggestedFix?.let { append(" (suggested: ").append(it).append(')') }
+                }
+            }
         }
 
         /** The packet is durable before the exit returns (§3.7 `persist_role_packet`): one boundary event with its references. */
@@ -1040,21 +1078,6 @@ public class Cell @JvmOverloads constructor(
 
         private fun Map<String, Currency>.certifiedReceipt(acceptanceId: String): String? =
             ws.checks.forAcceptance(acceptanceId).firstNotNullOfOrNull { check -> this[check.id]?.takeIf { it.certifies }?.receiptId }
-
-        /**
-         * FX-13: a required check of the increment whose current receipt is `unavailable` (missing runner or toolchain)
-         * ends the completion as `blocked` with the concrete blocker — never an endless gate the model cannot pass.
-         */
-        private fun unavailable(currencies: Map<String, Currency>): BlockedRequest? {
-            val stuck = increment.accept.flatMap { ws.checks.forAcceptance(it) }.distinctBy { it.id }.mapNotNull { check ->
-                val currency = currencies[check.id]?.takeIf { it.applicability == Applicability.Current } ?: return@mapNotNull null
-                currency.receiptId?.let { ev.receipts.get(it) }?.takeIf { it.outcome == Outcome.Unavailable }
-            }
-            if (stuck.isEmpty()) return null
-            val blockers = stuck.joinToString("; ") { r -> "${r.checkId}: " + (r.limits.firstOrNull { it.kind == "runner" }?.detail ?: "cannot run") }
-            // An external blocker, not a question: the campaign stops `blocked`, the remedy is in the reason.
-            return BlockedRequest("required check unavailable — $blockers (install or configure the runner, or amend the acceptance)", stuck.map { it.receiptId }, null, turn)
-        }
 
         /**
          * §5.6 repeated failure signature: a red check's normalized first error line (digits folded, whitespace
@@ -1216,6 +1239,16 @@ public class Cell @JvmOverloads constructor(
         const val DETAILS_IN_LINE = 2
 
         const val MILLIS_PER_SECOND = 1000.0
+
+        /** How many harness frames a failure record names, innermost first: no stack trace is kept anywhere else. */
+        const val SITE_FRAMES = 4
+
+        fun site(failure: Throwable): String {
+            val frames = failure.stackTrace.filter { it.className.startsWith("io.astrolabe.") && it.fileName != null && !it.methodName.startsWith("access\$") }
+            return if (frames.isEmpty()) "" else frames.take(SITE_FRAMES).joinToString(" ← ", prefix = " at ") {
+                "${it.className.substringAfterLast('.')}.${it.methodName}(${it.fileName}:${it.lineNumber})"
+            }
+        }
 
         val JSON = Json { encodeDefaults = true }
         val ITEMS = ListSerializer(Item.serializer())

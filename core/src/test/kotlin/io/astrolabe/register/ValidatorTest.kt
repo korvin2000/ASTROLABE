@@ -62,7 +62,7 @@ class ValidatorTest {
     @Test
     fun `every invariant rejects and leaves the register unchanged`() {
         val ready = applied(validator.check(base, Patch.of(Op.PlanAdd("a"), Op.PlanAdd("b"), Op.PlanCursor(1), Op.Next("go")), Ctx()))
-        assertEquals("exactly one Next", rejected(validator.check(ready, Patch.of(Op.PlanAdd("c")), Ctx())))
+        assertEquals("exactly one Next", rejected(validator.check(base, Patch.of(Op.PlanAdd("c")), Ctx())), "no Next in the patch nor in STATE")
         assertEquals("exactly one Next", rejected(validator.check(ready, Patch.of(Op.Next("a"), Op.Next("b")), Ctx())))
         assertEquals("v needs an existing evidence id", rejected(validator.check(ready, Patch.of(Op.FactAdd(ClaimKind.Verified, "x", evidence = "#99"), Op.Next("n")), Ctx())))
         assertEquals("v needs an existing evidence id", rejected(validator.check(ready, Patch.of(Op.FactAdd(ClaimKind.Verified, "x"), Op.Next("n")), Ctx())))
@@ -71,11 +71,42 @@ class ValidatorTest {
         assertEquals("dead ends need scope and reopen", rejected(validator.check(ready, Patch.of(Op.DeadendAdd("x", null, "", "later"), Op.Next("n")), Ctx())))
         assertEquals("line ≤ 240 chars", rejected(validator.check(ready, Patch.of(Op.FactAdd(ClaimKind.Hypothesis, "x".repeat(241)), Op.Next("n")), Ctx())))
         assertEquals("no fenced code", rejected(validator.check(ready, Patch.of(Op.FactAdd(ClaimKind.Hypothesis, "```py\nx```"), Op.Next("n")), Ctx())))
-        assertEquals("one [>] while [ ] exists", rejected(validator.check(ready, Patch.of(Op.PlanCancel(1, "dup"), Op.Next("n")), Ctx())))
         assertEquals("exactly one [>]", rejected(validator.check(ready.copy(plan = ready.plan.map { it.copy(mark = Mark.Cursor) }), Patch.of(Op.PlanAdd("c"), Op.Next("n")), Ctx())))
         assertEquals("patch cap", rejected(validator.check(ready, Patch.of(Op.FactAdd(ClaimKind.Hypothesis, "w ".repeat(120)), Op.FactAdd(ClaimKind.Hypothesis, "w ".repeat(120)), Op.FactAdd(ClaimKind.Hypothesis, "w ".repeat(120)), Op.FactAdd(ClaimKind.Hypothesis, "w ".repeat(120)), Op.FactAdd(ClaimKind.Hypothesis, "w ".repeat(120)), Op.FactAdd(ClaimKind.Hypothesis, "w ".repeat(120)), Op.Next("n")), Ctx())))
         assertEquals("unknown step", rejected(validator.check(ready, Patch.of(Op.PlanCursor(9), Op.Next("n")), Ctx())))
         assertEquals(1, ready.version, "rejections never change the register")
+    }
+
+    @Test
+    fun `a missing Next keeps the previous one and a missing cursor goes to the first open step, never past a red line`() {
+        val ready = applied(validator.check(base, Patch.of(Op.PlanAdd("a"), Op.PlanAdd("b"), Op.PlanAdd("c"), Op.PlanCursor(1), Op.Next("go")), Ctx()))
+        val kept = applied(validator.check(ready, Patch.of(Op.PlanAdd("d")), Ctx()))
+        assertEquals("go", kept.next)
+        assertEquals(Mark.Cursor, kept.step(1)!!.mark)
+
+        val cancelled = applied(validator.check(ready, Patch.of(Op.PlanCancel(1, "dup"), Op.Next("n")), Ctx()))
+        assertEquals(Mark.Cursor, cancelled.step(2)!!.mark, "the cursor goes to the first open step")
+        assertEquals(1, cancelled.cursors)
+        val ticked = applied(validator.check(ready, Patch.of(Op.PlanTick(1, "#12")), Ctx()))
+        assertEquals(Mark.Cursor, ticked.step(2)!!.mark)
+        assertEquals("go", ticked.next)
+        val fresh = applied(validator.check(base, Patch.of(Op.PlanAdd("x"), Op.PlanAdd("y"), Op.Next("start")), Ctx()))
+        assertEquals(Mark.Cursor, fresh.step(1)!!.mark)
+
+        val red = validator.check(ready, Patch.of(Op.PlanTick(1, "#12")), Ctx(redChecks = setOf("AC-4")))
+        assertEquals("red not recorded", rejected(red))
+        assertTrue((red as Validation.Rejected).detail.contains("the patch left no [>]; it would go to step 2"), red.detail)
+        applied(validator.check(ready, Patch.of(Op.OpenAdd("AC-4 red: TypeError"), Op.PlanTick(1, "#12")), Ctx(redChecks = setOf("AC-4"))))
+    }
+
+    @Test
+    fun `evidence refusals name op N as a call of the same turn and hash N as an earlier result`() {
+        val ready = applied(validator.check(base, Patch.of(Op.PlanAdd("a", accept = "run: pytest -k a"), Op.PlanCursor(1), Op.Next("go")), Ctx()))
+        val tick = assertIs<Validation.Rejected>(validator.check(ready, Patch.of(Op.PlanTick(1, "op:3")), Ctx()))
+        assertTrue(tick.detail.contains("op:N is a call of the same turn; a result of an earlier turn is named by its alias #N"), tick.detail)
+        assertTrue(tick.detail.contains("or tick once its accept 'run: pytest -k a' is green"), tick.detail)
+        val fact = assertIs<Validation.Rejected>(validator.check(ready, Patch.of(Op.FactAdd(ClaimKind.Verified, "x")), Ctx()))
+        assertTrue(fact.detail.contains("no evidence given — name a stored result by its alias #N, or a run or verify call of this turn as op:N"), fact.detail)
     }
 
     @Test

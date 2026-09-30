@@ -38,6 +38,7 @@ import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import java.time.Instant
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -104,6 +105,22 @@ class ContractsTest {
         assertEquals(1, strengthened.version)
         assertFailsWith<IllegalArgumentException> { c.strengthen(Acceptance.Run("AC-1", Command(listOf("true")), Origin.Model("R1"))) }
         assertFailsWith<IllegalArgumentException> { c.strengthen(Acceptance.Run("AC-5", Command(listOf("true")), Origin.User)) }
+    }
+
+    @Test
+    fun `a host amendment changes the contract without writing the user's words (D-345)`() {
+        val contracts = Contracts(InMemoryContractRepository(), FixedIdGen(), clock)
+        val opened = contracts.open(contract())
+        val amended = contracts.amendByHost(work, "verification setup (review)") { c ->
+            c.copy(acceptance = c.acceptance + Acceptance.Check("AC-9", "The change fulfils the request", Origin.Amended(c.version + 1), obligationVersion = c.version + 1))
+        }
+        assertEquals(opened.version + 1, amended.version)
+        assertEquals(opened.requests, amended.requests, "no request is appended")
+        assertEquals(opened.objective, amended.objective, "the objective stays the user's request")
+        assertEquals("AC-9", amended.acceptance.last().id)
+        assertFailsWith<IllegalArgumentException>("a host never writes a request") {
+            contracts.amendByHost(work, "sneaky") { c -> c.copy(requests = c.requests + UserRequest("U-9", Instant.EPOCH, "Working notes: …")) }
+        }
     }
 
     @Test

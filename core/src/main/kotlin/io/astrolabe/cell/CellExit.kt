@@ -22,6 +22,12 @@ public enum class PartialReason {
 }
 
 /**
+ * A completion whose acceptance waits for an authority (D-339): the work is done, [code] says what decision is
+ * needed and [gaps] what it is about. The controller keeps the proposal as a pending completion.
+ */
+public data class PendingAcceptance(val code: io.astrolabe.verify.StopCode, val gaps: List<String>)
+
+/**
  * How a cell ended (§3.7, invariant 11). Every exit carries the register in force, the checkpoint that was
  * persisted for it — there is no exit without one — the number of turns taken and the Result Packet (§5.9)
  * the controller verifies and commits from.
@@ -44,6 +50,10 @@ public sealed interface CellExit {
         /** The model's final text; a claim, never a packet field the runtime owns. */
         val text: String,
         val evidenceRefs: List<String>,
+        /** Set when the proposal's acceptance awaits a decision (D-339); `null` when the completion seam accepted it. */
+        val pending: PendingAcceptance? = null,
+        /** Set when the model ended the task with an answer and the harness confirmed nothing changed (D-344). */
+        val answer: String? = null,
     ) : CellExit
 
     /** `state(blocked)` or `task.ask` without an answer: a success path that needs the authority (§5.9). */

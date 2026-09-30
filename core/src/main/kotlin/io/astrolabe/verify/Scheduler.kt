@@ -355,7 +355,8 @@ public class Scheduler(
             reasons += if (receipt.testedInputs.mutatedDuringCheck.isNotEmpty()) "inputs moved during the check: ${receipt.testedInputs.mutatedDuringCheck.sorted().joinToString(", ")}" else "input stability ${receipt.testedInputs.stability.name.lowercase()} cannot certify the final tree"
         }
         val green = receipt?.outcome?.green ?: false
-        if (receipt != null && !green) reasons += "outcome ${receipt.outcome.name.lowercase()}"
+        // D-338: an unverified result names its cause for the decider — "cannot start python3", not just "unavailable".
+        if (receipt != null && !green) reasons += "outcome ${receipt.outcome.name.lowercase()}" + (receipt.limits.firstOrNull()?.detail?.let { ": $it" } ?: "")
         return Currency(last.receiptId, refreshed.applicability, eligible, green, reasons, red = receipt?.outcome == Outcome.Failed)
     }
 

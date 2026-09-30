@@ -26,7 +26,8 @@ import io.astrolabe.id.Digest
 import io.astrolabe.id.WorkId
 import io.astrolabe.register.Register
 import io.astrolabe.verify.Applicability
-import io.astrolabe.verify.Assessment
+import io.astrolabe.verify.Verdict
+import io.astrolabe.verify.VerdictOutcome
 import io.astrolabe.verify.CompletionProposal
 import io.astrolabe.verify.CompletionResult
 import io.astrolabe.verify.Currency
@@ -260,7 +261,7 @@ class RequirementGraphTest {
             CompletionProposal("I1", "done", 1, stamp, stamp, null, Digest.ofUtf8("env")),
             c, graph.increments.single(), Register.empty(ContextId("cell-I1"), "I1", "check"),
             Ledger.initial(c), stamp, emptyMap(),
-            assessments = listOf(Assessment("AC1", "signature unchanged", "#44", true, "user", 1, candidate = stamp)),
+            verdicts = mapOf("AC1" to Verdict("#44", 1, stamp, VerdictOutcome.Approve, confidence = 0.9, signedBy = "user")),
         ))
         val ledger = graph.recordAccepted(c, result).ledger(c, stamp)
         assertEquals(RequirementStatus.Verified, ledger["R1"]!!.status)

@@ -6,6 +6,8 @@ import io.astrolabe.Mode
 import io.astrolabe.auth.Stage
 import io.astrolabe.budget.Budget
 import io.astrolabe.budget.Tokens
+import io.astrolabe.cell.GateState
+import io.astrolabe.cell.Gates
 import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Authorization
 import io.astrolabe.contract.Command
@@ -22,6 +24,7 @@ import io.astrolabe.id.AttemptId
 import io.astrolabe.id.CandidateId
 import io.astrolabe.id.ContextId
 import io.astrolabe.id.Digest
+import io.astrolabe.id.Identities
 import io.astrolabe.id.WorkId
 import io.astrolabe.register.Mark
 import io.astrolabe.register.OpenItem
@@ -32,9 +35,15 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-/** P1.7.7: the exit gate lists exactly what is missing, `Open` never waives a required acceptance, the verifier binds stamps and leaves the ledger untouched on refusal. */
+/**
+ * D-337 (§8.7): the acceptance resolver — one case per cell of the two result tables (run items by receipt currency,
+ * check/review items by verdict), the resolution order, decisions, provenance (I7), and the verifier that binds an
+ * accepted completion to its stamps. Only an executed red check or a substantive rejection is "not done" (I2);
+ * everything the harness cannot establish awaits a decision (I1).
+ */
 class ExitGateTest {
     private val contract = Contract(
         workId = WorkId("W-1"), version = 2, attemptId = AttemptId("a1"), mode = Mode.Autonomous, shape = Shape.S0,
@@ -57,131 +66,308 @@ class ExitGateTest {
 
     private fun green(receipt: String = "rcpt-1") = Currency(receipt, Applicability.Current, eligible = true, green = true, reasons = emptyList())
     private fun stale(receipt: String = "rcpt-1") = Currency(receipt, Applicability.Stale, eligible = true, green = true, reasons = listOf("candidate moved @s8 → @s9 (no reuse proof)"))
-    private fun red(receipt: String = "rcpt-2") = Currency(receipt, Applicability.Current, eligible = true, green = false, reasons = listOf("outcome failed"))
-    private val assessed = Assessment("AC-2", "no public signature change in src/api/", "#44", accepted = true, by = "user", contractVersion = 2, candidate = s9)
-    private val signed = Verdict("rev-1", 2, s9, VerdictOutcome.Approve, confidence = 0.9, signedBy = "human:alice")
+    private fun red(receipt: String = "rcpt-2") = Currency(receipt, Applicability.Current, eligible = true, green = false, reasons = listOf("outcome failed"), red = true)
+    private fun notGreen(outcome: String, receipt: String = "rcpt-5") = Currency(receipt, Applicability.Current, eligible = true, green = false, reasons = listOf("outcome $outcome"), red = false)
+    private val approve = Verdict("rev-1", 2, s9, VerdictOutcome.Approve, confidence = 0.9, signedBy = "human:alice")
+    private val major = Finding(Severity.Major, "src/total.py:12", "rounds half-even, not half-up", kind = FindingKind.Correctness)
+    private val revise = approve.copy(outcome = VerdictOutcome.Revise, findings = listOf(major))
 
-    private fun evaluate(
+    private fun resolve(
         register: Register = done,
         currencies: Map<String, Currency> = mapOf("CHK-accept-AC-1" to green()),
-        assessments: List<Assessment> = listOf(assessed),
-        reviews: Map<String, Verdict> = mapOf("AC-3" to signed),
+        verdicts: Map<String, Verdict> = mapOf("AC-2" to approve, "AC-3" to approve),
+        unavailable: Map<String, String> = emptyMap(),
         flags: List<TestIntegrityFlag> = emptyList(),
         nudges: List<String> = emptyList(),
-    ) = ExitGate.evaluate(register, contract, increment, currencies, assessments, reviews, flags, nudges)
+        decision: DecisionRecord? = null,
+        reworkSpent: Boolean = false,
+    ) = Resolver.increment(register, contract, increment, currencies, verdicts, unavailable, flags, nudges, s9, decision, reworkSpent)
+
+    private fun decision(kind: DecisionKind, obligations: List<String>, decider: Decider = Decider.User, spent: Boolean = false, reason: String = "checked it by hand") =
+        DecisionRecord("dec-1", "I1", AcceptanceDecision("ask-1", 2, s9, kind, decider, if (decider == Decider.User) "user:local" else "studio:policy(auto)", reason), obligations, spent)
+
+    private fun result(resolved: Resolved, id: String): ObligationResult = resolved.results.single { it.obligation == id }
+
+    // --------------------------------------------------------------- table 1: run items by their receipt
 
     @Test
-    fun `every obligation satisfied by evidence is accepted with the receipts that certify it`() {
-        val accepted = assertIs<GateResult.Accepted>(evaluate())
-        assertEquals(listOf("rcpt-1"), accepted.receiptIds)
-        assertIs<GateResult.Accepted>(evaluate(currencies = mapOf("AC-1" to green("rcpt-7"))), "currencies may be keyed by acceptance id")
+    fun `a run item passes only on a current eligible green receipt and fails only on a current eligible red one`() {
+        val passed = result(resolve(), "AC-1")
+        assertEquals(ResultStatus.Passed, passed.status)
+        assertEquals("rcpt-1", passed.evidenceRef)
+        assertEquals(ResultStatus.Passed, result(resolve(currencies = mapOf("AC-1" to green("rcpt-7"))), "AC-1").status, "currencies may be keyed by acceptance id")
+        val failed = result(resolve(currencies = mapOf("CHK-accept-AC-1" to red())), "AC-1")
+        assertEquals(ResultStatus.Failed, failed.status)
+        assertTrue(failed.executedFailure)
+        assertEquals("AC-1: run: pytest -q (scope touched) — outcome failed", failed.detail)
     }
 
     @Test
-    fun `the refusal names exactly what is missing and an Open item never waives a required acceptance`() {
-        val refused = assertIs<GateResult.Refused>(evaluate(currencies = mapOf("CHK-accept-AC-1" to stale())))
-        assertEquals(listOf("AC-1: run: pytest -q (scope touched) — candidate moved @s8 → @s9 (no reuse proof)"), refused.missing)
-        assertEquals(listOf("AC-1: run: pytest -q (scope touched) — no receipt"), assertIs<GateResult.Refused>(evaluate(currencies = emptyMap())).missing)
-        assertEquals(listOf("AC-1: run: pytest -q (scope touched) — outcome failed"), assertIs<GateResult.Refused>(evaluate(currencies = mapOf("CHK-accept-AC-1" to red()))).missing)
-        val ineligible = Currency("rcpt-3", Applicability.Current, eligible = false, green = true, reasons = listOf("inputs moved during the check: src/a.py"))
-        assertEquals(listOf("AC-1: run: pytest -q (scope touched) — inputs moved during the check: src/a.py"), assertIs<GateResult.Refused>(evaluate(currencies = mapOf("CHK-accept-AC-1" to ineligible))).missing)
+    fun `every other run receipt is unverified - none, stale, stale red, ineligible, timed out, unavailable, inconclusive`() {
+        val cases = mapOf(
+            "no receipt" to null,
+            "stale green" to stale(),
+            "stale red" to red().copy(applicability = Applicability.Stale),
+            "ineligible" to Currency("rcpt-3", Applicability.Current, eligible = false, green = true, reasons = listOf("inputs moved during the check: src/a.py")),
+            "ineligible red" to red().copy(eligible = false),
+            "timeout" to notGreen("timeout"),
+            "unavailable" to notGreen("unavailable"),
+            "inconclusive" to notGreen("inconclusive"),
+        )
+        for ((name, currency) in cases) {
+            val resolved = resolve(currencies = currency?.let { mapOf("CHK-accept-AC-1" to it) } ?: emptyMap())
+            assertEquals(ResultStatus.Unverified, result(resolved, "AC-1").status, name)
+            assertEquals(Resolution.Await, resolved.resolution, "$name never refuses (I1)")
+            assertEquals(StopCode.AcceptanceDecision, resolved.code, name)
+        }
+        assertEquals("AC-1: run: pytest -q (scope touched) — no receipt", result(resolve(currencies = emptyMap()), "AC-1").detail)
+    }
 
-        val waived = done.copy(open = listOf(OpenItem(1, "AC-1 red: CHK-accept-AC-1 fails on the legacy path, tracked")))
-        val still = assertIs<GateResult.Refused>(evaluate(register = waived, currencies = mapOf("CHK-accept-AC-1" to red())))
-        assertEquals(1, still.missing.size, "recording a required failure in Open does not waive it")
+    // ------------------------------------------------------ table 2: check and review items by verdict
+
+    @Test
+    fun `a reviewer's approval passes, a rejection with a blocker or major finding fails`() {
+        assertEquals(ResultStatus.Passed, result(resolve(), "AC-2").status)
+        assertEquals("human:alice", result(resolve(), "AC-3").by)
+        val rejected = resolve(verdicts = mapOf("AC-2" to approve, "AC-3" to revise))
+        val failed = result(rejected, "AC-3")
+        assertEquals(ResultStatus.Failed, failed.status)
+        assertTrue(failed.reviewFailure)
+        assertEquals(listOf(major), failed.findings)
+        assertEquals(Resolution.Rework, rejected.resolution)
+        assertEquals(listOf(failed), rejected.rejections)
+        val blocker = revise.copy(outcome = VerdictOutcome.Reject, findings = listOf(major.copy(severity = Severity.Blocker)))
+        assertEquals(ResultStatus.Failed, result(resolve(verdicts = mapOf("AC-2" to blocker, "AC-3" to approve)), "AC-2").status)
     }
 
     @Test
-    fun `check items need an accepted assessment of the stated criterion at this contract version`() {
-        assertEquals(listOf("AC-2: check: no public signature change in src/api/ — no assessment recorded"), assertIs<GateResult.Refused>(evaluate(assessments = emptyList())).missing)
-        assertEquals(listOf("AC-2: check: no public signature change in src/api/ — assessment does not name the stated criterion"), assertIs<GateResult.Refused>(evaluate(assessments = listOf(assessed.copy(criterion = "AC-2")))).missing)
-        assertEquals(listOf("AC-2: check: no public signature change in src/api/ — assessment bound to another contract version"), assertIs<GateResult.Refused>(evaluate(assessments = listOf(assessed.copy(contractVersion = 1)))).missing)
-        assertEquals(listOf("AC-2: check: no public signature change in src/api/ — assessment not accepted"), assertIs<GateResult.Refused>(evaluate(assessments = listOf(assessed.copy(accepted = false)))).missing)
+    fun `no verdict, insufficient evidence, a rejection without substance or another revision or candidate is unverified`() {
+        val cases = mapOf(
+            "no verdict" to null,
+            "insufficient evidence" to approve.copy(outcome = VerdictOutcome.InsufficientEvidence, missingCriterion = "program output"),
+            "minor findings only" to revise.copy(findings = listOf(major.copy(severity = Severity.Minor))),
+            "no location" to revise.copy(findings = listOf(major.copy(location = " "))),
+            "no findings" to revise.copy(findings = emptyList()),
+            "another revision" to approve.copy(contractRevision = 1),
+            "another candidate" to approve.copy(reviewedCandidate = s8),
+        )
+        for ((name, verdict) in cases) {
+            val resolved = resolve(verdicts = listOfNotNull(verdict?.let { "AC-3" to it }).toMap() + ("AC-2" to approve), unavailable = if (verdict == null) mapOf("AC-3" to "the reviewer gave no verdict") else emptyMap())
+            assertEquals(ResultStatus.Unverified, result(resolved, "AC-3").status, name)
+            assertEquals(Resolution.Await, resolved.resolution, name)
+        }
+        assertEquals("AC-3: review: rounding matches the finance policy — the reviewer gave no verdict", result(resolve(verdicts = mapOf("AC-2" to approve), unavailable = mapOf("AC-3" to "the reviewer gave no verdict")), "AC-3").detail)
+    }
+
+    // -------------------------------------------------------------------------- resolution order
+
+    @Test
+    fun `an executed red check is rework whatever is decided (I2, 8-8)`() {
+        val red = mapOf("CHK-accept-AC-1" to red())
+        assertEquals(Resolution.Rework, resolve(currencies = red).resolution)
+        val accepted = resolve(currencies = red, decision = decision(DecisionKind.Accept, listOf("AC-1", "AC-2", "AC-3")))
+        assertEquals(Resolution.Rework, accepted.resolution, "a decision never overrides a failed required check")
+        assertEquals(GapKind.Failed, accepted.gaps.single().kind)
+        assertTrue(runCatching {
+            AcceptanceDecisionRequest("ask-1", 2, Identities(WorkId("W-1"), AttemptId("a1")), "I1", s9, StopCode.AcceptanceDecision,
+                listOf(DecisionItem("AC-1", ObligationKind.Run, ResultStatus.Failed, "red")))
+        }.isFailure, "an executed red check is never put to a decision")
     }
 
     @Test
-    fun `review items need an approving signed verdict at this contract version`() {
-        assertEquals(listOf("AC-3: review: rounding matches the finance policy — no signed review"), assertIs<GateResult.Refused>(evaluate(reviews = emptyMap())).missing)
-        assertEquals(listOf("AC-3: review: rounding matches the finance policy — review signed for contract v1, not v2"), assertIs<GateResult.Refused>(evaluate(reviews = mapOf("AC-3" to signed.copy(contractRevision = 1)))).missing)
-        assertEquals(listOf("AC-3: review: rounding matches the finance policy — review revise by human:alice"), assertIs<GateResult.Refused>(evaluate(reviews = mapOf("AC-3" to signed.copy(outcome = VerdictOutcome.Revise)))).missing)
-    }
-
-    @Test
-    fun `undisposed steps, red verify lines without Open, unjustified or unreviewed surface flags and impact nudges refuse`() {
+    fun `what the agent must close is rework - steps, red lines without Open, flags, nudges`() {
         val pending = done.copy(plan = done.plan + Step(2, Mark.Cursor, "update call sites") + Step(3, Mark.Todo, "docs"))
+        val steps = resolve(register = pending)
+        assertEquals(Resolution.Rework, steps.resolution)
         assertEquals(
             listOf("step 2 [>] 'update call sites' has no disposition (done, cancelled or an explicit non-completed exit)", "step 3 [ ] 'docs' has no disposition (done, cancelled or an explicit non-completed exit)"),
-            assertIs<GateResult.Refused>(evaluate(register = pending)).missing,
+            steps.missing,
         )
         val lintRed = mapOf("CHK-accept-AC-1" to green(), "CHK-lint" to red("rcpt-9"))
-        assertEquals(listOf("CHK-lint is red without an Open item naming it"), assertIs<GateResult.Refused>(evaluate(currencies = lintRed)).missing)
-        assertIs<GateResult.Accepted>(evaluate(register = done.copy(open = listOf(OpenItem(1, "CHK-lint: 3 style errors in legacy module, tracked"))), currencies = lintRed))
-        assertIs<GateResult.Refused>(evaluate(register = done.copy(open = listOf(OpenItem(1, "CHK-lint tracked", closed = true))), currencies = lintRed), "a closed item is no longer open")
-
-        val flag = TestIntegrityFlag("tests/test_total.py", AcceptanceSurface.TestFile, "edit #3", listOf("CHK-accept-AC-1"))
-        assertEquals(
-            listOf("acceptance surface tests/test_total.py touches CHK-accept-AC-1 without a recorded justification", "acceptance surface tests/test_total.py touches CHK-accept-AC-1 without an approving review"),
-            assertIs<GateResult.Refused>(evaluate(flags = listOf(flag))).missing,
-        )
-        assertEquals(listOf("acceptance surface tests/test_total.py touches CHK-accept-AC-1 without an approving review"), assertIs<GateResult.Refused>(evaluate(flags = listOf(flag.copy(reason = "asserted the old rounding")))).missing)
-        assertIs<GateResult.Accepted>(evaluate(flags = listOf(flag.copy(reason = "asserted the old rounding", verdict = signed))))
-        assertIs<GateResult.Accepted>(evaluate(flags = listOf(flag.copy(requiredChecks = emptyList()))), "a flag off the required set is visible, not blocking")
-        assertEquals(listOf("unresolved impact nudge: public def total() changed; 3 importers unread"), assertIs<GateResult.Refused>(evaluate(nudges = listOf("public def total() changed; 3 importers unread"))).missing)
+        assertEquals(listOf("CHK-lint is red without an Open item naming it"), resolve(currencies = lintRed).missing)
+        assertEquals(Resolution.Complete, resolve(register = done.copy(open = listOf(OpenItem(1, "CHK-lint: 3 style errors in legacy module, tracked"))), currencies = lintRed).resolution)
+        assertEquals(Resolution.Rework, resolve(register = done.copy(open = listOf(OpenItem(1, "CHK-lint tracked", closed = true))), currencies = lintRed).resolution, "a closed item is no longer open")
+        val waived = done.copy(open = listOf(OpenItem(1, "AC-1 red: CHK-accept-AC-1 fails on the legacy path, tracked")))
+        assertEquals(Resolution.Rework, resolve(register = waived, currencies = mapOf("CHK-accept-AC-1" to red())).resolution, "recording a required failure in Open does not waive it")
+        assertEquals(listOf("unresolved impact nudge: public def total() changed; 3 importers unread"), resolve(nudges = listOf("public def total() changed; 3 importers unread")).missing)
     }
+
+    @Test
+    fun `a test-integrity flag needs a justification from the agent and an approving review or a decision`() {
+        val flag = TestIntegrityFlag("tests/test_total.py", AcceptanceSurface.TestFile, "edit #3", listOf("CHK-accept-AC-1"))
+        val bare = resolve(flags = listOf(flag))
+        assertEquals(Resolution.Rework, bare.resolution)
+        assertEquals(
+            listOf("acceptance surface tests/test_total.py touches CHK-accept-AC-1 without a recorded justification",
+                "integrity:tests/test_total.py: acceptance surface tests/test_total.py touches CHK-accept-AC-1 — no approving review of the change to a required check"),
+            bare.missing,
+        )
+        val justified = resolve(flags = listOf(flag.copy(reason = "asserted the old rounding")))
+        assertEquals(Resolution.Await, justified.resolution, "a missing approval is unverified, not a refusal")
+        assertEquals(ResultStatus.Unverified, result(justified, "integrity:tests/test_total.py").status)
+        assertEquals(Resolution.Complete, resolve(flags = listOf(flag.copy(reason = "asserted the old rounding", verdict = approve))).resolution)
+        assertEquals(Resolution.Complete, resolve(flags = listOf(flag.copy(requiredChecks = emptyList()))).resolution, "a flag off the required set is visible, not blocking")
+        assertEquals(Resolution.Await, resolve(flags = listOf(flag.copy(reason = "r", verdict = approve.copy(reviewedCandidate = s8)))).resolution, "an approval of another candidate never certifies this one")
+        val accepted = resolve(flags = listOf(flag.copy(reason = "r")), decision = decision(DecisionKind.Accept, listOf("integrity:tests/test_total.py")))
+        assertEquals(Resolution.Complete, accepted.resolution)
+    }
+
+    @Test
+    fun `a reviewer's rejection is reworked once, then goes to the authority, who may accept over it (I4)`() {
+        val verdicts = mapOf("AC-2" to approve, "AC-3" to revise)
+        assertEquals(Resolution.Rework, resolve(verdicts = verdicts).resolution)
+        val spent = resolve(verdicts = verdicts, reworkSpent = true)
+        assertEquals(Resolution.Await, spent.resolution)
+        assertEquals(StopCode.ReviewRejected, spent.code)
+        val respent = resolve(verdicts = verdicts).spent()
+        assertEquals(Resolution.Await to StopCode.ReviewRejected, respent.resolution to respent.code, "the last round re-resolves the same inputs as spent")
+        assertEquals(listOf("AC-3"), spent.undecided.map { it.obligation })
+        val accepted = resolve(verdicts = verdicts, decision = decision(DecisionKind.Accept, listOf("AC-3")))
+        assertEquals(Resolution.Complete, accepted.resolution, "the decider's word is stronger than a review result")
+        val provenance = accepted.provenance.single { it.item == "AC-3" }
+        assertEquals(ProvenanceKind.Accepted, provenance.how)
+        assertEquals("user:local", provenance.by)
+        assertEquals(Decider.User, provenance.decider)
+        assertEquals("checked it by hand", provenance.reason)
+    }
+
+    @Test
+    fun `unverified obligations await a decision that covers exactly what its request listed`() {
+        val none = mapOf("AC-2" to approve)
+        val waiting = resolve(verdicts = none)
+        assertEquals(Resolution.Await, waiting.resolution)
+        assertEquals(StopCode.AcceptanceDecision, waiting.code)
+        assertEquals(listOf("AC-3"), waiting.undecided.map { it.obligation })
+        assertEquals(Resolution.Complete, resolve(verdicts = none, decision = decision(DecisionKind.Accept, listOf("AC-3"), Decider.Policy)).resolution)
+        assertEquals(Resolution.Await, resolve(verdicts = none, decision = decision(DecisionKind.Accept, listOf("AC-2"))).resolution, "a decision covers only what it was asked")
+        assertEquals(Resolution.Await, resolve(verdicts = none, decision = decision(DecisionKind.Accept, listOf("AC-3"), spent = true)).resolution, "a spent decision covers nothing")
+        val rework = resolve(verdicts = none, decision = decision(DecisionKind.Rework, listOf("AC-3"), reason = "the rounding table is missing"))
+        assertEquals(Resolution.Rework, rework.resolution)
+        assertEquals("rework requested by user:local: the rounding table is missing", rework.missing.last())
+    }
+
+    @Test
+    fun `provenance records per item whether it was tested, reviewed or accepted, and by whom (I7)`() {
+        val mixed = resolve(verdicts = mapOf("AC-2" to approve), decision = decision(DecisionKind.Accept, listOf("AC-3"), Decider.Policy, reason = "cannot verify a browser action"))
+        assertEquals(Resolution.Complete, mixed.resolution)
+        assertEquals(
+            mapOf("AC-1" to ProvenanceKind.Tested, "AC-2" to ProvenanceKind.Reviewed, "AC-3" to ProvenanceKind.Accepted),
+            mixed.provenance.associate { it.item to it.how },
+        )
+        val accepted = mixed.provenance.single { it.item == "AC-3" }
+        assertEquals(Decider.Policy, accepted.decider)
+        assertEquals("cannot verify a browser action", accepted.reason)
+        assertEquals(listOf("rcpt-1"), mixed.receiptIds)
+        assertEquals(listOf("rcpt-1", "rev-1", "ask-1"), mixed.evidenceRefs)
+        assertEquals(mixed.decision?.id, "dec-1")
+        assertNull(resolve().decision, "nothing applied when every item is verified")
+    }
+
+    @Test
+    fun `a policy decision covers what could not be verified, never a reviewer's rejection (D-338)`() {
+        val verdicts = mapOf("AC-2" to approve, "AC-3" to revise)
+        assertEquals(Resolution.Await, resolve(verdicts = verdicts, reworkSpent = true, decision = decision(DecisionKind.Accept, listOf("AC-3"), Decider.Policy)).resolution)
+        assertEquals(Resolution.Complete, resolve(verdicts = verdicts, reworkSpent = true, decision = decision(DecisionKind.Accept, listOf("AC-3"))).resolution)
+    }
+
+    @Test
+    fun `after the rework round what the agent left open goes to the decider, never a failure (I2)`() {
+        val open = done.copy(plan = done.plan + Step(2, Mark.Todo, "docs"))
+        assertEquals(Resolution.Rework, resolve(register = open).resolution)
+        val spent = resolve(register = open, reworkSpent = true)
+        assertEquals(Resolution.Await, spent.resolution)
+        assertEquals(listOf("open:1"), spent.undecided.map { it.obligation })
+        assertEquals(Resolution.Complete, resolve(register = open, reworkSpent = true, decision = decision(DecisionKind.Accept, listOf("open:1"))).resolution)
+        val moved = Verifier().accept(CompletionProposal("I1", "done", 2, s8, s8, null, env), contract, increment, done, Ledger.initial(contract), s9,
+            mapOf("CHK-accept-AC-1" to green()), mapOf("AC-2" to approve, "AC-3" to approve), reworkSpent = true)
+        assertIs<CompletionResult.Refused>(moved, "a proposal about another tree is never put to a decider")
+    }
+
+    @Test
+    fun `a stale red optional check is history, not a red line (D-337)`() {
+        val staleRed = mapOf("CHK-accept-AC-1" to green(), "CHK-lint" to red("rcpt-9").copy(applicability = Applicability.Stale))
+        assertEquals(Resolution.Complete, resolve(currencies = staleRed).resolution)
+    }
+
+    // ------------------------------------------------------------ one rule for gate and verifier (A1)
+
+    @Test
+    fun `the cell's exit gate refuses exactly the reworks the verifier refuses, and never an await`() {
+        fun gate(currencies: Map<String, Currency>, verdicts: Map<String, Verdict>) = Gates.s0().evaluate(GateState(
+            turn = 3, register = done, contract = contract, increment = increment, completionProposed = true, currencies = currencies, verdicts = verdicts,
+        )).rejections.filter { it.key.gate == Gates.EXIT }
+        val proposal = CompletionProposal("I1", "done", 2, s8, s9, null, env)
+        val cases = listOf(
+            mapOf("CHK-accept-AC-1" to green()) to mapOf("AC-2" to approve, "AC-3" to approve),
+            mapOf("CHK-accept-AC-1" to red()) to mapOf("AC-2" to approve, "AC-3" to approve),
+            mapOf("CHK-accept-AC-1" to notGreen("timeout")) to mapOf("AC-2" to approve, "AC-3" to approve),
+            mapOf("CHK-accept-AC-1" to green()) to mapOf("AC-2" to approve, "AC-3" to revise),
+            mapOf("CHK-accept-AC-1" to green()) to mapOf("AC-2" to approve),
+        )
+        for ((currencies, verdicts) in cases) {
+            val verified = Verifier().accept(proposal, contract, increment, done, Ledger.initial(contract), s9, currencies, verdicts)
+            val refused = gate(currencies, verdicts)
+            when (verified) {
+                is CompletionResult.Refused -> assertEquals(verified.missing, refused.single().details)
+                is CompletionResult.Accepted, is CompletionResult.Pending -> assertTrue(refused.isEmpty(), "$verified")
+                is CompletionResult.NotCompleted -> error("unexpected $verified")
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------------------- the verifier
 
     @Test
     fun `the verifier binds stamps, updates the ledger only on acceptance, and turns repeated refusals into recovery`() {
         val verifier = Verifier(maxFinalizations = 2)
         val ledger = Ledger.initial(contract)
         val proposal = CompletionProposal("I1", "done", 2, baseStamp = s8, resultingStamp = s9, patchHash = Digest.ofUtf8("patch"), envId = env)
+        val verdicts = mapOf("AC-2" to approve, "AC-3" to approve)
 
-        val moved = assertIs<CompletionResult.Refused>(verifier.accept(proposal, contract, increment, done, ledger, stampNow = s8, currencies = mapOf("CHK-accept-AC-1" to green()), assessments = listOf(assessed.copy(candidate = s8)), reviews = mapOf("AC-3" to signed)))
-        assertEquals(listOf(
-            "resulting stamp @${s9.hash8} is not the tree now @${s8.hash8}",
-            "AC-3: review does not certify the current candidate",
-        ), moved.missing)
+        val moved = assertIs<CompletionResult.Refused>(verifier.accept(proposal, contract, increment, done, ledger, stampNow = s8, currencies = mapOf("CHK-accept-AC-1" to green()), verdicts = verdicts))
+        assertEquals("resulting stamp @${s9.hash8} is not the tree now @${s8.hash8}", moved.missing.first())
         assertEquals(1, moved.attempts)
         assertFalse(moved.recoveryDirected)
         assertEquals(RequirementStatus.Pending, ledger["R1"]!!.status, "the ledger is untouched on refusal")
 
-        val again = assertIs<CompletionResult.Refused>(verifier.accept(proposal.copy(contractVersion = 1), contract, increment, done, ledger, s9, mapOf("CHK-accept-AC-1" to stale()), listOf(assessed), mapOf("AC-3" to signed)))
+        val again = assertIs<CompletionResult.Refused>(verifier.accept(proposal.copy(contractVersion = 1), contract, increment, done, ledger, s9, mapOf("CHK-accept-AC-1" to red()), verdicts))
         assertEquals(2, again.attempts)
         assertTrue(again.recoveryDirected, "the second unsupported finalization goes to gap-directed recovery, not an endless gate")
-        assertTrue(again.missing.first().startsWith("proposal binds contract v1"))
-        assertEquals(2, again.missing.size)
 
-        val accepted = assertIs<CompletionResult.Accepted>(verifier.accept(proposal, contract, increment, done, ledger, s9, mapOf("CHK-accept-AC-1" to green()), listOf(assessed), mapOf("AC-3" to signed)))
+        val accepted = assertIs<CompletionResult.Accepted>(verifier.accept(proposal, contract, increment, done, ledger, s9, mapOf("CHK-accept-AC-1" to green()), verdicts))
         assertEquals(s8, accepted.baseStamp)
         assertEquals(s9, accepted.resultingStamp)
         assertEquals(Digest.ofUtf8("patch"), accepted.patchHash)
         assertEquals(env, accepted.envId)
         assertEquals(listOf("rcpt-1"), accepted.receiptIds)
+        assertTrue(accepted.verified)
         assertEquals(RequirementStatus.Verified, accepted.ledger["R1"]!!.status)
-        assertEquals(listOf("rcpt-1", "#44", "rev-1"), accepted.evidenceRefs)
-        assertEquals(accepted.evidenceRefs, accepted.ledger["R1"]!!.evidence)
+        assertEquals(listOf("rcpt-1", "rev-1"), accepted.evidenceRefs)
+        assertEquals(accepted.provenance, accepted.ledger["R1"]!!.provenance)
         assertTrue(accepted.ledger["R1"]!!.stampValid)
         assertEquals(RequirementStatus.Pending, ledger["R1"]!!.status, "the controller commits the returned ledger; the input is immutable")
 
         assertEquals(CompletionResult.NotCompleted(ExitKind.Blocked, "needs the finance policy"), verifier.accept(proposal.copy(claimedStatus = "blocked", reason = "needs the finance policy"), contract, increment, done, ledger, s9, emptyMap()))
-        assertEquals(CompletionResult.NotCompleted(ExitKind.BudgetExhausted, "budget_exhausted"), verifier.accept(proposal.copy(claimedStatus = "budget_exhausted"), contract, increment, done, ledger, s9, emptyMap()))
         assertEquals(ExitKind.Waiting, assertIs<CompletionResult.NotCompleted>(verifier.accept(proposal.copy(claimedStatus = "waiting", reason = "full suite running"), contract, increment, done, ledger, s9, emptyMap())).kind)
         assertTrue(runCatching { verifier.accept(proposal.copy(claimedStatus = "verified"), contract, increment, done, ledger, s9, emptyMap()) }.isFailure, "the model cannot name a status the protocol does not have")
     }
 
     @Test
-    fun `stale review and acceptance surface approvals never certify the current candidate`() {
-        val proposal = CompletionProposal("I1", "done", contract.version, s8, s9, null, env)
-        fun complete(review: Verdict, flags: List<TestIntegrityFlag> = emptyList()) = Verifier().accept(
-            proposal, contract, increment, done, Ledger.initial(contract), s9,
-            mapOf("AC-1" to green()), listOf(assessed), mapOf("AC-3" to review), flags,
-        )
-        assertIs<CompletionResult.Refused>(complete(signed.copy(reviewedCandidate = s8)))
-        val flag = TestIntegrityFlag(
-            "tests/test_total.py", AcceptanceSurface.TestFile, "edit", listOf("CHK-accept-AC-1"),
-            reason = "correct old expectation", verdict = signed,
-        )
-        assertIs<CompletionResult.Refused>(complete(signed, listOf(flag.copy(verdict = signed.copy(reviewedCandidate = s8)))))
-        assertIs<CompletionResult.Refused>(complete(signed, listOf(flag.copy(verdict = signed.copy(contractRevision = 1)))))
-        assertIs<CompletionResult.Accepted>(complete(signed, listOf(flag)))
+    fun `the verifier holds an unverified completion pending and applies only a decision for this candidate and contract`() {
+        val proposal = CompletionProposal("I1", "done", 2, s8, s9, null, env)
+        val currencies = mapOf("CHK-accept-AC-1" to notGreen("unavailable"))
+        val verdicts = mapOf("AC-2" to approve, "AC-3" to approve)
+        val pending = assertIs<CompletionResult.Pending>(Verifier().accept(proposal, contract, increment, done, Ledger.initial(contract), s9, currencies, verdicts))
+        assertEquals(StopCode.AcceptanceDecision, pending.code)
+        assertEquals(listOf("AC-1"), pending.resolved.undecided.map { it.obligation })
+        val accept = decision(DecisionKind.Accept, listOf("AC-1"))
+        val accepted = assertIs<CompletionResult.Accepted>(Verifier().accept(proposal, contract, increment, done, Ledger.initial(contract), s9, currencies, verdicts, decision = accept))
+        assertFalse(accepted.verified)
+        assertEquals(ProvenanceKind.Accepted, accepted.provenance.single { it.item == "AC-1" }.how)
+        assertEquals(accept, accepted.decision)
+        val elsewhere = accept.copy(decision = accept.decision.copy(candidate = s8))
+        assertIs<CompletionResult.Pending>(Verifier().accept(proposal, contract, increment, done, Ledger.initial(contract), s9, currencies, verdicts, decision = elsewhere), "a decision about another tree is history")
+        val amended = accept.copy(decision = accept.decision.copy(contractRevision = 1))
+        assertIs<CompletionResult.Pending>(Verifier().accept(proposal, contract, increment, done, Ledger.initial(contract), s9, currencies, verdicts, decision = amended), "a decision about another contract version is history")
     }
 }

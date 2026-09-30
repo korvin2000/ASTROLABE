@@ -72,6 +72,17 @@ public data class ReceiptView(
     val receipts: List<StoredRow>,
 )
 
+/**
+ * Acceptance decisions of a work item (D-339, D-340): the pending completions — open ones wait for a decision — and the
+ * decisions an authority made, each bound to its request, candidate and contract version.
+ */
+@Serializable
+public data class AcceptanceView(
+    val work: WorkId,
+    val pending: List<StoredRow>,
+    val decisions: List<StoredRow>,
+)
+
 /** The finish receipt packet, once the campaign has produced one (§3.7). */
 @Serializable
 public data class FinishReceiptView(
@@ -156,6 +167,12 @@ public class Views(private val store: Store) {
             it.string("receipt_id")
         },
     )
+
+    public fun acceptance(work: WorkId): AcceptanceView = snapshot { AcceptanceView(
+        work = work,
+        pending = rows("pending_completions", "$COMMON, id, status", "work_id = ?", "created_at, id", work.value) { it.string("id") },
+        decisions = rows("acceptance_decisions", "$COMMON, id", "work_id = ?", "created_at, id", work.value) { it.string("id") },
+    ) }
 
     public fun finishReceipt(work: WorkId): FinishReceiptView {
         val packets = rows(

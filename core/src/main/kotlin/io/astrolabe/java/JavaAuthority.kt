@@ -6,6 +6,8 @@ import io.astrolabe.event.DClassRequest
 import io.astrolabe.event.Decision
 import io.astrolabe.event.Question
 import io.astrolabe.event.Resolution
+import io.astrolabe.verify.AcceptanceDecision
+import io.astrolabe.verify.AcceptanceDecisionRequest
 import io.astrolabe.verify.ReviewRequest
 import io.astrolabe.verify.Verdict
 import java.util.concurrent.CompletableFuture
@@ -24,4 +26,7 @@ public interface JavaAuthority {
     public fun resolve(proposal: AmendmentProposal): CompletableFuture<Resolution>
 
     public fun review(request: ReviewRequest): CompletableFuture<Verdict?>
+
+    /** The acceptance decision (D-338); a future completed with `null` means none now: the campaign waits for one. */
+    public fun decide(request: AcceptanceDecisionRequest): CompletableFuture<AcceptanceDecision?> = CompletableFuture.completedFuture(null)
 }

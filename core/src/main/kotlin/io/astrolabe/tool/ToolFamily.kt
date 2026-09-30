@@ -49,7 +49,7 @@ public object ToolOps {
     public val run: List<String> = listOf("run", "poll", "cancel")
     public val verify: List<String> = listOf("check", "tests", "acceptance", "baseline", "review")
     public val state: List<String> = listOf("patch", "blocked", "retrieval_miss")
-    public val task: List<String> = listOf("ask", "delegate", "collect", "propose")
+    public val task: List<String> = listOf("ask", "delegate", "collect", "propose", "answer")
     public val kb: List<String> = listOf("search", "get", "propose", "skill")
 
     public fun of(family: ToolFamily): List<String> = when (family) {
