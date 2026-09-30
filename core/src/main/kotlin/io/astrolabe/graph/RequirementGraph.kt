@@ -76,9 +76,9 @@ public class RequirementGraph(
                     acceptance[item] is Acceptance.Run ||
                         acceptance[item] is Acceptance.Check && !increment.evidenceKinds[item].isNullOrBlank()
                 }) {
-                issue(GraphIssueCode.MissingExecutableAcceptance, id, "needs a run or check with a named evidence kind")
+                issue(GraphIssueCode.MissingExecutableAcceptance, id, "needs an executable acceptance: an AC- id whose item is run:, or a check: item named in evidence_kinds")
             }
-            if (increment.produces == null) issue(GraphIssueCode.MissingProduction, id, "needs an artifact or named uncertainty")
+            if (increment.produces == null) issue(GraphIssueCode.MissingProduction, id, "needs produces: artifact or resolves:<question>")
             for (dependency in increment.dependsOn.distinct().sorted()) when (byId[dependency]?.status) {
                 null -> issue(GraphIssueCode.UnknownDependency, id, "unknown dependency $dependency")
                 IncrementStatus.Cancelled -> issue(GraphIssueCode.CancelledDependency, id, "dependency $dependency was cancelled; replan explicitly")

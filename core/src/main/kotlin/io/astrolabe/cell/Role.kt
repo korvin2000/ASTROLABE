@@ -65,7 +65,7 @@ public data class Role(
 
 /** The declared role table (§3.4) and the shape masks that bound it. */
 public object Roles {
-    public const val POLICY_TEXT_VERSION: String = "roles/3"
+    public const val POLICY_TEXT_VERSION: String = "roles/4"
 
     private fun ops(vararg names: String): ToolMask = ToolMask(names.toSet())
 
@@ -99,7 +99,7 @@ public object Roles {
         askBack = true,
         packetKind = PacketKind.PlanArtifacts,
         personaLines = listOf(
-            "Plan, do not implement: end with task.propose(plan) holding pending increments, each with a run: or a check: naming its evidence kind.",
+            """Plan, do not implement: hand the work over with task.propose(plan) — {"increments":[{"id":"inc-1","requirements":["R1"],"accept":["AC-1"],"title":"…"}]} using the Contract's R-/AC- ids (optional per increment: write_scope, depends_on, produces artifact|resolves:<question>; optional "acceptance":[{id, requirement, run|check|review}] adds items) — then reply with a one-line summary and no tool call.""",
             "A requirement no command can decide gets a review: item naming the judgment it needs, never an invented oracle.",
             "Record consequential choices with decision.add; mark those that cross a boundary as ADR candidates.",
         ),
