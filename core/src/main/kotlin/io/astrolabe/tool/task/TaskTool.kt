@@ -184,7 +184,11 @@ public class TaskTool(
         }
         val intake = proposals ?: return result("masked", "propose(${args.kind}) needs the controller's proposal intake (S1+)")
         return when (val outcome = if (args.kind == "plan") intake.plan(ids, proposal) else intake.incrementSplit(ids, proposal)) {
-            is ProposalOutcome.Recorded -> result("proposed", "${args.kind} proposal ${outcome.id} recorded: ${outcome.summary}; the controller validates it — the contract and the graph are unchanged")
+            is ProposalOutcome.Recorded -> result(
+                "proposed",
+                "${args.kind} proposal ${outcome.id} recorded: ${outcome.summary}; the controller validates it — the contract and the graph are unchanged" +
+                    if (args.kind == "plan" && "gap" !in outcome.summary) "; end the turn now with a one-line summary and no tool call" else "",
+            )
             is ProposalOutcome.Refused -> result("rejected", "${args.kind} proposal refused: ${outcome.reason}")
         }
     }
