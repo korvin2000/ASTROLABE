@@ -104,3 +104,5 @@ iterations, green at the end); `:core:updateKotlinAbi`; `:eval:testClasses`, `:p
 - Verification (focused): RunTest 28, GenericShaperTest 9, GeneratedToolTest 3, DispatcherTest 5, StateToolTest 11,
   ValidatorTest 8, ValidatorFieldsTest 151, ToolContractsTest 6, CellTest 29, GatesTest 14, ControllerTest 21,
   RoleWiringTest 1, MountTest 2, VerifyTest 14 — all green; `:core:updateKotlinAbi`, `:core:checkKotlinAbi` pass.
+- Live round 2 (both models): a model denied `task.answer` after changing files did not know how to finish ("propose
+  completion"); the denial now says to reply with a summary and no tool call (D-344 text only). AcceptanceDecisionTest 10 green.

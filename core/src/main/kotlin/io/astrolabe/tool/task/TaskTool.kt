@@ -138,7 +138,7 @@ public class TaskTool(
      */
     private fun answer(args: TaskArgs): ToolOutcome {
         val check = answerCheck ?: return result("denied", "task.answer ends a task of the main line; this cell cannot end with an answer")
-        check()?.let { why -> return result("denied", "an answer ends a task that changed nothing, and this one did: $why. Finish the work and propose completion instead.") }
+        check()?.let { why -> return result("denied", "an answer ends a task that changed nothing, and this one did: $why. Finish the work, then reply with a summary and no tool call: that proposes completion.") }
         answered = args.text!!.trim()
         return result("answered", "answer recorded: the task ends with it and nothing is verified, since nothing changed")
     }
