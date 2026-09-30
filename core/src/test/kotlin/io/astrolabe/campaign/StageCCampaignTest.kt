@@ -112,7 +112,7 @@ class StageCCampaignTest {
         Command(listOf("/bin/sh", "-c", "if grep -rq dispatch src && grep -rq forward src; then cat pytest_fail.txt; else cat pytest_pass.txt; fi"))
     }
 
-    private fun controller() = Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all), clock, idGen)
+    private fun controller() = Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all, defaults = alwaysPlan), clock, idGen)
 
     private fun resource(name: String): String = javaClass.getResourceAsStream("/shaper/$name")!!.use { String(it.readAllBytes(), Charsets.UTF_8) }
 

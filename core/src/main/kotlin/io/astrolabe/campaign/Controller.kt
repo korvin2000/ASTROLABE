@@ -2,6 +2,7 @@ package io.astrolabe.campaign
 
 import io.astrolabe.AttemptConfig
 import io.astrolabe.Config
+import io.astrolabe.PlanCellPolicy
 import io.astrolabe.Project
 import io.astrolabe.atlas.Atlas
 import io.astrolabe.atlas.Prime
@@ -727,7 +728,14 @@ public class Controller @JvmOverloads public constructor(
         // §4.2: the first cell of S1 is the plan cell; the placeholder graph is replaced once, before any dispatch.
         var s3: S3Admission? = null
         if (opened.graph.increments.none { it.cells.isNotEmpty() || it.status != IncrementStatus.Pending }) {
-            plan(c, model, authority, syntax, span, packets)?.let { stop ->
+            // planCell = WhenNeeded: a contract that already is the plan installs G_single(C) without a model call.
+            val trivial = if (c.attempt.config.defaults.shapePolicy.planCell == PlanCellPolicy.WhenNeeded) PlanNeed.trivialGraph(c.contract, c.kb.contractAnchors()) else null
+            if (trivial != null) {
+                c.checks.synchronizeAcceptance(c.contract)
+                c.advance(Transition.Planned(trivial))
+                c.journal.append(JournalEvent(idGen.next("ev"), c.ids, null, JournalKind.Boundary,
+                    text = "plan cell skipped: ${PlanNeed.reason(c.contract)}; single increment ${ShapeSelector.SINGLE}", at = clock.instant()))
+            } else plan(c, model, authority, syntax, span, packets)?.let { stop ->
                 val outcome = if (c.refusal() != null) stopOutcome(c) else stop.outcome
                 return S0Run(c.advance(Transition.Stopped(outcome, stop.reason)), null, null, null)
             }
@@ -1791,7 +1799,8 @@ public class Controller @JvmOverloads public constructor(
                 shadowRef = tree.shadow,
                 transforms = TransformExecution(runner, tree.stamper, logs, config.executionMode, EnvPolicy(inheritedNames = config.redaction.envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1"))),
             ),
-            run = Run(tree.workspace, tree.registry, tree.stamper, runner, c.os, c.intents, SqliteHandles(c.store, clock), observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, c.contracts, authority, config, clock, logs, catalog = layered.mounts, tools = layered.tools),
+            run = Run(tree.workspace, tree.registry, tree.stamper, runner, c.os, c.intents, SqliteHandles(c.store, clock), observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, c.contracts, authority, config, clock, logs, catalog = layered.mounts, tools = layered.tools,
+                readOnlyRole = role.name.takeIf { Roles.readOnlyRuns(role) }),
             verify = verify,
             task = TaskTool(
                 authority, c.contracts, c.journal, estimator, idGen, ids, clock, events, role.effectiveOps(contract.shape, ceiling), proposals ?: if (child == null && contract.shape >= Shape.S1) CampaignProposals(

@@ -187,6 +187,8 @@ public data class ShapePolicy(
     val s3Enabled: Boolean = false,
     /** D-39 measured-slack multiplier over the sequential-S1 estimate; cannot enable S3 before promotion. */
     val slackFactor: Double = 1.5,
+    /** Whether an S1 campaign always opens with its plan cell (§4.2) or only when planning has something to decide. */
+    val planCell: PlanCellPolicy = PlanCellPolicy.WhenNeeded,
 ) {
     public fun violations(): List<ConfigViolation> = buildList {
         if (smallMaxFiles < 1 || smallMaxRequirements < 1) add(ConfigViolation("shapePolicy.small*", "must be ≥ 1"))
@@ -195,6 +197,17 @@ public data class ShapePolicy(
         if (slackFactor < 1.0) add(ConfigViolation("shapePolicy.slackFactor", "must be ≥ 1"))
     }
 }
+
+/**
+ * When the first cell of an S1 campaign is the plan cell (§4.2). [Always] is §4.2 as written. [WhenNeeded] runs
+ * the plan cell only when planning has something to decide: an S1 contract whose acceptance is executable, with no
+ * `review:` item, no contract touched and a single-increment graph the plan validator admits as it stands, opens on
+ * `G_single(C)` directly. Replans and increment splits always run the plan cell. An attempt frozen before this
+ * field existed decodes as [WhenNeeded]; that matters only before its first dispatch, since a planned graph is
+ * never re-planned from scratch.
+ */
+@Serializable
+public enum class PlanCellPolicy { WhenNeeded, Always }
 
 /** Which configured profile plays each routing function (§17 "Profiles" row, §11). Ids refer to [Config.profiles]. */
 @Serializable

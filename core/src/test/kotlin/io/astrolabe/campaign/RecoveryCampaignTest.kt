@@ -122,7 +122,7 @@ class RecoveryCampaignTest {
     @Test
     fun `repeated verified failures nudge, open an alternative, trip the no-progress budget and survive a resume`() = runBlocking<Unit> {
         seed(attempts = 4)
-        val ctl = Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all), clock, idGen)
+        val ctl = Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all, defaults = alwaysPlan), clock, idGen)
         // The plan cell, then cells that claim completion without evidence: each is a stalled completion of I1.
         val replies = listOf<Scripted>(
             Scripted.Reply(listOf(say("planning"), call("p1", "task", """{"op":"propose","kind":"plan","proposal":$plan}"""))),
@@ -150,7 +150,7 @@ class RecoveryCampaignTest {
             assertEquals(3, recorded.size)
         }
         // A resumed controller rebuilds the same guard state from the journal: a resume never replenishes the budget.
-        Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all), clock, idGen).open(repo.root, request, policy).use { c ->
+        Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all, defaults = alwaysPlan), clock, idGen).open(repo.root, request, policy).use { c ->
             assertEquals(recorded, CampaignRecovery(c.journal, idGen, clock, request.work, GuardLimits.of(Defaults())).noProgressEvents)
         }
     }

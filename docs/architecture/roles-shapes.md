@@ -17,7 +17,7 @@ A role is `context view × note scope × skill filter × tool mask × permission
 
 | Role (cell configuration) | Runs in | Context view | Tool mask ([§5.4](../runtime/tools.md#sec-5-4)) | Tier prior | Duties | Output |
 |---|---|---|---|---|---|---|
-| **Plan cell** (planner / architect) | main line only, never a child | contract, prime, GLOBAL + CON + ADR notes, behaviour maps, calibration prior | look, kb, state, task.ask, task.delegate(probe), verify.baseline | high | requirement graph, acceptance proposals, increments with write scopes, ownership map, decision packets, CON/ADR candidates, shape suggestion | contract amendments (proposed), graph, packets |
+| **Plan cell** (planner / architect) | main line only, never a child | contract, prime, GLOBAL + CON + ADR notes, behaviour maps, calibration prior | look, kb, state, run (R class only), task.ask, task.delegate(probe), verify.baseline | high | requirement graph, acceptance proposals, increments with write scopes, ownership map, decision packets, CON/ADR candidates, shape suggestion; read-only: R-class runs only | contract amendments (proposed), graph, packets |
 | **Implementing cell** | the cell runtime | `[S][R][K]` + own `[T][A]` | all families; task.delegate(writer) only in S3 | high by default; medium when risk is low and verification strong | execute one increment to green acceptance; maintain STATE; propose notes | Result Packet + receipts |
 | **Probe cell** (investigator) | fresh read-only cell | question, scope, evidence refs | look, kb.search, run (R class only), state (own), task.ask | medium | bounded findings with coverage and completeness | Investigation packet |
 | **Review cell** (judge) | fresh context, no proposer transcript | evidence packet | look, verify.tests on an isolated copy, kb.search | high (contract/design), medium (routine) | verdict against acceptance and contracts; findings; `insufficient_evidence` allowed | Judge verdict |
@@ -25,6 +25,8 @@ A role is `context view × note scope × skill filter × tool mask × permission
 | **Writer cell** (S3) | own worktree | child contract slice | implementer mask minus delegation, minus CON/ADR writes | by risk | one packet to green acceptance; never decides interfaces | Result Packet |
 | **Repair helper** | fresh small context | failure capsule only | failing family + look + run within capsule scope | low | ≤2 attempts: fixed / diagnosis / escalate | ≤100-token diagnosis + optional corrected call |
 | **Extractor / curator** | post-cell, helper tier | final STATE, journal digest, diff summary, receipts | kb.* | low | candidate notes with evidence; dedupe; supersession; lint | note candidates |
+
+The plan and probe roles run read-only: their run executor dispatches R-class commands only (`git status`, `ls`, known read forms) and refuses every W- or D-class command before dispatch — builders and test runners such as `./gradlew test` included — with `denied: the <role> role runs R-class commands only`. A plan cell can therefore inspect the toolchain without executing acceptance.
 <!-- end-source-section: 3.4 -->
 
 <!-- source-section: 3.5 -->
@@ -50,6 +52,8 @@ select_shape(contract, impact, plan=None):                        # deterministi
     return shape        # upgrade only on traced evidence (pressure in a cell, a probe request, a risk floor);
                         # downgrade aggressively; design decisions and interface changes never run in S3 children
 ```
+
+**Plan cell only when needed** (`ShapePolicy.planCell`, default `WhenNeeded`). An S1 contract (never S2/S3) whose acceptance holds no `review:` item, which touches no contract, and whose `G_single(C)` passes the plan validator unchanged (refactor-mode checklist and per-requirement acceptance included) is already its own plan: the controller installs `G_single(C)` without a plan cell and journals `plan cell skipped: <reason>; single increment inc-1`. `Always` restores §4.2 as written. Replans and increment splits always run the plan cell.
 
 **What is active per shape** (the collapsibility contract). Required review obligations, including enabled refactor mode, select at least S2 (or use an explicitly authorized human review); a downgrade never removes an outstanding required check or review. The last row is non-negotiable in every shape: deleting lifecycle controls makes an architecture broken, not smaller `[C F25; MB §15.2]`.
 

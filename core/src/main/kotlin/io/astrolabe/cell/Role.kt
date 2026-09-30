@@ -92,10 +92,10 @@ public object Roles {
         contextView = setOf(ContextPart.Kernel, ContextPart.ContractSlice, ContextPart.Prime, ContextPart.Notes, ContextPart.BehaviourMaps, ContextPart.CalibrationPrior, ContextPart.Transcript, ContextPart.Anchor),
         noteScope = setOf("GLOBAL", "CON", "ADR"),
         skillFilter = setOf("*"),
-        toolMask = ToolMask(ToolOps.look.map { ToolOps.name(io.astrolabe.tool.ToolFamily.Look, it) }.toSet() + ToolOps.kb.filter { it != "propose" }.map { "kb.$it" } + ToolOps.state.map { "state.$it" } + setOf("task.ask", "task.delegate", "task.collect", "task.propose", "verify.baseline")),
+        toolMask = ToolMask(ToolOps.look.map { ToolOps.name(io.astrolabe.tool.ToolFamily.Look, it) }.toSet() + ToolOps.kb.filter { it != "propose" }.map { "kb.$it" } + ToolOps.state.map { "state.$it" } + setOf("task.ask", "task.delegate", "task.collect", "task.propose", "verify.baseline", "run.run", "run.poll", "run.cancel")),
         permission = Stage.Patch,
         tierPrior = Tier.High,
-        duties = listOf("requirement graph and acceptance proposals", "increments with write scopes and an ownership map", "decision packets, CON/ADR candidates, shape suggestion"),
+        duties = listOf("requirement graph and acceptance proposals", "increments with write scopes and an ownership map", "decision packets, CON/ADR candidates, shape suggestion", "read-only: R-class runs only"),
         askBack = true,
         packetKind = PacketKind.PlanArtifacts,
         personaLines = listOf(
@@ -194,6 +194,12 @@ public object Roles {
 
     @JvmField
     public val defaults: Map<String, Role> = listOf(implementing, plan, probe, review, qa, writer, repair, extractor).associateBy { it.name }
+
+    /**
+     * The roles whose duty is `read-only: R-class runs only`: their run executor refuses every W- and D-class
+     * command before dispatch. Keyed by name because a host override changes wording only (D-38).
+     */
+    internal fun readOnlyRuns(role: Role): Boolean = role.name == plan.name || role.name == probe.name
 
     /**
      * What a shape enables (§3.5 collapsibility): S0 = one implementing cell without delegation, proposals or
