@@ -521,7 +521,8 @@ public class Run(
     }
 
     private fun render(args: RunArgs, result: RunResult, argv: List<String>, shell: Boolean, before: StampReport?, after: StampReport?, effectsUnknown: Boolean, statusWire: String = wire(result.status), captureMask: io.astrolabe.evidence.RedactionMask = io.astrolabe.evidence.RedactionMask.NONE, completedPlainly: Boolean = false): ToolOutcome {
-        // D-351: presentation only — the header status, the outcome and `green` stay what the shaper derived (D-50).
+        // D-351/D-353: presentation only — the outcome and `green` stay what the shaper derived (D-50); a plain exit 0
+        // reads `completed` in the header too, never green.
         val shown = if (completedPlainly) GenericShaper.COMPLETED else statusWire
         val exit = if (completedPlainly) "" else result.exit?.let { "exit $it · " } ?: ""
         val head = "run ${result.alias} $shown · class ${result.effectClass}" + (if (shell) " · shell wrapper" else "") + " · $exit${redaction.apply(argv.joinToString(" ")).text.take(80)}"
@@ -541,7 +542,7 @@ public class Run(
             effects = if (result.changedPaths.isNotEmpty()) Effects.Observed else if (effectsUnknown) Effects.Unknown else Effects.None,
             flags = InstructionShape.detect(body).flags,
             runtime = RuntimeFields(
-                actionId = result.actionId, status = statusWire, candidateBefore = result.stampBefore, candidateAfter = after?.candidateId,
+                actionId = result.actionId, status = if (completedPlainly) GenericShaper.COMPLETED_STATUS else statusWire, candidateBefore = result.stampBefore, candidateAfter = after?.candidateId,
                 scope = redaction.apply(argv.joinToString(" ")).text.take(80), completeness = if (truncated || !captureComplete) "truncated" else "complete",
                 artifactRefs = listOfNotNull(result.log?.hex), captureComplete = captureComplete, displayTruncated = truncated,
                 redactionApplied = safe.applied || captureMask.applied, effectsObserved = result.changedPaths.take(20).map { redaction.apply(it).text }, effectsUnknown = effectsUnknown,

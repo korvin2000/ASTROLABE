@@ -18511,6 +18511,7 @@ public final class io/astrolabe/register/Op$Companion {
 public final class io/astrolabe/register/Op$DeadendAdd : io/astrolabe/register/Op {
 	public static final field Companion Lio/astrolabe/register/Op$DeadendAdd$Companion;
 	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Ljava/lang/String;
 	public final fun component2 ()Ljava/lang/String;
 	public final fun component3 ()Ljava/lang/String;

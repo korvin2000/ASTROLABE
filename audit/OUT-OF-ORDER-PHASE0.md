@@ -90,3 +90,17 @@ iterations, green at the end); `:core:updateKotlinAbi`; `:eval:testClasses`, `:p
   GenericShaperTest 9, RunTest 27, GeneratedToolTest 3, MountTest 2, SchedulerTest 14 (1 skipped), DispatcherTest 5,
   PartitionTest 6, VerifyTest 14, CellTest 29 — all green; `:core:checkKotlinAbi` passes (no public API change).
 - Next: shorten Studio's `Guidance.NOTES` (§9: after E2–E5), in the UI repository.
+
+## After part E — owner decisions and live finding (2026-09-30, D-353–D-355)
+
+- D-353 (owner): where the D-351 predicate holds, the `run` header says `status=completed` (`GenericShaper.COMPLETED_STATUS`),
+  foreground and background completion alike; `Outcome` stays Inconclusive, `green` false; receipts, Scheduler, gauge unchanged.
+- D-354 (owner): `deadend.add` `evidence?` and `decision.add` `rejected?` (defaults, constructor order kept); blank is stored as
+  none; scope and reopen stay required. ABI: one synthetic default constructor of `Op.DeadendAdd` (additive).
+- D-355 (local, found live with z-ai/glm-5.3-flash): `PatchParser` merges declared sibling fields of the one op key
+  (`{"plan.tick": 1, "evidence": "#3"}`); collisions, foreign keys, zero/two op keys and flat items still refuse.
+- Tests changed because they pinned old behaviour: `RunTest` (header of a plain exit 0 is now `completed`). Added: RunTest
+  wrapper/background case, StateToolTest optional-field and sibling-merge cases.
+- Verification (focused): RunTest 28, GenericShaperTest 9, GeneratedToolTest 3, DispatcherTest 5, StateToolTest 11,
+  ValidatorTest 8, ValidatorFieldsTest 151, ToolContractsTest 6, CellTest 29, GatesTest 14, ControllerTest 21,
+  RoleWiringTest 1, MountTest 2, VerifyTest 14 — all green; `:core:updateKotlinAbi`, `:core:checkKotlinAbi` pass.

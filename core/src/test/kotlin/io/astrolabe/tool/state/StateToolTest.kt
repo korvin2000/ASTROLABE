@@ -17,6 +17,7 @@ import io.astrolabe.provider.ToolCall as ProviderCall
 import io.astrolabe.register.Mark
 import io.astrolabe.register.Op
 import io.astrolabe.register.Register
+import io.astrolabe.register.RegisterRender
 import io.astrolabe.register.SqliteRegisterVersions
 import io.astrolabe.register.ValidationContext
 import io.astrolabe.register.Validator
@@ -200,6 +201,51 @@ class StateToolTest {
         assertEquals(1, hits.events.size, "searchable through look(find, in=store)")
         assertEquals(recorded.eventId, hits.events.single().eventId)
         assertTrue(hits.events.single().text.contains("need=where discounts are applied"))
+    }
+
+    @Test
+    fun `a dead end without evidence and a decision without a rejected alternative are valid and render without the suffix`() = runTest {
+        run("""{"op":"patch","patch":[{"plan.add":"a"},{"next":"go"}]}""")
+        val out = run("""{"op":"patch","patch":[{"deadend.add":{"text":"monkeypatch","scope":"handlers","reopen":"fixtures isolated"}},{"deadend.add":{"text":"retry loop","evidence":null,"scope":"io","reopen":"a flaky test"}},{"deadend.add":{"text":"sleep","evidence":" ","scope":"io","reopen":"never"}},{"decision.add":{"text":"pass ctx explicitly","because":"tests construct handlers"}},{"decision.add":{"text":"keep the cache","because":"hot path","rejected":""}}]}""")
+        assertEquals("ok", status(out), out.body)
+        // D-354: omitted, explicit null and blank are all stored as no evidence / no rejected alternative.
+        assertEquals(listOf(null, null, null), tool.register.deadEnds.map { it.evidence })
+        assertEquals(listOf(null, null), tool.register.decisions.map { it.rejected })
+        val shown = RegisterRender.markdown(tool.register)
+        assertTrue(shown.contains("- monkeypatch   scope: handlers   reopen: fixtures isolated"), shown)
+        assertTrue(shown.contains("- D1: pass ctx explicitly — because tests construct handlers") && !shown.contains("rejected:"), shown)
+
+        val noScope = run("""{"op":"patch","patch":[{"deadend.add":{"text":"x","reopen":"y"}}]}""")
+        assertEquals("rejected", status(noScope), noScope.body)
+        assertTrue(noScope.body.contains("op 1 (deadend.add): ") && noScope.body.contains("form: deadend.add{text, evidence?, scope, reopen}"), noScope.body)
+        assertEquals(3, tool.register.deadEnds.size, "scope and reopen stay required")
+    }
+
+    @Test
+    fun `declared fields beside the one op key join it and every other shape is still refused`() = runTest {
+        fun parse(json: String) = PatchParser.parse(listOf(Json.parseToJsonElement(json)), mapOf(2 to "#7"))
+        fun op(json: String) = assertIs<ParsedPatch.Valid>(parse(json), json).patch.ops.single()
+        // D-355: the two shapes seen live parse to the canonical op.
+        assertEquals(op("""{"plan.tick":{"n":1,"evidence":"#3"}}"""), op("""{"plan.tick":1,"evidence":"#3"}"""))
+        assertEquals(op("""{"plan.add":{"text":"pass ctx","accept":"AC-1"}}"""), op("""{"accept":"AC-1","plan.add":{"text":"pass ctx"}}"""))
+        assertEquals(Op.PlanTick(1, "#7"), op("""{"plan.tick":1,"evidence":"op:2","if":"green(op:2)"}""").op, "op:N resolves in a merged field")
+        for (bad in listOf(
+            """{"plan.tick":1,"n":2}""",
+            """{"plan.add":{"text":"a","accept":"x"},"accept":"y"}""",
+            """{"plan.tick":1,"colour":"red"}""",
+            """{"plan.tick":1,"text":"a field of another op"}""",
+            """{"plan.add":"a","next":"b"}""",
+            """{"kind":"h","text":"x","evidence":"#3"}""",
+        )) {
+            val refused = assertIs<ParsedPatch.Invalid>(parse(bad), bad)
+            assertTrue(refused.reason.contains("needs exactly one op key"), refused.reason)
+        }
+
+        run("""{"op":"patch","patch":[{"plan.add":"a"},{"next":"go"}]}""")
+        tool.validation = Ctx(evidence = setOf("#3"))
+        val live = run("""{"op":"patch","patch":[{"plan.tick":1,"evidence":"#3"}]}""")
+        assertEquals("ok", status(live), live.body)
+        assertEquals("#3", tool.register.step(1)!!.evidence)
     }
 
     @Test

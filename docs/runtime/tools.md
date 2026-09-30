@@ -46,9 +46,10 @@ edit(ops, why)
 
 run(argv|cmd, cwd?, shape="auto", budget=1200, timeout=120, bg=false, intent?, class_hint?, if?: "applied(op:N)")
   → { id, exit, status, view, truncated, log: "#id", class: R|W|D, stamp_before, stamp_after, current, changed_paths[], handle?, parsed? }
-  · status ∈ { passed, failed, timeout, infra_error, inconclusive, running, denied, unknown_outcome } from exit code AND parser
-  · a plain run outside acceptance (no check, wrapper or mounted tool) that exits 0 without counts reads
-    "completed, exit code 0"; its status stays inconclusive and it is never green (D-351, D-50)
+  · status ∈ { passed, failed, timeout, infra_error, inconclusive, completed, running, denied, unknown_outcome } from exit code AND parser
+  · completed = a plain run outside acceptance (no check, wrapper or mounted tool) that exits 0 without counts; it reads
+    "completed, exit code 0" (D-351) and its header says status=completed (D-353); as evidence it is inconclusive,
+    never green (D-50)
   · cwd blank, "." or "./" is the workspace root (D-352)
   · full output to the store; shaped view (pytest, unittest, jest/vitest, mocha, cargo, go test, tsc, eslint, ruff, mypy, pyright,
     gradle/maven, dotnet; generic head+tail with error lines) with absolute counts; truncation marked with a recall pointer
@@ -72,6 +73,8 @@ state(op)
   · patches validated against §5.2 invariants; a rejected op returns the violated rule and sizes; nothing else is applied
   · the schema and every schema refusal name the op forms of §5.2; evidence is #N (a stored result) or op:N (a run or
     verify call of the same turn); a `patch` sent as a JSON string holding an array is parsed first (D-347, D-349)
+  · an item with one op key whose other keys are declared fields of that op (`{"plan.tick": 1, "evidence": "#3"}`) is that
+    op; a collision, a foreign key, zero or two op keys still refuse (D-355)
   · evaluate conditions, then validate/commit the eligible patch list atomically against the current STATE version; rejection leaves STATE unchanged, not earlier workspace effects
 
 task(op)

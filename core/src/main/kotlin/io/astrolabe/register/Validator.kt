@@ -134,9 +134,9 @@ public class Validator(
                 }
                 is Op.DeadendAdd -> {
                     if (op.scope.isBlank() || op.reopen.isBlank()) return reject("dead ends need scope and reopen", "deadend.add")
-                    next.copy(deadEnds = next.deadEnds + DeadEnd(nextN(next.deadEnds.map { it.n }), op.text, op.evidence, op.scope, op.reopen))
+                    next.copy(deadEnds = next.deadEnds + DeadEnd(nextN(next.deadEnds.map { it.n }), op.text, op.evidence?.takeIf { it.isNotBlank() }, op.scope, op.reopen))
                 }
-                is Op.DecisionAdd -> next.copy(decisions = next.decisions + Decision(nextN(next.decisions.map { it.n }), op.text, op.because, op.rejected, op.probe, op.adrCandidate))
+                is Op.DecisionAdd -> next.copy(decisions = next.decisions + Decision(nextN(next.decisions.map { it.n }), op.text, op.because, op.rejected?.takeIf { it.isNotBlank() }, op.probe, op.adrCandidate))
                 is Op.OpenAdd -> next.copy(open = next.open + OpenItem(nextN(next.open.map { it.n }), op.text, op.trip, op.needs))
                 is Op.OpenClose -> {
                     val item = next.openItem(op.n) ?: return reject("unknown open item", "open.close(${op.n})")

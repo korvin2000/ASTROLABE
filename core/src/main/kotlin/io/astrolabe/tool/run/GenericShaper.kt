@@ -72,9 +72,12 @@ public class GenericShaper : Shaper {
         /** How a plain command's exit 0 reads (D-351); its outcome stays [Outcome.Inconclusive], never test evidence (D-50). */
         const val COMPLETED = "completed, exit code 0"
 
+        /** The envelope header status of the same plain exit 0 (D-353); as evidence it stays inconclusive, never green. */
+        const val COMPLETED_STATUS = "completed"
+
         /**
          * A plain `run` outside acceptance — no check, no wrapper, no mounted tool — that exited 0 without test counts.
-         * Presentation only (D-351): the status, the receipt and certification are unchanged (§8.3, D-50).
+         * Presentation only (D-351, D-353): the outcome, the receipt and certification are unchanged (§8.3, D-50).
          */
         fun completedPlainly(capture: RunCapture, status: Outcome, counts: Counts?, wrapper: WrapperDetection?): Boolean =
             status == Outcome.Inconclusive && counts == null && wrapper == null && capture.checkId == null &&

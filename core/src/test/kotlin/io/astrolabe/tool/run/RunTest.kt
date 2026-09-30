@@ -198,10 +198,10 @@ class RunTest {
         assertTrue(status(out) != "denied" && status(out) != "unknown_outcome", status(out))
         assertEquals("#1", out.resultAlias)
         assertTrue(out.body.contains("hello-run"), out.body)
-        // D-351: a plain command's exit 0 reads as such; the status stays inconclusive and it is never green (D-50).
+        // D-351/D-353: a plain command's exit 0 reads as such, header status included; it is never green (D-50).
         assertTrue(out.body.startsWith("run #1 completed, exit code 0 · class R · shell wrapper · echo hello-run"), out.body)
         assertTrue(out.body.contains("\ngeneric · completed, exit code 0\n"), out.body)
-        assertEquals("inconclusive", status(out))
+        assertEquals("completed", status(out))
         assertEquals(out.header!!.runtime.candidateBefore, out.header!!.runtime.candidateAfter, "nothing moved")
         assertEquals(out.header!!.runtime.candidateAfter, out.header!!.stamp)
         assertEquals(EffectClass.R, out.header!!.effectClass)
@@ -210,6 +210,19 @@ class RunTest {
         assertTrue(intents.open().isEmpty())
         assertFalse(out.green, "exit 0 alone is never green")
         assertNotNull(SqliteObservations(store, clock).get("obs-1"))
+    }
+
+    @Test
+    fun `an exit-hiding wrapper keeps the inconclusive header and a completed background run is still not green`() = runTest {
+        // D-353: `completed` only where the D-351 predicate holds; a wrapper hides the exit, so the verdict wording stays.
+        val wrapped = run("""{"cmd":"echo wrapped || true"}""")
+        assertEquals("inconclusive", status(wrapped), wrapped.body)
+        assertFalse(wrapped.body.lineSequence().first().contains("completed"), wrapped.body)
+        assertFalse(wrapped.green)
+        run("""{"cmd":"echo settled","bg":true}""")
+        val settled = awaitSettled("handle-1")
+        assertEquals("completed", status(settled), settled.body)
+        assertFalse(settled.green, "the background completion path is presentation only too")
     }
 
     @Test
