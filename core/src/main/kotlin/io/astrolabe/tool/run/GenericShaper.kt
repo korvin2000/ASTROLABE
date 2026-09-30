@@ -1,6 +1,7 @@
 package io.astrolabe.tool.run
 
 import io.astrolabe.evidence.Counts
+import io.astrolabe.evidence.Outcome
 
 /**
  * The fallback shaper: head + tail with every error-shaped line (§5.4). Counts appear only when a
@@ -49,7 +50,8 @@ public class GenericShaper : Shaper {
             limitations += "${errorLines.size - MAX_ERROR_LINES} further error-shaped lines are in the stored log only"
         }
         val shaperId = summary.family?.let { "$id/$it" } ?: id
-        val view = buildView(shaperId, capture, status, summary.counts, summary.tests, wrapper, limitations, budget, sections)
+        val statusText = if (completedPlainly(capture, status, summary.counts, wrapper)) COMPLETED else null
+        val view = buildView(shaperId, capture, status, summary.counts, summary.tests, wrapper, limitations, budget, sections, statusText = statusText)
         return Shaped(
             status = status,
             counts = summary.counts,
@@ -67,6 +69,17 @@ public class GenericShaper : Shaper {
     private fun errorLines(text: String): List<String> = errorShapedLines(text)
 
     internal companion object {
+        /** How a plain command's exit 0 reads (D-351); its outcome stays [Outcome.Inconclusive], never test evidence (D-50). */
+        const val COMPLETED = "completed, exit code 0"
+
+        /**
+         * A plain `run` outside acceptance — no check, no wrapper, no mounted tool — that exited 0 without test counts.
+         * Presentation only (D-351): the status, the receipt and certification are unchanged (§8.3, D-50).
+         */
+        fun completedPlainly(capture: RunCapture, status: Outcome, counts: Counts?, wrapper: WrapperDetection?): Boolean =
+            status == Outcome.Inconclusive && counts == null && wrapper == null && capture.checkId == null &&
+                capture.exitCode == 0 && !capture.timedOut && capture.argv.firstOrNull()?.startsWith("mcp:") != true
+
         /** Error-shaped lines of a capture: the checker's count for a tool without a [DiagnosticsParser]. */
         internal fun errorShapedLines(text: String): List<String> = text.lineSequence()
             .map { it.trimEnd() }

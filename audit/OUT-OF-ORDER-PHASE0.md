@@ -68,3 +68,25 @@ iterations, green at the end); `:core:updateKotlinAbi`; `:eval:testClasses`, `:p
 
 - Studio (part B) answers `decide`, shows the two decision cards and derives its states from the stop code.
 - A8 (`answered`), A9 (host context channel) and part E after the live acceptance run.
+
+## Part E — tool ergonomics (2026-09-30, D-346–D-352)
+
+- E1 D-346 `edit` `expect`: full hash as given; 4–63 hex → the one version shown in the cell it prefixes (KNOWN or
+  stale history); omitted → the one version KNOWN at dispatch; never the current bytes. CAS, displayed ranges and the
+  atomic refusal unchanged; unresolved/ambiguous/malformed → kind `expect` (was an unhandled exception). Delete and
+  rename resolve alike. `Workset.history`, `WorksetView.versions` (internal).
+- E2 D-347 / E3 D-348 `InputTolerance` before typed decoding: `ops`/`patch` JSON strings holding an array are parsed;
+  empty placeholders of an edit op's other forms and an empty `if` are dropped by a per-form whitelist.
+- E4 D-349 `PatchParser.FORMS`: the `state` description, the `patch` schema and every schema refusal name the forms;
+  the Validator's tick and `v` refusals name `op:N` (same turn) and `#N` (earlier result). Evidence rules unchanged.
+- E5 D-350 Validator: no `next` keeps the previous Next; open steps without `[>]` get it on the first open step, which
+  counts as advancing (red rule still refuses).
+- E6 D-351 presentation: a plain `run` exit 0 without counts reads `completed, exit code 0` (first line and shaped view);
+  status `inconclusive`, `green`, receipts and certification unchanged; checks, wrappers and mounted tools excluded.
+- E7 D-352 `run` `cwd` blank/`.`/`./`/`.\` is the root (normalised at the executor entry; also a contract command's cwd).
+- Tests changed because they pinned old behaviour: `ToolContractsTest` (missing expect now parses), `ValidatorTest`
+  (no-Next and no-cursor cases now apply), `RunTest` and `GeneratedToolTest` (first line of a plain exit 0).
+- Verification (focused): ToolContractsTest 6, EditTest 28, StateToolTest 9, ValidatorTest 8, GatesTest 14,
+  GenericShaperTest 9, RunTest 27, GeneratedToolTest 3, MountTest 2, SchedulerTest 14 (1 skipped), DispatcherTest 5,
+  PartitionTest 6, VerifyTest 14, CellTest 29 — all green; `:core:checkKotlinAbi` passes (no public API change).
+- Next: shorten Studio's `Guidance.NOTES` (§9: after E2–E5), in the UI repository.

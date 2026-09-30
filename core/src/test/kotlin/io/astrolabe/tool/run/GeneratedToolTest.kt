@@ -173,7 +173,7 @@ class GeneratedToolTest {
         val active = tools.boundary(AttemptId("a1"), enabled = true)
 
         val ok = run("""{"argv":["tool:changed"]}""", active)
-        assertTrue(ok.body.startsWith("run #1 inconclusive · class R · exit 0 · git status --short"), "dispatched as its script, like any command: ${ok.body}")
+        assertTrue(ok.body.startsWith("run #1 completed, exit code 0 · class R · git status --short"), "dispatched as its script, like any command: ${ok.body}")
         assertEquals(EffectClass.R, ok.header!!.effectClass)
 
         val network = run("""{"argv":["tool:fetcher"]}""", active)

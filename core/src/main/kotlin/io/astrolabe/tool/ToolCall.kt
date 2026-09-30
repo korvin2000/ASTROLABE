@@ -76,14 +76,17 @@ public object ToolCalls {
         return ParsedCalls.Valid(out)
     }
 
-    private fun decode(family: ToolFamily, raw: JsonObject): Args = when (family) {
-        ToolFamily.Look -> Args.Look(json.decodeFromJsonElement(LookArgs.serializer(), raw))
-        ToolFamily.Edit -> Args.Edit(json.decodeFromJsonElement(EditArgs.serializer(), raw))
-        ToolFamily.Run -> Args.Run(json.decodeFromJsonElement(RunArgs.serializer(), raw))
-        ToolFamily.Verify -> Args.Verify(json.decodeFromJsonElement(VerifyArgs.serializer(), raw))
-        ToolFamily.State -> Args.State(json.decodeFromJsonElement(StateArgs.serializer(), raw))
-        ToolFamily.Task -> Args.Task(json.decodeFromJsonElement(TaskArgs.serializer(), raw))
-        ToolFamily.Kb -> Args.Kb(json.decodeFromJsonElement(KbArgs.serializer(), raw))
+    private fun decode(family: ToolFamily, received: JsonObject): Args {
+        val raw = InputTolerance.normalise(family, received)
+        return when (family) {
+            ToolFamily.Look -> Args.Look(json.decodeFromJsonElement(LookArgs.serializer(), raw))
+            ToolFamily.Edit -> Args.Edit(json.decodeFromJsonElement(EditArgs.serializer(), raw))
+            ToolFamily.Run -> Args.Run(json.decodeFromJsonElement(RunArgs.serializer(), raw))
+            ToolFamily.Verify -> Args.Verify(json.decodeFromJsonElement(VerifyArgs.serializer(), raw))
+            ToolFamily.State -> Args.State(json.decodeFromJsonElement(StateArgs.serializer(), raw))
+            ToolFamily.Task -> Args.Task(json.decodeFromJsonElement(TaskArgs.serializer(), raw))
+            ToolFamily.Kb -> Args.Kb(json.decodeFromJsonElement(KbArgs.serializer(), raw))
+        }
     }
 
     private fun opName(family: ToolFamily, args: Args, raw: JsonObject): String = when (args) {

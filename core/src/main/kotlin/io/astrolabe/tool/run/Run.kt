@@ -67,6 +67,9 @@ import java.time.Clock
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 
+/** `cwd` blank, `.` or `./` (`.\` on Windows) names the workspace root, which a path resolution refuses (D-352). */
+internal fun namesWorkspaceRoot(dir: String): Boolean = dir.isBlank() || dir.trim() in setOf(".", "./", ".\\")
+
 /** The typed result of one `run` call (§5.4). Status is runner-assigned from exit code **and** parser, never model-authored. */
 public data class RunResult(
     val alias: String,
@@ -142,7 +145,8 @@ public class Run(
 
     override suspend fun execute(call: ToolCall, context: TurnContext): ToolOutcome {
         require(call.family == ToolFamily.Run) { "not a run call: ${call.name}" }
-        val args = (call.args as Args.Run).args
+        // D-352: a cwd naming the root is no cwd, so intents, handles and the unknown-outcome guard see one command.
+        val args = (call.args as Args.Run).args.let { if (it.cwd != null && namesWorkspaceRoot(it.cwd)) it.copy(cwd = null) else it }
         if (!mask.allows(call.name)) return refused(args, Outcome.Denied, "${call.name} is masked in this role")
         return when (args.op) {
             "run" -> run(args, context)
@@ -391,8 +395,11 @@ public class Run(
             current = true, changedPaths = changed, handle = null, parsed = shaped.counts, shaped = shaped, limits = shaped.limitations, intentId = intentId,
         )
         return render(args, result, argv, shell, before, after, effectsUnknown || status is ProcStatus.Lost,
-            captureMask = redaction.applyBytes(output, ContentClass.ReusableEvidence).mask)
+            captureMask = redaction.applyBytes(output, ContentClass.ReusableEvidence).mask, completedPlainly = completedPlainly(capture, outcome, shaped))
     }
+
+    private fun completedPlainly(capture: RunCapture, outcome: Outcome, shaped: Shaped): Boolean =
+        shaped.shaper == Shapers.generic.id && GenericShaper.completedPlainly(capture, outcome, shaped.counts, shaped.wrapper)
 
     /** §4.6 post hoc: a write under a protected path is D whatever the launch label; any other change lifts R to W. */
     private fun observedClass(label: EffectClass, changed: List<String>): EffectClass = when {
@@ -457,7 +464,7 @@ public class Run(
                 val view = "handle ${handle.handleId} ${wire(status)}\n" + shaped.view + "\nBackground effects cannot be attributed exclusively to this process." + (if (changed.isEmpty()) "" else "\nchanged during background run (${changed.size} paths): " + changed.take(10).joinToString(", "))
                 val effectClass = observedClass(handle.effectClass, changed)
                 val result = RunResult(handle.alias, handle.actionId, capture.exitCode, outcome, view, shaped.viewTruncated, logBlob, effectClass, stampBefore, after.candidateId, true, changed, handle.handleId, shaped.counts, shaped, shaped.limitations)
-                render(args, result, handle.argv, handle.shell, null, after, effectsUnknown = true, captureMask = safeLog.mask)
+                render(args, result, handle.argv, handle.shell, null, after, effectsUnknown = true, captureMask = safeLog.mask, completedPlainly = completedPlainly(capture, outcome, shaped))
             }
         }
     }
@@ -513,9 +520,11 @@ public class Run(
         return ToolOutcome(safe.text, header, tokens = estimator.estimate(safe.text).tokens)
     }
 
-    private fun render(args: RunArgs, result: RunResult, argv: List<String>, shell: Boolean, before: StampReport?, after: StampReport?, effectsUnknown: Boolean, statusWire: String = wire(result.status), captureMask: io.astrolabe.evidence.RedactionMask = io.astrolabe.evidence.RedactionMask.NONE): ToolOutcome {
-        val exit = result.exit?.let { "exit $it · " } ?: ""
-        val head = "run ${result.alias} $statusWire · class ${result.effectClass}" + (if (shell) " · shell wrapper" else "") + " · $exit${redaction.apply(argv.joinToString(" ")).text.take(80)}"
+    private fun render(args: RunArgs, result: RunResult, argv: List<String>, shell: Boolean, before: StampReport?, after: StampReport?, effectsUnknown: Boolean, statusWire: String = wire(result.status), captureMask: io.astrolabe.evidence.RedactionMask = io.astrolabe.evidence.RedactionMask.NONE, completedPlainly: Boolean = false): ToolOutcome {
+        // D-351: presentation only — the header status, the outcome and `green` stay what the shaper derived (D-50).
+        val shown = if (completedPlainly) GenericShaper.COMPLETED else statusWire
+        val exit = if (completedPlainly) "" else result.exit?.let { "exit $it · " } ?: ""
+        val head = "run ${result.alias} $shown · class ${result.effectClass}" + (if (shell) " · shell wrapper" else "") + " · $exit${redaction.apply(argv.joinToString(" ")).text.take(80)}"
         val safe = redaction.apply(head + "\n" + result.view, ContentClass.ReusableEvidence)
         val body = safe.text
         val truncated = result.truncated || safe.limitations.isNotEmpty()

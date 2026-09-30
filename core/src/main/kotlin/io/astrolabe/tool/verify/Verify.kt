@@ -49,6 +49,7 @@ import io.astrolabe.tool.run.RunCapture
 import io.astrolabe.tool.run.Runner
 import io.astrolabe.tool.run.ShapeBudget
 import io.astrolabe.tool.run.Shapers
+import io.astrolabe.tool.run.namesWorkspaceRoot
 import io.astrolabe.verify.Applicability
 import io.astrolabe.verify.Baseline
 import io.astrolabe.verify.CampaignReview
@@ -369,8 +370,8 @@ public class Verify(
             }
             val actionId = idGen.next("act")
             val cwd = when (val path = command.cwd) {
-                null, ".", "./" -> root
-                else -> (WorkspacePath.of(root).resolve(path, Intent.Read) as? PathResolution.Resolved)?.real
+                null -> root
+                else -> if (namesWorkspaceRoot(path)) root else (WorkspacePath.of(root).resolve(path, Intent.Read) as? PathResolution.Resolved)?.real
             }
             if (cwd == null || !Files.isDirectory(cwd)) {
                 view = "  ${check.id}: denied — working directory must be a directory inside the verification workspace"

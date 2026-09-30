@@ -198,7 +198,10 @@ class RunTest {
         assertTrue(status(out) != "denied" && status(out) != "unknown_outcome", status(out))
         assertEquals("#1", out.resultAlias)
         assertTrue(out.body.contains("hello-run"), out.body)
-        assertTrue(out.body.startsWith("run #1 ${status(out)} · class R · shell wrapper · exit 0 · echo hello-run"), out.body)
+        // D-351: a plain command's exit 0 reads as such; the status stays inconclusive and it is never green (D-50).
+        assertTrue(out.body.startsWith("run #1 completed, exit code 0 · class R · shell wrapper · echo hello-run"), out.body)
+        assertTrue(out.body.contains("\ngeneric · completed, exit code 0\n"), out.body)
+        assertEquals("inconclusive", status(out))
         assertEquals(out.header!!.runtime.candidateBefore, out.header!!.runtime.candidateAfter, "nothing moved")
         assertEquals(out.header!!.runtime.candidateAfter, out.header!!.stamp)
         assertEquals(EffectClass.R, out.header!!.effectClass)
@@ -207,6 +210,20 @@ class RunTest {
         assertTrue(intents.open().isEmpty())
         assertFalse(out.green, "exit 0 alone is never green")
         assertNotNull(SqliteObservations(store, clock).get("obs-1"))
+    }
+
+    @Test
+    fun `a cwd that is blank, a dot or dot-slash runs in the workspace root`() = runTest {
+        val list = shell("dir /b", "ls")
+        for (cwd in listOf("", " ", ".", "./")) {
+            val out = run("""{"cmd":"$list","cwd":"$cwd"}""")
+            assertTrue(status(out) != "denied", "cwd '$cwd': ${out.body}")
+            assertTrue(out.body.contains("README.md"), out.body)
+        }
+        assertTrue((1..4).all { intents.get("intent-$it")!!.cwd == null }, "one command for the unknown-outcome guard, whatever spelling named the root")
+        val sub = run("""{"cmd":"$list","cwd":"src"}""")
+        assertTrue(sub.body.contains("a.py") && !sub.body.contains("README.md"), sub.body)
+        assertEquals("denied", status(run("""{"cmd":"$list","cwd":"src/.."}""")), "only the named spellings mean the root")
     }
 
     @Test

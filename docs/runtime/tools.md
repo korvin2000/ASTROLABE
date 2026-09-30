@@ -27,12 +27,18 @@ look(what, target, budget=1500, near?, glob?, in="workspace"|"store"|"kb", since
   · several independent looks in one turn run in parallel under one shared output budget                       [J1 §7.3]
 
 edit(ops, why)
-  ops: [ { path, expect: v /*required*/, hunks: [{anchor, near?, new}], if?: "green(op:N)" }
-       | { create, content } | { delete, expect } | { rename, expect } | { revert: "#id" | "turn:N" }
+  ops: [ { path, expect?: v, hunks: [{anchor, near?, new}], if?: "green(op:N)" }
+       | { create, content } | { delete, expect? } | { rename, to, expect? } | { revert: "#id" | "turn:N" }
        | { transform: { script | argv, scope_glob, inventory?, expected_matches?, why } } ]                        [§9.2]
   → { ok, views[], versions, syntax{path: ok|error:line}, diffstat, touched_outside_scope[], test_integrity[],
       error?: {kind, candidates[], sites[], diff_since_expect?} }
   · CAS on content hash; anchors unique (exact → ws-normalised); hunks inside displayed(path, expect); non-overlapping
+  · `expect` names a version shown in this cell, never the current bytes: a full hash as given; ≥4 hex → the one shown
+    version (KNOWN or dropped as stale) it prefixes; omitted → the one version KNOWN at dispatch; delete and rename alike.
+    Unresolved or ambiguous → error kind `expect`, no write; a stale version → `stale_expect` with its diff    (D-346)
+  · `ops` sent as a JSON string holding an array is parsed first (D-347); an op's empty placeholders of the other forms
+    and an empty `if` are ignored by a per-form whitelist — own empty values (`content: ""`, `new: ""`) and unknown
+    keys keep their meaning (D-348)
   · preflight all ops, then apply; a mid-batch I/O failure reports actual per-file state with preimage ids —
     never "rolled back", never retried blindly                                                                   [J1 §5.2]
   · inline syntax check; post-edit views ±3 lines become displayed ranges; preimages saved; shadow snapshot per turn
@@ -41,6 +47,9 @@ edit(ops, why)
 run(argv|cmd, cwd?, shape="auto", budget=1200, timeout=120, bg=false, intent?, class_hint?, if?: "applied(op:N)")
   → { id, exit, status, view, truncated, log: "#id", class: R|W|D, stamp_before, stamp_after, current, changed_paths[], handle?, parsed? }
   · status ∈ { passed, failed, timeout, infra_error, inconclusive, running, denied, unknown_outcome } from exit code AND parser
+  · a plain run outside acceptance (no check, wrapper or mounted tool) that exits 0 without counts reads
+    "completed, exit code 0"; its status stays inconclusive and it is never green (D-351, D-50)
+  · cwd blank, "." or "./" is the workspace root (D-352)
   · full output to the store; shaped view (pytest, unittest, jest/vitest, mocha, cargo, go test, tsc, eslint, ruff, mypy, pyright,
     gradle/maven, dotnet; generic head+tail with error lines) with absolute counts; truncation marked with a recall pointer
   · argv default; `cmd` is one shell invocation shaped as such (`|| echo FAIL` reports the wrapper)                [J1 §9]
@@ -61,6 +70,8 @@ verify(what, ...)
 state(op)
   op ∈ { patch: [typed ops, §5.2], blocked: {reason, evidence[], question?}, retrieval_miss: {need, why} }
   · patches validated against §5.2 invariants; a rejected op returns the violated rule and sizes; nothing else is applied
+  · the schema and every schema refusal name the op forms of §5.2; evidence is #N (a stored result) or op:N (a run or
+    verify call of the same turn); a `patch` sent as a JSON string holding an array is parsed first (D-347, D-349)
   · evaluate conditions, then validate/commit the eligible patch list atomically against the current STATE version; rejection leaves STATE unchanged, not earlier workspace effects
 
 task(op)

@@ -143,6 +143,32 @@ class StateToolTest {
     }
 
     @Test
+    fun `a patch sent as a JSON string applies, keeps the previous Next when it has none and places the cursor`() = runTest {
+        val first = run("""{"op":"patch","patch":"[{\"plan.add\":\"a\"},{\"plan.add\":\"b\"},{\"next\":\"go\"}]"}""")
+        assertEquals("ok", status(first), first.body)
+        assertEquals(Mark.Cursor, tool.register.step(1)!!.mark, "open steps without [>] get it on the first open step")
+        val kept = run("""{"op":"patch","patch":[{"fact.add":{"kind":"h","text":"b is optional"}}]}""")
+        assertEquals("ok", status(kept), kept.body)
+        assertEquals("go", tool.register.next, "a patch without next keeps the previous one")
+        assertEquals(2, tool.register.version)
+    }
+
+    @Test
+    fun `schema and evidence refusals name the allowed op forms`() = runTest {
+        run("""{"op":"patch","patch":[{"plan.add":"a"},{"next":"go"}]}""")
+        val unknown = run("""{"op":"patch","patch":[{"fact":{"kind":"h","text":"x"}}]}""")
+        assertTrue(unknown.body.contains("rejected: schema — op 1: unknown op 'fact' — one op key per object"), unknown.body)
+        assertTrue(unknown.body.contains("fact.add{kind: h|v|x, text, evidence?, anchor?: {path, version, line?}}"), unknown.body)
+        assertTrue(unknown.body.contains("plan.tick{n, evidence?}") && unknown.body.contains("next{text}"), unknown.body)
+        val missing = run("""{"op":"patch","patch":[{"fact.add":{"text":"x"}}]}""")
+        assertTrue(missing.body.contains("op 1 (fact.add): ") && missing.body.contains("— form: fact.add{kind: h|v|x"), missing.body)
+        val tick = run("""{"op":"patch","patch":[{"plan.tick":{"n":1,"evidence":"op:4"}}]}""")
+        assertTrue(tick.body.contains("rejected: tick needs green accept or an evidence id — step 1: evidence 'op:4' names no run or verify call of this turn with a result — op:N is a call of the same turn; a result of an earlier turn is named by its alias #N"), tick.body)
+        val fact = run("""{"op":"patch","patch":[{"fact.add":{"kind":"v","text":"x","evidence":"R-12"}}]}""")
+        assertTrue(fact.body.contains("fact.add(v): evidence 'R-12' is not a stored result — name one by its alias #N"), fact.body)
+    }
+
+    @Test
     fun `conditions and op-result evidence resolve against the turn, and dropped conditional ops are rendered`() = runTest {
         run("""{"op":"patch","patch":[{"plan.add":"a"},{"plan.cursor":1},{"next":"go"}]}""")
         tool.validation = Ctx(evidence = setOf("#7"), green = setOf(2), applied = setOf(1))

@@ -2,7 +2,12 @@ package io.astrolabe.tool
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 /** `look(what, target, budget, near?, glob?, in, since?)` (§5.4). */
 @Serializable
@@ -79,10 +84,66 @@ public data class EditOpArgs(
     init {
         val forms = listOfNotNull(path, create, delete, rename, revert, transform).size
         require(forms == 1) { "an edit op needs exactly one form (path|create|delete|rename|revert|transform), got $forms" }
-        if (path != null) require(!expect.isNullOrBlank() && !hunks.isNullOrEmpty()) { "anchored edits need expect and hunks (§9.1)" }
-        if (delete != null || rename != null) require(!expect.isNullOrBlank()) { "delete/rename need expect" }
+        // D-346: an omitted or short `expect` is resolved by the edit tool against the versions shown in this cell.
+        if (path != null) require(!hunks.isNullOrEmpty()) { "anchored edits need hunks (§9.1)" }
         if (rename != null) require(!to.isNullOrBlank()) { "rename needs to" }
         if (create != null) require(content != null) { "create needs content" }
+    }
+}
+
+/**
+ * Input tolerance before typed decoding (D-347, D-348): shapes weaker models send that have exactly one reading.
+ * `ops` and `patch` sent as a JSON string holding an array are parsed; an edit op's empty placeholders of the
+ * *other* forms (and an empty `if`) are dropped by the per-form whitelist [FORM_FIELDS]. A form's own fields keep
+ * their empty values (`content: ""` creates an empty file, `new: ""` deletes the match), unknown keys still refuse.
+ */
+internal object InputTolerance {
+    /** The fields each edit form owns (§5.4); every other known field is a placeholder when empty. */
+    private val FORM_FIELDS: Map<String, Set<String>> = mapOf(
+        "path" to setOf("path", "expect", "hunks"),
+        "create" to setOf("create", "content"),
+        "delete" to setOf("delete", "expect"),
+        "rename" to setOf("rename", "to", "expect"),
+        "revert" to setOf("revert"),
+        "transform" to setOf("transform"),
+    )
+
+    private val EDIT_FIELDS: Set<String> = FORM_FIELDS.values.flatten().toSet() + "if"
+
+    private val json = Json { ignoreUnknownKeys = false }
+
+    fun normalise(family: ToolFamily, raw: JsonObject): JsonObject = when (family) {
+        ToolFamily.Edit -> raw.mapValue("ops") { ops -> parsedArray(ops).let { if (it is JsonArray) JsonArray(it.map(::editOp)) else it } }
+        ToolFamily.State -> raw.mapValue("patch", ::parsedArray)
+        else -> raw
+    }
+
+    private fun JsonObject.mapValue(key: String, change: (JsonElement) -> JsonElement): JsonObject {
+        val value = this[key] ?: return this
+        val changed = change(value)
+        return if (changed == value) this else JsonObject(this + (key to changed))
+    }
+
+    /** A JSON string whose content is an array becomes that array; anything else is left for the schema to refuse. */
+    private fun parsedArray(value: JsonElement): JsonElement {
+        val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content?.trim() ?: return value
+        if (!text.startsWith("[")) return value
+        return (runCatching { json.parseToJsonElement(text) }.getOrNull() as? JsonArray) ?: value
+    }
+
+    private fun editOp(op: JsonElement): JsonElement {
+        if (op !is JsonObject) return op
+        val form = FORM_FIELDS.keys.filter { key -> op[key]?.let { !empty(it) } == true }.singleOrNull() ?: return op
+        val own = FORM_FIELDS.getValue(form)
+        val kept = op.filter { (key, value) -> key !in EDIT_FIELDS || key in own || !empty(value) }
+        return if (kept.size == op.size) op else JsonObject(kept)
+    }
+
+    private fun empty(value: JsonElement): Boolean = when (value) {
+        is JsonNull -> true
+        is JsonPrimitive -> if (value.isString) value.content.isBlank() else value.content == "0" || value.content == "false"
+        is JsonArray -> value.all(::empty)
+        is JsonObject -> value.values.all(::empty)
     }
 }
 

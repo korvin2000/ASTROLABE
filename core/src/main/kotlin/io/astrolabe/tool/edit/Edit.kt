@@ -70,7 +70,7 @@ public data class View(val path: String, val range: LineRange, val version: File
 
 /** Why the batch was refused or where it stopped; typed so the retry costs no re-read (§5.4 error policy). */
 public data class EditError(
-    /** `scope` · `missing` · `stale_expect` · `anchor` · `outside_displayed` · `overlap` · `exists` · `unsupported` · `divergent` · `unknown` · `io`. */
+    /** `scope` · `missing` · `expect` · `stale_expect` · `anchor` · `outside_displayed` · `overlap` · `exists` · `unsupported` · `divergent` · `unknown` · `io`. */
     val kind: String,
     val opIndex: Int?,
     val path: String?,
@@ -308,7 +308,7 @@ public class Edit(
         "delete" -> {
             val path = op.delete!!
             val resolved = mutable(index, path)
-            val content = current(index, path, op.expect!!)
+            val content = current(index, path, expected(index, path, op.expect, context))
             DeletePlan(index, path, resolved, content.version, content.bytes)
         }
         "rename" -> {
@@ -317,7 +317,7 @@ public class Edit(
             if (from != to && from.equals(to, ignoreCase = true)) throw Refusal(EditError("unsupported", index, from, "case-only rename '$from' → '$to' is an unsupported mutation kind (§9.5)"))
             val resolved = mutable(index, from)
             val target = mutable(index, to)
-            val content = current(index, from, op.expect!!)
+            val content = current(index, from, expected(index, from, op.expect, context))
             if (registry.read(to) != null) throw Refusal(EditError("exists", index, to, "rename target '$to' exists"))
             RenamePlan(index, from, resolved, to, target, content.version, content.bytes)
         }
@@ -341,7 +341,7 @@ public class Edit(
     private fun preflightAnchored(index: Int, op: EditOpArgs, context: TurnContext): AnchoredPlan {
         val path = op.path!!
         val resolved = mutable(index, path)
-        val expect = FileVersion(io.astrolabe.id.Digest(op.expect!!))
+        val expect = expected(index, path, op.expect, context)
         val content = current(index, path, expect)
         val text = decodeStrict(content.bytes) ?: throw Refusal(EditError("unsupported", index, path, "'$path' is not valid UTF-8 text; binary changes need an explicit operation (§9.5)"))
         val eol = dominantEol(text)
@@ -401,7 +401,40 @@ public class Edit(
         return content
     }
 
-    private fun current(index: Int, path: String, expectHex: String): io.astrolabe.workspace.FileContent = current(index, path, FileVersion(io.astrolabe.id.Digest(expectHex)))
+    /**
+     * The version an op's `expect` names (§9.1, D-346): a full hash as given; an omitted one is the one version KNOWN at
+     * dispatch; a short one (≥ [MIN_EXPECT] hex) is the one version shown in this cell it prefixes, KNOWN or dropped
+     * as stale. Never the current bytes: [current] still compares the named version with them (stale-write protection).
+     */
+    private fun expected(index: Int, path: String, expect: String?, context: TurnContext): FileVersion {
+        val hex = expect?.trim()?.removePrefix("@")?.lowercase().orEmpty()
+        if (hex.length == FULL_EXPECT && hex.all(::isHex)) return FileVersion(io.astrolabe.id.Digest(hex))
+        val known = context.coverage.versions(path)
+        fun list(versions: Collection<FileVersion>) = versions.joinToString(", ") { "@${it.hash8}" }
+        if (hex.isEmpty()) {
+            return known.singleOrNull() ?: throw Refusal(
+                EditError(
+                    "expect", index, path,
+                    if (known.isEmpty()) "expect omitted and no version of '$path' is KNOWN: read it first, or send the hash it was shown with"
+                    else "expect omitted and ${known.size} versions of '$path' are KNOWN (${list(known)}): send the one you read",
+                ),
+            )
+        }
+        if (hex.length !in MIN_EXPECT until FULL_EXPECT || !hex.all(::isHex)) {
+            throw Refusal(EditError("expect", index, path, "expect '$expect' is not a content hash: send the hash '$path' was shown with (at least $MIN_EXPECT hex characters) or omit it"))
+        }
+        val shown = known + workset.history(path)
+        val matches = shown.filter { it.digest.hex.startsWith(hex) }
+        return matches.singleOrNull() ?: throw Refusal(
+            EditError(
+                "expect", index, path,
+                if (matches.isEmpty()) "expect @$hex names no version of '$path' shown in this cell (${if (shown.isEmpty()) "none shown" else "shown: ${list(shown)}"}); read it first"
+                else "expect @$hex matches ${matches.size} versions of '$path' shown in this cell (${list(matches)}); send more characters",
+            ),
+        )
+    }
+
+    private fun isHex(c: Char): Boolean = c in '0'..'9' || c in 'a'..'f'
 
     // ----------------------------------------------------------------- apply
 
@@ -737,5 +770,9 @@ public class Edit(
     private companion object {
         /** Per-file lines shown in a transform receipt; the rest is in the recallable diff (§9.2 bounded summary). */
         const val PER_FILE_LINES = 12
+
+        /** A short `expect` needs the four hex characters every header shows (D-346); a full one is a SHA-256 in hex. */
+        const val MIN_EXPECT = 4
+        const val FULL_EXPECT = 64
     }
 }
