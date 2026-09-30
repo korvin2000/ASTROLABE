@@ -129,17 +129,21 @@ class GatesTest {
     }
 
     @Test
-    fun `stall fires once after three turns without progress, resets on progress and yields to a live build`() {
+    fun `stall fires every three idle turns, resets on progress and yields to a live build`() {
         val reports = turns(
             state(3).copy(lastProgressTurn = 1),
             state(4).copy(lastProgressTurn = 1),
             state(5).copy(lastProgressTurn = 1),
-            state(6).copy(lastProgressTurn = 6),
-            state(9).copy(lastProgressTurn = 6, liveRunOutput = true),
-            state(9).copy(lastProgressTurn = 6),
+            state(7).copy(lastProgressTurn = 1),
+            state(8).copy(lastProgressTurn = 1),
+            state(10).copy(lastProgressTurn = 1),
+            state(10).copy(lastProgressTurn = 10),
+            state(13).copy(lastProgressTurn = 10, liveRunOutput = true),
+            state(13).copy(lastProgressTurn = 10),
         )
-        assertEquals(listOf(0, 1, 0, 0, 0, 1), reports.map { it.nudges.count { n -> n.key.gate == Gates.STALL } })
+        assertEquals(listOf(0, 1, 0, 1, 0, 1, 0, 0, 1), reports.map { it.nudges.count { n -> n.key.gate == Gates.STALL } })
         assertEquals("stall: 3 turns without progress — re-read the plan · zoom out · run the pending decision probe · surface the blocker · or request a probe cell", reports[1].nudges.single().line)
+        assertEquals("stall: 9 turns without progress — re-read the plan · zoom out · run the pending decision probe · surface the blocker · or request a probe cell", reports[5].nudges.single().line)
         assertEquals(1, gates.evaluate(state(3).copy(lastProgressTurn = 0)).nudges.size, "no progress since cell start counts from turn 0")
     }
 
@@ -172,6 +176,30 @@ class GatesTest {
         assertEquals("state", ended.requiredOp)
         assertEquals("loop: look.read returned the same result 3 times — turn ended; a state op is required", ended.line)
         assertEquals(1, gates.evaluate(state(5).copy(signatures = listOf(same, same, same), fired = reports[3].fired)).rejections.size, "the third occurrence is refused again if replayed")
+    }
+
+    @Test
+    fun `refusal loop nudges on the second identical refusal and ends the turn on the third`() {
+        val masked = RefusalSignature.of("run.run", """{"argv":["make"]}""", "run.run is not available to the plan role in this cell (any turn)")
+        val other = RefusalSignature.of("run.run", """{"argv":["make"]}""", "the loop gate ended the last turn")
+        val reports = turns(
+            state(1).copy(refusals = listOf(masked)),
+            state(2).copy(refusals = listOf(masked, other, masked)),
+            state(3).copy(refusals = listOf(masked, other, masked, masked)),
+        )
+        assertEquals(listOf(0, 1, 0), reports.map { it.nudges.count { n -> n.key.gate == Gates.REFUSAL_LOOP } })
+        assertEquals(
+            "refusal loop: run.run was refused 2 times for the same reason — change the call or end with state(blocked), task.ask or task.propose",
+            reports[1].nudges.single { it.key.gate == Gates.REFUSAL_LOOP }.line,
+        )
+        val ended = reports[2].rejections.single()
+        assertEquals(Gates.REFUSAL_LOOP, ended.key.gate)
+        assertTrue(ended.endsTurn)
+        assertEquals(null, ended.requiredOp)
+        assertEquals("refusal loop: run.run refused 3 times — the cell ends blocked", ended.line)
+        assertEquals(emptyList(), gates.evaluate(state(4)).outcomes.filter { it.key.gate == Gates.REFUSAL_LOOP }, "no refusal since the last executed call")
+        val names = gates.gates.map { it.name }
+        assertEquals(names.indexOf(Gates.LOOP) + 1, names.indexOf(Gates.REFUSAL_LOOP), "registered right after the loop gate")
     }
 
     @Test

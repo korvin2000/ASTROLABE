@@ -90,6 +90,18 @@ public data class CallSignature(val tool: String, val argsDigest: Digest, val re
     }
 }
 
+/**
+ * The refusal loop gate's identity of one refused call: `(tool, args, refusal reason)`. Two identical signatures
+ * mean the model re-sent a call the harness had already refused for the same reason.
+ */
+public data class RefusalSignature(val tool: String, val argsDigest: Digest, val reasonDigest: Digest) {
+    public companion object {
+        @JvmStatic
+        public fun of(tool: String, args: String, reason: String): RefusalSignature =
+            RefusalSignature(tool, Digest.ofUtf8(args), Digest.ofUtf8(reason))
+    }
+}
+
 /** Identifies one condition of one gate; a nudge with a key already in [GateState.fired] is not repeated. */
 public data class GateKey(val gate: String, val condition: String) {
     init {
@@ -175,6 +187,8 @@ public data class GateState @JvmOverloads constructor(
      * `null` makes the exit gate resolve the fields above itself.
      */
     val acceptance: Resolved? = null,
+    /** Every refused call since a call of the cell last executed, this turn's included. */
+    val refusals: List<RefusalSignature> = emptyList(),
 ) {
     init {
         require(turn >= 1) { "turn is 1-based, got $turn" }
@@ -237,6 +251,7 @@ public class Gates(gates: List<Gate>) {
         public const val PRESSURE: String = "pressure"
         public const val STALL: String = "stall"
         public const val LOOP: String = "loop"
+        public const val REFUSAL_LOOP: String = "refusal-loop"
         public const val CURSOR: String = "cursor"
         public const val RED_NOT_RECORDED: String = "red-not-recorded"
         public const val STALE_FACT: String = "stale-fact"
@@ -254,7 +269,7 @@ public class Gates(gates: List<Gate>) {
          * are registered too (P3.4.3), and impact (P3.2.4). Judge-dependent gates are not.
          */
         @JvmStatic
-        public fun s0(): Gates = Gates(listOf(Entry, Exit, Pressure, Stall, Loop, RegisterInvariants, StaleFact, Impact, ContractTouch, RepeatedFailure, Scope, AcceptanceSurfaceGate, Reserve, Turns))
+        public fun s0(): Gates = Gates(listOf(Entry, Exit, Pressure, Stall, Loop, RefusalLoop, RegisterInvariants, StaleFact, Impact, ContractTouch, RepeatedFailure, Scope, AcceptanceSurfaceGate, Reserve, Turns))
     }
 
     // §5.6 Impact: once per changed symbol while its references are not inspected; the key carries the change turn.
@@ -359,7 +374,7 @@ public class Gates(gates: List<Gate>) {
         }
     }
 
-    // §5.6 Stall: stallTurns turns without a progress event; live build output is work.
+    // §5.6 Stall: every stallTurns turns without a progress event (the key counts the periods); live build output is work.
     private object Stall : Gate {
         override val name: String get() = STALL
 
@@ -370,7 +385,7 @@ public class Gates(gates: List<Gate>) {
             val probe = state.register.decisions.lastOrNull { !it.probe.isNullOrBlank() }?.let { " (decision ${it.n}: ${it.probe})" }.orEmpty()
             return listOf(
                 GateOutcome.Nudge(
-                    GateKey(name, "since-${state.lastProgressTurn}"),
+                    GateKey(name, "since-${state.lastProgressTurn}/${idle / state.defaults.stallTurns}"),
                     "stall: $idle turns without progress — re-read the plan · zoom out · run the pending decision probe$probe · surface the blocker · or request a probe cell",
                 ),
             )
@@ -402,6 +417,27 @@ public class Gates(gates: List<Gate>) {
                 }
             }
             return out
+        }
+    }
+
+    // F1a: the same call refused for the same reason loopIdentical times nudges; one more ends the cell blocked (the loop acts).
+    private object RefusalLoop : Gate {
+        override val name: String get() = REFUSAL_LOOP
+
+        override fun evaluate(state: GateState): List<GateOutcome> {
+            val counts = LinkedHashMap<RefusalSignature, Int>()
+            for (signature in state.refusals) counts.merge(signature, 1, Int::plus)
+            return counts.mapNotNull { (signature, n) ->
+                val key = GateKey(name, "${signature.tool}:${signature.argsDigest.hash8}/${signature.reasonDigest.hash8}:$n")
+                when {
+                    n == state.defaults.loopIdentical -> GateOutcome.Nudge(
+                        key,
+                        "refusal loop: ${signature.tool} was refused $n times for the same reason — change the call or end with state(blocked), task.ask or task.propose",
+                    )
+                    n > state.defaults.loopIdentical -> GateOutcome.Rejection(key, "refusal loop: ${signature.tool} refused $n times — the cell ends blocked", endsTurn = true)
+                    else -> null
+                }
+            }
         }
     }
 

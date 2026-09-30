@@ -79,7 +79,7 @@ public object Kernel {
  * tool layer, never in this text.
  */
 public object ErrorPolicy {
-    public const val VERSION: String = "error-policy/1"
+    public const val VERSION: String = "error-policy/2"
 
     /** Event → what the harness does. Order is the specification's. */
     public val rows: List<Pair<String, String>> = listOf(
@@ -94,7 +94,7 @@ public object ErrorPolicy {
         "truncation" to "always marked; prompt and capture limits are distinguished; a recall pointer is given",
         "empty search in a limited scope" to "`complete` describes exhaustion of the declared scope, never repository-wide absence",
         "recall of a changed file" to "labelled `historical v=…`",
-        "identical call and result twice" to "loop nudge; the third ends the turn with a required `state` op",
+        "identical call and result, or identical refusal, twice" to "loop nudge; the third ends the turn (a refusal loop ends the cell blocked)",
         "instruction-shaped tool content" to "flagged; never executed",
         "delegated result with a moved base" to "`stale-for-integration`; never merged as current",
         "transform outside its scope" to "publication is refused or a guarded inverse applied; actual restoration, partial state or unknown effects are reported",
