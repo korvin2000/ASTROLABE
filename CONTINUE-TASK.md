@@ -4,7 +4,7 @@ Rewritten every session (≤40 lines). Workflow: `CLAUDE.md` § Workflow. State 
 
 **Checkpoint (2026-09-30):** owner-requested out-of-order **phase 0** (`../next-goal.md`): the owner's acceptance rule
 in the core — every obligation is passed, failed or unverified; unverified never becomes blocked or failed; the user
-(or the host's policy) decides. Branch `phase0/acceptance`, fast-forwarded into `main` and pushed on the owner's request.
+(or the host's policy) decides. Branch `phase0/acceptance`, merged `--no-ff` into `main` and pushed on the owner's request.
 Journal: `audit/OUT-OF-ORDER-PHASE0.md`. Decisions D-337–D-355. P0–P6 remain 185/185 DONE.
 
 ## This session

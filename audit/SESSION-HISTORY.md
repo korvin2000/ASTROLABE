@@ -709,4 +709,4 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - Live diagnosis first: Codex review failures were the SDK reading untyped SSE as JSON (fixed in `llm-transport-sdk`).
 - A Codex review of A1–A7 and a Fable + Codex consult (owner questions on E6/E4); findings applied, residuals in the journal.
 - Live acceptance through Studio on gpt-6-luna and glm-5.3-flash (numbers in `../phase0-report.md`); targeted tests only
-  (owner: no 40-minute full build). Fast-forwarded into `main` and pushed on the owner's request.
+  (owner: no 40-minute full build). Merged `--no-ff` into `main` and pushed on the owner's request.
