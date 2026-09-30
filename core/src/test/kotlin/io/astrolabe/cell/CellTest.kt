@@ -137,7 +137,7 @@ class CellTest {
                 ), role = role)
                 assertEquals(before, f.version("src/a.py"))
                 assertFalse(Files.exists(f.repo.root.resolve("src/forbidden.txt")))
-                assertTrue(f.transcript(3).filterIsInstance<ToolResult>().any { "is masked in this turn" in resultText(it) })
+                assertTrue(f.transcript(3).filterIsInstance<ToolResult>().any { "is not available to the ${role.name} role in this cell (any turn)" in resultText(it) })
             }
         }
     }
@@ -394,6 +394,51 @@ class CellTest {
             assertEquals(CellFixture.A_PY, Files.readString(f.repo.resolve("src/a.py")), "no edit executed")
             assertTrue(f.intents.open().isEmpty() && f.intents.get("intent-1") == null, "no run executed")
             assertEquals(listOf(1, 2, 3), f.checkpoints.turns(f.ids.context!!).map { it.turn })
+        }
+    }
+
+    @Test
+    fun `a call refused three times for the same reason ends the cell blocked with that reason`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("run it"), runCmd("c1", "make"))),
+                Scripted.Reply(listOf(say("run it again"), runCmd("c2", "make"))),
+                Scripted.Reply(listOf(say("and again"), runCmd("c3", "make"))),
+            )
+
+            val blocked = assertIs<CellExit.Blocked>(f.run(model, role = Roles.plan))
+
+            assertEquals(3, f.adapter.calls.size, "the third identical refusal ends the cell")
+            val reason = blocked.request.reason
+            assertTrue(reason.startsWith("refusal loop: run.run is not available to the plan role in this cell (any turn); available: "), reason)
+            assertTrue(reason.contains("hand the work over with task.propose(plan)"), reason)
+            assertEquals(listOf("3 identical refused calls of run.run since turn 1"), blocked.request.evidence)
+            assertNull(blocked.request.question)
+            assertTrue(f.anchorText(3).contains("refusal loop: run.run was refused 2 times for the same reason"), f.anchorText(3))
+            assertEquals(CellStatus.Blocked, f.checkpoints.latest(f.ids.context!!)!!.status)
+        }
+    }
+
+    @Test
+    fun `a terminal ask survives a whole-turn refusal and runs alone`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(
+                    say("recording and asking"),
+                    call("c1", "state", "not json"),
+                    call("c2", "task", """{"op":"ask","question":"Which value should a return?"}"""),
+                )),
+            )
+
+            val blocked = assertIs<CellExit.Blocked>(f.run(model))
+
+            assertEquals("Which value should a return?", blocked.request.question)
+            assertEquals(1, blocked.turns)
+            val results = f.journal.events(JournalScope(f.ids.work, kinds = setOf(JournalKind.Result))).filter { it.turn == 1 }.map { it.text }
+            val refused = results.single { it.startsWith("call c1: ") }
+            assertTrue(refused.contains("schema error in call c1") && refused.endsWith(" — the terminal call task(ask) ran alone"), refused)
+            assertFalse(refused.contains("no call of this turn executed"), refused)
+            assertTrue(results.single { it.startsWith("call c2: ") }.contains("tool=task"), results.toString())
         }
     }
 
