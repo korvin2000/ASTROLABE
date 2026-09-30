@@ -28,7 +28,7 @@ Journal: `audit/OUT-OF-ORDER-PHASE0.md`. Decisions D-337–D-355. P0–P6 remain
 2. Residual (journal): a crash between the cell's return and the pending save re-proposes with a new cell; explicit
    model `verify` and harness regression/full-suite reruns are not suppressed on the same candidate; a fact anchor
    `version` still needs the full 64-hex digest (models send 4); `deadend.add.evidence` is not checked for existence.
-3. Owner decision (report): S3/S4 still 5–10 calls — Next from `[>]` when STATE has none, short anchor versions.
+3. D-356 done (branch `phase0/next-from-cursor`, not merged): S3/S4 4–9 calls; left: short anchor versions, `op:N` misuse.
 4. F-5 (Studio): the core review cell for `check:` items in the simple shape — out of phase 0 scope.
 
 ## Carried-forward debts (unchanged)
