@@ -20,6 +20,7 @@ import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 
 /** The `risk > θ` row of the §8.1 layer table (§7.4 verification depth), wired in P4.5.2. */
 class RiskTriggerTest {
@@ -48,6 +49,25 @@ class RiskTriggerTest {
             val lines = f.journal.events(JournalScope(f.ids.work, kinds = setOf(JournalKind.Check))).filter { it.text.startsWith("risk > θ") }
             assertEquals(listOf(3), lines.map { it.turn }, lines.map { it.text }.toString())
             assertEquals("risk > θ ${Checks.TESTS_BLAST}: passed", lines.single().text)
+        }
+    }
+
+    @Test
+    fun `a reworded prose line whose generic outline name was cut at a space does not fail the cell found live`() = runTest {
+        val old = "Save the following as `index.html` and open it in any browser. It is a complete, offline two-player game."
+        val new = "Open `index.html` in any modern browser to play the complete offline two-player game, including win/draw detection and a new-game button."
+        CellFixture(stateRoot, files = CellFixture.DEFAULT_FILES + ("src/notes.md" to "# notes\n\n$old\n")).use { f ->
+            val notes = f.version("src/notes.md")
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("reading"), read("c0", "src/notes.md"))),
+                // The enclosing generic declaration of the edited line is named by its first 80 characters, which end in a space.
+                Scripted.Reply(listOf(say("rewording"), anchored("c1", "src/notes.md", notes, old, new))),
+                Scripted.Reply(listOf(say("stopping here"))),
+            )
+
+            val exit = f.run(model)
+
+            assertFalse(exit is CellExit.Failed, (exit as? CellExit.Failed)?.error)
         }
     }
 }

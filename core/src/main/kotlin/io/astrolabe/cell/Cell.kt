@@ -256,7 +256,7 @@ public class Cell @JvmOverloads constructor(
                 withContext(NonCancellable) { settle(CellStatus.Cancelled, "cancelled: ${cancelled.message ?: "coroutine cancelled"}") }
                 throw cancelled
             } catch (failure: Exception) {
-                val error = "${failure::class.simpleName}: ${failure.message}"
+                val error = "${failure::class.simpleName}: ${failure.message}${site(failure)}"
                 val checkpoint = settle(CellStatus.Failed, error)
                 return CellExit.Failed(budget.turnsTaken, register, checkpoint, persistPacket(packet(PacketStatus.Failed, error)), error)
             } finally {
@@ -1239,6 +1239,16 @@ public class Cell @JvmOverloads constructor(
         const val DETAILS_IN_LINE = 2
 
         const val MILLIS_PER_SECOND = 1000.0
+
+        /** How many harness frames a failure record names, innermost first: no stack trace is kept anywhere else. */
+        const val SITE_FRAMES = 4
+
+        fun site(failure: Throwable): String {
+            val frames = failure.stackTrace.filter { it.className.startsWith("io.astrolabe.") && it.fileName != null && !it.methodName.startsWith("access\$") }
+            return if (frames.isEmpty()) "" else frames.take(SITE_FRAMES).joinToString(" ← ", prefix = " at ") {
+                "${it.className.substringAfterLast('.')}.${it.methodName}(${it.fileName}:${it.lineNumber})"
+            }
+        }
 
         val JSON = Json { encodeDefaults = true }
         val ITEMS = ListSerializer(Item.serializer())

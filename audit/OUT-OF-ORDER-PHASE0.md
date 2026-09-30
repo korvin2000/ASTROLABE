@@ -106,3 +106,12 @@ iterations, green at the end); `:core:updateKotlinAbi`; `:eval:testClasses`, `:p
   RoleWiringTest 1, MountTest 2, VerifyTest 14 — all green; `:core:updateKotlinAbi`, `:core:checkKotlinAbi` pass.
 - Live round 2 (both models): a model denied `task.answer` after changing files did not know how to finish ("propose
   completion"); the denial now says to reply with a summary and no tool call (D-344 text only). AcceptanceDecisionTest 10 green.
+- Live crash (openai-codex/gpt-6-luna, Studio): a cell failed with `IllegalArgumentException: Failed requirement.` at the end of
+  a turn that reworded a README prose line. Cause: the generic outline names a declaration by its trimmed line cut to 80 chars,
+  and that cut ended in a space; the `risk > θ` trigger (`Verify.riskAboveTheta` → `ImpactAssembly.hunkOf`) passed the name as
+  `ImpactHunk.symbol`, whose label check (`ImpactSnapshot.kt` `impactLabel`) rejects untrimmed text. Fix: `Outline` generic
+  names read control characters as spaces and are trimmed after the cut (a tab in a top-level line hit the same check).
+  The cell's failure reason now names the innermost harness frames (`… at ImpactSnapshotKt.impactLabel(ImpactSnapshot.kt:159) ← …`).
+  Added: OutlineTest (cut/tab names), RiskTriggerTest (the live edit through a cell; failed before, passes after).
+  Verification (focused): OutlineTest 9, RiskTriggerTest 2, CellTest 29, ImpactAssemblyTest 3, DefinitionChangesTest 3,
+  SymbolIndexTest 7, AtlasTest 20, PrimeTest 7 — green. No public API change.

@@ -697,18 +697,20 @@ private const val GENERIC_NAME_CHARS = 80
  */
 private fun parseGeneric(path: String, language: Language, lines: List<String>): Outline {
     val starts = ArrayList<Int>()
+    val names = ArrayList<String>()
     for ((index, line) in lines.withIndex()) {
-        if (line.isBlank() || indentOf(line) != 0) continue
-        val trimmed = line.trim()
-        if (GENERIC_COMMENT.any { trimmed.startsWith(it) }) continue
+        if (indentOf(line) != 0) continue
+        val name = genericName(line)
+        if (name.isEmpty() || GENERIC_COMMENT.any { name.startsWith(it) }) continue
         starts += index
+        names += name
     }
     val entries = ArrayList<Declaration>(starts.size)
     for ((position, index) in starts.withIndex()) {
         val end = if (position + 1 < starts.size) starts[position + 1] - 1 else lines.size - 1
         entries += Declaration(
             kind = DeclarationKind.Other,
-            name = lines[index].trim().take(GENERIC_NAME_CHARS),
+            name = names[position],
             from = index + 1,
             to = maxOf(end, index) + 1,
             exported = false,
@@ -716,3 +718,10 @@ private fun parseGeneric(path: String, language: Language, lines: List<String>):
     }
     return Outline(path, language, entries)
 }
+
+/**
+ * A generic name is an impact label (§7.4, `ImpactHunk.symbol`): control characters read as spaces and the
+ * cut is trimmed again, since a prose line cut at a space would otherwise end in one.
+ */
+private fun genericName(line: String): String =
+    String(CharArray(line.length) { if (line[it].isISOControl()) ' ' else line[it] }).trim().take(GENERIC_NAME_CHARS).trimEnd()
