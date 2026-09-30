@@ -710,3 +710,13 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - A Codex review of A1–A7 and a Fable + Codex consult (owner questions on E6/E4); findings applied, residuals in the journal.
 - Live acceptance through Studio on gpt-6-luna and glm-5.3-flash (numbers in `../phase0-report.md`); targeted tests only
   (owner: no 40-minute full build). Merged `--no-ff` into `main` and pushed on the owner's request.
+
+## 2026-10-01: plan-handoff fix (`fix/plan-handoff`, owner request, out of order)
+- Diagnosis of Studio task `W-tgxiilat7og6a33vtwva` (`../harness-fiasco-analysis.md`): S1 plan cell without execution,
+  transient-sounding masked refusal, loop gate blind to refusals, invisible plan wire form; false green in run 1.
+- Live probe (`GlmToolCallProbeTest`, `scripts/probe/or_raw_capture.py`): corrupted GLM tool arguments come from the
+  OpenRouter upstream Together (3/12) and not from Z.AI (0/6) or the SDK; DeepSeek clean (0/36).
+- Four Opus worktree agents (F1/F2, F3, F4, F8) + one for the Studio + one for transport; Codex reviewed the F4 design
+  and the denial-loop patch, Opus reviewed the hypotheses and the same patch; merged `--no-ff`. D-357–D-362.
+- Targeted core tests and provider-ai-gate offline tests only; ABI regenerated; not merged into `main`, not pushed.
+

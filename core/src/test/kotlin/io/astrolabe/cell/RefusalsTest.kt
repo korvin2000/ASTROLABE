@@ -13,9 +13,9 @@ class RefusalsTest {
     @Test
     fun `an op outside the role mask is refused in any turn with the plan role's hand-over exit`() {
         assertEquals(
-            "run.run is not available to the plan role in this cell (any turn); available: kb.get, kb.search, look.read, task.ask; " +
+            "edit.anchored is not available to the plan role in this cell (any turn); available: kb.get, kb.search, look.read, task.ask; " +
                 "to get commands executed, hand the work over with task.propose(plan); if the plan cannot be made, end with state(blocked) or task.ask",
-            Refusals.masked("run.run", Roles.plan, Shape.S1, available, null),
+            Refusals.masked("edit.anchored", Roles.plan, Shape.S1, available, null),
         )
     }
 

@@ -411,12 +411,49 @@ class CellTest {
 
             assertEquals(3, f.adapter.calls.size, "the third identical refusal ends the cell")
             val reason = blocked.request.reason
-            assertTrue(reason.startsWith("refusal loop: run.run is not available to the plan role in this cell (any turn); available: "), reason)
-            assertTrue(reason.contains("hand the work over with task.propose(plan)"), reason)
+            // D-360: the plan role may call run, but only R-class commands; `make` is a W-class build, denied by the executor.
+            assertTrue(reason.startsWith("refusal loop: denied: the plan role runs R-class commands only; this command is W-class"), reason)
             assertEquals(listOf("3 identical refused calls of run.run since turn 1"), blocked.request.evidence)
             assertNull(blocked.request.question)
             assertTrue(f.anchorText(3).contains("refusal loop: run.run was refused 2 times for the same reason"), f.anchorText(3))
             assertEquals(CellStatus.Blocked, f.checkpoints.latest(f.ids.context!!)!!.status)
+        }
+    }
+
+    @Test
+    fun `three identical masked edits refused by the validator end the plan cell blocked`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val before = f.version("src/a.py")
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(anchored("c1", "src/a.py", before, "    return 1", "    return 10"))),
+                Scripted.Reply(listOf(anchored("c2", "src/a.py", before, "    return 1", "    return 10"))),
+                Scripted.Reply(listOf(anchored("c3", "src/a.py", before, "    return 1", "    return 10"))),
+            )
+
+            val blocked = assertIs<CellExit.Blocked>(f.run(model, role = Roles.plan))
+
+            assertEquals(3, f.adapter.calls.size)
+            assertTrue(blocked.request.reason.startsWith("refusal loop: edit.anchored is not available to the plan role in this cell (any turn)"), blocked.request.reason)
+            assertEquals(before, f.version("src/a.py"))
+        }
+    }
+
+    @Test
+    fun `denials interleaved with other calls still end the cell because the refusal history lives for the cell`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(runCmd("c1", "make"))),
+                Scripted.Reply(listOf(read("c2", "src/a.py"))),
+                Scripted.Reply(listOf(runCmd("c3", "make"))),
+                Scripted.Reply(listOf(read("c4", "src/a.py"))),
+                Scripted.Reply(listOf(runCmd("c5", "make"))),
+            )
+
+            val blocked = assertIs<CellExit.Blocked>(f.run(model, role = Roles.plan))
+
+            assertEquals(5, f.adapter.calls.size, "reads between the denials do not reset the refusal history")
+            assertTrue(blocked.request.reason.startsWith("refusal loop: denied: the plan role runs R-class commands only"), blocked.request.reason)
+            assertEquals(listOf("3 identical refused calls of run.run since turn 1"), blocked.request.evidence)
         }
     }
 

@@ -192,6 +192,8 @@ public class Cell @JvmOverloads constructor(
         /** F1a: calls refused since a call last executed, and each signature's first turn and reason. */
         private val refused = ArrayList<RefusalSignature>()
         private val refusedFirst = HashMap<RefusalSignature, Pair<Int, String>>()
+        /** The contract version the refusal history was collected under: an amendment may change masks and ceilings (D-358). */
+        private var refusedUnder = -1
         private var lastProgressTurn = 0
         private var requiredOp: String? = null
         private var refusals = 0
@@ -300,6 +302,7 @@ public class Cell @JvmOverloads constructor(
             rebuildGap?.let { return partial(PartialReason.Pressure, it) }
             // Render: [A] first (rebuilt every turn), then the cached regions, then admission.
             val contract = contract()
+            if (contract.version != refusedUnder) { refused.clear(); refusedFirst.clear(); refusedUnder = contract.version }
             ws.checks.synchronizeAcceptance(contract)
             contractVersion = contract.version
             val refactor = RefactorMode.detect(contract)
@@ -483,7 +486,15 @@ public class Cell @JvmOverloads constructor(
                 appendResult(call.providerCallId, text, isError = outcome == null, label = label(call, outcome), resultClass = ResultClass.of(call.name), alias = alias)
                 journalResult(call.providerCallId, outcome?.header?.line() ?: text.lineSequence().first(), refs)
                 if (outcome == null) return
-                signatures += CallSignature.of(call, outcome)
+                // D-358: a `run` the executor denied by policy (read-only role, ceiling, execution mode, D-class without intent)
+                // is a refusal the same call cannot get past: it joins the refusal loop, not the ordinary loop, so the third
+                // identical denial ends the cell blocked instead of nudging twice per turn until the budget is spent.
+                if (call.family == ToolFamily.Run && outcome.header?.runtime?.status == "denied") {
+                    val reason = outcome.body.lineSequence().firstOrNull { it.isNotBlank() && !it.startsWith(Boundary.RESULT_OPEN) } ?: outcome.body.lineSequence().first()
+                    val signature = RefusalSignature.of(call.name, call.raw.toString(), reason)
+                    refused += signature
+                    refusedFirst.putIfAbsent(signature, turn to reason)
+                } else signatures += CallSignature.of(call, outcome)
                 if (call.family == ToolFamily.Run && outcome.header?.runtime?.status == "running") liveRunOutput = true
                 val mutated = mutatedPaths(call, outcome)
                 if (mutated.isNotEmpty()) {
@@ -512,7 +523,7 @@ public class Cell @JvmOverloads constructor(
                 null -> Unit
                 is Validated.Refused -> {
                     native.forEach { notExecuted(it, validated.reason) }
-                    // F1a: a refusal counts toward the refusal loop until a call of the cell executes again.
+                    // D-358: a refusal joins the cell's refusal history, kept until the contract version changes (masks and ceilings may move).
                     for (culprit in validated.culprits) {
                         val signature = RefusalSignature.of(parsedAlone(culprit)?.name ?: culprit.name, culprit.argsJson, validated.key)
                         refused += signature
@@ -521,13 +532,9 @@ public class Cell @JvmOverloads constructor(
                 }
                 is Validated.Calls -> {
                     calls.forEach(::executed)
-                    refused.clear()
-                    refusedFirst.clear()
                 }
                 is Validated.Partial -> {
                     native.forEachIndexed { index, call -> if (index == validated.index) executed(validated.call) else notExecuted(call, validated.reason) }
-                    refused.clear()
-                    refusedFirst.clear()
                 }
             }
             editedPaths.addAll(movedThisTurn(before, after, contract))
