@@ -73,10 +73,8 @@ public class Validator(
             if (met) eligible += po.op else dropped += po
         }
         val nextOps = eligible.count { it is Op.Next }
-        // D-350: a patch without `next` keeps the Next STATE already has; none at all, or two, still refuse.
-        if (nextOps > 1 || (nextOps == 0 && register.next == null)) {
-            return reject("exactly one Next", "patch carries $nextOps next ops" + if (nextOps == 0) " and STATE has no Next yet: add {\"next\": \"…\"}" else "")
-        }
+        // D-350: a patch without `next` keeps the Next STATE already has; two still refuse. None yet: D-356 below.
+        if (nextOps > 1) return reject("exactly one Next", "patch carries $nextOps next ops")
 
         var next = register
         val flags = ArrayList<String>()
@@ -155,6 +153,11 @@ public class Validator(
         if (placed != null) {
             next = next.copy(plan = next.plan.map { s -> if (s.n == placed.n) s.copy(mark = Mark.Cursor) else s })
             cursorMoved = true
+        }
+        // D-356: STATE has no Next yet and the patch names none — Next is the [>] step; with no open step there is nothing to name.
+        if (next.next == null) {
+            val active = next.cursor ?: return reject("exactly one Next", "patch carries 0 next ops, STATE has no Next yet and no open step to take it from: add {\"next\": \"…\"}")
+            next = next.copy(next = active.text)
         }
         if (cursorMoved && context.redChecks.isNotEmpty()) {
             val unrecorded = context.redChecks.filter { red -> next.open.none { !it.closed && it.text.contains(red) } }

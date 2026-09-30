@@ -62,7 +62,7 @@ class ValidatorTest {
     @Test
     fun `every invariant rejects and leaves the register unchanged`() {
         val ready = applied(validator.check(base, Patch.of(Op.PlanAdd("a"), Op.PlanAdd("b"), Op.PlanCursor(1), Op.Next("go")), Ctx()))
-        assertEquals("exactly one Next", rejected(validator.check(base, Patch.of(Op.PlanAdd("c")), Ctx())), "no Next in the patch nor in STATE")
+        assertEquals("exactly one Next", rejected(validator.check(base, Patch.of(Op.FactAdd(ClaimKind.Hypothesis, "c")), Ctx())), "no Next in the patch nor in STATE, and no open step")
         assertEquals("exactly one Next", rejected(validator.check(ready, Patch.of(Op.Next("a"), Op.Next("b")), Ctx())))
         assertEquals("v needs an existing evidence id", rejected(validator.check(ready, Patch.of(Op.FactAdd(ClaimKind.Verified, "x", evidence = "#99"), Op.Next("n")), Ctx())))
         assertEquals("v needs an existing evidence id", rejected(validator.check(ready, Patch.of(Op.FactAdd(ClaimKind.Verified, "x"), Op.Next("n")), Ctx())))
@@ -97,6 +97,22 @@ class ValidatorTest {
         assertEquals("red not recorded", rejected(red))
         assertTrue((red as Validation.Rejected).detail.contains("the patch left no [>]; it would go to step 2"), red.detail)
         applied(validator.check(ready, Patch.of(Op.OpenAdd("AC-4 red: TypeError"), Op.PlanTick(1, "#12")), Ctx(redChecks = setOf("AC-4"))))
+    }
+
+    @Test
+    fun `with no Next yet the active step becomes Next, and without an open step the patch still refuses`() {
+        val first = applied(validator.check(base, Patch.of(Op.PlanAdd("write hello.py"), Op.PlanAdd("run it"), Op.PlanCursor(2)), Ctx()))
+        assertEquals("run it", first.next, "Next is the [>] step the patch placed")
+        val placed = applied(validator.check(base, Patch.of(Op.PlanAdd("write hello.py"), Op.PlanAdd("run it")), Ctx()))
+        assertEquals(Mark.Cursor, placed.step(1)!!.mark)
+        assertEquals("write hello.py", placed.next, "the cursor placed by D-350 names Next too")
+        val named = applied(validator.check(base, Patch.of(Op.PlanAdd("write hello.py"), Op.Next("check the output")), Ctx()))
+        assertEquals("check the output", named.next, "a named Next wins")
+        assertEquals("write hello.py", applied(validator.check(placed, Patch.of(Op.PlanTick(1, "#12")), Ctx())).next, "an existing Next is kept")
+
+        val done = validator.check(base, Patch.of(Op.PlanAdd("write hello.py"), Op.PlanTick(1, "#12")), Ctx())
+        assertEquals("exactly one Next", rejected(done))
+        assertTrue((done as Validation.Rejected).detail.contains("no open step to take it from"), done.detail)
     }
 
     @Test
