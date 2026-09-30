@@ -168,10 +168,13 @@ public data class TaskArgs(
     val mode: String? = null,
     val handle: String? = null,
     val proposal: JsonElement? = null,
+    /** `answer` (D-344): the reply to a request that needs no change to the files. */
+    val text: String? = null,
 ) {
     init {
         require(op in ToolOps.task) { "unknown task op '$op'" }
         if (op == "ask") require(!question.isNullOrBlank()) { "task(ask) needs a question" }
+        if (op == "answer") require(!text.isNullOrBlank()) { "task(answer) needs the answer as text" }
         if (op == "propose") {
             require(kind in PROPOSAL_KINDS) { "task(propose) needs kind ${PROPOSAL_KINDS.joinToString("|")}, got '$kind'" }
             require(proposal != null) { "task(propose) needs a proposal object" }

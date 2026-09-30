@@ -272,6 +272,11 @@ public data class CampaignPolicy @JvmOverloads constructor(
     val tokens: Tokens,
     val cost: Money? = null,
     val resumeExpected: Boolean = false,
+    /**
+     * The host's instructions for this campaign (D-345): pinned in every main-line cell as notes from the host —
+     * never a contract request, so the contract's objective and pinned requests stay the user's own words.
+     */
+    val hostNotes: List<String> = emptyList(),
 )
 
 /** What open-time reconciliation found (§13.1), before any consequential action. */
@@ -331,6 +336,8 @@ public class OpenedCampaign internal constructor(
     private val leases: Leases,
     /** The notes as of open, the `Frozen` arm of `Flags.kbInjection` (§19.5 ablation). */
     public val frozenNotes: List<Note> = emptyList(),
+    /** The host's instructions (D-345), pinned as host notes in every main-line cell. */
+    public val hostNotes: List<String> = emptyList(),
 ) : AutoCloseable {
     /** Cancels this campaign: no further dispatch, no publication; effects already made are archived (D-26). */
     public val cancellation: Cancellation = Cancellation()
@@ -612,7 +619,7 @@ public class Controller @JvmOverloads public constructor(
         return OpenedCampaign(
             request, ids, store, os, workspace, registry, stamper, dirty, shadow, s0, atlas, derived.sniffed, commands,
             contracts, checks, rules, prime, kb, journal, intents, campaigns, reconciliation, prescan, impactPrescan, shape, state, refusal, owned,
-            frozen, lease, leases, frozenNotes = Notes(store).all(),
+            frozen, lease, leases, frozenNotes = Notes(store).all(), hostNotes = policy.hostNotes.filter { it.isNotBlank() },
         ).also { plugged[it] = layered }
     }
 
@@ -850,6 +857,10 @@ public class Controller @JvmOverloads public constructor(
             refreshPrescan(c, run.ids, exit)?.let { return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, it)), exit, null, compiled) }
             boundary(c, cellId, RebuildReason.CellEnd(if (exit is CellExit.Completed) RebuildReason.CellEnd.Next.NextIncrement else RebuildReason.CellEnd.Next.Continuation))
             val stampNow = c.stamper.report().candidateId
+            if (exit is CellExit.Completed && exit.answer != null) {
+                routing.selected?.let { router.record(it, RoutingOutcome.Accepted) }
+                return S0Run(c.advance(Transition.Answered(stampNow, exit.answer)), exit, null, compiled)
+            }
             // §8.7/§8.8: in S2+ a required increment review must approve before the increment closes; none owed ⇒ null.
             // A completion that can no longer publish (cancelled, lease lost) is archived below, never reviewed (D-170).
             // D-343: an unavailable or declined increment review is a result like any other — unverified or rejected — never a block.
@@ -910,6 +921,19 @@ public class Controller @JvmOverloads public constructor(
             }
             last = last.copy(state = c.state)
         }
+    }
+
+    /**
+     * D-344: why this campaign may not end with an answer, or `null` when it may — the tree is still snapshot 0 and no
+     * intent with effects (anything but a replay-safe read) was recorded.
+     */
+    private fun answerable(c: OpenedCampaign): String? {
+        val stamp = c.stamper.report().candidateId
+        if (stamp != c.s0.stampId) return "the tree changed since the task started (@${c.s0.stampId.hash8} → @${stamp.hash8})"
+        val effects = c.store.db.query("SELECT body FROM intents WHERE work_id = ?", c.ids.work) {
+            Json.decodeFromString(io.astrolabe.evidence.Intent.serializer(), it.string("body"))
+        }.filterNot { it.replaySafe }
+        return effects.firstOrNull()?.let { "an action with effects ran: ${it.argv.joinToString(" ")}" }
     }
 
     /** §7.3 cadence: the full suite every K verified increments; a red result is a regression on record. */
@@ -1329,6 +1353,11 @@ public class Controller @JvmOverloads public constructor(
         }
 
         val stampNow = c.stamper.report().candidateId
+        // D-344: an answer ends the campaign `answered`; the facts were checked by the tool and again at the turn's end.
+        if (exit is CellExit.Completed && exit.answer != null) {
+            routing.selected?.let { router.record(it, RoutingOutcome.Accepted) }
+            return S0Run(c.advance(Transition.Answered(stampNow, exit.answer)), exit, null, compiled)
+        }
         val completion = if (exit is CellExit.Completed) {
             val returned = checkNotNull(c.state).graph.increments.first { it.id == increment.id }
             verify(c, exit, returned, stampNow, currencies(c, scheduler, stampNow))
@@ -1769,6 +1798,7 @@ public class Controller @JvmOverloads public constructor(
                     SqlitePlanProposals(c.store, idGen, clock), SqliteSplitRequests(c.store, idGen, clock),
                     { c.contracts.current(c.ids.work) }, { registerVersions.latest(cellId) }, { c.kb.contractAnchors() }) else null,
                 delegator, delegator?.let { TaskPackets(WORKSPACE, ceiling, generation) }, tree.registry::version,
+                answerCheck = if (child == null && role.packetKind == io.astrolabe.cell.PacketKind.Result) { { answerable(c) } } else null,
             ),
             kb = KbTool(c.kb, estimator, idGen, queue = Queue(c.store, KbWriter(c.store, estimator, clock), idGen, clock), ids = ids, events = events, deniedKinds = role.deniedNoteKinds, dense = layered.dense, redaction = redaction),
         )
@@ -1795,6 +1825,8 @@ public class Controller @JvmOverloads public constructor(
         // §6.5: every compiled context leaves a manifest; the cell's end event links it.
         val manifests = SqliteManifests(c.store, clock)
         val manifest = Manifest.of(idGen.next("manifest"), compiled, increment, contract, ids, model.profile, inputs, register?.version, boundary, model.effort.name.lowercase()).also { manifests.save(ids, it) }
+        // D-345: the host's notes come first, marked as the host's; a child cell's brief is its parent's business.
+        val hostBlock = if (child == null && c.hostNotes.isNotEmpty()) listOf(HOST_NOTES + c.hostNotes.joinToString("\n") { "- $it" }) else emptyList()
         val ctx = CellContext(
             ids = ids, role = RoleTexts.worded(role, config.role(role.name)), contracts = c.contracts, model = model, tools = tools,
             workspace = CellWorkspace(tree.workspace, tree.registry, coherence, tree.stamper, workset, tree.checks, scheduler, tree.atlas, checker),
@@ -1805,7 +1837,7 @@ public class Controller @JvmOverloads public constructor(
             accounting = accounting,
             manifest = manifest.id,
             sections = compiled.k.sections,
-            pinned = pinned,
+            pinned = hostBlock + pinned,
             precompile = precompile,
             knowledge = knowledge,
             completionEvidence = if (child == null && role.packetKind == io.astrolabe.cell.PacketKind.Result) { flags ->
@@ -2295,6 +2327,9 @@ public class Controller @JvmOverloads public constructor(
         /** The agent's final text kept with a pending completion, for the decider. */
         private const val MAX_SUMMARY_CHARS: Int = 4_000
         private const val HOST_ANSWER: String = "host answer for "
+
+        /** The heading of the host's notes in a cell's pinned context (D-345): the user did not write them. */
+        public const val HOST_NOTES: String = "Notes from the host application (not from the user):\n"
 
         /** D-170: review and probe cells exist (P4.4), so S2 is selectable; S3 comes from a plan at intake (D-183). */
         private val CAPABILITIES: ShapeCapabilities = ShapeCapabilities(reviewCells = true, probes = true)

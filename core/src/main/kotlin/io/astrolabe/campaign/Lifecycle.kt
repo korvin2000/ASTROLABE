@@ -20,6 +20,9 @@ import kotlinx.serialization.Serializable
 @Serializable
 public enum class CampaignOutcome(public val wire: String) {
     Completed("completed"),
+
+    /** The request needed no change and the model answered it; the harness confirmed the tree unchanged (D-344). Not `completed`. */
+    Answered("answered"),
     WaitingForProcess("waiting_for_process"),
     WaitingForInput("waiting_for_input"),
     BlockedExternal("blocked_external"),
@@ -162,6 +165,16 @@ public sealed interface Transition {
     /** Every requirement is verified at [stamp]: final acceptance begins. */
     public data class Finishing(val stamp: CandidateId) : Transition
 
+    /**
+     * The model answered a request that needed no change (D-344): the tree is still the campaign's snapshot 0 at
+     * [stamp] and no effect ran. The only way to `answered`; the requirements stay unverified.
+     */
+    public data class Answered(val stamp: CandidateId, val text: String) : Transition {
+        init {
+            require(text.isNotBlank()) { "an answer has text" }
+        }
+    }
+
     /** Final acceptance held at [stamp] with [receipts] (§3.7 `finish`); the only way to `completed`. */
     public data class Finished(val stamp: CandidateId, val receipts: List<String>) : Transition {
         init {
@@ -176,6 +189,7 @@ public sealed interface Transition {
     public data class Stopped @JvmOverloads constructor(val outcome: CampaignOutcome, val reason: String, val code: StopCode? = null) : Transition {
         init {
             require(outcome != CampaignOutcome.Completed) { "completed is reached only through Finished" }
+            require(outcome != CampaignOutcome.Answered) { "answered is reached only through Answered" }
             require(reason.isNotBlank()) { "a stop records why" }
             require(code == null || outcome == CampaignOutcome.WaitingForInput) { "a stop code marks waiting_for_input only" }
         }
@@ -299,6 +313,11 @@ public object Lifecycle {
                 expect(s, CampaignPhase.Finishing)
                 val ledger = verifiedLedger(s, contract, transition.stamp)
                 s.next(phase = CampaignPhase.Ended, ledger = ledger, outcome = CampaignOutcome.Completed, reason = null, contractVersion = v, stopCode = null)
+            }
+            is Transition.Answered -> {
+                expect(s, CampaignPhase.Running)
+                check(s.running == null) { "reconcile the running cell ${s.running?.cell} before the answer ends the campaign" }
+                s.next(phase = CampaignPhase.Ended, outcome = CampaignOutcome.Answered, reason = null, contractVersion = v, stopCode = null)
             }
             is Transition.Stopped -> {
                 expect(s, CampaignPhase.Opened, CampaignPhase.Running, CampaignPhase.Finishing)

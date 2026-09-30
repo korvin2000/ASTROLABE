@@ -593,6 +593,8 @@ public class Cell @JvmOverloads constructor(
 
             // Terminal requests, the completion path, pressure.
             (tools.state.pendingBlock ?: tools.task?.pendingBlock)?.let { return blocked(it) }
+            // D-344: an answer to a request that needed no change ends the cell before any acceptance is attempted.
+            tools.task?.takeAnswer()?.let { return answered(it) }
             if (proposal) {
                 // D-338: an unavailable runner is an unverified result like any other (FX-13 no longer blocks).
                 val output = RoleOutput(turn, response.text, register, certifiedAfter.mapNotNull { currenciesNow.certifiedReceipt(it) }, refusals, packet(PacketStatus.Done, null), shownAliases.toSet(), acceptance)
@@ -966,6 +968,8 @@ public class Cell @JvmOverloads constructor(
         private fun cancelled(reason: String) = Exit(CellStatus.Cancelled, reason) { t, r, cp, p -> CellExit.Cancelled(t, r, cp, p, reason) }
         private fun partial(reason: PartialReason, hint: String) = Exit(CellStatus.Partial, "${reason.name}: $hint") { t, r, cp, p -> CellExit.Partial(t, r, cp, p, reason, hint) }
         private fun blocked(request: BlockedRequest) = Exit(CellStatus.Blocked, request.reason, blocked = request) { t, r, cp, p -> CellExit.Blocked(t, r, cp, p, request) }
+        private fun answered(text: String) = Exit(CellStatus.Completed, null) { t, r, cp, p -> CellExit.Completed(t, r, cp, p, text, emptyList(), answer = text) }
+
         // A pending acceptance keeps the `done` packet reason-free (§5.9): its gaps are the packet's recorded gaps.
         private fun completed(text: String, refs: List<String>, pending: PendingAcceptance? = null) =
             Exit(CellStatus.Completed, null, evidenceRefs = refs) { t, r, cp, p -> CellExit.Completed(t, r, cp, p, text, refs, pending) }

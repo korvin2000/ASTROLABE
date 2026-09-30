@@ -116,7 +116,7 @@ public object ToolSchemas {
             required = listOf("op"),
             "op" to enum(ToolOps.task), "question" to str(), "options" to arr(str()), "kind" to enum(listOf("probe", "review", "writer", "qa") + TaskArgs.PROPOSAL_KINDS),
             "packet" to buildJsonObject { put("type", "object") }, "mode" to enum(listOf("sync", "async")), "handle" to str(),
-            "proposal" to buildJsonObject { put("type", "object") },
+            "proposal" to buildJsonObject { put("type", "object") }, "text" to str(),
         )
         ToolFamily.Kb -> obj(
             required = listOf("op"),

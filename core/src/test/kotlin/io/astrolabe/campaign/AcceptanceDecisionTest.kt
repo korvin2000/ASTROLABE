@@ -5,6 +5,7 @@ import io.astrolabe.atlas.Atlas
 import io.astrolabe.budget.HeuristicEstimator
 import io.astrolabe.budget.Tokens
 import io.astrolabe.cell.CellFixture.Companion.anchored
+import io.astrolabe.cell.CellFixture.Companion.call
 import io.astrolabe.cell.CellFixture.Companion.read
 import io.astrolabe.cell.CellFixture.Companion.say
 import io.astrolabe.cell.CellModel
@@ -161,6 +162,65 @@ class AcceptanceDecisionTest {
             assertTrue(finish.notVerified.any { it.startsWith("AC-1: accepted without verification by user:test") }, finish.notVerified.toString())
             assertEquals(ProvenanceKind.Accepted, c.state!!.ledger.entries.getValue("R1").provenance.single().how)
             assertNull(Acceptances(c.store, clock).open(request.work, request.attempt), "the pending completion is applied")
+        }
+    }
+
+    @Test
+    fun `an answer to a request that needs no change ends the campaign answered, with no acceptance asked (D-344)`() = runBlocking<Unit> {
+        seed(missing)
+        controller().open(repo.root, request, policy).use { c ->
+            val adapter = adapter(Scripted.Reply(listOf(call("a1", "task", """{"op":"answer","text":"I am fine, thanks."}"""))))
+            val host = Host()
+            val run = controller().run(c, model(adapter), host)
+            assertEquals(CampaignOutcome.Answered, run.outcome, run.state?.reason)
+            assertEquals(1, adapter.calls.size)
+            assertTrue(host.asked.isEmpty() && host.reviews.isEmpty(), "an answer is not put to acceptance")
+            assertEquals("I am fine, thanks.", (run.exit as io.astrolabe.cell.CellExit.Completed).answer)
+            assertEquals("answered", assertNotNull(run.finish).outcome)
+        }
+    }
+
+    @Test
+    fun `an answer after an edit is refused and the work goes through acceptance (D-344)`() = runBlocking<Unit> {
+        seed(missing)
+        controller().open(repo.root, request, policy).use { c ->
+            val v = c.registry.version("src/a.py")!!
+            val adapter = adapter(
+                Scripted.Reply(listOf(read("r1", "src/a.py"))),
+                Scripted.Reply(listOf(anchored("e1", "src/a.py", v, "def a(): return 1", "def a(): return 1  # one"))),
+                Scripted.Reply(listOf(call("a1", "task", """{"op":"answer","text":"nothing to change"}"""))),
+                Scripted.Reply(listOf(say("done"))),
+            )
+            val run = controller().run(c, model(adapter), Host())
+            assertTrue(run.outcome != CampaignOutcome.Answered, run.state?.reason)
+            assertTrue("an answer ends a task that changed nothing" in adapter.calls[3].request.toString(), "the refusal reaches the model")
+        }
+    }
+
+    @Test
+    fun `stopping without an answer and without changes is ordinary acceptance, never answered (D-344)`() = runBlocking<Unit> {
+        seed(missing)
+        controller().open(repo.root, request, policy).use { c ->
+            val run = controller().run(c, model(adapter(Scripted.Reply(listOf(say("nothing to do"))))), Host())
+            assertEquals(CampaignOutcome.WaitingForInput, run.outcome, run.state?.reason)
+            assertEquals(StopCode.AcceptanceDecision, run.state?.stopCode)
+        }
+    }
+
+    @Test
+    fun `host notes are pinned as the host's, never as the user's words, and the prefix stays stable (D-345)`() = runBlocking<Unit> {
+        seed(missing)
+        val noted = policy.copy(hostNotes = listOf("this project has no test command; write a short summary and stop"))
+        controller().open(repo.root, request, noted).use { c ->
+            val adapter = adapter(Scripted.Reply(listOf(read("r1", "src/a.py"))), Scripted.Reply(listOf(say("done"))))
+            controller().run(c, model(adapter), Host())
+            assertEquals(request.text, c.contract.objective, "the objective is the user's request")
+            assertEquals(1, c.contract.requests.size)
+            val first = texts(adapter.calls[0].request)
+            val second = texts(adapter.calls[1].request)
+            val block = Controller.HOST_NOTES + "- this project has no test command; write a short summary and stop"
+            assertTrue(block in first && block in second, first)
+            assertEquals(first.substringBefore(block) + block, second.substringBefore(block) + block, "the pinned prefix does not move between turns")
         }
     }
 

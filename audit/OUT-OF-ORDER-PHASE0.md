@@ -54,6 +54,16 @@ verification-related stop names its reason and offers "done" / "not done, rework
 `RequirementGraphTest`, `MigrationsTest`, and the campaign/cell/graph/event/verify packages (284 + 207 tests over the
 iterations, green at the end); `:core:updateKotlinAbi`; `:eval:testClasses`, `:provider-ai-gate:testClasses` compile.
 
+## A8 and A9 (after the first live round)
+
+- D-344 `answered`: `task(op=answer, text)`, facts checked by the controller (`answerable`: stamp = snapshot 0, no
+  effectful intent) at the call and at the turn's end; `CellExit.Completed.answer`, `Transition.Answered`,
+  `CampaignOutcome.Answered`. Tests: answer → `answered` with no authority call; answer after an edit refused; a silent
+  stop is ordinary acceptance.
+- D-345 host notes: `CampaignPolicy.hostNotes` pinned first under a host heading; `Contracts.amendByHost` refuses to
+  write requests. Tests: `ContractsTest` (objective unchanged), a campaign whose two requests carry the same pinned
+  prefix with the host block.
+
 ## Open / next
 
 - Studio (part B) answers `decide`, shows the two decision cards and derives its states from the stop code.

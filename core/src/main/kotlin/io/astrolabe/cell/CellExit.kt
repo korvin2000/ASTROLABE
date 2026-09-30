@@ -52,6 +52,8 @@ public sealed interface CellExit {
         val evidenceRefs: List<String>,
         /** Set when the proposal's acceptance awaits a decision (D-339); `null` when the completion seam accepted it. */
         val pending: PendingAcceptance? = null,
+        /** Set when the model ended the task with an answer and the harness confirmed nothing changed (D-344). */
+        val answer: String? = null,
     ) : CellExit
 
     /** `state(blocked)` or `task.ask` without an answer: a success path that needs the authority (§5.9). */

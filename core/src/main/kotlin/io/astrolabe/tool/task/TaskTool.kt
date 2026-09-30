@@ -82,6 +82,11 @@ public class TaskTool(
     private val packets: TaskPackets? = null,
     /** Current file versions, so a probe's pointers are shown current or stale when collected (§10.2, FX-41). */
     private val versions: (String) -> FileVersion? = { null },
+    /**
+     * D-344: why this task may not end with an answer now — the tree moved since the campaign's snapshot 0, or an
+     * action with effects ran — or `null` when it may. Absent outside the main line: such a cell never answers.
+     */
+    private val answerCheck: (() -> String?)? = null,
 ) : ToolExecutor {
     internal var beforeDispatch: () -> Unit = {}
     init {
@@ -99,6 +104,19 @@ public class TaskTool(
     public var pendingBlock: BlockedRequest? = null
         private set
 
+    private var answered: String? = null
+
+    /**
+     * The answer the model ended the task with (D-344), when the facts still hold at the turn's end: the same checks
+     * again, since a later call of the same turn may have changed the tree. `null` when there is none or it no
+     * longer stands.
+     */
+    public fun takeAnswer(): String? {
+        val text = answered ?: return null
+        answered = null
+        return text.takeIf { answerCheck?.invoke() == null }
+    }
+
     override suspend fun execute(call: ToolCall, context: TurnContext): ToolOutcome {
         require(call.family == ToolFamily.Task) { "not a task call: ${call.name}" }
         val args = (call.args as Args.Task).args
@@ -108,8 +126,21 @@ public class TaskTool(
             "propose" -> propose(args)
             "delegate" -> delegate(args)
             "collect" -> collect(args)
+            "answer" -> answer(args)
             else -> result("masked", "${call.name} is masked in this role")
         }
+    }
+
+    /**
+     * `answer(text)` (D-344): the model states that the request needs no change to the files and gives the answer.
+     * The harness checks the facts — the tree is the one the campaign opened on and nothing with effects ran — and
+     * refuses otherwise; the explicit statement is required, since stopping without changes may just be unfinished work.
+     */
+    private fun answer(args: TaskArgs): ToolOutcome {
+        val check = answerCheck ?: return result("denied", "task.answer ends a task of the main line; this cell cannot end with an answer")
+        check()?.let { why -> return result("denied", "an answer ends a task that changed nothing, and this one did: $why. Finish the work and propose completion instead.") }
+        answered = args.text!!.trim()
+        return result("answered", "answer recorded: the task ends with it and nothing is verified, since nothing changed")
     }
 
     private suspend fun ask(args: TaskArgs, context: TurnContext): ToolOutcome {
