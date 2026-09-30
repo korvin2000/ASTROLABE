@@ -81,7 +81,7 @@ class CadenceTest {
         repo.close()
     }
 
-    private val config get() = Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all, qualityGates = listOf(printing))
+    private val config get() = Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all, qualityGates = listOf(printing), defaults = alwaysPlan)
 
     private val plan = (1..7).joinToString(",", prefix = """{"increments":[""", postfix = "]}") { i ->
         val depends = if (i > 1) ""","depends_on":["I${i - 1}"]""" else ""

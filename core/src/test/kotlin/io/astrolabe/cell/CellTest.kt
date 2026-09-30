@@ -128,8 +128,9 @@ class CellTest {
         for (role in listOf(Roles.probe, Roles.plan, Roles.review)) {
             CellFixture(stateRoot.resolve(role.name)).use { f ->
                 val before = f.version("src/a.py")
-                val masked = if (role == Roles.probe) anchored("c2", "src/a.py", before, "    return 1", "    return 10")
-                    else runCmd("c2", "echo masked > src/forbidden.txt")
+                // Plan and probe run R-class commands; an edit is what their masks refuse.
+                val masked = if (role == Roles.review) runCmd("c2", "echo masked > src/forbidden.txt")
+                    else anchored("c2", "src/a.py", before, "    return 1", "    return 10")
                 f.run(ScriptedModel.of(
                     Scripted.Reply(listOf(read("c1", "src/a.py"))),
                     Scripted.Reply(listOf(masked)),

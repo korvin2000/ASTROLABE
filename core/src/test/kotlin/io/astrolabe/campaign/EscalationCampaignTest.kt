@@ -79,7 +79,7 @@ class EscalationCampaignTest {
 
     @Test
     fun `a stalled completion escalates once with its evidence and the second verified failure blocks the increment for good`() = runBlocking<Unit> {
-        val ctl = Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all), clock, idGen)
+        val ctl = Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all, defaults = alwaysPlan), clock, idGen)
         val replies = listOf<Scripted>(
             Scripted.Reply(listOf(say("planning"), call("p1", "task", """{"op":"propose","kind":"plan","proposal":$plan}"""))),
             Scripted.Reply(listOf(say("plan ready"))),

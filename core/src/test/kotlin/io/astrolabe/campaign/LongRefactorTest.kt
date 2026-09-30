@@ -151,7 +151,7 @@ class LongRefactorTest {
 
     @Test
     fun `a long refactor under context pressure continues the partial increment and drops nothing`() = runBlocking<Unit> {
-        val config = Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all + (small.id to small))
+        val config = Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all + (small.id to small), defaults = alwaysPlan)
         val events = Events(clock)
         val recorder = EventRecorder().also(events::subscribe)
         events.use { Controller(config, clock, idGen, events).open(repo.root, request, policy).use { c ->

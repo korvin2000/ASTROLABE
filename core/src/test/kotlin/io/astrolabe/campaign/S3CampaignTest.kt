@@ -3,6 +3,7 @@ package io.astrolabe.campaign
 import io.astrolabe.Config
 import io.astrolabe.Defaults
 import io.astrolabe.Flags
+import io.astrolabe.PlanCellPolicy
 import io.astrolabe.ShapePolicy
 import io.astrolabe.atlas.Atlas
 import io.astrolabe.budget.HeuristicEstimator
@@ -121,7 +122,7 @@ class S3CampaignTest {
     }
 
     /** S3 promoted (`S3.enabled`) and the writer runtime on (`flags.s3Writers`): both are needed (D-183). */
-    private val s3 = Config(profiles = FakeProfiles.all, defaults = Defaults(shapePolicy = ShapePolicy(s3Enabled = true)), flags = Flags(s3Writers = true))
+    private val s3 = Config(profiles = FakeProfiles.all, defaults = Defaults(shapePolicy = ShapePolicy(s3Enabled = true, planCell = PlanCellPolicy.Always)), flags = Flags(s3Writers = true))
 
     private fun controller(config: Config, lease: Duration = Duration.ofHours(1)) =
         Controller(config.copy(stateRoot = stateRoot.toString()), clock, idGen, leaseDuration = lease)
@@ -372,7 +373,7 @@ class S3CampaignTest {
     fun `S3 flag defaults off - a disjoint plan runs sequentially with the refusal logged`() = runBlocking<Unit> {
         assertFalse(Config().defaults.shapePolicy.s3Enabled, "S3.enabled ships off (§10.4)")
         assertFalse(Config().flags.s3Writers, "the writer runtime flag ships off")
-        sequential(Config(profiles = FakeProfiles.all), "S3 is not enabled")
+        sequential(Config(profiles = FakeProfiles.all, defaults = alwaysPlan), "S3 is not enabled")
     }
 
     @Test

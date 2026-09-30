@@ -136,6 +136,8 @@ public class Run(
     private val mcp: McpClient? = null,
     /** The generated tools active at this attempt's boundary (§12.2); `run(["tool:<name>", …])` resolves only against it. */
     private val tools: ToolSet = ToolSet.EMPTY,
+    /** The role this executor serves when that role runs R-class commands only (§3.4 probe, plan); `null` for the writing roles. */
+    private val readOnlyRole: String? = null,
 ) : ToolExecutor {
     internal var beforeDispatch: () -> Unit = {}
     init {
@@ -258,6 +260,10 @@ public class Run(
             return refused(args, Outcome.Denied, "denied: ${misconfigured.message}")
         }
         ceiling.allows(classification)?.let { return refused(args, Outcome.Denied, "denied by the capability ceiling: ${it.detail}") }
+        if (readOnlyRole != null && classification.effectClass != EffectClass.R) {
+            return refused(args, Outcome.Denied, "denied: the $readOnlyRole role runs R-class commands only; this command is ${classification.effectClass}-class " +
+                "(${classification.reasons.joinToString("; ")}); nothing was dispatched")
+        }
         val decision = Executors.require(config.executionMode)
         if (decision is ExecutionDecision.Refused) return refused(args, Outcome.Denied, "denied: ${decision.refusal.detail} (D-11)")
         if (classification.effectClass == EffectClass.D) {
