@@ -21,11 +21,12 @@ compiler.compile(increment)            contract slice + CON/ADR touching scope +
 cell.run()                             turns: look/edit/run/verify/state/task/kb; scheduler runs checks by trigger;
                                         register validated on each patch; gauge on every result; gates fire once each
 cell.terminate()                       done (acceptance green @ current stamp) | blocked | partial | replan | waiting
-scheduler.exit_gate()                  refuses "done" without current acceptance and required review for the increment
+scheduler.exit_gate()                  resolves "done" (D-337): complete · rework (red check, rejection, open step) · await a decision
 verifier.accept(result_packet)         status validated against receipts, never taken from the model's word
 (S3) integrator.integrate(result)      stale-result check → merge queue → combined-tree checks → publish
 controller.accept()                    ledger update; receipts stored; touched files → invalidation of dependents
 extractor.run(trace)                   low tier, post-cell: candidate notes → admission queue → curator lint
+controller.decide()                    await → pending completion + one acceptance decision (D-338/D-339); none ⇒ waiting_for_input
 controller.next()                      continue | review cell | ask user | finish campaign (full suite + campaign receipt)
 ```
 <!-- end-source-section: 3.6 -->
@@ -41,6 +42,7 @@ This is lifecycle pseudocode, not executable provider code. Calls below use the 
 campaign(request, repo, policy):
     C, W, S, KB = open_contract_workspace_store_and_kb(request, repo, policy)
     reconcile_pending_actions_and_workspace(C, W, S)       # before any new consequential action
+    settle_pending_completion_if_still_valid(C, G, S, W)  # D-340: accept commits, rework continues, none waits — no cell, no model call
     imp = impact_prescan(C, W)
     shape = select_shape(C, imp, plan=None)                 # S0–S2 until a plan exists
     G = plan_cell(C, W, S, KB) if shape >= S1 else G_single(C)
@@ -65,6 +67,8 @@ campaign(request, repo, policy):
             ver = scheduler.obtain_required_review_once(ver, inc, C)  # before closure; reuse current approval
         if shape == S3 and ver.acceptable:
             ver = integrator.integrate(res, ver)            # combined-state checks and required review
+        if ver.awaits_decision:                           # D-339: unverified work is done work waiting for an authority
+            ver = decide_once(store_pending_completion(res, ver), authority)   # accept | rework | none ⇒ waiting_for_input
         controller.commit_outcome_if_current(ver, C, G, S)  # checks contract/candidate/generation; one ledger owner
         extractor.enqueue_if_enabled(res, KB); telemetry.record(res, ver)
         dispatch_outcome(ver):                             # same increment on partial; no budget resets
@@ -89,7 +93,8 @@ cell(ctx, inc, budget):
             proposal = validate_role_output(out, ctx.role)  # probe/reviewer packets are not implementing STATE
             completion = scheduler.assess_role_completion(proposal, ctx, inc)
             if completion.accepted: return reconcile_and_persist_role_packet(ctx, completion)
-            record_completion_gaps(completion)
+            if completion.awaits_decision: return reconcile_and_persist_pending(ctx, completion)   # D-339: no more turns
+            record_completion_gaps(completion)                # a rejection's findings are pinned whole (D-341)
             if completion.cannot_progress: return reconcile_and_persist_incomplete(ctx, completion)
             continue
         ops = partition_by_effect(calls)                     # stable op ids; §5.4 conditions
@@ -108,6 +113,6 @@ cell(ctx, inc, budget):
     return persist_partial(ctx)
 ```
 
-`assess_role_completion` uses the implementing exit gate for implementers/writers, and the declared packet validator for plan/probe/review/QA/helper roles; it never lets a reviewer recursively demand a review of its own verdict. A completion proposal can request scheduler-owned required checks/review, but is accepted only with current evidence. The outer verification step reuses those results instead of invoking a second judge. All terminal branches reconcile/persist already-started actions; a missing/failed check becomes a specific gap or non-completed outcome, never an endless finalization loop. Boundary pre-compilation may run locally while final checks are pending ([§6.6](../context/continuity.md#sec-6-6)); publication remains contingent on successful verification.
+`assess_role_completion` uses the implementing exit gate for implementers/writers, and the declared packet validator for plan/probe/review/QA/helper roles; it never lets a reviewer recursively demand a review of its own verdict. A completion proposal can request scheduler-owned required checks/review, but is accepted only with current evidence. The outer verification step reuses those results instead of invoking a second judge. All terminal branches reconcile/persist already-started actions; a failed check becomes a specific gap, a missing or unverifiable one an acceptance decision (D-337–D-340), never an endless finalization loop and never a `blocked` or `failed` outcome by itself. Boundary pre-compilation may run locally while final checks are pending ([§6.6](../context/continuity.md#sec-6-6)); publication remains contingent on successful verification.
 <!-- end-source-section: 3.7 -->
 

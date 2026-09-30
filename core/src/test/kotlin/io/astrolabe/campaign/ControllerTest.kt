@@ -477,17 +477,18 @@ class ControllerTest {
     }
 
     @Test
-    fun `FX-13 - a required check that cannot run is an unavailable receipt and a blocked stop naming the runner`() = runTest {
+    fun `FX-13 (D-338) - a required check that cannot run is an unavailable receipt and a decision the campaign waits for`() = runTest {
         seedContract(Command(listOf("no-such-runner-xyz", "-q")))
         open().use { c ->
             val run = controller().runS0(c, model(Scripted.Reply(listOf(say("done")))))
-            val blocked = assertIs<CellExit.Blocked>(run.exit, run.state?.reason)
-            assertEquals(1, blocked.turns, "blocked at the first completion proposal, no endless gating")
-            assertTrue("CHK-accept-AC-1: cannot start no-such-runner-xyz" in blocked.request.reason, blocked.request.reason)
+            val completed = assertIs<CellExit.Completed>(run.exit, run.state?.reason)
+            assertEquals(1, completed.turns, "the cell ends at the first completion proposal, no endless gating")
+            assertEquals(io.astrolabe.verify.StopCode.AcceptanceDecision, completed.pending?.code)
+            assertTrue(completed.pending!!.gaps.single().contains("cannot start no-such-runner-xyz"), completed.pending.gaps.toString())
             val receipt = SqliteReceipts(c.store, clock).forCheck("CHK-accept-AC-1").single()
             assertEquals(Outcome.Unavailable, receipt.outcome)
-            assertEquals(listOf(receipt.receiptId), blocked.request.evidence)
-            assertEquals(CampaignOutcome.BlockedExternal, run.outcome, run.state?.reason)
+            assertEquals(CampaignOutcome.WaitingForInput, run.outcome, "never blocked for a check that cannot run (I1): ${run.state?.reason}")
+            assertEquals(io.astrolabe.verify.StopCode.AcceptanceDecision, run.state?.stopCode)
             assertEquals(RequirementStatus.Pending, c.campaigns.load(request.work, request.attempt)!!.ledger.entries.getValue("R1").status)
         }
     }

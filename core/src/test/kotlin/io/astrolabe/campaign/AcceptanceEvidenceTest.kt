@@ -106,7 +106,7 @@ class AcceptanceEvidenceTest {
             assertEquals(CampaignOutcome.Completed, result.outcome, result.state?.reason)
             assertTrue(reviewer.requests.any { it.criteria.any { text -> criterion in text } })
             assertEquals(RequirementStatus.Verified, c.state!!.ledger.entries.getValue("R1").status)
-            assertEquals("accepted", assertNotNull(result.finish).acceptance.single().status)
+            assertEquals("assessed" to "reviewed", assertNotNull(result.finish).acceptance.single().let { it.status to it.provenance })
         }
     }
 

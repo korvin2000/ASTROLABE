@@ -1,6 +1,8 @@
 package io.astrolabe.event
 
 import io.astrolabe.java.JavaAuthority
+import io.astrolabe.verify.AcceptanceDecision
+import io.astrolabe.verify.AcceptanceDecisionRequest
 import io.astrolabe.verify.ReviewRequest
 import io.astrolabe.verify.Verdict
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -21,6 +23,7 @@ public object Authorities {
         override suspend fun approve(request: DClassRequest): Decision = authority.approve(request).awaitRequired()
         override suspend fun resolve(proposal: AmendmentProposal): Resolution = authority.resolve(proposal).awaitRequired()
         override suspend fun review(request: ReviewRequest): Verdict? = authority.review(request).awaitNullable()
+        override suspend fun decide(request: AcceptanceDecisionRequest): AcceptanceDecision? = authority.decide(request).awaitNullable()
     }
 
     /** Waits without cancelling the host's future; an exceptional completion counts as "no answer". */

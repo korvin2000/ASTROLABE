@@ -190,6 +190,19 @@ import io.astrolabe.verify.RunnerCommands
 import io.astrolabe.verify.Scheduler
 import io.astrolabe.verify.ScopeGuard
 import io.astrolabe.verify.Verifier
+import io.astrolabe.verify.AcceptanceDecisionRequest
+import io.astrolabe.verify.DecisionItem
+import io.astrolabe.verify.DecisionKind
+import io.astrolabe.verify.DecisionRecord
+import io.astrolabe.verify.ObligationKind
+import io.astrolabe.verify.ObligationResult
+import io.astrolabe.verify.Obligations
+import io.astrolabe.verify.Resolution
+import io.astrolabe.verify.Resolver
+import io.astrolabe.verify.ResultStatus
+import io.astrolabe.verify.StopCode
+import io.astrolabe.event.Replies
+import io.astrolabe.event.ReplyValidity
 import io.astrolabe.workset.Workset
 import io.astrolabe.workspace.DirtyState
 import io.astrolabe.workspace.EnvFingerprint
@@ -336,7 +349,7 @@ public class OpenedCampaign internal constructor(
         get() {
             val current = state ?: return Disposition.Stop(CampaignOutcome.WaitingForInput, checkNotNull(refusal))
             val outcome = current.outcome ?: return null
-            return Disposition.Stop(outcome, current.reason ?: outcome.wire)
+            return Disposition.Stop(outcome, current.reason ?: outcome.wire, current.stopCode)
         }
 
     /** Applies [transition] and saves the result: the controller is the one writer of the campaign row (L9). */
@@ -690,6 +703,13 @@ public class Controller @JvmOverloads public constructor(
     private suspend fun runS1(c: OpenedCampaign, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?, maxCells: Int, packets: MutableList<ResultPacket>): S0Run {
         c.stop?.let { return S0Run(c.state, null, null, null) }
         c.refusal()?.let { return S0Run(c.advance(Transition.Stopped(stopOutcome(c), "nothing dispatched: $it")), null, null, null) }
+        // D-340: a completion waiting for a decision is settled first — no cell, no budget check, no model call.
+        var resumed: CompletionResult? = null
+        when (val pending = resumePending(c, authority)) {
+            null, Resumed.Continue -> Unit
+            is Resumed.Committed -> resumed = pending.result
+            is Resumed.Stopped -> return S0Run(pending.state, null, null, null)
+        }
         val pendingSplits = SqliteSplitRequests(c.store, idGen, clock).forPlanRole(c.ids.work).filter { split ->
             c.state?.graph?.increments?.any { it.id == split.split.increment && split.cell in it.cells && it.status !in setOf(IncrementStatus.Verified, IncrementStatus.Cancelled) } == true
         }
@@ -707,7 +727,7 @@ public class Controller @JvmOverloads public constructor(
             // §3.5 select_shape(contract, impact, plan): the S3 branch reads the admitted plan's records (D-183, P5.8.1).
             s3 = S3Intake.admit(c, writerEstimates(c, model), CAPABILITIES, events, idGen, clock).takeIf { it.units.isNotEmpty() }
         }
-        var last = S0Run(c.state, null, null, null)
+        var last = S0Run(c.state, null, resumed, null)
         var cells = 0
         val writerExits = ConcurrentHashMap<String, CellExit>()
         // §6.6 `[O]`: boundary pre-compilation only under the frozen `precompile` flag; off, nothing below runs.
@@ -749,7 +769,7 @@ public class Controller @JvmOverloads public constructor(
             }
             if (ready == null) {
                 // FX-42: verified work is never re-executed; its regression evidence is refreshed from current receipts.
-                refreshRegressions(c, scheduler, authority)
+                refreshRegressions(c, scheduler, authority)?.let { return last.copy(state = it) }
                 if (checkNotNull(c.state).ledger.unfinished().size < unverified.size || checkNotNull(c.state).graph.readyFrontier(c.contract, 1).isNotEmpty()) continue
                 return last.copy(state = stopOrFinish(c, "no ready increment with ${unverified.size} requirements unverified: an empty frontier never means completed"))
             }
@@ -766,7 +786,8 @@ public class Controller @JvmOverloads public constructor(
             val resume = resumeNote(c, ready, carry)
             val knowledge = knowledge(c, ready, Roles.implementing, model, touched = carry?.seeds.orEmpty().map { it.path }.toSet())
             val inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) }, notes = knowledge.notes, contractsIndex = knowledge.contractsIndex, skills = knowledge.skills, skillConflicts = knowledge.skillConflicts)
-            val pinned = listOfNotNull(resume, attempts.line(ready.id)) + recovery.lines(ready.id) + hostAnswers(c, ready)
+            val (reworkLines, reworkRecords) = reworkNotes(c, ready)
+            val pinned = listOfNotNull(resume, attempts.line(ready.id)) + recovery.lines(ready.id) + hostAnswers(c, ready) + reworkLines
             val compiler = Compiler(model.estimator, c.attempt.config)
             // §6.6: a pre-compiled [K] is served for cell_end(next_increment) only, on a full-fingerprint and coverage match.
             val take = precompile?.let { p ->
@@ -804,6 +825,7 @@ public class Controller @JvmOverloads public constructor(
             val cellId = ContextId(idGen.next("cell"))
             events?.emit(AgentEvent.Campaign.IncrementSelected(c.ids, ready.id))
             val dispatched = c.advance(Transition.Dispatched(ready.id, cellId))
+            spendReworks(c, cellId, reworkRecords)
             val increment = dispatched.graph.increments.first { it.id == ready.id }
             val register = carry?.register?.copy(cell = cellId, increment = increment.id, incrementTitle = increment.title)
             // The pre-compile job lives in this scope: joined at cell close, cancelled with the cell (§6.6).
@@ -815,7 +837,8 @@ public class Controller @JvmOverloads public constructor(
             }
             if (precompile != null) closed = cellId to precompiles.now()
             val exit = run.exit
-            routing.selected?.let { router.record(it, outcomeOf(exit)) }
+            // A completed cell's outcome is recorded once the verifier resolved it (A3).
+            if (exit !is CellExit.Completed) routing.selected?.let { router.record(it, outcomeOf(exit)) }
             if (exit == null) {
                 snapshot(c)
                 c.advance(Transition.Interrupted(checkNotNull(run.checkpoints.latest(cellId)) { "a cancelled cell settles its checkpoint" }))
@@ -829,15 +852,15 @@ public class Controller @JvmOverloads public constructor(
             val stampNow = c.stamper.report().candidateId
             // §8.7/§8.8: in S2+ a required increment review must approve before the increment closes; none owed ⇒ null.
             // A completion that can no longer publish (cancelled, lease lost) is archived below, never reviewed (D-170).
+            // D-343: an unavailable or declined increment review is a result like any other — unverified or rejected — never a block.
             val review = if (exit is CellExit.Completed && c.contract.shape >= Shape.S2 && c.refusal() == null) incrementReview(c, increment, exit, routing.selected?.tier, compiled, cellModel, authority, syntax, span) else null
-            if (review is ReviewOutcome.Unavailable) return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "required review of ${increment.id} unavailable: ${review.reason}")), exit, null, compiled)
             val completion = if (exit is CellExit.Completed) {
                 val returned = checkNotNull(c.state).graph.increments.first { it.id == increment.id }
-                if (review is ReviewOutcome.Declined) CompletionResult.Refused(listOf("required review: ${review.reason}"), 1, recoveryDirected = false)
-                else Verifier().accept(exit.packet.proposal(), c.contract, returned, exit.register, checkNotNull(c.state).ledger, stampNow, currencies(c, run.scheduler, stampNow), assessments = completionEvidence(c, returned).assessments, reviews = completionEvidence(c, returned).reviews + reviewItems(c.contract, returned, review), flags = completionEvidence(c, returned, exit.packet.flags.testIntegrity).flags)
+                verify(c, exit, returned, stampNow, currencies(c, run.scheduler, stampNow), review)
             } else {
                 null
             }
+            if (exit is CellExit.Completed) routing.selected?.let { router.record(it, outcomeOf(exit, completion)) }
             last = S0Run(c.state, exit, completion, compiled)
             val splits = SqliteSplitRequests(c.store, idGen, clock).forPlanRole(c.ids.work).filter { it.cell == cellId && it.split.increment == increment.id }
             if (splits.isNotEmpty() && exit !is CellExit.Completed && cells < maxCells && c.refusal() == null) {
@@ -848,15 +871,8 @@ public class Controller @JvmOverloads public constructor(
             }
             when (val disposition = Lifecycle.disposition(exit, completion)) {
                 is Disposition.Close -> {
-                    c.refusal()?.let { reason ->
-                        c.journal.append(JournalEvent(idGen.next("ev"), run.ids, exit.turns, JournalKind.Reconcile, refs = disposition.accepted.receiptIds, text = "late completion of ${increment.id} archived; publication refused: $reason", at = clock.instant()))
-                        return last.copy(state = c.advance(Transition.Stopped(stopOutcome(c), "late completion archived; publication refused: $reason")))
-                    }
-                    c.advance(Transition.Committed(disposition.accepted, stampNow))
-                    events?.emit(AgentEvent.Campaign.IncrementClosed(c.ids, increment.id, "verified"))
-                    // §7.3 cadence: the full suite every K verified increments; a red result is a regression on record.
-                    val verified = checkNotNull(c.state).graph.increments.count { it.status == IncrementStatus.Verified }
-                    if (verified % c.attempt.config.defaults.fullSuiteCadence == 0 && checkNotNull(c.state).ledger.unfinished().isNotEmpty()) fullSuite(c, "cadence after $verified verified increments")
+                    commit(c, run.ids, exit.turns, increment, disposition.accepted, stampNow)?.let { return last.copy(state = it) }
+                    cadence(c)
                 }
                 // S1: a partial continues the same increment from its carry-forward; the cell cap bounds it (D-70).
                 // §11.3: a refused or stalled completion is a verified failure of the increment's attempt.
@@ -873,10 +889,33 @@ public class Controller @JvmOverloads public constructor(
                     }
                     recovery.alternative(run.ids, attempts.allowance(c.ids.work, increment.id, contract.budget.attempts), exit.register, exit.packet.receipts, contract.version, hypothesis)
                 }
-                is Disposition.Stop -> return last.copy(state = c.advance(Transition.Stopped(disposition.outcome, disposition.reason)))
+                is Disposition.Stop -> {
+                    if (completion !is CompletionResult.Pending) return last.copy(state = c.advance(Transition.Stopped(disposition.outcome, disposition.reason, disposition.code)))
+                    when (val settled = settle(c, run.ids, increment, exit as CellExit.Completed, completion, authority)) {
+                        is Settled.Commit -> {
+                            val returned = checkNotNull(c.state).graph.increments.first { it.id == increment.id }
+                            commit(c, run.ids, exit.turns, increment, Verifier().commit(completion.proposal, c.contract, returned, exit.packet.ids.context, checkNotNull(c.state).ledger, settled.resolved), stampNow)?.let {
+                                closePending(c, run.ids, settled.pending, PendingStatus.Void, "publication refused")
+                                return last.copy(state = it)
+                            }
+                            closePending(c, run.ids, settled.pending, PendingStatus.Applied, settled.why)
+                            cadence(c)
+                        }
+                        // D-340: the loop's next cell continues the increment with the decider's text pinned.
+                        is Settled.Rework -> closePending(c, run.ids, settled.pending, PendingStatus.Void, "rework requested by ${settled.record.decision.by}")
+                        is Settled.Wait -> return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, settled.reason, settled.code)))
+                        is Settled.Void -> closePending(c, run.ids, settled.pending, PendingStatus.Void, settled.reason)
+                    }
+                }
             }
             last = last.copy(state = c.state)
         }
+    }
+
+    /** §7.3 cadence: the full suite every K verified increments; a red result is a regression on record. */
+    private suspend fun cadence(c: OpenedCampaign) {
+        val verified = checkNotNull(c.state).graph.increments.count { it.status == IncrementStatus.Verified }
+        if (verified % c.attempt.config.defaults.fullSuiteCadence == 0 && checkNotNull(c.state).ledger.unfinished().isNotEmpty()) fullSuite(c, "cadence after $verified verified increments")
     }
 
     /**
@@ -950,27 +989,29 @@ public class Controller @JvmOverloads public constructor(
     /**
      * Regression obligations (§4.2, FX-42): a verified increment whose evidence no longer holds at the current stamp is
      * re-accepted from the receipts current now — never re-executed. Its green `run:` acceptances are regression
-     * obligations the harness re-runs at campaign end (§4.1); one still without current receipts stays unfinished.
+     * obligations the harness re-runs at campaign end (§4.1); one still without current receipts stays unfinished. A
+     * re-acceptance that needs a decision waits for one (D-343); the stop state is returned when it does.
      */
-    private suspend fun refreshRegressions(c: OpenedCampaign, scheduler: Scheduler, authority: Authority) {
+    private suspend fun refreshRegressions(c: OpenedCampaign, scheduler: Scheduler, authority: Authority): CampaignState? {
         for (increment in checkNotNull(c.state).graph.increments.filter { it.status == IncrementStatus.Verified }) {
             val assessed = completionEvidence(c, increment)
-            if (increment.accept.any { id -> (c.contract.acceptance(id) is Acceptance.Check && assessed.assessments.none { it.acceptanceId == id }) ||
-                    (c.contract.acceptance(id) is Acceptance.Review && id !in assessed.reviews) }) {
+            if (increment.accept.any { id -> (c.contract.acceptance(id) is Acceptance.Check || c.contract.acceptance(id) is Acceptance.Review) &&
+                    id !in assessed.verdicts && id !in assessed.unavailable }) {
                 hostAssessment(c, increment, authority)
             }
         }
-        reaccept(c, scheduler)
+        // Current receipts first; what still needs a decision is asked only after the regression checks re-ran.
+        reaccept(c, scheduler, authority, settle = false)
         val state = checkNotNull(c.state)
         val stale = stale(c)
         val runs = c.contract.acceptance.filterIsInstance<Acceptance.Run>().map { it.id }.toSet()
         val obligations = state.graph.increments.filter { it.status == IncrementStatus.Verified && it.requirementIds.any { r -> r in stale } }
             .flatMap { it.accept }.filter { it in runs }.distinct()
-        if (obligations.isEmpty()) return
+        if (obligations.isEmpty()) return reaccept(c, scheduler, authority)
         val ids = c.ids.copy(context = ContextId(idGen.next("finish")))
         val outcome = harnessVerify(c, ids, "regression", """{"what":"acceptance","ids":[${obligations.joinToString(",") { "\"$it\"" }}]}""")
         c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, text = "regression obligations re-run (campaign end): ${obligations.joinToString(", ")} · ${outcome.body.lineSequence().joinToString(" ")}", at = clock.instant()))
-        reaccept(c, scheduler)
+        return reaccept(c, scheduler, authority)
     }
 
     /**
@@ -982,16 +1023,46 @@ public class Controller @JvmOverloads public constructor(
         return state.ledger.unfinished().toSet() + state.graph.ledger(c.contract, c.stamper.report().candidateId).unfinished()
     }
 
-    private fun reaccept(c: OpenedCampaign, scheduler: Scheduler) {
+    /** Re-accepts stale verified increments from current receipts; with [settle], one that needs a decision asks for it. */
+    private suspend fun reaccept(c: OpenedCampaign, scheduler: Scheduler, authority: Authority, settle: Boolean = true): CampaignState? {
         val report = c.stamper.report()
         val state = checkNotNull(c.state)
         val stale = stale(c)
         for (increment in state.graph.increments.filter { it.status == IncrementStatus.Verified && it.requirementIds.any { r -> r in stale } }) {
             val cell = increment.cells.lastOrNull() ?: continue
+            val ids = c.ids.copy(context = cell)
             val proposal = CompletionProposal(increment.id, PacketStatus.Done.wire, c.contract.version, report.candidateId, report.candidateId, null, report.env.envId)
-            val result = Verifier().accept(proposal, c.contract, increment, Register.empty(cell, increment.id, increment.title), checkNotNull(c.state).ledger, report.candidateId, currencies(c, scheduler, report.candidateId), assessments = completionEvidence(c, increment).assessments, reviews = completionEvidence(c, increment).reviews)
-            if (result is CompletionResult.Accepted) c.advance(Transition.Committed(result, report.candidateId))
+            val evidence = completionEvidence(c, increment)
+            // No cell reworks a verified increment (FX-42): a standing rejection goes to the authority at once.
+            val result = Verifier().accept(proposal, c.contract, increment, Register.empty(cell, increment.id, increment.title), checkNotNull(c.state).ledger, report.candidateId,
+                currencies(c, scheduler, report.candidateId), evidence.verdicts, evidence.unavailable, decision = evidence.decision, reworkSpent = true)
+            when (result) {
+                is CompletionResult.Accepted -> c.advance(Transition.Committed(result, report.candidateId))
+                is CompletionResult.Pending -> {
+                    if (!settle) continue
+                    val record = PendingCompletion(
+                        idGen.next("pending"), c.ids.work, c.ids.attempt, increment.id, cell, proposal.contractVersion, proposal.baseStamp, proposal.resultingStamp,
+                        null, proposal.envId, null, emptyList(), result.resolved.results, result.resolved.other, result.resolved.gaps, result.code,
+                        result.resolved.results.mapNotNull { it.evidenceRef }.distinct(), null, idGen.next("decide"),
+                    )
+                    Acceptances(c.store, clock).save(ids, record)
+                    when (val settled = decide(c, ids, record, authority)) {
+                        is Settled.Commit -> {
+                            c.advance(Transition.Committed(Verifier().commit(proposal, c.contract, increment, cell, checkNotNull(c.state).ledger, settled.resolved), report.candidateId))
+                            closePending(c, ids, record, PendingStatus.Applied, settled.why)
+                        }
+                        is Settled.Rework -> {
+                            closePending(c, ids, record, PendingStatus.Void, "rework requested by ${settled.record.decision.by}")
+                            return c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, "rework of verified ${increment.id} requested by ${settled.record.decision.by}: ${settled.record.decision.reason} — amend the contract to reopen it"))
+                        }
+                        is Settled.Wait -> return c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, settled.reason, settled.code))
+                        is Settled.Void -> closePending(c, ids, record, PendingStatus.Void, settled.reason)
+                    }
+                }
+                is CompletionResult.Refused, is CompletionResult.NotCompleted -> Unit
+            }
         }
+        return null
     }
 
     /**
@@ -1139,7 +1210,7 @@ public class Controller @JvmOverloads public constructor(
         extract(c, packets)
         val receipt = FinishReceipts.build(c, packets, currencies(c, scheduler, c.stamper.report().candidateId), receipts::get)
         val (ref, _) = FinishReceipts.export(c, receipt)
-        events?.emit(AgentEvent.Campaign.Finished(c.ids, outcome.wire, ref))
+        events?.emit(AgentEvent.Campaign.Finished(c.ids, outcome.wire, ref, stopCode = result.state?.stopCode?.wire))
         return result.copy(finish = receipt)
     }
 
@@ -1189,20 +1260,26 @@ public class Controller @JvmOverloads public constructor(
         return if (fresh.isEmpty()) register else register.copy(open = register.open + fresh)
     }
 
-    private suspend fun runS0(campaign: OpenedCampaign, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?): S0Run {
+    private suspend fun runS0(campaign: OpenedCampaign, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?, reworks: Int = 0): S0Run {
         val c = campaign
         c.stop?.let { return S0Run(c.state, null, null, null) }
         // Every later use reads the attempt's frozen configuration, never the controller's live one (invariant 12).
         val config = c.attempt.config
         c.refusal()?.let { return S0Run(c.advance(Transition.Stopped(stopOutcome(c), "nothing dispatched: $it")), null, null, null) }
+        // D-340: a completion waiting for a decision is settled first — no cell, no budget check, no model call.
+        when (val resumed = resumePending(c, authority)) {
+            null, Resumed.Continue -> Unit
+            is Resumed.Committed -> return S0Run(stopOrFinish(c, "requirements remain unverified after ${resumed.result.incrementId}", scheduler(c), authority = authority), null, resumed.result, null)
+            is Resumed.Stopped -> return S0Run(resumed.state, null, null, null)
+        }
         reassessBlocked(c, authority)
         val opened = checkNotNull(c.state)
         check(opened.phase == CampaignPhase.Running && opened.running == null) { "runS0 needs a reconciled campaign with no running cell; it is ${opened.phase}" }
         val contract = c.contract
         val ready = opened.graph.readyFrontier(contract, 1).firstOrNull()
             ?: run {
-                val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = candidates(c), retryCandidates = c.store.layout.candidates)
-                refreshRegressions(c, scheduler, authority)
+                val scheduler = scheduler(c)
+                refreshRegressions(c, scheduler, authority)?.let { return S0Run(it, null, null, null) }
                 return S0Run(stopOrFinish(c, "no ready increment: an empty frontier never means completed", scheduler, authority = authority), null, null, null)
             }
         val role = Roles.implementing
@@ -1227,15 +1304,17 @@ public class Controller @JvmOverloads public constructor(
 
         val cellId = ContextId(idGen.next("cell"))
         events?.emit(AgentEvent.Campaign.IncrementSelected(c.ids, ready.id))
+        val (reworkLines, reworkRecords) = reworkNotes(c, ready)
         val dispatched = c.advance(Transition.Dispatched(ready.id, cellId))
+        spendReworks(c, cellId, reworkRecords)
         val increment = dispatched.graph.increments.first { it.id == ready.id }
         val register = carry?.register?.copy(cell = cellId, increment = increment.id, incrementTitle = increment.title)
-        val run = runCell(c, cellId, increment, Roles.implementing, cellModel, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = listOfNotNull(resume) + hostAnswers(c, ready), inputs = inputs)
-        routing.selected?.let { router.record(it, outcomeOf(run.exit)) }
+        val run = runCell(c, cellId, increment, Roles.implementing, cellModel, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = listOfNotNull(resume) + hostAnswers(c, ready) + reworkLines, inputs = inputs)
         val ids = run.ids
         val scheduler = run.scheduler
         val exit = run.exit
         if (exit == null) {
+            routing.selected?.let { router.record(it, outcomeOf(null)) }
             snapshot(c)
             val checkpoint = checkNotNull(run.checkpoints.latest(cellId)) { "a cancelled cell settles its checkpoint" }
             c.advance(Transition.Interrupted(checkpoint))
@@ -1244,33 +1323,277 @@ public class Controller @JvmOverloads public constructor(
         // The tree after the cell is the base the next open reconciles against: only moves after this are external.
         snapshot(c)
         c.advance(Transition.Returned(exit))
-        refreshPrescan(c, ids, exit)?.let { return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, it)), exit, null, compiled) }
+        refreshPrescan(c, ids, exit)?.let {
+            routing.selected?.let { selected -> router.record(selected, outcomeOf(exit)) }
+            return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, it)), exit, null, compiled)
+        }
 
         val stampNow = c.stamper.report().candidateId
         val completion = if (exit is CellExit.Completed) {
-            val current = c.contract
             val returned = checkNotNull(c.state).graph.increments.first { it.id == increment.id }
-            Verifier().accept(exit.packet.proposal(), current, returned, exit.register, checkNotNull(c.state).ledger, stampNow, currencies(c, scheduler, stampNow), assessments = completionEvidence(c, returned).assessments, reviews = completionEvidence(c, returned).reviews, flags = completionEvidence(c, returned, exit.packet.flags.testIntegrity).flags)
+            verify(c, exit, returned, stampNow, currencies(c, scheduler, stampNow))
         } else {
             null
         }
+        // The router learns the verified outcome, never the cell's own word (A3): an unverified completion is not an acceptance.
+        routing.selected?.let { router.record(it, outcomeOf(exit, completion)) }
         val state = when (val disposition = Lifecycle.disposition(exit, completion)) {
-            is Disposition.Close -> {
-                // §3.7 publication: a completion that arrives after cancellation or lease loss is archived, never committed.
-                c.refusal()?.let { reason ->
-                    c.journal.append(JournalEvent(idGen.next("ev"), ids, exit.turns, JournalKind.Reconcile, refs = disposition.accepted.receiptIds, text = "late completion of ${increment.id} archived; publication refused: $reason", at = clock.instant()))
-                    return S0Run(c.advance(Transition.Stopped(stopOutcome(c), "late completion archived; publication refused: $reason")), exit, completion, compiled)
-                }
-                c.advance(Transition.Committed(disposition.accepted, stampNow))
-                events?.emit(AgentEvent.Campaign.IncrementClosed(c.ids, increment.id, "verified"))
-                stopOrFinish(c, "requirements remain unverified after ${increment.id}", scheduler, authority = authority)
-            }
-            // S0 has no continuation cell: the fallback is the honest outcome (D-64).
+            is Disposition.Close -> commit(c, ids, exit.turns, increment, disposition.accepted, stampNow)
+                ?: stopOrFinish(c, "requirements remain unverified after ${increment.id}", scheduler, authority = authority)
+            // S0 has no continuation cell of its own: the fallback is the honest outcome (D-64).
             is Disposition.Continue -> c.advance(Transition.Stopped(disposition.fallback, disposition.reason))
-            is Disposition.Stop -> c.advance(Transition.Stopped(disposition.outcome, disposition.reason))
+            is Disposition.Stop -> if (completion is CompletionResult.Pending) {
+                when (val settled = settle(c, ids, increment, exit as CellExit.Completed, completion, authority)) {
+                    is Settled.Commit -> commit(c, ids, exit.turns, increment, Verifier().commit(completion.proposal, c.contract, checkNotNull(c.state).graph.increments.first { it.id == increment.id }, exit.packet.ids.context, checkNotNull(c.state).ledger, settled.resolved), stampNow)
+                        ?.also { closePending(c, ids, settled.pending, PendingStatus.Void, "publication refused") }
+                        ?: run {
+                            closePending(c, ids, settled.pending, PendingStatus.Applied, settled.why)
+                            stopOrFinish(c, "requirements remain unverified after ${increment.id}", scheduler, authority = authority)
+                        }
+                    // D-340: a `rework` answer runs one continuation cell with the decider's text pinned.
+                    is Settled.Rework -> {
+                        closePending(c, ids, settled.pending, PendingStatus.Void, "rework requested by ${settled.record.decision.by}")
+                        if (reworks < MAX_REWORKS_PER_RUN) return runS0(c, model, authority, syntax, span, reworks + 1)
+                        c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, "rework requested again (${settled.record.decision.reason}); resume to continue"))
+                    }
+                    is Settled.Wait -> c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, settled.reason, settled.code))
+                    is Settled.Void -> {
+                        closePending(c, ids, settled.pending, PendingStatus.Void, settled.reason)
+                        if (reworks < MAX_REWORKS_PER_RUN) return runS0(c, model, authority, syntax, span, reworks + 1)
+                        c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, "${settled.reason}; resume to continue"))
+                    }
+                }
+            } else c.advance(Transition.Stopped(disposition.outcome, disposition.reason, disposition.code))
         }
         return S0Run(state, exit, completion, compiled)
     }
+
+    /**
+     * The verifier over a completed cell's proposal (§8.7, D-337): current receipts, the reviewers' results at this
+     * candidate, the increment review [review] owes (S2+), the current decision and whether a rework round is spent —
+     * the cell's own pending marker says so for a rejection that stood after its round (D-341).
+     */
+    private fun verify(c: OpenedCampaign, exit: CellExit.Completed, increment: Increment, stampNow: CandidateId, currencies: Map<String, Currency>, review: ReviewOutcome? = null): CompletionResult {
+        val evidence = completionEvidence(c, increment, exit.packet.flags.testIntegrity)
+        val reviewed = withIncrementReview(c.contract, increment, review, evidence, stampNow)
+        return Verifier().accept(
+            exit.packet.proposal(), c.contract, increment, exit.register, checkNotNull(c.state).ledger, stampNow, currencies,
+            reviewed.verdicts, reviewed.unavailable, evidence.flags, decision = evidence.decision,
+            // The cell deferred only past its rework round, or with nothing to rework: the same rule, the same answer.
+            reworkSpent = evidence.reworkSpent || exit.pending != null, extra = reviewed.extra,
+        )
+    }
+
+    /** The increment review an S2+ campaign obtained (§8.8): the verdict of its `review:` items, or its own obligation when it has none. */
+    private class Reviewed(val verdicts: Map<String, io.astrolabe.verify.Verdict>, val unavailable: Map<String, String>, val extra: List<ObligationResult>)
+
+    private fun withIncrementReview(contract: Contract, increment: Increment, review: ReviewOutcome?, evidence: io.astrolabe.cell.CompletionEvidence, stampNow: CandidateId): Reviewed {
+        if (review == null) return Reviewed(evidence.verdicts, evidence.unavailable, emptyList())
+        val verdict = review.record.verdict?.takeIf { review.record.unavailable == null }
+        val why = (review as? ReviewOutcome.Unavailable)?.reason ?: review.record.unavailable
+        val items = increment.accept.filter { contract.acceptance(it) is Acceptance.Review }
+        if (items.isEmpty()) {
+            val result = io.astrolabe.verify.Obligations.verdict("review:${increment.id}", io.astrolabe.verify.ObligationKind.Review, "increment review (${review.record.path.joinToString(" → ").ifEmpty { "owed" }})", verdict, contract.version, stampNow, why)
+            return Reviewed(evidence.verdicts, evidence.unavailable, listOf(result))
+        }
+        return if (verdict != null) Reviewed(evidence.verdicts + items.associateWith { verdict }, evidence.unavailable - items.toSet(), emptyList())
+        else Reviewed(evidence.verdicts - items.toSet(), evidence.unavailable + items.associateWith { why ?: "no increment review verdict" }, emptyList())
+    }
+
+    /** Commits an accepted completion while publication is authorized (§3.7); the stop state when it is not. */
+    private fun commit(c: OpenedCampaign, ids: Identities, turns: Int?, increment: Increment, accepted: CompletionResult.Accepted, stampNow: CandidateId): CampaignState? {
+        // §3.7 publication: a completion that arrives after cancellation or lease loss is archived, never committed.
+        c.refusal()?.let { reason ->
+            c.journal.append(JournalEvent(idGen.next("ev"), ids, turns, JournalKind.Reconcile, refs = accepted.receiptIds, text = "late completion of ${increment.id} archived; publication refused: $reason", at = clock.instant()))
+            return c.advance(Transition.Stopped(stopOutcome(c), "late completion archived; publication refused: $reason"))
+        }
+        c.advance(Transition.Committed(accepted, stampNow))
+        // I7: an increment accepted on a decider's word is `accepted`, never `verified`.
+        events?.emit(AgentEvent.Campaign.IncrementClosed(c.ids, increment.id, if (accepted.verified) "verified" else "accepted"))
+        return null
+    }
+
+    /** What an acceptance decision settled for a pending completion (D-339, D-340). */
+    private sealed interface Settled {
+        val pending: PendingCompletion
+
+        class Commit(override val pending: PendingCompletion, val resolved: io.astrolabe.verify.Resolved, val why: String) : Settled
+        class Rework(override val pending: PendingCompletion, val record: DecisionRecord) : Settled
+        class Wait(override val pending: PendingCompletion, val reason: String, val code: StopCode) : Settled
+
+        /** The completion no longer speaks for the tree or contract: the work continues in a cell. */
+        class Void(override val pending: PendingCompletion, val reason: String) : Settled
+    }
+
+    /**
+     * D-339: records a pending completion of [increment] durably before anything is asked — so a stop at any point can
+     * resume it — then settles it with the authority's decision.
+     */
+    private suspend fun settle(c: OpenedCampaign, ids: Identities, increment: Increment, exit: CellExit.Completed, pending: CompletionResult.Pending, authority: Authority): Settled {
+        val proposal = pending.proposal
+        val record = PendingCompletion(
+            idGen.next("pending"), c.ids.work, c.ids.attempt, increment.id, exit.packet.ids.context, proposal.contractVersion,
+            proposal.baseStamp, proposal.resultingStamp, proposal.patchHash, proposal.envId, exit.register.version,
+            exit.packet.flags.testIntegrity.map { it.line }, pending.resolved.results, pending.resolved.other, pending.resolved.gaps, pending.code,
+            pending.resolved.results.mapNotNull { it.evidenceRef }.distinct(), exit.text.take(MAX_SUMMARY_CHARS), idGen.next("decide"),
+        )
+        Acceptances(c.store, clock).save(ids, record)
+        c.journal.append(JournalEvent(idGen.next("ev"), ids, exit.turns, JournalKind.Boundary, refs = record.evidence,
+            text = "completion of ${increment.id} awaits ${pending.code.wire} (${record.id}): ${pending.missing.joinToString("; ")}", at = clock.instant()))
+        return decide(c, ids, record, authority)
+    }
+
+    /**
+     * D-340: the stored results of [pending] resolved again with a decision — a stored one that still speaks for its
+     * candidate, else the authority's answer to one request, validated before use. Asking costs no model call.
+     */
+    private suspend fun decide(c: OpenedCampaign, ids: Identities, pending: PendingCompletion, authority: Authority): Settled {
+        val acceptances = Acceptances(c.store, clock)
+        val waiting = pending.resolve(null)
+        val decision = acceptances.current(c.ids.work, c.ids.attempt, pending.incrementId, pending.resultingStamp, pending.contractVersion)
+            ?: ask(c, ids, pending, waiting, authority)
+        val resolved = pending.resolve(decision)
+        // The authority may take its time: a decision applies only to the tree and contract it was asked about.
+        val now = c.stamper.report().candidateId
+        if (now != pending.resultingStamp || c.contract.version != pending.contractVersion) {
+            return Settled.Void(pending, "the tree or contract moved while the decision was asked (@${now.hash8}, v${c.contract.version})")
+        }
+        return when (resolved.resolution) {
+            Resolution.Complete -> Settled.Commit(pending, resolved, decision?.let { "${it.decision.kind.name.lowercase()} by ${it.decision.by}: ${it.decision.reason}" } ?: "all obligations settled")
+            Resolution.Rework -> Settled.Rework(pending, checkNotNull(decision?.takeIf { it.decision.kind == DecisionKind.Rework }) { "a pending completion reworks only on a rework decision" })
+            Resolution.Await -> Settled.Wait(pending, Lifecycle.pendingReason(CompletionResult.Pending(pending.proposal(), checkNotNull(resolved.code), resolved)), checkNotNull(resolved.code))
+        }
+    }
+
+    /** One acceptance-decision request for [pending] (D-338); an answer for another request, revision or candidate is no answer. */
+    private suspend fun ask(c: OpenedCampaign, ids: Identities, pending: PendingCompletion, waiting: io.astrolabe.verify.Resolved, authority: Authority): DecisionRecord? {
+        val items = waiting.undecided.map { DecisionItem(it.obligation, it.kind, it.status, it.detail, it.findings, it.by) }
+        if (items.isEmpty()) return null
+        val diff = runCatching { campaignReview(c, authority).diffBlob(c.s0.stampId, pending.resultingStamp).first.hex }.getOrNull()
+        val request = AcceptanceDecisionRequest(
+            pending.requestId, pending.contractVersion, c.ids.withCandidate(pending.resultingStamp).withContext(pending.cell), pending.incrementId,
+            pending.resultingStamp, waiting.code ?: pending.code, items, diff, pending.evidence, pending.summary,
+        )
+        val reply = authority.decide(request)
+        val invalid = when {
+            reply == null -> "no decision available"
+            reply.requestId != request.id -> "the decision answers ${reply.requestId}, not ${request.id}"
+            Replies.check(reply, c.contract.version) != ReplyValidity.Current -> "the decision is for contract v${reply.contractRevision}, not v${c.contract.version}"
+            reply.candidate != pending.resultingStamp -> "the decision is about @${reply.candidate.hash8}, not @${pending.resultingStamp.hash8}"
+            else -> null
+        }
+        if (invalid != null) {
+            c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, refs = listOf(request.id), text = "acceptance decision ${request.id}: $invalid · the campaign waits", at = clock.instant()))
+            return null
+        }
+        val record = DecisionRecord(idGen.next("decision"), pending.incrementId, checkNotNull(reply), items.map { it.obligation })
+        Acceptances(c.store, clock).record(ids, record)
+        c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, refs = listOf(request.id),
+            text = "acceptance decision ${request.id}: ${reply.kind.name.lowercase()} by ${reply.by} (${reply.decider.name.lowercase()}): ${reply.reason}", at = clock.instant()))
+        return record
+    }
+
+    private fun closePending(c: OpenedCampaign, ids: Identities, pending: PendingCompletion, status: PendingStatus, reason: String) {
+        Acceptances(c.store, clock).close(ids, pending, status, reason)
+        c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, text = "pending completion ${pending.id} ${status.name.lowercase()}: $reason", at = clock.instant()))
+    }
+
+    /** What resuming a pending completion did (D-340). */
+    private sealed interface Resumed {
+        /** Nothing to apply now: the normal path runs (a cell, or final acceptance). */
+        data object Continue : Resumed
+
+        class Committed(val result: CompletionResult.Accepted) : Resumed
+
+        class Stopped(val state: CampaignState) : Resumed
+    }
+
+    /**
+     * D-340 resume, one path for S0 and S1: after open reconciled the effects and before any cell or budget check. An
+     * open pending completion that still speaks for the tree, the contract, the environment and the increment's latest
+     * cell is settled with a decision — `accept` commits with no model call, `rework` lets the continuation cell run,
+     * none stops again. One that no longer does is void and the work continues in a cell. `null`: nothing pending.
+     */
+    private suspend fun resumePending(c: OpenedCampaign, authority: Authority): Resumed? {
+        val pending = Acceptances(c.store, clock).open(c.ids.work, c.ids.attempt) ?: return null
+        val ids = c.ids.copy(context = pending.cell)
+        val state = checkNotNull(c.state)
+        val report = c.stamper.report()
+        val increment = pending.incrementId?.let { id -> state.graph.increments.firstOrNull { it.id == id } }
+        val applied = increment?.status == IncrementStatus.Verified && state.graph.evidence[increment.id]?.let { it.stamp == pending.resultingStamp && it.contractVersion == pending.contractVersion } == true
+        val void = when {
+            applied -> null
+            pending.contractVersion != c.contract.version -> "the contract moved to v${c.contract.version}"
+            pending.resultingStamp != report.candidateId -> "the tree moved to @${report.candidateId.hash8}"
+            pending.envId != report.env.envId -> "the environment changed"
+            pending.incrementId == null -> null
+            increment == null -> "${pending.incrementId} is no longer in the graph"
+            increment.status != IncrementStatus.InProgress && increment.status != IncrementStatus.Verified -> "${increment.id} is ${increment.status}"
+            increment.cells.lastOrNull() != pending.cell || state.cells.firstOrNull { it.cell == pending.cell }?.status != CellStatus.Completed -> "a later cell superseded ${pending.cell?.value}"
+            else -> null
+        }
+        if (applied) {
+            // A stop between the commit and closing the record: the decision was applied once already.
+            closePending(c, ids, pending, PendingStatus.Applied, "already committed at @${pending.resultingStamp.hash8}")
+            return Resumed.Continue
+        }
+        if (void != null) {
+            closePending(c, ids, pending, PendingStatus.Void, "$void; the work continues in a cell")
+            return null
+        }
+        // The campaign gate's own pending completion is settled where final acceptance runs.
+        if (increment == null) return Resumed.Continue
+        return when (val settled = decide(c, ids, pending, authority)) {
+            is Settled.Commit -> {
+                val accepted = Verifier().commit(pending.proposal(), c.contract, increment, pending.cell, state.ledger, settled.resolved)
+                commit(c, ids, null, increment, accepted, pending.resultingStamp)?.let {
+                    closePending(c, ids, pending, PendingStatus.Void, "publication refused")
+                    return Resumed.Stopped(it)
+                }
+                closePending(c, ids, pending, PendingStatus.Applied, settled.why)
+                Resumed.Committed(accepted)
+            }
+            is Settled.Rework -> {
+                closePending(c, ids, pending, PendingStatus.Void, "rework requested by ${settled.record.decision.by}")
+                Resumed.Continue
+            }
+            is Settled.Wait -> Resumed.Stopped(c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, settled.reason, settled.code)))
+            is Settled.Void -> {
+                closePending(c, ids, pending, PendingStatus.Void, "${settled.reason}; the work continues in a cell")
+                null
+            }
+        }
+    }
+
+    /**
+     * D-340/D-341: the unspent `rework` decisions about [increment] as pinned blocks for its continuation cell — who
+     * asked, what to change, and the reviewer findings the decision answered — with the records to spend on dispatch.
+     */
+    private fun reworkNotes(c: OpenedCampaign, increment: Increment): Pair<List<String>, List<DecisionRecord>> {
+        val acceptances = Acceptances(c.store, clock)
+        val records = acceptances.decisions(c.ids.work, c.ids.attempt).filter { !it.spent && it.incrementId == increment.id && it.decision.kind == DecisionKind.Rework }
+        if (records.isEmpty()) return emptyList<String>() to emptyList()
+        val pendings = acceptances.pending(c.ids.work, c.ids.attempt).associateBy { it.requestId }
+        val lines = records.map { r ->
+            buildString {
+                append("rework requested by ").append(r.decision.by).append(": ").append(r.decision.reason)
+                pendings[r.decision.requestId]?.results?.filter { it.reviewFailure }?.forEach { rejection ->
+                    append("\nreview of ").append(rejection.obligation).append(" by ").append(rejection.by ?: "the reviewer").append(" found:")
+                    rejection.findings.forEach { f -> append("\n- ").append(f.severity.name.lowercase()).append(' ').append(f.location).append(": ").append(f.issue) }
+                }
+            }
+        }
+        return lines to records
+    }
+
+    /** A `rework` decision acts on one continuation run (D-340): spent once its cell is dispatched. */
+    private fun spendReworks(c: OpenedCampaign, cell: ContextId, records: List<DecisionRecord>) {
+        val acceptances = Acceptances(c.store, clock)
+        records.forEach { acceptances.spend(c.ids.copy(context = cell), it) }
+    }
+
+    private fun scheduler(c: OpenedCampaign): Scheduler =
+        Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = candidates(c), retryCandidates = c.store.layout.candidates)
 
     /** One cell's routing: the model to run it with, the selection to record, or the refusal that stops the campaign. */
     private class Routing(val model: CellModel, val compiled: Compiled, val selected: Routed.Selected?, val refused: Routed.Refused?)
@@ -1309,9 +1632,17 @@ public class Controller @JvmOverloads public constructor(
         }
     }
 
-    /** The verified outcome of a cell for the calibration log: the harness's exit, never the model's claim. */
-    private fun outcomeOf(exit: CellExit?): RoutingOutcome = when (exit) {
-        is CellExit.Completed -> RoutingOutcome.Accepted
+    /**
+     * The verified outcome of a cell for the calibration log: the harness's exit and the verifier's resolution, never the
+     * model's claim (A3). A completion accepted only on a decider's word, or waiting for one, is unverified.
+     */
+    private fun outcomeOf(exit: CellExit?, completion: CompletionResult? = null): RoutingOutcome = when (exit) {
+        is CellExit.Completed -> when (completion) {
+            is CompletionResult.Accepted -> if (completion.verified) RoutingOutcome.Accepted else RoutingOutcome.Unverified
+            is CompletionResult.Refused -> RoutingOutcome.VerifiedFailure
+            is CompletionResult.Pending -> RoutingOutcome.Unverified
+            is CompletionResult.NotCompleted, null -> if (exit.pending != null) RoutingOutcome.Unverified else RoutingOutcome.Accepted
+        }
         is CellExit.Failed -> RoutingOutcome.VerifiedFailure
         is CellExit.Blocked, is CellExit.Partial, is CellExit.Cancelled, null -> RoutingOutcome.Unverified
     }
@@ -1645,31 +1976,34 @@ public class Controller @JvmOverloads public constructor(
             evidence(c, increment, listOf("current acceptance assessment"), emptyList(), null, authority), Tier.Medium, c.registry::version)
     }
 
+    /**
+     * The reviewers' results for [increment] at the tree now (D-337, D-341): the latest review recorded for this
+     * candidate and contract version — an approval, a rejection or no usable verdict alike — the current acceptance
+     * decision and whether a rework round was spent on this candidate. An item never reviewed at this candidate is in
+     * neither map.
+     */
     private fun completionEvidence(c: OpenedCampaign, increment: Increment, flags: List<io.astrolabe.verify.TestIntegrityFlag> = emptyList()): io.astrolabe.cell.CompletionEvidence {
         val stamp = c.stamper.report().candidateId
         val contract = c.contract
         val integrity = flags.map { it.copy(verdict = null).line + it.originalObligation.orEmpty() }
         val record = c.store.db.query("SELECT body FROM packets WHERE work_id = ? AND attempt_id = ? AND kind = ? ORDER BY rowid DESC",
             c.ids.work, c.ids.attempt, ReviewCell.KIND) { Json.decodeFromString(io.astrolabe.delegate.ReviewRecord.serializer(), it.string("body")) }
-            .firstOrNull { it.approved && it.incrementId == increment.id && it.contractVersion == contract.version &&
-                it.candidate == stamp && it.verdict?.reviewedCandidate == stamp && it.verdict.contractRevision == contract.version &&
-                it.criteria.containsAll(increment.accept) && (flags.isEmpty() || it.integrity == integrity) &&
-                it.evidenceVersions.all { (path, version) -> c.registry.version(path) == version } }
-        val verdict = record?.verdict ?: return io.astrolabe.cell.CompletionEvidence(flags = flags.map { it.copy(verdict = null) })
-        // D-320: a review-cell approval still certifies Check/Review items, but under Human it never resolves a flag.
-        val flagVerdict = verdict.takeUnless { humanIntegrity(c, flags) && record.path.lastOrNull() != "human" }
+            .firstOrNull { it.incrementId == increment.id && it.criteria.containsAll(increment.accept) && (flags.isEmpty() || it.integrity == integrity) &&
+                it.freshness(contract.version, stamp, c.registry::version) == io.astrolabe.delegate.Freshness.Current }
+        val acceptances = Acceptances(c.store, clock)
+        val decision = acceptances.current(c.ids.work, c.ids.attempt, increment.id, stamp, contract.version)
+        val reworkSpent = acceptances.reworkSpent(c.ids.work, c.ids.attempt, increment.id, stamp, contract.version)
+        val independent = increment.accept.filter { contract.acceptance(it) is Acceptance.Check || contract.acceptance(it) is Acceptance.Review }
+        val verdict = record?.verdict?.takeIf { record.unavailable == null }
+        // D-320: a review-cell verdict still speaks for Check/Review items, but under Human it never resolves a flag.
+        val flagVerdict = verdict?.takeUnless { humanIntegrity(c, flags) && record.path.lastOrNull() != "human" }
         return io.astrolabe.cell.CompletionEvidence(
-            increment.accept.mapNotNull { id -> (contract.acceptance(id) as? Acceptance.Check)?.let {
-                io.astrolabe.verify.Assessment(id, it.text, record.packetId, true, verdict.signedBy, contract.version, stamp)
-            } }, increment.accept.filter { contract.acceptance(it) is Acceptance.Review }.associateWith { verdict },
-            flags.map { it.copy(verdict = flagVerdict) },
+            verdicts = if (verdict != null) independent.associateWith { verdict } else emptyMap(),
+            unavailable = if (record != null && verdict == null) independent.associateWith { record.unavailable ?: "no usable verdict" } else emptyMap(),
+            flags = flags.map { it.copy(verdict = flagVerdict) },
+            decision = decision,
+            reworkSpent = reworkSpent,
         )
-    }
-
-    /** The verdict each `review:` item of [increment] is signed with (§8.7); only an approval is passed on. */
-    private fun reviewItems(contract: Contract, increment: Increment, review: ReviewOutcome?): Map<String, io.astrolabe.verify.Verdict> {
-        val verdict = (review as? ReviewOutcome.Approved)?.record?.verdict ?: return emptyMap()
-        return increment.accept.filter { contract.acceptance(it) is Acceptance.Review }.associateWith { verdict }
     }
 
     /**
@@ -1701,69 +2035,140 @@ public class Controller @JvmOverloads public constructor(
     }
 
     /**
-     * `finish` (§3.7) in its S0 form: every requirement verified and every `run:` item re-certified by a current
-     * receipt at the final stamp, else an honest stop — never `completed` over a gap.
+     * `finish` (§3.7) with the campaign gate (§8.7, D-343): every requirement verified, then the campaign's obligations —
+     * the full suite, every acceptance item at the final stamp, the owed campaign review — resolved by the same rule as
+     * an increment. A red executed check fails; what cannot be verified waits for a decision, never blocks or fails
+     * (I1); an item a decider accepted for this candidate keeps that provenance and is not asked again. A stored campaign
+     * pending completion at this candidate is decided on its stored results: nothing runs twice (I3).
      */
     private suspend fun stopOrFinish(c: OpenedCampaign, unfinished: String, scheduler: Scheduler? = null, campaign: Boolean = false, authority: Authority? = null): CampaignState {
         val state = checkNotNull(c.state)
         if (state.ledger.unfinished().isNotEmpty() || scheduler == null) {
             return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, unfinished))
         }
-        val refactor = RefactorMode.isActive(c.contract)
-        // §8.7 campaign gate (P2.2.6): the campaign review predicate names the review owed; P3.5.2 obtains it below, after the evidence.
-        val reviewOwed = if (campaign) CampaignFinish.reviewRequired(c.contract, state.graph.increments.count { it.status != IncrementStatus.Cancelled }, refactor) else null
-        if (campaign) {
-            when (val full = fullSuite(c, "campaign end")) {
-                is FullSuite.Red -> return c.advance(Transition.Stopped(CampaignOutcome.Failed, "final full suite red: ${full.detail}"))
-                is FullSuite.NotCertified -> return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "final full suite could not certify: ${full.detail}"))
-                FullSuite.Green, FullSuite.Undeclared -> Unit
-            }
-        }
-        val stamp = c.stamper.report().candidateId
-        val currencies = currencies(c, scheduler, stamp)
+        val acceptances = Acceptances(c.store, clock)
+        val report = c.stamper.report()
+        val stamp = report.candidateId
         val contract = c.contract
-        val gaps = ArrayList<String>()
-        val receipts = ArrayList<String>()
-        for (item in contract.acceptance.filterIsInstance<io.astrolabe.contract.Acceptance.Run>()) {
-            val receipt = c.checks.forAcceptance(item.id).firstNotNullOfOrNull { check -> currencies[check.id]?.takeIf { it.certifies }?.receiptId }
-            if (receipt == null) gaps += "${item.id}: no current receipt at @${stamp.hash8}" else receipts += receipt
-        }
-        for (increment in state.graph.increments.filter { it.status == IncrementStatus.Verified }) {
-            var assessed = completionEvidence(c, increment)
-            val independent = increment.accept.filter { contract.acceptance(it) !is Acceptance.Run }
-            if (independent.any { id -> assessed.assessments.none { it.acceptanceId == id } && id !in assessed.reviews } && authority != null) {
-                hostAssessment(c, increment, authority)
-                assessed = completionEvidence(c, increment)
+        val ids = c.ids.withCandidate(stamp)
+        val stored = acceptances.open(c.ids.work, c.ids.attempt)
+            ?.takeIf { it.incrementId == null && it.resultingStamp == stamp && it.contractVersion == contract.version && it.envId == report.env.envId }
+        val carried = carriedAcceptances(c, stamp)
+        val results = stored?.results ?: campaignResults(c, scheduler, campaign, authority, stamp)
+            .filterNot { it.status != ResultStatus.Passed && it.obligation in carried }
+        val spent = acceptances.reworkSpent(c.ids.work, c.ids.attempt, null, stamp, contract.version)
+        // There is no cell to rework a campaign-level rejection: it goes to the authority at once.
+        var resolved = Resolver.resolve(results, decision = acceptances.current(c.ids.work, c.ids.attempt, null, stamp, contract.version), reworkSpent = true)
+        var pending = stored
+        if (resolved.resolution == Resolution.Await && authority != null) {
+            val record = pending ?: PendingCompletion(
+                idGen.next("pending"), c.ids.work, c.ids.attempt, null, null, contract.version, c.s0.stampId, stamp, null, report.env.envId, null,
+                emptyList(), results, emptyList(), resolved.gaps, checkNotNull(resolved.code), results.mapNotNull { it.evidenceRef }.distinct(), null, idGen.next("decide"),
+            ).also {
+                acceptances.save(ids, it)
+                c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, refs = it.evidence, text = "final acceptance awaits ${it.code.wire} (${it.id}): ${resolved.missing.joinToString("; ")}", at = clock.instant()))
             }
-            for (id in independent) {
-                val reference = assessed.assessments.firstOrNull { it.acceptanceId == id }?.evidenceRef ?: assessed.reviews[id]?.requestId
-                if (reference == null) gaps += "$id: no independent assessment at @${stamp.hash8}" else receipts += reference
-            }
-        }
-        c.refusal()?.let { return c.advance(Transition.Stopped(stopOutcome(c), "final acceptance not published: $it")) }
-        if (gaps.isNotEmpty() || receipts.isEmpty()) {
-            return c.advance(Transition.Stopped(CampaignOutcome.Failed, "final acceptance at @${stamp.hash8} failed: ${gaps.ifEmpty { listOf("no acceptance evidence") }.joinToString("; ")}"))
-        }
-        if (reviewOwed != null) {
-            // §8.9 items 5–6, D-23: the equivalence evidence, then the signed campaign-scope review — blocked when unavailable, never skipped.
-            val reviewer = campaignReview(c, authority ?: return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "$reviewOwed; no authority to review")))
-            val equivalence = if (refactor) reviewer.equivalence(stamp, currencies) else null
-            if (refactor && equivalence == null) {
-                return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "refactor mode without a behaviour snapshot: no equivalence evidence at @${stamp.hash8} (§8.9 item 5)"))
-            }
-            val current = currencies.values.filter { it.certifies }.mapNotNull { it.receiptId }.distinct()
-            when (val review = reviewer.review(c.contract, c.s0.stampId, current, equivalence, reviewOwed)) {
-                is CampaignReviewOutcome.Approved -> Unit
-                is CampaignReviewOutcome.Declined -> return c.advance(Transition.Stopped(if (review.terminal) CampaignOutcome.Failed else CampaignOutcome.BlockedExternal, "$reviewOwed; ${review.reason}"))
-                is CampaignReviewOutcome.Unavailable -> return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "$reviewOwed; ${review.reason}"))
+            pending = record
+            when (val settled = decide(c, ids, record, authority)) {
+                is Settled.Commit -> resolved = settled.resolved
+                is Settled.Rework -> {
+                    closePending(c, ids, record, PendingStatus.Void, "rework requested by ${settled.record.decision.by}")
+                    return c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, "rework requested at campaign scope by ${settled.record.decision.by}: ${settled.record.decision.reason} — amend the contract or start a follow-up task"))
+                }
+                is Settled.Wait -> return c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, settled.reason, settled.code))
+                is Settled.Void -> {
+                    closePending(c, ids, record, PendingStatus.Void, settled.reason)
+                    return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "candidate or contract changed during final review; verification and review must be repeated"))
+                }
             }
         }
+        when (resolved.resolution) {
+            Resolution.Complete -> Unit
+            Resolution.Await -> return c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, "final acceptance needs a decision: ${resolved.missing.joinToString("; ")}", resolved.code))
+            Resolution.Rework -> return c.advance(
+                if (resolved.results.any { it.executedFailure }) Transition.Stopped(CampaignOutcome.Failed, "final acceptance at @${stamp.hash8} failed: ${resolved.missing.joinToString("; ")}")
+                else Transition.Stopped(CampaignOutcome.WaitingForInput, "final acceptance at @${stamp.hash8}: ${resolved.missing.joinToString("; ")}"),
+            )
+        }
+        val receipts = (resolved.evidenceRefs + carried.values.mapNotNull { it.evidenceRef }).distinct()
+        if (receipts.isEmpty()) return c.advance(Transition.Stopped(CampaignOutcome.Failed, "final acceptance at @${stamp.hash8}: no acceptance evidence"))
         if (c.stamper.report().candidateId != stamp || c.contract != contract) {
             return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "candidate or contract changed during final review; verification and review must be repeated"))
         }
         c.refusal()?.let { return c.advance(Transition.Stopped(stopOutcome(c), "final acceptance not published: $it")) }
+        pending?.let { closePending(c, ids, it, PendingStatus.Applied, resolved.decision?.let { d -> "accepted by ${d.decision.by}: ${d.decision.reason}" } ?: "final acceptance held") }
         c.advance(Transition.Finishing(stamp))
-        return c.advance(Transition.Finished(stamp, receipts.distinct()))
+        return c.advance(Transition.Finished(stamp, receipts))
+    }
+
+    /** Acceptance items a decider accepted for [stamp] at increment level (I7): their provenance stands at the campaign gate. */
+    private fun carriedAcceptances(c: OpenedCampaign, stamp: CandidateId): Map<String, io.astrolabe.verify.ItemProvenance> {
+        val state = checkNotNull(c.state)
+        return state.graph.increments.filter { it.status == IncrementStatus.Verified }
+            .mapNotNull { state.graph.evidence[it.id] }
+            .filter { it.stamp == stamp && it.contractVersion == c.contract.version }
+            .flatMap { it.provenance }.filter { it.how == io.astrolabe.verify.ProvenanceKind.Accepted }
+            .associateBy { it.item }
+    }
+
+    /**
+     * The campaign gate's obligations at [stamp] (§8.7, D-343), as results — never as stops: the declared full suite and
+     * quality gates, every `run:` item's current receipt, every independent item's assessment, and the campaign review
+     * when the §8.8 predicate owes one (with the refactor-mode equivalence evidence).
+     */
+    private suspend fun campaignResults(c: OpenedCampaign, scheduler: Scheduler, campaign: Boolean, authority: Authority?, stamp: CandidateId): List<ObligationResult> {
+        val state = checkNotNull(c.state)
+        val contract = c.contract
+        val refactor = RefactorMode.isActive(contract)
+        val reviewOwed = if (campaign) CampaignFinish.reviewRequired(contract, state.graph.increments.count { it.status != IncrementStatus.Cancelled }, refactor) else null
+        val results = ArrayList<ObligationResult>()
+        if (campaign) {
+            when (val full = fullSuite(c, "campaign end")) {
+                is FullSuite.Red -> results += ObligationResult(FULL_SUITE, ObligationKind.Run, ResultStatus.Failed, "final full suite red: ${full.detail}")
+                is FullSuite.NotCertified -> results += ObligationResult(FULL_SUITE, ObligationKind.Run, ResultStatus.Unverified, "final full suite could not certify: ${full.detail}")
+                FullSuite.Green -> results += ObligationResult(FULL_SUITE, ObligationKind.Run, ResultStatus.Passed, "final full suite green", c.checks[Checks.FULL]?.last?.receiptId)
+                FullSuite.Undeclared -> Unit
+            }
+        }
+        val currencies = currencies(c, scheduler, stamp)
+        for (item in contract.acceptance.filterIsInstance<Acceptance.Run>()) {
+            val checks = c.checks.forAcceptance(item.id)
+            val currency = checks.firstNotNullOfOrNull { check -> currencies[check.id]?.takeIf { it.certifies } } ?: checks.firstNotNullOfOrNull { currencies[it.id] }
+            results += Obligations.run(item.id, item.criterion, currency)
+        }
+        for (increment in state.graph.increments.filter { it.status == IncrementStatus.Verified }) {
+            var assessed = completionEvidence(c, increment)
+            val independent = increment.accept.filter { contract.acceptance(it) is Acceptance.Check || contract.acceptance(it) is Acceptance.Review }
+            if (independent.any { id -> id !in assessed.verdicts && id !in assessed.unavailable } && authority != null) {
+                hostAssessment(c, increment, authority)
+                assessed = completionEvidence(c, increment)
+            }
+            for (id in independent) {
+                val item = contract.acceptance(id) ?: continue
+                val kind = if (item is Acceptance.Review) ObligationKind.Review else ObligationKind.Check
+                results += Obligations.verdict(id, kind, item.criterion, assessed.verdicts[id], contract.version, stamp, assessed.unavailable[id])
+            }
+        }
+        if (reviewOwed != null) {
+            if (authority == null) {
+                results += ObligationResult(CAMPAIGN_REVIEW, ObligationKind.Review, ResultStatus.Unverified, "$reviewOwed; no authority to review")
+            } else {
+                // §8.9 items 5–6, D-23: the equivalence evidence, then the signed campaign-scope review — unverified when unavailable, never skipped.
+                val reviewer = campaignReview(c, authority)
+                val equivalence = if (refactor) reviewer.equivalence(stamp, currencies) else null
+                if (refactor && equivalence == null) {
+                    results += ObligationResult(EQUIVALENCE, ObligationKind.Run, ResultStatus.Unverified, "refactor mode without a behaviour snapshot: no equivalence evidence at @${stamp.hash8} (§8.9 item 5)")
+                } else {
+                    val current = currencies.values.filter { it.certifies }.mapNotNull { it.receiptId }.distinct()
+                    results += when (val review = reviewer.review(contract, c.s0.stampId, current, equivalence, reviewOwed)) {
+                        is CampaignReviewOutcome.Approved -> ObligationResult(CAMPAIGN_REVIEW, ObligationKind.Review, ResultStatus.Passed, "$reviewOwed; approved by ${review.record.verdict?.signedBy}", review.record.request.id, review.record.verdict?.signedBy)
+                        is CampaignReviewOutcome.Declined -> Obligations.verdict(CAMPAIGN_REVIEW, ObligationKind.Review, reviewOwed, review.record.verdict, contract.version, stamp, review.reason)
+                        is CampaignReviewOutcome.Unavailable -> ObligationResult(CAMPAIGN_REVIEW, ObligationKind.Review, ResultStatus.Unverified, "$reviewOwed; ${review.reason}")
+                    }
+                }
+            }
+        }
+        return results.distinctBy { it.obligation }
     }
 
     /** The D-23 human review path of this campaign: `Authority.review` over the full diff, the receipts and the rubric built from the admitted plan. */
@@ -1797,7 +2202,7 @@ public class Controller @JvmOverloads public constructor(
         val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, ids, clock)
         val required = (gates + listOfNotNull(check?.id)).mapNotNull { c.checks[it] }
         val currency = required.associate { it.id to scheduler.currency(it, stamp) }
-        val red = required.firstOrNull { currency.getValue(it.id).red }
+        val red = required.firstOrNull { currency.getValue(it.id).let { c -> c.red && c.applicability == io.astrolabe.verify.Applicability.Current && c.eligible } }
         val gap = required.firstOrNull { !currency.getValue(it.id).certifies }
         val certification = when {
             red != null -> FullSuite.Red("${red.id} ${red.last?.receiptId} failed at @${stamp.hash8}")
@@ -1879,6 +2284,16 @@ public class Controller @JvmOverloads public constructor(
         /** The review brief carries at most this much of the diff; the full diff stays a blob it names (D-124). */
         private const val MAX_REVIEW_DIFF_CHARS: Int = 16_000
         private const val CAMPAIGN_REVIEW: String = "campaign-review"
+
+        /** Campaign-gate obligation ids (D-343). */
+        private const val FULL_SUITE: String = "campaign:full-suite"
+        private const val EQUIVALENCE: String = "campaign:equivalence"
+
+        /** How many `rework` continuations one S0 run applies before it waits for the next resume (D-340). */
+        private const val MAX_REWORKS_PER_RUN: Int = 2
+
+        /** The agent's final text kept with a pending completion, for the decider. */
+        private const val MAX_SUMMARY_CHARS: Int = 4_000
         private const val HOST_ANSWER: String = "host answer for "
 
         /** D-170: review and probe cells exist (P4.4), so S2 is selectable; S3 comes from a plan at intake (D-183). */

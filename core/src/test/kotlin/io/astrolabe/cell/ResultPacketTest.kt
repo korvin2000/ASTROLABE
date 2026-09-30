@@ -174,19 +174,19 @@ class ResultPacketTest {
     }
 
     @Test
-    fun `a refused proposal records its gaps and the implementing packet carries them`() = runTestIn { f ->
+    fun `a refused proposal records its gaps and, past its rework round, awaits a decision instead of stalling (I2)`() = runTestIn { f ->
         val model = ScriptedModel.of(
             Scripted.Reply(listOf(say("planning"), patch("c1", """{"plan.add":"make a return 10"},{"plan.cursor":1},{"next":"edit a"}"""))),
             Scripted.Reply(listOf(say("done"))),
             Scripted.Reply(listOf(say("done, really"))),
         )
 
-        val partial = assertIs<CellExit.Partial>(f.run(model))
+        val completed = assertIs<CellExit.Completed>(f.run(model))
 
-        assertEquals(PartialReason.CompletionStalled, partial.reason)
-        assertEquals(2, partial.packet.gaps.count { it.contains("has no disposition") }, partial.packet.gaps.toString())
-        assertEquals(PacketStatus.Partial, partial.packet.status)
-        assertEquals(partial.checkpoint.reason, partial.packet.reason)
+        assertEquals(io.astrolabe.verify.StopCode.AcceptanceDecision, completed.pending?.code, "an open step is the agent's, never a failure by itself")
+        assertEquals(2, completed.packet.gaps.count { it.contains("has no disposition") }, completed.packet.gaps.toString())
+        assertEquals(PacketStatus.Done, completed.packet.status)
+        assertEquals(null, completed.packet.reason)
     }
 
     @Test

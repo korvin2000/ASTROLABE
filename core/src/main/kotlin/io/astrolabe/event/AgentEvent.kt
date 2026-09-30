@@ -57,7 +57,16 @@ public sealed interface AgentEvent {
 
         @Serializable
         @SerialName("campaign.finished")
-        public data class Finished(override val ids: Identities, val outcome: String, val finishReceiptRef: String?, override val phase: Phase = Phase.Verify, override val span: SpanId? = null, override val parent: SpanId? = null) : Campaign
+        public data class Finished(
+            override val ids: Identities,
+            val outcome: String,
+            val finishReceiptRef: String?,
+            override val phase: Phase = Phase.Verify,
+            override val span: SpanId? = null,
+            override val parent: SpanId? = null,
+            /** Why a `waiting_for_input` campaign waits, machine-readable (D-339): `acceptance_decision` · `review_rejected`. */
+            val stopCode: String? = null,
+        ) : Campaign
     }
 
     @Serializable

@@ -197,6 +197,8 @@ public data class RoleOutput(
     val packet: ResultPacket,
     /** Resolved evidence aliases actually delivered by this cell. */
     val shownAliases: Set<String> = emptySet(),
+    /** The implementing proposal's acceptance as the loop resolved it (D-337); `null` for other packet kinds. */
+    val resolved: io.astrolabe.verify.Resolved? = null,
 )
 
 /** What the completion seam decided (§3.7 `assess_role_completion`). */
@@ -208,6 +210,12 @@ public sealed interface CompletionDecision {
 
     /** The gaps cannot be closed by this cell: an explicit incomplete exit (§3.7 `cannot_progress`). */
     public data class CannotProgress(val gaps: List<String>) : CompletionDecision
+
+    /**
+     * The work is done and its acceptance needs an authority's decision (D-339): the cell ends without another turn and
+     * the controller keeps the proposal as a pending completion. Neither a refusal nor a partial.
+     */
+    public data class Defer(val gaps: List<String>, val code: io.astrolabe.verify.StopCode) : CompletionDecision
 }
 
 /**
@@ -227,11 +235,22 @@ public fun interface RoleCompletion {
         public fun exitGate(maxFinalizations: Int = Verifier().maxFinalizations): RoleCompletion {
             require(maxFinalizations >= 1) { "maxFinalizations must be ≥ 1" }
             return RoleCompletion { output, gates ->
-                val exit = gates.rejections.firstOrNull { it.key.gate == Gates.EXIT }
-                when {
-                    exit == null -> CompletionDecision.Accepted(output.certified)
-                    output.refusals + 1 >= maxFinalizations -> CompletionDecision.CannotProgress(exit.details)
-                    else -> CompletionDecision.Continue(exit.details)
+                val resolved = output.resolved
+                if (resolved == null) {
+                    val exit = gates.rejections.firstOrNull { it.key.gate == Gates.EXIT }
+                    return@RoleCompletion when {
+                        exit == null -> CompletionDecision.Accepted(output.certified)
+                        output.refusals + 1 >= maxFinalizations -> CompletionDecision.CannotProgress(exit.details)
+                        else -> CompletionDecision.Continue(exit.details)
+                    }
+                }
+                val last = output.refusals + 1 >= maxFinalizations
+                // I4: one rework round per cell; on the last one a reviewer's rejection goes to the authority (D-341).
+                val final = if (last && resolved.resolution == io.astrolabe.verify.Resolution.Rework) resolved.spent() else resolved
+                when (final.resolution) {
+                    io.astrolabe.verify.Resolution.Complete -> CompletionDecision.Accepted((output.certified + final.evidenceRefs).distinct())
+                    io.astrolabe.verify.Resolution.Await -> CompletionDecision.Defer(final.missing, checkNotNull(final.code))
+                    io.astrolabe.verify.Resolution.Rework -> if (last) CompletionDecision.CannotProgress(final.missing) else CompletionDecision.Continue(final.missing)
                 }
             }
         }
@@ -255,9 +274,16 @@ public fun interface RoleCompletion {
     }
 }
 
-/** Current, independently assessed evidence obtained before the implementing completion gate. */
+/**
+ * Independent evidence obtained before the implementing completion gate (D-337): the reviewers' [verdicts] on
+ * `check:`/`review:` items at the current candidate — approvals and rejections alike — with [unavailable] saying why an
+ * item has none, the resolved test-integrity [flags], the current acceptance [decision] and whether a `rework`
+ * decision was already spent on this candidate ([reworkSpent], D-340).
+ */
 public data class CompletionEvidence(
-    val assessments: List<io.astrolabe.verify.Assessment> = emptyList(),
-    val reviews: Map<String, io.astrolabe.verify.Verdict> = emptyMap(),
+    val verdicts: Map<String, io.astrolabe.verify.Verdict> = emptyMap(),
+    val unavailable: Map<String, String> = emptyMap(),
     val flags: List<io.astrolabe.verify.TestIntegrityFlag> = emptyList(),
+    val decision: io.astrolabe.verify.DecisionRecord? = null,
+    val reworkSpent: Boolean = false,
 )

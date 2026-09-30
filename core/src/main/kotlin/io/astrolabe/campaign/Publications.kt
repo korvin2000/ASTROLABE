@@ -80,7 +80,8 @@ internal class Publications(private val idGen: IdGen, private val clock: Clock) 
             }
         }
         val current = c.stamper.report().candidateId
-        // D-250: L0–L2 are green at the final stamp only for a completed campaign with nothing left unverified.
+        // D-250: L0–L2 are green at the final stamp only for a completed campaign with nothing left unverified; an item
+        // accepted without verification is listed in `notVerified` (D-342), so it never publishes beyond `patch`.
         val green = finish.stamp.takeIf { finish.status == "completed" && finish.notVerified.isEmpty() }
         val evidence = PublicationEvidence(
             shape = contract.shape,

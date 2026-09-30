@@ -63,6 +63,8 @@ public data class IncrementEvidence(
     val contextId: ContextId,
     val definition: Digest,
     val evidenceRefs: List<String>,
+    /** Per acceptance item: tested, reviewed, or accepted by a decider without verification (I7, D-342). */
+    val provenance: List<io.astrolabe.verify.ItemProvenance> = emptyList(),
 ) {
     init { require(contractVersion >= 1) }
 }

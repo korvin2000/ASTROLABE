@@ -14,10 +14,10 @@ import io.astrolabe.register.Validator
 import io.astrolabe.tool.ToolCall
 import io.astrolabe.tool.ToolFamily
 import io.astrolabe.tool.ToolOutcome
-import io.astrolabe.verify.Assessment
 import io.astrolabe.verify.Currency
-import io.astrolabe.verify.ExitGate
-import io.astrolabe.verify.GateResult
+import io.astrolabe.verify.Resolution
+import io.astrolabe.verify.Resolved
+import io.astrolabe.verify.Resolver
 import io.astrolabe.verify.TestIntegrityFlag
 import io.astrolabe.verify.Verdict
 import kotlin.math.ceil
@@ -151,8 +151,9 @@ public data class GateState @JvmOverloads constructor(
     /** True when the turn ended with a `done` completion proposal; the exit gate then runs on the evidence below. */
     val completionProposed: Boolean = false,
     val currencies: Map<String, Currency> = emptyMap(),
-    val assessments: List<Assessment> = emptyList(),
-    val reviews: Map<String, Verdict> = emptyMap(),
+    /** Reviewers' verdicts on `check:`/`review:` items at the current candidate; [unavailable] says why an item has none. */
+    val verdicts: Map<String, Verdict> = emptyMap(),
+    val unavailable: Map<String, String> = emptyMap(),
     val flags: List<TestIntegrityFlag> = emptyList(),
     val unresolvedImpactNudges: List<String> = emptyList(),
     /** Changed definitions with `fanin > 0` whose references are not inspected yet (§5.6 Impact, §7.4). */
@@ -169,6 +170,11 @@ public data class GateState @JvmOverloads constructor(
     val contractAnchors: Map<String, Set<String>> = emptyMap(),
     /** Normalized failure signatures still red after two repairs (§5.6; fingerprints proper arrive with P4.6.2). */
     val repeatedFailures: List<String> = emptyList(),
+    /**
+     * The proposal's acceptance as the loop resolved it (D-337), with the decision and rework round the loop knows of;
+     * `null` makes the exit gate resolve the fields above itself.
+     */
+    val acceptance: Resolved? = null,
 ) {
     init {
         require(turn >= 1) { "turn is 1-based, got $turn" }
@@ -322,19 +328,20 @@ public class Gates(gates: List<Gate>) {
         }
     }
 
-    // §5.6 Exit (hard): the P1.7.7 gate, called, never restated.
+    // §5.6 Exit (hard): the D-337 resolver, called, never restated. Only a rework refuses; an await ends the cell for a decision.
     private object Exit : Gate {
         override val name: String get() = EXIT
 
         override fun evaluate(state: GateState): List<GateOutcome> {
             if (!state.completionProposed) return emptyList()
-            val result = ExitGate.evaluate(state.register, state.contract, state.increment, state.currencies, state.assessments, state.reviews, state.flags, state.unresolvedImpactNudges)
-            if (result !is GateResult.Refused) return emptyList()
+            val resolved = state.acceptance ?: Resolver.increment(state.register, state.contract, state.increment, state.currencies, state.verdicts, state.unavailable, state.flags, state.unresolvedImpactNudges)
+            if (resolved.resolution != Resolution.Rework) return emptyList()
+            val missing = resolved.missing
             return listOf(
                 GateOutcome.Rejection(
-                    GateKey(name, "v${state.register.version}:" + Digest.ofUtf8(result.missing.joinToString("\n")).hash8),
-                    "exit refused: ${result.missing.size} missing — escape only via state(blocked) or task.ask with evidence",
-                    details = result.missing,
+                    GateKey(name, "v${state.register.version}:" + Digest.ofUtf8(missing.joinToString("\n")).hash8),
+                    "exit refused: ${missing.size} to fix — fix them and propose completion again",
+                    details = missing,
                 ),
             )
         }

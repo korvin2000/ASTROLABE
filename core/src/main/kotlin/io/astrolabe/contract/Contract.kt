@@ -331,6 +331,8 @@ public data class LedgerEntry(
     val status: RequirementStatus,
     val evidence: List<String> = emptyList(),
     val stampValid: Boolean = false,
+    /** How the requirement's acceptance items were accepted (I7, D-342): tested, reviewed, or accepted without verification. */
+    val provenance: List<io.astrolabe.verify.ItemProvenance> = emptyList(),
 )
 
 @Serializable

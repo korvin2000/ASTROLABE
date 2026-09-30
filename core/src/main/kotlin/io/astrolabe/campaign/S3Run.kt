@@ -484,14 +484,15 @@ internal class S3Round(
             val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock)
             val currencies = c.checks.all().filter { it.last != null }.associate { it.id to scheduler.currency(it, stampNow) }
             val reviews = approvals[increment.id]?.let { verdict -> returnedIncrement.accept.filter { c.contract.acceptance(it) is Acceptance.Review }.associateWith { verdict } }.orEmpty()
-            when (val result = Verifier().accept(proposal, c.contract, returnedIncrement, exit.register, current.ledger, stampNow, currencies, reviews = reviews)) {
+            when (val result = Verifier().accept(proposal, c.contract, returnedIncrement, exit.register, current.ledger, stampNow, currencies, verdicts = reviews)) {
                 is CompletionResult.Accepted -> {
                     c.advance(Transition.Committed(result, stampNow))
                     events?.emit(AgentEvent.Campaign.IncrementClosed(c.ids, increment.id, "verified"))
                     committed += increment.id
                 }
-                is CompletionResult.Refused, is CompletionResult.NotCompleted -> {
-                    journal(coordinator, listOf(handle.id), "integrated ${increment.id} not accepted at @${stampNow.hash8}: ${(result as? CompletionResult.Refused)?.missing?.joinToString("; ") ?: result.toString()}")
+                // D-339: an unverified writer result returns to the main line, where its acceptance is decided.
+                is CompletionResult.Refused, is CompletionResult.Pending, is CompletionResult.NotCompleted -> {
+                    journal(coordinator, listOf(handle.id), "integrated ${increment.id} not accepted at @${stampNow.hash8}: ${((result as? CompletionResult.Refused)?.missing ?: (result as? CompletionResult.Pending)?.missing)?.joinToString("; ") ?: result.toString()}")
                     returned += increment.id
                 }
             }
