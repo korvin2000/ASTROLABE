@@ -115,3 +115,5 @@ iterations, green at the end); `:core:updateKotlinAbi`; `:eval:testClasses`, `:p
   Added: OutlineTest (cut/tab names), RiskTriggerTest (the live edit through a cell; failed before, passes after).
   Verification (focused): OutlineTest 9, RiskTriggerTest 2, CellTest 29, ImpactAssemblyTest 3, DefinitionChangesTest 3,
   SymbolIndexTest 7, AtlasTest 20, PrimeTest 7 — green. No public API change.
+- D-356 (owner, after round 2b): no Next yet and none in the patch → Next is the `[>]` step's text; no open step still
+  refuses. `ValidatorTest` pinned the old refusal with a plan-only patch; it now pins a patch with no open step.
