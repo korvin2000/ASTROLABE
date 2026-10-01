@@ -1,5 +1,6 @@
 package io.astrolabe.tool
 
+import io.astrolabe.Defaults
 import io.astrolabe.budget.Reservations
 import io.astrolabe.budget.Tokens
 import io.astrolabe.event.AgentEvent
@@ -14,8 +15,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 
 /**
  * What an executor reports back: the result [body] with its envelope [header] (the cell renders both with
@@ -71,6 +70,9 @@ public class TurnContext(
 /** One tool family's executor (P1.6.3–P1.6.10). It returns typed outcomes; a throw is a harness defect. */
 public fun interface ToolExecutor {
     public suspend fun execute(call: ToolCall, context: TurnContext): ToolOutcome
+
+    /** The tokens a read [call] asks of the turn's read budget when its own `budget` is omitted; null: the dispatcher's default. */
+    public fun defaultReadTokens(call: ToolCall): Int? = null
 }
 
 /** Called once before the edit batch of a mutating turn: the shadow-ref checkpoint of §5.4. */
@@ -125,28 +127,36 @@ public class Dispatcher(
         val context = TurnContext(turn, workset.snapshot(), Reservations(readBudget))
         val results = HashMap<Int, Disposition>()
 
-        // Reads: admission in emitted order against the one budget (decided before anything runs), then
-        // bounded parallel execution; a reservation is reconciled to what the result actually cost.
-        val admitted = LinkedHashMap<ToolCall, Reservations.Reservation>()
-        for (call in ordered.reads) {
-            val tokens = readTokensOf(call).toLong()
-            val reservation = context.readBudget.reserve(Tokens(tokens), "op ${call.opId}")
-            if (reservation == null) {
-                results[call.opId] = Disposition.NotExecuted(call.opId, "read budget exhausted: $tokens tokens requested, ${context.readBudget.available.value} available")
-            } else {
-                admitted[call] = reservation
-            }
-        }
-        coroutineScope {
-            val permits = Semaphore(maxParallelReads)
-            admitted.map { (call, reservation) ->
-                async {
-                    val readContext = TurnContext(turn, context.coverage, context.readBudget).also { it.resultBudgetTokens = readTokensOf(call).toLong() }
-                    permits.withPermit { run(call, readContext, TurnPhase.Read) }.also { d ->
-                        if (d is Disposition.Executed) reservation.reconcile(Tokens(d.outcome.tokens)) else reservation.release()
-                    }
+        // Reads: waves of at most maxParallelReads in emitted order; each wave is admitted against the one budget
+        // after the earlier waves were reconciled to what their results actually cost, so admission stays a function
+        // of the calls and their results, never of completion order. A read gets min(asked, available) and its
+        // executor that budget; only a remainder below READ_FLOOR_TOKENS refuses (D-370).
+        var admittedBefore = 0
+        for (wave in ordered.reads.chunked(maxParallelReads)) {
+            val admitted = LinkedHashMap<ToolCall, Reservations.Reservation>()
+            for (call in wave) {
+                val asked = readTokensOf(call).toLong()
+                val available = context.readBudget.available.value
+                val granted = minOf(asked, available)
+                val reservation = if (granted > 0 && (granted == asked || granted >= READ_FLOOR_TOKENS)) context.readBudget.reserve(Tokens(granted), "op ${call.opId}") else null
+                if (reservation == null) {
+                    val ran = admittedBefore + admitted.size
+                    results[call.opId] = Disposition.NotExecuted(call.opId, "read budget of this turn spent: $ran read${if (ran == 1) "" else "s"} ran, $available tokens left; read again next turn")
+                } else {
+                    admitted[call] = reservation
                 }
-            }.awaitAll().forEach { results[it.opId] = it }
+            }
+            admittedBefore += admitted.size
+            coroutineScope {
+                admitted.map { (call, reservation) ->
+                    async {
+                        val readContext = TurnContext(turn, context.coverage, context.readBudget).also { it.resultBudgetTokens = reservation.amount.value }
+                        run(granted(call, reservation.amount.value.toInt()), readContext, TurnPhase.Read).also { d ->
+                            if (d is Disposition.Executed) reservation.reconcile(Tokens(d.outcome.tokens)) else reservation.release()
+                        }
+                    }
+                }.awaitAll().forEach { results[it.opId] = it }
+            }
         }
 
         // Edits: one checkpoint, one batch; a call that did not apply stops the batch.
@@ -223,7 +233,19 @@ public class Dispatcher(
     }
 
     private fun readTokensOf(call: ToolCall): Int = when (val a = call.args) {
-        is Args.Look -> a.args.budget
+        is Args.Look -> a.args.budget ?: executors[call.family]?.defaultReadTokens(call) ?: DEFAULT_LOOK_TOKENS
         else -> kbReadTokens
+    }
+
+    /** The call as its executor runs it: a `look` carries the granted budget, so the cut is the admitted one. */
+    private fun granted(call: ToolCall, tokens: Int): ToolCall = when (val a = call.args) {
+        is Args.Look -> if (a.args.budget == tokens) call else call.copy(args = Args.Look(a.args.copy(budget = tokens)))
+        else -> call
+    }
+
+    private companion object {
+        /** Below this remainder a read would show too little to be worth a call; it waits for the next turn. */
+        const val READ_FLOOR_TOKENS: Long = 300
+        val DEFAULT_LOOK_TOKENS: Int = Defaults().lookBudgetTokens
     }
 }

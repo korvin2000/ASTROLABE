@@ -1,5 +1,6 @@
 package io.astrolabe.tool.look
 
+import io.astrolabe.Defaults
 import io.astrolabe.atlas.Atlas
 import io.astrolabe.atlas.DeclarationKind
 import io.astrolabe.atlas.EditSet
@@ -126,11 +127,18 @@ public class Look(
     private val tools: ToolSet = ToolSet.EMPTY,
     /** Where `look(impact)`'s import graph takes its outlines: tier 0, or a host tier-1 index (D-251). */
     private val tiers: IndexTiers = IndexTiers.TIER_0,
+    /** The budget of a call that names none: the configured `Defaults.lookBudgetTokens`. */
+    private val budgetTokens: Int = Defaults().lookBudgetTokens,
 ) : ToolExecutor {
     init {
         require(ids.context != null) { "look runs inside a cell: ids.context is its lineage" }
         require(findMaxHits > 0 && findCaptureBytes > 0) { "find limits must be positive" }
+        require(budgetTokens > 0) { "budgetTokens must be positive" }
     }
+
+    private val LookArgs.tokens: Int get() = budget ?: budgetTokens
+
+    override fun defaultReadTokens(call: ToolCall): Int = budgetTokens
 
     /** The campaign's current atlas; the cell replaces it after `Atlas.refresh` at a turn boundary. */
     public var atlas: Atlas = atlas
@@ -219,8 +227,8 @@ public class Look(
         }
         // D-365: a whole file above budget shows its first lines like a range read; the outline follows the marker only
         // when it is small, and its tokens come out of the same budget.
-        val outlineNote = if (target is LookTarget.Whole && tokensOf(rendered(lines, span)) > args.budget) {
-            renderOutline(outlineOf()).takeIf { tokensOf(it) + 1 <= minOf(OUTLINE_ALLOWANCE_TOKENS, args.budget / 4).toLong() }
+        val outlineNote = if (target is LookTarget.Whole && tokensOf(rendered(lines, span)) > args.tokens) {
+            renderOutline(outlineOf()).takeIf { tokensOf(it) + 1 <= minOf(OUTLINE_ALLOWANCE_TOKENS, args.tokens / 4).toLong() }
         } else {
             null
         }
@@ -236,9 +244,9 @@ public class Look(
         val full = redaction.apply(rendered(lines, span), ContentClass.ReusableEvidence)
         val hidden = shift(full.mask.hiddenLines, span.from - 1)
         val marker = { kept: Int -> "\n… ${span.to - span.from - kept + 1} more lines: recall ${alias.text} range ${span.from + kept}-${span.to}" }
-        val outlined = outlineNote?.let { fit(full.text.lines(), args.budget - tokensOf(it).toInt() - 1, suffix = marker) }?.takeIf { it.lines.isNotEmpty() && it.truncated }
-        val view = outlined ?: fit(full.text.lines(), args.budget, suffix = marker)
-        if (view.lines.isEmpty()) return refused(args, "refused", "${target.path}: selected line exceeds budget ${args.budget}; raise budget or narrow range", complete = false)
+        val outlined = outlineNote?.let { fit(full.text.lines(), args.tokens - tokensOf(it).toInt() - 1, suffix = marker) }?.takeIf { it.lines.isNotEmpty() && it.truncated }
+        val view = outlined ?: fit(full.text.lines(), args.tokens, suffix = marker)
+        if (view.lines.isEmpty()) return refused(args, "refused", "${target.path}: selected line exceeds budget ${args.tokens}; raise budget or narrow range", complete = false)
         val displayed = LineRange(span.from, span.from + view.lines.size - 1)
         val body = if (outlined != null) view.body + "\n" + outlineNote else view.body
         val tokens = tokensOf(body)
@@ -299,8 +307,8 @@ public class Look(
         val summary = "${hits.hits.size} match${if (hits.hits.size == 1) "" else "es"} for /$pattern/ in $scopeText" +
             (hits.filesSearched?.let { " · $it files searched" } ?: "") + (if (hits.complete) "" else " · capture incomplete (${hits.backend.name.lowercase()} limit)")
         val full = redaction.apply((listOf(summary) + lines).joinToString("\n"), ContentClass.ReusableEvidence)
-        val view = fit(full.text.lines(), args.budget) { kept -> "\n… ${lines.size + 1 - kept} more lines: recall ${alias.text}" }
-        if (view.lines.isEmpty()) return refused(args, "refused", "find result exceeds budget ${args.budget}; raise budget", complete = false, scope = scopeText)
+        val view = fit(full.text.lines(), args.tokens) { kept -> "\n… ${lines.size + 1 - kept} more lines: recall ${alias.text}" }
+        if (view.lines.isEmpty()) return refused(args, "refused", "find result exceeds budget ${args.tokens}; raise budget", complete = false, scope = scopeText)
         val body = view.body
         val versions = files.filterValues { it != null }.mapValues { it.value!!.version }
         val blob = blobs.put(full.text.toByteArray(Charsets.UTF_8), BlobKind.OUTPUT, ids)
@@ -340,8 +348,8 @@ public class Look(
         val lines = listOf("${hits.events.size} journal event${if (hits.events.size == 1) "" else "s"} match '$pattern' in store" + (if (hits.complete) "" else " · more than $findMaxHits: narrow the pattern")) +
             hits.events.map { "#${it.seq} ${it.kind.name.lowercase()}" + (it.turn?.let { t -> " turn $t" } ?: "") + ": " + it.text.lineSequence().first() }
         val full = redaction.apply(lines.joinToString("\n"), ContentClass.ReusableEvidence)
-        val view = fit(full.text.lines(), args.budget) { "\n… recall ${alias.text}" }
-        if (view.lines.isEmpty()) return refused(args, "refused", "store search result exceeds budget ${args.budget}; raise budget", complete = false, scope = "store")
+        val view = fit(full.text.lines(), args.tokens) { "\n… recall ${alias.text}" }
+        if (view.lines.isEmpty()) return refused(args, "refused", "store search result exceeds budget ${args.tokens}; raise budget", complete = false, scope = "store")
         val body = view.body
         val blob = blobs.put(full.text.toByteArray(Charsets.UTF_8), BlobKind.OUTPUT, ids)
         observations.record(Observation(alias.canonicalId, ids, actionId, null, blob, emptyList(), emptyMap(), hits.complete && !view.truncated, emptyMap(), hits.complete, RedactionMask(Ranges.EMPTY, full.mask.limitations), view.truncated))
@@ -392,10 +400,10 @@ public class Look(
             now == null -> "recall of #$number · historical v=${recorded.hash8} (file gone); not KNOWN"
             else -> "recall of #$number · historical v=${recorded.hash8} (now ${now.hash8}); not KNOWN, read again for current bytes"
         }
-        val view = fit(selected, args.budget, prefix = "$label\n") { kept ->
+        val view = fit(selected, args.tokens, prefix = "$label\n") { kept ->
             "\n… recall #$number range ${selectedSource?.from?.plus(kept) ?: kept + 1}-${selectedSource?.to ?: selected.size}"
         }
-        if (view.lines.isEmpty()) return refused(args, "refused", "recall result exceeds budget ${args.budget}; raise budget", complete = false)
+        if (view.lines.isEmpty()) return refused(args, "refused", "recall result exceeds budget ${args.tokens}; raise budget", complete = false)
         val shown = selectedSource?.let { LineRange(it.from, it.from + view.lines.size - 1) }
         val versions = LinkedHashMap<String, FileVersion>()
         if (path != null && shown != null) {
@@ -432,7 +440,7 @@ public class Look(
         if (focus is Focus.Dir && atlas.filesUnder(focus.path) == 0 && atlas.children(focus.path).isEmpty()) {
             return refused(args, "refused", "no directory '${focus.path}' in the atlas")
         }
-        return textResult(args, Focus.render(atlas, focus, args.budget), scope = "tree " + (if (focus is Focus.Dir) focus.path else "/"))
+        return textResult(args, Focus.render(atlas, focus, args.tokens), scope = "tree " + (if (focus is Focus.Dir) focus.path else "/"))
     }
 
     private fun outline(args: LookArgs): ToolOutcome {
@@ -522,7 +530,7 @@ public class Look(
             ?: return refused(args, "not_found", "no admitted BMAP-$subsystem (complete: the knowledge base was searched); navigate with tree, outline and find", scope = "bmap $subsystem")
         val validation = BehaviourMaps.validate(map, atlas)
         return if (behaviour == null) {
-            textResult(args.copy(budget = minOf(args.budget, BehaviourMaps.SUBSYSTEM_MAX_TOKENS)), BehaviourMaps.render(validation, BmapLevel.Subsystem), scope = "bmap $subsystem")
+            textResult(args.copy(budget = minOf(args.tokens, BehaviourMaps.SUBSYSTEM_MAX_TOKENS)), BehaviourMaps.render(validation, BmapLevel.Subsystem), scope = "bmap $subsystem")
         } else {
             textResult(args, BehaviourMaps.render(validation, BmapLevel.Behaviour, behaviour), scope = "bmap $target")
         }
@@ -596,8 +604,8 @@ public class Look(
         val actionId = idGen.next("act")
         val alias = allocate()
         val full = redaction.apply(text, ContentClass.ReusableEvidence)
-        val view = fit(full.text.lines(), args.budget) { "\n… recall ${alias.text}" }
-        if (view.lines.isEmpty()) return refused(args, "refused", "structural result exceeds budget ${args.budget}; raise budget", complete = false, scope = scope)
+        val view = fit(full.text.lines(), args.tokens) { "\n… recall ${alias.text}" }
+        if (view.lines.isEmpty()) return refused(args, "refused", "structural result exceeds budget ${args.tokens}; raise budget", complete = false, scope = scope)
         val body = view.body
         val blob = blobs.put(full.text.toByteArray(Charsets.UTF_8), BlobKind.OUTPUT, ids)
         observations.record(Observation(alias.canonicalId, ids, actionId, null, blob, versions.keys.toList(), emptyMap(), complete && !view.truncated, versions, captureComplete, RedactionMask(Ranges.EMPTY, full.mask.limitations), view.truncated))
@@ -606,7 +614,7 @@ public class Look(
 
     /** A result that observed nothing new: refusal, masked op, dedup pointer. Not aliased, not stored. */
     private fun refused(args: LookArgs, status: String, body: String, versions: Map<String, FileVersion> = emptyMap(), complete: Boolean = true, scope: String? = null): ToolOutcome {
-        val bounded = bounded(body, args.budget)
+        val bounded = bounded(body, args.tokens)
         return outcome("#-", idGen.next("act"), status, bounded, tokensOf(bounded), versions = versions, scope = scope ?: args.target,
             complete = complete, captureComplete = true, displayTruncated = bounded != body, redacted = false, artifact = null)
     }

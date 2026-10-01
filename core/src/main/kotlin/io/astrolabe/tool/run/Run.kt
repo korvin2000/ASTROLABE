@@ -145,6 +145,12 @@ public class Run(
         require(pollSliceSeconds > 0) { "pollSliceSeconds must be positive" }
     }
 
+    private val RunArgs.budgetTokens: Int get() = budget ?: config.defaults.runBudgetTokens
+
+    /** An explicit timeout is clamped, never refused; the configured default may exceed the clamp. */
+    private val RunArgs.timeoutSeconds: Int
+        get() = timeout?.coerceAtMost(maxOf(MAX_TIMEOUT_SECONDS, config.defaults.runTimeoutSeconds)) ?: config.defaults.runTimeoutSeconds
+
     override suspend fun execute(call: ToolCall, context: TurnContext): ToolOutcome {
         require(call.family == ToolFamily.Run) { "not a run call: ${call.name}" }
         // D-352: a cwd naming the root is no cwd, so intents, handles and the unknown-outcome guard see one command.
@@ -205,7 +211,7 @@ public class Run(
             workingDirectory = cwd,
             logPath = logPath(actionId),
             environment = EnvPolicy(inheritedNames = config.redaction.envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")),
-            deadlineSeconds = args.timeout.toLong(),
+            deadlineSeconds = args.timeoutSeconds.toLong(),
         )
         var logBlob: Digest? = null
         var rendered: ToolOutcome? = null
@@ -330,7 +336,7 @@ public class Run(
                 val changed = announce(before, after, "run ${alias.text}")
                 val effectClass = observedClass(entry.effectClass, changed)
                 val capture = RunCapture(actionId = actionId, argv = argv, exitCode = if (reply.isError) 1 else 0, output = reply.content.toByteArray(Charsets.UTF_8))
-                val shaped = Shapers.shape(capture, ShapeBudget(args.budget, estimator, alias.text))
+                val shaped = Shapers.shape(capture, ShapeBudget(args.budgetTokens, estimator, alias.text))
                 val touched = if (changed.isEmpty()) "" else "\ntouched (by run ${alias.text} $program: ${changed.size} path${if (changed.size == 1) "" else "s"}) " + changed.take(10).joinToString(", ")
                 val result = RunResult(
                     alias.text, actionId, capture.exitCode, shaped.status, shaped.view + touched, shaped.viewTruncated, logBlob, effectClass, before.candidateId, after.candidateId,
@@ -358,7 +364,7 @@ public class Run(
             val first = os.poll(proc, 0, 0)
             return Launch.Background(proc.copy(status = first.status), first.newBytes, first.nextCursorBytes)
         }
-        val observed = Executions.observeCancellable(os, proc, pollSliceSeconds, args.timeout.toLong() + 5)
+        val observed = Executions.observeCancellable(os, proc, pollSliceSeconds, args.timeoutSeconds.toLong() + 5)
         if (observed.lost) throw IOException("process observation lost; reconcile before retry")
         return Launch.Finished(observed.proc, observed.output, captureComplete = !observed.truncated)
     }
@@ -388,7 +394,7 @@ public class Run(
             exitCode = (status as? ProcStatus.Exited)?.exitCode, timedOut = status == ProcStatus.DeadlineExceeded,
             output = output, captureComplete = captureComplete && status !is ProcStatus.Lost,
         )
-        val shaped = Shapers.shape(capture, ShapeBudget(args.budget, estimator, alias))
+        val shaped = Shapers.shape(capture, ShapeBudget(args.budgetTokens, estimator, alias))
         val outcome = when (status) {
             is ProcStatus.Lost -> Outcome.UnknownOutcome
             is ProcStatus.Cancelled -> Outcome.UnknownOutcome
@@ -432,7 +438,7 @@ public class Run(
         val proc = os.reattach(handle.proc)
         val since = args.since ?: handle.cursor
         val poll = try {
-            kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { os.poll(proc, since, args.timeout.toLong()) }
+            kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { os.poll(proc, since, args.timeoutSeconds.toLong()) }
         } catch (failure: IOException) {
             handles.save(handle.copy(status = wire(ProcStatus.Lost)))
             return refused(args, Outcome.UnknownOutcome, "handle ${handle.handleId}: the log cannot be read (${failure.message}); the process state is unknown — reconcile, never relaunch")
@@ -443,7 +449,7 @@ public class Run(
         val slice = safeSlice.text
         return when (val status = poll.status) {
             ProcStatus.Running -> {
-                val view = "handle ${handle.handleId} running · cursor ${poll.nextCursorBytes}" + (if (poll.timedOut) " · observation timed out after ${args.timeout}s, the process keeps running (no relaunch)" else "") + (if (slice.isBlank()) "" else "\n$slice")
+                val view = "handle ${handle.handleId} running · cursor ${poll.nextCursorBytes}" + (if (poll.timedOut) " · observation timed out after ${args.timeoutSeconds}s, the process keeps running (no relaunch)" else "") + (if (slice.isBlank()) "" else "\n$slice")
                 val result = RunResult(handle.alias, handle.actionId, null, Outcome.NotRun, view, false, null, handle.effectClass, CandidateId(Digest(handle.stampBefore)), null, false, emptyList(), handle.handleId, null, null, emptyList())
                 render(args, result, handle.argv, handle.shell, null, null, effectsUnknown = handle.effectsUnknown, statusWire = "running", captureMask = safeSlice.mask)
             }
@@ -465,7 +471,7 @@ public class Run(
                 val stampBefore = CandidateId(Digest(handle.stampBefore))
                 val changed = announceBackground(handle, after)
                 val capture = RunCapture(handle.actionId, handle.argv, handle.shell, handle.cwd, (status as? ProcStatus.Exited)?.exitCode, status == ProcStatus.DeadlineExceeded, log, complete && status !is ProcStatus.Lost)
-                val shaped = Shapers.shape(capture, ShapeBudget(args.budget, estimator, handle.alias))
+                val shaped = Shapers.shape(capture, ShapeBudget(args.budgetTokens, estimator, handle.alias))
                 val outcome = if (status is ProcStatus.Lost || status is ProcStatus.Cancelled) Outcome.UnknownOutcome else shaped.status
                 val view = "handle ${handle.handleId} ${wire(status)}\n" + shaped.view + "\nBackground effects cannot be attributed exclusively to this process." + (if (changed.isEmpty()) "" else "\nchanged during background run (${changed.size} paths): " + changed.take(10).joinToString(", "))
                 val effectClass = observedClass(handle.effectClass, changed)
@@ -572,3 +578,6 @@ public class Run(
 
     private fun wire(outcome: Outcome): String = outcome.name.replace(Regex("(?<=[a-z])([A-Z])")) { "_" + it.value }.lowercase()
 }
+
+/** The longest `run` a model may ask for in one call (D-370); a larger value is clamped to it. */
+private const val MAX_TIMEOUT_SECONDS: Int = 3_600

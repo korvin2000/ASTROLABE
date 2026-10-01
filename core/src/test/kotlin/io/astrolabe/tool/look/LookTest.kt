@@ -1,5 +1,6 @@
 package io.astrolabe.tool.look
 
+import io.astrolabe.Defaults
 import io.astrolabe.atlas.Atlas
 import io.astrolabe.auth.InstructionShape
 import io.astrolabe.auth.Redaction
@@ -245,8 +246,7 @@ class LookTest {
     }
 
     @Test
-    fun `recall takes an id as hash N, bare N or a number, and look asks a 4000-token budget by default`() = runTest {
-        assertEquals(4_000, (call("""{"what":"read","target":"src/a.py"}""").args as Args.Look).args.budget)
+    fun `recall takes an id as hash N, bare N or a number`() = runTest {
         look("""{"what":"read","target":"src/a.py:1-2"}""")
         for (id in listOf("\"#1\"", "\"1\"", "1", "\" 1 \"")) {
             val recalled = look("""{"what":"recall","id":$id}""")
@@ -255,6 +255,24 @@ class LookTest {
         }
         assertEquals("refused", status(look("""{"what":"recall","id":"0"}""")))
         assertEquals("refused", status(look("""{"what":"recall","id":"one"}""")))
+    }
+
+    @Test
+    fun `a look without budget gets the configured default and an explicit budget wins`() = runTest {
+        val omitted = call("""{"what":"read","target":"src/big.py"}""")
+        assertNull((omitted.args as Args.Look).args.budget, "the default is the executor's, not the schema's")
+        assertEquals(Defaults().lookBudgetTokens, look.defaultReadTokens(omitted))
+        val small = Look(
+            workspace, registry, workset, Atlas.build(repo.root), Searches.jvm(), journal,
+            SqliteObservations(store, clock), SqliteAliases(store, clock), store.blobs, Redaction(), estimator, idGen, ids, budgetTokens = 80,
+        )
+        assertEquals(80, small.defaultReadTokens(omitted))
+        val cut = small.execute(omitted, context())
+        assertEquals("ok", status(cut))
+        assertTrue(cut.header!!.runtime.displayTruncated && cut.tokens <= 80, cut.body)
+        val whole = small.execute(call("""{"what":"read","target":"src/big.py:150-200","budget":4000}"""), context())
+        assertFalse(whole.header!!.runtime.displayTruncated, whole.body)
+        assertTrue(whole.body.contains("200| line200 = 200"), whole.body)
     }
 
     @Test
