@@ -38,13 +38,14 @@ public data class RulesSnapshot(
 /**
  * The repository prime: the `[R]` segment's content (§5.1, §7.1).
  *
- * Tree digest, languages, sniffed commands, the approved rules file, hubs, the knowledge-base index
- * lines and the behaviour-map excerpt — in that order, as plain text with `\n` endings and
- * forward-slashed workspace-relative paths.
+ * Tree digest, languages, sniffed commands, the host block, the approved rules file, hubs, the
+ * knowledge-base index lines and the behaviour-map excerpt — in that order, as plain text with `\n`
+ * endings and forward-slashed workspace-relative paths.
  *
- * **Byte-stable per repo version and role.** [render] is a pure function of its arguments: no
- * timestamps, no counters, no absolute paths, no host-dependent formatting (§5.1 cache discipline).
- * Two calls with equal arguments produce identical bytes.
+ * **Byte-stable per repo version, role and host.** [render] is a pure function of its arguments: no
+ * timestamps, no counters, no absolute paths (§5.1 cache discipline). The only host-dependent text is
+ * the [HostFacts] block the caller probed once per campaign (D-366). Two calls with equal arguments
+ * produce identical bytes.
  *
  * **Data is never instructions.** Only an approved [RulesSnapshot] is rendered as text. Every other
  * rules-named file the repository contains is listed by path under an explicit
@@ -92,6 +93,7 @@ public object Prime {
      *   [bmapMaxTokens]. Empty until P4.3.
      * @param focusSubsystem the subsystem the cell is focused on; it labels the prime and selects
      *   the behaviour-map excerpt the caller passes.
+     * @param host the host block ([HostFacts.of]); `null` renders none (D-366).
      */
     @JvmStatic
     public fun render(
@@ -102,6 +104,7 @@ public object Prime {
         bmapExcerpt: String? = null,
         focusSubsystem: String? = null,
         bmapMaxTokens: Int = Defaults().focusZoomMaxTokens,
+        host: HostFacts? = null,
     ): String {
         val out = StringBuilder()
 
@@ -134,6 +137,8 @@ public object Prime {
                     .append('\n')
             }
         }
+
+        host?.let { out.append(it.render()) }
 
         out.append(renderRules(atlas, rules))
 

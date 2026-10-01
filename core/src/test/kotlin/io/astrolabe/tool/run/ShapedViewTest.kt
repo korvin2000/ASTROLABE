@@ -33,9 +33,9 @@ class ShapedViewTest {
         val shaped = Shapers.shape(capture, ShapeBudget(recallAlias = "#57"))
         // A partial log is never a pass (§8.4, review F-064), even when its summary line survived.
         assertEquals(Outcome.Inconclusive, shaped.status)
-        assertTrue(shaped.viewTruncated, "the 1200-token budget cannot hold 5002 lines")
+        assertTrue(shaped.viewTruncated, "the 4000-token budget cannot hold 5002 lines")
         assertTrue(shaped.captureTruncated, "captureComplete=false is the capture limit, not the prompt budget")
-        assertTrue(shaped.view.contains("view truncated at prompt budget 1200 tokens"), shaped.view)
+        assertTrue(shaped.view.contains("view truncated at prompt budget 4000 tokens"), shaped.view)
         assertTrue(shaped.view.contains("capture incomplete: log truncated at"), shaped.view)
         assertTrue(shaped.view.contains("full: #57 · 5002 lines"), shaped.view)
         assertEquals(

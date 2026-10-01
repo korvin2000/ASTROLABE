@@ -43,17 +43,23 @@ Schema **v5** (phase 0: `pending_completions`, `acceptance_decisions`); `packets
 `integration` rows; skills and behaviour maps are `BlobKind.MODULE` blobs linked as a note's `procedure` module.
 
 ## Last verification
-Ubuntu + Windows CI green: P4–P6 gates 36159227747, 36162949349, 36167689819, 36172349269; fine-tune + CI repair
-(`c407c24`) 36468171641. The AI Gate branch is verified locally only (Windows, JDK 26; journal).
+Local Windows (JDK 26), 2026-10-01, `main` tip after D-375: `./gradlew build` green — core 1831, eval 52, provider-api 20,
+provider-ai-gate 40, index-treesitter 17 tests, 0 failed (`checkKotlinAbi` included). Linux and CI not run for this change.
+Earlier CI (Ubuntu + Windows): P4–P6 gates 36159227747, 36162949349, 36167689819, 36172349269; `c407c24` 36468171641.
 
 ## Recorded deviations
 Local choices D-112–D-113, D-120–D-126, D-135–D-137, D-145–D-155, D-160–D-165, D-170–D-174, D-180–D-183, D-190–D-195,
 D-200–D-202, D-210–D-213, D-220–D-223, D-230–D-233, D-240–D-244, D-250–D-254, D-260 (TODO §3); owner D-175 (deps).
 ## Audit remediation (2026-09-28): 142 findings fixed (`audit/BUGFIX-REVIEW.md`); follow-ups D-321–D-325; CI green 36468171641.
-## Plan-handoff fix (2026-10-01, owner request, D-357–D-362, branch `fix/plan-handoff`, not merged)
-Masked-op refusals explain themselves; refusal loop ends the cell blocked; plan form visible/lenient (`PLAN_FORM`,
-`roles/4`); `ShapePolicy.planCell = WhenNeeded` skips the plan cell for an eligible S1 contract; plan/probe run R-class only
-(enforced); GLM input tolerance; `gate.body` pass-through. Tests: core cell/tool/campaign/graph/delegate/verify/context.
+## Plan-handoff fix (2026-10-01, D-357–D-362, merged into local `main`)
+Masked-op refusals explain themselves; refusal loop ends the cell blocked; plan form visible/lenient; `planCell = WhenNeeded`;
+plan/probe run R-class only; GLM input tolerance; `gate.body` pass-through.
+## Efficiency fix (2026-10-01, owner request, D-363–D-375, merged into `main`)
+Windows `PATH`×`PATHEXT` program resolution; `ContentCache` for stamps/snapshots with fresh stamps at every acceptance,
+publication and delegation boundary; look/edit/state input tolerance and `JsonRepair` (malformed, never truncated); a refused
+call refuses only itself; edit batches independent per path group; stall counts work, 80 turns, repair edits on reserve; host
+block + language line (`kernel/2`, `error-policy/5`); raised and wired defaults; open plan steps do not block a proven
+acceptance; delete/move W only with proven containment. Live runs and Codex reviews: `../harness-efficiency-analysis.md`.
 ## AI Gate transport (2026-09-28, merged into local `main`)
 `AiGateAdapter(llm, profiles)` + `Astrolabe(…, estimators = adapter.estimators(HeuristicEstimator()))`; profiles bind via
 `Profile.config.gate`, drafts/probes via `AiGateProfiles` (D-326–D-336); AX-01..10 pass offline; `liveTest` not yet run.

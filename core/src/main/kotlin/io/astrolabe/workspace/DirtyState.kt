@@ -210,10 +210,11 @@ public class DirtyState(
 
     /**
      * Captures the working tree as snapshot [turn] — tracked delta, the user's staged content and
-     * relevant untracked files — writing every byte to `blobs/recovery/` first (D-14).
+     * relevant untracked files — writing every byte to `blobs/recovery/` first (D-14). With [fresh]
+     * every file is read from disk instead of trusting the content cache ([Stamper.report]).
      */
     @JvmOverloads
-    public fun capture(turn: Int = 0): Snapshot {
+    public fun capture(turn: Int = 0, fresh: Boolean = false): Snapshot {
         workspace.git.unsupportedForms().firstOrNull()?.let {
             throw UnsupportedRepositoryForm(it, "dirty-state capture")
         }
@@ -221,7 +222,7 @@ public class DirtyState(
         var attempt = 1
         while (true) {
             try {
-                return captureOnce(turn, attempt)
+                return captureOnce(turn, attempt, fresh)
             } catch (changed: SnapshotIntegrityError) {
                 if (attempt >= CAPTURE_ATTEMPTS) throw changed
                 attempt++
@@ -232,20 +233,20 @@ public class DirtyState(
     /** Test seam: runs after an attempt's reads and before its integrity recheck, with the attempt number. */
     internal var beforeRecheck: (attempt: Int) -> Unit = {}
 
-    private fun captureOnce(turn: Int, attempt: Int): Snapshot {
+    private fun captureOnce(turn: Int, attempt: Int, fresh: Boolean): Snapshot {
         val status = workspace.git.status(UntrackedFiles.ALL, includeIgnored = true)
         val index = workspace.git.lsFiles()
         val entries = LinkedHashMap<String, SnapshotEntry>()
 
         for (entry in status.entries) {
             when (entry) {
-                is StatusEntry.Ordinary -> worktreeEntry(entry.path, entry.worktreeMode)?.let { entries[entry.path] = it }
-                is StatusEntry.Unmerged -> worktreeEntry(entry.path, entry.worktreeMode)?.let { entries[entry.path] = it }
-                is StatusEntry.Untracked -> worktreeEntry(entry.path, FileMode.ABSENT)?.let { entries[entry.path] = it }
+                is StatusEntry.Ordinary -> worktreeEntry(entry.path, entry.worktreeMode, fresh)?.let { entries[entry.path] = it }
+                is StatusEntry.Unmerged -> worktreeEntry(entry.path, entry.worktreeMode, fresh)?.let { entries[entry.path] = it }
+                is StatusEntry.Untracked -> worktreeEntry(entry.path, FileMode.ABSENT, fresh)?.let { entries[entry.path] = it }
                 is StatusEntry.Renamed -> {
-                    worktreeEntry(entry.path, entry.worktreeMode)?.let { entries[entry.path] = it }
+                    worktreeEntry(entry.path, entry.worktreeMode, fresh)?.let { entries[entry.path] = it }
                     if (entry.origin == ChangeOrigin.RENAME) {
-                        val origin = worktreeEntry(entry.origPath, FileMode.ABSENT)
+                        val origin = worktreeEntry(entry.origPath, FileMode.ABSENT, fresh)
                         if (origin?.kind == SnapshotEntryKind.Deleted) entries[entry.origPath] = origin
                     }
                 }
@@ -255,10 +256,10 @@ public class DirtyState(
         }
 
         val staged = stagedEntries(status, index)
-        val report = stamper.report()
+        val report = stamper.report(fresh)
         // Include raw differences hidden by Git's clean filters and checkout conversions.
         for ((path, entry) in report.members) {
-            if (path !in entries) worktreeEntry(path, entry.mode)?.let { entries[path] = it }
+            if (path !in entries) worktreeEntry(path, entry.mode, fresh)?.let { entries[path] = it }
         }
         val captured = entries.mapValues { (_, entry) ->
             val type = when (entry.kind) {
@@ -327,7 +328,7 @@ public class DirtyState(
         return staged.sortedWith(compareBy(Stamper.PATH_ORDER) { it.path + "" + it.stage })
     }
 
-    private fun worktreeEntry(path: String, reportedMode: FileMode): SnapshotEntry? {
+    private fun worktreeEntry(path: String, reportedMode: FileMode, fresh: Boolean): SnapshotEntry? {
         val resolved = workspace.paths.resolveCapture(path)
         if (resolved !is PathResolution.Resolved) {
             throw SnapshotIntegrityError("cannot capture '$path': $resolved")
@@ -340,12 +341,18 @@ public class DirtyState(
                     blobs.put(bytes, BlobKind.PREIMAGE, ids, recovery = true), bytes.size.toLong())
             }
             PathKind.Regular -> {
-                val bytes = workspace.bytes(resolved)
-                    ?: throw SnapshotIntegrityError("'$path' disappeared during capture")
                 // One mode rule with the stamp report the recheck compares against (D-293).
                 val mode = stamper.fileMode(resolved, reportedMode)
+                // D-364: unchanged content already in the recovery store is not read or stored again.
+                val known = if (fresh) null else workspace.contents.cached(resolved.real)
+                if (known != null && blobs.holds(known.digest, recovery = true)) {
+                    return SnapshotEntry(path, SnapshotEntryKind.File, mode, known.digest, known.sizeBytes)
+                }
+                var bytes: ByteArray? = null
+                workspace.contents.load(resolved.real, null) { workspace.bytes(resolved).also { bytes = it } }
+                val read = bytes ?: throw SnapshotIntegrityError("'$path' disappeared during capture")
                 SnapshotEntry(path, SnapshotEntryKind.File, mode,
-                    blobs.put(bytes, BlobKind.PREIMAGE, ids, recovery = true), bytes.size.toLong())
+                    blobs.put(read, BlobKind.PREIMAGE, ids, recovery = true), read.size.toLong())
             }
             PathKind.Directory -> null
             else -> throw SnapshotIntegrityError("unsupported capture kind ${resolved.kind}: $path")

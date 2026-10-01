@@ -1,6 +1,7 @@
 package io.astrolabe.tool.run
 
 import io.astrolabe.Config
+import io.astrolabe.Defaults
 import io.astrolabe.atlas.Atlas
 import io.astrolabe.auth.Capability
 import io.astrolabe.auth.CapabilitySet
@@ -257,6 +258,19 @@ class RunTest {
         assertFalse(workset.covers("src/a.py", v, LineRange(1, 2)), "coherence dropped the stale read")
         assertEquals("touched by run", workset.pendingDrops.single().cause.substringBefore(" #").let { "touched by run" })
         assertTrue(out.header!!.runtime.candidateBefore != out.header!!.runtime.candidateAfter)
+    }
+
+    @Test
+    fun `an omitted budget and timeout are the configured defaults and explicit values win`() = runTest {
+        val tool = runner(config = Config(defaults = Defaults(runBudgetTokens = 60, runTimeoutSeconds = 1)))
+        val lines = shell("for /L %i in (1,1,200) do @echo line%i", "seq 1 200")
+        val cut = run("""{"cmd":"$lines"}""", tool)
+        assertTrue(cut.body.contains("view truncated at prompt budget 60 tokens"), cut.body)
+        val whole = run("""{"cmd":"$lines","budget":4000}""", tool)
+        assertFalse(whole.body.contains("view truncated"), whole.body)
+        val slow = shell("ping -n 3 127.0.0.1 >NUL", "sleep 2")
+        assertEquals("timeout", status(run("""{"cmd":"$slow"}""", tool)), "the configured 1 s deadline applies")
+        assertEquals("completed", status(run("""{"cmd":"$slow","timeout":30}""", tool)), "an explicit timeout wins")
     }
 
     @Test

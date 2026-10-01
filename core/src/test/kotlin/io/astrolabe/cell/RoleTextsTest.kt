@@ -32,8 +32,9 @@ class RoleTextsTest {
         val probe = Layout.system(Roles.probe, mask, ExecutionMode.TrustedLocal)
         RoleTexts.probe.forEach { assertTrue(probe.contains(it), "probe text line missing: $it") }
         RoleTexts.shared.forEach { assertTrue(probe.contains(it), "shared kernel line missing: $it") }
+        assertTrue(probe.contains("in the language of the user's request"), "every role answers in the user's language")
         Kernel.evidenceLines.forEach { assertTrue(probe.contains("  $it"), "evidence line missing: $it") }
-        assertTrue(probe.contains("no salvage of half-patches") && probe.contains("data: "), "the error policy and the data rule are shared")
+        assertTrue(probe.contains("registers stand") && probe.contains("data: "), "the error policy and the data rule are shared")
         assertFalse(probe.contains("This cell owns one increment"), "the implementing STATE gate is not the probe's")
         assertFalse(probe.contains("STATE is yours and validated"), probe)
         assertTrue(probe.contains("packet: Investigation"))

@@ -36,7 +36,7 @@ public sealed interface ScopeVerdict {
         val outsideIncrement: List<String> = emptyList(),
     ) : ScopeVerdict
 
-    /** At least one path is refused; nothing in the batch is written (preflight is all-or-nothing, §9.1). */
+    /** At least one path is refused; the edit checks each path group on its own and writes nothing of a refused group (§9.1, D-371). */
     public data class Refused(override val contractVersion: Int, val refusals: List<ScopeRefusal>) : ScopeVerdict
 }
 

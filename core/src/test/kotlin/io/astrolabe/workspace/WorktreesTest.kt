@@ -67,6 +67,25 @@ class WorktreesTest {
     }
 
     @Test
+    fun `a worktree reproduces a same-size rewrite with a restored modification time`(@TempDir state: Path) {
+        WorkspaceFixture.create(state).use { fixture ->
+            val file = fixture.repo.resolve("notes.txt")
+            fixture.repo.untracked("notes.txt", "aaaa\n")
+            fixture.settle()
+            val modified = Files.getLastModifiedTime(file)
+            fixture.stamper.report()
+            fixture.repo.write("notes.txt", "bbbb\n")
+            Files.setLastModifiedTime(file, modified)
+
+            val workspaces = Workspaces(fixture.workspace, fixture.store.layout.candidates, TEST_ENV)
+            val tree = workspaces.createWorktree(fixture.ids.work, fixture.ids.attempt, "I1")
+            assertEquals("bbbb\n", Files.readString(tree.root.resolve("notes.txt")))
+            assertEquals(Stamper(fixture.workspace, TEST_ENV).report(fresh = true).candidateId, tree.base)
+            workspaces.remove(tree)
+        }
+    }
+
+    @Test
     fun `worktree removal never touches user branches or refs`(@TempDir state: Path) {
         WorkspaceFixture.create(state).use { fixture ->
             fixture.rawGit("branch", "feature")

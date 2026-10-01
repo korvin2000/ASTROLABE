@@ -19,7 +19,7 @@ import io.astrolabe.provider.Role as ItemRole
  * line is a harness change that takes effect at an attempt boundary (invariant 12).
  */
 public object Kernel {
-    public const val VERSION: String = "kernel/1"
+    public const val VERSION: String = "kernel/2"
 
     /** The three evidence lines §4.3 requires verbatim in `[S]`; line 3 below states the same rule. */
     public val evidenceLines: List<String> = listOf(
@@ -39,7 +39,9 @@ public object Kernel {
         "Exit 0 proves that this invocation succeeded, nothing more. An empty search in a limited scope is " +
             "not absence. \"Pre-existing failure\" requires a baseline receipt. A diff is a fact; a summary " +
             "is a claim.",
-        "Never wrap tests in `|| true` or `|| echo`; run invocations separately or aggregate status explicitly.",
+        "`run` argv starts a program directly, without a shell; a missing program is reported as not found — check the " +
+            "host block in the repository prime before concluding a tool is absent. Never wrap tests in `|| true` or " +
+            "`|| echo`; run invocations separately or aggregate status explicitly.",
         "Before editing across a module boundary, name the fact you are missing — caller, contract, config, " +
             "fixture, test — and look for that, not for more similar snippets. Use `look(impact)` before a " +
             "change with many references. Record unknown edges in Open instead of inventing them.",
@@ -65,7 +67,12 @@ public object Kernel {
             "green. Do not loop to manufacture green.",
         "Be terse: one intent line per turn; do not restate results; update STATE with typed ops; the anchor " +
             "is rendered for you — never re-emit it.",
+        LANGUAGE,
     )
+
+    /** D-366: the user reads the final summary in their own language; every role shares this line ([RoleTexts.shared]). */
+    public const val LANGUAGE: String = "Write everything the user reads — the final summary, questions, blockers — in the " +
+        "language of the user's request; tool arguments and STATE stay as they are."
 
     /** The numbered contract, one line per rule. */
     @JvmStatic
@@ -79,16 +86,21 @@ public object Kernel {
  * tool layer, never in this text.
  */
 public object ErrorPolicy {
-    public const val VERSION: String = "error-policy/2"
+    public const val VERSION: String = "error-policy/5"
 
     /** Event → what the harness does. Order is the specification's. */
     public val rows: List<Pair<String, String>> = listOf(
-        "unparseable output" to "no world effect; one-line schema error; registers stand; no salvage of half-patches",
-        "anchor 0x or >1x" to "no write; three nearest candidates with lines, or all match sites",
-        "`expect` stale" to "no write; the diff since `expect` returned",
-        "hunk outside displayed range" to "no write; outline plus the displayed ranges",
+        "unparseable output" to "malformed JSON arguments (brackets, a missing or trailing comma) are repaired and the result says what changed; an output that was cut is never repaired: send that call again in full; " +
+            "otherwise that call has no world effect and gets a one-line schema error; the other calls of the turn run " +
+            "(a refused edit holds back the turn's runs, a call conditioned on it does not run); registers stand",
+        "anchor 0x or >1x" to "that op's path group is not written; three nearest candidates with lines, or all match sites; the other groups apply",
+        "`expect` stale" to "that op's path group is not written; the diff since `expect` returned; the other groups apply",
+        "hunk outside displayed range" to "that op's path group is not written; outline plus the displayed ranges; the other groups apply; " +
+            "the result ends \"N of M files written; resend only the refused ops\"",
         "mid-batch I/O failure" to "actual per-file state with preimage ids; no auto-retry; no false \"rolled back\"",
-        "STATE invariant violated" to "the eligible STATE patch list is rejected with the invariant and sizes; prior world effects remain recorded",
+        "STATE invariant violated" to "an op that breaks its own rule is skipped and named while the others apply, unless a later op " +
+            "depends on it; a whole-patch rule (caps, one Next, one [>], red recorded) rejects the eligible list with the invariant and sizes; " +
+            "prior world effects remain recorded",
         "run timeout" to "the process group is killed; `timeout`; no replay",
         "unknown outcome" to "`unknown_outcome`; external and workspace state are reconciled before any retry",
         "truncation" to "always marked; prompt and capture limits are distinguished; a recall pointer is given",

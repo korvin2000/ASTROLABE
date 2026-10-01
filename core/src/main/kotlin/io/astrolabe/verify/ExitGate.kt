@@ -53,6 +53,8 @@ public sealed interface CompletionResult {
         val provenance: List<ItemProvenance> = emptyList(),
         /** The acceptance decision this completion applied, if any. */
         val decision: DecisionRecord? = null,
+        /** Plan steps left unticked on a proven acceptance (D-368, [Resolved.leftOpen]). */
+        val leftOpen: List<String> = emptyList(),
     ) : CompletionResult {
         /** Every item was verified: nothing was accepted on a decider's word alone. */
         val verified: Boolean get() = provenance.none { it.how == ProvenanceKind.Accepted }
@@ -143,7 +145,7 @@ public class Verifier(public val maxFinalizations: Int = 2) {
         return CompletionResult.Accepted(
             increment.id, proposal.baseStamp, proposal.patchHash, proposal.resultingStamp, proposal.envId,
             resolved.receiptIds, Ledger(entries), contract.version, contract.workId, increment.definitionDigest(),
-            contract.attemptId, resolved.evidenceRefs, cell, resolved.provenance, resolved.decision,
+            contract.attemptId, resolved.evidenceRefs, cell, resolved.provenance, resolved.decision, resolved.leftOpen,
         )
     }
 

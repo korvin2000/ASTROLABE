@@ -64,16 +64,20 @@ class ValidatorTest {
         val ready = applied(validator.check(base, Patch.of(Op.PlanAdd("a"), Op.PlanAdd("b"), Op.PlanCursor(1), Op.Next("go")), Ctx()))
         assertEquals("exactly one Next", rejected(validator.check(base, Patch.of(Op.FactAdd(ClaimKind.Hypothesis, "c")), Ctx())), "no Next in the patch nor in STATE, and no open step")
         assertEquals("exactly one Next", rejected(validator.check(ready, Patch.of(Op.Next("a"), Op.Next("b")), Ctx())))
-        assertEquals("v needs an existing evidence id", rejected(validator.check(ready, Patch.of(Op.FactAdd(ClaimKind.Verified, "x", evidence = "#99"), Op.Next("n")), Ctx())))
-        assertEquals("v needs an existing evidence id", rejected(validator.check(ready, Patch.of(Op.FactAdd(ClaimKind.Verified, "x"), Op.Next("n")), Ctx())))
-        assertEquals("tick needs green accept or an evidence id", rejected(validator.check(ready, Patch.of(Op.PlanTick(1), Op.PlanCursor(2), Op.Next("n")), Ctx())))
-        assertEquals("[~] needs a reason", rejected(validator.check(ready, Patch.of(Op.PlanCancel(2, " "), Op.Next("n")), Ctx())))
-        assertEquals("dead ends need scope and reopen", rejected(validator.check(ready, Patch.of(Op.DeadendAdd("x", null, "", "later"), Op.Next("n")), Ctx())))
-        assertEquals("line ≤ 240 chars", rejected(validator.check(ready, Patch.of(Op.FactAdd(ClaimKind.Hypothesis, "x".repeat(241)), Op.Next("n")), Ctx())))
-        assertEquals("no fenced code", rejected(validator.check(ready, Patch.of(Op.FactAdd(ClaimKind.Hypothesis, "```py\nx```"), Op.Next("n")), Ctx())))
+        // D-373: a per-op rule skips that op and the others apply; an op alone rejects the patch with its rule. An unbacked
+        // tick and a v fact without stored evidence are recorded (D-373 tests below).
+        assertEquals("[~] needs a reason", rejected(validator.check(ready, Patch.of(Op.PlanCancel(2, " ")), Ctx())))
+        assertEquals("dead ends need scope and reopen", rejected(validator.check(ready, Patch.of(Op.DeadendAdd("x", null, "", "later")), Ctx())))
+        assertEquals("line ≤ 600 chars", rejected(validator.check(ready, Patch.of(Op.FactAdd(ClaimKind.Hypothesis, "x".repeat(601))), Ctx())))
+        assertIs<Validation.Applied>(validator.check(ready, Patch.of(Op.FactAdd(ClaimKind.Hypothesis, "x".repeat(500)), Op.Next("n")), Ctx()), "D-370: a 500-char fact line fits the default")
+        assertEquals("line ≤ 240 chars", rejected(Validator(HeuristicEstimator(), factLineMaxChars = 240).check(ready, Patch.of(Op.FactAdd(ClaimKind.Hypothesis, "x".repeat(500))), Ctx())), "the configured cap applies")
+        assertEquals("no fenced code", rejected(validator.check(ready, Patch.of(Op.FactAdd(ClaimKind.Hypothesis, "```py\nx```")), Ctx())))
         assertEquals("exactly one [>]", rejected(validator.check(ready.copy(plan = ready.plan.map { it.copy(mark = Mark.Cursor) }), Patch.of(Op.PlanAdd("c"), Op.Next("n")), Ctx())))
-        assertEquals("patch cap", rejected(validator.check(ready, Patch.of(Op.FactAdd(ClaimKind.Hypothesis, "w ".repeat(120)), Op.FactAdd(ClaimKind.Hypothesis, "w ".repeat(120)), Op.FactAdd(ClaimKind.Hypothesis, "w ".repeat(120)), Op.FactAdd(ClaimKind.Hypothesis, "w ".repeat(120)), Op.FactAdd(ClaimKind.Hypothesis, "w ".repeat(120)), Op.FactAdd(ClaimKind.Hypothesis, "w ".repeat(120)), Op.Next("n")), Ctx())))
-        assertEquals("unknown step", rejected(validator.check(ready, Patch.of(Op.PlanCursor(9), Op.Next("n")), Ctx())))
+        val facts = Array<Op>(20) { Op.FactAdd(ClaimKind.Hypothesis, "w ".repeat(120)) }
+        assertEquals("patch cap", rejected(validator.check(ready, Patch.of(*facts, Op.Next("n")), Ctx())))
+        val six = validator.check(ready, Patch.of(*facts.copyOf(6).requireNoNulls(), Op.Next("n")), Ctx())
+        assertTrue(six is Validation.Applied && six.sizes.patchTokens > 400, "D-365: a patch over the old 400-token cap applies: $six")
+        assertEquals("unknown step", rejected(validator.check(ready, Patch.of(Op.PlanCursor(9)), Ctx())))
         assertEquals(1, ready.version, "rejections never change the register")
     }
 
@@ -116,13 +120,49 @@ class ValidatorTest {
     }
 
     @Test
-    fun `evidence refusals name op N as a call of the same turn and hash N as an earlier result`() {
-        val ready = applied(validator.check(base, Patch.of(Op.PlanAdd("a", accept = "run: pytest -k a"), Op.PlanCursor(1), Op.Next("go")), Ctx()))
-        val tick = assertIs<Validation.Rejected>(validator.check(ready, Patch.of(Op.PlanTick(1, "op:3")), Ctx()))
-        assertTrue(tick.detail.contains("op:N is a call of the same turn; a result of an earlier turn is named by its alias #N"), tick.detail)
-        assertTrue(tick.detail.contains("or tick once its accept 'run: pytest -k a' is green"), tick.detail)
-        val fact = assertIs<Validation.Rejected>(validator.check(ready, Patch.of(Op.FactAdd(ClaimKind.Verified, "x")), Ctx()))
-        assertTrue(fact.detail.contains("no evidence given — name a stored result by its alias #N, or a run or verify call of this turn as op:N"), fact.detail)
+    fun `a tick without usable evidence is recorded without it and a v fact whose evidence does not resolve is kept as h`() {
+        val ready = applied(validator.check(base, Patch.of(Op.PlanAdd("a", accept = "run: pytest -k a"), Op.PlanAdd("b"), Op.PlanCursor(1), Op.Next("go")), Ctx()))
+        val tick = assertIs<Validation.Applied>(validator.check(ready, Patch.of(Op.PlanTick(1, "op:3"), Op.Next("n")), Ctx()))
+        assertEquals(Mark.Done, tick.register.step(1)!!.mark)
+        assertEquals(null, tick.register.step(1)!!.evidence, "the unusable evidence is dropped")
+        assertEquals(setOf(1), tick.unbackedTicks)
+        assertEquals(listOf("tick 1 recorded without evidence: 'op:3' names no call of this turn; a stored result is #N"), tick.notes)
+        assertEquals(emptyList(), io.astrolabe.cell.Progress.events(ready, tick.register, 2, unbackedTicks = tick.unbackedTicks), "an unbacked tick is not progress")
+        val backed = assertIs<Validation.Applied>(validator.check(ready, Patch.of(Op.PlanTick(1, "#12")), Ctx()))
+        assertEquals(emptySet(), backed.unbackedTicks)
+        assertEquals(1, io.astrolabe.cell.Progress.events(ready, backed.register, 2).size)
+
+        val fact = assertIs<Validation.Applied>(validator.check(ready, Patch.of(Op.FactAdd(ClaimKind.Verified, "x", evidence = "#99"), Op.Next("n")), Ctx()))
+        assertEquals(ClaimKind.Hypothesis, fact.register.facts.single().kind)
+        assertEquals(null, fact.register.facts.single().evidenceId)
+        assertTrue(fact.notes.single().startsWith("op 1 (fact.add) kept as h: '#99' is not a stored result"), fact.notes.toString())
+        assertEquals(ClaimKind.Verified, applied(validator.check(ready, Patch.of(Op.FactAdd(ClaimKind.Verified, "x", evidence = "#12")), Ctx())).facts.single().kind, "a v fact with stored evidence stays v")
+    }
+
+    @Test
+    fun `a cursor on a done or unknown step is ignored with a note and the cursor goes to the first open step`() {
+        val ready = applied(validator.check(base, Patch.of(Op.PlanAdd("a"), Op.PlanAdd("b"), Op.PlanCursor(1), Op.Next("go")), Ctx()))
+        // the live run's last patch: tick, cursor 0, next
+        val live = assertIs<Validation.Applied>(validator.check(ready, Patch.of(Op.PlanTick(1, "#12"), Op.PlanCursor(0), Op.Next("increment complete")), Ctx()))
+        assertEquals(listOf("op 2 (plan.cursor) ignored: unknown step 0"), live.notes)
+        assertEquals(Mark.Cursor, live.register.step(2)!!.mark, "the first open step takes the cursor")
+        val done = assertIs<Validation.Applied>(validator.check(live.register, Patch.of(Op.PlanCursor(1), Op.Next("n")), Ctx()))
+        assertEquals(listOf("op 1 (plan.cursor) ignored: step 1 is [x]"), done.notes)
+        assertEquals(Mark.Cursor, done.register.step(2)!!.mark)
+    }
+
+    @Test
+    fun `an invalid op is skipped and named while the rest apply unless a later op depends on it`() {
+        val ready = applied(validator.check(base, Patch.of(Op.PlanAdd("a"), Op.PlanCursor(1), Op.Next("go")), Ctx()))
+        val partly = assertIs<Validation.Applied>(validator.check(ready, Patch.of(Op.PlanAdd("b"), Op.OpenAdd("q"), Op.PlanCancel(1, " "), Op.Next("n")), Ctx()))
+        assertEquals(listOf("op 3 (plan.cancel) skipped: [~] needs a reason — plan.cancel(1)"), partly.notes)
+        assertEquals(listOf("a", "b"), partly.register.plan.map { it.text })
+        assertEquals(1, partly.register.open.size)
+        assertEquals(3, partly.appliedOps.size)
+        val dependent = validator.check(ready, Patch.of(Op.PlanAdd("x".repeat(601)), Op.PlanTick(2, "#12"), Op.Next("n")), Ctx())
+        assertEquals("depends on a skipped op", rejected(dependent))
+        assertTrue((dependent as Validation.Rejected).detail.contains("op 2 (plan.tick) names step 2, which op 1 (skipped) would have created"), dependent.detail)
+        assertIs<Validation.Applied>(validator.check(ready, Patch.of(Op.PlanAdd("x".repeat(601)), Op.PlanTick(1, "#12"), Op.Next("n")), Ctx()), "a tick of an existing step does not depend on it")
     }
 
     @Test

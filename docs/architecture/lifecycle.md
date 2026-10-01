@@ -86,7 +86,7 @@ cell(ctx, inc, budget):
         A = render_current_anchor(ctx, inc)
         request = adapter.render_and_admit(ctx.S, ctx.R, ctx.K, ctx.T, A)
         out = model(request, profile=ctx.profile)
-        calls = validate_complete_calls_and_dependencies(out) # fail closed; no partial-call execution
+        calls = validate_complete_calls_and_dependencies(out) # per call: a refused call and its dependents never run (D-372); no partial-call execution
         journal.persist_native_output(out)
         ctx.T.append_native(out)                            # assistant calls precede their results
         if not calls:

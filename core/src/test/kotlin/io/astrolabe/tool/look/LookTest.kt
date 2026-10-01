@@ -1,5 +1,6 @@
 package io.astrolabe.tool.look
 
+import io.astrolabe.Defaults
 import io.astrolabe.atlas.Atlas
 import io.astrolabe.auth.InstructionShape
 import io.astrolabe.auth.Redaction
@@ -23,6 +24,7 @@ import io.astrolabe.id.WorkspaceId
 import io.astrolabe.os.search.Searches
 import io.astrolabe.provider.ToolCall as ProviderCall
 import io.astrolabe.store.Store
+import io.astrolabe.tool.Args
 import io.astrolabe.tool.ParsedCalls
 import io.astrolabe.tool.ToolCalls
 import io.astrolabe.tool.ToolOutcome
@@ -122,6 +124,20 @@ class LookTest {
     }
 
     @Test
+    fun `an empty file reads as an ok observation and is KNOWN at its version`() = runTest {
+        repo.write("client/src/app/app.css", "")
+        val read = look("""{"what":"read","target":"client/src/app/app.css"}""")
+        assertEquals("ok", status(read), read.body)
+        assertTrue(read.body.contains("(empty file, 0 lines)"), read.body)
+        val v = registry.version("client/src/app/app.css")!!
+        assertEquals(v, read.header!!.versions["client/src/app/app.css"])
+        assertEquals(setOf(v), workset.snapshot().versions("client/src/app/app.css"), "an omitted expect now resolves to this version")
+        // the live run's second form: a line range on the empty file
+        val ranged = look("""{"what":"read","target":"client/src/app/app.css","range":"1-1"}""")
+        assertTrue(ranged.body.contains("see ${read.resultAlias} (unchanged)"), ranged.body)
+    }
+
+    @Test
     fun `a range read registers coverage at the read version, repeats dedup, and a broader read executes (IX-07)`() = runTest {
         val first = look("""{"what":"read","target":"src/a.py:1-2"}""")
         val v = registry.version("src/a.py")!!
@@ -153,12 +169,24 @@ class LookTest {
     }
 
     @Test
-    fun `a whole-file read above budget is refused with the outline and grants nothing`() = runTest {
-        val refused = look("""{"what":"read","target":"src/big.py","budget":100}""")
-        assertEquals("refused", status(refused))
-        assertTrue(refused.body.startsWith("src/big.py: 200 lines exceed budget 100; name a range (src/big.py:a-b) or ::Symbol"), refused.body)
-        assertTrue(refused.body.contains("outline src/big.py (python"), refused.body)
-        assertTrue(workset.entries.isEmpty())
+    fun `a whole-file read above budget shows its first lines, the small outline, and grants only the shown lines`() = runTest {
+        repo.write("src/mod.py", (1..3).joinToString("") { f -> "def f$f():\n" + (1..40).joinToString("") { "    x$it = $it\n" } + "\n" })
+        val v = registry.version("src/mod.py")!!
+        val cut = look("""{"what":"read","target":"src/mod.py","budget":200}""")
+        assertEquals("ok", status(cut), cut.body)
+        assertTrue(cut.header!!.runtime.displayTruncated)
+        assertEquals(estimator.estimate(cut.body).tokens, cut.tokens)
+        assertTrue(cut.tokens <= 200, "the outline comes out of the same budget")
+        val shownTo = cut.header!!.runtime.scope!!.substringAfter("src/mod.py:1-").toInt()
+        assertTrue(cut.body.contains("\n… ${126 - shownTo} more lines: recall #1 range ${shownTo + 1}-126\noutline src/mod.py (python"), cut.body)
+        assertTrue(cut.body.endsWith("function f3  85-125 exported"), cut.body)
+        assertTrue(workset.covers("src/mod.py", v, LineRange(1, shownTo)))
+        assertFalse(workset.covers("src/mod.py", v, LineRange(1, shownTo + 1)), "coverage is what was displayed")
+
+        val big = look("""{"what":"read","target":"src/big.py","budget":100}""")
+        assertEquals("ok", status(big))
+        assertTrue(big.tokens <= 100)
+        assertTrue(big.body.contains("more lines: recall #2 range"), big.body)
         assertEquals("ok", status(look("""{"what":"read","target":"src/a.py"}""")), "a small file fits")
         assertEquals("refused", status(look("""{"what":"read","target":"../outside.py"}""")))
         assertEquals("refused", status(look("""{"what":"read","target":"src/missing.py"}""")))
@@ -190,8 +218,9 @@ class LookTest {
 
         repo.write("src/many.py", (1..200).joinToString("\n") { "def f$it(): return $it" })
         val outline = look("""{"what":"read","target":"src/many.py","budget":30}""")
-        assertEquals("refused", status(outline))
+        assertEquals("ok", status(outline))
         assertTrue(estimator.estimate(outline.body).tokens <= 30, outline.body)
+        assertFalse(outline.body.contains("outline src/many.py"), "an outline above the allowance is omitted: ${outline.body}")
         val tiny = look("""{"what":"read","target":"src/many.py","budget":1}""")
         assertTrue(estimator.estimate(tiny.body).tokens <= 1, tiny.body)
         val structural = look("""{"what":"outline","target":"src/many.py","budget":30}""")
@@ -213,6 +242,51 @@ class LookTest {
         val missing = look("""{"what":"read","target":"src/a.py::zzz"}""")
         assertEquals("refused", status(missing))
         assertTrue(missing.body.startsWith("no symbol 'zzz' in src/a.py\noutline src/a.py"), missing.body)
+    }
+
+    @Test
+    fun `a read range given beside or instead of the target reads those lines, and a conflicting one is refused`() = runTest {
+        assertEquals("src/big.py:58-95", look("""{"what":"read","target":"src/big.py","range":"58-95"}""").header!!.runtime.scope)
+        assertEquals("src/big.py:10-12", look("""{"what":"read","range":"src/big.py:10-12"}""").header!!.runtime.scope)
+        assertEquals("src/big.py:20-21", look("""{"what":"read","target":"src/big.py","range":"src/big.py:20-21"}""").header!!.runtime.scope)
+        assertEquals("src/big.py:30-31", look("""{"what":"read","target":"src/big.py:30-31","range":"30-31"}""").header!!.runtime.scope)
+        val conflict = look("""{"what":"read","target":"src/big.py:1-3","range":"5-7"}""")
+        assertEquals("refused", status(conflict))
+        assertTrue(conflict.body.contains("'src/big.py:1-3'") && conflict.body.contains("'5-7'"), conflict.body)
+        val pathless = look("""{"what":"read","range":"5-7"}""")
+        assertEquals("refused", status(pathless))
+        assertTrue(pathless.body.contains("needs a path"), pathless.body)
+        assertEquals("refused", status(look("""{"what":"read","target":"src/a.py","range":"src/big.py:1-2"}""")), "a range naming another path is refused")
+    }
+
+    @Test
+    fun `recall takes an id as hash N, bare N or a number`() = runTest {
+        look("""{"what":"read","target":"src/a.py:1-2"}""")
+        for (id in listOf("\"#1\"", "\"1\"", "1", "\" 1 \"")) {
+            val recalled = look("""{"what":"recall","id":$id}""")
+            assertEquals("ok", status(recalled), "id $id: ${recalled.body}")
+            assertTrue(recalled.body.startsWith("recall of #1\n1| def a():"), recalled.body)
+        }
+        assertEquals("refused", status(look("""{"what":"recall","id":"0"}""")))
+        assertEquals("refused", status(look("""{"what":"recall","id":"one"}""")))
+    }
+
+    @Test
+    fun `a look without budget gets the configured default and an explicit budget wins`() = runTest {
+        val omitted = call("""{"what":"read","target":"src/big.py"}""")
+        assertNull((omitted.args as Args.Look).args.budget, "the default is the executor's, not the schema's")
+        assertEquals(Defaults().lookBudgetTokens, look.defaultReadTokens(omitted))
+        val small = Look(
+            workspace, registry, workset, Atlas.build(repo.root), Searches.jvm(), journal,
+            SqliteObservations(store, clock), SqliteAliases(store, clock), store.blobs, Redaction(), estimator, idGen, ids, budgetTokens = 80,
+        )
+        assertEquals(80, small.defaultReadTokens(omitted))
+        val cut = small.execute(omitted, context())
+        assertEquals("ok", status(cut))
+        assertTrue(cut.header!!.runtime.displayTruncated && cut.tokens <= 80, cut.body)
+        val whole = small.execute(call("""{"what":"read","target":"src/big.py:150-200","budget":4000}"""), context())
+        assertFalse(whole.header!!.runtime.displayTruncated, whole.body)
+        assertTrue(whole.body.contains("200| line200 = 200"), whole.body)
     }
 
     @Test

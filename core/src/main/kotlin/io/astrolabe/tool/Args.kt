@@ -10,12 +10,15 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
-/** `look(what, target, budget, near?, glob?, in, since?)` (§5.4). */
+/**
+ * `look(what, target, budget, near?, glob?, in, since?)` (§5.4). An omitted [budget] is the configured
+ * `Defaults.lookBudgetTokens`, resolved by the executor.
+ */
 @Serializable
 public data class LookArgs(
     val what: String,
     val target: String? = null,
-    val budget: Int = 1_500,
+    val budget: Int? = null,
     val near: String? = null,
     val glob: String? = null,
     @SerialName("in") val scope: String = "workspace",
@@ -27,7 +30,7 @@ public data class LookArgs(
     init {
         require(what in ToolOps.look) { "unknown look op '$what'" }
         require(scope in setOf("workspace", "store", "kb")) { "unknown look scope '$scope'" }
-        require(budget > 0) { "budget must be positive" }
+        require(budget == null || budget > 0) { "budget must be positive" }
     }
 }
 
@@ -106,6 +109,11 @@ public data class EditOpArgs(
  * the schema refuses it by name. Then a call without `op` gets `op` = the one of `patch`, `blocked`, `retrieval_miss`
  * that it carries; with none or several present (or an `op` already given) nothing is added.
  * A `patch`/`ops` string that opens like JSON (`[` or `{`) but does not parse is refused with the parser's own message.
+ *
+ * D-365: an `edit` whose op fields sit at the top level is one op — without `ops` they become `ops: [that op]`; with
+ * `ops` holding exactly one op, every top-level `path`/`expect`/`hunks`/`if` it lacks moves into it (D-373), one it holds
+ * with another value is refused naming both; any other mix is refused naming the accepted form. `hunks` sent as a JSON string holding an array is parsed like `ops`. A `look` `id` sent as a
+ * number is that number as text.
  */
 internal object InputTolerance {
     /** The fields each edit form owns (§5.4); every other known field is a placeholder when empty. */
@@ -133,10 +141,35 @@ internal object InputTolerance {
 
     private val json = Json { ignoreUnknownKeys = false }
 
-    fun normalise(family: ToolFamily, raw: JsonObject): JsonObject = when (family) {
-        ToolFamily.Edit -> raw.mapValue("ops") { ops -> parsedArray("ops", ops).let { if (it is JsonArray) JsonArray(it.map(::editOp)) else it } }
-        ToolFamily.State -> withInferredOp(unglued(raw.mapValue("patch") { parsedArray("patch", it) }))
+    /** [notes] collects what was repaired (D-373), for the call's result; a [truncated] response repairs nothing (D-375). */
+    fun normalise(family: ToolFamily, raw: JsonObject, notes: MutableList<String> = ArrayList(), truncated: Boolean = false): JsonObject = when (family) {
+        ToolFamily.Edit -> lifted(raw.mapValue("ops") { parsedArray("ops", it, notes, truncated) })
+            .mapValue("ops") { ops -> if (ops is JsonArray) JsonArray(ops.map { editOp(it, notes, truncated) }) else ops }
+        ToolFamily.State -> withInferredOp(unglued(raw.mapValue("patch") { parsedArray("patch", it, notes, truncated) }))
+        ToolFamily.Look -> raw.mapValue("id") { id -> if (id is JsonPrimitive && !id.isString && id.content.toIntOrNull() != null) JsonPrimitive(id.content) else id }
         else -> raw
+    }
+
+    /** The fields a single op's top-level copy may hand to the one op of `ops` (D-373: `path` and `hunks` too). */
+    private val LIFTABLE: Set<String> = setOf("path", "expect", "hunks", "if")
+
+    private const val EDIT_FORM: String =
+        "{\"ops\":[{\"path\":\"…\",\"expect\":\"…\",\"hunks\":[{\"anchor\":\"…\",\"new\":\"…\"}]}],\"why\":\"…\"} — every op field inside its op"
+
+    /** D-365: op fields at the top level of an `edit` call, moved into the one op they can belong to. */
+    private fun lifted(raw: JsonObject): JsonObject {
+        val loose = raw.filterKeys { it in EDIT_FIELDS }
+        if (loose.isEmpty()) return raw
+        val rest = raw.filterKeys { it !in EDIT_FIELDS }
+        val ops = raw["ops"] ?: return JsonObject(rest + ("ops" to JsonArray(listOf(JsonObject(loose)))))
+        val single = ((ops as? JsonArray)?.singleOrNull() as? JsonObject)
+        if (single == null || loose.keys.any { it !in LIFTABLE }) {
+            throw IllegalArgumentException("top-level ${loose.keys.joinToString(", ") { "'$it'" }} beside ops${(ops as? JsonArray)?.let { " (${it.size} ops)" } ?: ""} has no single op to belong to; send $EDIT_FORM")
+        }
+        loose.entries.firstOrNull { (key, value) -> single[key]?.let { !empty(it) && it != value } == true }?.let { (key, value) ->
+            throw IllegalArgumentException("top-level '$key' $value and the op's '$key' ${single[key]} differ; send $EDIT_FORM")
+        }
+        return JsonObject(rest + ("ops" to JsonArray(listOf(JsonObject(single + loose)))))
     }
 
     private fun JsonObject.mapValue(key: String, change: (JsonElement) -> JsonElement): JsonObject {
@@ -146,16 +179,21 @@ internal object InputTolerance {
     }
 
     /**
-     * A JSON string whose content is an array becomes that array; text that opens like JSON but does not parse is
-     * refused with the parser's message and position; anything else is left for the schema to refuse.
+     * A JSON string whose content is an array becomes that array; text that opens like JSON but does not parse gets the
+     * syntax repair of [JsonRepair] (D-373, D-375, noted), else is refused with the parser's message and position;
+     * anything else is left for the schema to refuse.
      */
-    private fun parsedArray(key: String, value: JsonElement): JsonElement {
+    private fun parsedArray(key: String, value: JsonElement, notes: MutableList<String>, truncated: Boolean): JsonElement {
         val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content?.trim() ?: return value
         if (!text.startsWith("[") && !text.startsWith("{")) return value
         val parsed = try {
             json.parseToJsonElement(text)
         } catch (e: SerializationException) {
-            throw IllegalArgumentException("$key is a string holding invalid JSON: ${e.message?.lineSequence()?.first()}")
+            val outcome = JsonRepair.repair(json, text, truncated)
+            val fixed = (outcome as? JsonRepair.Repaired)?.takeIf { it.element is JsonArray }
+                ?: throw IllegalArgumentException("$key is a string holding invalid JSON: ${e.message?.lineSequence()?.first()}${JsonRepair.suffix(outcome)}")
+            notes += "$key string repaired: ${fixed.summary}"
+            fixed.element
         }
         return if (parsed is JsonArray) parsed else value
     }
@@ -195,8 +233,9 @@ internal object InputTolerance {
         return JsonObject(raw + ("op" to JsonPrimitive(op)))
     }
 
-    private fun editOp(op: JsonElement): JsonElement {
-        if (op !is JsonObject) return op
+    private fun editOp(element: JsonElement, notes: MutableList<String>, truncated: Boolean): JsonElement {
+        if (element !is JsonObject) return element
+        val op = element.mapValue("hunks") { parsedArray("hunks", it, notes, truncated) }
         val form = FORM_FIELDS.keys.filter { key -> op[key]?.let { !empty(it) } == true }.singleOrNull() ?: return op
         val own = FORM_FIELDS.getValue(form)
         val kept = op.filter { (key, value) -> key !in EDIT_FIELDS || key in own || !empty(value) }
@@ -218,7 +257,10 @@ public data class EditArgs(val ops: List<EditOpArgs>, val why: String) {
     }
 }
 
-/** `run(argv|cmd, …)`, `run(op=poll, handle, since?)`, `run(op=cancel, handle)` (§5.4). */
+/**
+ * `run(argv|cmd, …)`, `run(op=poll, handle, since?)`, `run(op=cancel, handle)` (§5.4). An omitted [budget] or
+ * [timeout] (seconds) is the configured `Defaults.runBudgetTokens` / `runTimeoutSeconds`, resolved by the executor.
+ */
 @Serializable
 public data class RunArgs(
     val op: String = "run",
@@ -226,8 +268,8 @@ public data class RunArgs(
     val cmd: String? = null,
     val cwd: String? = null,
     val shape: String = "auto",
-    val budget: Int = 1_200,
-    val timeout: Int = 120,
+    val budget: Int? = null,
+    val timeout: Int? = null,
     val bg: Boolean = false,
     val intent: String? = null,
     @SerialName("class_hint") val classHint: String? = null,
@@ -241,7 +283,7 @@ public data class RunArgs(
             "run" -> require((argv != null && argv.isNotEmpty()) xor (!cmd.isNullOrBlank())) { "run needs exactly one of argv or cmd" }
             else -> require(!handle.isNullOrBlank()) { "$op needs a handle" }
         }
-        require(budget > 0 && timeout > 0) { "budget and timeout must be positive" }
+        require((budget == null || budget > 0) && (timeout == null || timeout > 0)) { "budget and timeout must be positive" }
     }
 }
 

@@ -65,6 +65,8 @@ public data class IncrementEvidence(
     val evidenceRefs: List<String>,
     /** Per acceptance item: tested, reviewed, or accepted by a decider without verification (I7, D-342). */
     val provenance: List<io.astrolabe.verify.ItemProvenance> = emptyList(),
+    /** Plan steps the agent left unticked on a proven acceptance (D-368); the finish receipt lists them (D-372). */
+    val leftOpen: List<String> = emptyList(),
 ) {
     init { require(contractVersion >= 1) }
 }

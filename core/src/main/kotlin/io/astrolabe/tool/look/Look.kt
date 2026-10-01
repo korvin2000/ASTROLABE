@@ -1,5 +1,6 @@
 package io.astrolabe.tool.look
 
+import io.astrolabe.Defaults
 import io.astrolabe.atlas.Atlas
 import io.astrolabe.atlas.DeclarationKind
 import io.astrolabe.atlas.EditSet
@@ -93,7 +94,8 @@ public sealed interface LookTarget {
  *
  * Budgets are prompt limits: a view is cut at [LookArgs.budget] tokens and says so, the blob keeps the whole
  * rendered selection, and `recall(#n, range)` serves the rest (FX-10). A search's own capture limit is
- * reported separately as `capture_complete`. A whole-file read above budget is refused with the outline.
+ * reported separately as `capture_complete`. A whole-file read above budget shows its first lines the same way,
+ * with the outline after the marker when it is small (D-365).
  *
  * Dedup (D-46, IX-07): a `read` whose lines are already KNOWN at the current version through a live look
  * result answers `see #n (unchanged)`; an evicted, stale or narrower result never does.
@@ -125,11 +127,18 @@ public class Look(
     private val tools: ToolSet = ToolSet.EMPTY,
     /** Where `look(impact)`'s import graph takes its outlines: tier 0, or a host tier-1 index (D-251). */
     private val tiers: IndexTiers = IndexTiers.TIER_0,
+    /** The budget of a call that names none: the configured `Defaults.lookBudgetTokens`. */
+    private val budgetTokens: Int = Defaults().lookBudgetTokens,
 ) : ToolExecutor {
     init {
         require(ids.context != null) { "look runs inside a cell: ids.context is its lineage" }
         require(findMaxHits > 0 && findCaptureBytes > 0) { "find limits must be positive" }
+        require(budgetTokens > 0) { "budgetTokens must be positive" }
     }
+
+    private val LookArgs.tokens: Int get() = budget ?: budgetTokens
+
+    override fun defaultReadTokens(call: ToolCall): Int = budgetTokens
 
     /** The campaign's current atlas; the cell replaces it after `Atlas.refresh` at a turn boundary. */
     public var atlas: Atlas = atlas
@@ -161,10 +170,38 @@ public class Look(
 
     // ------------------------------------------------------------------ read
 
+    /**
+     * `range` as a separate argument (D-365): `a-b` joins a bare-path target, `path:a-b` stands for a missing target or
+     * repeats the target's path. A range that differs from one the target already names is ambiguous and refused.
+     */
+    private fun readTarget(args: LookArgs): LookTarget? {
+        val target = args.target?.takeIf { it.isNotBlank() }?.let(LookTarget::parse)
+        val range = args.range?.trim()?.takeIf { it.isNotEmpty() } ?: return target
+        val bare = RANGE.matchEntire(range)
+        val given = when {
+            bare != null -> target?.let { LookTarget.Lines(it.path, bare.groupValues[1].toInt(), bare.groupValues[2].toInt()) }
+            else -> LookTarget.parse(range).takeIf { it is LookTarget.Lines }?.takeIf { target == null || it.path == target.path }
+        } ?: throw ReadRefusal(
+            if (target == null) "read range '$range' needs a path: send target \"path:a-b\" (or target \"path\" with range \"a-b\")"
+            else "read range '$range' does not fit target '${args.target}': send range \"a-b\" or put it in the target as \"${target.path}:a-b\"",
+        )
+        return when {
+            target == null || target is LookTarget.Whole || target == given -> given
+            else -> throw ReadRefusal("read target '${args.target}' and range '$range' name different lines; send one: target \"${target.path}:a-b\"")
+        }
+    }
+
+    private class ReadRefusal(message: String) : RuntimeException(message)
+
     private fun read(args: LookArgs, context: TurnContext): ToolOutcome {
-        val target = args.target?.let(LookTarget::parse) ?: return refused(args, "refused", "read needs a target: path | path:a-b | path::Symbol")
+        val target = try {
+            readTarget(args)
+        } catch (refusal: ReadRefusal) {
+            return refused(args, "refused", refusal.message!!)
+        } ?: return refused(args, "refused", "read needs a target: path | path:a-b | path::Symbol")
         val content = readFile(target.path) ?: return refused(args, "refused", refusalFor(target.path))
         val lines = decodeLines(content.bytes)
+        if (lines.isEmpty() && target !is LookTarget.Symbol) return emptyRead(args, target.path, content.version, content.bytes, context)
         val outlineOf = { Outline.of(target.path, content.bytes) }
         val span: LineRange = when (target) {
             is LookTarget.Lines -> {
@@ -184,14 +221,14 @@ public class Look(
                 }
                 LineRange(chosen.from, minOf(chosen.to, lines.size))
             }
-            is LookTarget.Whole -> {
-                if (lines.isEmpty()) return refused(args, "refused", "${target.path} is empty")
-                val whole = LineRange(1, lines.size)
-                if (tokensOf(rendered(lines, whole)) > args.budget) {
-                    return refused(args, "refused", "${target.path}: ${lines.size} lines exceed budget ${args.budget}; name a range (${target.path}:a-b) or ::Symbol\n" + renderOutline(outlineOf()))
-                }
-                whole
-            }
+            is LookTarget.Whole -> LineRange(1, lines.size)
+        }
+        // D-365: a whole file above budget shows its first lines like a range read; the outline follows the marker only
+        // when it is small, and its tokens come out of the same budget.
+        val outlineNote = if (target is LookTarget.Whole && tokensOf(rendered(lines, span)) > args.tokens) {
+            renderOutline(outlineOf()).takeIf { tokensOf(it) + 1 <= minOf(OUTLINE_ALLOWANCE_TOKENS, args.tokens / 4).toLong() }
+        } else {
+            null
         }
         // Dedup: the same lines KNOWN at this version through a live look result (D-46).
         workset.entries.firstOrNull { it.path == target.path && it.version == content.version && it.source != EntrySource.PostEdit && it.coverage.covers(span) }?.resultId?.let { alias ->
@@ -204,12 +241,13 @@ public class Look(
         blobs.put(content.bytes, BlobKind.PREIMAGE, ids, recovery = true)
         val full = redaction.apply(rendered(lines, span), ContentClass.ReusableEvidence)
         val hidden = shift(full.mask.hiddenLines, span.from - 1)
-        val view = fit(full.text.lines(), args.budget) { kept ->
-            "\n… ${span.to - span.from - kept + 1} more lines: recall ${alias.text} range ${span.from + kept}-${span.to}"
-        }
-        if (view.lines.isEmpty()) return refused(args, "refused", "${target.path}: selected line exceeds budget ${args.budget}; raise budget or narrow range", complete = false)
+        val marker = { kept: Int -> "\n… ${span.to - span.from - kept + 1} more lines: recall ${alias.text} range ${span.from + kept}-${span.to}" }
+        val outlined = outlineNote?.let { fit(full.text.lines(), args.tokens - tokensOf(it).toInt() - 1, suffix = marker) }?.takeIf { it.lines.isNotEmpty() && it.truncated }
+        val view = outlined ?: fit(full.text.lines(), args.tokens, suffix = marker)
+        if (view.lines.isEmpty()) return refused(args, "refused", "${target.path}: selected line exceeds budget ${args.tokens}; raise budget or narrow range", complete = false)
         val displayed = LineRange(span.from, span.from + view.lines.size - 1)
-        val body = view.body
+        val body = if (outlined != null) view.body + "\n" + outlineNote else view.body
+        val tokens = tokensOf(body)
         val mask = RedactionMask(hidden, full.mask.limitations)
         val blob = blobs.put(full.text.toByteArray(Charsets.UTF_8), BlobKind.OUTPUT, ids)
         observations.record(
@@ -219,11 +257,40 @@ public class Look(
                 sourceVersions = mapOf(target.path to content.version), captureComplete = true, redaction = mask, truncated = view.truncated,
             ),
         )
-        show(target.path, content.version, Ranges.of(displayed), mask, alias.text, context.turn, view.tokens)
+        show(target.path, content.version, Ranges.of(displayed), mask, alias.text, context.turn, tokens)
         return outcome(
-            alias.text, actionId, "ok", body, view.tokens,
+            alias.text, actionId, "ok", body, tokens,
             versions = mapOf(target.path to content.version), scope = "${target.path}:${displayed.from}-${displayed.to}" + (if (content.raced) " (raced)" else ""),
             complete = !view.truncated, captureComplete = true, displayTruncated = view.truncated, redacted = mask.applied, artifact = blob,
+        )
+    }
+
+    /**
+     * D-373: an empty file reads as an ok observation and is KNOWN whole at its version, so it can be deleted or replaced.
+     * Coverage cannot hold zero lines; line 1 stands for the empty file.
+     */
+    private fun emptyRead(args: LookArgs, path: String, version: FileVersion, bytes: ByteArray, context: TurnContext): ToolOutcome {
+        val whole = LineRange(1, 1)
+        workset.entries.firstOrNull { it.path == path && it.version == version && it.source != EntrySource.PostEdit && it.coverage.covers(whole) }?.resultId?.let { alias ->
+            return refused(args, "unchanged", "see $alias (unchanged)", versions = mapOf(path to version))
+        }
+        val actionId = idGen.next("act")
+        val alias = allocate()
+        blobs.put(bytes, BlobKind.PREIMAGE, ids, recovery = true)
+        val body = "(empty file, 0 lines)"
+        val tokens = tokensOf(body)
+        val blob = blobs.put(body.toByteArray(Charsets.UTF_8), BlobKind.OUTPUT, ids)
+        observations.record(
+            Observation(
+                id = alias.canonicalId, ids = ids, actionId = actionId, candidate = null, contentRef = blob,
+                paths = listOf(path), ranges = mapOf(path to Ranges.of(whole)), complete = true,
+                sourceVersions = mapOf(path to version), captureComplete = true, redaction = RedactionMask.NONE, truncated = false,
+            ),
+        )
+        show(path, version, Ranges.of(whole), RedactionMask.NONE, alias.text, context.turn, tokens)
+        return outcome(
+            alias.text, actionId, "ok", body, tokens, versions = mapOf(path to version), scope = "$path (empty)",
+            complete = true, captureComplete = true, displayTruncated = false, redacted = false, artifact = blob,
         )
     }
 
@@ -267,8 +334,8 @@ public class Look(
         val summary = "${hits.hits.size} match${if (hits.hits.size == 1) "" else "es"} for /$pattern/ in $scopeText" +
             (hits.filesSearched?.let { " · $it files searched" } ?: "") + (if (hits.complete) "" else " · capture incomplete (${hits.backend.name.lowercase()} limit)")
         val full = redaction.apply((listOf(summary) + lines).joinToString("\n"), ContentClass.ReusableEvidence)
-        val view = fit(full.text.lines(), args.budget) { kept -> "\n… ${lines.size + 1 - kept} more lines: recall ${alias.text}" }
-        if (view.lines.isEmpty()) return refused(args, "refused", "find result exceeds budget ${args.budget}; raise budget", complete = false, scope = scopeText)
+        val view = fit(full.text.lines(), args.tokens) { kept -> "\n… ${lines.size + 1 - kept} more lines: recall ${alias.text}" }
+        if (view.lines.isEmpty()) return refused(args, "refused", "find result exceeds budget ${args.tokens}; raise budget", complete = false, scope = scopeText)
         val body = view.body
         val versions = files.filterValues { it != null }.mapValues { it.value!!.version }
         val blob = blobs.put(full.text.toByteArray(Charsets.UTF_8), BlobKind.OUTPUT, ids)
@@ -308,8 +375,8 @@ public class Look(
         val lines = listOf("${hits.events.size} journal event${if (hits.events.size == 1) "" else "s"} match '$pattern' in store" + (if (hits.complete) "" else " · more than $findMaxHits: narrow the pattern")) +
             hits.events.map { "#${it.seq} ${it.kind.name.lowercase()}" + (it.turn?.let { t -> " turn $t" } ?: "") + ": " + it.text.lineSequence().first() }
         val full = redaction.apply(lines.joinToString("\n"), ContentClass.ReusableEvidence)
-        val view = fit(full.text.lines(), args.budget) { "\n… recall ${alias.text}" }
-        if (view.lines.isEmpty()) return refused(args, "refused", "store search result exceeds budget ${args.budget}; raise budget", complete = false, scope = "store")
+        val view = fit(full.text.lines(), args.tokens) { "\n… recall ${alias.text}" }
+        if (view.lines.isEmpty()) return refused(args, "refused", "store search result exceeds budget ${args.tokens}; raise budget", complete = false, scope = "store")
         val body = view.body
         val blob = blobs.put(full.text.toByteArray(Charsets.UTF_8), BlobKind.OUTPUT, ids)
         observations.record(Observation(alias.canonicalId, ids, actionId, null, blob, emptyList(), emptyMap(), hits.complete && !view.truncated, emptyMap(), hits.complete, RedactionMask(Ranges.EMPTY, full.mask.limitations), view.truncated))
@@ -319,7 +386,9 @@ public class Look(
     // ---------------------------------------------------------------- recall
 
     private fun recall(args: LookArgs, context: TurnContext): ToolOutcome {
-        val number = args.id?.let(Aliases::parse) ?: return refused(args, "refused", "recall needs id=#n")
+        // D-365: "#14", "14" and 14 name the same result.
+        val number = args.id?.trim()?.let { Aliases.parse(it) ?: it.toIntOrNull()?.takeIf { n -> n >= 1 } }
+            ?: return refused(args, "refused", "recall needs id=#n, e.g. \"#14\"")
         if (args.since != null) return refused(args, "unsupported", "recall since=: background output arrives with run handles (P1.6.5)")
         val alias = aliases.resolve(ids.work, number) ?: return refused(args, "refused", "no result #$number in this campaign")
         val observation = observations.get(alias.canonicalId) ?: return refused(args, "refused", "#$number is not a recallable observation (${alias.kind})")
@@ -358,10 +427,10 @@ public class Look(
             now == null -> "recall of #$number · historical v=${recorded.hash8} (file gone); not KNOWN"
             else -> "recall of #$number · historical v=${recorded.hash8} (now ${now.hash8}); not KNOWN, read again for current bytes"
         }
-        val view = fit(selected, args.budget, prefix = "$label\n") { kept ->
+        val view = fit(selected, args.tokens, prefix = "$label\n") { kept ->
             "\n… recall #$number range ${selectedSource?.from?.plus(kept) ?: kept + 1}-${selectedSource?.to ?: selected.size}"
         }
-        if (view.lines.isEmpty()) return refused(args, "refused", "recall result exceeds budget ${args.budget}; raise budget", complete = false)
+        if (view.lines.isEmpty()) return refused(args, "refused", "recall result exceeds budget ${args.tokens}; raise budget", complete = false)
         val shown = selectedSource?.let { LineRange(it.from, it.from + view.lines.size - 1) }
         val versions = LinkedHashMap<String, FileVersion>()
         if (path != null && shown != null) {
@@ -398,7 +467,7 @@ public class Look(
         if (focus is Focus.Dir && atlas.filesUnder(focus.path) == 0 && atlas.children(focus.path).isEmpty()) {
             return refused(args, "refused", "no directory '${focus.path}' in the atlas")
         }
-        return textResult(args, Focus.render(atlas, focus, args.budget), scope = "tree " + (if (focus is Focus.Dir) focus.path else "/"))
+        return textResult(args, Focus.render(atlas, focus, args.tokens), scope = "tree " + (if (focus is Focus.Dir) focus.path else "/"))
     }
 
     private fun outline(args: LookArgs): ToolOutcome {
@@ -488,7 +557,7 @@ public class Look(
             ?: return refused(args, "not_found", "no admitted BMAP-$subsystem (complete: the knowledge base was searched); navigate with tree, outline and find", scope = "bmap $subsystem")
         val validation = BehaviourMaps.validate(map, atlas)
         return if (behaviour == null) {
-            textResult(args.copy(budget = minOf(args.budget, BehaviourMaps.SUBSYSTEM_MAX_TOKENS)), BehaviourMaps.render(validation, BmapLevel.Subsystem), scope = "bmap $subsystem")
+            textResult(args.copy(budget = minOf(args.tokens, BehaviourMaps.SUBSYSTEM_MAX_TOKENS)), BehaviourMaps.render(validation, BmapLevel.Subsystem), scope = "bmap $subsystem")
         } else {
             textResult(args, BehaviourMaps.render(validation, BmapLevel.Behaviour, behaviour), scope = "bmap $target")
         }
@@ -562,8 +631,8 @@ public class Look(
         val actionId = idGen.next("act")
         val alias = allocate()
         val full = redaction.apply(text, ContentClass.ReusableEvidence)
-        val view = fit(full.text.lines(), args.budget) { "\n… recall ${alias.text}" }
-        if (view.lines.isEmpty()) return refused(args, "refused", "structural result exceeds budget ${args.budget}; raise budget", complete = false, scope = scope)
+        val view = fit(full.text.lines(), args.tokens) { "\n… recall ${alias.text}" }
+        if (view.lines.isEmpty()) return refused(args, "refused", "structural result exceeds budget ${args.tokens}; raise budget", complete = false, scope = scope)
         val body = view.body
         val blob = blobs.put(full.text.toByteArray(Charsets.UTF_8), BlobKind.OUTPUT, ids)
         observations.record(Observation(alias.canonicalId, ids, actionId, null, blob, versions.keys.toList(), emptyMap(), complete && !view.truncated, versions, captureComplete, RedactionMask(Ranges.EMPTY, full.mask.limitations), view.truncated))
@@ -572,7 +641,7 @@ public class Look(
 
     /** A result that observed nothing new: refusal, masked op, dedup pointer. Not aliased, not stored. */
     private fun refused(args: LookArgs, status: String, body: String, versions: Map<String, FileVersion> = emptyMap(), complete: Boolean = true, scope: String? = null): ToolOutcome {
-        val bounded = bounded(body, args.budget)
+        val bounded = bounded(body, args.tokens)
         return outcome("#-", idGen.next("act"), status, bounded, tokensOf(bounded), versions = versions, scope = scope ?: args.target,
             complete = complete, captureComplete = true, displayTruncated = bounded != body, redacted = false, artifact = null)
     }
@@ -625,6 +694,12 @@ public class Look(
 
 /** Alias kind of a `find` result, whose body is not source-aligned. */
 private const val SEARCH_KIND = "search"
+
+/** A `range` argument without a path: `a-b`. */
+private val RANGE = Regex("""^(\d+)-(\d+)$""")
+
+/** The most an outline may add after a whole-file read's truncation marker; it also takes at most a quarter of the budget. */
+private const val OUTLINE_ALLOWANCE_TOKENS = 300
 
 /** How many files with unresolved imports `look(importers)` names before eliding. */
 private const val UNRESOLVED_SHOWN = 5

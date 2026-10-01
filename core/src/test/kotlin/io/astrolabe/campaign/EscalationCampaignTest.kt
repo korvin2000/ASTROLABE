@@ -60,6 +60,7 @@ class EscalationCampaignTest {
             val derived = contracts.deriveS0(request.work, request.attempt, request.text, Atlas.build(repo.root), Config(), policy.tokens).contract
             contracts.open(derived.copy(
                 shape = Shape.S1,
+                budget = derived.budget.copy(attempts = 2),
                 requirements = listOf(
                     Requirement("R1", "a returns 10", listOf("AC-1"), authorityRef = derived.requests.single().id),
                     Requirement("R2", "b returns 20", listOf("AC-2"), authorityRef = derived.requests.single().id),

@@ -91,6 +91,12 @@ public data class AppliedOp(
     val preimageRef: String? = null,
 )
 
+/** D-375: what became of one op of a batch; the retry guidance is built from it, never from the applied list alone. */
+public enum class OpDisposition { Written, Refused, Failed, NotAttempted }
+
+/** D-371: the ops of one path group refused in preflight, with the first refused op's diagnostics; the other groups applied. */
+public data class RefusedGroup(val paths: List<String>, val ops: List<Int>, val error: EditError)
+
 /** The typed result of one `edit` call (§5.4). [applied] is the actual per-file state, never a claimed rollback. */
 public data class EditResult(
     val ok: Boolean,
@@ -105,6 +111,12 @@ public data class EditResult(
     val error: EditError? = null,
     /** The diff receipt when the batch was one `transform` op (§9.2); a rejected transform keeps its receipt. */
     val transform: TransformReceipt? = null,
+    /** Every refused path group of the batch (D-371); [error] is the first of them when nothing applied. */
+    val refused: List<RefusedGroup> = emptyList(),
+    /** Per applied op index: how it was applied when that differs from the plain form (normalised anchor, replace). */
+    val notes: Map<Int, String> = emptyMap(),
+    /** Per 1-based op index of a batch that reached application (D-375); empty when the batch stopped before it. */
+    val dispositions: Map<Int, OpDisposition> = emptyMap(),
 ) {
     /** Some ops reached the workspace before the batch stopped (mid-batch failure, §9.1). */
     val partial: Boolean get() = !ok && (applied.isNotEmpty() || error?.kind == "io")
@@ -117,7 +129,8 @@ public data class EditResult(
  *
  * Every op is preflighted before any write — committed-contract scope and protected paths through the
  * [ScopeGuard], `expect` re-hashed from raw bytes, anchors located (D-33) inside the dispatch-time displayed
- * coverage, hunks non-overlapping, unsupported kinds refused by name — and a single refusal writes nothing.
+ * coverage, hunks non-overlapping, unsupported kinds refused by name. Ops are grouped by the paths they touch
+ * (D-371): a refusal writes nothing of its group, and the other groups still apply.
  * Application holds the workspace mutation lock, saves the preimage before each write, publishes the
  * postimage bytes under their version, announces every transition to the version registry (which is what
  * the coherence horizons hear), and reports a mid-batch I/O failure as the actual per-file state with the
@@ -174,6 +187,9 @@ public class Edit(
     /** The classified acceptance-surface flags of the edit with [alias] (§8.6), its `why` as the recorded reason. */
     public fun flagsOf(alias: String): List<TestIntegrityFlag> = flagsByAlias[alias].orEmpty()
 
+    /** D-371: files whose whole content this cell wrote (create, replace, then its own anchored edits), by identity → the version it left. */
+    private val authored = HashMap<String, FileVersion>()
+
     /** Whether this cell was already warned for crossing the increment's write scope (§8.6: warning once). */
     private var warnedOutsideIncrement = false
 
@@ -190,13 +206,14 @@ public class Edit(
         if (call.operationNames.any { !mask.allows(it) }) {
             return render(args, alias, actionId, EditResult(false, editId, emptyList(), emptyList(), emptyMap(), emptyMap(), emptyMap(), emptyList(), emptyList(), EditError("unsupported", null, null, "${call.name} is masked in this role")), context)
         }
+        val carries = ArrayList<() -> Unit>()
         val result = workspace.mutation.withLock {
             beforeDispatch()
             kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) {
-                run(args, contracts.current(ids.work) ?: contract, context, editId, alias, actionId)
+                run(args, contracts.current(ids.work) ?: contract, context, editId, alias, actionId, carries)
             }
         }
-        return render(args, alias, actionId, result, context)
+        return render(args, alias, actionId, result, context, carries)
     }
 
     // ------------------------------------------------------------- preflight
@@ -204,11 +221,19 @@ public class Edit(
     private sealed interface Plan {
         val index: Int
         val path: String
+
+        /** Every op index this plan consumed: a replace carries its delete's too (D-375). */
+        val ops: List<Int> get() = listOf(index)
     }
 
-    private class AnchoredPlan(override val index: Int, override val path: String, val resolved: PathResolution.Resolved, val expect: FileVersion, val oldBytes: ByteArray, val oldText: String, val hunks: List<Pair<Located, String>>) : Plan
+    private class AnchoredPlan(override val index: Int, override val path: String, val resolved: PathResolution.Resolved, val expect: FileVersion, val oldBytes: ByteArray, val oldText: String, val hunks: List<Pair<Located, String>>, val normalised: Boolean) : Plan
     private class CreatePlan(override val index: Int, override val path: String, val resolved: PathResolution.Resolved, val bytes: ByteArray) : Plan
-    private class DeletePlan(override val index: Int, override val path: String, val resolved: PathResolution.Resolved, val expect: FileVersion, val oldBytes: ByteArray) : Plan
+    private class DeletePlan(override val index: Int, override val path: String, val resolved: PathResolution.Resolved, val expect: FileVersion, val oldBytes: ByteArray, val unread: Boolean = false) : Plan
+
+    /** D-365: `delete` then `create` of one path in one batch, applied as a whole-file replace at the create's place. */
+    private class ReplacePlan(override val index: Int, val deleteIndex: Int, override val path: String, val resolved: PathResolution.Resolved, val expect: FileVersion, val oldBytes: ByteArray, val bytes: ByteArray, val note: String) : Plan {
+        override val ops: List<Int> get() = listOf(deleteIndex, index)
+    }
     private class RenamePlan(override val index: Int, override val path: String, val resolved: PathResolution.Resolved, val to: String, val target: PathResolution.Resolved, val expect: FileVersion, val oldBytes: ByteArray) : Plan
     private class RevertEditPlan(override val index: Int, val editId: String, val paths: List<String>) : Plan {
         override val path: String get() = paths.joinToString(", ")
@@ -219,7 +244,7 @@ public class Edit(
 
     private class Refusal(val error: EditError) : RuntimeException(error.detail)
 
-    private fun run(args: EditArgs, contract: Contract, context: TurnContext, editId: String, alias: String, actionId: String): EditResult {
+    private fun run(args: EditArgs, contract: Contract, context: TurnContext, editId: String, alias: String, actionId: String, carries: MutableList<() -> Unit>): EditResult {
         val none = EditResult(false, editId, emptyList(), emptyList(), emptyMap(), emptyMap(), emptyMap(), emptyList(), emptyList())
         val transform = args.ops.firstOrNull { it.kind == "transform" }?.transform
         args.ops.forEachIndexed { i, op ->
@@ -228,26 +253,15 @@ public class Edit(
             if (op.kind == "invalid") return none.copy(error = EditError("unsupported", i + 1, null, "op ${i + 1} names no supported form"))
             if (op.kind == "revert" && args.ops.size > 1) return none.copy(error = EditError("overlap", i + 1, null, "send a revert alone so its restore paths cannot conflict with another operation"))
         }
-        // Scope first (§8.6): every path the batch would touch, against the committed contract only. A transform's
-        // allowed inventory is resolved here, before dispatch (§9.2).
-        val inScope = transform?.let { transformRun!!.inventory(it.scopeGlob) }.orEmpty()
-        val paths = args.ops.flatMap { op -> listOfNotNull(op.path, op.create, op.delete, op.rename, op.to) + revertPaths(op) } + inScope
-        val verdict = scopeGuard.check(paths, contract, increment)
-        if (verdict is ScopeVerdict.Refused) {
-            val first = verdict.refusals.first()
-            return none.copy(error = EditError("scope", null, first.path, verdict.refusals.joinToString("; ") { "${it.path}: ${it.kind.name.lowercase()} — ${it.detail}" }))
-        }
-        val outside = (verdict as ScopeVerdict.Allowed).outsideIncrement
-        // §8.6: the first crossing of the increment's write scope warns; every later one names its paths in `why` (D-74).
-        val unjustified = if (warnedOutsideIncrement) outside.filterNot { justified(it, args.why) } else emptyList()
-        if (unjustified.isNotEmpty()) {
-            return none.copy(
-                error = EditError("scope", null, unjustified.first(), "outside the increment's write scope again: ${unjustified.joinToString(", ")} — name each path in `why` with the reason, or task.propose(increment_split)"),
-                touchedOutsideScope = outside,
-            )
-        }
-        if (outside.isNotEmpty()) warnedOutsideIncrement = true
         if (transform != null) {
+            // Scope first (§8.6): the transform's allowed inventory is resolved here, before dispatch (§9.2).
+            val inScope = transformRun!!.inventory(transform.scopeGlob)
+            val verdict = scopeGuard.check(inScope, contract, increment)
+            if (verdict is ScopeVerdict.Refused) return none.copy(error = scopeError(null, verdict))
+            val outside = (verdict as ScopeVerdict.Allowed).outsideIncrement
+            // §8.6: the first crossing of the increment's write scope warns; every later one names its paths in `why` (D-74).
+            unjustified(outside, args.why)?.let { return none.copy(error = it.copy(opIndex = null), touchedOutsideScope = outside) }
+            if (outside.isNotEmpty()) warnedOutsideIncrement = true
             if (inScope.isEmpty()) return none.copy(error = EditError("missing", 1, null, "scope_glob '${transform.scopeGlob}' names no workspace file"), touchedOutsideScope = outside)
             val outcome = transformRun!!.apply(1, transform, editId, alias, actionId, contract, inScope, context.turn) { changed ->
                 val current = contracts.current(ids.work)
@@ -260,29 +274,109 @@ public class Edit(
             outcome.receipt?.let { receipts += it }
             return EditResult(outcome.error == null, editId, outcome.applied, emptyList(), outcome.versions, outcome.syntax, outcome.diffstat, outside, flags, outcome.error, outcome.receipt)
         }
-        val plans = try {
-            args.ops.mapIndexed { i, op -> preflight(i + 1, op, context) }
-        } catch (refusal: Refusal) {
-            return none.copy(error = refusal.error, touchedOutsideScope = outside)
+        // D-371: each path group is checked and preflighted on its own; a refusal refuses its group, never the batch.
+        val groups = groups(args.ops)
+        val refused = LinkedHashMap<Group, EditError>()
+        val crossing = LinkedHashMap<Group, List<String>>()
+        for (group in groups) {
+            when (val verdict = scopeGuard.check(group.paths, contract, increment)) {
+                is ScopeVerdict.Refused -> refused[group] = scopeError(group.ops.firstOrNull { verdict.refusals.first().path in group.pathsOf[it].orEmpty() }?.plus(1), verdict)
+                is ScopeVerdict.Allowed -> crossing[group] = verdict.outsideIncrement
+            }
         }
-        // A path that does not exist yet keeps its typed case, so identity folds case where the filesystem does.
+        // §8.6: the first crossing of the increment's write scope warns; every later one names its paths in `why` (D-74).
+        for ((group, paths) in crossing) unjustified(paths, args.why)?.let { refused[group] = it.copy(opIndex = group.ops.first() + 1) }
+        val outside = crossing.values.flatten().distinct()
+        if (outside.isNotEmpty()) warnedOutsideIncrement = true
+        val plans = ArrayList<Plan>()
+        for (group in groups) {
+            if (group in refused) continue
+            try {
+                plans += plan(group, args.ops, context)
+            } catch (refusal: Refusal) {
+                refused[group] = refusal.error
+            }
+        }
+        val refusals = groups.filter { it in refused }.map { RefusedGroup(it.paths, it.ops.map { i -> i + 1 }, refused.getValue(it)) }
+        if (plans.isEmpty()) return none.copy(error = refusals.first().error, touchedOutsideScope = outside, refused = refusals)
+        val result = apply(plans.sortedBy { it.index }, contract, context, editId, alias, outside, args.why, carries)
+        val dispositions = result.dispositions + refusals.flatMap { it.ops }.associateWith { OpDisposition.Refused }
+        return result.copy(ok = result.ok && refusals.isEmpty(), refused = refusals, dispositions = dispositions.toSortedMap())
+    }
+
+    /** D-371: the ops of a batch that touch one canonical path (a rename both names), in op order; [pathsOf] by op index. */
+    private class Group(val ops: List<Int>, val pathsOf: Map<Int, List<String>>) {
+        val paths: List<String> get() = ops.flatMap { pathsOf.getValue(it) }.distinct()
+    }
+
+    private fun groups(ops: List<EditOpArgs>): List<Group> {
+        val pathsOf = ops.indices.associateWith { i -> ops[i].let { op -> listOfNotNull(op.path, op.create, op.delete, op.rename, op.to) + revertPaths(op) } }
+        val root = IntArray(ops.size) { it }
+        fun find(i: Int): Int = if (root[i] == i) i else find(root[i]).also { root[i] = it }
+        val owner = HashMap<String, Int>()
+        for (i in ops.indices) {
+            for (path in pathsOf.getValue(i)) {
+                val key = when (val resolved = workspace.resolve(path, Intent.Mutate)) {
+                    is PathResolution.Resolved -> owned(resolved)
+                    is PathResolution.Rejected -> "\u0000$path"
+                }
+                val first = owner.putIfAbsent(key, i) ?: continue
+                val (a, b) = find(first) to find(i)
+                if (a != b) root[maxOf(a, b)] = minOf(a, b)
+            }
+        }
+        return ops.indices.groupBy(::find).values.map { Group(it, pathsOf) }
+    }
+
+    /** One group's plans in op order; the first refused op refuses the group. */
+    private fun plan(group: Group, ops: List<EditOpArgs>, context: TurnContext): List<Plan> {
+        val planned = ArrayList<Plan>()
+        val deleted = HashMap<String, DeletePlan>()
+        for (i in group.ops) {
+            val op = ops[i]
+            // D-365: a create of a path this batch deletes earlier replaces it; the delete's expect guards the bytes.
+            val earlier = op.create?.let { deleted.remove(identity(mutable(i + 1, it).real)) }
+            val plan = if (earlier != null) {
+                planned.remove(earlier)
+                ReplacePlan(i + 1, earlier.index, earlier.path, earlier.resolved, earlier.expect, earlier.oldBytes, op.content!!.toByteArray(Charsets.UTF_8), REPLACED_BY_DELETE)
+            } else {
+                preflight(i + 1, op, context)
+            }
+            if (plan is DeletePlan) deleted[identity(plan.resolved.real)] = plan
+            planned += plan
+        }
         val claimed = HashSet<String>()
-        fun identity(path: java.nio.file.Path): String =
-            if (workspace.paths.caseInsensitive) path.toString().lowercase(java.util.Locale.ROOT) else path.toString()
-        for (plan in plans) {
+        for (plan in planned) {
             val targets = when (plan) {
                 is AnchoredPlan -> listOf(plan.resolved.real)
                 is CreatePlan -> listOf(plan.resolved.real)
                 is DeletePlan -> listOf(plan.resolved.real)
+                is ReplacePlan -> listOf(plan.resolved.real)
                 is RenamePlan -> listOf(plan.resolved.real, plan.target.real)
                 is RevertEditPlan, is RevertTurnPlan -> emptyList()
             }
-            if (targets.any { !claimed.add(identity(it)) }) return none.copy(
-                error = EditError("overlap", plan.index, plan.path, "multiple operations touch the same canonical path; combine hunks in one operation or send separate batches"),
-                touchedOutsideScope = outside,
-            )
+            if (targets.any { !claimed.add(identity(it)) }) {
+                throw Refusal(EditError("overlap", plan.index, plan.path, "multiple operations touch the same canonical path; combine hunks in one operation or send separate batches"))
+            }
         }
-        return apply(plans, contract, context, editId, alias, outside, args.why)
+        return planned
+    }
+
+    /** The workspace-relative key of a path (groups, [authored]): stable whether or not the file exists when resolved. */
+    private fun owned(resolved: PathResolution.Resolved): String =
+        if (workspace.paths.caseInsensitive) resolved.relative.lowercase(java.util.Locale.ROOT) else resolved.relative
+
+    /** A path that does not exist yet keeps its typed case, so identity folds case where the filesystem does. */
+    private fun identity(path: java.nio.file.Path): String =
+        if (workspace.paths.caseInsensitive) path.toString().lowercase(java.util.Locale.ROOT) else path.toString()
+
+    private fun scopeError(opIndex: Int?, verdict: ScopeVerdict.Refused): EditError =
+        EditError("scope", opIndex, verdict.refusals.first().path, verdict.refusals.joinToString("; ") { "${it.path}: ${it.kind.name.lowercase()} — ${it.detail}" })
+
+    private fun unjustified(outside: List<String>, why: String): EditError? {
+        val unjustified = if (warnedOutsideIncrement) outside.filterNot { justified(it, why) } else emptyList()
+        if (unjustified.isEmpty()) return null
+        return EditError("scope", null, unjustified.first(), "outside the increment's write scope again: ${unjustified.joinToString(", ")} — name each path in `why` with the reason, or task.propose(increment_split)")
     }
 
     private fun revertPaths(op: EditOpArgs): List<String> {
@@ -302,14 +396,28 @@ public class Edit(
         "create" -> {
             val path = op.create!!
             val resolved = mutable(index, path)
-            if (registry.read(path) != null) throw Refusal(EditError("exists", index, path, "'$path' exists; use an anchored edit or delete it first"))
-            CreatePlan(index, path, resolved, op.content!!.toByteArray(Charsets.UTF_8))
+            val bytes = op.content!!.toByteArray(Charsets.UTF_8)
+            val existing = registry.read(path)
+            if (existing == null) {
+                CreatePlan(index, path, resolved, bytes)
+            } else {
+                val note = ownership(path, resolved, existing, context)
+                    ?: throw Refusal(EditError("exists", index, path, "'$path' exists; read it first, or use {delete} then {create} in one batch"))
+                ReplacePlan(index, index, path, resolved, existing.version, existing.bytes, bytes, note)
+            }
         }
         "delete" -> {
             val path = op.delete!!
             val resolved = mutable(index, path)
-            val content = current(index, path, expected(index, path, op.expect, context))
-            DeletePlan(index, path, resolved, content.version, content.bytes)
+            // D-373: a file no version of which is KNOWN is deleted as it is now (an `expect` must name that version); the
+            // preimage is saved before the delete, so `revert` restores it.
+            val now = if (context.coverage.versions(path).isEmpty()) registry.read(path)?.takeIf { names(op.expect, it.version) } else null
+            if (now != null) {
+                DeletePlan(index, path, resolved, now.version, now.bytes, unread = true)
+            } else {
+                val content = current(index, path, expected(index, path, op.expect, context))
+                DeletePlan(index, path, resolved, content.version, content.bytes)
+            }
         }
         "rename" -> {
             val from = op.rename!!
@@ -376,7 +484,18 @@ public class Edit(
                 throw Refusal(EditError("overlap", index, path, "hunks overlap in '$path': ${sorted[i - 1].first.lines} and ${sorted[i].first.lines}"))
             }
         }
-        return AnchoredPlan(index, path, resolved, expect, content.bytes, text, located)
+        return AnchoredPlan(index, path, resolved, expect, content.bytes, text, located, located.any { !it.first.exact })
+    }
+
+    /**
+     * D-371: a `create` may replace an existing file whose bytes this cell authored (created or replaced it, and
+     * nothing else wrote it since) or whose every line is KNOWN at its current version; null keeps the refusal.
+     */
+    private fun ownership(path: String, resolved: PathResolution.Resolved, existing: io.astrolabe.workspace.FileContent, context: TurnContext): String? {
+        if (authored[owned(resolved)] == existing.version) return "create over a file this cell wrote: replaced in place"
+        val lines = decodeStrict(existing.bytes)?.let { contentLines(it).size } ?: return null
+        if (lines == 0 || context.coverage.covers(path, existing.version, LineRange(1, lines))) return "create over a file KNOWN in full: replaced in place"
+        return null
     }
 
     private fun mutable(index: Int, path: String): PathResolution.Resolved = when (val resolved = workspace.resolve(path, Intent.Mutate)) {
@@ -436,17 +555,26 @@ public class Edit(
 
     private fun isHex(c: Char): Boolean = c in '0'..'9' || c in 'a'..'f'
 
+    /** An omitted [expect], or one (≥ [MIN_EXPECT] hex) that [version] starts with. */
+    private fun names(expect: String?, version: FileVersion): Boolean {
+        val hex = expect?.trim()?.removePrefix("@")?.lowercase().orEmpty()
+        return hex.isEmpty() || (hex.length >= MIN_EXPECT && hex.all(::isHex) && version.digest.hex.startsWith(hex))
+    }
+
     // ----------------------------------------------------------------- apply
 
-    private fun apply(plans: List<Plan>, contract: Contract, context: TurnContext, editId: String, alias: String, outside: List<String>, why: String): EditResult {
+    private fun apply(plans: List<Plan>, contract: Contract, context: TurnContext, editId: String, alias: String, outside: List<String>, why: String, carries: MutableList<() -> Unit>): EditResult {
         val applied = ArrayList<AppliedOp>()
         val views = ArrayList<View>()
         val versions = LinkedHashMap<String, FileVersion?>()
         val diffstat = LinkedHashMap<String, DiffStat>()
         val written = LinkedHashMap<String, PathResolution.Resolved>()
+        val notes = LinkedHashMap<Int, String>()
         val cause = "edit $alias"
         var error: EditError? = null
-        loop@ for (plan in plans) {
+        var stopped = 0
+        loop@ for ((at, plan) in plans.withIndex()) {
+            stopped = at
             beforeDispatch()
             try {
                 when (plan) {
@@ -461,10 +589,13 @@ public class Edit(
                         preimages.recordPostimage(editId, plan.path, after)
                         blobs.put(newBytes, BlobKind.POSTIMAGE, ids, recovery = true)
                         registry.change(plan.path, plan.expect, after, cause)
+                        lineMap(plan, newText).let { map -> carries += { workset.carry(plan.path, plan.expect, after, map) } }
                         val counts = Preimages.changedRegion(plan.oldBytes, newBytes)
                         diffstat[plan.path] = DiffStat(counts.first, counts.second)
                         written[plan.path] = plan.resolved
+                        owned(plan.resolved).let { id -> if (authored[id] == plan.expect) authored[id] = after }
                         views += postEditViews(plan, newText, after)
+                        if (plan.normalised) notes[plan.index] = "anchor matched after whitespace normalisation"
                     }
                     is CreatePlan -> {
                         os.replaceFileAtomically(plan.resolved.real, plan.bytes)
@@ -476,14 +607,33 @@ public class Edit(
                         val lines = decodeStrict(plan.bytes)?.let { contentLines(it) } ?: emptyList()
                         diffstat[plan.path] = DiffStat(lines.size, 0)
                         written[plan.path] = plan.resolved
+                        authored[owned(plan.resolved)] = after
+                        if (lines.isNotEmpty()) views += View(plan.path, LineRange(1, lines.size), after, lines.mapIndexed { i, l -> "${i + 1}| $l" }.joinToString("\n"))
+                    }
+                    is ReplacePlan -> {
+                        val preimage = preimages.saveThenWrite(editId, plan.path, plan.expect, plan.oldBytes) { os.replaceFileAtomically(plan.resolved.real, plan.bytes) }
+                        val after = FileVersion.of(plan.bytes)
+                        applied += AppliedOp(plan.index, "replace", plan.path, plan.expect, after, preimage.preimageDigest.hex)
+                        notes[plan.index] = plan.note
+                        versions[plan.path] = after
+                        preimages.recordPostimage(editId, plan.path, after)
+                        blobs.put(plan.bytes, BlobKind.POSTIMAGE, ids, recovery = true)
+                        registry.change(plan.path, plan.expect, after, cause)
+                        val counts = Preimages.changedRegion(plan.oldBytes, plan.bytes)
+                        diffstat[plan.path] = DiffStat(counts.first, counts.second)
+                        written[plan.path] = plan.resolved
+                        authored[owned(plan.resolved)] = after
+                        val lines = decodeStrict(plan.bytes)?.let { contentLines(it) } ?: emptyList()
                         if (lines.isNotEmpty()) views += View(plan.path, LineRange(1, lines.size), after, lines.mapIndexed { i, l -> "${i + 1}| $l" }.joinToString("\n"))
                     }
                     is DeletePlan -> {
                         val preimage = preimages.save(editId, plan.path, plan.expect, plan.oldBytes)
                         Files.delete(plan.resolved.real)
                         applied += AppliedOp(plan.index, "delete", plan.path, plan.expect, null, preimage.preimageDigest.hex)
+                        if (plan.unread) notes[plan.index] = "deleted without a prior read; preimage saved, revert: $alias"
                         versions[plan.path] = null
                         registry.change(plan.path, plan.expect, null, cause)
+                        authored.remove(owned(plan.resolved))
                         diffstat[plan.path] = DiffStat(0, decodeStrict(plan.oldBytes)?.let { contentLines(it).size } ?: 0)
                     }
                     is RenamePlan -> {
@@ -498,6 +648,7 @@ public class Edit(
                         registry.change(plan.to, null, plan.expect, cause)
                         diffstat[plan.to] = DiffStat(0, 0)
                         written[plan.to] = plan.target
+                        if (authored.remove(owned(plan.resolved)) == plan.expect) authored[owned(plan.target)] = plan.expect
                     }
                     is RevertEditPlan -> {
                         for (path in plan.paths) {
@@ -509,6 +660,7 @@ public class Edit(
                                     registry.change(path, receipt.versionBefore, receipt.versionAfter, "revert $alias")
                                     diffstat[path] = DiffStat(receipt.addedLines, receipt.removedLines)
                                     workspace.resolve(path, Intent.Mutate).let { if (it is PathResolution.Resolved) written[path] = it }
+                                    disown(path)
                                 }
                                 is RevertResult.Diverged -> {
                                     error = EditError("divergent", plan.index, path, "'$path' is @${result.actual?.hash8 ?: "gone"} now, not the @${result.expected?.hash8} that edit ${plan.editId} produced; the inverse is refused (FX-05)")
@@ -531,11 +683,13 @@ public class Edit(
                                     applied += AppliedOp(plan.index, "revert", path, null, after)
                                     versions[path] = after
                                     workspace.resolve(path, Intent.Mutate).let { if (it is PathResolution.Resolved) written[path] = it }
+                                    disown(path)
                                 }
                                 for (path in result.deleted) {
                                     registry.change(path, registry.recorded(path), null, "revert $alias")
                                     applied += AppliedOp(plan.index, "revert", path, null, null)
                                     versions[path] = null
+                                    disown(path)
                                 }
                             }
                             is RestoreResult.Divergent -> {
@@ -561,11 +715,17 @@ public class Edit(
                 break@loop
             }
         }
+        if (error == null) stopped = plans.size
+        val dispositions = HashMap<Int, OpDisposition>()
+        plans.forEachIndexed { at, plan ->
+            val disposition = if (at < stopped) OpDisposition.Written else if (at == stopped) OpDisposition.Failed else OpDisposition.NotAttempted
+            plan.ops.forEach { dispositions[it] = disposition }
+        }
         val syntaxResults = written.filter { (path, _) -> versions[path] != null }
             .mapValues { (path, resolved) -> beforeDispatch(); syntax.check(path, resolved.real, Language.of(path)) }
         val flags = TestIntegrity.classify(surfaceChanges(plans, applied), cause, contract, checks).map { it.copy(reason = why) }
         flagsByAlias[alias] = flags
-        return EditResult(error == null, editId, applied, views, versions, syntaxResults, diffstat, outside, flags, error)
+        return EditResult(error == null, editId, applied, views, versions, syntaxResults, diffstat, outside, flags, error, notes = notes, dispositions = dispositions)
     }
 
     /** Each applied path's text before and after, for the §8.6 classifier; an unknown before-text stays unknown. */
@@ -575,6 +735,7 @@ public class Edit(
             when (plan) {
                 is AnchoredPlan -> oldBytes[plan.path] = plan.oldBytes
                 is DeletePlan -> oldBytes[plan.path] = plan.oldBytes
+                is ReplacePlan -> oldBytes[plan.path] = plan.oldBytes
                 is RenamePlan -> oldBytes[plan.path] = plan.oldBytes
                 else -> Unit
             }
@@ -593,6 +754,11 @@ public class Edit(
             "; later ops not attempted, nothing rolled back",
     )
 
+    /** Restored bytes are not the cell's own writing (D-371): a later `create` over them needs a read. */
+    private fun disown(path: String) {
+        (workspace.resolve(path, Intent.Mutate) as? PathResolution.Resolved)?.let { authored.remove(owned(it)) }
+    }
+
     private fun revalidate(plan: AnchoredPlan) {
         val again = workspace.paths.revalidate(plan.resolved)
         if (again is PathResolution.Rejected) throw IOException("'${plan.path}' changed identity during publication: ${again.detail}")
@@ -609,13 +775,39 @@ public class Edit(
     private fun postEditViews(plan: AnchoredPlan, newText: String, after: FileVersion): List<View> {
         val lines = contentLines(newText)
         var ranges = Ranges.EMPTY
-        for ((span, new) in plan.hunks) {
+        var shift = 0
+        for ((span, new) in plan.hunks.sortedBy { it.first.start }) {
+            val start = span.lines.from + shift
             val newLineCount = if (new.isEmpty()) 0 else new.count { it == '\n' } + 1
-            val from = maxOf(1, span.lines.from - viewContextLines)
-            val to = minOf(lines.size, span.lines.from + maxOf(newLineCount, 1) - 1 + viewContextLines)
+            val from = maxOf(1, start - viewContextLines)
+            val to = minOf(lines.size, start + maxOf(newLineCount, 1) - 1 + viewContextLines)
             if (to >= from) ranges += LineRange(from, to)
+            shift += delta(plan, span, new)
         }
         return ranges.ranges.map { range -> View(plan.path, range, after, (range.from..range.to).joinToString("\n") { "$it| ${lines[it - 1]}" }) }
+    }
+
+    /** How many lines a hunk adds (negative: removes): the change in newline count over its span. */
+    private fun delta(plan: AnchoredPlan, span: Located, new: String): Int =
+        new.count { it == '\n' } - (span.start until span.end).count { plan.oldText[it] == '\n' }
+
+    /**
+     * D-371: a line no hunk touched → its line at the new version, shifted by the earlier hunks' [delta]s and kept
+     * only when the bytes there are the same (a hunk that joins the next line changes it); null for a changed line.
+     */
+    private fun lineMap(plan: AnchoredPlan, newText: String): (Int) -> Int? {
+        val old = plan.oldText.split('\n')
+        val now = newText.split('\n')
+        val shifts = plan.hunks.sortedBy { it.first.start }.map { (span, new) -> span.lines to delta(plan, span, new) }
+        return map@{ line ->
+            var shift = 0
+            for ((lines, delta) in shifts) {
+                if (line in lines) return@map null
+                if (lines.to < line) shift += delta else break
+            }
+            val at = line + shift
+            at.takeIf { line <= old.size && at in 1..now.size && now[at - 1] == old[line - 1] }
+        }
     }
 
     private fun show(view: View, alias: String, turn: Int) {
@@ -629,7 +821,7 @@ public class Edit(
 
     // ---------------------------------------------------------------- render
 
-    private fun render(args: EditArgs, alias: String, actionId: String, result: EditResult, context: TurnContext): ToolOutcome {
+    private fun render(args: EditArgs, alias: String, actionId: String, result: EditResult, context: TurnContext, carries: List<() -> Unit> = emptyList()): ToolOutcome {
         val status = when {
             result.ok -> "ok"
             // A rejected transform is not a half-applied batch: its receipt's effect line is the per-file truth (§9.2).
@@ -646,16 +838,22 @@ public class Edit(
             for (op in result.applied) {
                 val stat = result.diffstat[op.path]?.let { " $it" } ?: ""
                 val syn = result.syntax[op.path]?.let { " · syntax $it" } ?: ""
-                lines += "✓ ${op.opIndex} ${op.kind} ${op.path} @${op.versionBefore?.hash8 ?: "new"}→@${op.versionAfter?.hash8 ?: "gone"}$stat$syn"
+                lines += "✓ ${op.opIndex} ${op.kind} ${op.path} @${op.versionBefore?.hash8 ?: "new"}→@${op.versionAfter?.hash8 ?: "gone"}$stat$syn" +
+                    (result.notes[op.opIndex]?.let { " ($it)" } ?: "")
             }
         }
         for (view in result.views) {
             lines += "  post-edit ${view.path}:${view.range} @${view.version.hash8}"
             lines += view.text.lines().map { "  $it" }
         }
-        result.error?.let { e ->
+        for (group in result.refused) {
+            val e = group.error
+            lines += "✗ ${group.paths.joinToString(", ").ifEmpty { "op ${group.ops.joinToString(", ")}" }} refused · ${e.opIndex?.let { "op $it " } ?: ""}${e.kind}: ${e.detail}"
+        }
+        result.error?.takeIf { e -> result.refused.none { it.error === e } }?.let { e ->
             if (receipt == null) lines += "✗ ${e.opIndex?.let { "op $it " } ?: ""}${e.kind}: ${e.detail}"
         }
+        if (receipt == null) resendLine(args, result)?.let { lines += it }
         if (result.touchedOutsideScope.isNotEmpty()) lines += "outside the increment's write scope (inside the contract): ${result.touchedOutsideScope.joinToString(", ")}"
         result.testIntegrity.forEach { lines += it.line }
         val safe = redaction.apply(lines.joinToString("\n"), ContentClass.ReusableEvidence)
@@ -687,7 +885,45 @@ public class Edit(
                 effectsUnknown = result.error?.kind == "io",
             ),
         )
-        return ToolOutcome(body, header, applied = result.ok, tokens = estimator.estimate(body).tokens)
+        // D-371: earlier reads carry to the new versions only once this result, which names the change, is recorded.
+        carries.forEach { it() }
+        val partially = result.refused.isNotEmpty() && result.applied.isNotEmpty()
+        return ToolOutcome(
+            body, header, applied = result.ok, tokens = estimator.estimate(body).tokens,
+            notAppliedReason = if (partially) "the edit batch applied partially (${result.refused.sumOf { it.ops.size }} refused): fix those ops first" else null,
+        )
+    }
+
+    /**
+     * D-371/D-374/D-375: the one line the model acts on after a refusal or a mid-batch failure — every op is written,
+     * refused, failed (the batch stopped there) or not attempted (after the failure), from [EditResult.dispositions];
+     * a batch stopped before application fails at its error's op and leaves every other op unattempted.
+     */
+    private fun resendLine(args: EditArgs, result: EditResult): String? {
+        val failure = result.error?.takeIf { e -> e.opIndex != null && result.refused.none { it.error === e } }
+        val dispositions = result.dispositions.ifEmpty {
+            failure?.let { f -> args.ops.indices.associate { i -> (i + 1) to if (i + 1 == f.opIndex) OpDisposition.Failed else OpDisposition.NotAttempted } }.orEmpty()
+        }
+        fun opsOf(disposition: OpDisposition): List<Int> = dispositions.filterValues { it == disposition }.keys.sorted()
+        val failedOps = if (failure == null) emptyList() else opsOf(OpDisposition.Failed).ifEmpty { listOf(checkNotNull(failure.opIndex)) }
+        val unattempted = if (failure == null) emptyList() else opsOf(OpDisposition.NotAttempted)
+        if (result.refused.isEmpty() && (failure == null || result.applied.isEmpty() && unattempted.isEmpty())) return null
+        fun pathsOf(op: Int): List<String> = args.ops.getOrNull(op - 1)?.let { listOfNotNull(it.path, it.create, it.delete, it.rename, it.to) }.orEmpty()
+        fun named(paths: List<String>, ops: List<Int>): String {
+            val label = (if (ops.size == 1) "op " else "ops ") + ops.joinToString(", ")
+            return if (paths.isEmpty()) label else "${paths.joinToString(", ")} ($label)"
+        }
+        val failedPaths = failure?.let { listOfNotNull(it.path).ifEmpty { failedOps.flatMap(::pathsOf).distinct() } }.orEmpty()
+        val written = result.applied.map { it.path }.distinct()
+        val all = (result.refused.flatMap { it.paths } + written + failedPaths + unattempted.flatMap(::pathsOf)).distinct()
+        val parts = arrayListOf("${written.size} of ${all.size} files written")
+        if (result.refused.isNotEmpty()) parts += "resend only the refused ops: " + result.refused.joinToString(", ") { named(it.paths, it.ops) }
+        if (failure != null) {
+            val failed = named(failedPaths, failedOps)
+            parts += if (failure.kind == "io") "failed (I/O, state uncertain): $failed — look at it before resending" else "failed (${failure.kind}, not written): $failed"
+        }
+        if (unattempted.isNotEmpty()) parts += "not attempted (resend unchanged): " + unattempted.joinToString(", ") { named(pathsOf(it), listOf(it)) }
+        return parts.joinToString("; ")
     }
 
     /** The §9.2 diff receipt as the model sees it: bounded per-file summary, counts, sites, the two honesty labels. */
@@ -774,5 +1010,7 @@ public class Edit(
         /** A short `expect` needs the four hex characters every header shows (D-346); a full one is a SHA-256 in hex. */
         const val MIN_EXPECT = 4
         const val FULL_EXPECT = 64
+
+        const val REPLACED_BY_DELETE = "delete + create of one path in one batch: replaced in place"
     }
 }

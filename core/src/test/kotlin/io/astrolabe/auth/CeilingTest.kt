@@ -2,6 +2,7 @@ package io.astrolabe.auth
 
 import io.astrolabe.Config
 import io.astrolabe.DClassPolicy
+import io.astrolabe.atlas.OsFamily
 import io.astrolabe.contract.Authorization
 import io.astrolabe.provider.ToolMask
 import io.astrolabe.tool.EffectClass
@@ -127,6 +128,148 @@ class CeilingTest {
         assertEquals(EffectClass.R, EffectPolicy.classify(RunArgs(cmd = "git log --oneline | head -5"), root, protectedPaths).effectClass)
     }
 
+    /** The live run's three denied `run` calls (D-373), verbatim from its events. */
+    private val live: Map<String, String> = javaClass.getResourceAsStream("/live/d373-calls.jsonl")!!.use { String(it.readAllBytes(), Charsets.UTF_8) }
+        .lines().filter { it.isNotBlank() }.map { kotlinx.serialization.json.Json.parseToJsonElement(it) as kotlinx.serialization.json.JsonObject }
+        .filter { (it.getValue("name") as kotlinx.serialization.json.JsonPrimitive).content == "run" }
+        .associate { o -> (o.getValue("id") as kotlinx.serialization.json.JsonPrimitive).content to (o.getValue("argsJson") as kotlinx.serialization.json.JsonPrimitive).content }
+
+    private fun cmd(line: String, config: EffectPolicyConfig = EffectPolicyConfig()) = EffectPolicy.classify(RunArgs(cmd = line), root, protectedPaths, config)
+
+    @Test
+    fun `read-only probes outside the workspace are R and pass the workspace ceiling, and anything that writes or runs more is not`() {
+        val ceiling = Ceiling(CapabilitySet.WORKSPACE_LOCAL_TEST_ONLY, Stage.Patch, ExecutionMode.TrustedLocal)
+        for (id in listOf("call_02_9532tzlo1xubzye3tzub0v1z", "call_01_yplspwwizis04wf1z1f8nllx")) {
+            val args = kotlinx.serialization.json.Json.decodeFromString(RunArgs.serializer(), live.getValue(id))
+            val classification = EffectPolicy.classify(args, root, protectedPaths, windows)
+            assertEquals(EffectClass.R, classification.effectClass, "${args.cmd} -> $classification")
+            assertNull(ceiling.allows(classification), "${args.cmd}")
+        }
+        for (line in listOf("where chrome", "which node", "ver", "ls -la /usr/lib",
+            "if not exist \"C:/Program Files/x.exe\" (echo NONE) else (echo SOME)", "where chrome && dir /b C:/Windows || echo none")) {
+            assertEquals(EffectClass.R, cmd(line, windows).effectClass, "$line -> ${cmd(line, windows)}")
+        }
+        for (line in listOf("dir /b C:/Windows > out.txt", "type C:/x 2> ../err.txt", "if exist C:/x (del C:/x)", "where chrome & curl -s https://e.x",
+            "cat /etc/hosts $(touch y)", "cat /etc/hosts", "type C:/x/a.txt", "echo hi > C:/x.txt", "if exist C:/x (C:/x/run.exe)", "where chrome & npm i left-pad")) {
+            assertTrue(cmd(line).effectClass != EffectClass.R, "$line -> ${cmd(line)}")
+        }
+        assertEquals(EffectClass.D, cmd("dir /b C:/Windows > out.txt").effectClass, "a probe that writes a file is classified as before")
+    }
+
+    private val windows = EffectPolicyConfig(os = OsFamily.Windows)
+    private val posix = EffectPolicyConfig(os = OsFamily.Linux)
+
+    /** D-375: a probe that inspected every path and found it clear, recording what it was asked. */
+    private class Clear(private val refuse: Set<String> = emptySet()) : ContainmentProbe {
+        val asked = ArrayList<String>()
+
+        override fun contained(relative: String): Boolean {
+            asked += relative
+            return relative !in refuse
+        }
+    }
+
+    private fun removal(line: String, config: EffectPolicyConfig, probe: ContainmentProbe? = Clear(), cwd: String? = null): Classification =
+        EffectPolicy.classify(RunArgs(cmd = line, cwd = cwd), if (config.os == OsFamily.Windows) "C:/w" else root, protectedPaths, config, probe)
+
+    @Test
+    fun `deleting or moving literal paths a probe inspected inside the workspace is W`() {
+        val live = kotlinx.serialization.json.Json.decodeFromString(RunArgs.serializer(), live.getValue("call_00_jtg3raywrogarhtrukhkvr4g")).cmd!!
+        assertEquals("rmdir /s /q .tools", live)
+        val rmdir = removal(live, windows)
+        assertEquals(EffectClass.W, rmdir.effectClass, rmdir.toString())
+        assertContains(rmdir.reasons.toString(), "delete or move inside the workspace: 'rmdir /s'")
+        val table = listOf(
+            windows to listOf(
+                "rmdir /s /q .tools", "rd /S /Q build\\out", "del notes.txt", "erase /q notes.txt", "del /q .tools\\*.tmp", "del /s /q .tools\\*.tmp",
+                "move a.txt docs\\a.txt", "move /y a.txt docs/a.txt", "Remove-Item -Recurse -Force .tools", "Remove-Item -LiteralPath .tools",
+                "rd /s /q C:\\w\\build", "rm -rf node_modules", "rd /s /q .\\build",
+            ),
+            posix to listOf(
+                "rm -rf node_modules", "rm -rf src/*", "rm notes.txt", "rm -f -- -odd", "rmdir build", "mv a.txt docs/a.txt", "mv -f a.txt b.txt",
+                "rm -rf /w/build", "rm -Rfv build/out", "rm -rf ./build",
+            ),
+        )
+        for ((config, lines) in table) for (line in lines) {
+            val classification = removal(line, config)
+            assertEquals(EffectClass.W, classification.effectClass, "${config.os} $line -> $classification")
+            assertFalse(Capability.OutsideWorkspace in classification.requiredCapabilities, line)
+        }
+        val asked = Clear()
+        removal("del /s /q .tools\\x.tmp", windows, asked)
+        removal("rm -rf src/* notes.txt", posix, asked)
+        removal("rm a.txt", posix, asked, cwd = "src")
+        assertEquals(listOf(".tools", "src", "notes.txt", "src/a.txt"), asked.asked, "a wildcard and del /s are checked as their parent directory")
+    }
+
+    @Test
+    fun `a delete or move whose operands are not proven literal, inside, unprotected and inspected stays D`() {
+        val table = listOf(
+            windows to listOf(
+                "rd /s /q %USERPROFILE%\\victim", "del %TEMP%\\..\\x", "Remove-Item \$env:USERPROFILE\\x", "rd /s /q !TARGET!", "del ^%TEMP^%\\x",
+                "rd /s /q C:foo", "rd /s /q \\\\server\\share\\x", "rd /s /q \\\\?\\C:\\w\\x", "del a.txt:stream", "del PACKAG~1.JSO", "rd /s /q .git.",
+                "rd /s /q .", "rd /s /q .\\", "rd /s /q src\\..", "rd /s /q C:\\w", "rd /s /q C:\\Users", "del /q *.json", "del /s /q notes.txt",
+                "rd /s /q ci", "del /q ci\\*.yml", "rd /s /q db", "rd /s /q .GIT\\hooks", "rd /x /q build", "Remove-Item -Include *.js .tools",
+                "Remove-Item a,..\\..\\x", "move a.txt C:\\b.txt", "move a.txt ..\\b.txt", "rmdir /s /q", "rd /s /q (build)",
+                "rd /s /q a\\..\\b", "rm -rf a/../b", "del /q tmp\\..\\tmp\\x", "move a.txt sub\\..\\b.txt",
+            ),
+            posix to listOf(
+                "rm -rf \$HOME/victim", "rm -rf ~/x", "rm -rf ~", "rm -rf .*", "rm -rf sub/.*", "rm -rf *", "rm -rf ./*", "rm -rf /", "rm -rf .",
+                "rm -rf .\\./x", "rm -rf `pwd`", "rm -rf \$(pwd)", "rm -rf {a,b}", "rm -rf [ab]x", "rm --no-preserve-root -rf x", "mv -t /tmp a.txt",
+                "mv a.txt ../b.txt", "rmdir /s /q build", "/bin/rm -rf build", "rm -rf ci/x", "rm -rf db", "rm -rf src/*/x", "rm", "rm -rf",
+                "rm -rf a/../b", "mv x ../y", "rm -rf tmp/../tmp/x", "mv a.txt sub/../b.txt",
+            ),
+        )
+        for ((config, lines) in table) for (line in lines) {
+            val classification = removal(line, config)
+            assertEquals(EffectClass.D, classification.effectClass, "${config.os} $line -> $classification")
+            assertTrue(classification.reasons.any { it.startsWith("destructive delete outside tmp") || it.startsWith("path ") }, "${config.os} $line -> $classification")
+        }
+        // Without a probe nothing outside the tmp prefixes is proven; a probe that finds a protected descendant or a link refuses.
+        val unprobed = removal("rm -rf node_modules", posix, probe = null)
+        assertEquals(EffectClass.D, unprobed.effectClass)
+        assertContains(unprobed.reasons.toString(), "'node_modules' was not inspected on disk")
+        val site = removal("rd /s /q packages\\site", windows, Clear(setOf("packages/site")))
+        assertEquals(EffectClass.D, site.effectClass)
+        assertContains(site.reasons.toString(), "holds a protected path or a link")
+        assertEquals(EffectClass.D, removal("mv a.txt linked/a.txt", posix, Clear(setOf("linked/a.txt"))).effectClass)
+        // The tmp prefixes keep their rule without a probe, for literal operands only.
+        assertEquals(EffectClass.W, removal("rm -rf tmp/cache", posix, probe = null).effectClass)
+        assertEquals(EffectClass.D, removal("rm -rf tmp/\$X", posix, probe = null).effectClass)
+        assertEquals(EffectClass.W, removal("del /s /q tmp\\*.log", windows, probe = null).effectClass)
+        assertEquals(EffectClass.D, removal("del /s /q tmp", windows, probe = null).effectClass, "del /s matches the name in every directory below its parent")
+    }
+
+    @Test
+    fun `a redirect writes no file only to the null device of the shell that runs the line, and argv has no redirects`() {
+        val table = listOf(
+            Triple(windows, listOf("dir 2>nul", "dir > NUL", "dir >nul:", "where node 2>Nul"), EffectClass.R),
+            Triple(windows, listOf("echo x > \$null", "echo x 2> nul.txt", "dir > \$null"), EffectClass.W),
+            Triple(windows, listOf("echo x > /dev/null", "dir 2>/dev/null"), EffectClass.D),
+            Triple(posix, listOf("ls 2>/dev/null", "ls > /dev/null", "which node >/dev/null"), EffectClass.R),
+            Triple(posix, listOf("echo x > nul", "ls 2>NUL:", "echo x > \$null"), EffectClass.W),
+        )
+        for ((config, lines, expected) in table) for (line in lines) {
+            assertEquals(expected, cmd(line, config).effectClass, "${config.os} $line -> ${cmd(line, config)}")
+        }
+        // PowerShell's own `$null` lives inside its -Command string: the interpreter's effects are unknown, not a redirect.
+        val quoted = cmd("powershell -Command \"Get-ChildItem > \$null\"", windows)
+        assertEquals(EffectClass.W, quoted.effectClass)
+        assertTrue(quoted.effectsUnknown)
+        assertFalse(quoted.reasons.any { it.startsWith("output redirect") }, quoted.toString())
+        assertTrue(cmd("powershell -Command Get-ChildItem > \$null", windows).reasons.contains("output redirect '>'"), "cmd.exe owns an unquoted redirect")
+
+        for (config in listOf(windows, posix)) {
+            val echo = EffectPolicy.classify(listOf("echo", "x", ">", "nul"), null, root, protectedPaths, config)
+            assertEquals(EffectClass.R, echo.effectClass, "argv '>' is an argument: $echo")
+            assertFalse(echo.reasons.any { it.startsWith("output redirect") }, echo.toString())
+            val rm = EffectPolicy.classify(listOf("rm", "-rf", "build", ">", "/dev/null"), null, root, protectedPaths, config, Clear())
+            assertEquals(EffectClass.D, rm.effectClass, "rm deletes '>' and '/dev/null' too: $rm")
+            val tool = EffectPolicy.classify(listOf("mytool", ">", "out.txt"), null, root, protectedPaths, config)
+            assertFalse(tool.reasons.any { it.startsWith("output redirect") }, tool.toString())
+        }
+    }
+
     @Test
     fun `unknown local executables and wrappers have unknown write effects`() {
         for (argv in listOf(listOf("./scripts/deploy-helper"), listOf("mystery-wrapper", "git", "push"), listOf("./ls", "-la"))) {
@@ -170,21 +313,23 @@ class CeilingTest {
         assertContains(configured.reasons.toString(), "configured as non-D")
 
         // `cwd` is workspace-relative: the same token escapes from one directory and not from another.
-        assertEquals(EffectClass.R, EffectPolicy.classify(listOf("cat", "../a.txt"), "src", root, protectedPaths).effectClass)
+        assertEquals(EffectClass.R, EffectPolicy.classify(listOf("head", "../a.txt"), "src", root, protectedPaths).effectClass)
+        assertEquals(EffectClass.D, EffectPolicy.classify(listOf("head", "../a.txt"), null, root, protectedPaths).effectClass)
+        // D-373: only existence probes are R outside the workspace; reading a file's content there is not one
         assertEquals(EffectClass.D, EffectPolicy.classify(listOf("cat", "../a.txt"), null, root, protectedPaths).effectClass)
-        assertEquals(EffectClass.D, EffectPolicy.classify(listOf("cat", "../../a.txt"), "src", root, protectedPaths).effectClass)
-        assertEquals(EffectClass.R, EffectPolicy.classify(listOf("cat", "/w/src/a.txt"), null, root, protectedPaths).effectClass)
-        assertEquals(EffectClass.D, EffectPolicy.classify(listOf("cat", "/w2/src/a.txt"), null, root, protectedPaths).effectClass)
-        assertEquals(EffectClass.D, EffectPolicy.classify(listOf("cat", "~/.aws/credentials"), null, root, protectedPaths).effectClass)
+        assertEquals(EffectClass.D, EffectPolicy.classify(listOf("head", "../../a.txt"), "src", root, protectedPaths).effectClass)
+        assertEquals(EffectClass.R, EffectPolicy.classify(listOf("head", "/w/src/a.txt"), null, root, protectedPaths).effectClass)
+        assertEquals(EffectClass.D, EffectPolicy.classify(listOf("head", "/w2/src/a.txt"), null, root, protectedPaths).effectClass)
+        assertEquals(EffectClass.D, EffectPolicy.classify(listOf("head", "~/.aws/credentials"), null, root, protectedPaths).effectClass)
 
         // Windows spellings normalize to the same answer (D-12: both platforms are equal targets).
         assertEquals(
             EffectClass.D,
-            EffectPolicy.classify(listOf("type", "C:\\other\\secrets.txt"), null, "C:/w", protectedPaths).effectClass,
+            EffectPolicy.classify(listOf("findstr", "x", "C:\\other\\secrets.txt"), null, "C:/w", protectedPaths).effectClass,
         )
         assertEquals(
             EffectClass.R,
-            EffectPolicy.classify(listOf("type", "C:\\w\\src\\a.txt"), null, "C:/w", protectedPaths).effectClass,
+            EffectPolicy.classify(listOf("findstr", "x", "C:\\w\\src\\a.txt"), null, "C:/w", protectedPaths).effectClass,
         )
     }
 

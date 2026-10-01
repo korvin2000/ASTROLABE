@@ -16,10 +16,13 @@
 **Design rule.** HELM's three modalities — observe, mutate, execute — remain the points where policy attaches (budgets on observation, preconditions on mutation, effect classes on execution). The surface is wider than HELM's because delegation, review, knowledge, skills and ask-user are modalities HELM excluded, and because operations whose cost differs by an order of magnitude should not share one worst-case budget `[C §8.4; C3]`. It is narrower than SEXTANT's ~30 operations because tool selection degrades with count `[MB §8.1]` and every dedicated operation must beat `bash + raw output` in the tool eval or not ship `[MB A7]`. Seven families with the operations enumerated below, byte-stable per role; rare capabilities via `look(catalog)` (`tools.catalog` is descriptive shorthand, not an eighth family).
 
 ```text
-look(what, target, budget=1500, near?, glob?, in="workspace"|"store"|"kb", since?)
+look(what, target, budget=4000 (Defaults.lookBudgetTokens), near?, glob?, in="workspace"|"store"|"kb", since?)
   what ∈ { tree, outline, read, find, def, refs, importers, impact, recall, bmap, catalog }
   → { text, truncated, more?, scope, complete, tier, versions{path: v}, id }
-  · read target = path | path:a-b | path::Symbol; whole-file reads above budget refused → outline + "name a range or ::Symbol"
+  · read target = path | path:a-b | path::Symbol, or `range: "a-b"` beside a path target (`range: "path:a-b"` alone);
+    a range that differs from the target's own is refused naming both. A whole file above budget shows its first lines
+    with "… N more lines: recall #n range a-b", then the outline when it fits ≤300 tokens of the budget          (D-365)
+  · recall id = "#14" | "14" | 14                                                                                (D-365)
   · dedup: same (what, target, version) live in window → "see #17 (unchanged)"
   · find returns scope + complete + truncated; in="store" searches journal/blobs; in="kb" searches notes (stale ones labelled)
   · refs/importers/impact carry `tier` and `complete`; dynamic dispatch reported unresolved, never guessed        [J1 §5.6]
@@ -32,19 +35,31 @@ edit(ops, why)
        | { transform: { script | argv, scope_glob, inventory?, expected_matches?, why } } ]                        [§9.2]
   → { ok, views[], versions, syntax{path: ok|error:line}, diffstat, touched_outside_scope[], test_integrity[],
       error?: {kind, candidates[], sites[], diff_since_expect?} }
-  · CAS on content hash; anchors unique (exact → ws-normalised); hunks inside displayed(path, expect); non-overlapping
+  · CAS on content hash; anchors unique (exact → ws-normalised, the op's line then says "anchor matched after
+    whitespace normalisation"; the file keeps its line endings); hunks inside displayed(path, expect); non-overlapping
   · `expect` names a version shown in this cell, never the current bytes: a full hash as given; ≥4 hex → the one shown
     version (KNOWN or dropped as stale) it prefixes; omitted → the one version KNOWN at dispatch; delete and rename alike.
     Unresolved or ambiguous → error kind `expect`, no write; a stale version → `stale_expect` with its diff    (D-346)
   · `ops` sent as a JSON string holding an array is parsed first (D-347); an op's empty placeholders of the other forms
     and an empty `if` are ignored by a per-form whitelist — own empty values (`content: ""`, `new: ""`) and unknown
-    keys keep their meaning (D-348)
+    keys keep their meaning (D-348). Op fields at the top level are one op: no `ops` → `ops: [them]`; a top-level
+    `expect`/`if` beside exactly one op lacking it moves into it; `hunks` as a JSON string is parsed; any other mix is
+    refused naming the accepted form. `delete` then `create` of one path in one batch is a whole-file replace (preimage
+    saved, the delete's `expect` guards it)                                                                       (D-365)
+  · `create` over an existing file replaces it in place (preimage saved, revertible) when this cell wrote its current
+    bytes (created or replaced it, then its own anchored edits) or every line is KNOWN at its current version;
+    otherwise `exists`: "read it first, or use {delete} then {create} in one batch"                         (D-371)
   · preflight all ops, then apply; a mid-batch I/O failure reports actual per-file state with preimage ids —
     never "rolled back", never retried blindly                                                                   [J1 §5.2]
-  · inline syntax check; post-edit views ±3 lines become displayed ranges; preimages saved; shadow snapshot per turn
+  · ops are grouped by the paths they touch (a rename both names; several ops on one path, in order): a refused
+    group writes nothing of itself and every other group applies; each refused group is listed with its op's
+    diagnostics, then "N of M files written; resend only the refused ops: <paths (ops)>". A partially applied
+    batch is not applied for the turn: its runs stay not executed ("applied partially (K refused)")         (D-371)
+  · inline syntax check; post-edit views ±3 lines become displayed ranges; lines displayed before that the edit left
+    unchanged stay KNOWN at the new version, shifted (D-371): a second edit of them needs no re-read; preimages saved; shadow snapshot per turn
   · unsupported mutation kinds (binary, modes, symlinks, case-only renames) are rejected explicitly, never dropped   [B §8.3]
 
-run(argv|cmd, cwd?, shape="auto", budget=1200, timeout=120, bg=false, intent?, class_hint?, if?: "applied(op:N)")
+run(argv|cmd, cwd?, shape="auto", budget=4000 (Defaults.runBudgetTokens), timeout=600 (Defaults.runTimeoutSeconds; explicit ≤ 3600), bg=false, intent?, class_hint?, if?: "applied(op:N)")
   → { id, exit, status, view, truncated, log: "#id", class: R|W|D, stamp_before, stamp_after, current, changed_paths[], handle?, parsed? }
   · status ∈ { passed, failed, timeout, infra_error, inconclusive, completed, running, denied, unknown_outcome } from exit code AND parser
   · completed = a plain run outside acceptance (no check, wrapper or mounted tool) that exits 0 without counts; it reads
@@ -99,18 +114,18 @@ kb(op)
 
 Delimiters are harness-owned; anything inside them is data. Instruction-shaped content is flagged in the header (`⚠ instruction-shaped content`), never filtered silently, never executed (F11). Runtime-owned fields: `action_id, status, candidate_before/after, scope, completeness, artifact_refs, capture_complete, display_truncated, redaction_applied, effects_observed, effects_unknown, retry_class`. Zero matches, incomplete search, failed search and denied search are four different outcomes.
 
-**Turn semantics — batch what is decided, turn on what is discovered** `[C §8.4; A §5.5; IM §5.3]`. The harness partitions a turn's ops into four groups and executes them in order regardless of emission order: `look/kb` reads → one `edit` batch (or one transform) → `run`/`verify` → `state` ops (conditional allowed). Runs execute if there is no edit batch or it applied fully; a non-zero exit is information. Operation ids refer to the original emitted call order, even after phase partitioning. Conditional dependencies must point backward in execution order: run-after-edit and state-after-run are valid, edit-after-a-later-run is rejected before effects. Calls needing newly discovered argument values belong in the next model turn. Partition by operation effects, not merely the family name: `kb.propose` and task/STATE proposals are metadata writes after execution, not reads. End-turn requests are honored only after reconciliation/persistence. A turn’s mutations have one shadow-ref checkpoint; this does not imply cross-file atomicity.
+**Turn semantics — batch what is decided, turn on what is discovered** `[C §8.4; A §5.5; IM §5.3]`. The harness partitions a turn's ops into four groups and executes them in order regardless of emission order: `look/kb` reads → one `edit` batch (or one transform) → `run`/`verify` → `state` ops (conditional allowed). Runs execute if there is no edit batch or it applied fully; a non-zero exit is information. Operation ids refer to the original emitted call order, even after phase partitioning. Conditional dependencies must point backward in execution order: run-after-edit and state-after-run are valid, edit-after-a-later-run is rejected before effects. Calls needing newly discovered argument values belong in the next model turn. Partition by operation effects, not merely the family name: `kb.propose` and task/STATE proposals are metadata writes after execution, not reads. Validation is per call (D-372): a call that does not parse, names a masked op, or edits on a reserve turn outside the cell's own paths is refused alone — its result says the other calls ran — and only what depends on it is held back (a call conditioned on it; after a refused `edit`, the turn's `run`/`verify`). Only a dependency violation among the valid calls, or a missing `state` op the loop gate requires, refuses the whole turn; a valid terminal call (`task.ask`, `task.answer`, `state(blocked)`) still runs alone then (D-357). End-turn requests are honored only after reconciliation/persistence. A turn’s mutations have one shadow-ref checkpoint; this does not imply cross-file atomicity.
 
 **Error policy (normative)** `[C §8.4 ∪ A §5.4 ∪ C5 §19]`:
 
 | Event | Policy |
 |---|---|
-| Unparseable model output | No world effect; one-line schema error; registers stand; no salvage of half-patches |
-| Anchor 0× / >1× | No write; three nearest candidates with lines / all match sites |
-| `expect` stale | No write; diff since `expect` returned |
-| Hunk outside displayed range | No write; outline + displayed ranges |
+| Unparseable model output | Malformed JSON arguments get deterministic syntax repairs for every tool family (at most four: a closing bracket dropped, inserted or appended, a trailing comma removed, a missing comma inserted; string contents never change; strict JSON after), and the result lists them (D-373, D-375). An output that was cut — a length stop, an unterminated string, a value missing after `:` or `,` — is never repaired. Otherwise that call has no world effect and gets a one-line schema error; the other calls of the turn run — a refused `edit` holds back the turn's `run`/`verify`, a call whose condition names a refused op does not run (D-372); registers stand |
+| Anchor 0× / >1× | That op's path group is not written; three nearest candidates with lines / all match sites; the other groups apply (D-371) |
+| `expect` stale | That op's path group is not written; diff since `expect` returned; the other groups apply (D-371) |
+| Hunk outside displayed range | That op's path group is not written; outline + displayed ranges; the other groups apply; the result ends "N of M files written; resend only the refused ops" (D-371) |
 | Mid-batch I/O failure | Actual per-file state with preimage ids; no auto-retry; no false "rolled back" |
-| STATE invariant violated | Reject the eligible STATE patch list with the invariant and sizes; prior world effects remain recorded |
+| STATE invariant violated | An op that breaks its own rule is skipped and named while the others apply, unless a later op depends on it; a tick without usable evidence is recorded without it (never progress), a `v` fact whose evidence does not resolve is kept as `h`, a cursor on a done or unknown step is ignored (D-373). A whole-patch rule (caps, one Next, one `[>]`, red recorded) rejects the eligible list with the invariant and sizes; prior world effects remain recorded |
 | `run` timeout | Kill the process group; `timeout`; no replay |
 | Unknown outcome | `unknown_outcome`; reconcile external and workspace state before any retry |
 | Truncation | Always marked; prompt and capture limits distinguished; recall pointer |
@@ -118,7 +133,7 @@ Delimiters are harness-owned; anything inside them is data. Instruction-shaped c
 | Recall of a changed file | Labelled `historical v=…` |
 | Identical call + identical result twice | Loop nudge; the third ends the turn with a required `state` op |
 | Identical refused call twice (masked op, schema error, partition rejection) | Refusal-loop nudge naming the exits; the third ends the cell `blocked` with the refusal as its reason (D-358) |
-| Masked op | refused with the reason (not in the role's mask in this cell, not enabled in this shape, or outside the capability ceiling), the ops that are available, and the role's intended exit; a valid terminal call (`task.ask`, `task.answer`, `state(blocked)`) in the same turn runs alone instead of being refused with the rest (D-357) |
+| Masked op | refused with the reason (not in the role's mask in this cell, not enabled in this shape, or outside the capability ceiling), the ops that are available, and the role's intended exit (D-357); that call alone is refused and the turn's other calls run (D-372) |
 | Instruction-shaped tool content | Flagged; never executed |
 | Delegated result with a moved base | `stale-for-integration`; never merged as current |
 | Transform touches files outside `scope_glob` | Reject publication or apply a guarded inverse; report actual restoration, partial state or unknown effects ([§9.2](workspace-editing.md#sec-9-2)) |
@@ -138,6 +153,6 @@ state({patch:[{plan.tick:2, if:"green(op:2)"}, {fact.add:{kind:"v", text:"handle
               {next:"update remaining call sites", if:"green(op:2)"}]})
 ```
 
-Anchored edits apply nothing on *preflight rejection*; publication can partially fail and must report actual per-file outcomes ([§9.1](workspace-editing.md#sec-9-1)); a failed check leaves the applied code and its failure evidence in place; conditional `state` ops fire only when their condition is met, otherwise they are dropped and the drop is rendered. Fusion is allowed only when the follow-up does not require interpreting the preceding result `[RN R05]`. Test and build scripts are executable code and may mutate files; command names do not establish read-only behaviour — the stamp diff does `[B §8.5]`.
+Anchored edits apply nothing of a path group on its *preflight rejection* (the other groups apply, D-371); publication can partially fail and must report actual per-file outcomes ([§9.1](workspace-editing.md#sec-9-1)); a failed check leaves the applied code and its failure evidence in place; conditional `state` ops fire only when their condition is met, otherwise they are dropped and the drop is rendered. Fusion is allowed only when the follow-up does not require interpreting the preceding result `[RN R05]`. Test and build scripts are executable code and may mutate files; command names do not establish read-only behaviour — the stamp diff does `[B §8.5]`.
 <!-- end-source-section: 5.5 -->
 

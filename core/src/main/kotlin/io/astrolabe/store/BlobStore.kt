@@ -154,6 +154,14 @@ public class BlobStore internal constructor(
         return Files.exists(directory(recovery).resolve(digest.hex))
     }
 
+    /**
+     * True when [put] of bytes hashing to [digest] with this [recovery] would write nothing: the file
+     * is already in that directory and the row exists. The row is keyed by digest alone (first writer's
+     * kind and ids stand), so such a `put` is a no-op and a caller holding the digest may skip it.
+     */
+    internal fun holds(digest: Digest, recovery: Boolean): Boolean =
+        Files.exists(directory(recovery).resolve(digest.hex)) && recoveryOf(digest) != null
+
     /** Where [digest] lives once published; the file may not exist yet. */
     public fun path(digest: Digest, recovery: Boolean = false): Path =
         directory(recovery).resolve(digest.hex)

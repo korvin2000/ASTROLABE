@@ -8,6 +8,12 @@ import io.astrolabe.event.Authority
 import io.astrolabe.evidence.Closure
 import io.astrolabe.id.CandidateId
 import io.astrolabe.id.Identities
+import io.astrolabe.workspace.Intent
+import io.astrolabe.workspace.PathResolution
+import io.astrolabe.workspace.Workspace
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 /** Which part of the acceptance surface a touched path belongs to (§8.6). */
 public enum class AcceptanceSurface(public val wire: String) {
@@ -119,7 +125,7 @@ public object TestIntegrity {
     @JvmStatic
     public fun baseline(touched: Collection<String>, cause: String, contract: Contract, checks: Checks): List<TestIntegrityFlag> =
         LinkedHashSet(touched.map(::normalize)).mapNotNull { path ->
-            val surface = surfaceOf(path, contract) ?: return@mapNotNull null
+            val surface = surfaceOf(path, contract, checks.packageManifest) ?: return@mapNotNull null
             TestIntegrityFlag(path, surface, cause, requiredChecksFor(path, surface, checks))
         }
 
@@ -132,7 +138,7 @@ public object TestIntegrity {
     public fun classify(changes: Collection<SurfaceChange>, cause: String, contract: Contract, checks: Checks): List<TestIntegrityFlag> =
         changes.distinctBy { normalize(it.path) }.mapNotNull { change ->
             val path = normalize(change.path)
-            val surface = surfaceOf(path, contract) ?: return@mapNotNull null
+            val surface = surfaceOf(path, contract, checks.packageManifest) ?: return@mapNotNull null
             val before = lines(change.before)
             val after = lines(change.after)
             val prefix = before.zip(after).takeWhile { (a, b) -> a == b }.size
@@ -189,7 +195,9 @@ public object TestIntegrity {
 
     /** The surface [path] belongs to, or `null` when it is ordinary source. CI and check definitions outrank the test-file convention. */
     @JvmStatic
-    public fun surfaceOf(path: String, contract: Contract): AcceptanceSurface? {
+    public fun surfaceOf(path: String, contract: Contract): AcceptanceSurface? = surfaceOf(path, contract) { null }
+
+    internal fun surfaceOf(path: String, contract: Contract, manifest: (String) -> String?): AcceptanceSurface? {
         val relative = normalize(path)
         val name = relative.substringAfterLast('/')
         val first = relative.substringBefore('/')
@@ -197,7 +205,7 @@ public object TestIntegrity {
             first in CI_PREFIXES || name in CI_NAMES -> AcceptanceSurface.CiConfig
             name in CHECK_DEFINITION_NAMES || CHECK_DEFINITION_PREFIXES.any { name.startsWith(it) } -> AcceptanceSurface.CheckDefinition
             isTestPath(relative) -> AcceptanceSurface.TestFile
-            contract.acceptance.filterIsInstance<Acceptance.Run>().any { namesPath(it.command.argv, it.command.cwd, relative) } ->
+            contract.acceptance.filterIsInstance<Acceptance.Run>().any { names(it.command.argv, it.command.cwd, relative, manifest) } ->
                 AcceptanceSurface.AcceptanceCommand
             else -> null
         }
@@ -259,22 +267,136 @@ public object TestIntegrity {
                 Closure.Unknown -> true
                 is Closure.Known -> path in closure.paths
                 is Closure.Package -> path == closure.path || path.startsWith(closure.path.trimEnd('/') + "/")
-            } || (check.command?.let { namesPath(it.argv, it.cwd, path) } ?: false)
+            } || (check.command?.let { names(it.argv, it.cwd, path, checks.packageManifest) } ?: false)
         }
     }.map { it.id }
 
-    /** True when an argv token (resolved against [cwd]) or [cwd] itself is [path] or a directory above it. */
-    private fun namesPath(argv: List<String>, cwd: String?, path: String): Boolean {
+    private fun names(argv: List<String>, cwd: String?, path: String, manifest: (String) -> String?): Boolean =
+        namesPath(argv, cwd, path) || scriptPaths(argv, cwd, manifest).any { path == it || path.startsWith("$it/") }
+
+    /** A package-manager command with its directory option consumed: the directory, and the argv without the option. */
+    private class PackageCommand(val directory: String?, val argv: List<String>)
+
+    /**
+     * D-375: `npm|pnpm|yarn` with `--prefix|--cwd|--dir|-C <dir>` (or `=<dir>`): the directory is where the manifest is
+     * read, never a named input, so the option and its value leave the argv before path classification. Arguments
+     * after `--` belong to the script and are kept verbatim; `null` for any other tool.
+     */
+    private fun packageCommand(argv: List<String>): PackageCommand? {
+        val tool = argv.firstOrNull()?.replace('\\', '/')?.substringAfterLast('/')?.lowercase()?.substringBefore('.') ?: return null
+        if (tool !in PACKAGE_MANAGERS) return null
+        var directory: String? = null
+        val rest = arrayListOf(argv.first())
+        var i = 1
+        while (i < argv.size) {
+            val arg = argv[i]
+            if (arg == "--") {
+                rest += argv.subList(i, argv.size)
+                break
+            }
+            when {
+                arg in PREFIX_FLAGS -> directory = argv.getOrNull(++i)
+                PREFIX_FLAGS.any { arg.startsWith("$it=") } -> directory = arg.substringAfter('=')
+                else -> rest += arg
+            }
+            i++
+        }
+        return PackageCommand(directory, rest)
+    }
+
+    /**
+     * D-374: what `npm|pnpm|yarn test` or `… run <name>` runs is the `scripts.<name>` string of the package's
+     * `package.json`, read in the directory option's directory (resolved against the cwd) when one is given; its
+     * path-like tokens, resolved against that package directory, are named inputs. One level only, and an unreadable
+     * or absent manifest names nothing.
+     */
+    private fun scriptPaths(argv: List<String>, cwd: String?, manifest: (String) -> String?): List<String> {
+        val command = packageCommand(argv) ?: return emptyList()
+        val prefix = command.directory
+        val positional = command.argv.drop(1).takeWhile { it != "--" }.filterNot { it.startsWith("-") }
+        val name = when (positional.firstOrNull()) {
+            "test" -> "test"
+            "run", "run-script" -> positional.getOrNull(1) ?: return emptyList()
+            else -> return emptyList()
+        }
+        val base = packageDirectory(cwd, prefix) ?: return emptyList()
+        val script = runCatching {
+            ((Json.parseToJsonElement(manifest(base) ?: return emptyList()) as? JsonObject)?.get("scripts") as? JsonObject)?.get(name) as? JsonPrimitive
+        }.getOrNull()?.takeIf { it.isString }?.content ?: return emptyList()
+        return script.split(SCRIPT_SEPARATORS).mapNotNull(::pathToken).map { if (base.isEmpty()) it else "$base/$it" }
+    }
+
+    /** [cwd] joined with the directory option [prefix], `""` for the root; `null` when either is absolute or escapes. */
+    private fun packageDirectory(cwd: String?, prefix: String?): String? {
+        val parts = listOfNotNull(cwd, prefix).map(::normalize).filter { it.isNotEmpty() && it != "." }
+        if (parts.any { it.startsWith("/") || it.startsWith("..") || it.matches(DRIVE) }) return null
+        return parts.joinToString("/")
+    }
+
+    /**
+     * Index in [argv] (directory option consumed) of the first argument the package manager forwards to the script:
+     * the one after `--`, else the one after the script name (`run <name>`, `test`, or a bare `<name>` for yarn and
+     * pnpm); `argv.size` when there is none.
+     */
+    private fun forwardedFrom(argv: List<String>): Int {
+        var run = false
+        for (i in 1 until argv.size) {
+            val arg = argv[i]
+            when {
+                arg == "--" -> return i + 1
+                arg.startsWith("-") -> Unit
+                !run && (arg == "run" || arg == "run-script") -> run = true
+                else -> return i + 1
+            }
+        }
+        return argv.size
+    }
+
+    /** A relative path-like script token (`scripts/validate.js`, `--config=cfg/x.json`), normalised; null for anything else. */
+    private fun pathToken(token: String): String? {
+        val raw = token.trim('"', '\'').let { if (it.startsWith("-")) it.substringAfter('=', "") else it }
+        if (raw.isEmpty() || "://" in raw || raw.startsWith("/") || raw.startsWith("$") || raw.startsWith("%") || raw.matches(DRIVE)) return null
+        val path = normalize(raw)
+        if (path.isEmpty() || path == "." || path.startsWith("..")) return null
+        return path.takeIf { '/' in it || EXTENSION.containsMatchIn(it) }
+    }
+
+    private val PACKAGE_MANAGERS = setOf("npm", "pnpm", "yarn")
+    private val PREFIX_FLAGS = setOf("--prefix", "--cwd", "--dir", "-C")
+    private val SCRIPT_SEPARATORS = Regex("""[\s;|&()<>]+""")
+    private val EXTENSION = Regex("""\.[A-Za-z][A-Za-z0-9]*$""")
+    private val DRIVE = Regex("^[A-Za-z]:.*")
+
+    /** Reads `package.json` texts through [workspace]'s path contract, for [Checks.seed]. */
+    internal fun packageManifests(workspace: Workspace): (String) -> String? = { directory ->
+        (workspace.resolve(if (directory.isEmpty()) "package.json" else "$directory/package.json", Intent.Read) as? PathResolution.Resolved)
+            ?.let(workspace::bytes)?.toString(Charsets.UTF_8)
+    }
+
+    /**
+     * True when an argv token or the relative executable, resolved against [cwd], is [path] or a directory above it.
+     * The bare [cwd] names nothing (D-369): it would make every source file of the package a command input; the
+     * package's manifest is a check definition by name.
+     */
+    private fun namesPath(command: List<String>, cwd: String?, path: String): Boolean {
+        val pkg = packageCommand(command)
+        val argv = pkg?.argv ?: command
         val base = cwd?.let { normalize(it) }?.takeIf { it.isNotEmpty() && it != "." }
+        // D-375: the script runs in the package directory, so the arguments forwarded to it resolve there.
+        val forwarded = if (pkg?.directory == null) argv.size else forwardedFrom(argv)
+        val scriptBase = packageDirectory(cwd, pkg?.directory)?.takeIf { it.isNotEmpty() } ?: base
         // Test the raw spelling: normalize strips "./", which would drop a root-level `./check.sh`.
         val executable = argv.firstOrNull()?.takeIf {
             val named = it.replace('\\', '/')
             '/' in named && !named.startsWith('/') && !named.matches(Regex("^[A-Za-z]:.*"))
         }
-        val candidates = (argv.drop(1) + listOfNotNull(executable)).map { normalize(it) }.filter { it.isNotEmpty() && !it.startsWith("-") }
-            .map { if (base != null && !it.startsWith("$base/")) "$base/$it" else it } + listOfNotNull(base)
+        val candidates = resolved(argv.subList(1, forwarded) + listOfNotNull(executable), base) + resolved(argv.drop(forwarded), scriptBase)
         return candidates.any { path == it || path.startsWith("$it/") }
     }
+
+    private fun resolved(tokens: List<String>, base: String?): List<String> =
+        tokens.map { normalize(it) }.filter { it.isNotEmpty() && !it.startsWith("-") }
+            .map { if (base != null && !it.startsWith("$base/")) "$base/$it" else it }
 
     private fun normalize(path: String): String = path.replace('\\', '/').removePrefix("./").trimEnd('/')
 }

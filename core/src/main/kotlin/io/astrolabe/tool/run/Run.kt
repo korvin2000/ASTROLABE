@@ -6,7 +6,9 @@ import io.astrolabe.auth.CapabilitySet
 import io.astrolabe.auth.Ceiling
 import io.astrolabe.auth.Classification
 import io.astrolabe.auth.ContentClass
+import io.astrolabe.auth.ContainmentProbe
 import io.astrolabe.auth.EffectPolicy
+import io.astrolabe.auth.EffectPolicyConfig
 import io.astrolabe.auth.ExecutionDecision
 import io.astrolabe.auth.Executors
 import io.astrolabe.auth.InstructionShape
@@ -55,13 +57,17 @@ import io.astrolabe.tool.ToolOutcome
 import io.astrolabe.tool.ToolSet
 import io.astrolabe.tool.TurnContext
 import io.astrolabe.workspace.Intent as PathIntent
+import io.astrolabe.workspace.PathKind
 import io.astrolabe.workspace.PathResolution
 import io.astrolabe.workspace.Stamper
 import io.astrolabe.workspace.StampReport
 import io.astrolabe.workspace.VersionRegistry
 import io.astrolabe.workspace.Workspace
+import io.astrolabe.workspace.WorkspacePath
 import java.io.IOException
+import java.nio.file.DirectoryIteratorException
 import java.nio.file.Files
+import java.nio.file.InvalidPathException
 import java.nio.file.Path
 import java.time.Clock
 import kotlinx.coroutines.currentCoroutineContext
@@ -145,6 +151,16 @@ public class Run(
         require(pollSliceSeconds > 0) { "pollSliceSeconds must be positive" }
     }
 
+    private val RunArgs.budgetTokens: Int get() = budget ?: config.defaults.runBudgetTokens
+
+    /** An explicit timeout is clamped, never refused; the configured default may exceed the clamp. */
+    private val RunArgs.timeoutSeconds: Int
+        get() = timeout?.coerceAtMost(maxOf(MAX_TIMEOUT_SECONDS, config.defaults.runTimeoutSeconds)) ?: config.defaults.runTimeoutSeconds
+
+    /** How long a poll waits for new output: a quiet server must not hold the turn for the whole run timeout. */
+    private val RunArgs.pollWaitSeconds: Long
+        get() = (timeout?.coerceAtMost(maxOf(MAX_TIMEOUT_SECONDS, config.defaults.runTimeoutSeconds)) ?: pollSliceSeconds.toInt()).toLong()
+
     override suspend fun execute(call: ToolCall, context: TurnContext): ToolOutcome {
         require(call.family == ToolFamily.Run) { "not a run call: ${call.name}" }
         // D-352: a cwd naming the root is no cwd, so intents, handles and the unknown-outcome guard see one command.
@@ -187,7 +203,8 @@ public class Run(
         } ?: workspace.root
 
         // Policy label (§4.6), capability ceiling (§14.2) and execution mode (D-11) — all before any effect.
-        val classified = EffectPolicy.classify(if (generated == null) args else args.copy(argv = argv), workspace.root.toString(), contract.scope.protectedPaths)
+        val containment = DiskContainment(workspace.paths, { contract.scope.protects(it, ignoreCase = true) || workspace.paths.isProtected(it, PathIntent.Mutate) })
+        val classified = EffectPolicy.classify(if (generated == null) args else args.copy(argv = argv), workspace.root.toString(), contract.scope.protectedPaths, EffectPolicyConfig(), containment)
         // §12.2: a generated wrapper's declarations only add to its script's classification; the caller's ceiling decides.
         val classification = generated?.let { GeneratedTools.inherit(classified, it) } ?: classified
         authorize(args, argv, contract, classification)?.let { return it }
@@ -205,7 +222,7 @@ public class Run(
             workingDirectory = cwd,
             logPath = logPath(actionId),
             environment = EnvPolicy(inheritedNames = config.redaction.envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")),
-            deadlineSeconds = args.timeout.toLong(),
+            deadlineSeconds = args.timeoutSeconds.toLong(),
         )
         var logBlob: Digest? = null
         var rendered: ToolOutcome? = null
@@ -330,7 +347,7 @@ public class Run(
                 val changed = announce(before, after, "run ${alias.text}")
                 val effectClass = observedClass(entry.effectClass, changed)
                 val capture = RunCapture(actionId = actionId, argv = argv, exitCode = if (reply.isError) 1 else 0, output = reply.content.toByteArray(Charsets.UTF_8))
-                val shaped = Shapers.shape(capture, ShapeBudget(args.budget, estimator, alias.text))
+                val shaped = Shapers.shape(capture, ShapeBudget(args.budgetTokens, estimator, alias.text))
                 val touched = if (changed.isEmpty()) "" else "\ntouched (by run ${alias.text} $program: ${changed.size} path${if (changed.size == 1) "" else "s"}) " + changed.take(10).joinToString(", ")
                 val result = RunResult(
                     alias.text, actionId, capture.exitCode, shaped.status, shaped.view + touched, shaped.viewTruncated, logBlob, effectClass, before.candidateId, after.candidateId,
@@ -358,7 +375,7 @@ public class Run(
             val first = os.poll(proc, 0, 0)
             return Launch.Background(proc.copy(status = first.status), first.newBytes, first.nextCursorBytes)
         }
-        val observed = Executions.observeCancellable(os, proc, pollSliceSeconds, args.timeout.toLong() + 5)
+        val observed = Executions.observeCancellable(os, proc, pollSliceSeconds, args.timeoutSeconds.toLong() + 5)
         if (observed.lost) throw IOException("process observation lost; reconcile before retry")
         return Launch.Finished(observed.proc, observed.output, captureComplete = !observed.truncated)
     }
@@ -388,7 +405,7 @@ public class Run(
             exitCode = (status as? ProcStatus.Exited)?.exitCode, timedOut = status == ProcStatus.DeadlineExceeded,
             output = output, captureComplete = captureComplete && status !is ProcStatus.Lost,
         )
-        val shaped = Shapers.shape(capture, ShapeBudget(args.budget, estimator, alias))
+        val shaped = Shapers.shape(capture, ShapeBudget(args.budgetTokens, estimator, alias))
         val outcome = when (status) {
             is ProcStatus.Lost -> Outcome.UnknownOutcome
             is ProcStatus.Cancelled -> Outcome.UnknownOutcome
@@ -432,7 +449,7 @@ public class Run(
         val proc = os.reattach(handle.proc)
         val since = args.since ?: handle.cursor
         val poll = try {
-            kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { os.poll(proc, since, args.timeout.toLong()) }
+            kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { os.poll(proc, since, args.pollWaitSeconds) }
         } catch (failure: IOException) {
             handles.save(handle.copy(status = wire(ProcStatus.Lost)))
             return refused(args, Outcome.UnknownOutcome, "handle ${handle.handleId}: the log cannot be read (${failure.message}); the process state is unknown — reconcile, never relaunch")
@@ -443,7 +460,7 @@ public class Run(
         val slice = safeSlice.text
         return when (val status = poll.status) {
             ProcStatus.Running -> {
-                val view = "handle ${handle.handleId} running · cursor ${poll.nextCursorBytes}" + (if (poll.timedOut) " · observation timed out after ${args.timeout}s, the process keeps running (no relaunch)" else "") + (if (slice.isBlank()) "" else "\n$slice")
+                val view = "handle ${handle.handleId} running · cursor ${poll.nextCursorBytes}" + (if (poll.timedOut) " · observation timed out after ${args.pollWaitSeconds}s, the process keeps running (no relaunch)" else "") + (if (slice.isBlank()) "" else "\n$slice")
                 val result = RunResult(handle.alias, handle.actionId, null, Outcome.NotRun, view, false, null, handle.effectClass, CandidateId(Digest(handle.stampBefore)), null, false, emptyList(), handle.handleId, null, null, emptyList())
                 render(args, result, handle.argv, handle.shell, null, null, effectsUnknown = handle.effectsUnknown, statusWire = "running", captureMask = safeSlice.mask)
             }
@@ -465,7 +482,7 @@ public class Run(
                 val stampBefore = CandidateId(Digest(handle.stampBefore))
                 val changed = announceBackground(handle, after)
                 val capture = RunCapture(handle.actionId, handle.argv, handle.shell, handle.cwd, (status as? ProcStatus.Exited)?.exitCode, status == ProcStatus.DeadlineExceeded, log, complete && status !is ProcStatus.Lost)
-                val shaped = Shapers.shape(capture, ShapeBudget(args.budget, estimator, handle.alias))
+                val shaped = Shapers.shape(capture, ShapeBudget(args.budgetTokens, estimator, handle.alias))
                 val outcome = if (status is ProcStatus.Lost || status is ProcStatus.Cancelled) Outcome.UnknownOutcome else shaped.status
                 val view = "handle ${handle.handleId} ${wire(status)}\n" + shaped.view + "\nBackground effects cannot be attributed exclusively to this process." + (if (changed.isEmpty()) "" else "\nchanged during background run (${changed.size} paths): " + changed.take(10).joinToString(", "))
                 val effectClass = observedClass(handle.effectClass, changed)
@@ -571,4 +588,66 @@ public class Run(
     }
 
     private fun wire(outcome: Outcome): String = outcome.name.replace(Regex("(?<=[a-z])([A-Z])")) { "_" + it.value }.lowercase()
+}
+
+/** The longest `run` a model may ask for in one call (D-370); a larger value is clamped to it. */
+private const val MAX_TIMEOUT_SECONDS: Int = 3_600
+
+/**
+ * D-375: [ContainmentProbe] over the real workspace. Every existing segment of the path is a plain directory (the last
+ * may be a file), never a link, junction or special entry; its real path lies strictly below the root; and neither it nor
+ * any of at most [limit] entries below it is protected ([protects]) or a link. Anything unreadable answers false.
+ */
+internal class DiskContainment(
+    private val paths: WorkspacePath,
+    private val protects: (relative: String) -> Boolean,
+    private val limit: Int = 20_000,
+) : ContainmentProbe {
+    override fun contained(relative: String): Boolean = try {
+        inspect(relative)
+    } catch (e: IOException) {
+        false
+    } catch (e: InvalidPathException) {
+        false
+    } catch (e: DirectoryIteratorException) {
+        false
+    } catch (e: SecurityException) {
+        false
+    }
+
+    private fun inspect(relative: String): Boolean {
+        val segments = relative.split('/')
+        if (segments.any { it.isEmpty() || it == "." || it == ".." }) return false
+        var path = paths.root
+        for ((index, segment) in segments.withIndex()) {
+            path = path.resolve(segment)
+            when (WorkspacePath.kindOf(path)) {
+                PathKind.Missing -> return !protects(relative)
+                PathKind.Directory -> Unit
+                PathKind.Regular -> if (index < segments.lastIndex) return false
+                else -> return false
+            }
+        }
+        val real = path.toRealPath()
+        if (real == paths.root || !real.startsWith(paths.root) || protects(relativeOf(real))) return false
+        if (WorkspacePath.kindOf(real) != PathKind.Directory) return true
+        val pending = ArrayDeque(listOf(real))
+        var seen = 0
+        while (pending.isNotEmpty()) {
+            Files.newDirectoryStream(pending.removeLast()).use { entries ->
+                for (entry in entries) {
+                    if (++seen > limit) return false
+                    when (WorkspacePath.kindOf(entry)) {
+                        PathKind.Directory -> pending.addLast(entry)
+                        PathKind.Regular -> Unit
+                        else -> return false
+                    }
+                    if (protects(relativeOf(entry))) return false
+                }
+            }
+        }
+        return true
+    }
+
+    private fun relativeOf(real: Path): String = paths.root.relativize(real).joinToString("/") { it.toString() }
 }

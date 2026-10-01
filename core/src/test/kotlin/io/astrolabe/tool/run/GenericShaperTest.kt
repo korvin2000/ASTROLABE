@@ -1,5 +1,6 @@
 package io.astrolabe.tool.run
 
+import io.astrolabe.budget.HeuristicEstimator
 import io.astrolabe.evidence.Outcome
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -26,6 +27,47 @@ class GenericShaperTest {
             assertTrue(!other.view.lines().first().contains("completed"), "${capture.argv} ${capture.checkId}: ${other.view.lines().first()}")
         }
         assertEquals("generic · inconclusive · exit 0", Shapers.shape(plain.copy(checkId = "CHK-1")).view.lines().first(), "acceptance keeps the verdict wording")
+    }
+
+    @Test
+    fun `a long plain output fills the budget with its head and a larger tail`() {
+        val output = (1..2_000).joinToString("\n", postfix = "\n") { "step $it of the build" }
+        val budget = ShapeBudget(1_000, HeuristicEstimator())
+        val shaped = Shapers.shape(RunCapture("act-1", listOf("make", "all"), exitCode = 2, output = output.toByteArray()), budget)
+        assertTrue(HeuristicEstimator().estimate(shaped.view).upperBoundTokens <= 1_000, shaped.view)
+        assertTrue(shaped.viewTruncated)
+        val title = Regex("""output \(head (\d+) / tail (\d+) of 2000 lines\):""").find(shaped.view)
+        val (head, tail) = assertNotNull(title, shaped.view).destructured.toList().map { it.toInt() }
+        assertTrue(head + tail > 60, "the bigger budget shows more than the old 30 + 30 lines: $head + $tail")
+        assertTrue(tail > head, "errors usually come last: $head / $tail")
+        assertTrue(shaped.view.contains("  step 1 of the build\n") && shaped.view.contains("  step 2000 of the build\n"), shaped.view)
+        assertTrue(shaped.view.contains("  … ${2_000 - head - tail} lines elided …"), shaped.view)
+
+        val oneLine = Shapers.shape(RunCapture("act-2", listOf("node", "x.js"), exitCode = 0, output = "{\"k\":\"${"v".repeat(20_000)}\"}".toByteArray()), budget)
+        assertTrue(oneLine.viewTruncated && oneLine.view.contains("{\"k\":\"vvv"), "a single wide line is cut, not dropped: ${oneLine.view.take(300)}")
+    }
+
+    @Test
+    fun `a first line wider than the head share is cut and the last line still shows`() {
+        val output = "x".repeat(3_000) + "\n" + (1..200).joinToString("\n", postfix = "\n") { "line $it " + "y".repeat(70) } + "ZZZ-LAST summary line\n"
+        val budget = ShapeBudget(1_000, HeuristicEstimator())
+        val shaped = Shapers.shape(RunCapture("act-3", listOf("make", "all"), exitCode = 2, output = output.toByteArray()), budget)
+
+        assertTrue(HeuristicEstimator().estimate(shaped.view).upperBoundTokens <= 1_000, shaped.view)
+        assertTrue(shaped.view.contains("  xxx") && shaped.view.contains("x …\n"), "the head line is cut: ${shaped.view.take(400)}")
+        assertTrue(Regex("""  … \d+ lines elided …""").containsMatchIn(shaped.view), shaped.view)
+        assertTrue(shaped.view.contains("  ZZZ-LAST summary line"), shaped.view)
+    }
+
+    @Test
+    fun `a short structured output whose first line is huge keeps its last line`() {
+        val output = "x".repeat(3_000) + "\nrunning 1 test\ntest a::b ... ok\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured\nZZZ-LAST summary line\n"
+        val budget = ShapeBudget(400, HeuristicEstimator())
+        val shaped = Shapers.shape(RunCapture("act-4", listOf("cargo", "test"), exitCode = 0, output = output.toByteArray()), budget)
+
+        assertTrue(shaped.view.startsWith("generic/cargo"), shaped.view.take(200))
+        assertTrue(HeuristicEstimator().estimate(shaped.view).upperBoundTokens <= 400, shaped.view)
+        assertTrue(shaped.view.contains("  ZZZ-LAST summary line"), shaped.view)
     }
 
     @Test

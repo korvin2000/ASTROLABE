@@ -15,21 +15,21 @@
 
 | Gate | Trigger | Effect |
 |---|---|---|
-| Entry | first non-register edit while the register has no plan step with an `accept:` or the increment's acceptance is unresolved | nudge; if acceptance cannot be written crisply, the right move is one question (`task.ask`) |
+| Entry | first non-register edit while none of the increment's acceptance items is in the contract and no plan step carries an `accept:` (acceptance the contract already defines — harness-derived `run:` items, the host's review item — needs no plan step, D-372) | nudge; if acceptance cannot be written crisply, the right move is one question (`task.ask`) |
 | Exit (hard) | completion proposal resolved by the §8.7 rule (D-337): a required obligation is red, a reviewer rejected with substance, or any `[ ]`/`[>]` step (or other agent-owned gap) is open | refused; the anchor lists exactly what to fix; a rejection's findings are pinned whole (D-341). What cannot be verified is not refused: the cell ends and the proposal awaits an acceptance decision (D-339) |
 | Pressure | `tokens > α·C_max` | fold into register; rebuild ([§5.8](residency-rebuild.md#sec-5-8)); second rebuild ⇒ `partial` + replan hint |
-| Stall | 3 turns without a progress event (evidence-backed tick, h→v with id, green run advancing an AC, verified new fact, new dead end) — a live build producing output is work, not a stall; the nudge repeats every 3 idle turns (D-358) | one line: re-read plan · zoom out · run the pending decision probe · surface the blocker · or request a probe cell |
+| Stall | 5 turns (`stallTurns`) without a progress event (evidence-backed tick, h→v with id, green run advancing an AC, verified new fact, new dead end) or work (an applied edit batch; a finished `run`/`verify` whose `(tool, args, result)` signature is new in the cell — a repeat with the same result and reads are not, D-366) — a live build producing output is work, not a stall; the nudge repeats every `stallTurns` idle turns (D-358) | one line: re-read plan · zoom out · run the pending decision probe · surface the blocker · or request a probe cell |
 | Loop | identical `(tool, args, result hash)` twice | one line; third occurrence ends the turn with a required `state` op |
 | Refusal loop (D-358) | identical refused call `(tool, args, refusal reason)` twice — a masked op, a schema error or a partition rejection repeated verbatim | one line naming the exits (`state(blocked)`, `task.ask`, `task.propose`); the third ends the cell `blocked` with the refusal as its reason, so the campaign surfaces it instead of spending the turn budget |
 | No cursor / two cursors | register invariant | patch rejected with the rule |
 | Red not recorded | `[>]` advances while a verify line is red and no `Open` item references it | patch rejected |
 | Stale fact in Next | `Next` or a decision rests on an `h` or `v(stale)` fact | flagged risk line |
-| **Impact** `[C §9.3]` | a changed definition (signature, visibility, export) of a symbol with `fanin > 0` whose references were not inspected since the change | "impact: `Router.dispatch` signature changed; 6 references not inspected → look(refs) or scope the plan" |
+| **Impact** `[C §9.3]` | a changed definition (signature, visibility, export) of a symbol with `fanin > 0` whose references were not inspected since the change; never for a file the cell created (absent at its start), and at most 3 new nudges a turn — the rest are one summary line ("impact: … and N more: look(impact, paths)") and never exit obligations (D-366) | "impact: `Router.dispatch` signature changed; 6 references not inspected → look(refs) or scope the plan" |
 | **Contract touch** `[C §8.8]` | an edit set touches anchors of a `CON` note | "contract payments-api@7 touched: an ADR in the main line is required before this lands" |
 | **Repeated failure signature** `[C §8.8]` | same normalized error after 2 repairs | "same failure twice: change the hypothesis, record a dead end, or request an alternative attempt" |
 | Scope `[A §8.6]` | an edit touches a path outside `increment.write_scope` (inside contract scope) | allowed once with a warning; the second requires `task.propose(increment_split)` or a justification in `why` |
 | Acceptance surface / test integrity `[A §8.6; C §9.7]` | an edit or run touches test files, snapshots, skip markers, CI config or acceptance commands | rendered as a flagged line with the classifier's kind; must be justified in the Result Packet; forces review when the change weakens an existing check |
-| Reserve `[C §8.8]` | verification reserve reached | "reserve reached: verify and report; no new edits" |
+| Reserve `[C §8.8]` | verification reserve reached | "reserve reached: verify and report; no new edits" — on a reserve reached by the turn count an edit batch whose every op targets a path the cell already changed still runs; any other edit is refused with "reserve reached: edits are limited to files this cell already changed (…); verify and report" (D-366) |
 | Turn budget | 80 % of cell turns | nudge: reach a coherent boundary and checkpoint |
 <!-- end-source-section: 5.6 -->
 

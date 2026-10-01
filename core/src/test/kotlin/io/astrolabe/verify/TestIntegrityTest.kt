@@ -108,8 +108,106 @@ class TestIntegrityTest {
         assertEquals(listOf("CHK-accept-AC-1", "CHK-accept-AC-2"), flag.requiredChecks, "the unknown-closure suite and the command that names the path; not ${known.id}")
         assertNull(TestIntegrity.surfaceOf("scripts/helper.py", contract))
 
-        val cwdScoped = base.strengthen(Acceptance.Run("AC-3", Command(listOf("npm", "test"), cwd = "packages/web"), Origin.Model("R1")))
-        assertEquals(AcceptanceSurface.AcceptanceCommand, TestIntegrity.surfaceOf("packages/web/src/index.ts", cwdScoped))
+    }
+
+    @Test
+    fun `a command's cwd alone does not make the files under it acceptance inputs`() {
+        val (base, _) = s0()
+        val contract = base.strengthen(Acceptance.Run("AC-3", Command(listOf("npm", "test"), cwd = "client"), Origin.Model("R1")))
+            .strengthen(Acceptance.Run("AC-4", Command(listOf("python", "tools/verify.py"), cwd = "client"), Origin.Model("R1")))
+        val checks = Checks.seed(contract, RunnerCommands(test = Command(listOf("python", "-m", "pytest", "-q"))))
+        assertNull(TestIntegrity.surfaceOf("client/src/core/config/env.ts", contract), "ordinary source under the cwd")
+        assertNull(TestIntegrity.surfaceOf("client/.env.local", contract))
+        assertTrue(TestIntegrity.baseline(listOf("client/src/core/config/env.ts", "client/.env.local"), "edit #5", contract, checks).isEmpty())
+        val flags = TestIntegrity.baseline(listOf("client/tools/verify.py", "client/src/core/config.test.ts", "client/package.json"), "edit #6", contract, checks)
+        assertEquals(
+            listOf(
+                "client/tools/verify.py" to AcceptanceSurface.AcceptanceCommand,
+                "client/src/core/config.test.ts" to AcceptanceSurface.TestFile,
+                "client/package.json" to AcceptanceSurface.CheckDefinition,
+            ),
+            flags.map { it.path to it.surface },
+        )
+        assertTrue("CHK-accept-AC-4" in flags.first().requiredChecks)
+        assertTrue(flags.all { it.blocksCompletion }, flags.toString())
+    }
+
+    @Test
+    fun `a file a package script runs is an acceptance input while ordinary package source is not`() {
+        val (base, _) = s0()
+        val contract = base.strengthen(Acceptance.Run("AC-5", Command(listOf("npm", "test"), cwd = "client"), Origin.Model("R1")))
+            .strengthen(Acceptance.Run("AC-6", Command(listOf("npm", "run", "lint:api", "--prefix", "server")), Origin.Model("R1")))
+        val manifests = mapOf(
+            "client" to """{"scripts":{"test":"node scripts/validate.js && echo done"}}""",
+            "server" to """{"scripts":{"lint:api":"eslint --config=cfg/api.json src/api"}}""",
+        )
+        val checks = Checks.seed(contract, RunnerCommands(test = Command(listOf("python", "-m", "pytest", "-q"))), packageManifest = { manifests[it] })
+
+        val flags = TestIntegrity.classify(
+            listOf(
+                SurfaceChange("client/scripts/validate.js", "if (!ok) process.exit(1)\n", "process.exit(0)\n"),
+                SurfaceChange("client/src/app.ts", "a\n", "b\n"),
+                SurfaceChange("server/cfg/api.json", "{}", "{\"rules\":{}}"),
+                SurfaceChange("server/src/api/routes.ts", "a\n", "b\n"),
+            ),
+            "edit #7", contract, checks,
+        )
+        assertEquals(
+            listOf("client/scripts/validate.js", "server/cfg/api.json", "server/src/api/routes.ts"),
+            flags.map { it.path },
+        )
+        assertTrue(flags.all { it.surface == AcceptanceSurface.AcceptanceCommand && it.kind == TestIntegrity.ACCEPTANCE_COMMAND }, flags.toString())
+        assertTrue("CHK-accept-AC-5" in flags.first().requiredChecks, flags.first().requiredChecks.toString())
+
+        val unreadable = Checks.seed(contract, RunnerCommands(test = Command(listOf("python", "-m", "pytest", "-q"))), packageManifest = { "not json" })
+        assertTrue(TestIntegrity.baseline(listOf("client/scripts/validate.js"), "edit #8", contract, unreadable).isEmpty(), "an unreadable manifest names nothing")
+    }
+
+    @Test
+    fun `a package manager directory option names the manifest directory, never every file under it`() {
+        val (base, _) = s0()
+        val manifests = mapOf("server" to """{"scripts":{"test":"node tools/check.js"}}""")
+        val forms = listOf(
+            listOf("npm", "--prefix", "server", "run", "test"),
+            listOf("npm", "run", "test", "--prefix", "server"),
+            listOf("npm", "test", "--prefix=server"),
+            listOf("pnpm", "-C", "server", "test"),
+            listOf("yarn", "--cwd", "server", "test"),
+        )
+        for (argv in forms) {
+            val contract = base.strengthen(Acceptance.Run("AC-9", Command(argv), Origin.Model("R1")))
+            val checks = Checks.seed(contract, RunnerCommands(test = Command(listOf("python", "-m", "pytest", "-q"))), packageManifest = { manifests[it] })
+            val flags = TestIntegrity.classify(
+                listOf(SurfaceChange("server/src/app.ts", "a\n", "b\n"), SurfaceChange("server/tools/check.js", "exit(1)\n", "exit(0)\n")),
+                "edit #9", contract, checks,
+            )
+            assertEquals(listOf("server/tools/check.js"), flags.map { it.path }, argv.joinToString(" "))
+        }
+    }
+
+    @Test
+    fun `arguments forwarded to a package script resolve against the package directory`() {
+        val (base, _) = s0()
+        val manifests = mapOf("server" to """{"scripts":{"check":"node"}}""")
+        val forms = listOf(
+            listOf("npm", "--prefix", "server", "run", "check", "--", "tools/validate.js"),
+            listOf("npm", "run", "check", "--prefix", "server", "--", "tools/validate.js"),
+            listOf("pnpm", "-C", "server", "run", "check", "tools/validate.js"),
+            listOf("yarn", "--cwd", "server", "check", "tools/validate.js"),
+        )
+        for (argv in forms) {
+            val contract = base.strengthen(Acceptance.Run("AC-10", Command(argv), Origin.Model("R1")))
+            val checks = Checks.seed(contract, RunnerCommands(test = Command(listOf("python", "-m", "pytest", "-q"))), packageManifest = { manifests[it] })
+            val flags = TestIntegrity.classify(
+                listOf(
+                    SurfaceChange("server/tools/validate.js", "exit(1)\n", "exit(0)\n"),
+                    SurfaceChange("tools/validate.js", "exit(1)\n", "exit(0)\n"),
+                    SurfaceChange("server/src/app.ts", "a\n", "b\n"),
+                ),
+                "edit #10", contract, checks,
+            )
+            assertEquals(listOf("server/tools/validate.js"), flags.map { it.path }, argv.joinToString(" "))
+        }
     }
 
     @Test

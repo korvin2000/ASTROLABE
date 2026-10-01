@@ -15,7 +15,7 @@ public data class Defaults(
     // Shape (§3.5, D-16)
     val shapePolicy: ShapePolicy = ShapePolicy(),
     // Cell turn budget
-    val turnsPerCell: Int = 40,
+    val turnsPerCell: Int = 80,
     val turnNudgeFraction: Double = 0.80,
     // Bounded wait for a provider terminal after the response (D-314)
     val providerTerminalWaitSeconds: Int = 60,
@@ -25,22 +25,22 @@ public data class Defaults(
     val k: Int = 8,
     val m: Int = 6,
     // R_max total live results / [A] max
-    val rMaxTokens: Int = 16_000,
-    val anchorMaxTokens: Int = 2_500,
+    val rMaxTokens: Int = 48_000,
+    val anchorMaxTokens: Int = 5_000,
     // Immediate-stub threshold for stale reads
-    val immediateStubTokens: Int = 800,
+    val immediateStubTokens: Int = 2_400,
     // look.budget / run.budget
-    val lookBudgetTokens: Int = 1_500,
-    val runBudgetTokens: Int = 1_200,
+    val lookBudgetTokens: Int = 4_000,
+    val runBudgetTokens: Int = 4_000,
     // Register cap / contract digest cap / patch cap
-    val registerCapTokens: Int = 1_200,
+    val registerCapTokens: Int = 3_000,
     val digestCapTokens: Int = 150,
     // D-270: the digest cap grows per requirement up to a ceiling; 0 per requirement pins [digestCapTokens]
     val digestTokensPerRequirement: Int = 8,
     val digestCapCeilingTokens: Int = 2_000,
-    val patchCapTokens: Int = 400,
+    val patchCapTokens: Int = 1_200,
     // Fact line / note body / note summary
-    val factLineMaxChars: Int = 240,
+    val factLineMaxChars: Int = 600,
     val noteBodyMaxTokens: Int = 120,
     val noteSummaryMaxChars: Int = 200,
     // Workset seeds per cell / KB injection / focus notes / focus zoom
@@ -64,7 +64,7 @@ public data class Defaults(
     val reserveRecoveryAndPersist: Double = 0.05,
     val campaignRecoveryReserve: Double = 0.10,
     // Stall / loop / repeated signature / doom-loop guard
-    val stallTurns: Int = 3,
+    val stallTurns: Int = 5,
     val loopIdentical: Int = 2,
     val repeatedSignatureRepairs: Int = 2,
     val doomLoopSameCalls: Int = 3,
@@ -80,7 +80,7 @@ public data class Defaults(
     val reviewRoutineTier: Tier = Tier.Medium,
     // Repair helper / substantive attempts per increment / delegation depth / parallel cells
     val repairCalls: Int = 2,
-    val attemptsPerIncrement: Int = 2,
+    val attemptsPerIncrement: Int = 3,
     val writerDepth: Int = 1,
     val probeDepth: Int = 2,
     val parallelCells: Int = 3,
@@ -100,7 +100,7 @@ public data class Defaults(
     val unknownOutcomeReconciliation: UnknownOutcomeReconciliation = UnknownOutcomeReconciliation.Host,
     val ceiling: Stage = Stage.Patch,
     // Timeouts
-    val runTimeoutSeconds: Int = 120,
+    val runTimeoutSeconds: Int = 600,
     /** Deadline of one git command (D-303); at most one hour, the [io.astrolabe.os.Git] bound. */
     val gitDeadlineSeconds: Int = 600,
 ) {

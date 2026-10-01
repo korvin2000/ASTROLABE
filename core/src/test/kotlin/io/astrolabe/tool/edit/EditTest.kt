@@ -196,6 +196,77 @@ class EditTest {
         assertTrue(Files.exists(repo.resolve("src/b.py")))
     }
 
+    private fun op(path: String, expect: FileVersion, vararg hunks: String) = """{"path":"$path","expect":"${expect.digest.hex}","hunks":[${hunks.joinToString(",")}]}"""
+
+    private fun batch(vararg ops: String) = """{"ops":[${ops.joinToString(",")}],"why":"w"}"""
+
+    @Test
+    fun `one bad anchor in a ten-file batch refuses only its file and the turn's runs wait for it`() = runTest {
+        val ops = (0 until 10).map { i ->
+            repo.write("src/f$i.py", "v = $i\n")
+            op("src/f$i.py", seen("src/f$i.py", 1, 1), hunk(if (i == 6) "v = 99" else "v = $i", "v = ${i * 10}"))
+        }
+        val ran = ArrayList<Int>()
+        val dispatcher = io.astrolabe.tool.Dispatcher(
+            mapOf(
+                io.astrolabe.tool.ToolFamily.Edit to edit(),
+                io.astrolabe.tool.ToolFamily.Run to io.astrolabe.tool.ToolExecutor { c, _ -> ran += c.opId; ToolOutcome("ran") },
+            ),
+            workset, ids,
+        )
+        val calls = (ToolCalls.parse(listOf(ProviderCall("c1", "edit", batch(*ops.toTypedArray())), ProviderCall("c2", "run", """{"argv":["pytest"]}"""))) as ParsedCalls.Valid).calls
+        val turn = dispatcher.dispatch(1, calls, Tokens(10_000))
+
+        val out = (turn.of(1) as io.astrolabe.tool.Disposition.Executed).outcome
+        assertEquals("partial", status(out), out.body)
+        assertFalse(out.applied)
+        assertFalse(out.header!!.runtime.effectsUnknown, "a refused group is no unknown effect")
+        for (i in 0 until 10) assertEquals(if (i == 6) "v = 6\n" else "v = ${i * 10}\n", Files.readString(repo.resolve("src/f$i.py")))
+        assertTrue(out.body.contains("✗ src/f6.py refused · op 7 anchor: anchor 0× in 'src/f6.py'"), out.body)
+        assertTrue(out.body.contains("9 of 10 files written; resend only the refused ops: src/f6.py (op 7)"), out.body)
+        assertEquals((0 until 10).filter { it != 6 }.map { "src/f$it.py" }.toSet(), preimages.of("edit-1").map { it.path }.toSet(), "preimages cover exactly the applied files")
+        assertEquals(9, out.header!!.versions.size)
+        assertFalse(turn.editsApplied)
+        val run = turn.of(2) as io.astrolabe.tool.Disposition.NotExecuted
+        assertEquals("the edit batch applied partially (1 refused): fix those ops first", run.reason)
+        assertTrue(ran.isEmpty())
+    }
+
+    @Test
+    fun `a group refuses as a whole and leaves every other group to apply`() = runTest {
+        val va = seen("src/a.py", 1, 10)
+        val vb = seen("src/b.py", 1, 2)
+        // Two ops on one path, the second one bad: that path is untouched; the other path applies.
+        val twice = run(batch(op("src/b.py", vb, hunk("x = 1", "x = 3")), op("src/b.py", vb, hunk("nope", "y = 4")), op("src/a.py", va, hunk("    return 1", "    return 10"))))
+        assertEquals("partial", status(twice), twice.body)
+        assertEquals("x = 1\ny = 2\n", Files.readString(repo.resolve("src/b.py")))
+        assertTrue(Files.readString(repo.resolve("src/a.py")).contains("return 10"))
+        assertTrue(twice.body.contains("1 of 2 files written; resend only the refused ops: src/b.py (ops 1, 2)"), twice.body)
+
+        // A rename and an op on its target are one group: the missing target refuses both; the create applies.
+        val renamed = run(batch("""{"rename":"src/b.py","to":"src/r.py","expect":"${vb.digest.hex}"}""", op("src/r.py", vb, hunk("x = 1", "x = 5")), """{"create":"src/c.py","content":"c = 1\n"}"""))
+        assertEquals("partial", status(renamed), renamed.body)
+        assertTrue(Files.exists(repo.resolve("src/b.py")))
+        assertFalse(Files.exists(repo.resolve("src/r.py")))
+        assertEquals("c = 1\n", Files.readString(repo.resolve("src/c.py")))
+        assertTrue(renamed.body.contains("src/b.py, src/r.py refused"), renamed.body)
+
+        // A protected or out-of-contract path refuses only its own group.
+        val mixed = run(batch("""{"create":"migrations/0001.sql","content":"select 1;"}""", """{"create":"src/ok.py","content":"ok = 1\n"}""", """{"create":"docs/n.md","content":"#"}"""))
+        assertEquals("partial", status(mixed), mixed.body)
+        assertEquals("ok = 1\n", Files.readString(repo.resolve("src/ok.py")))
+        assertFalse(Files.exists(repo.resolve("migrations/0001.sql")))
+        assertFalse(Files.exists(repo.resolve("docs/n.md")))
+        assertTrue(mixed.body.contains("scope: migrations/0001.sql: protected"), mixed.body)
+        assertTrue(mixed.body.contains("1 of 3 files written; resend only the refused ops: migrations/0001.sql (op 1), docs/n.md (op 3)"), mixed.body)
+
+        // Every group refused: nothing written, every diagnostic listed at once.
+        val none = run(batch(op("src/ok.py", registry.version("src/ok.py")!!, hunk("zzz", "1")), """{"create":"docs/m.md","content":"#"}"""))
+        assertEquals("refused", status(none), none.body)
+        assertTrue(none.body.contains("anchor 0×") && none.body.contains("outsidecontract"), none.body)
+        assertTrue(none.body.contains("0 of 2 files written"), none.body)
+    }
+
     @Test
     fun `creates that differ only in case refuse the batch on a case-insensitive filesystem`() = runTest {
         org.junit.jupiter.api.Assumptions.assumeTrue(workspace.paths.caseInsensitive)
@@ -245,6 +316,31 @@ class EditTest {
         assertTrue(out.body.contains("post-edit src/a.py:1-5 @${after.hash8}\n  1| def a():\n  2|     return 10"), out.body)
         assertEquals("edit", SqliteAliases(store, clock).resolve(ids.work, 1)!!.kind)
         assertNotNull(SqliteObservations(store, clock).get(SqliteAliases(store, clock).resolve(ids.work, 1)!!.canonicalId))
+    }
+
+    @Test
+    fun `a second anchored edit needs no re-read inside written or unchanged displayed lines and is refused elsewhere`() = runTest {
+        repo.write("src/long.py", (1..30).joinToString("") { "l$it = $it\n" })
+        seen("src/long.py", 1, 20)
+        val first = run(anchoredBy("src/long.py", null, hunk("l2 = 2\n", "l2 = 2\nextra = 0\n")))
+        assertEquals("ok", status(first), first.body)
+        val v1 = registry.version("src/long.py")!!
+        assertTrue(workset.covers("src/long.py", v1, LineRange(1, 21)), "written lines and the unchanged displayed ones, shifted by one")
+        assertFalse(workset.covers("src/long.py", v1, LineRange(22, 22)), "never displayed stays NOT SEEN")
+        assertTrue(workset.pendingDrops.none { it.path == "src/long.py" }, "the carried read is not announced stale")
+
+        // Unchanged displayed line 18 is line 19 now: no re-read, the expect omitted names the one version KNOWN.
+        val second = run(anchoredBy("src/long.py", null, hunk("l18 = 18", "l18 = 180")), turn = 2)
+        assertEquals("ok", status(second), second.body)
+        // Lines the first edit wrote stay KNOWN through the second.
+        val third = run(anchoredBy("src/long.py", null, hunk("extra = 0", "extra = 1")), turn = 3)
+        assertEquals("ok", status(third), third.body)
+        val outside = run(anchoredBy("src/long.py", null, hunk("l25 = 25", "l25 = 250")), turn = 4)
+        assertEquals("refused", status(outside))
+        assertTrue(outside.body.contains("outside_displayed: hunk at 'src/long.py:26'"), outside.body)
+        assertTrue(Files.readString(repo.resolve("src/long.py")).contains("l2 = 2\nextra = 1\nl3 = 3\n") && Files.readString(repo.resolve("src/long.py")).contains("l18 = 180\n"))
+        val now = registry.version("src/long.py")!!
+        assertTrue(workset.entries.filter { it.path == "src/long.py" && it.version == now }.all { it.source == EntrySource.PostEdit }, "a look never answers unchanged from a carried entry")
     }
 
     @Test
@@ -317,7 +413,8 @@ class EditTest {
 
     @Test
     fun `delete and rename resolve an omitted or short expect like an anchored edit`() = runTest {
-        val refused = run("""{"ops":[{"delete":"src/b.py"}],"why":"rm"}""")
+        // D-373: an unread delete runs (its own test below); an unread rename still needs a read
+        val refused = run("""{"ops":[{"rename":"src/b.py","to":"src/b3.py"}],"why":"mv"}""")
         assertEquals("refused", status(refused))
         assertTrue(refused.body.contains("expect omitted and no version of 'src/b.py' is KNOWN"), refused.body)
         assertTrue(Files.exists(repo.resolve("src/b.py")))
@@ -329,6 +426,99 @@ class EditTest {
         val deleted = run("""{"ops":[{"delete":"src/b2.py"}],"why":"rm"}""")
         assertEquals("ok", status(deleted), deleted.body)
         assertFalse(Files.exists(repo.resolve("src/b2.py")))
+    }
+
+    @Test
+    fun `a delete then create of one path in one batch replaces it under the delete's guards with a preimage`() = runTest {
+        val replace = """{"ops":[{"delete":"src/b.py"},{"create":"src/b.py","content":"z = 3\n"}],"why":"rewrite"}"""
+        val stale = run(replace.replace("\"src/b.py\"},", "\"src/b.py\",\"expect\":\"0000\"},"))
+        assertEquals("refused", status(stale), "an expect that names no version shown still refuses: ${stale.body}")
+        assertEquals("x = 1\ny = 2\n", Files.readString(repo.resolve("src/b.py")))
+
+        val before = seen("src/b.py", 1, 2)
+        val replaced = run(replace)
+        assertEquals("ok", status(replaced), replaced.body)
+        val after = registry.version("src/b.py")!!
+        assertTrue(replaced.body.contains("✓ 2 replace src/b.py @${before.hash8}→@${after.hash8}"), replaced.body)
+        assertTrue(replaced.body.contains("delete + create of one path in one batch"), replaced.body)
+        assertEquals("z = 3\n", Files.readString(repo.resolve("src/b.py")))
+        val preimage = preimages.of("edit-2").single()
+        assertEquals(before, preimage.versionBefore)
+        assertEquals(after, preimage.versionAfter)
+        assertTrue(workset.covers("src/b.py", after, LineRange(1, 1)), "the new content is the post-edit view")
+
+        val reverted = run("""{"ops":[{"revert":"#2"}],"why":"undo"}""", turn = 2)
+        assertEquals("ok", status(reverted), reverted.body)
+        assertEquals("x = 1\ny = 2\n", Files.readString(repo.resolve("src/b.py")), "the preimage restores the replaced bytes")
+
+        val createOnly = run("""{"ops":[{"create":"src/b.py","content":"w"}],"why":"w"}""")
+        assertTrue(createOnly.body.contains("exists: 'src/b.py' exists"), "a create without the batch's own delete still refuses: ${createOnly.body}")
+    }
+
+    @Test
+    fun `a file never read is deleted as it is now, its preimage saved, and a revert restores it`() = runTest {
+        val deleted = run("""{"ops":[{"delete":"src/b.py"}],"why":"rm"}""")
+        assertEquals("ok", status(deleted), deleted.body)
+        assertTrue(deleted.body.contains("✓ 1 delete src/b.py") && deleted.body.contains("(deleted without a prior read; preimage saved, revert: #1)"), deleted.body)
+        assertFalse(Files.exists(repo.resolve("src/b.py")))
+        val reverted = run("""{"ops":[{"revert":"#1"}],"why":"undo"}""", turn = 2)
+        assertEquals("ok", status(reverted), reverted.body)
+        assertEquals("x = 1\ny = 2\n", Files.readString(repo.resolve("src/b.py")))
+
+        val now = registry.version("src/b.py")!!
+        val other = if (now.digest.hex.startsWith("0000")) "1111" else "0000"
+        val wrong = run("""{"ops":[{"delete":"src/b.py","expect":"$other"}],"why":"rm"}""")
+        assertEquals("refused", status(wrong), wrong.body)
+        assertTrue(Files.exists(repo.resolve("src/b.py")), "a given expect must name the current version")
+        val again = run("""{"ops":[{"delete":"src/b.py","expect":"${now.hash8.take(4)}"}],"why":"rm"}""")
+        assertEquals("ok", status(again), again.body)
+        assertFalse(Files.exists(repo.resolve("src/b.py")))
+        repo.write("src/b.py", "appeared\n")
+        val clobber = run("""{"ops":[{"revert":"${again.resultAlias}"}],"why":"undo"}""", turn = 3)
+        assertEquals("refused", status(clobber), "a revert of a delete never overwrites a file that appeared since: ${clobber.body}")
+        assertEquals("appeared\n", Files.readString(repo.resolve("src/b.py")))
+    }
+
+    @Test
+    fun `a delete then create of a file never read replaces it in one batch`() = runTest {
+        val replaced = run("""{"ops":[{"delete":"src/b.py"},{"create":"src/b.py","content":"z = 3\n"}],"why":"rewrite"}""")
+        assertEquals("ok", status(replaced), replaced.body)
+        assertTrue(replaced.body.contains("✓ 2 replace src/b.py") && replaced.body.contains("delete + create of one path in one batch"), replaced.body)
+        assertEquals("z = 3\n", Files.readString(repo.resolve("src/b.py")))
+        assertEquals(1, preimages.of("edit-1").size, "the replaced bytes are saved")
+        assertEquals("ok", status(run("""{"ops":[{"revert":"#1"}],"why":"undo"}""", turn = 2)))
+        assertEquals("x = 1\ny = 2\n", Files.readString(repo.resolve("src/b.py")))
+    }
+
+    @Test
+    fun `a create over a file the cell wrote or knows in full replaces it and reverts, any other existing file refuses`() = runTest {
+        val cell = edit()
+        assertEquals("ok", status(run("""{"ops":[{"create":"src/own.py","content":"o = 1\n"}],"why":"w"}""", cell)))
+        val first = registry.version("src/own.py")!!
+        val again = run("""{"ops":[{"create":"src/own.py","content":"o = 2\np = 3\n"}],"why":"w"}""", cell, turn = 2)
+        assertEquals("ok", status(again), again.body)
+        assertTrue(again.body.contains("✓ 1 replace src/own.py @${first.hash8}→@"), again.body)
+        assertTrue(again.body.contains("(create over a file this cell wrote: replaced in place)"), again.body)
+        assertEquals("o = 2\np = 3\n", Files.readString(repo.resolve("src/own.py")))
+        assertEquals(first, preimages.of("edit-2").single().versionBefore)
+        assertEquals("ok", status(run("""{"ops":[{"revert":"#2"}],"why":"undo"}""", cell, turn = 3)))
+        assertEquals("o = 1\n", Files.readString(repo.resolve("src/own.py")), "the preimage restores the created bytes")
+
+        // Not written by the cell and only partly KNOWN: refused with both ways out.
+        seen("src/a.py", 1, 2)
+        val partly = run("""{"ops":[{"create":"src/a.py","content":"z = 1\n"}],"why":"w"}""", cell)
+        assertEquals("refused", status(partly))
+        assertTrue(partly.body.contains("exists: 'src/a.py' exists; read it first, or use {delete} then {create} in one batch"), partly.body)
+        assertEquals(a, Files.readString(repo.resolve("src/a.py")))
+        // KNOWN in full at its current version: replaced.
+        seen("src/a.py", 1, 9)
+        val known = run("""{"ops":[{"create":"src/a.py","content":"z = 1\n"}],"why":"w"}""", cell)
+        assertEquals("ok", status(known), known.body)
+        assertTrue(known.body.contains("(create over a file KNOWN in full: replaced in place)"), known.body)
+        assertEquals("z = 1\n", Files.readString(repo.resolve("src/a.py")))
+        // A file the cell wrote but someone else changed since is no longer the cell's own.
+        repo.write("src/a.py", "z = 2\n")
+        assertEquals("refused", status(run("""{"ops":[{"create":"src/a.py","content":"z = 3\n"}],"why":"w"}""", cell)))
     }
 
     @Test
@@ -382,6 +572,52 @@ class EditTest {
         val preimage = preimages.of("edit-1").single { it.path == "src/a.py" }
         assertTrue(out.body.contains("✗ op 2 io: disk full while applying op 2 on 'src/b.py'; already written: src/a.py (preimage ${preimage.preimageDigest.hex.take(8)}); later ops not attempted, nothing rolled back"), out.body)
         assertNotNull(preimages.of("edit-1", "src/b.py"), "the preimage was saved before the failed write")
+    }
+
+    @Test
+    fun `a partial batch names written, refused, failed and not attempted paths`() = runTest {
+        val ops = listOf("a", "b", "c", "d").map { name ->
+            repo.write("src/$name.py", "v = 1\n")
+            op("src/$name.py", seen("src/$name.py", 1, 1), hunk(if (name == "d") "v = 99" else "v = 1", "v = 2"))
+        }
+        val failing = object : Os by os {
+            override fun replaceFileAtomically(path: Path, bytes: ByteArray) {
+                if (path.fileName.toString() == "b.py") throw OsFailure("replaceFileAtomically", 0, "disk full")
+                os.replaceFileAtomically(path, bytes)
+            }
+        }
+        val out = run(batch(*ops.toTypedArray()), edit(os = failing))
+
+        assertEquals("partial", status(out), out.body)
+        assertEquals("v = 2\n", Files.readString(repo.resolve("src/a.py")))
+        assertEquals("v = 1\n", Files.readString(repo.resolve("src/c.py")), "the op after the failure never ran")
+        assertTrue(
+            out.body.contains(
+                "1 of 4 files written; resend only the refused ops: src/d.py (op 4); " +
+                    "failed (I/O, state uncertain): src/b.py (op 2) — look at it before resending; " +
+                    "not attempted (resend unchanged): src/c.py (op 3)",
+            ),
+            out.body,
+        )
+    }
+
+    @Test
+    fun `both ops of an applied replace are written when a later group fails`() = runTest {
+        seen("src/b.py", 1, 2)
+        repo.write("src/c.py", "v = 1\n")
+        val c = op("src/c.py", seen("src/c.py", 1, 1), hunk("v = 1", "v = 2"))
+        val failing = object : Os by os {
+            override fun replaceFileAtomically(path: Path, bytes: ByteArray) {
+                if (path.fileName.toString() == "c.py") throw OsFailure("replaceFileAtomically", 0, "disk full")
+                os.replaceFileAtomically(path, bytes)
+            }
+        }
+        val out = run(batch("""{"delete":"src/b.py"}""", """{"create":"src/b.py","content":"z = 3\n"}""", c), edit(os = failing))
+
+        assertEquals("partial", status(out), out.body)
+        assertEquals("z = 3\n", Files.readString(repo.resolve("src/b.py")))
+        assertTrue(out.body.contains("1 of 2 files written; failed (I/O, state uncertain): src/c.py (op 3) — look at it before resending"), out.body)
+        assertFalse(out.body.contains("resend unchanged"), "the replace's delete must never be resent: ${out.body}")
     }
 
     @Test
@@ -565,8 +801,9 @@ class EditTest {
         assertTrue(protectedWrite.body.contains("scope: migrations/0001.sql: protected"), protectedWrite.body)
         assertFalse(Files.exists(repo.resolve("migrations/0001.sql")))
         val mixed = run("""{"ops":[{"create":"src/new.py","content":"x = 1\n"},{"create":"docs/new.md","content":"#"}],"why":"w"}""")
-        assertEquals("refused", status(mixed))
-        assertFalse(Files.exists(repo.resolve("src/new.py")), "one refused path refuses the batch before any write")
+        assertEquals("partial", status(mixed))
+        assertTrue(Files.exists(repo.resolve("src/new.py")), "D-371: a refused path refuses only its own group")
+        assertFalse(Files.exists(repo.resolve("docs/new.md")))
     }
 
     @Test
@@ -606,7 +843,9 @@ class EditTest {
         val vc = registry.version("src/c.py")!!
         assertTrue(workset.covers("src/c.py", vc, LineRange(1, 2)), "a created file is displayed in full at its version")
         assertTrue(created.body.contains("✓ 1 create src/c.py @new→@${vc.hash8} +2 −0 · syntax ok"), created.body)
-        assertEquals("refused", status(run("""{"ops":[{"create":"src/c.py","content":"again"}],"why":"dup"}""")))
+        // D-371: a create over a file this cell created replaces it in place.
+        assertEquals("ok", status(run("""{"ops":[{"create":"src/c.py","content":"def c():\n    return 4\n"}],"why":"dup"}""")))
+        val vc2 = registry.version("src/c.py")!!
 
         val vb = registry.version("src/b.py")!!
         val renamed = run("""{"ops":[{"rename":"src/b.py","expect":"${vb.digest.hex}","to":"src/b2.py"}],"why":"mv"}""")
@@ -617,11 +856,11 @@ class EditTest {
         assertNull(registry.recorded("src/b.py"))
         assertEquals("refused", status(run("""{"ops":[{"rename":"src/b2.py","expect":"${vb.digest.hex}","to":"src/B2.py"}],"why":"case"}""")))
 
-        val deleted = run("""{"ops":[{"delete":"src/c.py","expect":"${vc.digest.hex}"}],"why":"rm"}""")
+        val deleted = run("""{"ops":[{"delete":"src/c.py","expect":"${vc2.digest.hex}"}],"why":"rm"}""")
         assertEquals("ok", status(deleted))
         assertFalse(Files.exists(repo.resolve("src/c.py")))
-        assertTrue(deleted.body.contains("✓ 1 delete src/c.py @${vc.hash8}→@gone +0 −2"), deleted.body)
-        assertEquals("refused", status(run("""{"ops":[{"delete":"src/c.py","expect":"${vc.digest.hex}"}],"why":"rm"}""")))
+        assertTrue(deleted.body.contains("✓ 1 delete src/c.py @${vc2.hash8}→@gone +0 −2"), deleted.body)
+        assertEquals("refused", status(run("""{"ops":[{"delete":"src/c.py","expect":"${vc2.digest.hex}"}],"why":"rm"}""")))
 
         val vbin = seen("src/blob.bin", 1, 1)
         val binary = run(anchored("src/blob.bin", vbin, hunk("x", "y")))
@@ -681,6 +920,25 @@ class EditTest {
         val out = run(anchored("src/win.py", v, hunk("def w():\n\treturn 1", "def w():\n    return 2\n    # two")))
         assertEquals("ok", status(out))
         assertEquals("def w():\r\n    return 2\r\n    # two\r\n", Files.readString(repo.resolve("src/win.py")))
+    }
+
+    @Test
+    fun `an anchor found only after CRLF and trailing-blank normalisation applies once and says so`() = runTest {
+        repo.write("src/ws.py", "def f():\r\n    x = 1   \r\n    return x\r\n")
+        val v = seen("src/ws.py", 1, 3)
+        val out = run(anchored("src/ws.py", v, hunk("    x = 1\n    return x", "    x = 2\n    return x")))
+        assertEquals("ok", status(out), out.body)
+        assertTrue(out.body.contains("(anchor matched after whitespace normalisation)"), out.body)
+        assertEquals("def f():\r\n    x = 2\r\n    return x\r\n", Files.readString(repo.resolve("src/ws.py")), "the file keeps CRLF")
+        val exact = run(anchored("src/ws.py", registry.version("src/ws.py")!!, hunk("    x = 2", "    x = 3")))
+        assertFalse(exact.body.contains("normalisation"), exact.body)
+
+        repo.write("src/twice.py", "a = 1 \nb = 2\na = 1\t\n")
+        val twice = seen("src/twice.py", 1, 3)
+        val ambiguous = run(anchored("src/twice.py", twice, hunk("a  = 1", "a = 5")))
+        assertEquals("refused", status(ambiguous))
+        assertTrue(ambiguous.body.contains("anchor 2× in 'src/twice.py': sites 1, 3"), ambiguous.body)
+        assertEquals("a = 1 \nb = 2\na = 1\t\n", Files.readString(repo.resolve("src/twice.py")))
     }
 
     @Test

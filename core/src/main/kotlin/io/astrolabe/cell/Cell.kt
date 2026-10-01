@@ -54,6 +54,7 @@ import io.astrolabe.provider.ToolResult
 import io.astrolabe.provider.UsageItem
 import io.astrolabe.provider.Validation
 import io.astrolabe.provider.estimate
+import io.astrolabe.register.Condition
 import io.astrolabe.register.ContractDigest
 import io.astrolabe.register.DigestCapacity
 import io.astrolabe.register.Mark
@@ -96,6 +97,8 @@ import io.astrolabe.verify.TestIntegrity
 import io.astrolabe.verify.TestIntegrityFlag
 import io.astrolabe.workset.StaleDrop
 import io.astrolabe.workspace.ChangeListener
+import io.astrolabe.workspace.Intent
+import io.astrolabe.workspace.PathResolution
 import io.astrolabe.workspace.PathPattern
 import io.astrolabe.workspace.Preimage
 import io.astrolabe.workspace.Ranges
@@ -156,16 +159,14 @@ public class Cell @JvmOverloads constructor(
         val make: (Int, Register, CellCheckpoint, ResultPacket) -> CellExit,
     )
 
-    /** The turn's calls after validation: all of them, none (§5.4 error policy, fail closed), or one terminal call alone (F2b). */
-    private sealed interface Validated {
-        class Calls(val calls: List<ToolCall>) : Validated
+    /**
+     * The turn after validation (D-372): [calls] dispatch under their op ids, the position in the model's output; every
+     * other call of the turn has its result text in [notExecuted], by index. [refused] feeds the refusal loop (D-358).
+     */
+    private class Validated(val calls: List<ToolCall>, val notExecuted: Map<Int, String>, val refused: List<Refusal>)
 
-        /** [culprits] caused the refusal (every call when none is to blame); [key] is [reason] without per-turn call ids. */
-        class Refused(val reason: String, val culprits: List<NativeCall>, val key: String) : Validated
-
-        /** [call], the turn's call at [index], ran alone as op 1; every other call of the turn is refused with [reason]. */
-        class Partial(val call: ToolCall, val index: Int, val reason: String) : Validated
-    }
+    /** A refused [call]: [reason] as the model reads it, [key] the same without per-turn call ids. */
+    private class Refusal(val call: NativeCall, val reason: String, val key: String)
 
     private inner class Loop(private val ctx: CellContext, private val increment: Increment, private val budget: CellBudget) {
         private val ids = ctx.ids
@@ -195,9 +196,13 @@ public class Cell @JvmOverloads constructor(
         /** The contract version the refusal history was collected under: an amendment may change masks and ceilings (D-358). */
         private var refusedUnder = -1
         private var lastProgressTurn = 0
+        /** D-366: signatures of every finished `run`/`verify` of the cell; a repeat with the same result is not new information. */
+        private val seenResults = HashSet<CallSignature>()
         private var requiredOp: String? = null
         private var refusals = 0
         private val touched = LinkedHashSet<String>()
+        /** D-366: paths named by edits whose dispatch failed (effects unknown); ownership needs the ledger to show them moved. */
+        private val failedEditPaths = LinkedHashSet<String>()
         private val touchedLedger = ArrayList<Touched>()
         private val flags = LinkedHashMap<String, TestIntegrityFlag>()
         private var drops: List<StaleDrop> = emptyList()
@@ -206,6 +211,8 @@ public class Cell @JvmOverloads constructor(
         private var reconciledTurn = 0
         private var occupancy: Occupancy? = null
         private var atlas = ws.atlas
+        /** D-366: the files the atlas listed at cell start; with the base stamp's members, what existed before the cell. */
+        private val baseFiles: Set<String> = ws.atlas.rows.mapTo(HashSet()) { it.path }
         private var rebuilds = 0
         private val rebuildNotes = ArrayList<String>()
 
@@ -312,7 +319,9 @@ public class Cell @JvmOverloads constructor(
                 ev.journal.append(JournalEvent(idGen.next("ev"), ids, turn, JournalKind.Boundary, text = "refactor mode (${refactor.reasons.first()}): red_ok_until ${RefactorMode.RED_OK_UNTIL}", at = clock.instant()))
             }
             redOkUntilIncrementEnd = refactor.active
-            val mask = maskFor(contract, reserveTurn)
+            // D-366: a reserve reached by the turn count, with working tokens left, still lets the cell repair what it changed.
+            val repairable = if (reserveTurn && budget.working.available.value > 0) ownPaths() else emptySet()
+            val mask = maskFor(contract, reserveTurn, repairable.isNotEmpty())
             val schemas = when (val selection = ToolSchemas.forLineage(ctx.model.adapter, ctx.model.profile, mask)) {
                 is SchemaSelection.Supported -> selection.set
                 is SchemaSelection.Unsupported -> return failed("tool schemas unsupported for ${selection.profileId}: ${selection.reason}")
@@ -440,7 +449,7 @@ public class Cell @JvmOverloads constructor(
 
             // §3.7: the native output is durable before any result exists, then appended (calls before results).
             journalOutput(response)
-            appendNative(response)
+            val responseTokens = appendNative(response)
             when (response.stop) {
                 StopReason.Cancelled -> return cancelled("the provider cancelled the invocation")
                 StopReason.Refusal -> return failed("the model refused: ${response.text.lineSequence().firstOrNull().orEmpty()}")
@@ -450,21 +459,25 @@ public class Cell @JvmOverloads constructor(
             val registerBefore = register
             val certifiedBefore = certified(currencies(before.candidateId))
             val native = response.toolCalls
-            val validated = if (native.isEmpty()) null else validateCalls(native, reserveTurn, mask, contract)
-            val calls = when (validated) {
-                is Validated.Calls -> validated.calls
-                is Validated.Partial -> listOf(validated.call)
-                is Validated.Refused, null -> emptyList()
-            }
+            val validated = if (native.isEmpty()) null else validateCalls(native, reserveTurn, mask, contract, repairable,
+                truncated = response.stop == StopReason.OutputLimit || response.stop == StopReason.Truncated)
+            val calls = validated?.calls.orEmpty()
 
-            // Partition and dispatch — or refuse the whole turn.
+            // Partition and dispatch what validation left — nothing when the whole turn is refused.
             record.reset()
             val dispatchedAt = clock.millis()
-            val result = if (calls.isNotEmpty()) dispatcher.dispatch(turn, calls, Tokens(defaults.rMaxTokens.toLong())) else null
+            // D-374: this turn's results are exempt from eviction, so they must fit α of the window beside what the next
+            // request already holds (this turn's response included), its output reserve and the anchor's growth. D-375:
+            // a spent window grants only the dispatcher's read floor; the reads past it wait for the next turn.
+            val headroom = (capabilities.contextLimitTokens * defaults.alpha).toLong() - estimate.upperBoundTokens - responseTokens -
+                ctx.model.maxOutputTokens - maxOf(0L, defaults.anchorMaxTokens - anchor.tokens)
+            val readBudget = minOf(defaults.rMaxTokens.toLong(), maxOf(Dispatcher.READ_FLOOR_TOKENS, headroom))
+            val result = if (calls.isNotEmpty()) dispatcher.dispatch(turn, calls, Tokens(readBudget)) else null
             cost = cost.plusToolSeconds((clock.millis() - dispatchedAt) / MILLIS_PER_SECOND)
             val after = reconcile("turn $turn")
             val gauge = gauge(currencies(after.candidateId))
             var liveRunOutput = false
+            val worked = ArrayList<Pair<ToolCall, ToolOutcome>>()
             val editedPaths = LinkedHashSet<String>()
             // §7.4 impact nudge: each edited file's bytes before this turn's batch, and the refs looks emitted after its last edit.
             val batchBefore = LinkedHashMap<String, ByteArray>()
@@ -477,15 +490,20 @@ public class Cell @JvmOverloads constructor(
                 val disposition = result!!.of(call.opId)
                 val outcome = (disposition as? Disposition.Executed)?.outcome
                 val text = when (disposition) {
-                    is Disposition.Executed -> Gauges.result(disposition.outcome, gauge)
+                    is Disposition.Executed -> Gauges.result(
+                        if (call.notes.isEmpty()) disposition.outcome else disposition.outcome.copy(body = call.notes.joinToString("") { "note: $it\n" } + disposition.outcome.body),
+                        gauge,
+                    )
                     is Disposition.NotExecuted -> "${Boundary.RESULT_OPEN}not executed: ${disposition.reason}${Boundary.RESULT_CLOSE}\n${gauge.line()}"
                     is Disposition.Failed -> "${Boundary.RESULT_OPEN}failed: ${disposition.error} — effects unknown; reconciled at the turn boundary${Boundary.RESULT_CLOSE}\n${gauge.line()}"
                 }
+                if (disposition is Disposition.Failed && call.family == ToolFamily.Edit) failedEditPaths += editPaths(call).orEmpty()
                 val alias = outcome?.resultAlias?.takeIf { it != NO_ALIAS }
                 val refs = listOfNotNull(alias) + outcome?.header?.runtime?.artifactRefs.orEmpty()
                 appendResult(call.providerCallId, text, isError = outcome == null, label = label(call, outcome), resultClass = ResultClass.of(call.name), alias = alias)
                 journalResult(call.providerCallId, outcome?.header?.line() ?: text.lineSequence().first(), refs)
                 if (outcome == null) return
+                worked += call to outcome
                 // D-358: a `run` the executor denied by policy (read-only role, ceiling, execution mode, D-class without intent)
                 // is a refusal the same call cannot get past: it joins the refusal loop, not the ordinary loop, so the third
                 // identical denial ends the cell blocked instead of nudging twice per turn until the budget is spent.
@@ -519,22 +537,14 @@ public class Cell @JvmOverloads constructor(
                     (call.args as? Args.Look)?.args?.takeIf { it.what == "refs" }?.target?.let { impact.inspected(it); inspected += it }
                 }
             }
-            when (validated) {
-                null -> Unit
-                is Validated.Refused -> {
-                    native.forEach { notExecuted(it, validated.reason) }
-                    // D-358: a refusal joins the cell's refusal history, kept until the contract version changes (masks and ceilings may move).
-                    for (culprit in validated.culprits) {
-                        val signature = RefusalSignature.of(parsedAlone(culprit)?.name ?: culprit.name, culprit.argsJson, validated.key)
-                        refused += signature
-                        refusedFirst.putIfAbsent(signature, turn to validated.reason)
-                    }
-                }
-                is Validated.Calls -> {
-                    calls.forEach(::executed)
-                }
-                is Validated.Partial -> {
-                    native.forEachIndexed { index, call -> if (index == validated.index) executed(validated.call) else notExecuted(call, validated.reason) }
+            if (validated != null) {
+                val dispatched = calls.associateBy { it.opId - 1 }
+                native.forEachIndexed { index, call -> dispatched[index]?.let(::executed) ?: notExecuted(call, validated.notExecuted.getValue(index)) }
+                // D-358: a refusal joins the cell's refusal history, kept until the contract version changes (masks and ceilings may move).
+                for (refusal in validated.refused) {
+                    val signature = RefusalSignature.of((parseOne(refusal.call, 1) as? ParsedCalls.Valid)?.calls?.single()?.name ?: refusal.call.name, refusal.call.argsJson, refusal.key)
+                    refused += signature
+                    refusedFirst.putIfAbsent(signature, turn to refusal.reason)
                 }
             }
             editedPaths.addAll(movedThisTurn(before, after, contract))
@@ -553,8 +563,17 @@ public class Cell @JvmOverloads constructor(
             if (batchBefore.isNotEmpty()) {
                 val index = SymbolIndex(atlas)
                 val changes = batchBefore.flatMap { (path, bytes) -> DefinitionChanges.of(path, bytes, ws.registry.read(path)?.bytes) }
+                // D-366: a file absent at the cell's base is the cell's own; it is exempt only until a file the cell
+                // did not create imports it (an extracted module with a real caller is impact like any other). D-375: the
+                // atlas leaves a pre-existing dangling import unresolved until its next build, so a lexical mention of the
+                // module stem in a file the cell did not create also ends the exemption, declaring lines included.
+                val own = { path: String -> path !in baseFiles && base?.members?.containsKey(path) != true }
+                val created = batchBefore.keys.filter { path ->
+                    own(path) && atlas.importers(path).all(own) &&
+                        index.mentions(path.substringAfterLast('/').substringBeforeLast('.')).let { refs -> !refs.truncated && refs.references.all { own(it.path) } }
+                }.toSet()
                 // Fan-in outside the edited file: tier-0 lexical refs, which is also the no-index literal fallback (§7.4).
-                impact.changed(turn, changes) { c -> index.refs(c.symbol).references.count { it.path != c.path } }
+                impact.changed(turn, changes, created) { c -> index.refs(c.symbol).references.count { it.path != c.path } }
             }
             inspected.forEach(impact::inspected)
             impact.rescoped(registerBefore, register)
@@ -590,7 +609,10 @@ public class Cell @JvmOverloads constructor(
             val currenciesNow = currencies(stampNow.candidateId)
             uncertified = outstanding(currenciesNow)
             val certifiedAfter = certified(currenciesNow)
-            if (Progress.events(registerBefore, register, turn, certifiedBefore, certifiedAfter).isNotEmpty()) lastProgressTurn = turn
+            val work = Progress.work(turn, worked, seenResults)
+            worked.filter { (call, outcome) -> (call.family == ToolFamily.Run || call.family == ToolFamily.Verify) && Progress.finished(outcome) }
+                .forEach { (call, outcome) -> seenResults += CallSignature.of(call, outcome) }
+            if (work.isNotEmpty() || Progress.events(registerBefore, register, turn, certifiedBefore, certifiedAfter, tools.state.unbackedTicks).isNotEmpty()) lastProgressTurn = turn
             val completionEvidence = if (proposal && implementingCompletion && dispatchRefusal == null)
                 ctx.completionEvidence?.invoke(flags.values.toList()) else null
             completionEvidence?.flags?.forEach { flag -> flags[flag.path] = flag }
@@ -615,6 +637,7 @@ public class Cell @JvmOverloads constructor(
                 reserve = budget.verdict(outstanding(currenciesNow)), turnsMax = budget.turns, completionProposed = proposal,
                 currencies = currenciesNow, verdicts = validEvidence?.verdicts.orEmpty(), unavailable = validEvidence?.unavailable.orEmpty(), flags = gateFlags, fired = fired, defaults = defaults,
                 impactNudges = impact.unresolved, unresolvedImpactNudges = impact.unresolvedPublic.map { it.missing },
+                impactOverflow = if (batchBefore.isNotEmpty()) impact.overflow else emptyList(),
                 outsideIncrement = editedByEdit.filter { p -> contract.scope.covers(p) && increment.writeScope.none { PathPattern.matches(it, p) } },
                 surfaceFlags = flags.values.filter { it.path in editedPaths }, editedPaths = editedPaths.toSet(),
                 contractAnchors = (tools.kb as? KbTool)?.contractAnchors().orEmpty(), repeatedFailures = repeated, acceptance = acceptance,
@@ -624,8 +647,12 @@ public class Cell @JvmOverloads constructor(
             fired = report.fired
             report.outcomes.forEach { events?.emit(AgentEvent.Cell.GateFired(ids, it.key.gate, it.line)) }
             report.rejections.firstOrNull { it.endsTurn }?.let { requiredOp = it.requiredOp }
-            // §5.1: at most two lines, the hard gates' refusals before the nudges.
-            nudges = (report.rejections.map { it.line + it.details.take(DETAILS_IN_LINE).joinToString("") { d -> " · $d" } } + report.nudges.map { it.line } + truncationLine(response)).take(MAX_NUDGES)
+            // §5.1: at most MAX_NUDGES lines, the hard gates' refusals first; D-372: the stall and budget lines before the
+            // other nudges, the impact lines last, so a turn of impact nudges never hides how much of the cell is left.
+            val (impactLines, softer) = report.nudges.partition { it.key.gate == Gates.IMPACT }
+            val (budgetLines, otherLines) = softer.partition { it.key.gate in PRIORITY_NUDGES }
+            nudges = (report.rejections.map { it.line + it.details.take(DETAILS_IN_LINE).joinToString("") { d -> " · $d" } } +
+                (budgetLines + otherLines).map { it.line } + truncationLine(response) + impactLines.map { it.line }).take(MAX_NUDGES)
 
             // Checkpoint: the turn's boundary is durable before any exit is decided.
             persist(checkpoint(CellStatus.Running, stampNow.candidateId, null))
@@ -706,10 +733,30 @@ public class Cell @JvmOverloads constructor(
             occupancy?.percentOf(capabilities.contextLimitTokens) ?: 0, budget.snapshot(), checksSummary(currencies), ws.workset, register, turn, budget.turns,
         )
 
-        /** Role mask ∩ shape ∩ ceiling; a reserve turn also masks the edit family (§5.9 "no new edits"). */
-        private fun maskFor(contract: Contract, reserveTurn: Boolean): ToolMask {
+        /**
+         * Role mask ∩ shape ∩ ceiling; a reserve turn also masks the edit family (§5.9 "no new edits") — except, on a
+         * [repair] turn (D-366), the path-addressed edit ops, which [validateCalls] holds to the cell's own paths.
+         */
+        private fun maskFor(contract: Contract, reserveTurn: Boolean, repair: Boolean = false): ToolMask {
             val effective = ctx.role.effectiveOps(contract.shape, Ceiling.of(contract.authorization, ctx.config.executionMode, ctx.hostSets))
-            return if (reserveTurn) ToolMask(effective.allowed.filterNot { it.startsWith(ToolFamily.Edit.wire + ".") }.toSet()) else effective
+            if (!reserveTurn) return effective
+            val edit = ToolFamily.Edit.wire + "."
+            return ToolMask(effective.allowed.filterNot { it.startsWith(edit) && (!repair || it.removePrefix(edit) in NOT_PATH_ADDRESSED) }.toSet())
+        }
+
+        /** D-366: the paths this cell changed itself — by edit or run, or by an edit that failed mid-batch and moved them. */
+        private fun ownPaths(): Set<String> {
+            val moved = touchedLedger.map { it.path }.toSet()
+            return (origins.filterValues { it != ChangeOrigin.External }.keys + failedEditPaths.filter { it in moved }).toSortedSet()
+        }
+
+        /** The workspace-relative paths [call]'s edit ops name; `null` when an op is not addressed by path (transform, revert). */
+        private fun editPaths(call: ToolCall): List<String>? {
+            val ops = (call.args as? Args.Edit)?.args?.ops ?: return null
+            if (ops.any { it.kind in NOT_PATH_ADDRESSED }) return null
+            return ops.flatMap { listOfNotNull(it.path, it.create, it.delete, it.rename, it.to) }.map { spelled ->
+                (ws.workspace.paths.resolve(spelled, Intent.Read) as? PathResolution.Resolved)?.relative ?: spelled.replace('\\', '/').removePrefix("./")
+            }
         }
 
         private fun contract(): Contract = ctx.contracts.current(ids.work) ?: throw IllegalStateException("no committed contract for ${ids.work}")
@@ -717,49 +764,95 @@ public class Cell @JvmOverloads constructor(
         // --------------------------------------------------------- validate
 
         /**
-         * §3.7 `validate_complete_calls_and_dependencies`: one unparseable call, one forward dependency, a missing
-         * required `state` op after the loop gate, a masked op or an edit on a reserve turn refuses every call of the
-         * turn — except one valid, unmasked terminal call, which runs alone (F2b).
+         * §3.7 `validate_complete_calls_and_dependencies`, call by call (D-372): an unparseable call, a masked op or a
+         * reserve-turn edit outside the cell's own paths (D-366) refuses that call alone; a call whose condition names a
+         * refused op is not executed, and a refused edit holds back the turn's runs and verifies as an edit batch that
+         * did not apply does. Only a dependency violation among the valid calls or a `state` op the loop gate requires
+         * refuses the whole turn — and even then one valid terminal call runs alone (F2b).
          */
-        private fun validateCalls(native: List<NativeCall>, reserveTurn: Boolean, mask: ToolMask, contract: Contract): Validated {
-            val calls = when (val parsed = ToolCalls.parse(native)) {
-                is ParsedCalls.Invalid -> return refuse(native, mask, "schema error in call ${parsed.providerCallId}: ${parsed.error}",
-                    native.filter { it.id == parsed.providerCallId }, key = "schema error: ${parsed.error}")
-                is ParsedCalls.Valid -> parsed.calls
+        private fun validateCalls(native: List<NativeCall>, reserveTurn: Boolean, mask: ToolMask, contract: Contract, repairable: Set<String> = emptySet(), truncated: Boolean = false): Validated {
+            val alone = LinkedHashMap<Int, Pair<String, String>>()
+            val valid = ArrayList<ToolCall>()
+            native.forEachIndexed { index, call ->
+                when (val parsed = parseOne(call, index + 1, truncated)) {
+                    is ParsedCalls.Invalid -> alone[index] = "schema error in call ${parsed.providerCallId}: ${parsed.error}" to "schema error: ${parsed.error}"
+                    is ParsedCalls.Valid -> {
+                        val one = parsed.calls.single()
+                        refusalOf(one, reserveTurn, mask, contract, repairable)?.let { alone[index] = it to it } ?: valid.add(one)
+                    }
+                }
             }
-            (Partition.of(calls) as? Partition.Rejected)?.let { rejected ->
-                return refuse(native, mask, rejected.reason, native.filterIndexed { index, _ -> index + 1 == rejected.opId })
+            val refusedEdit = alone.keys.firstOrNull { ToolFamily.byWire(native[it].name) == ToolFamily.Edit }
+            val dependents = LinkedHashMap<Int, String>()
+            var remaining: List<ToolCall> = valid
+            while (true) {
+                val held = remaining.mapNotNull { call ->
+                    val target = call.condition?.let(Condition::parse)?.opId
+                    when {
+                        target != null && target - 1 in alone -> "depends on op $target, which was refused"
+                        target != null && target - 1 in dependents -> "depends on op $target, which was not executed"
+                        refusedEdit != null && (call.family == ToolFamily.Run || call.family == ToolFamily.Verify) ->
+                            "the edit batch did not apply fully: op ${refusedEdit + 1} was refused; runs execute only after a fully applied batch or none"
+                        else -> null
+                    }?.let { call to it }
+                }
+                if (held.isEmpty()) break
+                held.forEach { (call, reason) -> dependents[call.opId - 1] = reason }
+                remaining = remaining.filter { it.opId - 1 !in dependents }
             }
-            if (reserveTurn && calls.any { it.family == ToolFamily.Edit }) {
-                return refuse(native, mask, CellBudget.GATE, native.filterIndexed { index, _ -> calls[index].family == ToolFamily.Edit }, trailer = "; the edit refused the whole turn")
-            }
-            calls.firstNotNullOfOrNull { call -> call.operationNames.firstOrNull { !mask.allows(it) }?.let { call to it } }?.let { (call, op) ->
-                val ceiling = Ceiling.of(contract.authorization, ctx.config.executionMode, ctx.hostSets).allows(op, ctx.role.toolMask)?.detail
-                return refuse(native, mask, Refusals.masked(op, ctx.role, contract.shape, mask, ceiling), listOf(native[call.opId - 1]))
+            (Partition.of(remaining) as? Partition.Rejected)?.let { rejected ->
+                return wholeTurn(native, remaining, alone, rejected.reason, culprits = setOf(rejected.opId - 1))
             }
             requiredOp?.let { op ->
-                if (calls.none { it.family.wire == op }) return refuse(native, mask, "the loop gate ended the last turn: a $op op is required before anything else runs", native)
+                if (remaining.none { it.family.wire == op }) return wholeTurn(native, remaining, alone, "the loop gate ended the last turn: a $op op is required before anything else runs")
                 requiredOp = null
             }
-            return Validated.Calls(calls)
+            return validated(native, remaining, alone, dependents)
+        }
+
+        /** Why [call] is refused on its own, or `null`: a reserve-turn edit that is no repair (D-366), then a masked op (D-357). */
+        private fun refusalOf(call: ToolCall, reserveTurn: Boolean, mask: ToolMask, contract: Contract, repairable: Set<String>): String? {
+            // D-366: on a turn-count reserve an edit whose every op targets a path the cell already changed is a repair.
+            if (reserveTurn && call.family == ToolFamily.Edit && (repairable.isEmpty() || editPaths(call)?.all { it in repairable } != true)) {
+                return if (repairable.isEmpty()) CellBudget.GATE else "reserve reached: edits are limited to files this cell already changed (" +
+                    repairable.take(REPAIR_PATHS_SHOWN).joinToString(", ") + (if (repairable.size > REPAIR_PATHS_SHOWN) ", … +${repairable.size - REPAIR_PATHS_SHOWN}" else "") + "); verify and report"
+            }
+            val op = call.operationNames.firstOrNull { !mask.allows(it) } ?: return null
+            val ceiling = Ceiling.of(contract.authorization, ctx.config.executionMode, ctx.hostSets).allows(op, ctx.role.toolMask)?.detail
+            return Refusals.masked(op, ctx.role, contract.shape, mask, ceiling)
         }
 
         /**
-         * The whole turn is refused for [reason] ([culprits] caused it) — unless one call parses alone, is unmasked and
-         * is terminal (`task` ask or answer, `state` blocked): that call runs alone and the others are refused (F2b).
+         * The whole turn is refused for [reason] ([culprits] by index caused it; every call not refused on its own when
+         * none is to blame) — unless one of the [valid] calls is terminal (`task` ask or answer, `state` blocked): that
+         * call runs alone (F2b). A call refused on its own keeps its own reason.
          */
-        private fun refuse(native: List<NativeCall>, mask: ToolMask, reason: String, culprits: List<NativeCall>, trailer: String = Refusals.WHOLE_TURN, key: String = reason): Validated {
-            val (index, terminal) = native.withIndex().firstNotNullOfOrNull { (index, call) ->
-                parsedAlone(call)?.takeIf { it.terminal && it.operationNames.all(mask::allows) }?.let { index to it }
-            } ?: return Validated.Refused(reason + trailer, culprits, key + trailer)
-            return Validated.Partial(terminal, index, "$reason — the terminal call ${terminal.family.wire}(${terminal.op}) ran alone")
+        private fun wholeTurn(native: List<NativeCall>, valid: List<ToolCall>, alone: Map<Int, Pair<String, String>>, reason: String, culprits: Set<Int>? = null): Validated {
+            val terminal = valid.firstOrNull { it.terminal }
+            val text = if (terminal == null) reason + Refusals.WHOLE_TURN else "$reason — the terminal call ${terminal.family.wire}(${terminal.op}) ran alone"
+            val others = native.indices.filter { it !in alone && it != terminal?.opId?.minus(1) }
+            val blamed = (culprits ?: others.toSet()).filter { it !in alone }.map { Refusal(native[it], reason, reason) }
+            val ran = validated(native, listOfNotNull(terminal), alone, others.associateWith { text })
+            return Validated(ran.calls, ran.notExecuted, ran.refused + blamed)
         }
 
-        /** [call] parsed on its own, or `null` when it does not parse. */
-        private fun parsedAlone(call: NativeCall): ToolCall? = try {
-            (ToolCalls.parse(listOf(call)) as? ParsedCalls.Valid)?.calls?.single()
-        } catch (_: IllegalArgumentException) {
-            null
+        /** [calls] dispatch; each refused call says whether the others ran; [held] are not executed for their own reason. */
+        private fun validated(native: List<NativeCall>, calls: List<ToolCall>, alone: Map<Int, Pair<String, String>>, held: Map<Int, String>): Validated {
+            val n = calls.size
+            val trailer = if (n == 0) Refusals.WHOLE_TURN else "; this call was refused; the other $n call${if (n == 1) "" else "s"} of the turn ran"
+            val notExecuted = HashMap(held)
+            alone.forEach { (index, refusal) -> notExecuted[index] = refusal.first + trailer }
+            return Validated(calls, notExecuted, alone.map { (index, refusal) -> Refusal(native[index], refusal.first, refusal.second) })
+        }
+
+        /** [call] parsed on its own as op [opId], or the schema error that refuses it; a [truncated] response is never repaired (D-375). */
+        private fun parseOne(call: NativeCall, opId: Int, truncated: Boolean = false): ParsedCalls = try {
+            when (val parsed = ToolCalls.parse(listOf(call), truncated)) {
+                is ParsedCalls.Valid -> ParsedCalls.Valid(listOf(parsed.calls.single().copy(opId = opId)))
+                is ParsedCalls.Invalid -> parsed
+            }
+        } catch (e: IllegalArgumentException) {
+            ParsedCalls.Invalid(call.id, "${call.name}: ${e.message}")
         }
 
         private val ToolCall.terminal: Boolean
@@ -790,7 +883,9 @@ public class Cell @JvmOverloads constructor(
             }
         }
 
-        private fun appendNative(response: Response) {
+        /** Appends [response]'s replayed items to `[T]`; their estimated tokens, which the next request carries. */
+        private fun appendNative(response: Response): Long {
+            var tokens = 0L
             for (item in response.items) {
                 val resident = when (item) {
                     is Message -> Resident.message(item, turn, item.estimate(estimator).tokens)
@@ -799,7 +894,9 @@ public class Cell @JvmOverloads constructor(
                     else -> continue // usage and continuations are accounting items, never replayed as [T]
                 }
                 residents = residents + resident
+                tokens += resident.tokens
             }
+            return tokens
         }
 
         /** A result enters `[T]` with the pointer a stub will keep: the alias resolved to its observation, when it is one (§5.7). */
@@ -1207,11 +1304,19 @@ public class Cell @JvmOverloads constructor(
                 Outcome.Failed -> CheckState.Red("", (last.counts?.failed ?: 0) + (last.counts?.errors ?: 0))
                 Outcome.Timeout -> CheckState.Timeout("time box")
                 Outcome.NotRun -> CheckState.NotRun
-                Outcome.Unavailable -> CheckState.Unavailable("runner missing")
+                Outcome.Unavailable -> CheckState.Unavailable(unavailableReason(last.receiptId))
                 Outcome.UnknownOutcome -> CheckState.Unavailable("unknown outcome; reconcile before retry")
                 else -> CheckState.Inconclusive(last.outcome.name.lowercase())
             }
             CheckLine(labelOf(check), Blast.scope(check), null, state, last.stamp.hash8, ws.scheduler.aliasOf(last.receiptId))
+        }
+
+        /** Why a check could not run, as its receipt records it (the launcher's reason, bounded), the way `verify` shows it. */
+        private fun unavailableReason(receiptId: String): String {
+            val limits = ev.receipts.get(receiptId)?.limits.orEmpty()
+            val reason = (limits.firstOrNull { it.kind == "runner" || it.kind == "unavailable" } ?: limits.firstOrNull())?.detail
+                ?.replace('\r', ' ')?.replace('\n', ' ')?.trim()?.takeIf { it.isNotEmpty() } ?: return "runner missing"
+            return if (reason.length <= UNAVAILABLE_REASON_CHARS) reason else reason.take(UNAVAILABLE_REASON_CHARS - 1) + "…"
         }
 
         private fun checksSummary(currencies: Map<String, Currency>): String = checkLines(currencies).joinToString(" · ") { line ->
@@ -1287,6 +1392,9 @@ public class Cell @JvmOverloads constructor(
 
             override fun currentVersion(path: String): io.astrolabe.id.FileVersion? = ws.registry.version(path)
 
+            override fun knownVersions(path: String): Collection<io.astrolabe.id.FileVersion> =
+                listOfNotNull(currentVersion(path)) + ws.workset.entries.filter { it.path == path }.map { it.version } + ws.workset.history(path)
+
             override fun acceptGreen(accept: String): Boolean {
                 val currencies = currencies(ws.stamper.stamp().id)
                 return ws.checks.forAcceptance(accept).any { currencies[it.id]?.certifies == true } || currencies[accept]?.certifies == true
@@ -1305,11 +1413,23 @@ public class Cell @JvmOverloads constructor(
         /** The alias executors give a result that observed nothing new. */
         const val NO_ALIAS = "#-"
 
-        /** §5.1 `[A]`: at most two nudge lines per turn. */
-        const val MAX_NUDGES = 2
+        /** §5.1 `[A]`: at most four nudge lines per turn (D-372; [Anchor] applies the same cap). */
+        const val MAX_NUDGES = 4
+
+        /** The nudges that say how much of the cell is left: shown before the other nudges (D-372). */
+        val PRIORITY_NUDGES = setOf(Gates.STALL, Gates.RESERVE, Gates.TURNS)
         const val SIGNATURE_CHARS = 120
+
+        /** How much of a launcher's reason the checks view of `[A]` carries. */
+        const val UNAVAILABLE_REASON_CHARS = 160
         val DIGITS = Regex("\\d+")
         val SPACES = Regex("\\s+")
+
+        /** D-366: how many of the cell's own paths a reserve-repair refusal names before it counts the rest. */
+        const val REPAIR_PATHS_SHOWN = 12
+
+        /** Edit ops not addressed by a path: never a reserve repair (D-366). */
+        val NOT_PATH_ADDRESSED = setOf("transform", "revert")
 
         /** How many of a rejection's details ride on its line. */
         const val DETAILS_IN_LINE = 2

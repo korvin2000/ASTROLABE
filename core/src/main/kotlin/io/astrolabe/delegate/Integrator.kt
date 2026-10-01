@@ -257,16 +257,16 @@ public class Integrator @JvmOverloads constructor(
             val changes = batch.flatMap { result -> result.packet.changes.map { result to it } }
             apply(candidate, changes)?.let { return outcomes + Integration.Rejected(handles, IntegrationStep.Apply, it) }
             val union = changes.map { it.second.path }.toSortedSet()
-            val testedReport = Stamper(candidate.workspace, env).report()
+            val testedReport = Stamper(candidate.workspace, env).report(fresh = true)
             val tested = testedReport.candidateId
             val combined = checks.verify(candidate.workspace, union, batch)
-            Stamper(candidate.workspace, env).report().takeIf { it.candidateId != tested }?.let { moved ->
+            Stamper(candidate.workspace, env).report(fresh = true).takeIf { it.candidateId != tested }?.let { moved ->
                 return outcomes + Integration.Rejected(handles, IntegrationStep.CombinedCheck, "combined checks changed the candidate: ${movedPathsHint(testedReport, moved)}")
             }
             if (combined.failures.isNotEmpty()) return outcomes + Integration.Rejected(handles, IntegrationStep.CombinedCheck, "the combined tree fails", combined.failures, returnsToMainLine = true)
             val gated = gates.verify(candidate.workspace, union, batch)
             if (gated.failures.isNotEmpty()) return outcomes + Integration.Rejected(handles, IntegrationStep.Gates, "contract lint or the required review refuses the combined tree", gated.failures, returnsToMainLine = true)
-            Stamper(candidate.workspace, env).report().takeIf { it.candidateId != tested }?.let { moved ->
+            Stamper(candidate.workspace, env).report(fresh = true).takeIf { it.candidateId != tested }?.let { moved ->
                 return outcomes + Integration.Rejected(handles, IntegrationStep.Gates, "review changed the tested candidate: ${movedPathsHint(testedReport, moved)}")
             }
             return outcomes + publish(candidate, base.candidateId, tested, batch, changes.map { it.second }, combined.receipts + gated.receipts)
@@ -290,7 +290,7 @@ public class Integrator @JvmOverloads constructor(
         val handles = batch.map { it.handle }
         val patchHash = patchHash(changes)
         return main.mutation.withLock {
-            val before = Stamper(main, env).report().candidateId
+            val before = Stamper(main, env).report(fresh = true).candidateId
             if (before != integrationBase) return@withLock Integration.Rejected(handles, IntegrationStep.Publish, "main moved during integration: @${before.hash8}, integration base @${integrationBase.hash8}")
             // Every postimage is read and checked before the first byte reaches the main line.
             val staged = changes.map { change ->
@@ -300,7 +300,7 @@ public class Integrator @JvmOverloads constructor(
                 }
                 change to bytes
             }
-            if (Stamper(candidate.workspace, env).report().candidateId != tested) return@withLock Integration.Rejected(handles, IntegrationStep.Publish, "the tested candidate changed before publication")
+            if (Stamper(candidate.workspace, env).report(fresh = true).candidateId != tested) return@withLock Integration.Rejected(handles, IntegrationStep.Publish, "the tested candidate changed before publication")
             val now = current()
             batch.firstOrNull { it.dispatch.task.contractVersion != now.contractVersion }?.let {
                 return@withLock Integration.Rejected(handles, IntegrationStep.Publish, "contract is v${now.contractVersion}, dispatched under v${it.dispatch.task.contractVersion}", archived = archive(batch))
@@ -316,7 +316,7 @@ public class Integrator @JvmOverloads constructor(
                     IntegrationPublication.replace(main, change.path, bytes)
                     registry.change(change.path, change.before, change.after, "integrated ${handles.joinToString(",")}")
                 }
-                Stamper(main, env).report().candidateId.also { check(it == tested) { "published tree differs from the tested candidate" } }
+                Stamper(main, env).report(fresh = true).candidateId.also { check(it == tested) { "published tree differs from the tested candidate" } }
             } catch (failure: Throwable) {
                 val recovery = runCatching { IntegrationPublication.rollback(main, registry, blobs, intents, intent) }.exceptionOrNull()
                 if (recovery != null) failure.addSuppressed(recovery)

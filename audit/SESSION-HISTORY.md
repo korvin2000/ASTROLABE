@@ -720,3 +720,15 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
   and the denial-loop patch, Opus reviewed the hypotheses and the same patch; merged `--no-ff`. D-357–D-362.
 - Targeted core tests and provider-ai-gate offline tests only; ABI regenerated; not merged into `main`, not pushed.
 
+
+## 2026-10-01: efficiency fix (`fix/efficiency`, owner request, out of order)
+- Diagnosis of three Studio sessions (`../harness-efficiency-analysis.md`): 30–47 % of turns held a refused call; the
+  Windows launcher could not start `.cmd` shims ("npm unavailable"); snapshots re-read 461 MB per mutating turn; gates,
+  the register and the exit rule demanded ritual. Owner directive: the harness helps the model.
+- Eleven Opus worktree agents (exec + cache, tool tolerance, gates + prompt, exit rule, limits, edit batches, partial
+  turns, live-run fixes, two review rounds, hardening); merged `--no-ff`. Decisions D-363–D-375.
+- Codex: strategy consult (rework, keep the acceptance boundary) and two code reviews (5 bugs + 3 risks, then 10
+  findings); all applied or recorded. Owner rule: malformed JSON is repaired, truncated output never.
+- Live runs through an isolated Studio (todo app → Angular port): deepseek-v4.1-flash 4 + 15 minutes with a verified
+  build (before: 28 minutes, broken tree); second run on glm-5.3-flash in the analysis §4.
+- Full `./gradlew build` on Windows green at D-374 and again at the tip; ABI regenerated.

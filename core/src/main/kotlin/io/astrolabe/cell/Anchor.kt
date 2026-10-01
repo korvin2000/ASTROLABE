@@ -206,8 +206,8 @@ public object Anchor {
     /** `[A]` Workset line: `KNOWN … NOT SEEN …` is a hint; the registry holds the authoritative coverage. */
     private const val WORKSET_CAP_TOKENS: Int = 60
 
-    /** §5.1 `[A]`: at most two nudges per turn. */
-    private const val MAX_NUDGES: Int = 2
+    /** §5.1 `[A]`: at most four nudges per turn (D-372). */
+    private const val MAX_NUDGES: Int = 4
 
     /** What the Touched ledger keeps when the anchor is over budget. */
     private const val MIN_TOUCHED: Int = 3

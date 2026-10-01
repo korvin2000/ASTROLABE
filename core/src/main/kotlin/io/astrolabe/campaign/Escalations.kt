@@ -21,6 +21,7 @@ import io.astrolabe.route.SubstantiveAttempt
 import io.astrolabe.route.Tier
 import io.astrolabe.route.VerifiedFailure
 import io.astrolabe.verify.CompletionResult
+import io.astrolabe.verify.GapKind
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -110,9 +111,20 @@ internal class IncrementAttempts(private val journal: Journal, private val idGen
 
         /** What a verified failure of the attempt left unmet: a refused completion, or one the cell could not get past its gate. */
         fun verifiedFailure(exit: CellExit, completion: CompletionResult?): List<String>? = when {
-            completion is CompletionResult.Refused -> completion.missing
+            completion is CompletionResult.Refused -> refusedFailure(completion)
             exit is CellExit.Partial && exit.reason == PartialReason.CompletionStalled -> listOf(exit.hint)
             else -> null
+        }
+
+        /**
+         * D-367: a proposal refused only because the contract or the tree moved under it (the user spoke during the
+         * last turn) is not a failed attempt — the next cell continues under the committed contract, budget unspent.
+         * Unverified obligations beside the binding would have awaited a decision, so they do not make it a failure.
+         */
+        fun refusedFailure(refused: CompletionResult.Refused): List<String>? = refused.missing.takeUnless {
+            val resolved = refused.resolved
+            resolved != null && resolved.binding.isNotEmpty() &&
+                resolved.gaps.none { it.kind == GapKind.Failed || it.kind == GapKind.Other && it.text !in resolved.binding }
         }
     }
 }
