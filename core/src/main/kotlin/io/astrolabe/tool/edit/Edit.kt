@@ -820,7 +820,7 @@ public class Edit(
         result.error?.takeIf { e -> result.refused.none { it.error === e } }?.let { e ->
             if (receipt == null) lines += "✗ ${e.opIndex?.let { "op $it " } ?: ""}${e.kind}: ${e.detail}"
         }
-        if (result.refused.isNotEmpty()) lines += resendLine(result)
+        if (receipt == null) resendLine(args, result)?.let { lines += it }
         if (result.touchedOutsideScope.isNotEmpty()) lines += "outside the increment's write scope (inside the contract): ${result.touchedOutsideScope.joinToString(", ")}"
         result.testIntegrity.forEach { lines += it.line }
         val safe = redaction.apply(lines.joinToString("\n"), ContentClass.ReusableEvidence)
@@ -861,15 +861,31 @@ public class Edit(
         )
     }
 
-    /** D-371: the one line the model acts on after a refusal — what was written and exactly which ops to resend. */
-    private fun resendLine(result: EditResult): String {
-        val all = (result.refused.flatMap { it.paths } + result.applied.map { it.path }).distinct()
-        val written = result.applied.map { it.path }.distinct()
-        val resend = result.refused.joinToString(", ") { g ->
-            val ops = (if (g.ops.size == 1) "op " else "ops ") + g.ops.joinToString(", ")
-            if (g.paths.isEmpty()) ops else "${g.paths.joinToString(", ")} ($ops)"
+    /**
+     * D-371/D-374: the one line the model acts on after a refusal or a mid-batch failure — every op is written, refused,
+     * failed (the batch stopped there) or not attempted (after the failure), and each non-written state is named.
+     */
+    private fun resendLine(args: EditArgs, result: EditResult): String? {
+        val failure = result.error?.takeIf { e -> e.opIndex != null && result.refused.none { it.error === e } }
+        val settled = result.refused.flatMap { it.ops }.toSet() + result.applied.map { it.opIndex } + listOfNotNull(failure?.opIndex)
+        val unattempted = if (failure == null) emptyList() else args.ops.indices.map { it + 1 }.filter { it !in settled }
+        if (result.refused.isEmpty() && (failure == null || result.applied.isEmpty() && unattempted.isEmpty())) return null
+        fun pathsOf(op: Int): List<String> = args.ops.getOrNull(op - 1)?.let { listOfNotNull(it.path, it.create, it.delete, it.rename, it.to) }.orEmpty()
+        fun named(paths: List<String>, ops: List<Int>): String {
+            val label = (if (ops.size == 1) "op " else "ops ") + ops.joinToString(", ")
+            return if (paths.isEmpty()) label else "${paths.joinToString(", ")} ($label)"
         }
-        return "${written.size} of ${all.size} files written; resend only the refused ops: $resend"
+        val failedPaths = failure?.let { listOfNotNull(it.path).ifEmpty { pathsOf(checkNotNull(it.opIndex)) } }.orEmpty()
+        val written = result.applied.map { it.path }.distinct()
+        val all = (result.refused.flatMap { it.paths } + written + failedPaths + unattempted.flatMap(::pathsOf)).distinct()
+        val parts = arrayListOf("${written.size} of ${all.size} files written")
+        if (result.refused.isNotEmpty()) parts += "resend only the refused ops: " + result.refused.joinToString(", ") { named(it.paths, it.ops) }
+        if (failure != null) {
+            val failed = named(failedPaths, listOf(checkNotNull(failure.opIndex)))
+            parts += if (failure.kind == "io") "failed (I/O, state uncertain): $failed — look at it before resending" else "failed (${failure.kind}, not written): $failed"
+        }
+        if (unattempted.isNotEmpty()) parts += "not attempted (resend unchanged): " + unattempted.joinToString(", ") { named(pathsOf(it), listOf(it)) }
+        return parts.joinToString("; ")
     }
 
     /** The §9.2 diff receipt as the model sees it: bounded per-file summary, counts, sites, the two honesty labels. */
