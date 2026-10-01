@@ -16,7 +16,7 @@
 **Design rule.** HELM's three modalities — observe, mutate, execute — remain the points where policy attaches (budgets on observation, preconditions on mutation, effect classes on execution). The surface is wider than HELM's because delegation, review, knowledge, skills and ask-user are modalities HELM excluded, and because operations whose cost differs by an order of magnitude should not share one worst-case budget `[C §8.4; C3]`. It is narrower than SEXTANT's ~30 operations because tool selection degrades with count `[MB §8.1]` and every dedicated operation must beat `bash + raw output` in the tool eval or not ship `[MB A7]`. Seven families with the operations enumerated below, byte-stable per role; rare capabilities via `look(catalog)` (`tools.catalog` is descriptive shorthand, not an eighth family).
 
 ```text
-look(what, target, budget=4000, near?, glob?, in="workspace"|"store"|"kb", since?)
+look(what, target, budget=4000 (Defaults.lookBudgetTokens), near?, glob?, in="workspace"|"store"|"kb", since?)
   what ∈ { tree, outline, read, find, def, refs, importers, impact, recall, bmap, catalog }
   → { text, truncated, more?, scope, complete, tier, versions{path: v}, id }
   · read target = path | path:a-b | path::Symbol, or `range: "a-b"` beside a path target (`range: "path:a-b"` alone);
@@ -50,7 +50,7 @@ edit(ops, why)
   · inline syntax check; post-edit views ±3 lines become displayed ranges; preimages saved; shadow snapshot per turn
   · unsupported mutation kinds (binary, modes, symlinks, case-only renames) are rejected explicitly, never dropped   [B §8.3]
 
-run(argv|cmd, cwd?, shape="auto", budget=1200, timeout=120, bg=false, intent?, class_hint?, if?: "applied(op:N)")
+run(argv|cmd, cwd?, shape="auto", budget=4000 (Defaults.runBudgetTokens), timeout=600 (Defaults.runTimeoutSeconds; explicit ≤ 3600), bg=false, intent?, class_hint?, if?: "applied(op:N)")
   → { id, exit, status, view, truncated, log: "#id", class: R|W|D, stamp_before, stamp_after, current, changed_paths[], handle?, parsed? }
   · status ∈ { passed, failed, timeout, infra_error, inconclusive, completed, running, denied, unknown_outcome } from exit code AND parser
   · completed = a plain run outside acceptance (no check, wrapper or mounted tool) that exits 0 without counts; it reads

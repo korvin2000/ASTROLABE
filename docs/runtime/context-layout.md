@@ -34,7 +34,7 @@ The cell is HELM's loop `[HELM §7]` with judje-1's corrections and six changes 
     skill modules · carry-forward (dead ends, open items, decisions, last verification status) · pre-existing-failure ledger
 [T] transcript  (append-only between eviction batches — cache breakpoint at its end)
     main-line user messages pinned verbatim; children use exact applicable excerpts + authority refs (§20.2 D13) · packet · model messages · calls · results | stubs
-[A] anchor  (≤2.5K tok, typical ~1.2–1.8K, rebuilt every turn, never persisted, never cached)
+[A] anchor  (≤5K tok, typical ~1.2–1.8K, rebuilt every turn, never persisted, never cached)
     contract digest (≤150: exact goal excerpt + ids/status; full authoritative wording remains in [K]/pinned messages) · STATE register (≤1.2K) · Workset KNOWN / NOT SEEN (≤60) ·
     Touched (≤10) · Checks (≤3 lines, Δ + absolute + stamp) · focus atlas zoom (≤300) · focus notes (≤300, each once per cell) ·
     gauge · nudges (≤2)
