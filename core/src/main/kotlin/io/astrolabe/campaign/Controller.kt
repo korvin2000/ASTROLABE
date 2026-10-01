@@ -1795,8 +1795,8 @@ public class Controller @JvmOverloads public constructor(
             Delegator(CellChildRunner(childCell(c, increment, model, authority, syntax, span), evidence = reviews), PublicationAuthority { c.refusal() }, c.cancellation, DelegationLimits.of(config.defaults, contract.budget.tokens), contract.shape, scope, idGen, clock, events, worth = worth)
         }
         val tools = CellTools(
-            state = StateTool(Validator(estimator, patchCapTokens = config.defaults.patchCapTokens), registerVersions, c.journal, estimator, idGen, ids, clock, register ?: Register.empty(cellId, increment.id, increment.title), events),
-            look = Look(tree.workspace, tree.registry, workset, tree.atlas, Searches.jvm(), c.journal, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, checks = tree.checks, mounts = layered.mounts, bmaps = BmapStore(c.store), tools = layered.tools, tiers = layered.tiers),
+            state = StateTool(Validator(estimator, registerCapTokens = config.defaults.registerCapTokens, patchCapTokens = config.defaults.patchCapTokens, factLineMaxChars = config.defaults.factLineMaxChars), registerVersions, c.journal, estimator, idGen, ids, clock, register ?: Register.empty(cellId, increment.id, increment.title), events),
+            look = Look(tree.workspace, tree.registry, workset, tree.atlas, Searches.jvm(), c.journal, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, checks = tree.checks, mounts = layered.mounts, bmaps = BmapStore(c.store), tools = layered.tools, tiers = layered.tiers, budgetTokens = config.defaults.lookBudgetTokens),
             edit = Edit(
                 tree.workspace, tree.registry, workset, c.os, preimages, ScopeGuard(tree.workspace), c.contracts, tree.checks, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, syntax,
                 // D-99: `revert:turn:N` names the tree's shadow snapshots (the turn checkpoint records them).

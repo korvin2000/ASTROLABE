@@ -1,5 +1,6 @@
 package io.astrolabe.register
 
+import io.astrolabe.Defaults
 import io.astrolabe.evidence.ClaimKind
 import io.astrolabe.provider.TokenEstimator
 import kotlinx.serialization.Serializable
@@ -51,9 +52,9 @@ public sealed interface Validation {
  */
 public class Validator(
     private val estimator: TokenEstimator,
-    private val registerCapTokens: Int = 1_200,
+    private val registerCapTokens: Int = Defaults().registerCapTokens,
     private val patchCapTokens: Int = 1_200,
-    private val factLineMaxChars: Int = 240,
+    private val factLineMaxChars: Int = Defaults().factLineMaxChars,
     private val referenceMaxChars: Int = 1_000,
 ) {
     internal fun schemaRejection(register: Register, rawPatch: String, reason: String): Validation.Rejected =

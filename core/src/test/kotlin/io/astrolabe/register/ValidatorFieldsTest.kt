@@ -91,7 +91,7 @@ class ValidatorFieldsTest {
         assertEquals("line ≤ 1000 chars", rejected.rule)
     }
 
-    private fun maxChars(field: String): Int = if (field in references) 1_000 else 240
+    private fun maxChars(field: String): Int = if (field in references) 1_000 else 600
 
     private val references = setOf("plan accept", "plan req", "tick evidence", "fact evidence", "fact anchor path",
         "refute evidence", "deadend evidence", "close evidence", "focus dir")

@@ -69,7 +69,9 @@ class ValidatorTest {
         assertEquals("tick needs green accept or an evidence id", rejected(validator.check(ready, Patch.of(Op.PlanTick(1), Op.PlanCursor(2), Op.Next("n")), Ctx())))
         assertEquals("[~] needs a reason", rejected(validator.check(ready, Patch.of(Op.PlanCancel(2, " "), Op.Next("n")), Ctx())))
         assertEquals("dead ends need scope and reopen", rejected(validator.check(ready, Patch.of(Op.DeadendAdd("x", null, "", "later"), Op.Next("n")), Ctx())))
-        assertEquals("line ≤ 240 chars", rejected(validator.check(ready, Patch.of(Op.FactAdd(ClaimKind.Hypothesis, "x".repeat(241)), Op.Next("n")), Ctx())))
+        assertEquals("line ≤ 600 chars", rejected(validator.check(ready, Patch.of(Op.FactAdd(ClaimKind.Hypothesis, "x".repeat(601)), Op.Next("n")), Ctx())))
+        assertIs<Validation.Applied>(validator.check(ready, Patch.of(Op.FactAdd(ClaimKind.Hypothesis, "x".repeat(500)), Op.Next("n")), Ctx()), "D-370: a 500-char fact line fits the default")
+        assertEquals("line ≤ 240 chars", rejected(Validator(HeuristicEstimator(), factLineMaxChars = 240).check(ready, Patch.of(Op.FactAdd(ClaimKind.Hypothesis, "x".repeat(500)), Op.Next("n")), Ctx())), "the configured cap applies")
         assertEquals("no fenced code", rejected(validator.check(ready, Patch.of(Op.FactAdd(ClaimKind.Hypothesis, "```py\nx```"), Op.Next("n")), Ctx())))
         assertEquals("exactly one [>]", rejected(validator.check(ready.copy(plan = ready.plan.map { it.copy(mark = Mark.Cursor) }), Patch.of(Op.PlanAdd("c"), Op.Next("n")), Ctx())))
         val facts = Array<Op>(20) { Op.FactAdd(ClaimKind.Hypothesis, "w ".repeat(120)) }

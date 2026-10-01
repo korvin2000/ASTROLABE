@@ -48,8 +48,8 @@ public data class VerifiedFailure @JvmOverloads constructor(
 }
 
 /**
- * `budget.attempts` of one increment (§11.3, §13.3; default 2: the initial attempt plus one alternative or escalated
- * attempt). It counts the substantive attempts made, keyed by the increment, never by attempt id: a controller-assigned
+ * `budget.attempts` of one increment (§11.3, §13.3; default `Defaults.attemptsPerIncrement`: the initial attempt plus
+ * alternative or escalated attempts). It counts the substantive attempts made, keyed by the increment, never by attempt id: a controller-assigned
  * new attempt id never replenishes it.
  */
 public class AttemptAllowance @JvmOverloads constructor(

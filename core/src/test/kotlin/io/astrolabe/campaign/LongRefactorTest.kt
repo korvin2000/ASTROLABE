@@ -69,6 +69,9 @@ class LongRefactorTest {
     private val policy = CampaignPolicy(Tokens(2_000_000))
     private val small = Profile("small", FakeProfiles.PROVIDER, "fake-small", FakeProfiles.capabilities(16_000, 500), FakeProfiles.main.priceTable)
 
+    /** A 16K window cannot reserve the default [A] and observation sizes (D-370); a small-window task configures its own. */
+    private val smallWindow = alwaysPlan.copy(rMaxTokens = 16_000, anchorMaxTokens = 2_500, registerCapTokens = 1_200, lookBudgetTokens = 1_500, runBudgetTokens = 1_200)
+
     @BeforeTest
     fun setUp() {
         repo = TempRepo.create()
@@ -151,7 +154,7 @@ class LongRefactorTest {
 
     @Test
     fun `a long refactor under context pressure continues the partial increment and drops nothing`() = runBlocking<Unit> {
-        val config = Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all + (small.id to small), defaults = alwaysPlan)
+        val config = Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all + (small.id to small), defaults = smallWindow)
         val events = Events(clock)
         val recorder = EventRecorder().also(events::subscribe)
         events.use { Controller(config, clock, idGen, events).open(repo.root, request, policy).use { c ->

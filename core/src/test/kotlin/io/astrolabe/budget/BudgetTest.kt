@@ -68,7 +68,7 @@ class BudgetTest {
         val budget = Budget.of(Defaults(), Tokens(2_500_000))
         assertEquals(12, budget.cells)
         assertEquals(80, budget.turnsPerCell)
-        assertEquals(2, budget.attempts)
+        assertEquals(3, budget.attempts)
         assertEquals(Tokens(3), Tokens(5) - Tokens(2))
         assertEquals(Tokens.ZERO, Tokens(2) - Tokens(5))
         assertEquals(Tokens(34), Tokens(100).fraction(0.334))

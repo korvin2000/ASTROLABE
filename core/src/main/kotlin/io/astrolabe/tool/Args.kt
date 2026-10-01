@@ -10,12 +10,15 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
-/** `look(what, target, budget, near?, glob?, in, since?)` (§5.4). */
+/**
+ * `look(what, target, budget, near?, glob?, in, since?)` (§5.4). An omitted [budget] is the configured
+ * `Defaults.lookBudgetTokens`, resolved by the executor.
+ */
 @Serializable
 public data class LookArgs(
     val what: String,
     val target: String? = null,
-    val budget: Int = 4_000,
+    val budget: Int? = null,
     val near: String? = null,
     val glob: String? = null,
     @SerialName("in") val scope: String = "workspace",
@@ -27,7 +30,7 @@ public data class LookArgs(
     init {
         require(what in ToolOps.look) { "unknown look op '$what'" }
         require(scope in setOf("workspace", "store", "kb")) { "unknown look scope '$scope'" }
-        require(budget > 0) { "budget must be positive" }
+        require(budget == null || budget > 0) { "budget must be positive" }
     }
 }
 
@@ -244,7 +247,10 @@ public data class EditArgs(val ops: List<EditOpArgs>, val why: String) {
     }
 }
 
-/** `run(argv|cmd, …)`, `run(op=poll, handle, since?)`, `run(op=cancel, handle)` (§5.4). */
+/**
+ * `run(argv|cmd, …)`, `run(op=poll, handle, since?)`, `run(op=cancel, handle)` (§5.4). An omitted [budget] or
+ * [timeout] (seconds) is the configured `Defaults.runBudgetTokens` / `runTimeoutSeconds`, resolved by the executor.
+ */
 @Serializable
 public data class RunArgs(
     val op: String = "run",
@@ -252,8 +258,8 @@ public data class RunArgs(
     val cmd: String? = null,
     val cwd: String? = null,
     val shape: String = "auto",
-    val budget: Int = 1_200,
-    val timeout: Int = 120,
+    val budget: Int? = null,
+    val timeout: Int? = null,
     val bg: Boolean = false,
     val intent: String? = null,
     @SerialName("class_hint") val classHint: String? = null,
@@ -267,7 +273,7 @@ public data class RunArgs(
             "run" -> require((argv != null && argv.isNotEmpty()) xor (!cmd.isNullOrBlank())) { "run needs exactly one of argv or cmd" }
             else -> require(!handle.isNullOrBlank()) { "$op needs a handle" }
         }
-        require(budget > 0 && timeout > 0) { "budget and timeout must be positive" }
+        require((budget == null || budget > 0) && (timeout == null || timeout > 0)) { "budget and timeout must be positive" }
     }
 }
 

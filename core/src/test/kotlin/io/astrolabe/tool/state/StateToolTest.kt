@@ -135,7 +135,7 @@ class StateToolTest {
         assertEquals("rejected", status(rejected))
         assertFalse(rejected.applied)
         assertTrue(rejected.body.startsWith("STATE v1 unchanged · rejected: v needs an existing evidence id — "), rejected.body)
-        assertTrue(Regex("register \\d+/1200 tokens · patch \\d+/1200 tokens").containsMatchIn(rejected.body), rejected.body)
+        assertTrue(Regex("register \\d+/3000 tokens · patch \\d+/1200 tokens").containsMatchIn(rejected.body), rejected.body)
         assertEquals(before, tool.register, "nothing applied")
         assertNull(SqliteRegisterVersions(store, clock).get(ids.context!!, 2))
 

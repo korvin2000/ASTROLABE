@@ -1,5 +1,6 @@
 package io.astrolabe.tool
 
+import io.astrolabe.Defaults
 import io.astrolabe.budget.Tokens
 import io.astrolabe.event.AgentEvent
 import io.astrolabe.event.Events
@@ -16,6 +17,7 @@ import io.astrolabe.workset.Workset
 import io.astrolabe.workspace.LineRange
 import io.astrolabe.workspace.Ranges
 import kotlinx.coroutines.test.runTest
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -32,7 +34,7 @@ class DispatcherTest {
     private fun calls(vararg raw: Pair<String, String>): List<ToolCall> =
         (ToolCalls.parse(raw.mapIndexed { i, (family, json) -> ProviderCall("c${i + 1}", family, json) }) as ParsedCalls.Valid).calls
 
-    private fun look(budget: Int = 500) = "look" to """{"what":"read","target":"src/a.py:1-10","budget":$budget}"""
+    private fun look(budget: Int? = 500) = "look" to """{"what":"read","target":"src/a.py:1-10"${budget?.let { ""","budget":$it""" } ?: ""}}"""
     private fun edit() = "edit" to """{"ops":[{"path":"src/a.py","expect":"c02e","hunks":[{"anchor":"x","new":"y"}]}],"why":"w"}"""
     private fun run(argv: String, condition: String? = null) = "run" to """{"argv":[$argv]${condition?.let { ""","if":"$it"""" } ?: ""}}"""
     private fun state() = "state" to """{"op":"patch","patch":[{"next":"x"}]}"""
@@ -43,8 +45,12 @@ class DispatcherTest {
         runtime = RuntimeFields("act-$opId", "ok", null, null, "src/a.py:1-10", "complete"),
     )
 
+    /** The budget each look executed with, by op id. */
+    private val lookBudgets = ConcurrentHashMap<Int, Int>()
+
     private val executors: Map<ToolFamily, ToolExecutor> = mapOf(
         ToolFamily.Look to ToolExecutor { call, _ ->
+            (call.args as Args.Look).args.budget?.let { lookBudgets[call.opId] = it }
             workset.register(Entry("src/a.py", Ranges.single(1, 10), v1, EntrySource.Look, turn = 1, resultId = "#${call.opId}", tokens = 120))
             ToolOutcome("1| def a():", header(call.opId), tokens = 120)
         },
@@ -96,13 +102,41 @@ class DispatcherTest {
     }
 
     @Test
-    fun `parallel reads draw on one budget admitted in emitted order and reconciled to actual use`() = runTest {
-        val result = dispatcher(maxParallelReads = 2).dispatch(4, calls(look(600), look(600), look(600)), Tokens(1_500))
-        assertIs<Disposition.Executed>(result.of(1))
-        assertIs<Disposition.Executed>(result.of(2))
-        val third = assertIs<Disposition.NotExecuted>(result.of(3))
-        assertTrue(third.reason.startsWith("read budget exhausted: 600 tokens requested, 300 available"), third.reason)
-        assertEquals(2, result.executed.size)
+    fun `parallel reads draw on one budget, a read gets what is left, and only a remainder below the floor refuses`() = runTest {
+        val result = dispatcher(maxParallelReads = 4).dispatch(4, calls(look(600), look(600), look(600), look(600)), Tokens(1_500))
+        assertEquals(mapOf(1 to 600, 2 to 600, 3 to 300), lookBudgets.toMap(), "the third read runs with the 300 tokens left")
+        val fourth = assertIs<Disposition.NotExecuted>(result.of(4))
+        assertEquals("read budget of this turn spent: 3 reads ran, 0 tokens left; read again next turn", fourth.reason)
+        assertEquals(3, result.executed.size)
+
+        lookBudgets.clear()
+        val small = dispatcher(maxParallelReads = 4).dispatch(5, calls(look(1_000), look(299), look(400)), Tokens(1_299))
+        assertEquals(mapOf(1 to 1_000, 2 to 299), lookBudgets.toMap(), "a read asking less than the floor still gets all it asked")
+        assertTrue(assertIs<Disposition.NotExecuted>(small.of(3)).reason.startsWith("read budget of this turn spent: 2 reads ran, 0 tokens left"))
+    }
+
+    @Test
+    fun `twelve small reads in one turn all run, later waves admitted against reconciled use`() = runTest {
+        val result = dispatcher().dispatch(9, calls(*Array(12) { look(null) }), Tokens(16_000))
+        assertEquals(12, result.executed.size, result.dispositions.toString())
+        // Waves of four: the first reserves 4 x 4000 and costs 4 x 120; the last read of each later wave gets the rest.
+        assertEquals(Defaults().lookBudgetTokens, lookBudgets[1])
+        assertEquals(16_000 - 4 * 120 - 3 * 4_000, lookBudgets[8])
+        assertEquals(16_000 - 8 * 120 - 3 * 4_000, lookBudgets[12])
+    }
+
+    @Test
+    fun `an omitted look budget is the executor's configured default`() = runTest {
+        val configured = object : ToolExecutor {
+            override suspend fun execute(call: ToolCall, context: TurnContext): ToolOutcome {
+                lookBudgets[call.opId] = (call.args as Args.Look).args.budget!!
+                return ToolOutcome("ok", tokens = 10)
+            }
+
+            override fun defaultReadTokens(call: ToolCall): Int = 700
+        }
+        Dispatcher(executors + (ToolFamily.Look to configured), workset, ids).dispatch(10, calls(look(null), look(900)), Tokens(5_000))
+        assertEquals(mapOf(1 to 700, 2 to 900), lookBudgets.toMap(), "an explicit budget wins")
     }
 
     @Test

@@ -39,7 +39,7 @@ The store is campaign-scoped, so `recall #17` works across cells; a stub index o
 
 ### 6.4 Cross-cell fact coherence `[A §6.4 — now a case of §4.4]`
 
-At compile time the harness re-validates every `v` fact: the evidence id must resolve; if the fact carries a `path@hash` anchor and the hash changed, the fact is rendered `v(stale @old)`. A fact stale for two consecutive cells with no reference is moved to the STATUS note and dropped from the register. `x` facts are retained durably until the campaign ends and offered to the extractor as `PIT` candidates; inactive records need not remain in every 1,200-token register projection. Required carry-forward that still cannot fit causes an explicit capacity response, not deletion.
+At compile time the harness re-validates every `v` fact: the evidence id must resolve; if the fact carries a `path@hash` anchor and the hash changed, the fact is rendered `v(stale @old)`. A fact stale for two consecutive cells with no reference is moved to the STATUS note and dropped from the register. `x` facts are retained durably until the campaign ends and offered to the extractor as `PIT` candidates; inactive records need not remain in every 3,000-token register projection. Required carry-forward that still cannot fit causes an explicit capacity response, not deletion.
 <!-- end-source-section: 6.4 -->
 
 <!-- source-section: 6.5 -->
