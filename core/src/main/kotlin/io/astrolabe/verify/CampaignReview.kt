@@ -112,7 +112,7 @@ public class CampaignReview(
         equivalence: EquivalenceReport?,
         why: String = "campaign review required",
     ): CampaignReviewOutcome {
-        val stamp = stamper.report().candidateId
+        val stamp = stamper.report(fresh = true).candidateId
         latest()?.takeIf { it.approved && it.verdict!!.reviewedCandidate == stamp && it.verdict.contractRevision == contract.version }?.let { earlier ->
             val record = earlier.copy(reused = true, equivalence = equivalence ?: earlier.equivalence)
             record(record)

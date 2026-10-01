@@ -40,7 +40,7 @@ public class WorktreeRefused(message: String) : IllegalStateException(message)
  * The worktrees of one main [main] workspace (§10.4, D-180). [createWorktree] adds a detached worktree at the main
  * line's base commit and copies the main candidate's tracked delta and untracked files into it, raw bytes through the
  * path contract of both workspaces (D-47), then checks that the new tree stamps equal to the main candidate under
- * [env]; anything it cannot reproduce (a symlink or directory entry, a concurrent change) refuses and removes the
+ * [env], both stamps hashed from bytes rather than the content cache (D-375); anything it cannot reproduce (a symlink or directory entry, a concurrent change) refuses and removes the
  * worktree. [remove] only ever removes a worktree this instance created, with `git worktree remove`, which never
  * touches a branch or a ref.
  */
@@ -59,7 +59,7 @@ public class Workspaces(
         require(increment.isNotBlank()) { "a worktree belongs to an increment" }
         val id = idOf(work, attempt, increment)
         synchronized(open) { require(id !in open) { "increment $increment of ${work.value}/${attempt.value} already has worktree ${id.value}" } }
-        val report = Stamper(main, env).report()
+        val report = Stamper(main, env).report(fresh = true)
         val commit = ObjectId.parseOrNull(report.baseCommit)
             ?: throw WorktreeRefused("the main line has no base commit to add a worktree at")
         val dir = root.resolve(id.value)
@@ -69,7 +69,7 @@ public class Workspaces(
         val worktree = try {
             val workspace = Workspace(id, dir, Git(dir, main.git.executable, main.git.timeoutMillis), main.paths.protectedPaths)
             copyDelta(report, workspace)
-            val own = Stamper(workspace, env).report()
+            val own = Stamper(workspace, env).report(fresh = true)
             if (own.candidateId != report.candidateId) {
                 throw WorktreeRefused("worktree ${id.value} stamps @${own.candidateId.hash8}, the main candidate @${report.candidateId.hash8}: differing ${Stamper.diff(report, own).sorted()}")
             }
