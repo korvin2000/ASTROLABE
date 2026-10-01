@@ -449,7 +449,7 @@ public class Cell @JvmOverloads constructor(
 
             // §3.7: the native output is durable before any result exists, then appended (calls before results).
             journalOutput(response)
-            appendNative(response)
+            val responseTokens = appendNative(response)
             when (response.stop) {
                 StopReason.Cancelled -> return cancelled("the provider cancelled the invocation")
                 StopReason.Refusal -> return failed("the model refused: ${response.text.lineSequence().firstOrNull().orEmpty()}")
@@ -466,10 +466,11 @@ public class Cell @JvmOverloads constructor(
             record.reset()
             val dispatchedAt = clock.millis()
             // D-374: this turn's results are exempt from eviction, so they must fit α of the window beside what the next
-            // request already holds, its output reserve and the anchor's growth; one default look always fits.
-            val headroom = (capabilities.contextLimitTokens * defaults.alpha).toLong() - estimate.upperBoundTokens -
+            // request already holds (this turn's response included), its output reserve and the anchor's growth. D-375:
+            // a spent window grants only the dispatcher's read floor; the reads past it wait for the next turn.
+            val headroom = (capabilities.contextLimitTokens * defaults.alpha).toLong() - estimate.upperBoundTokens - responseTokens -
                 ctx.model.maxOutputTokens - maxOf(0L, defaults.anchorMaxTokens - anchor.tokens)
-            val readBudget = minOf(defaults.rMaxTokens.toLong(), maxOf(defaults.lookBudgetTokens.toLong(), headroom))
+            val readBudget = minOf(defaults.rMaxTokens.toLong(), maxOf(Dispatcher.READ_FLOOR_TOKENS, headroom))
             val result = if (calls.isNotEmpty()) dispatcher.dispatch(turn, calls, Tokens(readBudget)) else null
             cost = cost.plusToolSeconds((clock.millis() - dispatchedAt) / MILLIS_PER_SECOND)
             val after = reconcile("turn $turn")
@@ -881,7 +882,9 @@ public class Cell @JvmOverloads constructor(
             }
         }
 
-        private fun appendNative(response: Response) {
+        /** Appends [response]'s replayed items to `[T]`; their estimated tokens, which the next request carries. */
+        private fun appendNative(response: Response): Long {
+            var tokens = 0L
             for (item in response.items) {
                 val resident = when (item) {
                     is Message -> Resident.message(item, turn, item.estimate(estimator).tokens)
@@ -890,7 +893,9 @@ public class Cell @JvmOverloads constructor(
                     else -> continue // usage and continuations are accounting items, never replayed as [T]
                 }
                 residents = residents + resident
+                tokens += resident.tokens
             }
+            return tokens
         }
 
         /** A result enters `[T]` with the pointer a stub will keep: the alias resolved to its observation, when it is one (§5.7). */

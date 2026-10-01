@@ -762,6 +762,23 @@ class CellTest {
     }
 
     @Test
+    fun `a response that spends the window leaves one turn only the read floor`() = runTest {
+        val reads = (0 until 12).map { read("c$it", "src/r$it.py") }
+        CellFixture(stateRoot).use { f ->
+            (0 until 12).forEach { f.repo.write("src/r$it.py", "r = $it\n") }
+            val small = Profile("small32", FakeProfiles.PROVIDER, "fake-small32", FakeProfiles.capabilities(32_000, 2_000), FakeProfiles.main.priceTable)
+            // The headroom before this response is appended is positive; the response itself spends it.
+            val long = say("reasoning ".repeat(3_200))
+            f.run(ScriptedModel.of(Scripted.Reply(listOf(long) + reads), Scripted.Reply(listOf(say("done")))), profile = small, profiles = FakeProfiles.all + (small.id to small))
+
+            val results = f.transcript(2).filterIsInstance<ToolResult>().associate { it.callId to resultText(it) }
+            val spent = results.filterValues { it.contains("read budget of this turn spent") }
+            assertEquals(reads.size - 1, spent.size, results.toString())
+            assertTrue(results.getValue("c0").contains("r = 0"), results.getValue("c0"))
+        }
+    }
+
+    @Test
     fun `the first pressure rebuilds the projection, a second one ends the cell partial, at admission or from the gate`() = runTest {
         CellFixture(stateRoot).use { f ->
             val overflow = f.run(ScriptedModel.of(Scripted.Reply(listOf(say("look"), tree("c1")))), profile = FakeProfiles.tiny)
