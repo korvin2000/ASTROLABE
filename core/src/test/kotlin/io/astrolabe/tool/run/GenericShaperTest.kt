@@ -48,6 +48,18 @@ class GenericShaperTest {
     }
 
     @Test
+    fun `a first line wider than the head share is cut and the last line still shows`() {
+        val output = "x".repeat(3_000) + "\n" + (1..200).joinToString("\n", postfix = "\n") { "line $it " + "y".repeat(70) } + "ZZZ-LAST summary line\n"
+        val budget = ShapeBudget(1_000, HeuristicEstimator())
+        val shaped = Shapers.shape(RunCapture("act-3", listOf("make", "all"), exitCode = 2, output = output.toByteArray()), budget)
+
+        assertTrue(HeuristicEstimator().estimate(shaped.view).upperBoundTokens <= 1_000, shaped.view)
+        assertTrue(shaped.view.contains("  xxx") && shaped.view.contains("x …\n"), "the head line is cut: ${shaped.view.take(400)}")
+        assertTrue(Regex("""  … \d+ lines elided …""").containsMatchIn(shaped.view), shaped.view)
+        assertTrue(shaped.view.contains("  ZZZ-LAST summary line"), shaped.view)
+    }
+
+    @Test
     fun `cargo test summary and per-test lines`() {
         val shaped = Shapers.shape(Recorded.capture("cargo-fail.txt", listOf("cargo", "test"), exitCode = 101))
         assertEquals("generic/cargo", shaped.shaper)

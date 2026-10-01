@@ -575,6 +575,33 @@ class EditTest {
     }
 
     @Test
+    fun `a partial batch names written, refused, failed and not attempted paths`() = runTest {
+        val ops = listOf("a", "b", "c", "d").map { name ->
+            repo.write("src/$name.py", "v = 1\n")
+            op("src/$name.py", seen("src/$name.py", 1, 1), hunk(if (name == "d") "v = 99" else "v = 1", "v = 2"))
+        }
+        val failing = object : Os by os {
+            override fun replaceFileAtomically(path: Path, bytes: ByteArray) {
+                if (path.fileName.toString() == "b.py") throw OsFailure("replaceFileAtomically", 0, "disk full")
+                os.replaceFileAtomically(path, bytes)
+            }
+        }
+        val out = run(batch(*ops.toTypedArray()), edit(os = failing))
+
+        assertEquals("partial", status(out), out.body)
+        assertEquals("v = 2\n", Files.readString(repo.resolve("src/a.py")))
+        assertEquals("v = 1\n", Files.readString(repo.resolve("src/c.py")), "the op after the failure never ran")
+        assertTrue(
+            out.body.contains(
+                "1 of 4 files written; resend only the refused ops: src/d.py (op 4); " +
+                    "failed (I/O, state uncertain): src/b.py (op 2) — look at it before resending; " +
+                    "not attempted (resend unchanged): src/c.py (op 3)",
+            ),
+            out.body,
+        )
+    }
+
+    @Test
     fun `a postimage persistence failure reports the file already written and its recovery preimage`() = runTest {
         val version = seen("src/b.py", 1, 2)
         val failing = object : Os by os {

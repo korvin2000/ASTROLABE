@@ -310,6 +310,32 @@ class StamperTest {
     }
 
     @Test
+    fun `a same-size rewrite with a restored modification time is caught by a fresh report which repairs the cache`(@TempDir state: Path) {
+        WorkspaceFixture.create(state).use { fixture ->
+            val file = fixture.repo.resolve("notes.txt")
+            fixture.repo.untracked("notes.txt", "aaaa\n")
+            fixture.settle()
+            val modified = Files.getLastModifiedTime(file)
+            val before = fixture.stamper.report()
+            assertEquals(before, fixture.stamper.report(), "the entry is trusted")
+
+            // `cp -p`, `touch -r`, archive extraction: same size, the old modification time restored.
+            fixture.repo.write("notes.txt", "bbbb\n")
+            Files.setLastModifiedTime(file, modified)
+            val cached = fixture.stamper.report()
+            if (file.fileSystem.supportedFileAttributeViews().contains("unix")) {
+                assertEquals(setOf("notes.txt"), Stamper.diff(before, cached), "ctime is part of the validity key")
+            }
+
+            val fresh = fixture.stamper.report(fresh = true)
+            assertEquals(Digest.of("bbbb\n".toByteArray()), fresh.members.getValue("notes.txt").digest)
+            assertEquals(setOf("notes.txt"), Stamper.diff(before, fresh))
+            assertEquals(fresh, fixture.stamper.report(), "the fresh read repaired the cached entry")
+            assertEquals(fresh.stamp, fixture.stamper.stamp(fresh = true))
+        }
+    }
+
+    @Test
     fun `adding and deleting an untracked file is detected over a warm cache`(@TempDir state: Path) {
         WorkspaceFixture.create(state).use { fixture ->
             fixture.repo.untracked("notes/a.txt", "a\n")

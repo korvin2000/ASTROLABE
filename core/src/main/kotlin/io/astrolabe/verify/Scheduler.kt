@@ -135,12 +135,12 @@ public class Scheduler(
         if (isolatedRoot != null) runIsolated(check, contractVersion, inputs, isolatedRoot, execute)?.let { return it }
         val limits = ArrayList<Limit>()
         return workspace.mutation.withLock {
-            val before = stamper.report()
+            val before = stamper.report(fresh = true)
             val paths = testedInputsFor(check, inputs)
             val seenBefore = paths.associateWith { snapshot(it) }
             val manifest = manifestOf(check.inputClosure)
             val executed = execute(workspace.root)
-            val after = stamper.report()
+            val after = stamper.report(fresh = true)
             announceMoved(registry, before, after, "check ${check.id}")
             val afterPaths = testedInputsFor(check, inputs)
             val pathSet = paths.toHashSet()
@@ -175,7 +175,7 @@ public class Scheduler(
     private suspend fun runIsolated(check: Check, contractVersion: Int, inputs: Collection<String>, root: Path, execute: suspend (root: Path) -> Executed, retryOf: Receipt? = null): Receipt? {
         val dir = root.resolve(idGen.next("cand"))
         val (report, manifest, exported) = workspace.mutation.withLock {
-            val report = stamper.report()
+            val report = stamper.report(fresh = true)
             if (retryOf != null && (report.candidateId != retryOf.stampBefore ||
                     report.env.envId != retryOf.envId || !report.env.envKnown)) return null
             Triple(report, manifestOf(check.inputClosure), export(report, dir))

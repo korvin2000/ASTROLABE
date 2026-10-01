@@ -52,6 +52,18 @@ class WindowsOwnerTest {
     }
 
     @Test
+    fun `an extra Path beside the inherited PATH both resolves the program and reaches the child`(@TempDir root: Path) {
+        val bin = Files.createDirectories(root.resolve("bin-d374"))
+        val work = Files.createDirectories(root.resolve("work"))
+        batch(bin.resolve("tool-d374.cmd"), "echo seen=%PATH%")
+
+        val (exit, output) = run(work, listOf("tool-d374"), mapOf("Path" to "$bin;${System.getenv("PATH")}"))
+
+        assertEquals(ProcStatus.Exited(0), exit, "log was: $output")
+        assertTrue(output.contains("seen=$bin;"), "the child sees the PATH the program was resolved through; log was: $output")
+    }
+
+    @Test
     fun `a relative script runs with or without its extension and never the POSIX script beside it`(@TempDir root: Path) {
         batch(root.resolve("tool.bat"), "echo local-ran %~1")
         Files.writeString(root.resolve("tool"), "#!/bin/sh\necho posix\n")

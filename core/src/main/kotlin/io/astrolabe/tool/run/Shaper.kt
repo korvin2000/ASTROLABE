@@ -497,20 +497,28 @@ internal fun buildView(
     } else {
         RawSides(rawLines.take(headLines), rawLines.takeLast(tailLines), cut = false)
     }
-    val elided = rawLines.size - shownHead.size - shownTail.size
-    if (rawLines.isNotEmpty()) {
-        if (elided == 0) {
-            body += "output (${rawLines.size} lines):"
-            (shownHead + shownTail).forEach { body += "  $it" }
-        } else {
-            body += "output (head ${shownHead.size} / tail ${shownTail.size} of ${rawLines.size} lines):"
-            shownHead.forEach { body += "  $it" }
-            body += "  … $elided lines elided …"
-            shownTail.forEach { body += "  $it" }
-        }
+    fun raw(shownHead: List<String>, shownTail: List<String>): List<String> {
+        if (rawLines.isEmpty()) return emptyList()
+        val elided = rawLines.size - shownHead.size - shownTail.size
+        if (elided == 0) return listOf("output (${rawLines.size} lines):") + (shownHead + shownTail).map { "  $it" }
+        return listOf("output (head ${shownHead.size} / tail ${shownTail.size} of ${rawLines.size} lines):") +
+            shownHead.map { "  $it" } + "  … $elided lines elided …" + shownTail.map { "  $it" }
     }
 
     val maxFooter = footer(viewTruncated = true, captureTruncated = captureTruncated, capture = capture, rawLines = rawLines.size, budget = budget)
+    // D-374: when the raw section overflows the view, head lines go first; the last tail line is the last to go.
+    var keptHead = shownHead
+    var keptTail = shownTail
+    fun fits(raw: List<String>): Boolean = budget.fits(buildString {
+        append(head.joinToString("\n"))
+        (body + raw).forEach { append('\n').append(it) }
+        if (maxFooter.isNotEmpty()) append('\n').append(maxFooter)
+    })
+    while (!fits(raw(keptHead, keptTail)) && (keptHead.isNotEmpty() || keptTail.size > 1)) {
+        if (keptHead.isNotEmpty()) keptHead = keptHead.dropLast(1) else keptTail = keptTail.drop(1)
+    }
+    val elided = rawLines.size - keptHead.size - keptTail.size
+    body += raw(keptHead, keptTail)
     val acc = StringBuilder(head.joinToString("\n"))
     var included = 0
     for (line in body) {
@@ -567,14 +575,18 @@ private fun budgetedSides(lines: List<String>, budget: ShapeBudget, room: Long):
     var used = 0L
     var headCount = 0
     while (headCount < lines.size && used + costs[headCount] <= headRoom) used += costs[headCount++]
+    val shownHead = lines.take(headCount).toMutableList()
+    // A first line wider than the head's share is cut there and charged to it before the tail takes the rest.
+    if (headCount == 0) cut(lines.first(), budget, headRoom, fromEnd = false)?.let {
+        shownHead += it
+        used = budget.tokensOf("  $it\n")
+    }
     val tailRoom = room - used
     var tailUsed = 0L
     var tailCount = 0
-    while (headCount + tailCount < lines.size && tailUsed + costs[lines.size - 1 - tailCount] <= tailRoom) tailUsed += costs[lines.size - 1 - tailCount++]
-    val shownHead = lines.take(headCount).toMutableList()
+    while (shownHead.size + tailCount < lines.size && tailUsed + costs[lines.size - 1 - tailCount] <= tailRoom) tailUsed += costs[lines.size - 1 - tailCount++]
     val shownTail = lines.takeLast(tailCount).toMutableList()
-    if (headCount == 0) cut(lines.first(), budget, headRoom, fromEnd = false)?.let { shownHead += it }
-    if (tailCount == 0 && lines.size > shownHead.size) cut(lines.last(), budget, room - headRoom, fromEnd = true)?.let { shownTail += it }
+    if (tailCount == 0 && lines.size > shownHead.size) cut(lines.last(), budget, tailRoom, fromEnd = true)?.let { shownTail += it }
     return RawSides(shownHead, shownTail, cut = shownHead.size > headCount || shownTail.size > tailCount)
 }
 

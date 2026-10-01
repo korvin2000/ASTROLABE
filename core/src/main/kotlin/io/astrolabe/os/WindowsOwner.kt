@@ -29,7 +29,14 @@ internal class WindowsOwner(private val beforeAssignment: (Long) -> Unit = {}) :
     )
 
     override fun start(start: OwnedStart): OwnedProcess {
-        val launch = plan(start.command, start.workingDirectory, start.environment)
+        // One case-insensitive view, later entries winning, for both program resolution and the child's block (D-374).
+        val environment = TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER).apply {
+            start.environment.forEach { (name, value) ->
+                remove(name)
+                put(name, value)
+            }
+        }
+        val launch = plan(start.command, start.workingDirectory, environment)
         return Arena.ofConfined().use { arena ->
             val capture = arena.allocate(Win32.CAPTURE)
             val security = arena.allocate(Win32.SECURITY_ATTRIBUTES).also {
@@ -103,7 +110,7 @@ internal class WindowsOwner(private val beforeAssignment: (Long) -> Unit = {}) :
                     MemorySegment.NULL,
                     1, // The explicit handle list excludes other simultaneous launches and host handles.
                     CREATE_SUSPENDED or CREATE_UNICODE_ENVIRONMENT or CREATE_NO_WINDOW or EXTENDED_STARTUPINFO_PRESENT,
-                    environmentBlock(arena, start.environment),
+                    environmentBlock(arena, environment),
                     arena.allocateFrom(start.workingDirectory.toString(), StandardCharsets.UTF_16LE),
                     startupInfo,
                     info,
@@ -177,11 +184,10 @@ internal class WindowsOwner(private val beforeAssignment: (Long) -> Unit = {}) :
         return (times.get(ValueLayout.JAVA_LONG, 0L) - FILETIME_EPOCH_OFFSET) / 10_000L
     }
 
-    private fun environmentBlock(arena: Arena, environment: Map<String, String>): MemorySegment {
+    private fun environmentBlock(arena: Arena, environment: TreeMap<String, String>): MemorySegment {
         // CreateProcessW requires the Unicode block sorted case-insensitively and double-NUL ended.
-        val sorted = TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER).apply { putAll(environment) }
         val block = buildString {
-            sorted.forEach { (name, value) -> append(name).append('=').append(value).append('\u0000') }
+            environment.forEach { (name, value) -> append(name).append('=').append(value).append('\u0000') }
             append('\u0000')
         }
         return arena.allocateFrom(block, StandardCharsets.UTF_16LE)
