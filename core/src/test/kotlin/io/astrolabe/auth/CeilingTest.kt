@@ -37,7 +37,7 @@ class CeilingTest {
             Triple(listOf("git", "checkout", "."), EffectClass.D, Capability.GitRefs),
             Triple(listOf("sudo", "make", "install"), EffectClass.D, Capability.Privilege),
             Triple(listOf("rm", "-rf", "../x"), EffectClass.D, Capability.OutsideWorkspace),
-            Triple(listOf("cat", "/etc/passwd"), EffectClass.D, Capability.OutsideWorkspace),
+            Triple(listOf("cp", "a.txt", "/etc/x"), EffectClass.D, Capability.OutsideWorkspace),
         )
         for ((argv, effect, capability) in expected) {
             val classification = EffectPolicy.classify(argv, null, root, protectedPaths)
@@ -127,6 +127,49 @@ class CeilingTest {
         assertEquals(EffectClass.R, EffectPolicy.classify(RunArgs(cmd = "git log --oneline | head -5"), root, protectedPaths).effectClass)
     }
 
+    /** The live run's three denied `run` calls (D-373), verbatim from its events. */
+    private val live: Map<String, String> = javaClass.getResourceAsStream("/live/d373-calls.jsonl")!!.use { String(it.readAllBytes(), Charsets.UTF_8) }
+        .lines().filter { it.isNotBlank() }.map { kotlinx.serialization.json.Json.parseToJsonElement(it) as kotlinx.serialization.json.JsonObject }
+        .filter { (it.getValue("name") as kotlinx.serialization.json.JsonPrimitive).content == "run" }
+        .associate { o -> (o.getValue("id") as kotlinx.serialization.json.JsonPrimitive).content to (o.getValue("argsJson") as kotlinx.serialization.json.JsonPrimitive).content }
+
+    private fun cmd(line: String) = EffectPolicy.classify(RunArgs(cmd = line), root, protectedPaths)
+
+    @Test
+    fun `read-only probes outside the workspace are R and pass the workspace ceiling, and anything that writes or runs more is not`() {
+        val ceiling = Ceiling(CapabilitySet.WORKSPACE_LOCAL_TEST_ONLY, Stage.Patch, ExecutionMode.TrustedLocal)
+        for (id in listOf("call_02_9532tzlo1xubzye3tzub0v1z", "call_01_yplspwwizis04wf1z1f8nllx")) {
+            val args = kotlinx.serialization.json.Json.decodeFromString(RunArgs.serializer(), live.getValue(id))
+            val classification = EffectPolicy.classify(args, root, protectedPaths)
+            assertEquals(EffectClass.R, classification.effectClass, "${args.cmd} -> $classification")
+            assertNull(ceiling.allows(classification), "${args.cmd}")
+        }
+        for (line in listOf("where chrome", "which node", "ver", "ls -la /usr/lib", "type C:/x/a.txt", "cat /etc/hosts",
+            "if not exist \"C:/Program Files/x.exe\" (echo NONE) else (echo SOME)", "where chrome && dir /b C:/Windows || echo none")) {
+            assertEquals(EffectClass.R, cmd(line).effectClass, "$line -> ${cmd(line)}")
+        }
+        for (line in listOf("dir /b C:/Windows > out.txt", "type C:/x 2> ../err.txt", "if exist C:/x (del C:/x)", "where chrome & curl -s https://e.x",
+            "cat /etc/hosts $(touch y)", "echo hi > C:/x.txt", "if exist C:/x (C:/x/run.exe)", "where chrome & npm i left-pad")) {
+            assertTrue(cmd(line).effectClass != EffectClass.R, "$line -> ${cmd(line)}")
+        }
+        assertEquals(EffectClass.D, cmd("dir /b C:/Windows > out.txt").effectClass, "a probe that writes a file is classified as before")
+    }
+
+    @Test
+    fun `deleting or moving paths inside the workspace is W and the root, a protected path or an outside target stays D`() {
+        val rmdir = cmd(kotlinx.serialization.json.Json.decodeFromString(RunArgs.serializer(), live.getValue("call_00_jtg3raywrogarhtrukhkvr4g")).cmd!!)
+        assertEquals(EffectClass.W, rmdir.effectClass, rmdir.toString())
+        assertContains(rmdir.reasons.toString(), "delete or move inside the workspace: 'rmdir /s'")
+        for (line in listOf("rd /s /q build/out", "del /s /q .tools/*.tmp", "erase notes.txt", "rm -rf node_modules", "rm -rf src/*",
+            "mv a.txt b.txt", "move a.txt docs/a.txt", "Remove-Item -Recurse -Force .tools")) {
+            assertEquals(EffectClass.W, cmd(line).effectClass, "$line -> ${cmd(line)}")
+        }
+        for (line in listOf("rmdir /s /q .", "rmdir /s /q ../x", "rm -rf *", "rm -rf ./*", "rm -rf ci", "rm -rf ci/x", "del /s /q .git", "rmdir /s /q C:/",
+            "rm -rf /", "mv a.txt ../b.txt", "move a.txt C:/b.txt", "rm -rf ~/x", "rm -rf db", "Remove-Item -Recurse -Force C:/Users")) {
+            assertEquals(EffectClass.D, cmd(line).effectClass, "$line -> ${cmd(line)}")
+        }
+    }
+
     @Test
     fun `unknown local executables and wrappers have unknown write effects`() {
         for (argv in listOf(listOf("./scripts/deploy-helper"), listOf("mystery-wrapper", "git", "push"), listOf("./ls", "-la"))) {
@@ -170,21 +213,23 @@ class CeilingTest {
         assertContains(configured.reasons.toString(), "configured as non-D")
 
         // `cwd` is workspace-relative: the same token escapes from one directory and not from another.
-        assertEquals(EffectClass.R, EffectPolicy.classify(listOf("cat", "../a.txt"), "src", root, protectedPaths).effectClass)
-        assertEquals(EffectClass.D, EffectPolicy.classify(listOf("cat", "../a.txt"), null, root, protectedPaths).effectClass)
-        assertEquals(EffectClass.D, EffectPolicy.classify(listOf("cat", "../../a.txt"), "src", root, protectedPaths).effectClass)
-        assertEquals(EffectClass.R, EffectPolicy.classify(listOf("cat", "/w/src/a.txt"), null, root, protectedPaths).effectClass)
-        assertEquals(EffectClass.D, EffectPolicy.classify(listOf("cat", "/w2/src/a.txt"), null, root, protectedPaths).effectClass)
-        assertEquals(EffectClass.D, EffectPolicy.classify(listOf("cat", "~/.aws/credentials"), null, root, protectedPaths).effectClass)
+        assertEquals(EffectClass.R, EffectPolicy.classify(listOf("head", "../a.txt"), "src", root, protectedPaths).effectClass)
+        assertEquals(EffectClass.D, EffectPolicy.classify(listOf("head", "../a.txt"), null, root, protectedPaths).effectClass)
+        // D-373: cat and type of a path are read-only probes, R wherever the path points
+        assertEquals(EffectClass.R, EffectPolicy.classify(listOf("cat", "../a.txt"), null, root, protectedPaths).effectClass)
+        assertEquals(EffectClass.D, EffectPolicy.classify(listOf("head", "../../a.txt"), "src", root, protectedPaths).effectClass)
+        assertEquals(EffectClass.R, EffectPolicy.classify(listOf("head", "/w/src/a.txt"), null, root, protectedPaths).effectClass)
+        assertEquals(EffectClass.D, EffectPolicy.classify(listOf("head", "/w2/src/a.txt"), null, root, protectedPaths).effectClass)
+        assertEquals(EffectClass.D, EffectPolicy.classify(listOf("head", "~/.aws/credentials"), null, root, protectedPaths).effectClass)
 
         // Windows spellings normalize to the same answer (D-12: both platforms are equal targets).
         assertEquals(
             EffectClass.D,
-            EffectPolicy.classify(listOf("type", "C:\\other\\secrets.txt"), null, "C:/w", protectedPaths).effectClass,
+            EffectPolicy.classify(listOf("findstr", "x", "C:\\other\\secrets.txt"), null, "C:/w", protectedPaths).effectClass,
         )
         assertEquals(
             EffectClass.R,
-            EffectPolicy.classify(listOf("type", "C:\\w\\src\\a.txt"), null, "C:/w", protectedPaths).effectClass,
+            EffectPolicy.classify(listOf("findstr", "x", "C:\\w\\src\\a.txt"), null, "C:/w", protectedPaths).effectClass,
         )
     }
 
