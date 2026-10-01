@@ -431,6 +431,37 @@ class EditTest {
     }
 
     @Test
+    fun `a create over a file the cell wrote or knows in full replaces it and reverts, any other existing file refuses`() = runTest {
+        val cell = edit()
+        assertEquals("ok", status(run("""{"ops":[{"create":"src/own.py","content":"o = 1\n"}],"why":"w"}""", cell)))
+        val first = registry.version("src/own.py")!!
+        val again = run("""{"ops":[{"create":"src/own.py","content":"o = 2\np = 3\n"}],"why":"w"}""", cell, turn = 2)
+        assertEquals("ok", status(again), again.body)
+        assertTrue(again.body.contains("✓ 1 replace src/own.py @${first.hash8}→@"), again.body)
+        assertTrue(again.body.contains("(create over a file this cell wrote: replaced in place)"), again.body)
+        assertEquals("o = 2\np = 3\n", Files.readString(repo.resolve("src/own.py")))
+        assertEquals(first, preimages.of("edit-2").single().versionBefore)
+        assertEquals("ok", status(run("""{"ops":[{"revert":"#2"}],"why":"undo"}""", cell, turn = 3)))
+        assertEquals("o = 1\n", Files.readString(repo.resolve("src/own.py")), "the preimage restores the created bytes")
+
+        // Not written by the cell and only partly KNOWN: refused with both ways out.
+        seen("src/a.py", 1, 2)
+        val partly = run("""{"ops":[{"create":"src/a.py","content":"z = 1\n"}],"why":"w"}""", cell)
+        assertEquals("refused", status(partly))
+        assertTrue(partly.body.contains("exists: 'src/a.py' exists; read it first, or use {delete} then {create} in one batch"), partly.body)
+        assertEquals(a, Files.readString(repo.resolve("src/a.py")))
+        // KNOWN in full at its current version: replaced.
+        seen("src/a.py", 1, 9)
+        val known = run("""{"ops":[{"create":"src/a.py","content":"z = 1\n"}],"why":"w"}""", cell)
+        assertEquals("ok", status(known), known.body)
+        assertTrue(known.body.contains("(create over a file KNOWN in full: replaced in place)"), known.body)
+        assertEquals("z = 1\n", Files.readString(repo.resolve("src/a.py")))
+        // A file the cell wrote but someone else changed since is no longer the cell's own.
+        repo.write("src/a.py", "z = 2\n")
+        assertEquals("refused", status(run("""{"ops":[{"create":"src/a.py","content":"z = 3\n"}],"why":"w"}""", cell)))
+    }
+
+    @Test
     fun `a hunk outside the displayed range is refused with the outline and the displayed ranges (FX-02)`() = runTest {
         val v = seen("src/a.py", 1, 2)
         val out = run(anchored("src/a.py", v, hunk("    return 2", "    return 20")))
@@ -706,7 +737,9 @@ class EditTest {
         val vc = registry.version("src/c.py")!!
         assertTrue(workset.covers("src/c.py", vc, LineRange(1, 2)), "a created file is displayed in full at its version")
         assertTrue(created.body.contains("✓ 1 create src/c.py @new→@${vc.hash8} +2 −0 · syntax ok"), created.body)
-        assertEquals("refused", status(run("""{"ops":[{"create":"src/c.py","content":"again"}],"why":"dup"}""")))
+        // D-371: a create over a file this cell created replaces it in place.
+        assertEquals("ok", status(run("""{"ops":[{"create":"src/c.py","content":"def c():\n    return 4\n"}],"why":"dup"}""")))
+        val vc2 = registry.version("src/c.py")!!
 
         val vb = registry.version("src/b.py")!!
         val renamed = run("""{"ops":[{"rename":"src/b.py","expect":"${vb.digest.hex}","to":"src/b2.py"}],"why":"mv"}""")
@@ -717,11 +750,11 @@ class EditTest {
         assertNull(registry.recorded("src/b.py"))
         assertEquals("refused", status(run("""{"ops":[{"rename":"src/b2.py","expect":"${vb.digest.hex}","to":"src/B2.py"}],"why":"case"}""")))
 
-        val deleted = run("""{"ops":[{"delete":"src/c.py","expect":"${vc.digest.hex}"}],"why":"rm"}""")
+        val deleted = run("""{"ops":[{"delete":"src/c.py","expect":"${vc2.digest.hex}"}],"why":"rm"}""")
         assertEquals("ok", status(deleted))
         assertFalse(Files.exists(repo.resolve("src/c.py")))
-        assertTrue(deleted.body.contains("✓ 1 delete src/c.py @${vc.hash8}→@gone +0 −2"), deleted.body)
-        assertEquals("refused", status(run("""{"ops":[{"delete":"src/c.py","expect":"${vc.digest.hex}"}],"why":"rm"}""")))
+        assertTrue(deleted.body.contains("✓ 1 delete src/c.py @${vc2.hash8}→@gone +0 −2"), deleted.body)
+        assertEquals("refused", status(run("""{"ops":[{"delete":"src/c.py","expect":"${vc2.digest.hex}"}],"why":"rm"}""")))
 
         val vbin = seen("src/blob.bin", 1, 1)
         val binary = run(anchored("src/blob.bin", vbin, hunk("x", "y")))

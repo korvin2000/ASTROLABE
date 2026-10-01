@@ -46,6 +46,9 @@ edit(ops, why)
     `expect`/`if` beside exactly one op lacking it moves into it; `hunks` as a JSON string is parsed; any other mix is
     refused naming the accepted form. `delete` then `create` of one path in one batch is a whole-file replace (preimage
     saved, the delete's `expect` guards it)                                                                       (D-365)
+  · `create` over an existing file replaces it in place (preimage saved, revertible) when this cell wrote its current
+    bytes (created or replaced it, then its own anchored edits) or every line is KNOWN at its current version;
+    otherwise `exists`: "read it first, or use {delete} then {create} in one batch"                         (D-371)
   · preflight all ops, then apply; a mid-batch I/O failure reports actual per-file state with preimage ids —
     never "rolled back", never retried blindly                                                                   [J1 §5.2]
   · ops are grouped by the paths they touch (a rename both names; several ops on one path, in order): a refused

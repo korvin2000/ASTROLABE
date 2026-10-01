@@ -182,6 +182,9 @@ public class Edit(
     /** The classified acceptance-surface flags of the edit with [alias] (§8.6), its `why` as the recorded reason. */
     public fun flagsOf(alias: String): List<TestIntegrityFlag> = flagsByAlias[alias].orEmpty()
 
+    /** D-371: files whose whole content this cell wrote (create, replace, then its own anchored edits), by identity → the version it left. */
+    private val authored = HashMap<String, FileVersion>()
+
     /** Whether this cell was already warned for crossing the increment's write scope (§8.6: warning once). */
     private var warnedOutsideIncrement = false
 
@@ -302,7 +305,7 @@ public class Edit(
         for (i in ops.indices) {
             for (path in pathsOf.getValue(i)) {
                 val key = when (val resolved = workspace.resolve(path, Intent.Mutate)) {
-                    is PathResolution.Resolved -> identity(resolved.real)
+                    is PathResolution.Resolved -> owned(resolved)
                     is PathResolution.Rejected -> "\u0000$path"
                 }
                 val first = owner.putIfAbsent(key, i) ?: continue
@@ -347,6 +350,10 @@ public class Edit(
         return planned
     }
 
+    /** The workspace-relative key of a path (groups, [authored]): stable whether or not the file exists when resolved. */
+    private fun owned(resolved: PathResolution.Resolved): String =
+        if (workspace.paths.caseInsensitive) resolved.relative.lowercase(java.util.Locale.ROOT) else resolved.relative
+
     /** A path that does not exist yet keeps its typed case, so identity folds case where the filesystem does. */
     private fun identity(path: java.nio.file.Path): String =
         if (workspace.paths.caseInsensitive) path.toString().lowercase(java.util.Locale.ROOT) else path.toString()
@@ -377,8 +384,15 @@ public class Edit(
         "create" -> {
             val path = op.create!!
             val resolved = mutable(index, path)
-            if (registry.read(path) != null) throw Refusal(EditError("exists", index, path, "'$path' exists; use an anchored edit or delete it first"))
-            CreatePlan(index, path, resolved, op.content!!.toByteArray(Charsets.UTF_8))
+            val bytes = op.content!!.toByteArray(Charsets.UTF_8)
+            val existing = registry.read(path)
+            if (existing == null) {
+                CreatePlan(index, path, resolved, bytes)
+            } else {
+                val note = ownership(path, resolved, existing, context)
+                    ?: throw Refusal(EditError("exists", index, path, "'$path' exists; read it first, or use {delete} then {create} in one batch"))
+                ReplacePlan(index, index, path, resolved, existing.version, existing.bytes, bytes, note)
+            }
         }
         "delete" -> {
             val path = op.delete!!
@@ -452,6 +466,17 @@ public class Edit(
             }
         }
         return AnchoredPlan(index, path, resolved, expect, content.bytes, text, located, located.any { !it.first.exact })
+    }
+
+    /**
+     * D-371: a `create` may replace an existing file whose bytes this cell authored (created or replaced it, and
+     * nothing else wrote it since) or whose every line is KNOWN at its current version; null keeps the refusal.
+     */
+    private fun ownership(path: String, resolved: PathResolution.Resolved, existing: io.astrolabe.workspace.FileContent, context: TurnContext): String? {
+        if (authored[owned(resolved)] == existing.version) return "create over a file this cell wrote: replaced in place"
+        val lines = decodeStrict(existing.bytes)?.let { contentLines(it).size } ?: return null
+        if (lines == 0 || context.coverage.covers(path, existing.version, LineRange(1, lines))) return "create over a file KNOWN in full: replaced in place"
+        return null
     }
 
     private fun mutable(index: Int, path: String): PathResolution.Resolved = when (val resolved = workspace.resolve(path, Intent.Mutate)) {
@@ -540,6 +565,7 @@ public class Edit(
                         val counts = Preimages.changedRegion(plan.oldBytes, newBytes)
                         diffstat[plan.path] = DiffStat(counts.first, counts.second)
                         written[plan.path] = plan.resolved
+                        owned(plan.resolved).let { id -> if (authored[id] == plan.expect) authored[id] = after }
                         views += postEditViews(plan, newText, after)
                         if (plan.normalised) notes[plan.index] = "anchor matched after whitespace normalisation"
                     }
@@ -553,6 +579,7 @@ public class Edit(
                         val lines = decodeStrict(plan.bytes)?.let { contentLines(it) } ?: emptyList()
                         diffstat[plan.path] = DiffStat(lines.size, 0)
                         written[plan.path] = plan.resolved
+                        authored[owned(plan.resolved)] = after
                         if (lines.isNotEmpty()) views += View(plan.path, LineRange(1, lines.size), after, lines.mapIndexed { i, l -> "${i + 1}| $l" }.joinToString("\n"))
                     }
                     is ReplacePlan -> {
@@ -567,6 +594,7 @@ public class Edit(
                         val counts = Preimages.changedRegion(plan.oldBytes, plan.bytes)
                         diffstat[plan.path] = DiffStat(counts.first, counts.second)
                         written[plan.path] = plan.resolved
+                        authored[owned(plan.resolved)] = after
                         val lines = decodeStrict(plan.bytes)?.let { contentLines(it) } ?: emptyList()
                         if (lines.isNotEmpty()) views += View(plan.path, LineRange(1, lines.size), after, lines.mapIndexed { i, l -> "${i + 1}| $l" }.joinToString("\n"))
                     }
@@ -576,6 +604,7 @@ public class Edit(
                         applied += AppliedOp(plan.index, "delete", plan.path, plan.expect, null, preimage.preimageDigest.hex)
                         versions[plan.path] = null
                         registry.change(plan.path, plan.expect, null, cause)
+                        authored.remove(owned(plan.resolved))
                         diffstat[plan.path] = DiffStat(0, decodeStrict(plan.oldBytes)?.let { contentLines(it).size } ?: 0)
                     }
                     is RenamePlan -> {
@@ -590,6 +619,7 @@ public class Edit(
                         registry.change(plan.to, null, plan.expect, cause)
                         diffstat[plan.to] = DiffStat(0, 0)
                         written[plan.to] = plan.target
+                        if (authored.remove(owned(plan.resolved)) == plan.expect) authored[owned(plan.target)] = plan.expect
                     }
                     is RevertEditPlan -> {
                         for (path in plan.paths) {
@@ -601,6 +631,7 @@ public class Edit(
                                     registry.change(path, receipt.versionBefore, receipt.versionAfter, "revert $alias")
                                     diffstat[path] = DiffStat(receipt.addedLines, receipt.removedLines)
                                     workspace.resolve(path, Intent.Mutate).let { if (it is PathResolution.Resolved) written[path] = it }
+                                    disown(path)
                                 }
                                 is RevertResult.Diverged -> {
                                     error = EditError("divergent", plan.index, path, "'$path' is @${result.actual?.hash8 ?: "gone"} now, not the @${result.expected?.hash8} that edit ${plan.editId} produced; the inverse is refused (FX-05)")
@@ -623,11 +654,13 @@ public class Edit(
                                     applied += AppliedOp(plan.index, "revert", path, null, after)
                                     versions[path] = after
                                     workspace.resolve(path, Intent.Mutate).let { if (it is PathResolution.Resolved) written[path] = it }
+                                    disown(path)
                                 }
                                 for (path in result.deleted) {
                                     registry.change(path, registry.recorded(path), null, "revert $alias")
                                     applied += AppliedOp(plan.index, "revert", path, null, null)
                                     versions[path] = null
+                                    disown(path)
                                 }
                             }
                             is RestoreResult.Divergent -> {
@@ -685,6 +718,11 @@ public class Edit(
             (if (applied.isEmpty()) "publication outcome unknown; inspect the affected paths before retry" else "already written: " + applied.joinToString(", ") { "${it.path}" + (it.preimageRef?.let { ref -> " (preimage ${ref.take(8)})" } ?: "") }) +
             "; later ops not attempted, nothing rolled back",
     )
+
+    /** Restored bytes are not the cell's own writing (D-371): a later `create` over them needs a read. */
+    private fun disown(path: String) {
+        (workspace.resolve(path, Intent.Mutate) as? PathResolution.Resolved)?.let { authored.remove(owned(it)) }
+    }
 
     private fun revalidate(plan: AnchoredPlan) {
         val again = workspace.paths.revalidate(plan.resolved)
