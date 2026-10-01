@@ -50,10 +50,14 @@ Ubuntu + Windows CI green: P4–P6 gates 36159227747, 36162949349, 36167689819, 
 Local choices D-112–D-113, D-120–D-126, D-135–D-137, D-145–D-155, D-160–D-165, D-170–D-174, D-180–D-183, D-190–D-195,
 D-200–D-202, D-210–D-213, D-220–D-223, D-230–D-233, D-240–D-244, D-250–D-254, D-260 (TODO §3); owner D-175 (deps).
 ## Audit remediation (2026-09-28): 142 findings fixed (`audit/BUGFIX-REVIEW.md`); follow-ups D-321–D-325; CI green 36468171641.
-## Plan-handoff fix (2026-10-01, owner request, D-357–D-362, branch `fix/plan-handoff`, not merged)
-Masked-op refusals explain themselves; refusal loop ends the cell blocked; plan form visible/lenient (`PLAN_FORM`,
-`roles/4`); `ShapePolicy.planCell = WhenNeeded` skips the plan cell for an eligible S1 contract; plan/probe run R-class only
-(enforced); GLM input tolerance; `gate.body` pass-through. Tests: core cell/tool/campaign/graph/delegate/verify/context.
+## Plan-handoff fix (2026-10-01, D-357–D-362, merged into local `main`)
+Masked-op refusals explain themselves; refusal loop ends the cell blocked; plan form visible/lenient; `planCell = WhenNeeded`;
+plan/probe run R-class only; GLM input tolerance; `gate.body` pass-through.
+## Efficiency fix (2026-10-01, owner request, D-363–D-372, branch `fix/efficiency`, not merged into `main`)
+Windows `PATH`×`PATHEXT` program resolution; `ContentCache` for stamps/snapshots; look/edit/state input tolerance; a refused call
+refuses only itself; edit batches independent per path group, coverage survives own edits; stall counts work, 80 turns, repair
+edits on reserve; host block + language line (`kernel/2`, `error-policy/3`); raised and wired defaults; open plan steps do not
+block a proven acceptance. Tests: targeted core packages + Studio bridge/server; live run in `../harness-efficiency-analysis.md`.
 ## AI Gate transport (2026-09-28, merged into local `main`)
 `AiGateAdapter(llm, profiles)` + `Astrolabe(…, estimators = adapter.estimators(HeuristicEstimator()))`; profiles bind via
 `Profile.config.gate`, drafts/probes via `AiGateProfiles` (D-326–D-336); AX-01..10 pass offline; `liveTest` not yet run.
