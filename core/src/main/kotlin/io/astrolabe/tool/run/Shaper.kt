@@ -5,6 +5,7 @@ import io.astrolabe.evidence.Outcome
 import io.astrolabe.id.Digest
 import io.astrolabe.provider.TokenEstimator
 import kotlinx.serialization.Serializable
+import kotlin.math.ceil
 
 /** Structured report formats a runner can be asked to write (D-50). */
 @Serializable
@@ -197,7 +198,7 @@ public data class Shaped(
 }
 
 /**
- * How much of the shaped view may reach the prompt. The default is `run(budget=1200)` (§5.4); with no
+ * How much of the shaped view may reach the prompt. The default is `Defaults.runBudgetTokens` (§5.4); with no
  * [estimator] the planning ratio of D-06 bounds it in characters.
  */
 public data class ShapeBudget(
@@ -212,11 +213,13 @@ public data class ShapeBudget(
 
     val alias: String get() = recallAlias ?: RECALL_PLACEHOLDER
 
-    internal fun fits(text: String): Boolean =
-        estimator?.let { it.estimate(text).upperBoundTokens <= tokens } ?: (text.length <= tokens * CHARS_PER_TOKEN)
+    internal fun fits(text: String): Boolean = tokensOf(text) <= tokens
+
+    internal fun tokensOf(text: String): Long =
+        estimator?.estimate(text)?.upperBoundTokens ?: ceil(text.length / CHARS_PER_TOKEN).toLong()
 
     public companion object {
-        public const val DEFAULT_TOKENS: Int = 1_200
+        public const val DEFAULT_TOKENS: Int = 4_000
 
         /** Token the runner replaces with the log's alias once it has allocated one. */
         public const val RECALL_PLACEHOLDER: String = "#<log>"
@@ -447,6 +450,11 @@ internal fun buildView(
     tailLines: Int = TAIL_LINES,
     /** Replaces `status · exit N` in the first line; presentation only (D-351). */
     statusText: String? = null,
+    /**
+     * D-370: the raw output fills what the budget leaves, about 40 % from the start and 60 % from the end (errors
+     * usually come last), instead of [headLines] / [tailLines].
+     */
+    budgetedRaw: Boolean = false,
 ): ViewResult {
     val head = ArrayList<String>()
     val runner = listOfNotNull(shaperId, capture.runnerVersion).joinToString(" ")
@@ -480,21 +488,28 @@ internal fun buildView(
     }
 
     val rawLines = capture.text().lines().let { if (it.isNotEmpty() && it.last().isEmpty()) it.dropLast(1) else it }
-    var elided = 0
+    val captureTruncated = !capture.captureComplete
+    val (shownHead, shownTail, rawCut) = if (budgetedRaw) {
+        val fixed = (head + body + RAW_TITLE_ALLOWANCE + footer(true, captureTruncated, capture, rawLines.size, budget)).joinToString("\n")
+        budgetedSides(rawLines, budget, budget.tokens - budget.tokensOf(fixed))
+    } else if (rawLines.size <= headLines + tailLines) {
+        RawSides(rawLines, emptyList(), cut = false)
+    } else {
+        RawSides(rawLines.take(headLines), rawLines.takeLast(tailLines), cut = false)
+    }
+    val elided = rawLines.size - shownHead.size - shownTail.size
     if (rawLines.isNotEmpty()) {
-        if (rawLines.size <= headLines + tailLines) {
+        if (elided == 0) {
             body += "output (${rawLines.size} lines):"
-            rawLines.forEach { body += "  $it" }
+            (shownHead + shownTail).forEach { body += "  $it" }
         } else {
-            elided = rawLines.size - headLines - tailLines
-            body += "output (head $headLines / tail $tailLines of ${rawLines.size} lines):"
-            rawLines.take(headLines).forEach { body += "  $it" }
+            body += "output (head ${shownHead.size} / tail ${shownTail.size} of ${rawLines.size} lines):"
+            shownHead.forEach { body += "  $it" }
             body += "  … $elided lines elided …"
-            rawLines.takeLast(tailLines).forEach { body += "  $it" }
+            shownTail.forEach { body += "  $it" }
         }
     }
 
-    val captureTruncated = !capture.captureComplete
     val maxFooter = footer(viewTruncated = true, captureTruncated = captureTruncated, capture = capture, rawLines = rawLines.size, budget = budget)
     val acc = StringBuilder(head.joinToString("\n"))
     var included = 0
@@ -507,7 +522,7 @@ internal fun buildView(
         acc.append('\n').append(line)
         included++
     }
-    val viewTruncated = included < body.size || elided > 0
+    val viewTruncated = included < body.size || elided > 0 || rawCut
     val actualFooter = footer(viewTruncated, captureTruncated, capture, rawLines.size, budget)
     if (actualFooter.isNotEmpty()) acc.append('\n').append(actualFooter)
     val recall = if (viewTruncated || captureTruncated) recallHint(capture, rawLines.size, budget) else null
@@ -540,6 +555,46 @@ private fun footer(
     return lines.joinToString("\n")
 }
 
+/**
+ * The head and tail of [lines] within [room] tokens: everything when it fits, else about [HEAD_SHARE] of the room from
+ * the start and the rest from the end. A single line wider than its side's room is cut, so a one-line output still shows.
+ */
+private fun budgetedSides(lines: List<String>, budget: ShapeBudget, room: Long): RawSides {
+    if (lines.isEmpty() || room <= 0) return RawSides(emptyList(), emptyList(), cut = false)
+    val costs = lines.map { budget.tokensOf("  $it\n") }
+    if (costs.sum() <= room) return RawSides(lines, emptyList(), cut = false)
+    val headRoom = if (lines.size == 1) room else (room * HEAD_SHARE).toLong()
+    var used = 0L
+    var headCount = 0
+    while (headCount < lines.size && used + costs[headCount] <= headRoom) used += costs[headCount++]
+    val tailRoom = room - used
+    var tailUsed = 0L
+    var tailCount = 0
+    while (headCount + tailCount < lines.size && tailUsed + costs[lines.size - 1 - tailCount] <= tailRoom) tailUsed += costs[lines.size - 1 - tailCount++]
+    val shownHead = lines.take(headCount).toMutableList()
+    val shownTail = lines.takeLast(tailCount).toMutableList()
+    if (headCount == 0) cut(lines.first(), budget, headRoom, fromEnd = false)?.let { shownHead += it }
+    if (tailCount == 0 && lines.size > shownHead.size) cut(lines.last(), budget, room - headRoom, fromEnd = true)?.let { shownTail += it }
+    return RawSides(shownHead, shownTail, cut = shownHead.size > headCount || shownTail.size > tailCount)
+}
+
+private data class RawSides(val head: List<String>, val tail: List<String>, val cut: Boolean)
+
+/** The longest prefix (or suffix) of [line] within [room] tokens with a cut marker, or null when not even that fits. */
+private fun cut(line: String, budget: ShapeBudget, room: Long, fromEnd: Boolean): String? {
+    fun piece(n: Int) = if (fromEnd) "… " + line.takeLast(n) else line.take(n) + " …"
+    var low = 0
+    var high = line.length
+    while (low < high) {
+        val middle = (low + high + 1) / 2
+        if (budget.tokensOf("  ${piece(middle)}\n") <= room) low = middle else high = middle - 1
+    }
+    return if (low == 0) null else piece(low)
+}
+
+/** Room kept for the raw section's title and elision marker when the raw output is budget-driven. */
+private const val RAW_TITLE_ALLOWANCE = "output (head 99999 / tail 99999 of 99999 lines):\n  … 99999 lines elided …"
+private const val HEAD_SHARE = 0.4
 private const val HEAD_LINES = 30
 private const val TAIL_LINES = 30
 private const val MAX_FAILURES = 25

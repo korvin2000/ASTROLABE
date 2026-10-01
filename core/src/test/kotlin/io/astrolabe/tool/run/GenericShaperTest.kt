@@ -1,5 +1,6 @@
 package io.astrolabe.tool.run
 
+import io.astrolabe.budget.HeuristicEstimator
 import io.astrolabe.evidence.Outcome
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -26,6 +27,24 @@ class GenericShaperTest {
             assertTrue(!other.view.lines().first().contains("completed"), "${capture.argv} ${capture.checkId}: ${other.view.lines().first()}")
         }
         assertEquals("generic · inconclusive · exit 0", Shapers.shape(plain.copy(checkId = "CHK-1")).view.lines().first(), "acceptance keeps the verdict wording")
+    }
+
+    @Test
+    fun `a long plain output fills the budget with its head and a larger tail`() {
+        val output = (1..2_000).joinToString("\n", postfix = "\n") { "step $it of the build" }
+        val budget = ShapeBudget(1_000, HeuristicEstimator())
+        val shaped = Shapers.shape(RunCapture("act-1", listOf("make", "all"), exitCode = 2, output = output.toByteArray()), budget)
+        assertTrue(HeuristicEstimator().estimate(shaped.view).upperBoundTokens <= 1_000, shaped.view)
+        assertTrue(shaped.viewTruncated)
+        val title = Regex("""output \(head (\d+) / tail (\d+) of 2000 lines\):""").find(shaped.view)
+        val (head, tail) = assertNotNull(title, shaped.view).destructured.toList().map { it.toInt() }
+        assertTrue(head + tail > 60, "the bigger budget shows more than the old 30 + 30 lines: $head + $tail")
+        assertTrue(tail > head, "errors usually come last: $head / $tail")
+        assertTrue(shaped.view.contains("  step 1 of the build\n") && shaped.view.contains("  step 2000 of the build\n"), shaped.view)
+        assertTrue(shaped.view.contains("  … ${2_000 - head - tail} lines elided …"), shaped.view)
+
+        val oneLine = Shapers.shape(RunCapture("act-2", listOf("node", "x.js"), exitCode = 0, output = "{\"k\":\"${"v".repeat(20_000)}\"}".toByteArray()), budget)
+        assertTrue(oneLine.viewTruncated && oneLine.view.contains("{\"k\":\"vvv"), "a single wide line is cut, not dropped: ${oneLine.view.take(300)}")
     }
 
     @Test

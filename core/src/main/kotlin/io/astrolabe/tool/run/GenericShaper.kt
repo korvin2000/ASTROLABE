@@ -4,7 +4,8 @@ import io.astrolabe.evidence.Counts
 import io.astrolabe.evidence.Outcome
 
 /**
- * The fallback shaper: head + tail with every error-shaped line (§5.4). Counts appear only when a
+ * The fallback shaper: head + tail with every error-shaped line (§5.4); without a recognised runner the raw output
+ * fills the view budget, about 40 % head and 60 % tail (D-370). Counts appear only when a
  * recognisable summary does (`cargo test`, `go test`, `unittest`, `dotnet test`, `mocha`); otherwise the
  * result carries `counts = null` and a "no parser" limitation, because a generic exit code never becomes a
  * count (§8.3) and unparsed evidence is never green (D-50). The end-of-turn checkers' diagnostics parsers
@@ -51,7 +52,7 @@ public class GenericShaper : Shaper {
         }
         val shaperId = summary.family?.let { "$id/$it" } ?: id
         val statusText = if (completedPlainly(capture, status, summary.counts, wrapper)) COMPLETED else null
-        val view = buildView(shaperId, capture, status, summary.counts, summary.tests, wrapper, limitations, budget, sections, statusText = statusText)
+        val view = buildView(shaperId, capture, status, summary.counts, summary.tests, wrapper, limitations, budget, sections, statusText = statusText, budgetedRaw = summary.family == null)
         return Shaped(
             status = status,
             counts = summary.counts,
