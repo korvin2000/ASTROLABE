@@ -263,7 +263,11 @@ public object TestIntegrity {
         }
     }.map { it.id }
 
-    /** True when an argv token (resolved against [cwd]) or [cwd] itself is [path] or a directory above it. */
+    /**
+     * True when an argv token or the relative executable, resolved against [cwd], is [path] or a directory above it.
+     * The bare [cwd] names nothing (D-369): it would make every source file of the package a command input; the
+     * package's manifest is a check definition by name.
+     */
     private fun namesPath(argv: List<String>, cwd: String?, path: String): Boolean {
         val base = cwd?.let { normalize(it) }?.takeIf { it.isNotEmpty() && it != "." }
         // Test the raw spelling: normalize strips "./", which would drop a root-level `./check.sh`.
@@ -272,7 +276,7 @@ public object TestIntegrity {
             '/' in named && !named.startsWith('/') && !named.matches(Regex("^[A-Za-z]:.*"))
         }
         val candidates = (argv.drop(1) + listOfNotNull(executable)).map { normalize(it) }.filter { it.isNotEmpty() && !it.startsWith("-") }
-            .map { if (base != null && !it.startsWith("$base/")) "$base/$it" else it } + listOfNotNull(base)
+            .map { if (base != null && !it.startsWith("$base/")) "$base/$it" else it }
         return candidates.any { path == it || path.startsWith("$it/") }
     }
 

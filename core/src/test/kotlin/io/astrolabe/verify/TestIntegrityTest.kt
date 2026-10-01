@@ -108,8 +108,28 @@ class TestIntegrityTest {
         assertEquals(listOf("CHK-accept-AC-1", "CHK-accept-AC-2"), flag.requiredChecks, "the unknown-closure suite and the command that names the path; not ${known.id}")
         assertNull(TestIntegrity.surfaceOf("scripts/helper.py", contract))
 
-        val cwdScoped = base.strengthen(Acceptance.Run("AC-3", Command(listOf("npm", "test"), cwd = "packages/web"), Origin.Model("R1")))
-        assertEquals(AcceptanceSurface.AcceptanceCommand, TestIntegrity.surfaceOf("packages/web/src/index.ts", cwdScoped))
+    }
+
+    @Test
+    fun `a command's cwd alone does not make the files under it acceptance inputs`() {
+        val (base, _) = s0()
+        val contract = base.strengthen(Acceptance.Run("AC-3", Command(listOf("npm", "test"), cwd = "client"), Origin.Model("R1")))
+            .strengthen(Acceptance.Run("AC-4", Command(listOf("python", "tools/verify.py"), cwd = "client"), Origin.Model("R1")))
+        val checks = Checks.seed(contract, RunnerCommands(test = Command(listOf("python", "-m", "pytest", "-q"))))
+        assertNull(TestIntegrity.surfaceOf("client/src/core/config/env.ts", contract), "ordinary source under the cwd")
+        assertNull(TestIntegrity.surfaceOf("client/.env.local", contract))
+        assertTrue(TestIntegrity.baseline(listOf("client/src/core/config/env.ts", "client/.env.local"), "edit #5", contract, checks).isEmpty())
+        val flags = TestIntegrity.baseline(listOf("client/tools/verify.py", "client/src/core/config.test.ts", "client/package.json"), "edit #6", contract, checks)
+        assertEquals(
+            listOf(
+                "client/tools/verify.py" to AcceptanceSurface.AcceptanceCommand,
+                "client/src/core/config.test.ts" to AcceptanceSurface.TestFile,
+                "client/package.json" to AcceptanceSurface.CheckDefinition,
+            ),
+            flags.map { it.path to it.surface },
+        )
+        assertTrue("CHK-accept-AC-4" in flags.first().requiredChecks)
+        assertTrue(flags.all { it.blocksCompletion }, flags.toString())
     }
 
     @Test

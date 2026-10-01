@@ -177,11 +177,11 @@ class ExitGateTest {
     @Test
     fun `what the agent must close is rework - steps, red lines without Open, flags, nudges`() {
         val pending = done.copy(plan = done.plan + Step(2, Mark.Cursor, "update call sites") + Step(3, Mark.Todo, "docs"))
-        val steps = resolve(register = pending)
+        val steps = resolve(register = pending, verdicts = mapOf("AC-2" to approve), unavailable = mapOf("AC-3" to "the reviewer gave no verdict"))
         assertEquals(Resolution.Rework, steps.resolution)
         assertEquals(
             listOf("step 2 [>] 'update call sites' has no disposition (done, cancelled or an explicit non-completed exit)", "step 3 [ ] 'docs' has no disposition (done, cancelled or an explicit non-completed exit)"),
-            steps.missing,
+            steps.missing.take(2),
         )
         val lintRed = mapOf("CHK-accept-AC-1" to green(), "CHK-lint" to red("rcpt-9"))
         assertEquals(listOf("CHK-lint is red without an Open item naming it"), resolve(currencies = lintRed).missing)
@@ -273,14 +273,43 @@ class ExitGateTest {
     @Test
     fun `after the rework round what the agent left open goes to the decider, never a failure (I2)`() {
         val open = done.copy(plan = done.plan + Step(2, Mark.Todo, "docs"))
-        assertEquals(Resolution.Rework, resolve(register = open).resolution)
-        val spent = resolve(register = open, reworkSpent = true)
+        val nudge = listOf("public def total() changed; 3 importers unread")
+        assertEquals(Resolution.Rework, resolve(register = open, nudges = nudge).resolution)
+        val spent = resolve(register = open, nudges = nudge, reworkSpent = true)
         assertEquals(Resolution.Await, spent.resolution)
         assertEquals(listOf("open:1"), spent.undecided.map { it.obligation })
-        assertEquals(Resolution.Complete, resolve(register = open, reworkSpent = true, decision = decision(DecisionKind.Accept, listOf("open:1"))).resolution)
+        assertEquals(Resolution.Complete, resolve(register = open, nudges = nudge, reworkSpent = true, decision = decision(DecisionKind.Accept, listOf("open:1"))).resolution)
         val moved = Verifier().accept(CompletionProposal("I1", "done", 2, s8, s8, null, env), contract, increment, done, Ledger.initial(contract), s9,
             mapOf("CHK-accept-AC-1" to green()), mapOf("AC-2" to approve, "AC-3" to approve), reworkSpent = true)
         assertIs<CompletionResult.Refused>(moved, "a proposal about another tree is never put to a decider")
+    }
+
+    @Test
+    fun `open plan steps do not block an exit whose acceptance is proven, and stay visible (D-368)`() {
+        val open = done.copy(plan = done.plan + Step(2, Mark.Cursor, "update call sites") + Step(3, Mark.Todo, "docs"))
+        val proven = resolve(register = open)
+        assertEquals(Resolution.Complete, proven.resolution)
+        assertEquals(emptyList(), proven.missing)
+        assertEquals(listOf("step 2 'update call sites' left open by the agent", "step 3 'docs' left open by the agent"), proven.leftOpen)
+        val accepted = assertIs<CompletionResult.Accepted>(Verifier().accept(CompletionProposal("I1", "done", 2, s8, s9, null, env), contract, increment, open, Ledger.initial(contract), s9,
+            mapOf("CHK-accept-AC-1" to green()), mapOf("AC-2" to approve, "AC-3" to approve)))
+        assertEquals(proven.leftOpen, accepted.leftOpen)
+
+        val unverified = resolve(register = open, verdicts = mapOf("AC-2" to approve), unavailable = mapOf("AC-3" to "the reviewer gave no verdict"))
+        assertEquals(Resolution.Rework, unverified.resolution, "an unproven acceptance keeps an unticked step a gap")
+        assertTrue(unverified.missing.any { it.startsWith("step 3 [ ] 'docs' has no disposition") }, unverified.missing.toString())
+        assertEquals(emptyList(), unverified.leftOpen)
+
+        val failed = resolve(register = open, currencies = mapOf("CHK-accept-AC-1" to red()))
+        assertEquals(Resolution.Rework, failed.resolution)
+        assertEquals(3, failed.gaps.size, failed.missing.toString())
+        assertEquals(emptyList(), failed.leftOpen)
+
+        val lintRed = resolve(register = open, currencies = mapOf("CHK-accept-AC-1" to green(), "CHK-lint" to red("rcpt-9")))
+        assertTrue(lintRed.missing.any { it.contains("has no disposition") }, "a red check outside the required set keeps steps gaps")
+        val flag = TestIntegrityFlag("tests/test_total.py", AcceptanceSurface.TestFile, "edit #3", listOf("CHK-accept-AC-1"), reason = "renamed fixture")
+        assertTrue(resolve(register = open, flags = listOf(flag)).missing.any { it.contains("has no disposition") }, "an unreviewed integrity flag keeps steps gaps")
+        assertEquals(emptyList(), resolve(register = open, flags = listOf(flag.copy(verdict = approve))).missing, "a justified, approved flag is proven")
     }
 
     @Test

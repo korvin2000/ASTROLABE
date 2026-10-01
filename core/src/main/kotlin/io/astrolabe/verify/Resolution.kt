@@ -190,6 +190,8 @@ public data class Resolved(
     val other: List<String> = emptyList(),
     val considered: DecisionRecord? = null,
     val binding: List<String> = emptyList(),
+    /** Plan steps the agent left unticked on an increment whose acceptance is proven (D-368): shown, never a gap. */
+    val leftOpen: List<String> = emptyList(),
 ) {
     val missing: List<String> get() = gaps.map { it.text }
 
@@ -197,7 +199,7 @@ public data class Resolved(
      * The same inputs once the rework round is spent (I4): a reviewer's standing rejection, and whatever the agent left
      * open, then await a decision.
      */
-    public fun spent(): Resolved = Resolver.resolve(results, other, considered, reworkSpent = true, binding = binding)
+    public fun spent(): Resolved = Resolver.resolve(results, other, considered, reworkSpent = true, binding = binding).copy(leftOpen = leftOpen)
 
     /** Results the authority is asked about when this resolution awaits: uncovered unverified ones and reviewer rejections. */
     val undecided: List<ObligationResult>
@@ -271,8 +273,8 @@ public object Obligations {
  * The one acceptance rule (§8.7, D-337): the cell's exit gate, the verifier, final acceptance and resume all resolve a
  * proposal here, so the same inputs always give the same answer. Order:
  * 1. an executed red check → rework; no decision covers it (§8.8);
- * 2. something the agent must close ([other]: an open plan step, a red check without an `Open` item, a contract or
- *    stamp mismatch, an unresolved impact nudge, an unjustified acceptance-surface change) → rework;
+ * 2. something the agent must close ([other]: an open plan step while acceptance is not proven, a red check without an
+ *    `Open` item, a contract or stamp mismatch, an unresolved impact nudge, an unjustified acceptance-surface change) → rework;
  * 3. a current `rework` decision → rework;
  * 4. a reviewer rejection not accepted by a decision → rework, or — once the rework round is spent — await
  *    ([StopCode.ReviewRejected]);
@@ -373,15 +375,20 @@ public object Resolver {
             // A red test is "not done" (I2) until the agent records it in Open: never put to a decider.
             if (openTexts.none { it.contains(checkId) }) results += ObligationResult("red:$checkId", ObligationKind.Run, ResultStatus.Failed, "$checkId is red without an Open item naming it", currency.receiptId)
         }
-        register.plan.filter { it.mark == Mark.Todo || it.mark == Mark.Cursor }.forEach { step ->
+        val flagged = flags.mapNotNull { flag -> Obligations.flag(flag, contract.version, candidate)?.let { flag to it } }
+        // D-368: the plan is the agent's note, the acceptance its oracle — an unticked step blocks only an unproven exit.
+        val proven = results.isNotEmpty() && results.all { it.status == ResultStatus.Passed } && open.isEmpty() &&
+            flagged.all { (flag, result) -> !flag.reason.isNullOrBlank() && result.status == ResultStatus.Passed }
+        val steps = register.plan.filter { it.mark == Mark.Todo || it.mark == Mark.Cursor }
+        val leftOpen = if (proven) steps.map { "step ${it.n} '${it.text}' left open by the agent" } else emptyList()
+        if (!proven) steps.forEach { step ->
             open += "step ${step.n} ${step.mark.text} '${step.text}' has no disposition (done, cancelled or an explicit non-completed exit)"
         }
-        for (flag in flags) {
-            val result = Obligations.flag(flag, contract.version, candidate) ?: continue
+        for ((flag, result) in flagged) {
             if (flag.reason.isNullOrBlank()) open += "acceptance surface ${flag.path} touches ${flag.requiredChecks.joinToString(", ")} without a recorded justification"
             results += result
         }
         unresolvedImpactNudges.forEach { open += "unresolved impact nudge: $it" }
-        return resolve(results, open, decision, reworkSpent, binding)
+        return resolve(results, open, decision, reworkSpent, binding).copy(leftOpen = leftOpen)
     }
 }
