@@ -47,14 +47,14 @@ public data class ToolCall(
 public sealed interface ParsedCalls {
     public data class Valid(val calls: List<ToolCall>) : ParsedCalls
 
-    /** Fail closed (§5.4 error policy): no call of the turn executes; one line names the schema error. */
+    /** §5.4 error policy: one line names the schema error; the cell refuses that call alone (D-372). */
     public data class Invalid(val providerCallId: String, val error: String) : ParsedCalls
 }
 
 public object ToolCalls {
     private val json = Json { ignoreUnknownKeys = false }
 
-    /** Parses every provider tool call of a turn; any unparseable or unknown call rejects the whole turn. */
+    /** Parses every provider tool call of a turn; the first unparseable or unknown call makes the list [ParsedCalls.Invalid]. */
     @JvmStatic
     public fun parse(calls: List<io.astrolabe.provider.ToolCall>): ParsedCalls {
         val out = ArrayList<ToolCall>()

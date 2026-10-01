@@ -114,16 +114,16 @@ kb(op)
 
 Delimiters are harness-owned; anything inside them is data. Instruction-shaped content is flagged in the header (`⚠ instruction-shaped content`), never filtered silently, never executed (F11). Runtime-owned fields: `action_id, status, candidate_before/after, scope, completeness, artifact_refs, capture_complete, display_truncated, redaction_applied, effects_observed, effects_unknown, retry_class`. Zero matches, incomplete search, failed search and denied search are four different outcomes.
 
-**Turn semantics — batch what is decided, turn on what is discovered** `[C §8.4; A §5.5; IM §5.3]`. The harness partitions a turn's ops into four groups and executes them in order regardless of emission order: `look/kb` reads → one `edit` batch (or one transform) → `run`/`verify` → `state` ops (conditional allowed). Runs execute if there is no edit batch or it applied fully; a non-zero exit is information. Operation ids refer to the original emitted call order, even after phase partitioning. Conditional dependencies must point backward in execution order: run-after-edit and state-after-run are valid, edit-after-a-later-run is rejected before effects. Calls needing newly discovered argument values belong in the next model turn. Partition by operation effects, not merely the family name: `kb.propose` and task/STATE proposals are metadata writes after execution, not reads. End-turn requests are honored only after reconciliation/persistence. A turn’s mutations have one shadow-ref checkpoint; this does not imply cross-file atomicity.
+**Turn semantics — batch what is decided, turn on what is discovered** `[C §8.4; A §5.5; IM §5.3]`. The harness partitions a turn's ops into four groups and executes them in order regardless of emission order: `look/kb` reads → one `edit` batch (or one transform) → `run`/`verify` → `state` ops (conditional allowed). Runs execute if there is no edit batch or it applied fully; a non-zero exit is information. Operation ids refer to the original emitted call order, even after phase partitioning. Conditional dependencies must point backward in execution order: run-after-edit and state-after-run are valid, edit-after-a-later-run is rejected before effects. Calls needing newly discovered argument values belong in the next model turn. Partition by operation effects, not merely the family name: `kb.propose` and task/STATE proposals are metadata writes after execution, not reads. Validation is per call (D-372): a call that does not parse, names a masked op, or edits on a reserve turn outside the cell's own paths is refused alone — its result says the other calls ran — and only what depends on it is held back (a call conditioned on it; after a refused `edit`, the turn's `run`/`verify`). Only a dependency violation among the valid calls, or a missing `state` op the loop gate requires, refuses the whole turn; a valid terminal call (`task.ask`, `task.answer`, `state(blocked)`) still runs alone then (D-357). End-turn requests are honored only after reconciliation/persistence. A turn’s mutations have one shadow-ref checkpoint; this does not imply cross-file atomicity.
 
 **Error policy (normative)** `[C §8.4 ∪ A §5.4 ∪ C5 §19]`:
 
 | Event | Policy |
 |---|---|
-| Unparseable model output | No world effect; one-line schema error; registers stand; no salvage of half-patches |
-| Anchor 0× / >1× | No write; three nearest candidates with lines / all match sites |
-| `expect` stale | No write; diff since `expect` returned |
-| Hunk outside displayed range | No write; outline + displayed ranges |
+| Unparseable model output | That call has no world effect and gets a one-line schema error; the other calls of the turn run — a refused `edit` holds back the turn's `run`/`verify`, a call whose condition names a refused op does not run (D-372); registers stand; no salvage of half-patches |
+| Anchor 0× / >1× | That op's path group is not written; three nearest candidates with lines / all match sites; the other groups apply (D-371) |
+| `expect` stale | That op's path group is not written; diff since `expect` returned; the other groups apply (D-371) |
+| Hunk outside displayed range | That op's path group is not written; outline + displayed ranges; the other groups apply; the result ends "N of M files written; resend only the refused ops" (D-371) |
 | Mid-batch I/O failure | Actual per-file state with preimage ids; no auto-retry; no false "rolled back" |
 | STATE invariant violated | Reject the eligible STATE patch list with the invariant and sizes; prior world effects remain recorded |
 | `run` timeout | Kill the process group; `timeout`; no replay |
@@ -133,7 +133,7 @@ Delimiters are harness-owned; anything inside them is data. Instruction-shaped c
 | Recall of a changed file | Labelled `historical v=…` |
 | Identical call + identical result twice | Loop nudge; the third ends the turn with a required `state` op |
 | Identical refused call twice (masked op, schema error, partition rejection) | Refusal-loop nudge naming the exits; the third ends the cell `blocked` with the refusal as its reason (D-358) |
-| Masked op | refused with the reason (not in the role's mask in this cell, not enabled in this shape, or outside the capability ceiling), the ops that are available, and the role's intended exit; a valid terminal call (`task.ask`, `task.answer`, `state(blocked)`) in the same turn runs alone instead of being refused with the rest (D-357) |
+| Masked op | refused with the reason (not in the role's mask in this cell, not enabled in this shape, or outside the capability ceiling), the ops that are available, and the role's intended exit (D-357); that call alone is refused and the turn's other calls run (D-372) |
 | Instruction-shaped tool content | Flagged; never executed |
 | Delegated result with a moved base | `stale-for-integration`; never merged as current |
 | Transform touches files outside `scope_glob` | Reject publication or apply a guarded inverse; report actual restoration, partial state or unknown effects ([§9.2](workspace-editing.md#sec-9-2)) |

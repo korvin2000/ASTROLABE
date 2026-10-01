@@ -56,7 +56,8 @@ public sealed interface Partition {
          */
         @JvmStatic
         public fun of(calls: List<ToolCall>): Partition {
-            require(calls.mapIndexed { i, c -> c.opId == i + 1 }.all { it }) { "op ids must be the emitted order 1..n" }
+            // D-372: the calls a turn refused are left out, so ids may skip; they stay the emitted positions.
+            require(calls.all { it.opId >= 1 } && calls.zipWithNext().all { (a, b) -> a.opId < b.opId }) { "op ids must be the emitted order, increasing from 1" }
             val phases = calls.associate { it.opId to phaseOf(it) }
             val position = calls.associate { it.opId to (phases.getValue(it.opId).ordinal.toLong() shl 32 or it.opId.toLong()) }
             for (call in calls) {
