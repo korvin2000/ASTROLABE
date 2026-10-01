@@ -151,6 +151,10 @@ public class Run(
     private val RunArgs.timeoutSeconds: Int
         get() = timeout?.coerceAtMost(maxOf(MAX_TIMEOUT_SECONDS, config.defaults.runTimeoutSeconds)) ?: config.defaults.runTimeoutSeconds
 
+    /** How long a poll waits for new output: a quiet server must not hold the turn for the whole run timeout. */
+    private val RunArgs.pollWaitSeconds: Long
+        get() = (timeout?.coerceAtMost(maxOf(MAX_TIMEOUT_SECONDS, config.defaults.runTimeoutSeconds)) ?: pollSliceSeconds.toInt()).toLong()
+
     override suspend fun execute(call: ToolCall, context: TurnContext): ToolOutcome {
         require(call.family == ToolFamily.Run) { "not a run call: ${call.name}" }
         // D-352: a cwd naming the root is no cwd, so intents, handles and the unknown-outcome guard see one command.
@@ -438,7 +442,7 @@ public class Run(
         val proc = os.reattach(handle.proc)
         val since = args.since ?: handle.cursor
         val poll = try {
-            kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { os.poll(proc, since, args.timeoutSeconds.toLong()) }
+            kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { os.poll(proc, since, args.pollWaitSeconds) }
         } catch (failure: IOException) {
             handles.save(handle.copy(status = wire(ProcStatus.Lost)))
             return refused(args, Outcome.UnknownOutcome, "handle ${handle.handleId}: the log cannot be read (${failure.message}); the process state is unknown — reconcile, never relaunch")
@@ -449,7 +453,7 @@ public class Run(
         val slice = safeSlice.text
         return when (val status = poll.status) {
             ProcStatus.Running -> {
-                val view = "handle ${handle.handleId} running · cursor ${poll.nextCursorBytes}" + (if (poll.timedOut) " · observation timed out after ${args.timeoutSeconds}s, the process keeps running (no relaunch)" else "") + (if (slice.isBlank()) "" else "\n$slice")
+                val view = "handle ${handle.handleId} running · cursor ${poll.nextCursorBytes}" + (if (poll.timedOut) " · observation timed out after ${args.pollWaitSeconds}s, the process keeps running (no relaunch)" else "") + (if (slice.isBlank()) "" else "\n$slice")
                 val result = RunResult(handle.alias, handle.actionId, null, Outcome.NotRun, view, false, null, handle.effectClass, CandidateId(Digest(handle.stampBefore)), null, false, emptyList(), handle.handleId, null, null, emptyList())
                 render(args, result, handle.argv, handle.shell, null, null, effectsUnknown = handle.effectsUnknown, statusWire = "running", captureMask = safeSlice.mask)
             }
