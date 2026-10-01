@@ -4,12 +4,12 @@ import io.astrolabe.contract.Shape
 import io.astrolabe.provider.ToolMask
 
 /**
- * The wording of whole-turn refusals the cell returns as results (§3.7, §5.4). A masked op is refused for the
+ * The wording of refusals the cell returns as results (§3.7, §5.4). A masked op is refused for the
  * whole cell, not for one turn: the text says so, lists what the mask allows and names the role's intended
  * exit, so a model does not re-send the same call hoping the next turn differs (F2a).
  */
 internal object Refusals {
-    /** The trailer of a refusal that executed nothing. */
+    /** The trailer of a refusal in a turn that executed nothing. */
     const val WHOLE_TURN: String = "; no call of this turn executed"
 
     const val PLAN_EXIT: String = "to get commands executed, hand the work over with task.propose(plan); " +

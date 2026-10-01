@@ -86,14 +86,16 @@ public object Kernel {
  * tool layer, never in this text.
  */
 public object ErrorPolicy {
-    public const val VERSION: String = "error-policy/2"
+    public const val VERSION: String = "error-policy/3"
 
     /** Event → what the harness does. Order is the specification's. */
     public val rows: List<Pair<String, String>> = listOf(
-        "unparseable output" to "no world effect; one-line schema error; registers stand; no salvage of half-patches",
-        "anchor 0x or >1x" to "no write; three nearest candidates with lines, or all match sites",
-        "`expect` stale" to "no write; the diff since `expect` returned",
-        "hunk outside displayed range" to "no write; outline plus the displayed ranges",
+        "unparseable output" to "that call has no world effect and gets a one-line schema error; the other calls of the turn run " +
+            "(a refused edit holds back the turn's runs, a call conditioned on it does not run); registers stand; no salvage of half-patches",
+        "anchor 0x or >1x" to "that op's path group is not written; three nearest candidates with lines, or all match sites; the other groups apply",
+        "`expect` stale" to "that op's path group is not written; the diff since `expect` returned; the other groups apply",
+        "hunk outside displayed range" to "that op's path group is not written; outline plus the displayed ranges; the other groups apply; " +
+            "the result ends \"N of M files written; resend only the refused ops\"",
         "mid-batch I/O failure" to "actual per-file state with preimage ids; no auto-retry; no false \"rolled back\"",
         "STATE invariant violated" to "the eligible STATE patch list is rejected with the invariant and sizes; prior world effects remain recorded",
         "run timeout" to "the process group is killed; `timeout`; no replay",

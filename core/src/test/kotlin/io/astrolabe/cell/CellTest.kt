@@ -393,7 +393,7 @@ class CellTest {
     }
 
     @Test
-    fun `an unparseable call or a bad dependency refuses the whole turn and executes nothing`() = runTest {
+    fun `an unparseable call is refused alone and a bad dependency among valid calls refuses the whole turn`() = runTest {
         CellFixture(stateRoot).use { f ->
             val v = f.version("src/a.py")
             val model = ScriptedModel.of(
@@ -407,13 +407,172 @@ class CellTest {
             val history = f.transcript(3)
             val results = history.filterIsInstance<ToolResult>().map { resultText(it) }
             assertEquals(5, results.size)
-            assertTrue(results.take(2).all { it.contains("not executed: schema error in call c2") && it.contains("no call of this turn executed") }, results.toString())
-            assertTrue(results.drop(2).all { it.contains("not executed: op 2: condition applied(op:1) must name an edit op") }, results.toString())
+            assertFalse(results[0].contains("not executed"), "D-372: the read beside the unparseable call ran: $results")
+            assertTrue(results[1].contains("not executed: schema error in call c2") && results[1].contains("this call was refused; the other 1 call of the turn ran"), results.toString())
+            assertFalse(results[1].contains("no call of this turn executed"), results[1])
+            assertTrue(results.drop(2).all { it.contains("not executed: op 2: condition applied(op:1) must name an edit op") && it.contains("no call of this turn executed") }, results.toString())
             assertFalse(Items.pairs(history).broken)
-            assertNull(f.aliases.resolve(f.ids.work, 1), "no read executed: no alias was ever allocated")
             assertEquals(CellFixture.A_PY, Files.readString(f.repo.resolve("src/a.py")), "no edit executed")
             assertTrue(f.intents.open().isEmpty() && f.intents.get("intent-1") == null, "no run executed")
             assertEquals(listOf(1, 2, 3), f.checkpoints.turns(f.ids.context!!).map { it.turn })
+        }
+    }
+
+    @Test
+    fun `the budget and stall lines of the anchor come before impact lines, up to four nudges`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val impact = object : Gate {
+                override val name: String = Gates.IMPACT
+                override fun evaluate(state: GateState): List<GateOutcome> =
+                    (1..4).map { GateOutcome.Nudge(GateKey(name, "s$it@${state.turn}"), "impact: symbol $it changed; references not inspected") }
+            }
+            val turns = object : Gate {
+                override val name: String = Gates.TURNS
+                override fun evaluate(state: GateState): List<GateOutcome> =
+                    listOf(GateOutcome.Nudge(GateKey(name, "t${state.turn}"), "turns: turn ${state.turn} of ${state.turnsMax} — verify and report"))
+            }
+            val cell = Cell(f.clock, f.idGen, f.defaults, Gates(listOf(impact, turns)), f.events)
+
+            cell.run(f.context(ScriptedModel.of(Scripted.Reply(listOf(say("look"), tree("c1"))), Scripted.Reply(listOf(say("done"))))), f.increment, f.budget())
+
+            val anchor = f.anchorText(2)
+            assertTrue(anchor.contains("turns: turn 1 of 12 — verify and report"), anchor)
+            assertEquals(3, (1..4).count { anchor.contains("impact: symbol $it changed") }, anchor)
+            assertTrue(anchor.indexOf("turns: turn 1") < anchor.indexOf("impact: symbol 1"), anchor)
+        }
+    }
+
+    @Test
+    fun `the checks view carries the launcher's reason for an unavailable check, bounded`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val check = f.checks[Checks.TYPES_TOUCHED]!!
+            val stamp = f.stamper.report().candidateId
+            val reason = "cannot start npm: 'npm' was not found in the working directory or on PATH (PATHEXT .COM;.EXE;.BAT;.CMD)" + " and more".repeat(20)
+            f.scheduler.record(io.astrolabe.verify.CheckerResult(check.id, "chk-x", check.kind, check.selector, Outcome.Unavailable, emptyList(), null, null, stamp, stamp, null, 0, emptyList(), emptyList(), reason = reason), f.contract.version)
+
+            f.run(ScriptedModel.of(Scripted.Reply(listOf(say("look"), tree("c1")))))
+
+            val anchor = f.anchorText(1)
+            assertTrue(anchor.contains("unavailable (${reason.take(159)}…)"), anchor)
+            assertFalse(anchor.contains("runner missing"), anchor)
+        }
+    }
+
+    @Test
+    fun `a malformed state call beside a valid edit refuses only the state call`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val v = f.version("src/a.py")
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("read"), read("c1", "src/a.py"))),
+                Scripted.Reply(listOf(say("edit and record"), anchored("c2", "src/a.py", v, "    return 1", "    return 10"), call("c3", "state", "not json"))),
+                Scripted.Reply(listOf(say("done"))),
+            )
+
+            f.run(model)
+
+            assertTrue(Files.readString(f.repo.resolve("src/a.py")).contains("return 10"), "the edit applied")
+            val results = f.transcript(3).filterIsInstance<ToolResult>().associate { it.callId to resultText(it) }
+            assertFalse(results.getValue("c2").contains("not executed"), results.getValue("c2"))
+            val refused = results.getValue("c3")
+            assertTrue(refused.contains("not executed: schema error in call c3: state: arguments are not a JSON object"), refused)
+            assertTrue(refused.contains("this call was refused; the other 1 call of the turn ran") && !refused.contains("no call of this turn executed"), refused)
+        }
+    }
+
+    @Test
+    fun `three valid reads run beside a look with a bad argument`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("read"), read("c1", "src/a.py"), read("c2", "src/b.py"), call("c3", "look", """{"what":"read","target":"README.md","budget":0}"""), read("c4", "tests/test_a.py"))),
+                Scripted.Reply(listOf(say("done"))),
+            )
+
+            f.run(model)
+
+            val results = f.transcript(2).filterIsInstance<ToolResult>().associate { it.callId to resultText(it) }
+            assertTrue(listOf("c1", "c2", "c4").none { results.getValue(it).contains("not executed") }, results.toString())
+            assertTrue(results.getValue("c4").contains("assert a() == 1"), results.getValue("c4"))
+            val refused = results.getValue("c3")
+            assertTrue(refused.contains("not executed: schema error in call c3: look: budget must be positive") && refused.contains("the other 3 calls of the turn ran"), refused)
+        }
+    }
+
+    @Test
+    fun `a refused edit holds back the turn's runs and the calls conditioned on a refused op while reads run`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("read, edit, run"), read("c1", "src/a.py"), call("c2", "edit", """{"ops":[],"why":"w"}"""), runCmd("c3", "hi"))),
+                Scripted.Reply(listOf(say("run behind a broken run"), call("c4", "run", "not json"), runCmd("c5", "hi", extra = ",\"if\":\"green(op:1)\""), read("c6", "src/b.py"))),
+                Scripted.Reply(listOf(say("done"))),
+            )
+
+            f.run(model)
+
+            val results = f.transcript(3).filterIsInstance<ToolResult>().associate { it.callId to resultText(it) }
+            assertFalse(results.getValue("c1").contains("not executed"), results.getValue("c1"))
+            assertTrue(results.getValue("c2").contains("schema error in call c2") && results.getValue("c2").contains("the other 1 call of the turn ran"), results.getValue("c2"))
+            assertTrue(results.getValue("c3").contains("not executed: the edit batch did not apply fully: op 2 was refused; runs execute only after a fully applied batch or none"), results.getValue("c3"))
+            assertTrue(results.getValue("c5").contains("not executed: depends on op 1, which was refused"), results.getValue("c5"))
+            assertFalse(results.getValue("c6").contains("not executed"), results.getValue("c6"))
+            assertTrue(f.intents.open().isEmpty() && f.intents.get("intent-1") == null, "no run executed")
+        }
+    }
+
+    @Test
+    fun `a masked op is refused alone while the other calls of the turn run`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val before = f.version("src/a.py")
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("look, edit, record"), read("c1", "src/a.py"), anchored("c2", "src/a.py", before, "    return 1", "    return 10"), patch("c3", """{"next":"hand the plan over"}"""))),
+                Scripted.Reply(listOf(say("packet"))),
+            )
+
+            f.run(model, role = Roles.plan, completion = RoleCompletion { _, _ -> CompletionDecision.Accepted(emptyList()) })
+
+            assertEquals(before, f.version("src/a.py"))
+            val results = f.transcript(2).filterIsInstance<ToolResult>().associate { it.callId to resultText(it) }
+            assertFalse(results.getValue("c1").contains("not executed"), results.getValue("c1"))
+            assertTrue(results.getValue("c3").contains("STATE v1 · applied 1 op"), results.getValue("c3"))
+            val refused = results.getValue("c2")
+            assertTrue(refused.contains("edit.anchored is not available to the plan role in this cell (any turn)") && refused.contains("the other 2 calls of the turn ran"), refused)
+        }
+    }
+
+    @Test
+    fun `a call refused three times beside calls that ran still ends the cell blocked`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(read("c1", "src/a.py"), call("c2", "state", "not json"))),
+                Scripted.Reply(listOf(read("c3", "src/b.py"), call("c4", "state", "not json"))),
+                Scripted.Reply(listOf(read("c5", "README.md"), call("c6", "state", "not json"))),
+                Scripted.Reply(listOf(say("never sent"))),
+            )
+
+            val blocked = assertIs<CellExit.Blocked>(f.run(model))
+
+            assertEquals(3, f.adapter.calls.size, "the third identical refusal ends the cell")
+            assertTrue(blocked.request.reason.startsWith("refusal loop: schema error in call c2: state: arguments are not a JSON object"), blocked.request.reason)
+            assertEquals(listOf("3 identical refused calls of state since turn 1"), blocked.request.evidence)
+            assertTrue(f.anchorText(3).contains("refusal loop: state was refused 2 times for the same reason"), f.anchorText(3))
+        }
+    }
+
+    @Test
+    fun `a state op the loop gate requires still refuses the whole turn`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("look"), tree("c1"))),
+                Scripted.Reply(listOf(say("look again"), tree("c2"))),
+                Scripted.Reply(listOf(say("and again"), tree("c3"))),
+                Scripted.Reply(listOf(say("read and record badly"), read("c4", "src/a.py"), call("c5", "state", "not json"))),
+                Scripted.Reply(listOf(say("done"))),
+            )
+
+            f.run(model)
+
+            val results = f.transcript(5).filterIsInstance<ToolResult>().associate { it.callId to resultText(it) }
+            assertTrue(results.getValue("c4").contains("not executed: the loop gate ended the last turn: a state op is required before anything else runs; no call of this turn executed"), results.getValue("c4"))
+            assertTrue(results.getValue("c5").contains("not executed: schema error in call c5") && results.getValue("c5").contains("no call of this turn executed"), results.getValue("c5"))
         }
     }
 
@@ -481,8 +640,8 @@ class CellTest {
         CellFixture(stateRoot).use { f ->
             val model = ScriptedModel.of(
                 Scripted.Reply(listOf(
-                    say("recording and asking"),
-                    call("c1", "state", "not json"),
+                    say("running and asking"),
+                    runCmd("c1", "hi", extra = ",\"if\":\"applied(op:2)\""),
                     call("c2", "task", """{"op":"ask","question":"Which value should a return?"}"""),
                 )),
             )
@@ -493,9 +652,10 @@ class CellTest {
             assertEquals(1, blocked.turns)
             val results = f.journal.events(JournalScope(f.ids.work, kinds = setOf(JournalKind.Result))).filter { it.turn == 1 }.map { it.text }
             val refused = results.single { it.startsWith("call c1: ") }
-            assertTrue(refused.contains("schema error in call c1") && refused.endsWith(" — the terminal call task(ask) ran alone"), refused)
+            assertTrue(refused.contains("condition applied(op:2) must name an edit op") && refused.endsWith(" — the terminal call task(ask) ran alone"), refused)
             assertFalse(refused.contains("no call of this turn executed"), refused)
             assertTrue(results.single { it.startsWith("call c2: ") }.contains("tool=task"), results.toString())
+            assertTrue(f.intents.open().isEmpty() && f.intents.get("intent-1") == null, "the refused run never started")
         }
     }
 
@@ -601,7 +761,7 @@ class CellTest {
             assertTrue(f.anchorText(2).contains(CellBudget.GATE), f.anchorText(2))
             assertFalse(f.request(2).mask!!.allows("edit.anchored"), "edits are masked on a reserve turn")
             val refused = resultText(f.transcript(3).filterIsInstance<ToolResult>().last())
-            assertTrue(refused.contains("not executed: ${CellBudget.GATE}; the edit refused the whole turn"), refused)
+            assertTrue(refused.contains("not executed: ${CellBudget.GATE}; no call of this turn executed"), refused)
             assertEquals(CellFixture.A_PY, Files.readString(f.repo.resolve("src/a.py")))
             val turn3 = f.journal.events(JournalScope(f.ids.work, kinds = setOf(JournalKind.Result))).filter { it.turn == 3 }
             assertTrue(turn3.single().text.contains("tool=look"), "a read still runs on a reserve turn: $turn3")
@@ -617,7 +777,7 @@ class CellTest {
             val model = ScriptedModel.of(
                 Scripted.Reply(listOf(say("scratch"), call("c1", "edit", """{"ops":[{"create":"src/new.py","content":"new"}],"why":"scratch"}"""))),
                 Scripted.Reply(listOf(say("look"), tree("c2"))),
-                Scripted.Reply(listOf(say("edit a file this cell never changed"), anchored("c3", "src/a.py", v, "    return 1", "    return 10"))),
+                Scripted.Reply(listOf(say("edit a file this cell never changed"), anchored("c3", "src/a.py", v, "    return 1", "    return 10"), read("c3r", "README.md"), runCmd("c3x", "hi"))),
                 Scripted.Reply(listOf(say("remove my scratch file"), call("c4", "edit", """{"ops":[{"delete":"src/new.py","expect":"${io.astrolabe.id.Digest.of("new".toByteArray()).hex}"}],"why":"repair"}"""))),
             )
 
@@ -627,7 +787,10 @@ class CellTest {
             assertTrue(f.request(3).mask!!.allows("edit.delete") && f.request(3).mask!!.allows("edit.anchored"), "path-addressed edits stay enabled for a repair")
             assertFalse(f.request(3).mask!!.allows("edit.transform"), "a transform is never a repair")
             val refused = resultText(f.transcript(4).filterIsInstance<ToolResult>().last { "c3" == it.callId })
-            assertTrue(refused.contains("not executed: reserve reached: edits are limited to files this cell already changed (src/new.py); verify and report; the edit refused the whole turn"), refused)
+            assertTrue(refused.contains("not executed: reserve reached: edits are limited to files this cell already changed (src/new.py); verify and report; this call was refused; the other 1 call of the turn ran"), refused)
+            val beside = f.transcript(4).filterIsInstance<ToolResult>().associate { it.callId to resultText(it) }
+            assertFalse(beside.getValue("c3r").contains("not executed"), "D-372: a read beside the refused reserve edit runs")
+            assertTrue(beside.getValue("c3x").contains("not executed: the edit batch did not apply fully: op 1 was refused"), beside.getValue("c3x"))
             assertEquals(CellFixture.A_PY, Files.readString(f.repo.resolve("src/a.py")))
             assertFalse(Files.exists(f.repo.resolve("src/new.py")), "the repair of the cell's own file ran on the reserve")
         }

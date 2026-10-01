@@ -361,20 +361,16 @@ public class Gates(gates: List<Gate>) {
         }
     }
 
-    // §5.6 Entry: first non-register edit while no plan step carries an `accept:` or the increment's acceptance is unresolved.
+    // §5.6 Entry: first non-register edit while the increment has no acceptance item in the contract and no plan step
+    // carries an `accept:` (D-372: acceptance the contract already defines needs no plan step to restate it).
     private object Entry : Gate {
         override val name: String get() = ENTRY
 
         override fun evaluate(state: GateState): List<GateOutcome> {
             if (state.calls.none { it.family == ToolFamily.Edit }) return emptyList()
-            val noAcceptStep = state.register.plan.none { it.accept != null }
-            val unresolved = state.increment.accept.filter { state.contract.acceptance(it) == null }
-            val why = when {
-                state.increment.accept.isEmpty() -> "the increment declares no acceptance"
-                unresolved.isNotEmpty() -> "acceptance ${unresolved.joinToString(", ")} is not in contract v${state.contract.version}"
-                noAcceptStep -> "no plan step carries an accept:"
-                else -> return emptyList()
-            }
+            if (state.register.plan.any { it.accept != null } || state.increment.accept.any { state.contract.acceptance(it) != null }) return emptyList()
+            val why = if (state.increment.accept.isEmpty()) "the increment declares no acceptance"
+                else "acceptance ${state.increment.accept.joinToString(", ")} is not in contract v${state.contract.version} and no plan step carries an accept:"
             return listOf(GateOutcome.Nudge(GateKey(name, "first-edit"), "entry: editing while $why — write the acceptance crisply, or ask one question (task.ask)"))
         }
     }
