@@ -238,4 +238,65 @@ class DirtyStateTest {
             assertEquals(3, n)
         }
     }
+
+    // ---------------------------------------------------------- content reuse (D-364)
+
+    @Test
+    fun `a second capture of an unchanged tree reads no content and writes the same manifest bytes`(@TempDir state: Path) {
+        WorkspaceFixture.create(state).use { fixture ->
+            fixture.repo.modify("src/a.py", "def a():\n    return 7\n")
+            fixture.repo.untracked("notes/big.txt", "x".repeat(10_000))
+            fixture.settle()
+
+            val first = fixture.dirtyState.capture(turn = 1)
+            val reads = fixture.workspace.contents.reads.get()
+            val second = fixture.dirtyState.capture(turn = 1)
+
+            assertEquals(reads, fixture.workspace.contents.reads.get(), "no content was read again")
+            assertContentEquals(Snapshot.encodeToBytes(first), Snapshot.encodeToBytes(second))
+            val fresh = Workspace(io.astrolabe.id.WorkspaceId("ws-fresh"), fixture.repo.root, fixture.repo.git)
+            val uncached = DirtyState(fresh, fixture.store.blobs, Stamper(fresh, TEST_ENV), fixture.ids, fixture.clock).capture(turn = 1)
+            assertContentEquals(Snapshot.encodeToBytes(uncached), Snapshot.encodeToBytes(second))
+        }
+    }
+
+    @Test
+    fun `a changed file is read and stored again`(@TempDir state: Path) {
+        WorkspaceFixture.create(state).use { fixture ->
+            fixture.repo.untracked("notes.txt", "aaaa\n")
+            fixture.settle()
+            fixture.dirtyState.capture()
+            val reads = fixture.workspace.contents.reads.get()
+
+            fixture.repo.write("notes.txt", "bbbb\n")
+            fixture.settle(ageSeconds = 1800)
+            val entry = fixture.dirtyState.capture().entry("notes.txt")!!
+
+            assertTrue(fixture.workspace.contents.reads.get() > reads)
+            assertEquals(io.astrolabe.id.Digest.of("bbbb\n".toByteArray()), entry.digest)
+            assertContentEquals("bbbb\n".toByteArray(), fixture.dirtyState.bytesOf(entry))
+        }
+    }
+
+    @Test
+    fun `a snapshot captured through reuse restores the right bytes`(@TempDir state: Path) {
+        WorkspaceFixture.create(state).use { fixture ->
+            fixture.repo.modify("src/a.py", "def a():\n    return 'user'\n")
+            fixture.repo.untracked("notes.txt", "keep me\n")
+            fixture.settle()
+            fixture.dirtyState.capture()
+            val reads = fixture.workspace.contents.reads.get()
+            val shadow = fixture.shadowRef()
+            shadow.open(fixture.dirtyState.capture(0))
+            assertEquals(reads, fixture.workspace.contents.reads.get(), "snapshot 0 came from the reuse path")
+
+            fixture.repo.modify("src/a.py", "def a():\n    return 'agent'\n")
+            fixture.repo.write("notes.txt", "overwritten\n")
+            shadow.snapshot(1)
+
+            kotlin.test.assertIs<RestoreResult.Restored>(shadow.restore(0))
+            assertEquals("def a():\n    return 'user'\n", String(fixture.bytes("src/a.py"), StandardCharsets.UTF_8))
+            assertEquals("keep me\n", String(fixture.bytes("notes.txt"), StandardCharsets.UTF_8))
+        }
+    }
 }

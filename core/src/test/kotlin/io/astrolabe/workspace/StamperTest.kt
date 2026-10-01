@@ -260,7 +260,7 @@ class StamperTest {
             fixture.repo.modify("src/a.py", "def a():\n    return 7\n")
             fixture.repo.untracked("notes/big.txt", "x".repeat(10_000))
             fixture.repo.untracked("notes/small.txt", "scratch\n")
-            settle(fixture)
+            fixture.settle()
 
             val first = fixture.stamper.report()
             val reads = fixture.workspace.contents.reads.get()
@@ -280,12 +280,12 @@ class StamperTest {
     fun `a same-size rewrite with a new modification time changes the stamp`(@TempDir state: Path) {
         WorkspaceFixture.create(state).use { fixture ->
             fixture.repo.untracked("notes.txt", "aaaa\n")
-            settle(fixture)
+            fixture.settle()
             val before = fixture.stamper.report()
 
             fixture.repo.write("notes.txt", "bbbb\n")
             fixture.repo.write("src/a.py", String(fixture.bytes("src/a.py"), Charsets.UTF_8).replace('a', 'z'))
-            settle(fixture, ageSeconds = 1800)
+            fixture.settle(ageSeconds = 1800)
             val after = fixture.stamper.report()
 
             assertEquals(setOf("notes.txt", "src/a.py"), Stamper.diff(before, after))
@@ -313,7 +313,7 @@ class StamperTest {
     fun `adding and deleting an untracked file is detected over a warm cache`(@TempDir state: Path) {
         WorkspaceFixture.create(state).use { fixture ->
             fixture.repo.untracked("notes/a.txt", "a\n")
-            settle(fixture)
+            fixture.settle()
             val warm = fixture.stamper.report()
             fixture.stamper.report()
 
@@ -325,15 +325,6 @@ class StamperTest {
             val deleted = fixture.stamper.report()
             assertEquals(setOf("notes/a.txt"), Stamper.diff(added, deleted))
             assertEquals(listOf("notes/b.txt"), deleted.untracked.map { it.path })
-        }
-    }
-
-    /** Moves every working-tree file's modification time [ageSeconds] into the past, out of the racy window. */
-    private fun settle(fixture: WorkspaceFixture, ageSeconds: Long = 3600) {
-        val past = java.nio.file.attribute.FileTime.from(java.time.Instant.now().minusSeconds(ageSeconds))
-        Files.walk(fixture.repo.root).use { paths ->
-            paths.filter { Files.isRegularFile(it) && !fixture.repo.root.relativize(it).startsWith(".git") }
-                .forEach { Files.setLastModifiedTime(it, past) }
         }
     }
 }

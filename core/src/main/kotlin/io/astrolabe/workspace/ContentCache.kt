@@ -43,12 +43,22 @@ internal class ContentCache(private val clock: Clock = Clock.systemUTC()) {
      * [objectAlgorithm] (`SHA-1` or `SHA-256`) the result also carries the git blob id under it.
      * `null` when [read] finds no file.
      */
-    fun of(file: Path, objectAlgorithm: String?, read: () -> ByteArray?): Content? {
+    fun of(file: Path, objectAlgorithm: String?, read: () -> ByteArray?): Content? =
+        cached(file, objectAlgorithm) ?: load(file, objectAlgorithm, read)
+
+    /** The valid entry for [file] (carrying [objectAlgorithm] when given), without reading any content. */
+    fun cached(file: Path, objectAlgorithm: String? = null): Content? {
+        val before = observe(file) ?: return null
+        val cached = entries[file] ?: return null
+        return cached.content.takeIf {
+            cached.observed == before && (objectAlgorithm == null || objectAlgorithm in it.objectIds)
+        }
+    }
+
+    /** Reads [file] through [read] unconditionally and records the result when it may be trusted later. */
+    fun load(file: Path, objectAlgorithm: String?, read: () -> ByteArray?): Content? {
         val before = observe(file)
         val cached = entries[file]
-        if (before != null && cached != null && cached.observed == before &&
-            (objectAlgorithm == null || objectAlgorithm in cached.content.objectIds)
-        ) return cached.content
         val readAt = nowNanos()
         val bytes = read()
         if (bytes == null) {

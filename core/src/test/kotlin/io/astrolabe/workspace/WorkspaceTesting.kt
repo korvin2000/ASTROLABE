@@ -61,6 +61,15 @@ internal class WorkspaceFixture private constructor(
 
     fun digestOf(path: String): Digest = Digest.of(bytes(path))
 
+    /** Moves every working-tree file's modification time [ageSeconds] into the past, out of the racy window (D-364). */
+    fun settle(ageSeconds: Long = 3600) {
+        val past = java.nio.file.attribute.FileTime.from(Instant.now().minusSeconds(ageSeconds))
+        Files.walk(repo.root).use { paths ->
+            paths.filter { Files.isRegularFile(it) && !repo.root.relativize(it).startsWith(".git") }
+                .forEach { Files.setLastModifiedTime(it, past) }
+        }
+    }
+
     /** `git for-each-ref` over everything but this campaign's shadow refs. */
     fun userRefs(): List<String> = rawGit("for-each-ref", "--format=%(refname) %(objectname)")
         .lines()
