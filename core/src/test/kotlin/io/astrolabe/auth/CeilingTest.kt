@@ -234,6 +234,8 @@ class CeilingTest {
         // The tmp prefixes keep their rule without a probe, for literal operands only.
         assertEquals(EffectClass.W, removal("rm -rf tmp/cache", posix, probe = null).effectClass)
         assertEquals(EffectClass.D, removal("rm -rf tmp/\$X", posix, probe = null).effectClass)
+        assertEquals(EffectClass.W, removal("del /s /q tmp\\*.log", windows, probe = null).effectClass)
+        assertEquals(EffectClass.D, removal("del /s /q tmp", windows, probe = null).effectClass, "del /s matches the name in every directory below its parent")
     }
 
     @Test

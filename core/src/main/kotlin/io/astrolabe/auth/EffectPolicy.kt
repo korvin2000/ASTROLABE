@@ -284,7 +284,7 @@ public object EffectPolicy {
                 else -> parsed.operands.firstOrNull { !literal(it, windows) }?.let { "'$it' is not a literal path" }
             }
             when {
-                doubt == null && parsed.operands.all { underTmp(it, cwd, workspaceRoot, config) } -> {
+                doubt == null && parsed.operands.all { underTmp(if (parsed.byName) "$it/.." else it, cwd, workspaceRoot, config) } -> {
                     effect = maxOf(effect, EffectClass.W)
                     capabilities += Capability.WorkspaceWrite
                     reasons += "destructive delete under tmp: '$label'"
