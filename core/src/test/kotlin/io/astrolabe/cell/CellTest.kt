@@ -327,6 +327,25 @@ class CellTest {
     }
 
     @Test
+    fun `deleting a scratch file the cell created raises no impact nudge`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val scratch = "def a():\n    return 0\n"
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("probe"), call("c1", "edit", """{"ops":[{"create":"src/scratch.py","content":${CellFixture.quote(scratch)}}],"why":"probe"}"""))),
+                Scripted.Reply(listOf(say("reading"), read("c2", "src/scratch.py"))),
+                Scripted.Reply(listOf(say("cleanup"), call("c3", "edit", """{"ops":[{"delete":"src/scratch.py","expect":"${io.astrolabe.id.Digest.of(scratch.toByteArray()).hex}"}],"why":"cleanup"}"""))),
+                Scripted.Reply(listOf(say("look"), tree("c4"))),
+                Scripted.Reply(listOf(say("look"), tree("c5"))),
+            )
+
+            f.run(model, turns = 5)
+
+            assertFalse(Files.exists(f.repo.resolve("src/scratch.py")), "the scratch file was deleted")
+            assertFalse(f.anchorText(4).contains("impact:"), f.anchorText(4))
+        }
+    }
+
+    @Test
     fun `leaving a step runs its accept check at the step boundary and the packet records what was not tested`() = runTest {
         val pass = javaClass.getResourceAsStream("/shaper/pytest-pass.txt")!!.use { String(it.readAllBytes(), Charsets.UTF_8) }
         CellFixture(stateRoot, files = CellFixture.DEFAULT_FILES + ("pytest_pass.txt" to pass)).use { f ->
@@ -588,6 +607,29 @@ class CellTest {
             assertTrue(turn3.single().text.contains("tool=look"), "a read still runs on a reserve turn: $turn3")
             assertEquals(CellStatus.Partial, partial.checkpoint.status)
             assertTrue(partial.checkpoint.reason!!.contains("TurnBudget"))
+        }
+    }
+
+    @Test
+    fun `a turn-count reserve admits a repair of the cell's own file and refuses an edit to a new path`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val v = f.version("src/a.py")
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("scratch"), call("c1", "edit", """{"ops":[{"create":"src/new.py","content":"new"}],"why":"scratch"}"""))),
+                Scripted.Reply(listOf(say("look"), tree("c2"))),
+                Scripted.Reply(listOf(say("edit a file this cell never changed"), anchored("c3", "src/a.py", v, "    return 1", "    return 10"))),
+                Scripted.Reply(listOf(say("remove my scratch file"), call("c4", "edit", """{"ops":[{"delete":"src/new.py","expect":"${io.astrolabe.id.Digest.of("new".toByteArray()).hex}"}],"why":"repair"}"""))),
+            )
+
+            val exit = f.run(model, turns = 4)
+
+            assertEquals(PartialReason.TurnBudget, assertIs<CellExit.Partial>(exit).reason)
+            assertTrue(f.request(3).mask!!.allows("edit.delete") && f.request(3).mask!!.allows("edit.anchored"), "path-addressed edits stay enabled for a repair")
+            assertFalse(f.request(3).mask!!.allows("edit.transform"), "a transform is never a repair")
+            val refused = resultText(f.transcript(4).filterIsInstance<ToolResult>().last { "c3" == it.callId })
+            assertTrue(refused.contains("not executed: reserve reached: edits are limited to files this cell already changed (src/new.py); verify and report; the edit refused the whole turn"), refused)
+            assertEquals(CellFixture.A_PY, Files.readString(f.repo.resolve("src/a.py")))
+            assertFalse(Files.exists(f.repo.resolve("src/new.py")), "the repair of the cell's own file ran on the reserve")
         }
     }
 

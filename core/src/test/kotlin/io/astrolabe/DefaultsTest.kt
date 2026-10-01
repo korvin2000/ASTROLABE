@@ -56,7 +56,7 @@ class DefaultsTest {
     @Test
     fun `declared values match the table`() {
         val d = Defaults()
-        assertEquals(40, d.turnsPerCell)
+        assertEquals(80, d.turnsPerCell)
         assertEquals(0.65, d.alpha)
         assertEquals(8, d.k)
         assertEquals(6, d.m)

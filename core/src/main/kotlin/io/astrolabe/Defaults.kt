@@ -15,7 +15,7 @@ public data class Defaults(
     // Shape (§3.5, D-16)
     val shapePolicy: ShapePolicy = ShapePolicy(),
     // Cell turn budget
-    val turnsPerCell: Int = 40,
+    val turnsPerCell: Int = 80,
     val turnNudgeFraction: Double = 0.80,
     // Bounded wait for a provider terminal after the response (D-314)
     val providerTerminalWaitSeconds: Int = 60,
@@ -64,7 +64,7 @@ public data class Defaults(
     val reserveRecoveryAndPersist: Double = 0.05,
     val campaignRecoveryReserve: Double = 0.10,
     // Stall / loop / repeated signature / doom-loop guard
-    val stallTurns: Int = 3,
+    val stallTurns: Int = 5,
     val loopIdentical: Int = 2,
     val repeatedSignatureRepairs: Int = 2,
     val doomLoopSameCalls: Int = 3,

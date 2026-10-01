@@ -96,6 +96,8 @@ import io.astrolabe.verify.TestIntegrity
 import io.astrolabe.verify.TestIntegrityFlag
 import io.astrolabe.workset.StaleDrop
 import io.astrolabe.workspace.ChangeListener
+import io.astrolabe.workspace.Intent
+import io.astrolabe.workspace.PathResolution
 import io.astrolabe.workspace.PathPattern
 import io.astrolabe.workspace.Preimage
 import io.astrolabe.workspace.Ranges
@@ -195,9 +197,13 @@ public class Cell @JvmOverloads constructor(
         /** The contract version the refusal history was collected under: an amendment may change masks and ceilings (D-358). */
         private var refusedUnder = -1
         private var lastProgressTurn = 0
+        /** D-366: signatures of every finished `run`/`verify` of the cell; a repeat with the same result is not new information. */
+        private val seenResults = HashSet<CallSignature>()
         private var requiredOp: String? = null
         private var refusals = 0
         private val touched = LinkedHashSet<String>()
+        /** D-366: paths named by edits whose dispatch failed (effects unknown); ownership needs the ledger to show them moved. */
+        private val failedEditPaths = LinkedHashSet<String>()
         private val touchedLedger = ArrayList<Touched>()
         private val flags = LinkedHashMap<String, TestIntegrityFlag>()
         private var drops: List<StaleDrop> = emptyList()
@@ -206,6 +212,8 @@ public class Cell @JvmOverloads constructor(
         private var reconciledTurn = 0
         private var occupancy: Occupancy? = null
         private var atlas = ws.atlas
+        /** D-366: the files the atlas listed at cell start; with the base stamp's members, what existed before the cell. */
+        private val baseFiles: Set<String> = ws.atlas.rows.mapTo(HashSet()) { it.path }
         private var rebuilds = 0
         private val rebuildNotes = ArrayList<String>()
 
@@ -312,7 +320,9 @@ public class Cell @JvmOverloads constructor(
                 ev.journal.append(JournalEvent(idGen.next("ev"), ids, turn, JournalKind.Boundary, text = "refactor mode (${refactor.reasons.first()}): red_ok_until ${RefactorMode.RED_OK_UNTIL}", at = clock.instant()))
             }
             redOkUntilIncrementEnd = refactor.active
-            val mask = maskFor(contract, reserveTurn)
+            // D-366: a reserve reached by the turn count, with working tokens left, still lets the cell repair what it changed.
+            val repairable = if (reserveTurn && budget.working.available.value > 0) ownPaths() else emptySet()
+            val mask = maskFor(contract, reserveTurn, repairable.isNotEmpty())
             val schemas = when (val selection = ToolSchemas.forLineage(ctx.model.adapter, ctx.model.profile, mask)) {
                 is SchemaSelection.Supported -> selection.set
                 is SchemaSelection.Unsupported -> return failed("tool schemas unsupported for ${selection.profileId}: ${selection.reason}")
@@ -450,7 +460,7 @@ public class Cell @JvmOverloads constructor(
             val registerBefore = register
             val certifiedBefore = certified(currencies(before.candidateId))
             val native = response.toolCalls
-            val validated = if (native.isEmpty()) null else validateCalls(native, reserveTurn, mask, contract)
+            val validated = if (native.isEmpty()) null else validateCalls(native, reserveTurn, mask, contract, repairable)
             val calls = when (validated) {
                 is Validated.Calls -> validated.calls
                 is Validated.Partial -> listOf(validated.call)
@@ -465,6 +475,7 @@ public class Cell @JvmOverloads constructor(
             val after = reconcile("turn $turn")
             val gauge = gauge(currencies(after.candidateId))
             var liveRunOutput = false
+            val worked = ArrayList<Pair<ToolCall, ToolOutcome>>()
             val editedPaths = LinkedHashSet<String>()
             // §7.4 impact nudge: each edited file's bytes before this turn's batch, and the refs looks emitted after its last edit.
             val batchBefore = LinkedHashMap<String, ByteArray>()
@@ -481,11 +492,13 @@ public class Cell @JvmOverloads constructor(
                     is Disposition.NotExecuted -> "${Boundary.RESULT_OPEN}not executed: ${disposition.reason}${Boundary.RESULT_CLOSE}\n${gauge.line()}"
                     is Disposition.Failed -> "${Boundary.RESULT_OPEN}failed: ${disposition.error} — effects unknown; reconciled at the turn boundary${Boundary.RESULT_CLOSE}\n${gauge.line()}"
                 }
+                if (disposition is Disposition.Failed && call.family == ToolFamily.Edit) failedEditPaths += editPaths(call).orEmpty()
                 val alias = outcome?.resultAlias?.takeIf { it != NO_ALIAS }
                 val refs = listOfNotNull(alias) + outcome?.header?.runtime?.artifactRefs.orEmpty()
                 appendResult(call.providerCallId, text, isError = outcome == null, label = label(call, outcome), resultClass = ResultClass.of(call.name), alias = alias)
                 journalResult(call.providerCallId, outcome?.header?.line() ?: text.lineSequence().first(), refs)
                 if (outcome == null) return
+                worked += call to outcome
                 // D-358: a `run` the executor denied by policy (read-only role, ceiling, execution mode, D-class without intent)
                 // is a refusal the same call cannot get past: it joins the refusal loop, not the ordinary loop, so the third
                 // identical denial ends the cell blocked instead of nudging twice per turn until the budget is spent.
@@ -553,8 +566,10 @@ public class Cell @JvmOverloads constructor(
             if (batchBefore.isNotEmpty()) {
                 val index = SymbolIndex(atlas)
                 val changes = batchBefore.flatMap { (path, bytes) -> DefinitionChanges.of(path, bytes, ws.registry.read(path)?.bytes) }
+                // D-366: a file absent at the cell's base is the cell's own; nothing outside can reference it yet.
+                val created = batchBefore.keys.filter { it !in baseFiles && base?.members?.containsKey(it) != true }.toSet()
                 // Fan-in outside the edited file: tier-0 lexical refs, which is also the no-index literal fallback (§7.4).
-                impact.changed(turn, changes) { c -> index.refs(c.symbol).references.count { it.path != c.path } }
+                impact.changed(turn, changes, created) { c -> index.refs(c.symbol).references.count { it.path != c.path } }
             }
             inspected.forEach(impact::inspected)
             impact.rescoped(registerBefore, register)
@@ -590,7 +605,10 @@ public class Cell @JvmOverloads constructor(
             val currenciesNow = currencies(stampNow.candidateId)
             uncertified = outstanding(currenciesNow)
             val certifiedAfter = certified(currenciesNow)
-            if (Progress.events(registerBefore, register, turn, certifiedBefore, certifiedAfter).isNotEmpty()) lastProgressTurn = turn
+            val work = Progress.work(turn, worked, seenResults)
+            worked.filter { (call, outcome) -> (call.family == ToolFamily.Run || call.family == ToolFamily.Verify) && Progress.finished(outcome) }
+                .forEach { (call, outcome) -> seenResults += CallSignature.of(call, outcome) }
+            if (work.isNotEmpty() || Progress.events(registerBefore, register, turn, certifiedBefore, certifiedAfter).isNotEmpty()) lastProgressTurn = turn
             val completionEvidence = if (proposal && implementingCompletion && dispatchRefusal == null)
                 ctx.completionEvidence?.invoke(flags.values.toList()) else null
             completionEvidence?.flags?.forEach { flag -> flags[flag.path] = flag }
@@ -615,6 +633,7 @@ public class Cell @JvmOverloads constructor(
                 reserve = budget.verdict(outstanding(currenciesNow)), turnsMax = budget.turns, completionProposed = proposal,
                 currencies = currenciesNow, verdicts = validEvidence?.verdicts.orEmpty(), unavailable = validEvidence?.unavailable.orEmpty(), flags = gateFlags, fired = fired, defaults = defaults,
                 impactNudges = impact.unresolved, unresolvedImpactNudges = impact.unresolvedPublic.map { it.missing },
+                impactOverflow = if (batchBefore.isNotEmpty()) impact.overflow else emptyList(),
                 outsideIncrement = editedByEdit.filter { p -> contract.scope.covers(p) && increment.writeScope.none { PathPattern.matches(it, p) } },
                 surfaceFlags = flags.values.filter { it.path in editedPaths }, editedPaths = editedPaths.toSet(),
                 contractAnchors = (tools.kb as? KbTool)?.contractAnchors().orEmpty(), repeatedFailures = repeated, acceptance = acceptance,
@@ -706,10 +725,30 @@ public class Cell @JvmOverloads constructor(
             occupancy?.percentOf(capabilities.contextLimitTokens) ?: 0, budget.snapshot(), checksSummary(currencies), ws.workset, register, turn, budget.turns,
         )
 
-        /** Role mask ∩ shape ∩ ceiling; a reserve turn also masks the edit family (§5.9 "no new edits"). */
-        private fun maskFor(contract: Contract, reserveTurn: Boolean): ToolMask {
+        /**
+         * Role mask ∩ shape ∩ ceiling; a reserve turn also masks the edit family (§5.9 "no new edits") — except, on a
+         * [repair] turn (D-366), the path-addressed edit ops, which [validateCalls] holds to the cell's own paths.
+         */
+        private fun maskFor(contract: Contract, reserveTurn: Boolean, repair: Boolean = false): ToolMask {
             val effective = ctx.role.effectiveOps(contract.shape, Ceiling.of(contract.authorization, ctx.config.executionMode, ctx.hostSets))
-            return if (reserveTurn) ToolMask(effective.allowed.filterNot { it.startsWith(ToolFamily.Edit.wire + ".") }.toSet()) else effective
+            if (!reserveTurn) return effective
+            val edit = ToolFamily.Edit.wire + "."
+            return ToolMask(effective.allowed.filterNot { it.startsWith(edit) && (!repair || it.removePrefix(edit) in NOT_PATH_ADDRESSED) }.toSet())
+        }
+
+        /** D-366: the paths this cell changed itself — by edit or run, or by an edit that failed mid-batch and moved them. */
+        private fun ownPaths(): Set<String> {
+            val moved = touchedLedger.map { it.path }.toSet()
+            return (origins.filterValues { it != ChangeOrigin.External }.keys + failedEditPaths.filter { it in moved }).toSortedSet()
+        }
+
+        /** The workspace-relative paths [call]'s edit ops name; `null` when an op is not addressed by path (transform, revert). */
+        private fun editPaths(call: ToolCall): List<String>? {
+            val ops = (call.args as? Args.Edit)?.args?.ops ?: return null
+            if (ops.any { it.kind in NOT_PATH_ADDRESSED }) return null
+            return ops.flatMap { listOfNotNull(it.path, it.create, it.delete, it.rename, it.to) }.map { spelled ->
+                (ws.workspace.paths.resolve(spelled, Intent.Read) as? PathResolution.Resolved)?.relative ?: spelled.replace('\\', '/').removePrefix("./")
+            }
         }
 
         private fun contract(): Contract = ctx.contracts.current(ids.work) ?: throw IllegalStateException("no committed contract for ${ids.work}")
@@ -721,7 +760,7 @@ public class Cell @JvmOverloads constructor(
          * required `state` op after the loop gate, a masked op or an edit on a reserve turn refuses every call of the
          * turn — except one valid, unmasked terminal call, which runs alone (F2b).
          */
-        private fun validateCalls(native: List<NativeCall>, reserveTurn: Boolean, mask: ToolMask, contract: Contract): Validated {
+        private fun validateCalls(native: List<NativeCall>, reserveTurn: Boolean, mask: ToolMask, contract: Contract, repairable: Set<String> = emptySet()): Validated {
             val calls = when (val parsed = ToolCalls.parse(native)) {
                 is ParsedCalls.Invalid -> return refuse(native, mask, "schema error in call ${parsed.providerCallId}: ${parsed.error}",
                     native.filter { it.id == parsed.providerCallId }, key = "schema error: ${parsed.error}")
@@ -730,8 +769,13 @@ public class Cell @JvmOverloads constructor(
             (Partition.of(calls) as? Partition.Rejected)?.let { rejected ->
                 return refuse(native, mask, rejected.reason, native.filterIndexed { index, _ -> index + 1 == rejected.opId })
             }
-            if (reserveTurn && calls.any { it.family == ToolFamily.Edit }) {
-                return refuse(native, mask, CellBudget.GATE, native.filterIndexed { index, _ -> calls[index].family == ToolFamily.Edit }, trailer = "; the edit refused the whole turn")
+            val edits = calls.filter { it.family == ToolFamily.Edit }
+            // D-366: on a turn-count reserve an edit batch whose every op targets a path the cell already changed is a repair.
+            val repair = repairable.isNotEmpty() && edits.all { call -> editPaths(call)?.all { it in repairable } == true }
+            if (reserveTurn && edits.isNotEmpty() && !repair) {
+                val reason = if (repairable.isEmpty()) CellBudget.GATE else "reserve reached: edits are limited to files this cell already changed (" +
+                    repairable.take(REPAIR_PATHS_SHOWN).joinToString(", ") + (if (repairable.size > REPAIR_PATHS_SHOWN) ", … +${repairable.size - REPAIR_PATHS_SHOWN}" else "") + "); verify and report"
+                return refuse(native, mask, reason, native.filterIndexed { index, _ -> calls[index].family == ToolFamily.Edit }, trailer = "; the edit refused the whole turn")
             }
             calls.firstNotNullOfOrNull { call -> call.operationNames.firstOrNull { !mask.allows(it) }?.let { call to it } }?.let { (call, op) ->
                 val ceiling = Ceiling.of(contract.authorization, ctx.config.executionMode, ctx.hostSets).allows(op, ctx.role.toolMask)?.detail
@@ -1313,6 +1357,12 @@ public class Cell @JvmOverloads constructor(
         const val SIGNATURE_CHARS = 120
         val DIGITS = Regex("\\d+")
         val SPACES = Regex("\\s+")
+
+        /** D-366: how many of the cell's own paths a reserve-repair refusal names before it counts the rest. */
+        const val REPAIR_PATHS_SHOWN = 12
+
+        /** Edit ops not addressed by a path: never a reserve repair (D-366). */
+        val NOT_PATH_ADDRESSED = setOf("transform", "revert")
 
         /** How many of a rejection's details ride on its line. */
         const val DETAILS_IN_LINE = 2

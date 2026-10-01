@@ -127,6 +127,83 @@ class PrimeTest {
         }
     }
 
+    /** A deterministic probe: the programs in [found] resolve, the environment is [env]. */
+    private class FakeProbe(override val os: OsFamily, private val found: Set<String>, private val env: Map<String, String> = emptyMap()) : HostProbe {
+        override fun onPath(program: String): Boolean = program in found
+        override fun env(name: String): String? = env[name]
+    }
+
+    @Test
+    fun `the host block names a Windows host, the run form, PATH programs, wrappers and an unset JAVA_HOME`() {
+        FixtureRepos.materialize(Fixture.GradleSmall).use { repo ->
+            java.nio.file.Files.writeString(repo.root.resolve("gradlew"), "#!/bin/sh\n")
+            java.nio.file.Files.writeString(repo.root.resolve("gradlew.bat"), "@echo off\r\n")
+            val atlas = Atlas.build(repo.root)
+            val probe = FakeProbe(OsFamily.Windows, setOf("git", "node", "npm", "npx", "java"))
+            val block = """
+                host: windows · workspace paths use /; native paths use \
+                  run: argv starts the program directly, no shell; shell syntax (pipes, &&, set VAR=…) needs the `cmd` form — cmd.exe on Windows, sh on POSIX
+                  on PATH: git, node, npm, npx, java
+                  not on PATH: pnpm, yarn, javac, gradle, mvn, python, python3, pip, go, cargo, dotnet, docker
+                  wrappers: gradlew, gradlew.bat
+                  JAVA_HOME: unset (a Gradle or Maven build is present)
+
+            """.trimIndent()
+            val facts = HostFacts.of(probe, atlas)
+            assertEquals(block, facts.render())
+            assertTrue(facts.render().lines().filter { it.isNotEmpty() }.size <= 6, "at most six lines")
+            val text = Prime.render(atlas, Sniff.commands(atlas), host = facts)
+            assertContains(text, block + "rules: none")
+            assertTrue(text.indexOf("commands:") < text.indexOf("host: windows"), "the host block follows the sniffed commands")
+            assertEquals(text, Prime.render(atlas, Sniff.commands(atlas), host = HostFacts.of(probe, atlas)), "byte-stable for one host")
+            val set = HostFacts.of(FakeProbe(OsFamily.Windows, emptySet(), mapOf("JAVA_HOME" to "C:/jdk")), atlas)
+            assertFalse(set.javaHomeUnset)
+            assertContains(set.render(), "  on PATH: none of the probed programs\n")
+        }
+    }
+
+    @Test
+    fun `the host block on POSIX omits wrappers and JAVA_HOME without a JVM build`() {
+        FixtureRepos.materialize(Fixture.PythonSmall).use { repo ->
+            val atlas = Atlas.build(repo.root)
+            val facts = HostFacts.of(FakeProbe(OsFamily.Linux, setOf("git", "python3", "pip")), atlas)
+            assertEquals(
+                """
+                host: linux · paths use /
+                  run: ${HostFacts.RUN_LINE}
+                  on PATH: git, python3, pip
+                  not on PATH: node, npm, npx, pnpm, yarn, java, javac, gradle, mvn, python, go, cargo, dotnet, docker
+
+                """.trimIndent(),
+                facts.render(),
+            )
+            assertFalse("host:" in Prime.render(atlas, Sniff.commands(atlas)), "no probe, no host block")
+        }
+    }
+
+    @Test
+    fun `the path probe resolves programs on PATH without starting them`() {
+        val dir = java.nio.file.Files.createTempDirectory("astrolabe-path-probe")
+        try {
+            val os = OsFamily.of(System.getProperty("os.name"))
+            val probe = if (os == OsFamily.Windows) {
+                java.nio.file.Files.writeString(dir.resolve("mytool.cmd"), "@echo off\r\n")
+                PathProbe(os, mapOf("Path" to "C:\\nowhere;$dir", "PATHEXT" to ".COM;.EXE;.BAT;.CMD"))
+            } else {
+                val tool = java.nio.file.Files.writeString(dir.resolve("mytool"), "#!/bin/sh\n")
+                tool.toFile().setExecutable(true)
+                java.nio.file.Files.writeString(dir.resolve("plain"), "not executable\n")
+                PathProbe(os, mapOf("PATH" to "/nowhere:$dir"))
+            }
+            assertTrue(probe.onPath("mytool"))
+            assertFalse(probe.onPath("absent"))
+            if (os != OsFamily.Windows) assertFalse(probe.onPath("plain"), "a file without the execute bit is not a program")
+            assertEquals(null, probe.env("JAVA_HOME_SURELY_UNSET"))
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
     @Test
     fun `the knowledge-base index and the behaviour map are rendered as given and capped`() {
         FixtureRepos.materialize(Fixture.PythonSmall).use { repo ->

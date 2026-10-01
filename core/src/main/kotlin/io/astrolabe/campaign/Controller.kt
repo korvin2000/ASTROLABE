@@ -7,6 +7,8 @@ import io.astrolabe.Project
 import io.astrolabe.atlas.Atlas
 import io.astrolabe.atlas.Prime
 import io.astrolabe.atlas.RulesSnapshot
+import io.astrolabe.atlas.HostFacts
+import io.astrolabe.atlas.HostProbe
 import io.astrolabe.atlas.Sniffed
 import io.astrolabe.auth.Ceiling
 import io.astrolabe.auth.Redaction
@@ -416,6 +418,8 @@ public class Controller @JvmOverloads public constructor(
     private val layers: OptionalLayers = OptionalLayers(),
     /** Per-profile admission estimators for routed cells (D-06, D-327); `null` keeps the supplied cell model's estimator. */
     private val estimators: io.astrolabe.provider.EstimatorFactory? = null,
+    /** What the prime's host block reports (D-366): probed once per campaign open, never by starting a process. */
+    private val host: HostProbe = HostProbe.system(),
 ) {
     // Resolved once per campaign at open, its attempt boundary (§12.2).
     private val plugged = Collections.synchronizedMap(WeakHashMap<OpenedCampaign, PluggedLayers>())
@@ -506,7 +510,7 @@ public class Controller @JvmOverloads public constructor(
         workspace.paths.bindWriteProtection { path, ignoreCase -> contracts.current(request.work)?.scope?.protects(path, ignoreCase) != false }
         val checks = Checks.seed(contract, commands, qualityGates = effective.qualityGates)
         val rules = RulesTrust(workspace.root).approved(effective.rulesFile)?.let { RulesSnapshot(it.binding.path, it.digest, it.text) }
-        val prime = Prime.render(atlas, derived.sniffed, rules)
+        val prime = Prime.render(atlas, derived.sniffed, rules, host = HostFacts.of(host, atlas))
 
         var refusal: String? = null
         var state: CampaignState? = campaigns.load(request.work, request.attempt)

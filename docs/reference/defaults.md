@@ -18,7 +18,7 @@ All numbers are declared defaults for the first evaluation round, not derived op
 | Parameter | Default | Note |
 |---|---|---|
 | Shape | policy ([§3.5](../architecture/roles-shapes.md#sec-3-5)); S0 for small, low-risk work | logged with inputs |
-| Cell turn budget | 40 (soft; nudge at 80 %) | continuation cell on exhaustion; calibration prior may adjust per repo |
+| Cell turn budget | 80 (soft; nudge at 80 %; D-366, was 40) | continuation cell on exhaustion; calibration prior may adjust per repo; a reserve reached by the turn count still admits edits to files the cell already changed (D-366) |
 | `α` pressure threshold | 0.65 of `C_profile` | gauge every result; second rebuild ⇒ `partial` + replan |
 | `k` eviction batch / `m` turns kept on rebuild | 8 / 6 (0 for role switch, alternative attempt and cell end) | ablation: batched vs pressure-only within short cells |
 | `R_max` total live results / `[A]` max | 16K / 2.5K tokens | explicit residency bound |
@@ -32,7 +32,7 @@ All numbers are declared defaults for the first evaluation round, not derived op
 | `θ` risk threshold for early slow checks | 40 | `Σ Δlines·(1+log2(1+fanin))` `[C1 §6]` |
 | Full-suite cadence | every 5 verified increments and at campaign end | |
 | Reserves | cell: verification 15 % + recovery/persist 5 % of tokens and turns; campaign: recovery 10 % | unspendable elsewhere; raised to known check costs before start `[B §11.6]` |
-| Stall / loop / repeated signature / doom-loop guard | 3 turns / 2 identical / 2 repairs / 3 same calls | |
+| Stall / loop / repeated signature / doom-loop guard | 5 turns (D-366) / 2 identical / 2 repairs / 3 same calls | an applied edit batch or a new run result is progress (D-366) |
 | Probe cell | 15 turns / 40K tokens, medium tier | |
 | Review cell | ≤ 10 `look` / 30K tokens (increment), 60K (campaign); high tier for contract, design, campaign scope | |
 | Repair helper / substantive attempts per increment / delegation depth / parallel cells | 2 repair calls / 2 total (initial + one alternative) / 1 writers, 2 probes / 3 (S3 off by default) | |
