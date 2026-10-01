@@ -784,6 +784,25 @@ class EditTest {
     }
 
     @Test
+    fun `an anchor found only after CRLF and trailing-blank normalisation applies once and says so`() = runTest {
+        repo.write("src/ws.py", "def f():\r\n    x = 1   \r\n    return x\r\n")
+        val v = seen("src/ws.py", 1, 3)
+        val out = run(anchored("src/ws.py", v, hunk("    x = 1\n    return x", "    x = 2\n    return x")))
+        assertEquals("ok", status(out), out.body)
+        assertTrue(out.body.contains("(anchor matched after whitespace normalisation)"), out.body)
+        assertEquals("def f():\r\n    x = 2\r\n    return x\r\n", Files.readString(repo.resolve("src/ws.py")), "the file keeps CRLF")
+        val exact = run(anchored("src/ws.py", registry.version("src/ws.py")!!, hunk("    x = 2", "    x = 3")))
+        assertFalse(exact.body.contains("normalisation"), exact.body)
+
+        repo.write("src/twice.py", "a = 1 \nb = 2\na = 1\t\n")
+        val twice = seen("src/twice.py", 1, 3)
+        val ambiguous = run(anchored("src/twice.py", twice, hunk("a  = 1", "a = 5")))
+        assertEquals("refused", status(ambiguous))
+        assertTrue(ambiguous.body.contains("anchor 2× in 'src/twice.py': sites 1, 3"), ambiguous.body)
+        assertEquals("a = 1 \nb = 2\na = 1\t\n", Files.readString(repo.resolve("src/twice.py")))
+    }
+
+    @Test
     fun `a UTF-8 BOM, non-ASCII text and CRLF endings survive an edit byte-exactly outside the hunk`() = runTest {
         val v = seen("src/bom.py", 1, 2)
         assertEquals("ok", status(run(anchored("src/bom.py", v, hunk("w = 1", "w = 2")))))

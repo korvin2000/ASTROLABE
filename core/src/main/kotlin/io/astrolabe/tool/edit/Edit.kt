@@ -214,7 +214,7 @@ public class Edit(
         val path: String
     }
 
-    private class AnchoredPlan(override val index: Int, override val path: String, val resolved: PathResolution.Resolved, val expect: FileVersion, val oldBytes: ByteArray, val oldText: String, val hunks: List<Pair<Located, String>>) : Plan
+    private class AnchoredPlan(override val index: Int, override val path: String, val resolved: PathResolution.Resolved, val expect: FileVersion, val oldBytes: ByteArray, val oldText: String, val hunks: List<Pair<Located, String>>, val normalised: Boolean) : Plan
     private class CreatePlan(override val index: Int, override val path: String, val resolved: PathResolution.Resolved, val bytes: ByteArray) : Plan
     private class DeletePlan(override val index: Int, override val path: String, val resolved: PathResolution.Resolved, val expect: FileVersion, val oldBytes: ByteArray) : Plan
 
@@ -451,7 +451,7 @@ public class Edit(
                 throw Refusal(EditError("overlap", index, path, "hunks overlap in '$path': ${sorted[i - 1].first.lines} and ${sorted[i].first.lines}"))
             }
         }
-        return AnchoredPlan(index, path, resolved, expect, content.bytes, text, located)
+        return AnchoredPlan(index, path, resolved, expect, content.bytes, text, located, located.any { !it.first.exact })
     }
 
     private fun mutable(index: Int, path: String): PathResolution.Resolved = when (val resolved = workspace.resolve(path, Intent.Mutate)) {
@@ -541,6 +541,7 @@ public class Edit(
                         diffstat[plan.path] = DiffStat(counts.first, counts.second)
                         written[plan.path] = plan.resolved
                         views += postEditViews(plan, newText, after)
+                        if (plan.normalised) notes[plan.index] = "anchor matched after whitespace normalisation"
                     }
                     is CreatePlan -> {
                         os.replaceFileAtomically(plan.resolved.real, plan.bytes)

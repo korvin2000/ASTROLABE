@@ -35,7 +35,8 @@ edit(ops, why)
        | { transform: { script | argv, scope_glob, inventory?, expected_matches?, why } } ]                        [§9.2]
   → { ok, views[], versions, syntax{path: ok|error:line}, diffstat, touched_outside_scope[], test_integrity[],
       error?: {kind, candidates[], sites[], diff_since_expect?} }
-  · CAS on content hash; anchors unique (exact → ws-normalised); hunks inside displayed(path, expect); non-overlapping
+  · CAS on content hash; anchors unique (exact → ws-normalised, the op's line then says "anchor matched after
+    whitespace normalisation"; the file keeps its line endings); hunks inside displayed(path, expect); non-overlapping
   · `expect` names a version shown in this cell, never the current bytes: a full hash as given; ≥4 hex → the one shown
     version (KNOWN or dropped as stale) it prefixes; omitted → the one version KNOWN at dispatch; delete and rename alike.
     Unresolved or ambiguous → error kind `expect`, no write; a stale version → `stale_expect` with its diff    (D-346)
