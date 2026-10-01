@@ -91,6 +91,9 @@ public data class AppliedOp(
     val preimageRef: String? = null,
 )
 
+/** D-375: what became of one op of a batch; the retry guidance is built from it, never from the applied list alone. */
+public enum class OpDisposition { Written, Refused, Failed, NotAttempted }
+
 /** D-371: the ops of one path group refused in preflight, with the first refused op's diagnostics; the other groups applied. */
 public data class RefusedGroup(val paths: List<String>, val ops: List<Int>, val error: EditError)
 
@@ -112,6 +115,8 @@ public data class EditResult(
     val refused: List<RefusedGroup> = emptyList(),
     /** Per applied op index: how it was applied when that differs from the plain form (normalised anchor, replace). */
     val notes: Map<Int, String> = emptyMap(),
+    /** Per 1-based op index of a batch that reached application (D-375); empty when the batch stopped before it. */
+    val dispositions: Map<Int, OpDisposition> = emptyMap(),
 ) {
     /** Some ops reached the workspace before the batch stopped (mid-batch failure, §9.1). */
     val partial: Boolean get() = !ok && (applied.isNotEmpty() || error?.kind == "io")
@@ -216,6 +221,9 @@ public class Edit(
     private sealed interface Plan {
         val index: Int
         val path: String
+
+        /** Every op index this plan consumed: a replace carries its delete's too (D-375). */
+        val ops: List<Int> get() = listOf(index)
     }
 
     private class AnchoredPlan(override val index: Int, override val path: String, val resolved: PathResolution.Resolved, val expect: FileVersion, val oldBytes: ByteArray, val oldText: String, val hunks: List<Pair<Located, String>>, val normalised: Boolean) : Plan
@@ -223,7 +231,9 @@ public class Edit(
     private class DeletePlan(override val index: Int, override val path: String, val resolved: PathResolution.Resolved, val expect: FileVersion, val oldBytes: ByteArray, val unread: Boolean = false) : Plan
 
     /** D-365: `delete` then `create` of one path in one batch, applied as a whole-file replace at the create's place. */
-    private class ReplacePlan(override val index: Int, val deleteIndex: Int, override val path: String, val resolved: PathResolution.Resolved, val expect: FileVersion, val oldBytes: ByteArray, val bytes: ByteArray, val note: String) : Plan
+    private class ReplacePlan(override val index: Int, val deleteIndex: Int, override val path: String, val resolved: PathResolution.Resolved, val expect: FileVersion, val oldBytes: ByteArray, val bytes: ByteArray, val note: String) : Plan {
+        override val ops: List<Int> get() = listOf(deleteIndex, index)
+    }
     private class RenamePlan(override val index: Int, override val path: String, val resolved: PathResolution.Resolved, val to: String, val target: PathResolution.Resolved, val expect: FileVersion, val oldBytes: ByteArray) : Plan
     private class RevertEditPlan(override val index: Int, val editId: String, val paths: List<String>) : Plan {
         override val path: String get() = paths.joinToString(", ")
@@ -290,7 +300,8 @@ public class Edit(
         val refusals = groups.filter { it in refused }.map { RefusedGroup(it.paths, it.ops.map { i -> i + 1 }, refused.getValue(it)) }
         if (plans.isEmpty()) return none.copy(error = refusals.first().error, touchedOutsideScope = outside, refused = refusals)
         val result = apply(plans.sortedBy { it.index }, contract, context, editId, alias, outside, args.why, carries)
-        return result.copy(ok = result.ok && refusals.isEmpty(), refused = refusals)
+        val dispositions = result.dispositions + refusals.flatMap { it.ops }.associateWith { OpDisposition.Refused }
+        return result.copy(ok = result.ok && refusals.isEmpty(), refused = refusals, dispositions = dispositions.toSortedMap())
     }
 
     /** D-371: the ops of a batch that touch one canonical path (a rename both names), in op order; [pathsOf] by op index. */
@@ -561,7 +572,9 @@ public class Edit(
         val notes = LinkedHashMap<Int, String>()
         val cause = "edit $alias"
         var error: EditError? = null
-        loop@ for (plan in plans) {
+        var stopped = 0
+        loop@ for ((at, plan) in plans.withIndex()) {
+            stopped = at
             beforeDispatch()
             try {
                 when (plan) {
@@ -702,11 +715,17 @@ public class Edit(
                 break@loop
             }
         }
+        if (error == null) stopped = plans.size
+        val dispositions = HashMap<Int, OpDisposition>()
+        plans.forEachIndexed { at, plan ->
+            val disposition = if (at < stopped) OpDisposition.Written else if (at == stopped) OpDisposition.Failed else OpDisposition.NotAttempted
+            plan.ops.forEach { dispositions[it] = disposition }
+        }
         val syntaxResults = written.filter { (path, _) -> versions[path] != null }
             .mapValues { (path, resolved) -> beforeDispatch(); syntax.check(path, resolved.real, Language.of(path)) }
         val flags = TestIntegrity.classify(surfaceChanges(plans, applied), cause, contract, checks).map { it.copy(reason = why) }
         flagsByAlias[alias] = flags
-        return EditResult(error == null, editId, applied, views, versions, syntaxResults, diffstat, outside, flags, error, notes = notes)
+        return EditResult(error == null, editId, applied, views, versions, syntaxResults, diffstat, outside, flags, error, notes = notes, dispositions = dispositions)
     }
 
     /** Each applied path's text before and after, for the §8.6 classifier; an unknown before-text stays unknown. */
@@ -876,26 +895,31 @@ public class Edit(
     }
 
     /**
-     * D-371/D-374: the one line the model acts on after a refusal or a mid-batch failure — every op is written, refused,
-     * failed (the batch stopped there) or not attempted (after the failure), and each non-written state is named.
+     * D-371/D-374/D-375: the one line the model acts on after a refusal or a mid-batch failure — every op is written,
+     * refused, failed (the batch stopped there) or not attempted (after the failure), from [EditResult.dispositions];
+     * a batch stopped before application fails at its error's op and leaves every other op unattempted.
      */
     private fun resendLine(args: EditArgs, result: EditResult): String? {
         val failure = result.error?.takeIf { e -> e.opIndex != null && result.refused.none { it.error === e } }
-        val settled = result.refused.flatMap { it.ops }.toSet() + result.applied.map { it.opIndex } + listOfNotNull(failure?.opIndex)
-        val unattempted = if (failure == null) emptyList() else args.ops.indices.map { it + 1 }.filter { it !in settled }
+        val dispositions = result.dispositions.ifEmpty {
+            failure?.let { f -> args.ops.indices.associate { i -> (i + 1) to if (i + 1 == f.opIndex) OpDisposition.Failed else OpDisposition.NotAttempted } }.orEmpty()
+        }
+        fun opsOf(disposition: OpDisposition): List<Int> = dispositions.filterValues { it == disposition }.keys.sorted()
+        val failedOps = if (failure == null) emptyList() else opsOf(OpDisposition.Failed).ifEmpty { listOf(checkNotNull(failure.opIndex)) }
+        val unattempted = if (failure == null) emptyList() else opsOf(OpDisposition.NotAttempted)
         if (result.refused.isEmpty() && (failure == null || result.applied.isEmpty() && unattempted.isEmpty())) return null
         fun pathsOf(op: Int): List<String> = args.ops.getOrNull(op - 1)?.let { listOfNotNull(it.path, it.create, it.delete, it.rename, it.to) }.orEmpty()
         fun named(paths: List<String>, ops: List<Int>): String {
             val label = (if (ops.size == 1) "op " else "ops ") + ops.joinToString(", ")
             return if (paths.isEmpty()) label else "${paths.joinToString(", ")} ($label)"
         }
-        val failedPaths = failure?.let { listOfNotNull(it.path).ifEmpty { pathsOf(checkNotNull(it.opIndex)) } }.orEmpty()
+        val failedPaths = failure?.let { listOfNotNull(it.path).ifEmpty { failedOps.flatMap(::pathsOf).distinct() } }.orEmpty()
         val written = result.applied.map { it.path }.distinct()
         val all = (result.refused.flatMap { it.paths } + written + failedPaths + unattempted.flatMap(::pathsOf)).distinct()
         val parts = arrayListOf("${written.size} of ${all.size} files written")
         if (result.refused.isNotEmpty()) parts += "resend only the refused ops: " + result.refused.joinToString(", ") { named(it.paths, it.ops) }
         if (failure != null) {
-            val failed = named(failedPaths, listOf(checkNotNull(failure.opIndex)))
+            val failed = named(failedPaths, failedOps)
             parts += if (failure.kind == "io") "failed (I/O, state uncertain): $failed — look at it before resending" else "failed (${failure.kind}, not written): $failed"
         }
         if (unattempted.isNotEmpty()) parts += "not attempted (resend unchanged): " + unattempted.joinToString(", ") { named(pathsOf(it), listOf(it)) }

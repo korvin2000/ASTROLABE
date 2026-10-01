@@ -602,6 +602,25 @@ class EditTest {
     }
 
     @Test
+    fun `both ops of an applied replace are written when a later group fails`() = runTest {
+        seen("src/b.py", 1, 2)
+        repo.write("src/c.py", "v = 1\n")
+        val c = op("src/c.py", seen("src/c.py", 1, 1), hunk("v = 1", "v = 2"))
+        val failing = object : Os by os {
+            override fun replaceFileAtomically(path: Path, bytes: ByteArray) {
+                if (path.fileName.toString() == "c.py") throw OsFailure("replaceFileAtomically", 0, "disk full")
+                os.replaceFileAtomically(path, bytes)
+            }
+        }
+        val out = run(batch("""{"delete":"src/b.py"}""", """{"create":"src/b.py","content":"z = 3\n"}""", c), edit(os = failing))
+
+        assertEquals("partial", status(out), out.body)
+        assertEquals("z = 3\n", Files.readString(repo.resolve("src/b.py")))
+        assertTrue(out.body.contains("1 of 2 files written; failed (I/O, state uncertain): src/c.py (op 3) — look at it before resending"), out.body)
+        assertFalse(out.body.contains("resend unchanged"), "the replace's delete must never be resent: ${out.body}")
+    }
+
+    @Test
     fun `a postimage persistence failure reports the file already written and its recovery preimage`() = runTest {
         val version = seen("src/b.py", 1, 2)
         val failing = object : Os by os {
