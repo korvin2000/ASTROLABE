@@ -306,27 +306,23 @@ public class Stamper @JvmOverloads public constructor(
             PathKind.Missing -> deleted(path)
             PathKind.Symlink -> {
                 val bytes = linkTarget(resolved.real).toByteArray(StandardCharsets.UTF_8)
-                if (matchesObject(bytes, FileMode.SYMLINK, baseline)) return null
+                if (baseline?.mode == FileMode.SYMLINK && ContentCache.objectId(objectAlgorithm(baseline), bytes) == baseline.id.hex) return null
                 StampEntry(path, EntryType.Symlink, FileMode.SYMLINK, Digest.of(bytes), bytes.size.toLong())
             }
             PathKind.Regular -> {
-                val bytes = workspace.bytes(resolved)
+                val algorithm = baseline?.let(::objectAlgorithm)
+                val content = workspace.contents.of(resolved.real, algorithm) { workspace.bytes(resolved) }
                     ?: throw SnapshotIntegrityError("'$path' disappeared during stamping")
                 val mode = fileMode(resolved, reportedMode)
-                if (matchesObject(bytes, mode, baseline)) return null
-                StampEntry(path, EntryType.File, mode, Digest.of(bytes), bytes.size.toLong())
+                if (baseline != null && mode == baseline.mode && content.objectIds[algorithm] == baseline.id.hex) return null
+                StampEntry(path, EntryType.File, mode, content.digest, content.sizeBytes)
             }
             PathKind.Directory -> StampEntry(path, EntryType.Directory, FileMode.TREE, Digest.ofUtf8(""), 0)
             else -> throw SnapshotIntegrityError("unsupported capture kind ${resolved.kind}: $path")
         }
     }
 
-    private fun matchesObject(bytes: ByteArray, mode: FileMode, baseline: LsFilesEntry?): Boolean {
-        if (baseline == null || mode != baseline.mode) return false
-        val hash = java.security.MessageDigest.getInstance(if (baseline.id.hex.length == 40) "SHA-1" else "SHA-256")
-        hash.update("blob ${bytes.size}\u0000".toByteArray(StandardCharsets.US_ASCII))
-        return io.astrolabe.id.Hashing.hex(hash.digest(bytes)) == baseline.id.hex
-    }
+    private fun objectAlgorithm(baseline: LsFilesEntry): String = if (baseline.id.hex.length == 40) "SHA-1" else "SHA-256"
 
     /**
      * Read actual executable state on POSIX unless `core.fileMode` is disabled (D-293). On Windows, and

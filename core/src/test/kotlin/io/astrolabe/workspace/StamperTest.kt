@@ -251,4 +251,89 @@ class StamperTest {
             assertTrue(fixture.dirtyState.capture().entries.isEmpty())
         }
     }
+
+    // ---------------------------------------------------------- content cache (D-364)
+
+    @Test
+    fun `an unchanged tree is stamped again without reading any file content`(@TempDir state: Path) {
+        WorkspaceFixture.create(state).use { fixture ->
+            fixture.repo.modify("src/a.py", "def a():\n    return 7\n")
+            fixture.repo.untracked("notes/big.txt", "x".repeat(10_000))
+            fixture.repo.untracked("notes/small.txt", "scratch\n")
+            settle(fixture)
+
+            val first = fixture.stamper.report()
+            val reads = fixture.workspace.contents.reads.get()
+            assertTrue(reads > 0)
+            val second = fixture.stamper.report()
+            // A new Stamper over the same workspace shares the cache: controllers build one per call.
+            val third = Stamper(fixture.workspace, TEST_ENV).report()
+
+            assertEquals(reads, fixture.workspace.contents.reads.get(), "no content was read again")
+            assertEquals(first, second)
+            assertEquals(first, third)
+            assertEquals(Stamper(Workspace(WorkspaceId("ws-fresh"), fixture.repo.root, fixture.repo.git), TEST_ENV).report(), first)
+        }
+    }
+
+    @Test
+    fun `a same-size rewrite with a new modification time changes the stamp`(@TempDir state: Path) {
+        WorkspaceFixture.create(state).use { fixture ->
+            fixture.repo.untracked("notes.txt", "aaaa\n")
+            settle(fixture)
+            val before = fixture.stamper.report()
+
+            fixture.repo.write("notes.txt", "bbbb\n")
+            fixture.repo.write("src/a.py", String(fixture.bytes("src/a.py"), Charsets.UTF_8).replace('a', 'z'))
+            settle(fixture, ageSeconds = 1800)
+            val after = fixture.stamper.report()
+
+            assertEquals(setOf("notes.txt", "src/a.py"), Stamper.diff(before, after))
+            assertEquals(Digest.of("bbbb\n".toByteArray()), after.members.getValue("notes.txt").digest)
+        }
+    }
+
+    @Test
+    fun `a same-size rewrite inside the racy window is detected even with an unchanged modification time`(@TempDir state: Path) {
+        WorkspaceFixture.create(state).use { fixture ->
+            val file = fixture.repo.resolve("notes.txt")
+            fixture.repo.untracked("notes.txt", "aaaa\n")
+            val modified = Files.getLastModifiedTime(file)
+            val before = fixture.stamper.report()
+
+            fixture.repo.write("notes.txt", "bbbb\n")
+            Files.setLastModifiedTime(file, modified)
+            val after = fixture.stamper.report()
+
+            assertEquals(setOf("notes.txt"), Stamper.diff(before, after))
+        }
+    }
+
+    @Test
+    fun `adding and deleting an untracked file is detected over a warm cache`(@TempDir state: Path) {
+        WorkspaceFixture.create(state).use { fixture ->
+            fixture.repo.untracked("notes/a.txt", "a\n")
+            settle(fixture)
+            val warm = fixture.stamper.report()
+            fixture.stamper.report()
+
+            fixture.repo.untracked("notes/b.txt", "b\n")
+            val added = fixture.stamper.report()
+            assertEquals(setOf("notes/b.txt"), Stamper.diff(warm, added))
+
+            Files.delete(fixture.repo.resolve("notes/a.txt"))
+            val deleted = fixture.stamper.report()
+            assertEquals(setOf("notes/a.txt"), Stamper.diff(added, deleted))
+            assertEquals(listOf("notes/b.txt"), deleted.untracked.map { it.path })
+        }
+    }
+
+    /** Moves every working-tree file's modification time [ageSeconds] into the past, out of the racy window. */
+    private fun settle(fixture: WorkspaceFixture, ageSeconds: Long = 3600) {
+        val past = java.nio.file.attribute.FileTime.from(java.time.Instant.now().minusSeconds(ageSeconds))
+        Files.walk(fixture.repo.root).use { paths ->
+            paths.filter { Files.isRegularFile(it) && !fixture.repo.root.relativize(it).startsWith(".git") }
+                .forEach { Files.setLastModifiedTime(it, past) }
+        }
+    }
 }

@@ -41,6 +41,9 @@ public class Workspace @JvmOverloads public constructor(
      */
     internal val fileModeTrusted: Boolean by lazy { git.configBool("core.fileMode") != false }
 
+    /** Content digests every [Stamper] of this workspace shares for the workspace's lifetime (D-364). */
+    internal val contents: ContentCache = ContentCache()
+
     init {
         val repo = runCatching { git.repo.toRealPath() }.getOrDefault(git.repo)
         require(this.root == repo) {
