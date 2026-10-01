@@ -16,10 +16,13 @@
 **Design rule.** HELM's three modalities — observe, mutate, execute — remain the points where policy attaches (budgets on observation, preconditions on mutation, effect classes on execution). The surface is wider than HELM's because delegation, review, knowledge, skills and ask-user are modalities HELM excluded, and because operations whose cost differs by an order of magnitude should not share one worst-case budget `[C §8.4; C3]`. It is narrower than SEXTANT's ~30 operations because tool selection degrades with count `[MB §8.1]` and every dedicated operation must beat `bash + raw output` in the tool eval or not ship `[MB A7]`. Seven families with the operations enumerated below, byte-stable per role; rare capabilities via `look(catalog)` (`tools.catalog` is descriptive shorthand, not an eighth family).
 
 ```text
-look(what, target, budget=1500, near?, glob?, in="workspace"|"store"|"kb", since?)
+look(what, target, budget=4000, near?, glob?, in="workspace"|"store"|"kb", since?)
   what ∈ { tree, outline, read, find, def, refs, importers, impact, recall, bmap, catalog }
   → { text, truncated, more?, scope, complete, tier, versions{path: v}, id }
-  · read target = path | path:a-b | path::Symbol; whole-file reads above budget refused → outline + "name a range or ::Symbol"
+  · read target = path | path:a-b | path::Symbol, or `range: "a-b"` beside a path target (`range: "path:a-b"` alone);
+    a range that differs from the target's own is refused naming both. A whole file above budget shows its first lines
+    with "… N more lines: recall #n range a-b", then the outline when it fits ≤300 tokens of the budget          (D-365)
+  · recall id = "#14" | "14" | 14                                                                                (D-365)
   · dedup: same (what, target, version) live in window → "see #17 (unchanged)"
   · find returns scope + complete + truncated; in="store" searches journal/blobs; in="kb" searches notes (stale ones labelled)
   · refs/importers/impact carry `tier` and `complete`; dynamic dispatch reported unresolved, never guessed        [J1 §5.6]
@@ -38,7 +41,10 @@ edit(ops, why)
     Unresolved or ambiguous → error kind `expect`, no write; a stale version → `stale_expect` with its diff    (D-346)
   · `ops` sent as a JSON string holding an array is parsed first (D-347); an op's empty placeholders of the other forms
     and an empty `if` are ignored by a per-form whitelist — own empty values (`content: ""`, `new: ""`) and unknown
-    keys keep their meaning (D-348)
+    keys keep their meaning (D-348). Op fields at the top level are one op: no `ops` → `ops: [them]`; a top-level
+    `expect`/`if` beside exactly one op lacking it moves into it; `hunks` as a JSON string is parsed; any other mix is
+    refused naming the accepted form. `delete` then `create` of one path in one batch is a whole-file replace (preimage
+    saved, the delete's `expect` guards it)                                                                       (D-365)
   · preflight all ops, then apply; a mid-batch I/O failure reports actual per-file state with preimage ids —
     never "rolled back", never retried blindly                                                                   [J1 §5.2]
   · inline syntax check; post-edit views ±3 lines become displayed ranges; preimages saved; shadow snapshot per turn

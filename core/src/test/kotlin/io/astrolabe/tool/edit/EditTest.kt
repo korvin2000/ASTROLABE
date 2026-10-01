@@ -332,6 +332,34 @@ class EditTest {
     }
 
     @Test
+    fun `a delete then create of one path in one batch replaces it under the delete's guards with a preimage`() = runTest {
+        val replace = """{"ops":[{"delete":"src/b.py"},{"create":"src/b.py","content":"z = 3\n"}],"why":"rewrite"}"""
+        val unknown = run(replace)
+        assertEquals("refused", status(unknown))
+        assertTrue(unknown.body.contains("expect omitted and no version of 'src/b.py' is KNOWN"), unknown.body)
+        assertEquals("x = 1\ny = 2\n", Files.readString(repo.resolve("src/b.py")))
+
+        val before = seen("src/b.py", 1, 2)
+        val replaced = run(replace)
+        assertEquals("ok", status(replaced), replaced.body)
+        val after = registry.version("src/b.py")!!
+        assertTrue(replaced.body.contains("✓ 2 replace src/b.py @${before.hash8}→@${after.hash8}"), replaced.body)
+        assertTrue(replaced.body.contains("delete + create of one path in one batch"), replaced.body)
+        assertEquals("z = 3\n", Files.readString(repo.resolve("src/b.py")))
+        val preimage = preimages.of("edit-2").single()
+        assertEquals(before, preimage.versionBefore)
+        assertEquals(after, preimage.versionAfter)
+        assertTrue(workset.covers("src/b.py", after, LineRange(1, 1)), "the new content is the post-edit view")
+
+        val reverted = run("""{"ops":[{"revert":"#2"}],"why":"undo"}""", turn = 2)
+        assertEquals("ok", status(reverted), reverted.body)
+        assertEquals("x = 1\ny = 2\n", Files.readString(repo.resolve("src/b.py")), "the preimage restores the replaced bytes")
+
+        val createOnly = run("""{"ops":[{"create":"src/b.py","content":"w"}],"why":"w"}""")
+        assertTrue(createOnly.body.contains("exists: 'src/b.py' exists"), "a create without the batch's own delete still refuses: ${createOnly.body}")
+    }
+
+    @Test
     fun `a hunk outside the displayed range is refused with the outline and the displayed ranges (FX-02)`() = runTest {
         val v = seen("src/a.py", 1, 2)
         val out = run(anchored("src/a.py", v, hunk("    return 2", "    return 20")))

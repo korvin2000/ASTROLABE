@@ -1287,6 +1287,9 @@ public class Cell @JvmOverloads constructor(
 
             override fun currentVersion(path: String): io.astrolabe.id.FileVersion? = ws.registry.version(path)
 
+            override fun knownVersions(path: String): Collection<io.astrolabe.id.FileVersion> =
+                listOfNotNull(currentVersion(path)) + ws.workset.entries.filter { it.path == path }.map { it.version } + ws.workset.history(path)
+
             override fun acceptGreen(accept: String): Boolean {
                 val currencies = currencies(ws.stamper.stamp().id)
                 return ws.checks.forAcceptance(accept).any { currencies[it.id]?.certifies == true } || currencies[accept]?.certifies == true

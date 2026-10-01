@@ -71,7 +71,7 @@ class DefaultsTest {
         assertEquals(2_000, d.digestCapCeilingTokens)
         assertEquals(630, d.effectiveDigestCapTokens(60))
         assertEquals(150, d.copy(digestTokensPerRequirement = 0).effectiveDigestCapTokens(60))
-        assertEquals(400, d.patchCapTokens)
+        assertEquals(1_200, d.patchCapTokens)
         assertEquals(20, d.checkerTimeBoxSeconds)
         assertEquals(120, d.checkerFallbackTimeBoxSeconds)
         assertEquals(40, d.theta)

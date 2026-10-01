@@ -105,4 +105,29 @@ class InputToleranceTest {
             assertEquals(raw, call.raw)
         }
     }
+
+    private fun edit(json: String): EditArgs = (assertIs<ParsedCalls.Valid>(parse("edit", json)).calls.single().args as Args.Edit).args
+
+    @Test
+    fun `edit op fields at the top level become the one op they belong to and any other mix names the form`() {
+        val hunks = """[{"anchor":"a","new":"b"}]"""
+        val quoted = hunks.replace("\"", "\\\"")
+        val one = EditArgs(listOf(EditOpArgs(path = "a.ts", expect = "9d09", hunks = listOf(HunkArgs("a", null, "b")))), "w")
+        assertEquals(one, edit("""{"expect":"9d09","ops":[{"path":"a.ts","hunks":$hunks}],"why":"w"}"""))
+        assertEquals(one, edit("""{"path":"a.ts","expect":"9d09","hunks":$hunks,"why":"w"}"""))
+        assertEquals(one, edit("""{"ops":[{"path":"a.ts","expect":"9d09","hunks":"$quoted"}],"why":"w"}"""))
+        assertEquals(one, edit("""{"path":"a.ts","expect":"9d09","hunks":"$quoted","why":"w"}"""))
+        assertEquals(EditArgs(listOf(EditOpArgs(create = "n.ts", content = "x")), "w"), edit("""{"create":"n.ts","content":"x","why":"w"}"""))
+        assertEquals(EditArgs(listOf(EditOpArgs(delete = "n.ts", expect = "9d09")), "w"), edit("""{"delete":"n.ts","expect":"9d09","why":"w"}"""))
+        assertEquals(EditArgs(listOf(EditOpArgs(rename = "a.ts", to = "b.ts")), "w"), edit("""{"rename":"a.ts","to":"b.ts","why":"w"}"""))
+
+        val two = refusal("edit", """{"expect":"9d09","ops":[{"path":"a.ts","hunks":$hunks},{"delete":"b.ts"}],"why":"w"}""")
+        assertTrue(two.contains("'expect'") && two.contains("(2 ops)") && two.contains("every op field inside its op"), two)
+        val clash = refusal("edit", """{"expect":"9d09","ops":[{"path":"a.ts","expect":"1234","hunks":$hunks}],"why":"w"}""")
+        assertTrue(clash.contains("every op field inside its op"), clash)
+        val path = refusal("edit", """{"path":"b.ts","ops":[{"path":"a.ts","hunks":$hunks}],"why":"w"}""")
+        assertTrue(path.contains("'path'") && path.contains("every op field inside its op"), path)
+        val broken = refusal("edit", """{"ops":[{"path":"a.ts","hunks":"[{\"anchor\":"}],"why":"w"}""")
+        assertTrue(broken.contains("hunks is a string holding invalid JSON"), broken)
+    }
 }
