@@ -184,6 +184,7 @@ import kotlinx.serialization.json.Json
 import io.astrolabe.verify.CheckKind
 import io.astrolabe.verify.Checker
 import io.astrolabe.verify.Checks
+import io.astrolabe.verify.TestIntegrity
 import io.astrolabe.verify.CompletionProposal
 import io.astrolabe.verify.CompletionResult
 import io.astrolabe.verify.CostClass
@@ -508,7 +509,7 @@ public class Controller @JvmOverloads public constructor(
         })
         val commands = derived.primary?.let(RunnerCommands::of) ?: RunnerCommands()
         workspace.paths.bindWriteProtection { path, ignoreCase -> contracts.current(request.work)?.scope?.protects(path, ignoreCase) != false }
-        val checks = Checks.seed(contract, commands, qualityGates = effective.qualityGates)
+        val checks = Checks.seed(contract, commands, qualityGates = effective.qualityGates, packageManifest = TestIntegrity.packageManifests(workspace))
         val rules = RulesTrust(workspace.root).approved(effective.rulesFile)?.let { RulesSnapshot(it.binding.path, it.digest, it.text) }
         val prime = Prime.render(atlas, derived.sniffed, rules, host = HostFacts.of(host, atlas))
 

@@ -72,6 +72,7 @@ import io.astrolabe.tool.verify.Verify
 import io.astrolabe.verify.CheckKind
 import io.astrolabe.verify.Checker
 import io.astrolabe.verify.Checks
+import io.astrolabe.verify.TestIntegrity
 import io.astrolabe.verify.CompletionProposal
 import io.astrolabe.verify.CompletionResult
 import io.astrolabe.verify.Layer
@@ -129,7 +130,7 @@ internal class CellTree(
             val dirty = DirtyState(ws, c.store.blobs, stamper, c.ids, clock)
             val shadow = ShadowRef(c.ids.work, c.ids.attempt, ws, c.store, dirty, c.os, clock)
             val s0 = shadow.manifest(0) ?: dirty.capture(0).also { shadow.open(it) }
-            return CellTree(ws, VersionRegistry(ws), stamper, dirty, shadow, Atlas.build(ws.root), Checks.seed(c.contract, c.commands, qualityGates = c.attempt.config.qualityGates), s0.stampId)
+            return CellTree(ws, VersionRegistry(ws), stamper, dirty, shadow, Atlas.build(ws.root), Checks.seed(c.contract, c.commands, qualityGates = c.attempt.config.qualityGates, packageManifest = TestIntegrity.packageManifests(ws)), s0.stampId)
         }
     }
 }
@@ -263,7 +264,7 @@ internal class TreeVerification(private val c: OpenedCampaign, private val env: 
         val ids = c.ids.copy(context = ContextId(idGen.next("integrate")))
         val registry = VersionRegistry(workspace)
         val stamper = Stamper(workspace, env)
-        val checks = Checks.seed(c.contract, c.commands, qualityGates = config.qualityGates)
+        val checks = Checks.seed(c.contract, c.commands, qualityGates = config.qualityGates, packageManifest = TestIntegrity.packageManifests(workspace))
         val scheduler = Scheduler(checks, workspace, registry, stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, ids, clock, retryCandidates = c.store.layout.candidates)
         val runner = TrustedLocalRunner(c.os)
         val redaction = Redaction(config.redaction)

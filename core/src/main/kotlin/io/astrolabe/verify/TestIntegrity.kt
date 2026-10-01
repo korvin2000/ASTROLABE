@@ -8,6 +8,12 @@ import io.astrolabe.event.Authority
 import io.astrolabe.evidence.Closure
 import io.astrolabe.id.CandidateId
 import io.astrolabe.id.Identities
+import io.astrolabe.workspace.Intent
+import io.astrolabe.workspace.PathResolution
+import io.astrolabe.workspace.Workspace
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 /** Which part of the acceptance surface a touched path belongs to (§8.6). */
 public enum class AcceptanceSurface(public val wire: String) {
@@ -119,7 +125,7 @@ public object TestIntegrity {
     @JvmStatic
     public fun baseline(touched: Collection<String>, cause: String, contract: Contract, checks: Checks): List<TestIntegrityFlag> =
         LinkedHashSet(touched.map(::normalize)).mapNotNull { path ->
-            val surface = surfaceOf(path, contract) ?: return@mapNotNull null
+            val surface = surfaceOf(path, contract, checks.packageManifest) ?: return@mapNotNull null
             TestIntegrityFlag(path, surface, cause, requiredChecksFor(path, surface, checks))
         }
 
@@ -132,7 +138,7 @@ public object TestIntegrity {
     public fun classify(changes: Collection<SurfaceChange>, cause: String, contract: Contract, checks: Checks): List<TestIntegrityFlag> =
         changes.distinctBy { normalize(it.path) }.mapNotNull { change ->
             val path = normalize(change.path)
-            val surface = surfaceOf(path, contract) ?: return@mapNotNull null
+            val surface = surfaceOf(path, contract, checks.packageManifest) ?: return@mapNotNull null
             val before = lines(change.before)
             val after = lines(change.after)
             val prefix = before.zip(after).takeWhile { (a, b) -> a == b }.size
@@ -189,7 +195,9 @@ public object TestIntegrity {
 
     /** The surface [path] belongs to, or `null` when it is ordinary source. CI and check definitions outrank the test-file convention. */
     @JvmStatic
-    public fun surfaceOf(path: String, contract: Contract): AcceptanceSurface? {
+    public fun surfaceOf(path: String, contract: Contract): AcceptanceSurface? = surfaceOf(path, contract) { null }
+
+    internal fun surfaceOf(path: String, contract: Contract, manifest: (String) -> String?): AcceptanceSurface? {
         val relative = normalize(path)
         val name = relative.substringAfterLast('/')
         val first = relative.substringBefore('/')
@@ -197,7 +205,7 @@ public object TestIntegrity {
             first in CI_PREFIXES || name in CI_NAMES -> AcceptanceSurface.CiConfig
             name in CHECK_DEFINITION_NAMES || CHECK_DEFINITION_PREFIXES.any { name.startsWith(it) } -> AcceptanceSurface.CheckDefinition
             isTestPath(relative) -> AcceptanceSurface.TestFile
-            contract.acceptance.filterIsInstance<Acceptance.Run>().any { namesPath(it.command.argv, it.command.cwd, relative) } ->
+            contract.acceptance.filterIsInstance<Acceptance.Run>().any { names(it.command.argv, it.command.cwd, relative, manifest) } ->
                 AcceptanceSurface.AcceptanceCommand
             else -> null
         }
@@ -259,9 +267,67 @@ public object TestIntegrity {
                 Closure.Unknown -> true
                 is Closure.Known -> path in closure.paths
                 is Closure.Package -> path == closure.path || path.startsWith(closure.path.trimEnd('/') + "/")
-            } || (check.command?.let { namesPath(it.argv, it.cwd, path) } ?: false)
+            } || (check.command?.let { names(it.argv, it.cwd, path, checks.packageManifest) } ?: false)
         }
     }.map { it.id }
+
+    private fun names(argv: List<String>, cwd: String?, path: String, manifest: (String) -> String?): Boolean =
+        namesPath(argv, cwd, path) || scriptPaths(argv, cwd, manifest).any { path == it || path.startsWith("$it/") }
+
+    /**
+     * D-374: what `npm|pnpm|yarn test` or `… run <name>` (`--prefix <dir>` honoured) runs is the `scripts.<name>` string of
+     * the package's `package.json`; its path-like tokens, resolved against the package directory, are named inputs.
+     * One level only, and an unreadable or absent manifest names nothing.
+     */
+    private fun scriptPaths(argv: List<String>, cwd: String?, manifest: (String) -> String?): List<String> {
+        val tool = argv.firstOrNull()?.replace('\\', '/')?.substringAfterLast('/')?.lowercase()?.substringBefore('.') ?: return emptyList()
+        if (tool !in PACKAGE_MANAGERS) return emptyList()
+        var prefix: String? = null
+        val positional = ArrayList<String>()
+        var i = 1
+        while (i < argv.size && argv[i] != "--") {
+            val arg = argv[i]
+            when {
+                arg in PREFIX_FLAGS -> prefix = argv.getOrNull(++i)
+                PREFIX_FLAGS.any { arg.startsWith("$it=") } -> prefix = arg.substringAfter('=')
+                !arg.startsWith("-") -> positional += arg
+            }
+            i++
+        }
+        val name = when (positional.firstOrNull()) {
+            "test" -> "test"
+            "run", "run-script" -> positional.getOrNull(1) ?: return emptyList()
+            else -> return emptyList()
+        }
+        val parts = listOfNotNull(cwd, prefix).map(::normalize).filter { it.isNotEmpty() && it != "." }
+        if (parts.any { it.startsWith("/") || it.startsWith("..") || it.matches(DRIVE) }) return emptyList()
+        val base = parts.joinToString("/")
+        val script = runCatching {
+            ((Json.parseToJsonElement(manifest(base) ?: return emptyList()) as? JsonObject)?.get("scripts") as? JsonObject)?.get(name) as? JsonPrimitive
+        }.getOrNull()?.takeIf { it.isString }?.content ?: return emptyList()
+        return script.split(SCRIPT_SEPARATORS).mapNotNull(::pathToken).map { if (base.isEmpty()) it else "$base/$it" }
+    }
+
+    /** A relative path-like script token (`scripts/validate.js`, `--config=cfg/x.json`), normalised; null for anything else. */
+    private fun pathToken(token: String): String? {
+        val raw = token.trim('"', '\'').let { if (it.startsWith("-")) it.substringAfter('=', "") else it }
+        if (raw.isEmpty() || "://" in raw || raw.startsWith("/") || raw.startsWith("$") || raw.startsWith("%") || raw.matches(DRIVE)) return null
+        val path = normalize(raw)
+        if (path.isEmpty() || path == "." || path.startsWith("..")) return null
+        return path.takeIf { '/' in it || EXTENSION.containsMatchIn(it) }
+    }
+
+    private val PACKAGE_MANAGERS = setOf("npm", "pnpm", "yarn")
+    private val PREFIX_FLAGS = setOf("--prefix", "--cwd", "--dir", "-C")
+    private val SCRIPT_SEPARATORS = Regex("""[\s;|&()<>]+""")
+    private val EXTENSION = Regex("""\.[A-Za-z][A-Za-z0-9]*$""")
+    private val DRIVE = Regex("^[A-Za-z]:.*")
+
+    /** Reads `package.json` texts through [workspace]'s path contract, for [Checks.seed]. */
+    internal fun packageManifests(workspace: Workspace): (String) -> String? = { directory ->
+        (workspace.resolve(if (directory.isEmpty()) "package.json" else "$directory/package.json", Intent.Read) as? PathResolution.Resolved)
+            ?.let(workspace::bytes)?.toString(Charsets.UTF_8)
+    }
 
     /**
      * True when an argv token or the relative executable, resolved against [cwd], is [path] or a directory above it.

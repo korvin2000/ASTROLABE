@@ -133,6 +133,37 @@ class TestIntegrityTest {
     }
 
     @Test
+    fun `a file a package script runs is an acceptance input while ordinary package source is not`() {
+        val (base, _) = s0()
+        val contract = base.strengthen(Acceptance.Run("AC-5", Command(listOf("npm", "test"), cwd = "client"), Origin.Model("R1")))
+            .strengthen(Acceptance.Run("AC-6", Command(listOf("npm", "run", "lint:api", "--prefix", "server")), Origin.Model("R1")))
+        val manifests = mapOf(
+            "client" to """{"scripts":{"test":"node scripts/validate.js && echo done"}}""",
+            "server" to """{"scripts":{"lint:api":"eslint --config=cfg/api.json src/api"}}""",
+        )
+        val checks = Checks.seed(contract, RunnerCommands(test = Command(listOf("python", "-m", "pytest", "-q"))), packageManifest = { manifests[it] })
+
+        val flags = TestIntegrity.classify(
+            listOf(
+                SurfaceChange("client/scripts/validate.js", "if (!ok) process.exit(1)\n", "process.exit(0)\n"),
+                SurfaceChange("client/src/app.ts", "a\n", "b\n"),
+                SurfaceChange("server/cfg/api.json", "{}", "{\"rules\":{}}"),
+                SurfaceChange("server/src/api/routes.ts", "a\n", "b\n"),
+            ),
+            "edit #7", contract, checks,
+        )
+        assertEquals(
+            listOf("client/scripts/validate.js", "server/cfg/api.json", "server/src/api/routes.ts"),
+            flags.map { it.path },
+        )
+        assertTrue(flags.all { it.surface == AcceptanceSurface.AcceptanceCommand && it.kind == TestIntegrity.ACCEPTANCE_COMMAND }, flags.toString())
+        assertTrue("CHK-accept-AC-5" in flags.first().requiredChecks, flags.first().requiredChecks.toString())
+
+        val unreadable = Checks.seed(contract, RunnerCommands(test = Command(listOf("python", "-m", "pytest", "-q"))), packageManifest = { "not json" })
+        assertTrue(TestIntegrity.baseline(listOf("client/scripts/validate.js"), "edit #8", contract, unreadable).isEmpty(), "an unreadable manifest names nothing")
+    }
+
+    @Test
     fun `editing a repository executable used by acceptance requires review`() {
         val (base, _) = s0()
         for ((argv0, cwd, path) in listOf(

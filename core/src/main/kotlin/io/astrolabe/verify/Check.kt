@@ -233,7 +233,11 @@ public data class RunnerCommands(
  * a change moved, and [refresh] recomputes applicability against the current stamp (§8.4). Both leave the
  * historical outcome untouched.
  */
-public class Checks private constructor(private val checks: LinkedHashMap<String, Check>) : ChangeListener {
+public class Checks private constructor(
+    private val checks: LinkedHashMap<String, Check>,
+    /** The text of `package.json` in a workspace-relative directory (`""` = root), or null; see [TestIntegrity] (D-374). */
+    internal val packageManifest: (directory: String) -> String? = { null },
+) : ChangeListener {
     public fun all(): List<Check> = checks.values.toList()
 
     public operator fun get(id: String): Check? = checks[id]
@@ -358,8 +362,15 @@ public class Checks private constructor(private val checks: LinkedHashMap<String
          */
         @JvmStatic
         @JvmOverloads
-        public fun seed(contract: Contract, commands: RunnerCommands, touched: Set<String> = emptySet(), qualityGates: List<Command> = emptyList()): Checks {
-            val registry = Checks(LinkedHashMap())
+        public fun seed(
+            contract: Contract,
+            commands: RunnerCommands,
+            touched: Set<String> = emptySet(),
+            qualityGates: List<Command> = emptyList(),
+            /** Reads the `package.json` of a workspace-relative directory, so package-script inputs are acceptance inputs. */
+            packageManifest: (directory: String) -> String? = { null },
+        ): Checks {
+            val registry = Checks(LinkedHashMap(), packageManifest)
             commands.typecheck?.let {
                 registry.register(Check(TYPES_TOUCHED, CheckKind.Type, Selector.Touched, Closure.Known(touched), CostClass.Fast, Trigger.EndOfTurn, command = it))
             }
