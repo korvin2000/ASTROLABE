@@ -209,6 +209,9 @@ public class Edit(
     private class AnchoredPlan(override val index: Int, override val path: String, val resolved: PathResolution.Resolved, val expect: FileVersion, val oldBytes: ByteArray, val oldText: String, val hunks: List<Pair<Located, String>>) : Plan
     private class CreatePlan(override val index: Int, override val path: String, val resolved: PathResolution.Resolved, val bytes: ByteArray) : Plan
     private class DeletePlan(override val index: Int, override val path: String, val resolved: PathResolution.Resolved, val expect: FileVersion, val oldBytes: ByteArray) : Plan
+
+    /** D-365: `delete` then `create` of one path in one batch, applied as a whole-file replace at the create's place. */
+    private class ReplacePlan(override val index: Int, val deleteIndex: Int, override val path: String, val resolved: PathResolution.Resolved, val expect: FileVersion, val oldBytes: ByteArray, val bytes: ByteArray) : Plan
     private class RenamePlan(override val index: Int, override val path: String, val resolved: PathResolution.Resolved, val to: String, val target: PathResolution.Resolved, val expect: FileVersion, val oldBytes: ByteArray) : Plan
     private class RevertEditPlan(override val index: Int, val editId: String, val paths: List<String>) : Plan {
         override val path: String get() = paths.joinToString(", ")
@@ -260,20 +263,35 @@ public class Edit(
             outcome.receipt?.let { receipts += it }
             return EditResult(outcome.error == null, editId, outcome.applied, emptyList(), outcome.versions, outcome.syntax, outcome.diffstat, outside, flags, outcome.error, outcome.receipt)
         }
+        // A path that does not exist yet keeps its typed case, so identity folds case where the filesystem does.
+        fun identity(path: java.nio.file.Path): String =
+            if (workspace.paths.caseInsensitive) path.toString().lowercase(java.util.Locale.ROOT) else path.toString()
         val plans = try {
-            args.ops.mapIndexed { i, op -> preflight(i + 1, op, context) }
+            val planned = ArrayList<Plan>()
+            val deleted = HashMap<String, DeletePlan>()
+            args.ops.forEachIndexed { i, op ->
+                // D-365: a create of a path this batch deletes earlier replaces it; the delete's expect guards the bytes.
+                val earlier = op.create?.let { deleted.remove(identity(mutable(i + 1, it).real)) }
+                val plan = if (earlier != null) {
+                    planned.remove(earlier)
+                    ReplacePlan(i + 1, earlier.index, earlier.path, earlier.resolved, earlier.expect, earlier.oldBytes, op.content!!.toByteArray(Charsets.UTF_8))
+                } else {
+                    preflight(i + 1, op, context)
+                }
+                if (plan is DeletePlan) deleted[identity(plan.resolved.real)] = plan
+                planned += plan
+            }
+            planned
         } catch (refusal: Refusal) {
             return none.copy(error = refusal.error, touchedOutsideScope = outside)
         }
-        // A path that does not exist yet keeps its typed case, so identity folds case where the filesystem does.
         val claimed = HashSet<String>()
-        fun identity(path: java.nio.file.Path): String =
-            if (workspace.paths.caseInsensitive) path.toString().lowercase(java.util.Locale.ROOT) else path.toString()
         for (plan in plans) {
             val targets = when (plan) {
                 is AnchoredPlan -> listOf(plan.resolved.real)
                 is CreatePlan -> listOf(plan.resolved.real)
                 is DeletePlan -> listOf(plan.resolved.real)
+                is ReplacePlan -> listOf(plan.resolved.real)
                 is RenamePlan -> listOf(plan.resolved.real, plan.target.real)
                 is RevertEditPlan, is RevertTurnPlan -> emptyList()
             }
@@ -478,6 +496,20 @@ public class Edit(
                         written[plan.path] = plan.resolved
                         if (lines.isNotEmpty()) views += View(plan.path, LineRange(1, lines.size), after, lines.mapIndexed { i, l -> "${i + 1}| $l" }.joinToString("\n"))
                     }
+                    is ReplacePlan -> {
+                        val preimage = preimages.saveThenWrite(editId, plan.path, plan.expect, plan.oldBytes) { os.replaceFileAtomically(plan.resolved.real, plan.bytes) }
+                        val after = FileVersion.of(plan.bytes)
+                        applied += AppliedOp(plan.index, "replace", plan.path, plan.expect, after, preimage.preimageDigest.hex)
+                        versions[plan.path] = after
+                        preimages.recordPostimage(editId, plan.path, after)
+                        blobs.put(plan.bytes, BlobKind.POSTIMAGE, ids, recovery = true)
+                        registry.change(plan.path, plan.expect, after, cause)
+                        val counts = Preimages.changedRegion(plan.oldBytes, plan.bytes)
+                        diffstat[plan.path] = DiffStat(counts.first, counts.second)
+                        written[plan.path] = plan.resolved
+                        val lines = decodeStrict(plan.bytes)?.let { contentLines(it) } ?: emptyList()
+                        if (lines.isNotEmpty()) views += View(plan.path, LineRange(1, lines.size), after, lines.mapIndexed { i, l -> "${i + 1}| $l" }.joinToString("\n"))
+                    }
                     is DeletePlan -> {
                         val preimage = preimages.save(editId, plan.path, plan.expect, plan.oldBytes)
                         Files.delete(plan.resolved.real)
@@ -575,6 +607,7 @@ public class Edit(
             when (plan) {
                 is AnchoredPlan -> oldBytes[plan.path] = plan.oldBytes
                 is DeletePlan -> oldBytes[plan.path] = plan.oldBytes
+                is ReplacePlan -> oldBytes[plan.path] = plan.oldBytes
                 is RenamePlan -> oldBytes[plan.path] = plan.oldBytes
                 else -> Unit
             }
@@ -646,7 +679,8 @@ public class Edit(
             for (op in result.applied) {
                 val stat = result.diffstat[op.path]?.let { " $it" } ?: ""
                 val syn = result.syntax[op.path]?.let { " · syntax $it" } ?: ""
-                lines += "✓ ${op.opIndex} ${op.kind} ${op.path} @${op.versionBefore?.hash8 ?: "new"}→@${op.versionAfter?.hash8 ?: "gone"}$stat$syn"
+                lines += "✓ ${op.opIndex} ${op.kind} ${op.path} @${op.versionBefore?.hash8 ?: "new"}→@${op.versionAfter?.hash8 ?: "gone"}$stat$syn" +
+                    (if (op.kind == "replace") " (delete + create of one path in one batch: replaced in place)" else "")
             }
         }
         for (view in result.views) {
