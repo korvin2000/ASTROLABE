@@ -419,6 +419,22 @@ class CellTest {
     }
 
     @Test
+    fun `the checks view carries the launcher's reason for an unavailable check, bounded`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val check = f.checks[Checks.TYPES_TOUCHED]!!
+            val stamp = f.stamper.report().candidateId
+            val reason = "cannot start npm: 'npm' was not found in the working directory or on PATH (PATHEXT .COM;.EXE;.BAT;.CMD)" + " and more".repeat(20)
+            f.scheduler.record(io.astrolabe.verify.CheckerResult(check.id, "chk-x", check.kind, check.selector, Outcome.Unavailable, emptyList(), null, null, stamp, stamp, null, 0, emptyList(), emptyList(), reason = reason), f.contract.version)
+
+            f.run(ScriptedModel.of(Scripted.Reply(listOf(say("look"), tree("c1")))))
+
+            val anchor = f.anchorText(1)
+            assertTrue(anchor.contains("unavailable (${reason.take(159)}…)"), anchor)
+            assertFalse(anchor.contains("runner missing"), anchor)
+        }
+    }
+
+    @Test
     fun `a malformed state call beside a valid edit refuses only the state call`() = runTest {
         CellFixture(stateRoot).use { f ->
             val v = f.version("src/a.py")

@@ -1279,11 +1279,19 @@ public class Cell @JvmOverloads constructor(
                 Outcome.Failed -> CheckState.Red("", (last.counts?.failed ?: 0) + (last.counts?.errors ?: 0))
                 Outcome.Timeout -> CheckState.Timeout("time box")
                 Outcome.NotRun -> CheckState.NotRun
-                Outcome.Unavailable -> CheckState.Unavailable("runner missing")
+                Outcome.Unavailable -> CheckState.Unavailable(unavailableReason(last.receiptId))
                 Outcome.UnknownOutcome -> CheckState.Unavailable("unknown outcome; reconcile before retry")
                 else -> CheckState.Inconclusive(last.outcome.name.lowercase())
             }
             CheckLine(labelOf(check), Blast.scope(check), null, state, last.stamp.hash8, ws.scheduler.aliasOf(last.receiptId))
+        }
+
+        /** Why a check could not run, as its receipt records it (the launcher's reason, bounded), the way `verify` shows it. */
+        private fun unavailableReason(receiptId: String): String {
+            val limits = ev.receipts.get(receiptId)?.limits.orEmpty()
+            val reason = (limits.firstOrNull { it.kind == "runner" || it.kind == "unavailable" } ?: limits.firstOrNull())?.detail
+                ?.replace('\r', ' ')?.replace('\n', ' ')?.trim()?.takeIf { it.isNotEmpty() } ?: return "runner missing"
+            return if (reason.length <= UNAVAILABLE_REASON_CHARS) reason else reason.take(UNAVAILABLE_REASON_CHARS - 1) + "…"
         }
 
         private fun checksSummary(currencies: Map<String, Currency>): String = checkLines(currencies).joinToString(" · ") { line ->
@@ -1383,6 +1391,9 @@ public class Cell @JvmOverloads constructor(
         /** §5.1 `[A]`: at most two nudge lines per turn. */
         const val MAX_NUDGES = 2
         const val SIGNATURE_CHARS = 120
+
+        /** How much of a launcher's reason the checks view of `[A]` carries. */
+        const val UNAVAILABLE_REASON_CHARS = 160
         val DIGITS = Regex("\\d+")
         val SPACES = Regex("\\s+")
 
