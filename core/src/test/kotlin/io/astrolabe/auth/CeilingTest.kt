@@ -37,7 +37,7 @@ class CeilingTest {
             Triple(listOf("git", "checkout", "."), EffectClass.D, Capability.GitRefs),
             Triple(listOf("sudo", "make", "install"), EffectClass.D, Capability.Privilege),
             Triple(listOf("rm", "-rf", "../x"), EffectClass.D, Capability.OutsideWorkspace),
-            Triple(listOf("cp", "a.txt", "/etc/x"), EffectClass.D, Capability.OutsideWorkspace),
+            Triple(listOf("cat", "/etc/passwd"), EffectClass.D, Capability.OutsideWorkspace),
         )
         for ((argv, effect, capability) in expected) {
             val classification = EffectPolicy.classify(argv, null, root, protectedPaths)
@@ -144,12 +144,12 @@ class CeilingTest {
             assertEquals(EffectClass.R, classification.effectClass, "${args.cmd} -> $classification")
             assertNull(ceiling.allows(classification), "${args.cmd}")
         }
-        for (line in listOf("where chrome", "which node", "ver", "ls -la /usr/lib", "type C:/x/a.txt", "cat /etc/hosts",
+        for (line in listOf("where chrome", "which node", "ver", "ls -la /usr/lib",
             "if not exist \"C:/Program Files/x.exe\" (echo NONE) else (echo SOME)", "where chrome && dir /b C:/Windows || echo none")) {
             assertEquals(EffectClass.R, cmd(line).effectClass, "$line -> ${cmd(line)}")
         }
         for (line in listOf("dir /b C:/Windows > out.txt", "type C:/x 2> ../err.txt", "if exist C:/x (del C:/x)", "where chrome & curl -s https://e.x",
-            "cat /etc/hosts $(touch y)", "echo hi > C:/x.txt", "if exist C:/x (C:/x/run.exe)", "where chrome & npm i left-pad")) {
+            "cat /etc/hosts $(touch y)", "cat /etc/hosts", "type C:/x/a.txt", "echo hi > C:/x.txt", "if exist C:/x (C:/x/run.exe)", "where chrome & npm i left-pad")) {
             assertTrue(cmd(line).effectClass != EffectClass.R, "$line -> ${cmd(line)}")
         }
         assertEquals(EffectClass.D, cmd("dir /b C:/Windows > out.txt").effectClass, "a probe that writes a file is classified as before")
@@ -215,8 +215,8 @@ class CeilingTest {
         // `cwd` is workspace-relative: the same token escapes from one directory and not from another.
         assertEquals(EffectClass.R, EffectPolicy.classify(listOf("head", "../a.txt"), "src", root, protectedPaths).effectClass)
         assertEquals(EffectClass.D, EffectPolicy.classify(listOf("head", "../a.txt"), null, root, protectedPaths).effectClass)
-        // D-373: cat and type of a path are read-only probes, R wherever the path points
-        assertEquals(EffectClass.R, EffectPolicy.classify(listOf("cat", "../a.txt"), null, root, protectedPaths).effectClass)
+        // D-373: only existence probes are R outside the workspace; reading a file's content there is not one
+        assertEquals(EffectClass.D, EffectPolicy.classify(listOf("cat", "../a.txt"), null, root, protectedPaths).effectClass)
         assertEquals(EffectClass.D, EffectPolicy.classify(listOf("head", "../../a.txt"), "src", root, protectedPaths).effectClass)
         assertEquals(EffectClass.R, EffectPolicy.classify(listOf("head", "/w/src/a.txt"), null, root, protectedPaths).effectClass)
         assertEquals(EffectClass.D, EffectPolicy.classify(listOf("head", "/w2/src/a.txt"), null, root, protectedPaths).effectClass)

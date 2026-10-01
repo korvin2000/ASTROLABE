@@ -360,7 +360,7 @@ public object EffectPolicy {
     }
 
     /**
-     * D-373: probes that only report what exists, R even for paths outside the workspace. `if [not] exist <path> <cmd>`
+     * D-373: probes that only report what exists (never file content), R even for paths outside the workspace. `if [not] exist <path> <cmd>`
      * is one when every command it runs (before and after `else`) is one.
      */
     private fun probe(argv: List<String>): Boolean {
@@ -387,7 +387,7 @@ public object EffectPolicy {
         return parts.all { it.isNotEmpty() && probe(it) }
     }
 
-    private val PROBES = setOf("where", "which", "dir", "ls", "type", "cat", "ver", "echo")
+    private val PROBES = setOf("where", "which", "dir", "ls", "ver", "echo")
     private val NULL_DEVICES = setOf("nul", "nul:", "/dev/null", "\$null")
     private val DELETE_OR_MOVE = setOf("rm", "rmdir", "rd", "del", "erase", "mv", "move", "remove-item")
 
