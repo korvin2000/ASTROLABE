@@ -121,14 +121,20 @@ public class Stamper @JvmOverloads public constructor(
     private val countIgnored: Boolean = true,
 ) {
 
-    /** The candidate identity of the working tree right now. */
-    public fun stamp(): Stamp = report().stamp
+    /** The candidate identity of the working tree right now; [fresh] as in [report]. */
+    @JvmOverloads
+    public fun stamp(fresh: Boolean = false): Stamp = report(fresh).stamp
 
-    /** [stamp] with the membership and the exclusions that produced it. */
-    public fun report(): StampReport {
+    /**
+     * [stamp] with the membership and the exclusions that produced it. With [fresh] every file is hashed from its
+     * bytes and the shared content cache is refreshed rather than trusted: a stamp that binds acceptance must not
+     * rest on file metadata a user tool can restore (D-374).
+     */
+    @JvmOverloads
+    public fun report(fresh: Boolean = false): StampReport {
         val status = workspace.git.status(UntrackedFiles.ALL, includeIgnored = countIgnored)
-        val tracked = trackedDelta(status)
-        val untracked = untracked(status)
+        val tracked = trackedDelta(status, fresh)
+        val untracked = untracked(status, fresh)
         val baseCommit = status.branch?.let { it.oid?.hex ?: Stamp.NO_COMMIT }
             ?: throw SnapshotIntegrityError("git status omitted the base commit")
         val stamp = Stamp(
@@ -218,17 +224,17 @@ public class Stamper @JvmOverloads public constructor(
 
     // ------------------------------------------------------------ internals
 
-    private fun trackedDelta(status: GitStatus): List<StampEntry> {
+    private fun trackedDelta(status: GitStatus, fresh: Boolean): List<StampEntry> {
         val entries = LinkedHashMap<String, StampEntry>()
         for (entry in status.entries) {
             when (entry) {
-                is StatusEntry.Ordinary -> entries[entry.path] = stampEntry(entry.path, entry.worktreeMode)
-                is StatusEntry.Unmerged -> entries[entry.path] = stampEntry(entry.path, entry.worktreeMode)
+                is StatusEntry.Ordinary -> entries[entry.path] = stampEntry(entry.path, entry.worktreeMode, fresh)
+                is StatusEntry.Unmerged -> entries[entry.path] = stampEntry(entry.path, entry.worktreeMode, fresh)
                 is StatusEntry.Renamed -> {
-                    entries[entry.path] = stampEntry(entry.path, entry.worktreeMode)
+                    entries[entry.path] = stampEntry(entry.path, entry.worktreeMode, fresh)
                     // A rename removes its origin from the candidate; a copy leaves it in place.
                     if (entry.origin == ChangeOrigin.RENAME) {
-                        val origin = stampEntry(entry.origPath, FileMode.ABSENT)
+                        val origin = stampEntry(entry.origPath, FileMode.ABSENT, fresh)
                         if (origin.type == EntryType.Deleted) entries[entry.origPath] = origin
                     }
                 }
@@ -242,7 +248,7 @@ public class Stamper @JvmOverloads public constructor(
         for (row in workspace.git.lsFiles()) {
             // A gitlink is a directory on disk; git status already reports submodule changes.
             if (row.stage != 0 || row.path in entries || row.mode == FileMode.GITLINK) continue
-            val entry = captureEntry(row.path, row.mode, row) ?: continue
+            val entry = captureEntry(row.path, row.mode, fresh, row) ?: continue
             if (entry.type == EntryType.File && entry.mode == row.mode && '\n' !in row.path && '\r' !in row.path) {
                 converted.add(row to entry)
             } else {
@@ -283,9 +289,9 @@ public class Stamper @JvmOverloads public constructor(
         return changed
     }
 
-    private fun untracked(status: GitStatus): List<StampEntry> =
+    private fun untracked(status: GitStatus, fresh: Boolean): List<StampEntry> =
         status.entries.filterIsInstance<StatusEntry.Untracked>()
-            .map { stampEntry(it.path, FileMode.ABSENT) }
+            .map { stampEntry(it.path, FileMode.ABSENT, fresh) }
             .filter { it.type != EntryType.Deleted }
             .sortedWith(compareBy(PATH_ORDER) { it.path })
 
@@ -294,10 +300,10 @@ public class Stamper @JvmOverloads public constructor(
      * which is the only mode that is meaningful on a platform without a POSIX executable bit;
      * [FileMode.ABSENT] means "git did not say", and the mode is then derived from the file itself.
      */
-    private fun stampEntry(path: String, reportedMode: FileMode): StampEntry =
-        checkNotNull(captureEntry(path, reportedMode))
+    private fun stampEntry(path: String, reportedMode: FileMode, fresh: Boolean): StampEntry =
+        checkNotNull(captureEntry(path, reportedMode, fresh))
 
-    private fun captureEntry(path: String, reportedMode: FileMode, baseline: LsFilesEntry? = null): StampEntry? {
+    private fun captureEntry(path: String, reportedMode: FileMode, fresh: Boolean, baseline: LsFilesEntry? = null): StampEntry? {
         val resolved = workspace.paths.resolveCapture(path)
         if (resolved !is PathResolution.Resolved) {
             throw SnapshotIntegrityError("cannot stamp '$path': $resolved")
@@ -311,7 +317,8 @@ public class Stamper @JvmOverloads public constructor(
             }
             PathKind.Regular -> {
                 val algorithm = baseline?.let(::objectAlgorithm)
-                val content = workspace.contents.of(resolved.real, algorithm) { workspace.bytes(resolved) }
+                val read = { workspace.bytes(resolved) }
+                val content = (if (fresh) workspace.contents.load(resolved.real, algorithm, read) else workspace.contents.of(resolved.real, algorithm, read))
                     ?: throw SnapshotIntegrityError("'$path' disappeared during stamping")
                 val mode = fileMode(resolved, reportedMode)
                 if (baseline != null && mode == baseline.mode && content.objectIds[algorithm] == baseline.id.hex) return null

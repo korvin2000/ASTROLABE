@@ -8,6 +8,7 @@ import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.attribute.BasicFileAttributes
+import java.nio.file.attribute.FileTime
 import java.security.MessageDigest
 import java.time.Clock
 import java.util.concurrent.ConcurrentHashMap
@@ -19,17 +20,20 @@ import java.util.concurrent.atomic.AtomicLong
  * file is not re-read on every stamp (D-364). The digests are the ones a fresh read would produce, so
  * stamps are byte-identical with or without a hit.
  *
- * A hit needs the size, the nanosecond modification time and the file key observed **before** the
- * cached read. Like git's racily-clean rule, content read less than [RACY_WINDOW_NANOS] after its
- * modification time is never cached: a same-size rewrite within one timestamp tick would otherwise
- * keep a stale digest.
+ * A hit needs the size, the nanosecond modification time, the file key and — where the file system
+ * has the `unix` attribute view — the status-change time observed **before** the cached read. User
+ * tools can restore a modification time (`cp -p`, `touch -r`, archive extraction) but not a ctime, so
+ * without ctime a same-size rewrite with a restored mtime keeps a stale digest; acceptance therefore
+ * never trusts this cache alone ([Stamper.report] with `fresh`). Like git's racily-clean rule, content
+ * read less than [RACY_WINDOW_NANOS] after its modification time is never cached: a same-size
+ * rewrite within one timestamp tick would otherwise keep a stale digest.
  */
 internal class ContentCache(private val clock: Clock = Clock.systemUTC()) {
 
     /** What a read produced: the raw digest, the size, and git object ids by hash algorithm. */
     internal class Content(val digest: Digest, val sizeBytes: Long, val objectIds: Map<String, String>)
 
-    private data class Observed(val sizeBytes: Long, val modifiedNanos: Long, val fileKey: Any?)
+    private data class Observed(val sizeBytes: Long, val modifiedNanos: Long, val fileKey: Any?, val changedNanos: Long?)
 
     private class Entry(val observed: Observed, val content: Content)
 
@@ -66,10 +70,11 @@ internal class ContentCache(private val clock: Clock = Clock.systemUTC()) {
             return null
         }
         reads.incrementAndGet()
+        val digest = Digest.of(bytes)
         val objectIds = HashMap<String, String>()
-        if (cached != null && before != null && cached.observed == before) objectIds.putAll(cached.content.objectIds)
+        if (cached != null && cached.content.digest == digest) objectIds.putAll(cached.content.objectIds)
         if (objectAlgorithm != null) objectIds[objectAlgorithm] = objectId(objectAlgorithm, bytes)
-        val content = Content(Digest.of(bytes), bytes.size.toLong(), objectIds)
+        val content = Content(digest, bytes.size.toLong(), objectIds)
         if (before != null && before.sizeBytes == content.sizeBytes && readAt - before.modifiedNanos >= RACY_WINDOW_NANOS) {
             entries[file] = Entry(before, content)
         } else {
@@ -81,9 +86,22 @@ internal class ContentCache(private val clock: Clock = Clock.systemUTC()) {
     private fun observe(file: Path): Observed? = try {
         val attributes = Files.readAttributes(file, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
         if (!attributes.isRegularFile) null
-        else Observed(attributes.size(), attributes.lastModifiedTime().to(TimeUnit.NANOSECONDS), attributes.fileKey())
+        else Observed(attributes.size(), attributes.lastModifiedTime().to(TimeUnit.NANOSECONDS), attributes.fileKey(), changedNanos(file))
     } catch (_: IOException) {
         null
+    }
+
+    private fun changedNanos(file: Path): Long? {
+        if ("unix" !in file.fileSystem.supportedFileAttributeViews()) return null
+        return try {
+            (Files.getAttribute(file, "unix:ctime", LinkOption.NOFOLLOW_LINKS) as? FileTime)?.to(TimeUnit.NANOSECONDS)
+        } catch (_: UnsupportedOperationException) {
+            null
+        } catch (_: IllegalArgumentException) {
+            null
+        } catch (_: IOException) {
+            null
+        }
     }
 
     private fun nowNanos(): Long = clock.instant().let { it.epochSecond * 1_000_000_000L + it.nano }

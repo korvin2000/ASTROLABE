@@ -477,7 +477,7 @@ internal class S3Round(
                 journal(coordinator, listOf(handle.id), "integrated ${increment.id} not committed: $refusal")
                 return S3Result.Stopped(stopOutcome(), "integrated writer results not committed: $refusal", last)
             }
-            val stampNow = c.stamper.report().candidateId
+            val stampNow = c.stamper.report(fresh = true).candidateId
             val current = checkNotNull(c.state)
             val returnedIncrement = current.graph.increments.first { it.id == increment.id }
             val proposal = CompletionProposal(increment.id, "done", c.contract.version, receipt.integrationBase, receipt.resultingStamp, receipt.patchHash, receipt.envId)

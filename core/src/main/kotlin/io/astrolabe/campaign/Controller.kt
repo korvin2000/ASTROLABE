@@ -491,7 +491,7 @@ public class Controller @JvmOverloads public constructor(
 
         // Capture before anything else looks at the tree: snapshot 0 is the user's pre-existing state.
         val first = shadow.record(0) == null
-        val s0 = if (first) dirty.capture(0).also { shadow.open(it) } else checkNotNull(shadow.manifest(0))
+        val s0 = if (first) dirty.capture(0, fresh = true).also { shadow.open(it) } else checkNotNull(shadow.manifest(0))
         val external = if (first) emptyList() else drift(shadow, dirty)
 
         val atlas = Atlas.build(workspace.root)
@@ -868,7 +868,7 @@ public class Controller @JvmOverloads public constructor(
             c.advance(Transition.Returned(exit))
             refreshPrescan(c, run.ids, exit)?.let { return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, it)), exit, null, compiled) }
             boundary(c, cellId, RebuildReason.CellEnd(if (exit is CellExit.Completed) RebuildReason.CellEnd.Next.NextIncrement else RebuildReason.CellEnd.Next.Continuation))
-            val stampNow = c.stamper.report().candidateId
+            val stampNow = c.stamper.report(fresh = true).candidateId
             if (exit is CellExit.Completed && exit.answer != null) {
                 routing.selected?.let { router.record(it, RoutingOutcome.Accepted) }
                 return S0Run(c.advance(Transition.Answered(stampNow, exit.answer)), exit, null, compiled)
@@ -940,7 +940,7 @@ public class Controller @JvmOverloads public constructor(
      * intent with effects (anything but a replay-safe read) was recorded.
      */
     private fun answerable(c: OpenedCampaign): String? {
-        val stamp = c.stamper.report().candidateId
+        val stamp = c.stamper.report(fresh = true).candidateId
         if (stamp != c.s0.stampId) return "the tree changed since the task started (@${c.s0.stampId.hash8} → @${stamp.hash8})"
         val effects = c.store.db.query("SELECT body FROM intents WHERE work_id = ?", c.ids.work) {
             Json.decodeFromString(io.astrolabe.evidence.Intent.serializer(), it.string("body"))
@@ -963,7 +963,7 @@ public class Controller @JvmOverloads public constructor(
         val config = c.attempt.config
         val acceptance = OriginalAcceptance {
             harnessVerify(c, ids.copy(context = ContextId(idGen.next("repair-check"))), "repair-check", """{"what":"acceptance","ids":[${increment.accept.joinToString(",") { "\"$it\"" }}]}""")
-            val stamp = c.stamper.report().candidateId
+            val stamp = c.stamper.report(fresh = true).candidateId
             val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = candidates(c), retryCandidates = c.store.layout.candidates)
             val checks = increment.accept.flatMap { c.checks.forAcceptance(it) }
             val green = checks.isNotEmpty() && checks.all { scheduler.currency(it, stamp).certifies }
@@ -1061,7 +1061,7 @@ public class Controller @JvmOverloads public constructor(
 
     /** Re-accepts stale verified increments from current receipts; with [settle], one that needs a decision asks for it. */
     private suspend fun reaccept(c: OpenedCampaign, scheduler: Scheduler, authority: Authority, settle: Boolean = true): CampaignState? {
-        val report = c.stamper.report()
+        val report = c.stamper.report(fresh = true)
         val state = checkNotNull(c.state)
         val stale = stale(c)
         for (increment in state.graph.increments.filter { it.status == IncrementStatus.Verified && it.requirementIds.any { r -> r in stale } }) {
@@ -1244,7 +1244,7 @@ public class Controller @JvmOverloads public constructor(
         val receipts = SqliteReceipts(c.store, clock)
         val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, receipts, SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = candidates(c), retryCandidates = c.store.layout.candidates)
         extract(c, packets)
-        val receipt = FinishReceipts.build(c, packets, currencies(c, scheduler, c.stamper.report().candidateId), receipts::get)
+        val receipt = FinishReceipts.build(c, packets, currencies(c, scheduler, c.stamper.report(fresh = true).candidateId), receipts::get)
         val (ref, _) = FinishReceipts.export(c, receipt)
         events?.emit(AgentEvent.Campaign.Finished(c.ids, outcome.wire, ref, stopCode = result.state?.stopCode?.wire))
         return result.copy(finish = receipt)
@@ -1364,7 +1364,7 @@ public class Controller @JvmOverloads public constructor(
             return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, it)), exit, null, compiled)
         }
 
-        val stampNow = c.stamper.report().candidateId
+        val stampNow = c.stamper.report(fresh = true).candidateId
         // D-344: an answer ends the campaign `answered`; the facts were checked by the tool and again at the turn's end.
         if (exit is CellExit.Completed && exit.answer != null) {
             routing.selected?.let { router.record(it, RoutingOutcome.Accepted) }
@@ -1495,7 +1495,7 @@ public class Controller @JvmOverloads public constructor(
             ?: ask(c, ids, pending, waiting, authority)
         val resolved = pending.resolve(decision)
         // The authority may take its time: a decision applies only to the tree and contract it was asked about.
-        val now = c.stamper.report().candidateId
+        val now = c.stamper.report(fresh = true).candidateId
         if (now != pending.resultingStamp || c.contract.version != pending.contractVersion) {
             return Settled.Void(pending, "the tree or contract moved while the decision was asked (@${now.hash8}, v${c.contract.version})")
         }
@@ -2092,7 +2092,7 @@ public class Controller @JvmOverloads public constructor(
             return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, unfinished))
         }
         val acceptances = Acceptances(c.store, clock)
-        val report = c.stamper.report()
+        val report = c.stamper.report(fresh = true)
         val stamp = report.candidateId
         val contract = c.contract
         val ids = c.ids.withCandidate(stamp)
@@ -2137,7 +2137,7 @@ public class Controller @JvmOverloads public constructor(
         }
         val receipts = (resolved.evidenceRefs + carried.values.mapNotNull { it.evidenceRef }).distinct()
         if (receipts.isEmpty()) return c.advance(Transition.Stopped(CampaignOutcome.Failed, "final acceptance at @${stamp.hash8}: no acceptance evidence"))
-        if (c.stamper.report().candidateId != stamp || c.contract != contract) {
+        if (c.stamper.report(fresh = true).candidateId != stamp || c.contract != contract) {
             return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "candidate or contract changed during final review; verification and review must be repeated"))
         }
         c.refusal()?.let { return c.advance(Transition.Stopped(stopOutcome(c), "final acceptance not published: $it")) }
@@ -2242,7 +2242,7 @@ public class Controller @JvmOverloads public constructor(
         val before = c.stamper.report()
         if (gates.isNotEmpty()) harnessVerify(c, ids, "quality", """{"what":"tests","selection":"ids","ids":[${gates.joinToString(",") { "\"$it\"" }}]}""")
         if (check != null) harnessVerify(c, ids, "full", """{"what":"tests","selection":"full"}""")
-        val after = c.stamper.report()
+        val after = c.stamper.report(fresh = true)
         val stamp = after.candidateId
         val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, ids, clock)
         val required = (gates + listOfNotNull(check?.id)).mapNotNull { c.checks[it] }
