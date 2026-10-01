@@ -87,18 +87,27 @@ class GatesTest {
     }
 
     @Test
-    fun `entry fires once on the first non-register edit without an accept step, and never on reads`() {
+    fun `entry fires once on the first edit when neither the contract nor a plan step holds the acceptance, and never on reads`() {
         val bare = register.copy(plan = listOf(Step(1, Mark.Cursor, "round half-up")))
+        val undeclared = increment.copy(accept = listOf("AC-9"))
         val reports = turns(
-            state(1, bare).copy(calls = listOf(look())),
-            state(2, bare).copy(calls = listOf(edit())),
-            state(3, bare).copy(calls = listOf(edit())),
+            state(1, bare).copy(increment = undeclared, calls = listOf(look())),
+            state(2, bare).copy(increment = undeclared, calls = listOf(edit())),
+            state(3, bare).copy(increment = undeclared, calls = listOf(edit())),
         )
         assertEquals(listOf(0, 1, 0), reports.map { it.nudges.count { n -> n.key.gate == Gates.ENTRY } })
-        assertTrue(reports[1].nudges.single().line.startsWith("entry: editing while no plan step carries an accept:"), reports[1].lines.toString())
-        assertEquals(0, gates.evaluate(state(1).copy(calls = listOf(edit()))).outcomes.size, "a step with accept: opens the gate")
-        val undeclared = gates.evaluate(state(1).copy(increment = increment.copy(accept = listOf("AC-9")), calls = listOf(edit())))
-        assertTrue(undeclared.nudges.single().line.contains("AC-9 is not in contract v2"), undeclared.lines.toString())
+        assertTrue(reports[1].nudges.single().line.startsWith("entry: editing while acceptance AC-9 is not in contract v2 and no plan step carries an accept:"), reports[1].lines.toString())
+        assertEquals(0, gates.evaluate(state(1).copy(increment = undeclared, calls = listOf(edit()))).outcomes.size, "a step with accept: opens the gate")
+        val none = gates.evaluate(state(1, bare).copy(increment = increment.copy(accept = emptyList()), calls = listOf(edit())))
+        assertTrue(none.nudges.single().line.contains("the increment declares no acceptance"), none.lines.toString())
+    }
+
+    @Test
+    fun `entry is silent on the first edit when the contract already holds the increment's acceptance`() {
+        val bare = register.copy(plan = listOf(Step(1, Mark.Cursor, "round half-up")))
+        assertEquals(emptyList(), gates.evaluate(state(1, bare).copy(calls = listOf(edit()))).outcomes, "a harness-derived run: item")
+        val reviewed = contract.copy(acceptance = contract.acceptance + Acceptance.Review("AC-R", "the host reviews the change", Origin.Harness))
+        assertEquals(emptyList(), gates.evaluate(state(1, bare).copy(contract = reviewed, increment = increment.copy(accept = listOf("AC-R")), calls = listOf(edit()))).outcomes, "the host's review item")
     }
 
     @Test

@@ -15,7 +15,7 @@
 
 | Gate | Trigger | Effect |
 |---|---|---|
-| Entry | first non-register edit while the register has no plan step with an `accept:` or the increment's acceptance is unresolved | nudge; if acceptance cannot be written crisply, the right move is one question (`task.ask`) |
+| Entry | first non-register edit while none of the increment's acceptance items is in the contract and no plan step carries an `accept:` (acceptance the contract already defines — harness-derived `run:` items, the host's review item — needs no plan step, D-372) | nudge; if acceptance cannot be written crisply, the right move is one question (`task.ask`) |
 | Exit (hard) | completion proposal resolved by the §8.7 rule (D-337): a required obligation is red, a reviewer rejected with substance, or any `[ ]`/`[>]` step (or other agent-owned gap) is open | refused; the anchor lists exactly what to fix; a rejection's findings are pinned whole (D-341). What cannot be verified is not refused: the cell ends and the proposal awaits an acceptance decision (D-339) |
 | Pressure | `tokens > α·C_max` | fold into register; rebuild ([§5.8](residency-rebuild.md#sec-5-8)); second rebuild ⇒ `partial` + replan hint |
 | Stall | 5 turns (`stallTurns`) without a progress event (evidence-backed tick, h→v with id, green run advancing an AC, verified new fact, new dead end) or work (an applied edit batch; a finished `run`/`verify` whose `(tool, args, result)` signature is new in the cell — a repeat with the same result and reads are not, D-366) — a live build producing output is work, not a stall; the nudge repeats every `stallTurns` idle turns (D-358) | one line: re-read plan · zoom out · run the pending decision probe · surface the blocker · or request a probe cell |
