@@ -164,6 +164,28 @@ class TestIntegrityTest {
     }
 
     @Test
+    fun `a package manager directory option names the manifest directory, never every file under it`() {
+        val (base, _) = s0()
+        val manifests = mapOf("server" to """{"scripts":{"test":"node tools/check.js"}}""")
+        val forms = listOf(
+            listOf("npm", "--prefix", "server", "run", "test"),
+            listOf("npm", "run", "test", "--prefix", "server"),
+            listOf("npm", "test", "--prefix=server"),
+            listOf("pnpm", "-C", "server", "test"),
+            listOf("yarn", "--cwd", "server", "test"),
+        )
+        for (argv in forms) {
+            val contract = base.strengthen(Acceptance.Run("AC-9", Command(argv), Origin.Model("R1")))
+            val checks = Checks.seed(contract, RunnerCommands(test = Command(listOf("python", "-m", "pytest", "-q"))), packageManifest = { manifests[it] })
+            val flags = TestIntegrity.classify(
+                listOf(SurfaceChange("server/src/app.ts", "a\n", "b\n"), SurfaceChange("server/tools/check.js", "exit(1)\n", "exit(0)\n")),
+                "edit #9", contract, checks,
+            )
+            assertEquals(listOf("server/tools/check.js"), flags.map { it.path }, argv.joinToString(" "))
+        }
+    }
+
+    @Test
     fun `editing a repository executable used by acceptance requires review`() {
         val (base, _) = s0()
         for ((argv0, cwd, path) in listOf(

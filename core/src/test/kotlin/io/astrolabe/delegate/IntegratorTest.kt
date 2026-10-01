@@ -245,6 +245,28 @@ class IntegratorTest {
     }
 
     @Test
+    fun `publication refuses a main line rewritten with a restored modification time during integration`(@TempDir state: Path) = runTest {
+        Rig(state, { mapOf("src/a.py" to "def a():\n    return 7\n") }).use { rig ->
+            val notes = rig.main.root.resolve("notes.txt")
+            rig.fixture.repo.untracked("notes.txt", "aaaa\n")
+            rig.fixture.settle()
+            val modified = Files.getLastModifiedTime(notes)
+            val delegator = rig.delegator(backgroundScope)
+            val handle = started(delegator.dispatch(ChildKind.Writer, rig.task("I1", listOf("src/a.py")), DispatchMode.Sync))
+            val result = rig.collected(delegator, handle, delegator.collect(handle))
+            val integrator = rig.integrator(IntegrationChecks { _, _, _ ->
+                Files.writeString(notes, "bbbb\n")
+                Files.setLastModifiedTime(notes, modified)
+                IntegrationCheck(emptyList())
+            })
+            val rejected = assertIs<Integration.Rejected>(integrator.integrate(listOf(result)).single())
+            assertEquals(IntegrationStep.Publish, rejected.step, rejected.reason)
+            assertTrue(rejected.reason.contains("main moved during integration"), rejected.reason)
+            assertTrue(Files.readString(rig.main.root.resolve("src/a.py")) != "def a():\n    return 7\n", "nothing was published")
+        }
+    }
+
+    @Test
     fun `publication rechecks contract and generation after waiting for main ownership`(@TempDir state: Path) = runTest {
         Rig(state, { mapOf("src/a.py" to "def a():\n    return 7\n") }).use { rig ->
             val delegator = rig.delegator(backgroundScope)

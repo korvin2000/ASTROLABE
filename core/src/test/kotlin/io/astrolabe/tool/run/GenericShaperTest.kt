@@ -60,6 +60,17 @@ class GenericShaperTest {
     }
 
     @Test
+    fun `a short structured output whose first line is huge keeps its last line`() {
+        val output = "x".repeat(3_000) + "\nrunning 1 test\ntest a::b ... ok\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured\nZZZ-LAST summary line\n"
+        val budget = ShapeBudget(400, HeuristicEstimator())
+        val shaped = Shapers.shape(RunCapture("act-4", listOf("cargo", "test"), exitCode = 0, output = output.toByteArray()), budget)
+
+        assertTrue(shaped.view.startsWith("generic/cargo"), shaped.view.take(200))
+        assertTrue(HeuristicEstimator().estimate(shaped.view).upperBoundTokens <= 400, shaped.view)
+        assertTrue(shaped.view.contains("  ZZZ-LAST summary line"), shaped.view)
+    }
+
+    @Test
     fun `cargo test summary and per-test lines`() {
         val shaped = Shapers.shape(Recorded.capture("cargo-fail.txt", listOf("cargo", "test"), exitCode = 101))
         assertEquals("generic/cargo", shaped.shaper)

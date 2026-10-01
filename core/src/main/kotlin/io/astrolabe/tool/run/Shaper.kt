@@ -493,7 +493,9 @@ internal fun buildView(
         val fixed = (head + body + RAW_TITLE_ALLOWANCE + footer(true, captureTruncated, capture, rawLines.size, budget)).joinToString("\n")
         budgetedSides(rawLines, budget, budget.tokens - budget.tokensOf(fixed))
     } else if (rawLines.size <= headLines + tailLines) {
-        RawSides(rawLines, emptyList(), cut = false)
+        // D-375: a short output keeps the long path's head/tail shares, so under pressure its last line still goes last.
+        val headCount = rawLines.size * headLines / (headLines + tailLines)
+        RawSides(rawLines.take(headCount), rawLines.drop(headCount), cut = false)
     } else {
         RawSides(rawLines.take(headLines), rawLines.takeLast(tailLines), cut = false)
     }

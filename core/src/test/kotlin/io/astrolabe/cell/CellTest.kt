@@ -346,6 +346,25 @@ class CellTest {
     }
 
     @Test
+    fun `a created module a pre-existing file already imported raises the impact nudge`() = runTest {
+        val app = "from src.helpers import helper\n\nprint(helper())\n"
+        CellFixture(stateRoot, files = CellFixture.DEFAULT_FILES + ("src/app.py" to app)).use { f ->
+            val created = "def helper():\n    return 0\n"
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("extract"), call("c1", "edit", """{"ops":[{"create":"src/helpers.py","content":${CellFixture.quote(created)}}],"why":"extract"}"""))),
+                Scripted.Reply(listOf(say("reading"), read("c2", "src/helpers.py"))),
+                Scripted.Reply(listOf(say("widen"), anchored("c3", "src/helpers.py", io.astrolabe.id.FileVersion.of(created.toByteArray()), "def helper():", "def helper(scale=1):"))),
+                Scripted.Reply(listOf(say("look"), tree("c4"))),
+                Scripted.Reply(listOf(say("look"), tree("c5"))),
+            )
+
+            f.run(model, turns = 5)
+
+            assertTrue(f.anchorText(4).contains("impact: `helper` (src/helpers.py) signature changed"), f.anchorText(4))
+        }
+    }
+
+    @Test
     fun `leaving a step runs its accept check at the step boundary and the packet records what was not tested`() = runTest {
         val pass = javaClass.getResourceAsStream("/shaper/pytest-pass.txt")!!.use { String(it.readAllBytes(), Charsets.UTF_8) }
         CellFixture(stateRoot, files = CellFixture.DEFAULT_FILES + ("pytest_pass.txt" to pass)).use { f ->
@@ -739,6 +758,23 @@ class CellTest {
             f.run(ScriptedModel.of(Scripted.Reply(listOf(say("read")) + reads), Scripted.Reply(listOf(say("done")))))
 
             assertTrue(results(f).values.none { it.contains("read budget of this turn spent") }, "a large window is unaffected")
+        }
+    }
+
+    @Test
+    fun `a response that spends the window leaves one turn only the read floor`() = runTest {
+        val reads = (0 until 12).map { read("c$it", "src/r$it.py") }
+        CellFixture(stateRoot).use { f ->
+            (0 until 12).forEach { f.repo.write("src/r$it.py", "r = $it\n") }
+            val small = Profile("small32", FakeProfiles.PROVIDER, "fake-small32", FakeProfiles.capabilities(32_000, 2_000), FakeProfiles.main.priceTable)
+            // The headroom before this response is appended is positive; the response itself spends it.
+            val long = say("reasoning ".repeat(3_200))
+            f.run(ScriptedModel.of(Scripted.Reply(listOf(long) + reads), Scripted.Reply(listOf(say("done")))), profile = small, profiles = FakeProfiles.all + (small.id to small))
+
+            val results = f.transcript(2).filterIsInstance<ToolResult>().associate { it.callId to resultText(it) }
+            val spent = results.filterValues { it.contains("read budget of this turn spent") }
+            assertEquals(reads.size - 1, spent.size, results.toString())
+            assertTrue(results.getValue("c0").contains("r = 0"), results.getValue("c0"))
         }
     }
 

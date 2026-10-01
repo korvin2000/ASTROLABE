@@ -246,9 +246,9 @@ public class Dispatcher(
         else -> call
     }
 
-    private companion object {
+    internal companion object {
         /** Below this remainder a read would show too little to be worth a call; it waits for the next turn. */
         const val READ_FLOOR_TOKENS: Long = 300
-        val DEFAULT_LOOK_TOKENS: Int = Defaults().lookBudgetTokens
+        private val DEFAULT_LOOK_TOKENS: Int = Defaults().lookBudgetTokens
     }
 }
