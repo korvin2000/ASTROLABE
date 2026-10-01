@@ -86,18 +86,21 @@ public object Kernel {
  * tool layer, never in this text.
  */
 public object ErrorPolicy {
-    public const val VERSION: String = "error-policy/3"
+    public const val VERSION: String = "error-policy/4"
 
     /** Event → what the harness does. Order is the specification's. */
     public val rows: List<Pair<String, String>> = listOf(
-        "unparseable output" to "that call has no world effect and gets a one-line schema error; the other calls of the turn run " +
-            "(a refused edit holds back the turn's runs, a call conditioned on it does not run); registers stand; no salvage of half-patches",
+        "unparseable output" to "arguments whose only defect is an unbalanced bracket tail are repaired once and the result says so; " +
+            "otherwise that call has no world effect and gets a one-line schema error; the other calls of the turn run " +
+            "(a refused edit holds back the turn's runs, a call conditioned on it does not run); registers stand",
         "anchor 0x or >1x" to "that op's path group is not written; three nearest candidates with lines, or all match sites; the other groups apply",
         "`expect` stale" to "that op's path group is not written; the diff since `expect` returned; the other groups apply",
         "hunk outside displayed range" to "that op's path group is not written; outline plus the displayed ranges; the other groups apply; " +
             "the result ends \"N of M files written; resend only the refused ops\"",
         "mid-batch I/O failure" to "actual per-file state with preimage ids; no auto-retry; no false \"rolled back\"",
-        "STATE invariant violated" to "the eligible STATE patch list is rejected with the invariant and sizes; prior world effects remain recorded",
+        "STATE invariant violated" to "an op that breaks its own rule is skipped and named while the others apply, unless a later op " +
+            "depends on it; a whole-patch rule (caps, one Next, one [>], red recorded) rejects the eligible list with the invariant and sizes; " +
+            "prior world effects remain recorded",
         "run timeout" to "the process group is killed; `timeout`; no replay",
         "unknown outcome" to "`unknown_outcome`; external and workspace state are reconciled before any retry",
         "truncation" to "always marked; prompt and capture limits are distinguished; a recall pointer is given",

@@ -598,7 +598,7 @@ public class Cell @JvmOverloads constructor(
             val work = Progress.work(turn, worked, seenResults)
             worked.filter { (call, outcome) -> (call.family == ToolFamily.Run || call.family == ToolFamily.Verify) && Progress.finished(outcome) }
                 .forEach { (call, outcome) -> seenResults += CallSignature.of(call, outcome) }
-            if (work.isNotEmpty() || Progress.events(registerBefore, register, turn, certifiedBefore, certifiedAfter).isNotEmpty()) lastProgressTurn = turn
+            if (work.isNotEmpty() || Progress.events(registerBefore, register, turn, certifiedBefore, certifiedAfter, tools.state.unbackedTicks).isNotEmpty()) lastProgressTurn = turn
             val completionEvidence = if (proposal && implementingCompletion && dispatchRefusal == null)
                 ctx.completionEvidence?.invoke(flags.values.toList()) else null
             completionEvidence?.flags?.forEach { flag -> flags[flag.path] = flag }
