@@ -86,11 +86,11 @@ public object Kernel {
  * tool layer, never in this text.
  */
 public object ErrorPolicy {
-    public const val VERSION: String = "error-policy/4"
+    public const val VERSION: String = "error-policy/5"
 
     /** Event → what the harness does. Order is the specification's. */
     public val rows: List<Pair<String, String>> = listOf(
-        "unparseable output" to "arguments whose only defect is an unbalanced bracket tail are repaired once and the result says so; " +
+        "unparseable output" to "malformed JSON arguments (brackets, a missing or trailing comma) are repaired and the result says what changed; an output that was cut is never repaired: send that call again in full; " +
             "otherwise that call has no world effect and gets a one-line schema error; the other calls of the turn run " +
             "(a refused edit holds back the turn's runs, a call conditioned on it does not run); registers stand",
         "anchor 0x or >1x" to "that op's path group is not written; three nearest candidates with lines, or all match sites; the other groups apply",

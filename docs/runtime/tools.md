@@ -120,7 +120,7 @@ Delimiters are harness-owned; anything inside them is data. Instruction-shaped c
 
 | Event | Policy |
 |---|---|
-| Unparseable model output | Arguments whose only defect is an unbalanced bracket tail get one deterministic repair (at most three closing brackets dropped, inserted or appended; strict JSON after), and the result says so (D-373). Otherwise that call has no world effect and gets a one-line schema error; the other calls of the turn run — a refused `edit` holds back the turn's `run`/`verify`, a call whose condition names a refused op does not run (D-372); registers stand |
+| Unparseable model output | Malformed JSON arguments get deterministic syntax repairs for every tool family (at most four: a closing bracket dropped, inserted or appended, a trailing comma removed, a missing comma inserted; string contents never change; strict JSON after), and the result lists them (D-373, D-375). An output that was cut — a length stop, an unterminated string, a value missing after `:` or `,` — is never repaired. Otherwise that call has no world effect and gets a one-line schema error; the other calls of the turn run — a refused `edit` holds back the turn's `run`/`verify`, a call whose condition names a refused op does not run (D-372); registers stand |
 | Anchor 0× / >1× | That op's path group is not written; three nearest candidates with lines / all match sites; the other groups apply (D-371) |
 | `expect` stale | That op's path group is not written; diff since `expect` returned; the other groups apply (D-371) |
 | Hunk outside displayed range | That op's path group is not written; outline + displayed ranges; the other groups apply; the result ends "N of M files written; resend only the refused ops" (D-371) |
