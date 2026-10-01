@@ -592,6 +592,29 @@ class CellTest {
     }
 
     @Test
+    fun `a turn-count reserve admits a repair of the cell's own file and refuses an edit to a new path`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val v = f.version("src/a.py")
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("scratch"), call("c1", "edit", """{"ops":[{"create":"src/new.py","content":"new"}],"why":"scratch"}"""))),
+                Scripted.Reply(listOf(say("look"), tree("c2"))),
+                Scripted.Reply(listOf(say("edit a file this cell never changed"), anchored("c3", "src/a.py", v, "    return 1", "    return 10"))),
+                Scripted.Reply(listOf(say("remove my scratch file"), call("c4", "edit", """{"ops":[{"delete":"src/new.py","expect":"${io.astrolabe.id.Digest.of("new".toByteArray()).hex}"}],"why":"repair"}"""))),
+            )
+
+            val exit = f.run(model, turns = 4)
+
+            assertEquals(PartialReason.TurnBudget, assertIs<CellExit.Partial>(exit).reason)
+            assertTrue(f.request(3).mask!!.allows("edit.delete") && f.request(3).mask!!.allows("edit.anchored"), "path-addressed edits stay enabled for a repair")
+            assertFalse(f.request(3).mask!!.allows("edit.transform"), "a transform is never a repair")
+            val refused = resultText(f.transcript(4).filterIsInstance<ToolResult>().last { "c3" == it.callId })
+            assertTrue(refused.contains("not executed: reserve reached: edits are limited to files this cell already changed (src/new.py); verify and report; the edit refused the whole turn"), refused)
+            assertEquals(CellFixture.A_PY, Files.readString(f.repo.resolve("src/a.py")))
+            assertFalse(Files.exists(f.repo.resolve("src/new.py")), "the repair of the cell's own file ran on the reserve")
+        }
+    }
+
+    @Test
     fun `state blocked ends the cell blocked after reconciliation with a checkpoint`() = runTest {
         CellFixture(stateRoot).use { f ->
             val model = ScriptedModel.of(

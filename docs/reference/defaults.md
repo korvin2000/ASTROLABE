@@ -18,7 +18,7 @@ All numbers are declared defaults for the first evaluation round, not derived op
 | Parameter | Default | Note |
 |---|---|---|
 | Shape | policy ([§3.5](../architecture/roles-shapes.md#sec-3-5)); S0 for small, low-risk work | logged with inputs |
-| Cell turn budget | 40 (soft; nudge at 80 %) | continuation cell on exhaustion; calibration prior may adjust per repo |
+| Cell turn budget | 80 (soft; nudge at 80 %; D-366, was 40) | continuation cell on exhaustion; calibration prior may adjust per repo; a reserve reached by the turn count still admits edits to files the cell already changed (D-366) |
 | `α` pressure threshold | 0.65 of `C_profile` | gauge every result; second rebuild ⇒ `partial` + replan |
 | `k` eviction batch / `m` turns kept on rebuild | 8 / 6 (0 for role switch, alternative attempt and cell end) | ablation: batched vs pressure-only within short cells |
 | `R_max` total live results / `[A]` max | 16K / 2.5K tokens | explicit residency bound |

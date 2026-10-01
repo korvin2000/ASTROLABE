@@ -29,7 +29,7 @@
 | **Repeated failure signature** `[C §8.8]` | same normalized error after 2 repairs | "same failure twice: change the hypothesis, record a dead end, or request an alternative attempt" |
 | Scope `[A §8.6]` | an edit touches a path outside `increment.write_scope` (inside contract scope) | allowed once with a warning; the second requires `task.propose(increment_split)` or a justification in `why` |
 | Acceptance surface / test integrity `[A §8.6; C §9.7]` | an edit or run touches test files, snapshots, skip markers, CI config or acceptance commands | rendered as a flagged line with the classifier's kind; must be justified in the Result Packet; forces review when the change weakens an existing check |
-| Reserve `[C §8.8]` | verification reserve reached | "reserve reached: verify and report; no new edits" |
+| Reserve `[C §8.8]` | verification reserve reached | "reserve reached: verify and report; no new edits" — on a reserve reached by the turn count an edit batch whose every op targets a path the cell already changed still runs; any other edit is refused with "reserve reached: edits are limited to files this cell already changed (…); verify and report" (D-366) |
 | Turn budget | 80 % of cell turns | nudge: reach a coherent boundary and checkpoint |
 <!-- end-source-section: 5.6 -->
 
