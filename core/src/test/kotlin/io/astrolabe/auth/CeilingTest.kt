@@ -2,6 +2,7 @@ package io.astrolabe.auth
 
 import io.astrolabe.Config
 import io.astrolabe.DClassPolicy
+import io.astrolabe.atlas.OsFamily
 import io.astrolabe.contract.Authorization
 import io.astrolabe.provider.ToolMask
 import io.astrolabe.tool.EffectClass
@@ -155,19 +156,84 @@ class CeilingTest {
         assertEquals(EffectClass.D, cmd("dir /b C:/Windows > out.txt").effectClass, "a probe that writes a file is classified as before")
     }
 
+    private val windows = EffectPolicyConfig(os = OsFamily.Windows)
+    private val posix = EffectPolicyConfig(os = OsFamily.Linux)
+
+    /** D-375: a probe that inspected every path and found it clear, recording what it was asked. */
+    private class Clear(private val refuse: Set<String> = emptySet()) : ContainmentProbe {
+        val asked = ArrayList<String>()
+
+        override fun contained(relative: String): Boolean {
+            asked += relative
+            return relative !in refuse
+        }
+    }
+
+    private fun removal(line: String, config: EffectPolicyConfig, probe: ContainmentProbe? = Clear(), cwd: String? = null): Classification =
+        EffectPolicy.classify(RunArgs(cmd = line, cwd = cwd), if (config.os == OsFamily.Windows) "C:/w" else root, protectedPaths, config, probe)
+
     @Test
-    fun `deleting or moving paths inside the workspace is W and the root, a protected path or an outside target stays D`() {
-        val rmdir = cmd(kotlinx.serialization.json.Json.decodeFromString(RunArgs.serializer(), live.getValue("call_00_jtg3raywrogarhtrukhkvr4g")).cmd!!)
+    fun `deleting or moving literal paths a probe inspected inside the workspace is W`() {
+        val live = kotlinx.serialization.json.Json.decodeFromString(RunArgs.serializer(), live.getValue("call_00_jtg3raywrogarhtrukhkvr4g")).cmd!!
+        assertEquals("rmdir /s /q .tools", live)
+        val rmdir = removal(live, windows)
         assertEquals(EffectClass.W, rmdir.effectClass, rmdir.toString())
         assertContains(rmdir.reasons.toString(), "delete or move inside the workspace: 'rmdir /s'")
-        for (line in listOf("rd /s /q build/out", "del /s /q .tools/*.tmp", "erase notes.txt", "rm -rf node_modules", "rm -rf src/*",
-            "mv a.txt b.txt", "move a.txt docs/a.txt", "Remove-Item -Recurse -Force .tools")) {
-            assertEquals(EffectClass.W, cmd(line).effectClass, "$line -> ${cmd(line)}")
+        val table = listOf(
+            windows to listOf(
+                "rmdir /s /q .tools", "rd /S /Q build\\out", "del notes.txt", "erase /q notes.txt", "del /q .tools\\*.tmp", "del /s /q .tools\\*.tmp",
+                "move a.txt docs\\a.txt", "move /y a.txt docs/a.txt", "Remove-Item -Recurse -Force .tools", "Remove-Item -LiteralPath .tools",
+                "rd /s /q C:\\w\\build", "rm -rf node_modules",
+            ),
+            posix to listOf(
+                "rm -rf node_modules", "rm -rf src/*", "rm notes.txt", "rm -f -- -odd", "rmdir build", "mv a.txt docs/a.txt", "mv -f a.txt b.txt",
+                "rm -rf /w/build", "rm -Rfv build/out",
+            ),
+        )
+        for ((config, lines) in table) for (line in lines) {
+            val classification = removal(line, config)
+            assertEquals(EffectClass.W, classification.effectClass, "${config.os} $line -> $classification")
+            assertFalse(Capability.OutsideWorkspace in classification.requiredCapabilities, line)
         }
-        for (line in listOf("rmdir /s /q .", "rmdir /s /q ../x", "rm -rf *", "rm -rf ./*", "rm -rf ci", "rm -rf ci/x", "del /s /q .git", "rmdir /s /q C:/",
-            "rm -rf /", "mv a.txt ../b.txt", "move a.txt C:/b.txt", "rm -rf ~/x", "rm -rf db", "Remove-Item -Recurse -Force C:/Users")) {
-            assertEquals(EffectClass.D, cmd(line).effectClass, "$line -> ${cmd(line)}")
+        val asked = Clear()
+        removal("del /s /q .tools\\x.tmp", windows, asked)
+        removal("rm -rf src/* notes.txt", posix, asked)
+        removal("rm a.txt", posix, asked, cwd = "src")
+        assertEquals(listOf(".tools", "src", "notes.txt", "src/a.txt"), asked.asked, "a wildcard and del /s are checked as their parent directory")
+    }
+
+    @Test
+    fun `a delete or move whose operands are not proven literal, inside, unprotected and inspected stays D`() {
+        val table = listOf(
+            windows to listOf(
+                "rd /s /q %USERPROFILE%\\victim", "del %TEMP%\\..\\x", "Remove-Item \$env:USERPROFILE\\x", "rd /s /q !TARGET!", "del ^%TEMP^%\\x",
+                "rd /s /q C:foo", "rd /s /q \\\\server\\share\\x", "rd /s /q \\\\?\\C:\\w\\x", "del a.txt:stream", "del PACKAG~1.JSO", "rd /s /q .git.",
+                "rd /s /q .", "rd /s /q .\\", "rd /s /q src\\..", "rd /s /q C:\\w", "rd /s /q C:\\Users", "del /q *.json", "del /s /q notes.txt",
+                "rd /s /q ci", "del /q ci\\*.yml", "rd /s /q db", "rd /s /q .GIT\\hooks", "rd /x /q build", "Remove-Item -Include *.js .tools",
+                "Remove-Item a,..\\..\\x", "move a.txt C:\\b.txt", "move a.txt ..\\b.txt", "rmdir /s /q", "rd /s /q (build)",
+            ),
+            posix to listOf(
+                "rm -rf \$HOME/victim", "rm -rf ~/x", "rm -rf ~", "rm -rf .*", "rm -rf sub/.*", "rm -rf *", "rm -rf ./*", "rm -rf /", "rm -rf .",
+                "rm -rf .\\./x", "rm -rf `pwd`", "rm -rf \$(pwd)", "rm -rf {a,b}", "rm -rf [ab]x", "rm --no-preserve-root -rf x", "mv -t /tmp a.txt",
+                "mv a.txt ../b.txt", "rmdir /s /q build", "/bin/rm -rf build", "rm -rf ci/x", "rm -rf db", "rm -rf src/*/x", "rm", "rm -rf",
+            ),
+        )
+        for ((config, lines) in table) for (line in lines) {
+            val classification = removal(line, config)
+            assertEquals(EffectClass.D, classification.effectClass, "${config.os} $line -> $classification")
+            assertTrue(classification.reasons.any { it.startsWith("destructive delete outside tmp") || it.startsWith("path ") }, "${config.os} $line -> $classification")
         }
+        // Without a probe nothing outside the tmp prefixes is proven; a probe that finds a protected descendant or a link refuses.
+        val unprobed = removal("rm -rf node_modules", posix, probe = null)
+        assertEquals(EffectClass.D, unprobed.effectClass)
+        assertContains(unprobed.reasons.toString(), "'node_modules' was not inspected on disk")
+        val site = removal("rd /s /q packages\\site", windows, Clear(setOf("packages/site")))
+        assertEquals(EffectClass.D, site.effectClass)
+        assertContains(site.reasons.toString(), "holds a protected path or a link")
+        assertEquals(EffectClass.D, removal("mv a.txt linked/a.txt", posix, Clear(setOf("linked/a.txt"))).effectClass)
+        // The tmp prefixes keep their rule without a probe, for literal operands only.
+        assertEquals(EffectClass.W, removal("rm -rf tmp/cache", posix, probe = null).effectClass)
+        assertEquals(EffectClass.D, removal("rm -rf tmp/\$X", posix, probe = null).effectClass)
     }
 
     @Test
