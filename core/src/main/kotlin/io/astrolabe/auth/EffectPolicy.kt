@@ -185,7 +185,7 @@ public object EffectPolicy {
             return Classification(EffectClass.D, reasons.toList(), capabilities + Capability.OutsideWorkspace, rendered, true, approximate)
         }
         for (tokens in segments) {
-            val one = classifyOne(tokens, cwd, workspaceRoot, protectedPaths, config, probe)
+            val one = classifyOne(tokens, cwd, workspaceRoot, protectedPaths, config, probe, shell = approximate)
             effect = maxOf(effect, one.effectClass)
             reasons += one.reasons
             capabilities += one.requiredCapabilities
@@ -201,6 +201,7 @@ public object EffectPolicy {
         protectedPaths: List<String>,
         config: EffectPolicyConfig,
         containment: ContainmentProbe?,
+        shell: Boolean,
     ): Classification {
         val reasons = ArrayList<String>()
         val capabilities = linkedSetOf(Capability.RunLocal, Capability.WorkspaceRead)
@@ -212,9 +213,9 @@ public object EffectPolicy {
         var index = 0
         while (index < tokens.size) {
             val token = tokens[index]
-            if (token in REDIRECTS) {
-                // D-373: a redirect to the null device writes no file.
-                val target = tokens.getOrNull(index + 1)?.takeUnless { it.lowercase() in NULL_DEVICES }
+            // D-375: argv reaches the program without a shell, so `>` there is an argument, never a redirect.
+            if (shell && token in REDIRECTS) {
+                val target = tokens.getOrNull(index + 1)?.takeUnless { nullDevice(it, config) }
                 if (token != "<" && target != null) {
                     effect = maxOf(effect, EffectClass.W)
                     capabilities += Capability.WorkspaceWrite
@@ -421,7 +422,15 @@ public object EffectPolicy {
     }
 
     private val PROBES = setOf("where", "which", "dir", "ls", "ver", "echo")
-    private val NULL_DEVICES = setOf("nul", "nul:", "/dev/null", "\$null")
+    /**
+     * D-375: a redirect target that writes no file in the shell that runs the line — `nul` / `nul:` for `cmd.exe`,
+     * `/dev/null` for `sh`. `$null` is never one here: the redirects this classifier sees belong to `cmd.exe` or `sh`
+     * (which create a file `$null` or expand it), and PowerShell's own live inside its `-Command` string, which is
+     * classified as a script interpreter's.
+     */
+    private fun nullDevice(target: String, config: EffectPolicyConfig): Boolean =
+        if (config.os == OsFamily.Windows) target.lowercase() in setOf("nul", "nul:") else target == "/dev/null"
+
     private val DELETE_OR_MOVE = setOf("rm", "rmdir", "rd", "del", "erase", "mv", "move", "remove-item")
 
     /**

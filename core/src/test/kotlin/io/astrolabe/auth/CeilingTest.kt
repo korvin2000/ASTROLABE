@@ -134,20 +134,20 @@ class CeilingTest {
         .filter { (it.getValue("name") as kotlinx.serialization.json.JsonPrimitive).content == "run" }
         .associate { o -> (o.getValue("id") as kotlinx.serialization.json.JsonPrimitive).content to (o.getValue("argsJson") as kotlinx.serialization.json.JsonPrimitive).content }
 
-    private fun cmd(line: String) = EffectPolicy.classify(RunArgs(cmd = line), root, protectedPaths)
+    private fun cmd(line: String, config: EffectPolicyConfig = EffectPolicyConfig()) = EffectPolicy.classify(RunArgs(cmd = line), root, protectedPaths, config)
 
     @Test
     fun `read-only probes outside the workspace are R and pass the workspace ceiling, and anything that writes or runs more is not`() {
         val ceiling = Ceiling(CapabilitySet.WORKSPACE_LOCAL_TEST_ONLY, Stage.Patch, ExecutionMode.TrustedLocal)
         for (id in listOf("call_02_9532tzlo1xubzye3tzub0v1z", "call_01_yplspwwizis04wf1z1f8nllx")) {
             val args = kotlinx.serialization.json.Json.decodeFromString(RunArgs.serializer(), live.getValue(id))
-            val classification = EffectPolicy.classify(args, root, protectedPaths)
+            val classification = EffectPolicy.classify(args, root, protectedPaths, windows)
             assertEquals(EffectClass.R, classification.effectClass, "${args.cmd} -> $classification")
             assertNull(ceiling.allows(classification), "${args.cmd}")
         }
         for (line in listOf("where chrome", "which node", "ver", "ls -la /usr/lib",
             "if not exist \"C:/Program Files/x.exe\" (echo NONE) else (echo SOME)", "where chrome && dir /b C:/Windows || echo none")) {
-            assertEquals(EffectClass.R, cmd(line).effectClass, "$line -> ${cmd(line)}")
+            assertEquals(EffectClass.R, cmd(line, windows).effectClass, "$line -> ${cmd(line, windows)}")
         }
         for (line in listOf("dir /b C:/Windows > out.txt", "type C:/x 2> ../err.txt", "if exist C:/x (del C:/x)", "where chrome & curl -s https://e.x",
             "cat /etc/hosts $(touch y)", "cat /etc/hosts", "type C:/x/a.txt", "echo hi > C:/x.txt", "if exist C:/x (C:/x/run.exe)", "where chrome & npm i left-pad")) {
@@ -234,6 +234,36 @@ class CeilingTest {
         // The tmp prefixes keep their rule without a probe, for literal operands only.
         assertEquals(EffectClass.W, removal("rm -rf tmp/cache", posix, probe = null).effectClass)
         assertEquals(EffectClass.D, removal("rm -rf tmp/\$X", posix, probe = null).effectClass)
+    }
+
+    @Test
+    fun `a redirect writes no file only to the null device of the shell that runs the line, and argv has no redirects`() {
+        val table = listOf(
+            Triple(windows, listOf("dir 2>nul", "dir > NUL", "dir >nul:", "where node 2>Nul"), EffectClass.R),
+            Triple(windows, listOf("echo x > \$null", "echo x 2> nul.txt", "dir > \$null"), EffectClass.W),
+            Triple(windows, listOf("echo x > /dev/null", "dir 2>/dev/null"), EffectClass.D),
+            Triple(posix, listOf("ls 2>/dev/null", "ls > /dev/null", "which node >/dev/null"), EffectClass.R),
+            Triple(posix, listOf("echo x > nul", "ls 2>NUL:", "echo x > \$null"), EffectClass.W),
+        )
+        for ((config, lines, expected) in table) for (line in lines) {
+            assertEquals(expected, cmd(line, config).effectClass, "${config.os} $line -> ${cmd(line, config)}")
+        }
+        // PowerShell's own `$null` lives inside its -Command string: the interpreter's effects are unknown, not a redirect.
+        val quoted = cmd("powershell -Command \"Get-ChildItem > \$null\"", windows)
+        assertEquals(EffectClass.W, quoted.effectClass)
+        assertTrue(quoted.effectsUnknown)
+        assertFalse(quoted.reasons.any { it.startsWith("output redirect") }, quoted.toString())
+        assertTrue(cmd("powershell -Command Get-ChildItem > \$null", windows).reasons.contains("output redirect '>'"), "cmd.exe owns an unquoted redirect")
+
+        for (config in listOf(windows, posix)) {
+            val echo = EffectPolicy.classify(listOf("echo", "x", ">", "nul"), null, root, protectedPaths, config)
+            assertEquals(EffectClass.R, echo.effectClass, "argv '>' is an argument: $echo")
+            assertFalse(echo.reasons.any { it.startsWith("output redirect") }, echo.toString())
+            val rm = EffectPolicy.classify(listOf("rm", "-rf", "build", ">", "/dev/null"), null, root, protectedPaths, config, Clear())
+            assertEquals(EffectClass.D, rm.effectClass, "rm deletes '>' and '/dev/null' too: $rm")
+            val tool = EffectPolicy.classify(listOf("mytool", ">", "out.txt"), null, root, protectedPaths, config)
+            assertFalse(tool.reasons.any { it.startsWith("output redirect") }, tool.toString())
+        }
     }
 
     @Test
