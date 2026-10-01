@@ -486,7 +486,7 @@ class CellTest {
             f.run(ScriptedModel.of(Scripted.Reply(listOf(say("record"), call("c1", "state", args))), Scripted.Reply(listOf(say("done")))))
 
             val result = f.transcript(2).filterIsInstance<ToolResult>().single().let(::resultText)
-            assertTrue(result.contains("note: arguments repaired: 1 surplus '}' dropped at offset ${args.length - 3}"), result)
+            assertTrue(result.contains("note: arguments repaired: dropped '}' at ${args.length - 3}"), result)
             assertTrue(result.contains("applied 2 ops") && !result.contains("not executed"), result)
         }
     }
