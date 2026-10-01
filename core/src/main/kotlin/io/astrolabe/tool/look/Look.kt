@@ -201,6 +201,7 @@ public class Look(
         } ?: return refused(args, "refused", "read needs a target: path | path:a-b | path::Symbol")
         val content = readFile(target.path) ?: return refused(args, "refused", refusalFor(target.path))
         val lines = decodeLines(content.bytes)
+        if (lines.isEmpty() && target !is LookTarget.Symbol) return emptyRead(args, target.path, content.version, content.bytes, context)
         val outlineOf = { Outline.of(target.path, content.bytes) }
         val span: LineRange = when (target) {
             is LookTarget.Lines -> {
@@ -220,10 +221,7 @@ public class Look(
                 }
                 LineRange(chosen.from, minOf(chosen.to, lines.size))
             }
-            is LookTarget.Whole -> {
-                if (lines.isEmpty()) return refused(args, "refused", "${target.path} is empty")
-                LineRange(1, lines.size)
-            }
+            is LookTarget.Whole -> LineRange(1, lines.size)
         }
         // D-365: a whole file above budget shows its first lines like a range read; the outline follows the marker only
         // when it is small, and its tokens come out of the same budget.
@@ -264,6 +262,35 @@ public class Look(
             alias.text, actionId, "ok", body, tokens,
             versions = mapOf(target.path to content.version), scope = "${target.path}:${displayed.from}-${displayed.to}" + (if (content.raced) " (raced)" else ""),
             complete = !view.truncated, captureComplete = true, displayTruncated = view.truncated, redacted = mask.applied, artifact = blob,
+        )
+    }
+
+    /**
+     * D-373: an empty file reads as an ok observation and is KNOWN whole at its version, so it can be deleted or replaced.
+     * Coverage cannot hold zero lines; line 1 stands for the empty file.
+     */
+    private fun emptyRead(args: LookArgs, path: String, version: FileVersion, bytes: ByteArray, context: TurnContext): ToolOutcome {
+        val whole = LineRange(1, 1)
+        workset.entries.firstOrNull { it.path == path && it.version == version && it.source != EntrySource.PostEdit && it.coverage.covers(whole) }?.resultId?.let { alias ->
+            return refused(args, "unchanged", "see $alias (unchanged)", versions = mapOf(path to version))
+        }
+        val actionId = idGen.next("act")
+        val alias = allocate()
+        blobs.put(bytes, BlobKind.PREIMAGE, ids, recovery = true)
+        val body = "(empty file, 0 lines)"
+        val tokens = tokensOf(body)
+        val blob = blobs.put(body.toByteArray(Charsets.UTF_8), BlobKind.OUTPUT, ids)
+        observations.record(
+            Observation(
+                id = alias.canonicalId, ids = ids, actionId = actionId, candidate = null, contentRef = blob,
+                paths = listOf(path), ranges = mapOf(path to Ranges.of(whole)), complete = true,
+                sourceVersions = mapOf(path to version), captureComplete = true, redaction = RedactionMask.NONE, truncated = false,
+            ),
+        )
+        show(path, version, Ranges.of(whole), RedactionMask.NONE, alias.text, context.turn, tokens)
+        return outcome(
+            alias.text, actionId, "ok", body, tokens, versions = mapOf(path to version), scope = "$path (empty)",
+            complete = true, captureComplete = true, displayTruncated = false, redacted = false, artifact = blob,
         )
     }
 

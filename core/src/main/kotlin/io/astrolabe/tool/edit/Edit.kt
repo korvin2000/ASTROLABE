@@ -220,7 +220,7 @@ public class Edit(
 
     private class AnchoredPlan(override val index: Int, override val path: String, val resolved: PathResolution.Resolved, val expect: FileVersion, val oldBytes: ByteArray, val oldText: String, val hunks: List<Pair<Located, String>>, val normalised: Boolean) : Plan
     private class CreatePlan(override val index: Int, override val path: String, val resolved: PathResolution.Resolved, val bytes: ByteArray) : Plan
-    private class DeletePlan(override val index: Int, override val path: String, val resolved: PathResolution.Resolved, val expect: FileVersion, val oldBytes: ByteArray) : Plan
+    private class DeletePlan(override val index: Int, override val path: String, val resolved: PathResolution.Resolved, val expect: FileVersion, val oldBytes: ByteArray, val unread: Boolean = false) : Plan
 
     /** D-365: `delete` then `create` of one path in one batch, applied as a whole-file replace at the create's place. */
     private class ReplacePlan(override val index: Int, val deleteIndex: Int, override val path: String, val resolved: PathResolution.Resolved, val expect: FileVersion, val oldBytes: ByteArray, val bytes: ByteArray, val note: String) : Plan
@@ -398,8 +398,15 @@ public class Edit(
         "delete" -> {
             val path = op.delete!!
             val resolved = mutable(index, path)
-            val content = current(index, path, expected(index, path, op.expect, context))
-            DeletePlan(index, path, resolved, content.version, content.bytes)
+            // D-373: a file no version of which is KNOWN is deleted as it is now (an `expect` must name that version); the
+            // preimage is saved before the delete, so `revert` restores it.
+            val now = if (context.coverage.versions(path).isEmpty()) registry.read(path)?.takeIf { names(op.expect, it.version) } else null
+            if (now != null) {
+                DeletePlan(index, path, resolved, now.version, now.bytes, unread = true)
+            } else {
+                val content = current(index, path, expected(index, path, op.expect, context))
+                DeletePlan(index, path, resolved, content.version, content.bytes)
+            }
         }
         "rename" -> {
             val from = op.rename!!
@@ -537,6 +544,12 @@ public class Edit(
 
     private fun isHex(c: Char): Boolean = c in '0'..'9' || c in 'a'..'f'
 
+    /** An omitted [expect], or one (≥ [MIN_EXPECT] hex) that [version] starts with. */
+    private fun names(expect: String?, version: FileVersion): Boolean {
+        val hex = expect?.trim()?.removePrefix("@")?.lowercase().orEmpty()
+        return hex.isEmpty() || (hex.length >= MIN_EXPECT && hex.all(::isHex) && version.digest.hex.startsWith(hex))
+    }
+
     // ----------------------------------------------------------------- apply
 
     private fun apply(plans: List<Plan>, contract: Contract, context: TurnContext, editId: String, alias: String, outside: List<String>, why: String, carries: MutableList<() -> Unit>): EditResult {
@@ -604,6 +617,7 @@ public class Edit(
                         val preimage = preimages.save(editId, plan.path, plan.expect, plan.oldBytes)
                         Files.delete(plan.resolved.real)
                         applied += AppliedOp(plan.index, "delete", plan.path, plan.expect, null, preimage.preimageDigest.hex)
+                        if (plan.unread) notes[plan.index] = "deleted without a prior read; preimage saved, revert: $alias"
                         versions[plan.path] = null
                         registry.change(plan.path, plan.expect, null, cause)
                         authored.remove(owned(plan.resolved))

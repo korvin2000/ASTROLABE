@@ -44,7 +44,8 @@ public data class Preimage(
  */
 public data class DiffReceipt(
     val path: String,
-    val versionBefore: FileVersion,
+    /** `null` when the path was absent: the revert of a delete (D-373). */
+    val versionBefore: FileVersion?,
     val versionAfter: FileVersion,
     val addedLines: Int,
     val removedLines: Int,
@@ -164,20 +165,23 @@ public class Preimages @JvmOverloads constructor(
      * The version-checked inverse of one edit (§9.3): writes the preimage back when the file still
      * holds this edit's postimage, and refuses otherwise. Produces a [DiffReceipt]; the inline
      * syntax check that accompanies it belongs to the edit tool (D-10, P1.6.4).
+     *
+     * D-373: an edit without a postimage is a delete (or a write that never happened); its inverse writes the preimage
+     * back only while the path is still absent, so nothing that appeared there since is overwritten.
      */
     public fun revert(editId: String, path: String, os: Os): RevertResult {
         val preimage = of(editId, path)
             ?: return RevertResult.Refused("no preimage recorded for edit '$editId' on '$path'")
         val expected = preimage.versionAfter
-            ?: return RevertResult.Refused("edit '$editId' on '$path' recorded no postimage; nothing to check against")
 
         val resolved = workspace.resolve(path, Intent.Mutate)
         if (resolved is PathResolution.Rejected) {
             return RevertResult.Refused("the path contract refused '$path': ${resolved.reason}", resolved)
         }
         val current = workspace.bytes(resolved as PathResolution.Resolved)
-            ?: return RevertResult.Diverged(expected, null)
-        val actual = FileVersion.of(current)
+        if (expected == null && current != null) return RevertResult.Refused("edit '$editId' on '$path' recorded no postimage and '$path' exists; nothing to check against")
+        if (expected != null && current == null) return RevertResult.Diverged(expected, null)
+        val actual = current?.let(FileVersion::of)
         if (actual != expected) return RevertResult.Diverged(expected, actual)
 
         val bytes = bytesOf(preimage)
@@ -188,7 +192,7 @@ public class Preimages @JvmOverloads constructor(
         if (after is PathResolution.Rejected) {
             throw java.io.IOException("'$path' changed identity after revert publication: ${after.detail}; preimage ${preimage.preimageDigest.hash8}")
         }
-        val counts = changedRegion(current, bytes)
+        val counts = changedRegion(current ?: ByteArray(0), bytes)
         return RevertResult.Reverted(
             DiffReceipt(
                 path = path,

@@ -413,7 +413,8 @@ class EditTest {
 
     @Test
     fun `delete and rename resolve an omitted or short expect like an anchored edit`() = runTest {
-        val refused = run("""{"ops":[{"delete":"src/b.py"}],"why":"rm"}""")
+        // D-373: an unread delete runs (its own test below); an unread rename still needs a read
+        val refused = run("""{"ops":[{"rename":"src/b.py","to":"src/b3.py"}],"why":"mv"}""")
         assertEquals("refused", status(refused))
         assertTrue(refused.body.contains("expect omitted and no version of 'src/b.py' is KNOWN"), refused.body)
         assertTrue(Files.exists(repo.resolve("src/b.py")))
@@ -430,9 +431,8 @@ class EditTest {
     @Test
     fun `a delete then create of one path in one batch replaces it under the delete's guards with a preimage`() = runTest {
         val replace = """{"ops":[{"delete":"src/b.py"},{"create":"src/b.py","content":"z = 3\n"}],"why":"rewrite"}"""
-        val unknown = run(replace)
-        assertEquals("refused", status(unknown))
-        assertTrue(unknown.body.contains("expect omitted and no version of 'src/b.py' is KNOWN"), unknown.body)
+        val stale = run(replace.replace("\"src/b.py\"},", "\"src/b.py\",\"expect\":\"0000\"},"))
+        assertEquals("refused", status(stale), "an expect that names no version shown still refuses: ${stale.body}")
         assertEquals("x = 1\ny = 2\n", Files.readString(repo.resolve("src/b.py")))
 
         val before = seen("src/b.py", 1, 2)
@@ -453,6 +453,41 @@ class EditTest {
 
         val createOnly = run("""{"ops":[{"create":"src/b.py","content":"w"}],"why":"w"}""")
         assertTrue(createOnly.body.contains("exists: 'src/b.py' exists"), "a create without the batch's own delete still refuses: ${createOnly.body}")
+    }
+
+    @Test
+    fun `a file never read is deleted as it is now, its preimage saved, and a revert restores it`() = runTest {
+        val deleted = run("""{"ops":[{"delete":"src/b.py"}],"why":"rm"}""")
+        assertEquals("ok", status(deleted), deleted.body)
+        assertTrue(deleted.body.contains("✓ 1 delete src/b.py") && deleted.body.contains("(deleted without a prior read; preimage saved, revert: #1)"), deleted.body)
+        assertFalse(Files.exists(repo.resolve("src/b.py")))
+        val reverted = run("""{"ops":[{"revert":"#1"}],"why":"undo"}""", turn = 2)
+        assertEquals("ok", status(reverted), reverted.body)
+        assertEquals("x = 1\ny = 2\n", Files.readString(repo.resolve("src/b.py")))
+
+        val now = registry.version("src/b.py")!!
+        val other = if (now.digest.hex.startsWith("0000")) "1111" else "0000"
+        val wrong = run("""{"ops":[{"delete":"src/b.py","expect":"$other"}],"why":"rm"}""")
+        assertEquals("refused", status(wrong), wrong.body)
+        assertTrue(Files.exists(repo.resolve("src/b.py")), "a given expect must name the current version")
+        val again = run("""{"ops":[{"delete":"src/b.py","expect":"${now.hash8.take(4)}"}],"why":"rm"}""")
+        assertEquals("ok", status(again), again.body)
+        assertFalse(Files.exists(repo.resolve("src/b.py")))
+        repo.write("src/b.py", "appeared\n")
+        val clobber = run("""{"ops":[{"revert":"${again.resultAlias}"}],"why":"undo"}""", turn = 3)
+        assertEquals("refused", status(clobber), "a revert of a delete never overwrites a file that appeared since: ${clobber.body}")
+        assertEquals("appeared\n", Files.readString(repo.resolve("src/b.py")))
+    }
+
+    @Test
+    fun `a delete then create of a file never read replaces it in one batch`() = runTest {
+        val replaced = run("""{"ops":[{"delete":"src/b.py"},{"create":"src/b.py","content":"z = 3\n"}],"why":"rewrite"}""")
+        assertEquals("ok", status(replaced), replaced.body)
+        assertTrue(replaced.body.contains("✓ 2 replace src/b.py") && replaced.body.contains("delete + create of one path in one batch"), replaced.body)
+        assertEquals("z = 3\n", Files.readString(repo.resolve("src/b.py")))
+        assertEquals(1, preimages.of("edit-1").size, "the replaced bytes are saved")
+        assertEquals("ok", status(run("""{"ops":[{"revert":"#1"}],"why":"undo"}""", turn = 2)))
+        assertEquals("x = 1\ny = 2\n", Files.readString(repo.resolve("src/b.py")))
     }
 
     @Test
