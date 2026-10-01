@@ -55,7 +55,8 @@ edit(ops, why)
     group writes nothing of itself and every other group applies; each refused group is listed with its op's
     diagnostics, then "N of M files written; resend only the refused ops: <paths (ops)>". A partially applied
     batch is not applied for the turn: its runs stay not executed ("applied partially (K refused)")         (D-371)
-  · inline syntax check; post-edit views ±3 lines become displayed ranges; preimages saved; shadow snapshot per turn
+  · inline syntax check; post-edit views ±3 lines become displayed ranges; lines displayed before that the edit left
+    unchanged stay KNOWN at the new version, shifted (D-371): a second edit of them needs no re-read; preimages saved; shadow snapshot per turn
   · unsupported mutation kinds (binary, modes, symlinks, case-only renames) are rejected explicitly, never dropped   [B §8.3]
 
 run(argv|cmd, cwd?, shape="auto", budget=1200, timeout=120, bg=false, intent?, class_hint?, if?: "applied(op:N)")

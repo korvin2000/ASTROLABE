@@ -201,13 +201,14 @@ public class Edit(
         if (call.operationNames.any { !mask.allows(it) }) {
             return render(args, alias, actionId, EditResult(false, editId, emptyList(), emptyList(), emptyMap(), emptyMap(), emptyMap(), emptyList(), emptyList(), EditError("unsupported", null, null, "${call.name} is masked in this role")), context)
         }
+        val carries = ArrayList<() -> Unit>()
         val result = workspace.mutation.withLock {
             beforeDispatch()
             kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) {
-                run(args, contracts.current(ids.work) ?: contract, context, editId, alias, actionId)
+                run(args, contracts.current(ids.work) ?: contract, context, editId, alias, actionId, carries)
             }
         }
-        return render(args, alias, actionId, result, context)
+        return render(args, alias, actionId, result, context, carries)
     }
 
     // ------------------------------------------------------------- preflight
@@ -233,7 +234,7 @@ public class Edit(
 
     private class Refusal(val error: EditError) : RuntimeException(error.detail)
 
-    private fun run(args: EditArgs, contract: Contract, context: TurnContext, editId: String, alias: String, actionId: String): EditResult {
+    private fun run(args: EditArgs, contract: Contract, context: TurnContext, editId: String, alias: String, actionId: String, carries: MutableList<() -> Unit>): EditResult {
         val none = EditResult(false, editId, emptyList(), emptyList(), emptyMap(), emptyMap(), emptyMap(), emptyList(), emptyList())
         val transform = args.ops.firstOrNull { it.kind == "transform" }?.transform
         args.ops.forEachIndexed { i, op ->
@@ -288,7 +289,7 @@ public class Edit(
         }
         val refusals = groups.filter { it in refused }.map { RefusedGroup(it.paths, it.ops.map { i -> i + 1 }, refused.getValue(it)) }
         if (plans.isEmpty()) return none.copy(error = refusals.first().error, touchedOutsideScope = outside, refused = refusals)
-        val result = apply(plans.sortedBy { it.index }, contract, context, editId, alias, outside, args.why)
+        val result = apply(plans.sortedBy { it.index }, contract, context, editId, alias, outside, args.why, carries)
         return result.copy(ok = result.ok && refusals.isEmpty(), refused = refusals)
     }
 
@@ -538,7 +539,7 @@ public class Edit(
 
     // ----------------------------------------------------------------- apply
 
-    private fun apply(plans: List<Plan>, contract: Contract, context: TurnContext, editId: String, alias: String, outside: List<String>, why: String): EditResult {
+    private fun apply(plans: List<Plan>, contract: Contract, context: TurnContext, editId: String, alias: String, outside: List<String>, why: String, carries: MutableList<() -> Unit>): EditResult {
         val applied = ArrayList<AppliedOp>()
         val views = ArrayList<View>()
         val versions = LinkedHashMap<String, FileVersion?>()
@@ -562,6 +563,7 @@ public class Edit(
                         preimages.recordPostimage(editId, plan.path, after)
                         blobs.put(newBytes, BlobKind.POSTIMAGE, ids, recovery = true)
                         registry.change(plan.path, plan.expect, after, cause)
+                        lineMap(plan, newText).let { map -> carries += { workset.carry(plan.path, plan.expect, after, map) } }
                         val counts = Preimages.changedRegion(plan.oldBytes, newBytes)
                         diffstat[plan.path] = DiffStat(counts.first, counts.second)
                         written[plan.path] = plan.resolved
@@ -740,13 +742,39 @@ public class Edit(
     private fun postEditViews(plan: AnchoredPlan, newText: String, after: FileVersion): List<View> {
         val lines = contentLines(newText)
         var ranges = Ranges.EMPTY
-        for ((span, new) in plan.hunks) {
+        var shift = 0
+        for ((span, new) in plan.hunks.sortedBy { it.first.start }) {
+            val start = span.lines.from + shift
             val newLineCount = if (new.isEmpty()) 0 else new.count { it == '\n' } + 1
-            val from = maxOf(1, span.lines.from - viewContextLines)
-            val to = minOf(lines.size, span.lines.from + maxOf(newLineCount, 1) - 1 + viewContextLines)
+            val from = maxOf(1, start - viewContextLines)
+            val to = minOf(lines.size, start + maxOf(newLineCount, 1) - 1 + viewContextLines)
             if (to >= from) ranges += LineRange(from, to)
+            shift += delta(plan, span, new)
         }
         return ranges.ranges.map { range -> View(plan.path, range, after, (range.from..range.to).joinToString("\n") { "$it| ${lines[it - 1]}" }) }
+    }
+
+    /** How many lines a hunk adds (negative: removes): the change in newline count over its span. */
+    private fun delta(plan: AnchoredPlan, span: Located, new: String): Int =
+        new.count { it == '\n' } - (span.start until span.end).count { plan.oldText[it] == '\n' }
+
+    /**
+     * D-371: a line no hunk touched → its line at the new version, shifted by the earlier hunks' [delta]s and kept
+     * only when the bytes there are the same (a hunk that joins the next line changes it); null for a changed line.
+     */
+    private fun lineMap(plan: AnchoredPlan, newText: String): (Int) -> Int? {
+        val old = plan.oldText.split('\n')
+        val now = newText.split('\n')
+        val shifts = plan.hunks.sortedBy { it.first.start }.map { (span, new) -> span.lines to delta(plan, span, new) }
+        return map@{ line ->
+            var shift = 0
+            for ((lines, delta) in shifts) {
+                if (line in lines) return@map null
+                if (lines.to < line) shift += delta else break
+            }
+            val at = line + shift
+            at.takeIf { line <= old.size && at in 1..now.size && now[at - 1] == old[line - 1] }
+        }
     }
 
     private fun show(view: View, alias: String, turn: Int) {
@@ -760,7 +788,7 @@ public class Edit(
 
     // ---------------------------------------------------------------- render
 
-    private fun render(args: EditArgs, alias: String, actionId: String, result: EditResult, context: TurnContext): ToolOutcome {
+    private fun render(args: EditArgs, alias: String, actionId: String, result: EditResult, context: TurnContext, carries: List<() -> Unit> = emptyList()): ToolOutcome {
         val status = when {
             result.ok -> "ok"
             // A rejected transform is not a half-applied batch: its receipt's effect line is the per-file truth (§9.2).
@@ -824,6 +852,8 @@ public class Edit(
                 effectsUnknown = result.error?.kind == "io",
             ),
         )
+        // D-371: earlier reads carry to the new versions only once this result, which names the change, is recorded.
+        carries.forEach { it() }
         val partially = result.refused.isNotEmpty() && result.applied.isNotEmpty()
         return ToolOutcome(
             body, header, applied = result.ok, tokens = estimator.estimate(body).tokens,

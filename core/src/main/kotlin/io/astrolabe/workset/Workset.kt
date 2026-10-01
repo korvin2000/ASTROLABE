@@ -128,6 +128,24 @@ public class Workset(
         drops += affected.map { StaleDrop(it.path, it.range, it.version, change.cause, it.resultId, stubNow = it.tokens > immediateStubTokens) }
     }
 
+    /**
+     * D-371: after the cell's own edit moved [path] from [from] to [to], every line an entry displayed at [from] that
+     * [map] carries (same bytes, maybe a new line number) stays KNOWN at [to], under the result that displayed it. The
+     * carried entry is [EntrySource.PostEdit], so a `look` never answers "unchanged" with a result that showed another
+     * version. Only entries dropped by this change (their announcement still pending) carry; each one that carried a
+     * line withdraws its announcement, since its bytes in context still hold where the edit did not reach.
+     */
+    @Synchronized
+    internal fun carry(path: String, from: FileVersion, to: FileVersion, map: (Int) -> Int?) {
+        for (entry in stale.filter { it.path == path && it.version == from && it.source != EntrySource.Transform }) {
+            val drop = drops.firstOrNull { it.path == path && it.version == from && it.recallId == entry.resultId && it.range == entry.range } ?: continue
+            val lines = entry.coverage.ranges.flatMap { range -> (range.from..range.to).mapNotNull(map) }
+            if (lines.isEmpty()) continue
+            register(entry.copy(range = Ranges.of(lines.map { LineRange(it, it) }), version = to, source = EntrySource.PostEdit, hidden = Ranges.EMPTY))
+            drops.remove(drop)
+        }
+    }
+
     /** Eviction batch (P1.8.6): a stubbed result no longer contributes coverage. */
     @Synchronized
     public fun stub(resultId: String) {

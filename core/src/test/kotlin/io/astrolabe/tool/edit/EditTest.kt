@@ -319,6 +319,31 @@ class EditTest {
     }
 
     @Test
+    fun `a second anchored edit needs no re-read inside written or unchanged displayed lines and is refused elsewhere`() = runTest {
+        repo.write("src/long.py", (1..30).joinToString("") { "l$it = $it\n" })
+        seen("src/long.py", 1, 20)
+        val first = run(anchoredBy("src/long.py", null, hunk("l2 = 2\n", "l2 = 2\nextra = 0\n")))
+        assertEquals("ok", status(first), first.body)
+        val v1 = registry.version("src/long.py")!!
+        assertTrue(workset.covers("src/long.py", v1, LineRange(1, 21)), "written lines and the unchanged displayed ones, shifted by one")
+        assertFalse(workset.covers("src/long.py", v1, LineRange(22, 22)), "never displayed stays NOT SEEN")
+        assertTrue(workset.pendingDrops.none { it.path == "src/long.py" }, "the carried read is not announced stale")
+
+        // Unchanged displayed line 18 is line 19 now: no re-read, the expect omitted names the one version KNOWN.
+        val second = run(anchoredBy("src/long.py", null, hunk("l18 = 18", "l18 = 180")), turn = 2)
+        assertEquals("ok", status(second), second.body)
+        // Lines the first edit wrote stay KNOWN through the second.
+        val third = run(anchoredBy("src/long.py", null, hunk("extra = 0", "extra = 1")), turn = 3)
+        assertEquals("ok", status(third), third.body)
+        val outside = run(anchoredBy("src/long.py", null, hunk("l25 = 25", "l25 = 250")), turn = 4)
+        assertEquals("refused", status(outside))
+        assertTrue(outside.body.contains("outside_displayed: hunk at 'src/long.py:26'"), outside.body)
+        assertTrue(Files.readString(repo.resolve("src/long.py")).contains("l2 = 2\nextra = 1\nl3 = 3\n") && Files.readString(repo.resolve("src/long.py")).contains("l18 = 180\n"))
+        val now = registry.version("src/long.py")!!
+        assertTrue(workset.entries.filter { it.path == "src/long.py" && it.version == now }.all { it.source == EntrySource.PostEdit }, "a look never answers unchanged from a carried entry")
+    }
+
+    @Test
     fun `a stale expect writes nothing and returns the diff since expect (FX-01)`() = runTest {
         val shown = seen("src/a.py", 1, 10)
         repo.write("src/a.py", a.replace("return 1", "return 99"))
