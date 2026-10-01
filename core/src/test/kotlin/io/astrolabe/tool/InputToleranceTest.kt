@@ -75,7 +75,8 @@ class InputToleranceTest {
 
     @Test
     fun `a patch or ops string that is not valid JSON names the parse failure instead of Expected JsonArray`() {
-        val patch = refusal("state", """{"op":"patch","patch":"[{\"plan.add\":\"a\""}""")
+        // D-373: a string missing only its closers is repaired; a missing comma is not a bracket problem
+        val patch = refusal("state", """{"op":"patch","patch":"[{\"plan.add\":\"a\" \"b\"}]"}""")
         assertTrue(patch.startsWith("state: patch is a string holding invalid JSON: "), patch)
         assertTrue(patch.contains("offset"), "the parser's position is kept: $patch")
         assertFalse(patch.contains("JsonArray"), patch)
@@ -126,8 +127,26 @@ class InputToleranceTest {
         val clash = refusal("edit", """{"expect":"9d09","ops":[{"path":"a.ts","expect":"1234","hunks":$hunks}],"why":"w"}""")
         assertTrue(clash.contains("every op field inside its op"), clash)
         val path = refusal("edit", """{"path":"b.ts","ops":[{"path":"a.ts","hunks":$hunks}],"why":"w"}""")
-        assertTrue(path.contains("'path'") && path.contains("every op field inside its op"), path)
+        assertTrue(path.contains("top-level 'path' \"b.ts\" and the op's 'path' \"a.ts\" differ") && path.contains("every op field inside its op"), path)
         val broken = refusal("edit", """{"ops":[{"path":"a.ts","hunks":"[{\"anchor\":"}],"why":"w"}""")
         assertTrue(broken.contains("hunks is a string holding invalid JSON"), broken)
+    }
+
+    @Test
+    fun `every top-level op field the single op lacks moves into it, the live path beside ops included`() {
+        val live = javaClass.getResourceAsStream("/live/d373-calls.jsonl")!!.use { String(it.readAllBytes(), Charsets.UTF_8) }.lines()
+            .first { "call_00_dvm3t1db0r3bfjk8k5gs9803" in it }
+            .let { (Json.parseToJsonElement(it) as JsonObject).getValue("argsJson").let { a -> (a as kotlinx.serialization.json.JsonPrimitive).content } }
+        val op = edit(live).ops.single()
+        assertEquals("scripts/smoke.js", op.path)
+        assertEquals("6f67", op.expect)
+        assertEquals(3, op.hunks!!.size)
+
+        val hunks = """[{"anchor":"a","new":"b"}]"""
+        val one = EditArgs(listOf(EditOpArgs(path = "a.ts", expect = "9d09", hunks = listOf(HunkArgs("a", null, "b")), condition = "green(op:1)")), "w")
+        assertEquals(one, edit("""{"path":"a.ts","hunks":$hunks,"if":"green(op:1)","ops":[{"expect":"9d09"}],"why":"w"}"""))
+        assertEquals(one, edit("""{"path":"a.ts","expect":"9d09","ops":[{"path":"a.ts","hunks":$hunks,"if":"green(op:1)"}],"why":"w"}"""), "the same value on both sides is one value")
+        val clash = refusal("edit", """{"hunks":$hunks,"ops":[{"path":"a.ts","hunks":[{"anchor":"x","new":"y"}]}],"why":"w"}""")
+        assertTrue(clash.contains("top-level 'hunks'") && clash.contains("differ"), clash)
     }
 }

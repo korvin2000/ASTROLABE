@@ -124,6 +124,20 @@ class LookTest {
     }
 
     @Test
+    fun `an empty file reads as an ok observation and is KNOWN at its version`() = runTest {
+        repo.write("client/src/app/app.css", "")
+        val read = look("""{"what":"read","target":"client/src/app/app.css"}""")
+        assertEquals("ok", status(read), read.body)
+        assertTrue(read.body.contains("(empty file, 0 lines)"), read.body)
+        val v = registry.version("client/src/app/app.css")!!
+        assertEquals(v, read.header!!.versions["client/src/app/app.css"])
+        assertEquals(setOf(v), workset.snapshot().versions("client/src/app/app.css"), "an omitted expect now resolves to this version")
+        // the live run's second form: a line range on the empty file
+        val ranged = look("""{"what":"read","target":"client/src/app/app.css","range":"1-1"}""")
+        assertTrue(ranged.body.contains("see ${read.resultAlias} (unchanged)"), ranged.body)
+    }
+
+    @Test
     fun `a range read registers coverage at the read version, repeats dedup, and a broader read executes (IX-07)`() = runTest {
         val first = look("""{"what":"read","target":"src/a.py:1-2"}""")
         val v = registry.version("src/a.py")!!

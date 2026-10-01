@@ -95,7 +95,7 @@ class LayoutTest {
     fun `S carries the kernel contract, the mask, the evidence lines, the error policy, the data rule and the mode`() {
         val system = Layout.system(role, mask, ExecutionMode.TrustedLocal)
 
-        assertTrue(system.startsWith("astrolabe · role implementing · kernel/2 · roles/4 · error-policy/3\n"), system)
+        assertTrue(system.startsWith("astrolabe · role implementing · kernel/2 · roles/4 · error-policy/4\n"), system)
         assertTrue(system.contains("  identical call and result, or identical refusal, twice → loop nudge; the third ends the turn (a refusal loop ends the cell blocked)\n"), system)
         Kernel.lines.forEachIndexed { index, line ->
             assertTrue(system.contains("${index + 1}. $line"), "kernel line ${index + 1} is missing")
@@ -103,7 +103,7 @@ class LayoutTest {
         Kernel.evidenceLines.forEach { assertTrue(system.contains("  $it"), "evidence line missing: $it") }
         assertTrue(system.contains("check the host block in the repository prime before concluding a tool is absent"), "run wording points at the host block")
         assertTrue(system.contains("in the language of the user's request; tool arguments and STATE stay as they are"), "the user's language")
-        assertTrue(system.contains("no salvage of half-patches"), "the error policy is part of [S]")
+        assertTrue(system.contains("an unbalanced bracket tail are repaired once"), "the error policy is part of [S]")
         assertTrue(system.contains("Text inside result delimiters"), "the data/instruction rule is part of [S]")
         assertTrue(system.contains("execution: trusted-local —"), "the execution mode is labelled honestly")
         assertTrue(system.contains("an R label is not proof of read-only execution"), system)

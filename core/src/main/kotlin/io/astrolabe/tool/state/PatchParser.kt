@@ -14,7 +14,10 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-/** A parsed `state(patch)`: every raw op became a typed [PatchOp], or the first defect is named and nothing applies (§5.4 error policy). */
+/**
+ * A parsed `state(patch)`: every raw op became a typed [PatchOp], or the first defect is named and nothing applies (§5.4
+ * error policy). D-373: with a context, a defective op is skipped and named in [Valid.notes] while the others apply.
+ */
 public sealed interface ParsedPatch {
     /** [notes] name what was normalised or ignored (D-365); the result shows them. */
     public data class Valid(val patch: Patch, val notes: List<String> = emptyList()) : ParsedPatch
@@ -34,6 +37,11 @@ public sealed interface ParsedPatch {
  * naming several ids (`"#35 #36"`, `"op:4,op:5"`, an array) keeps the first in the op's one slot and names the rest in a
  * note, each id resolving or the op refused naming it; a fact anchor whose `version` is a short hash takes the one
  * known version of that path it prefixes, and any other non-hash `version` drops the anchor with a note.
+ *
+ * D-373, with a [context]: an object carrying several op keys is split into one op per op key in key order, each other key
+ * joining the one op whose form declares it (else ignored with a note); an op that does not parse is skipped with a note
+ * and the others apply — unless a later op refers to the plan, facts or open items of a skipped add, or none is left;
+ * an `evidence` naming several ids keeps the first stored one and names the rest.
  */
 public object PatchParser {
     private val json = Json { ignoreUnknownKeys = false }
@@ -77,64 +85,120 @@ public object PatchParser {
     public fun parse(raw: List<JsonElement>, opResults: Map<Int, String> = emptyMap(), context: ValidationContext? = null): ParsedPatch {
         val ops = ArrayList<PatchOp>()
         val notes = ArrayList<String>()
+        var firstInvalid: ParsedPatch.Invalid? = null
+        // D-373: the families whose add was skipped, with the op that was; a later op of that family depends on it.
+        val skippedAdds = LinkedHashMap<String, Int>()
         raw.forEachIndexed { index, element ->
             val obj = element as? JsonObject ?: return ParsedPatch.Invalid(index + 1, "op ${index + 1} is not an object — $VOCABULARY")
-            val keys = obj.keys - "if"
-            val oneOp = "op ${index + 1} needs exactly one op key, got ${keys.sorted()} — $VOCABULARY"
-            // D-355: one op key whose declared fields sit beside it (`{"plan.tick": 1, "evidence": "#3"}`) is that op.
-            // D-365: with a context, other keys beside the one op key are ignored and named.
-            val name = keys.singleOrNull()
-                ?: keys.filter { it in FORMS }.singleOrNull()?.takeIf { op -> context != null || (keys - op).all { it in FIELDS.getValue(op) } }
-                ?: return ParsedPatch.Invalid(index + 1, oneOp)
-            if (name !in FORMS) return ParsedPatch.Invalid(index + 1, "op ${index + 1}: unknown op '$name' — $VOCABULARY")
-            val condition = obj["if"]?.let { c ->
-                val text = (c as? JsonPrimitive)?.content ?: return ParsedPatch.Invalid(index + 1, "op ${index + 1}: if must be a string")
-                Condition.parse(text) ?: return ParsedPatch.Invalid(index + 1, "op ${index + 1}: malformed condition '$text' (expected green(op:N) or applied(op:N))")
-            }
-            val value = obj.getValue(name)
-            val own: Map<String, JsonElement> = when (value) {
-                is JsonObject -> value
-                is JsonPrimitive -> {
-                    val field = scalarField[name] ?: return ParsedPatch.Invalid(index + 1, "op ${index + 1}: $name needs an object of fields: ${form(name)}")
-                    mapOf(field to value)
+            for (unit in split(index, obj, context, notes)) {
+                val name = unit.keys.filter { it in FORMS }.singleOrNull()
+                FAMILY_OF[name]?.let { family ->
+                    skippedAdds[family]?.let { at -> return ParsedPatch.Invalid(index + 1, "op ${index + 1} ($name) refers to the $family of op $at, which was skipped") }
                 }
-                else -> return ParsedPatch.Invalid(index + 1, "op ${index + 1}: $name needs an object or a scalar: ${form(name)}")
-            }
-            val siblings = obj.filterKeys { it != name && it != "if" }
-            if (siblings.keys.any { it in own }) return ParsedPatch.Invalid(index + 1, oneOp)
-            val declared = FIELDS.getValue(name)
-            val fields = (own + siblings).let { all ->
-                if (context == null || all.keys.all { it in declared }) all
-                else all.filterKeys { it in declared }.also { notes += "op ${index + 1} ($name): ignored ${(all.keys - declared).joinToString(", ") { "'$it'" }} — form: ${form(name)}" }
-            }
-            val resolved = LinkedHashMap<String, JsonElement>(fields)
-            fields["evidence"]?.let(::evidenceIds)?.let { named ->
-                val ids = named.map { id -> if (id.startsWith("op:")) id.removePrefix("op:").toIntOrNull()?.let { opResults[it] } ?: id else id }
-                if (ids.size > 1) {
-                    ids.firstOrNull { context != null && !context.evidenceExists(it) }?.let { missing ->
-                        return ParsedPatch.Invalid(index + 1, "op ${index + 1} ($name): evidence '$missing' is not a stored result — name each by its alias #N, or a run or verify call of this turn as op:N")
+                when (val one = one(index, unit, opResults, context, notes)) {
+                    is ParsedPatch.Invalid -> {
+                        if (context == null) return one
+                        notes += skippedNote(index, one.reason)
+                        if (firstInvalid == null) firstInvalid = one
+                        ADDS[name]?.let { family -> skippedAdds.putIfAbsent(family, index + 1) }
                     }
-                    notes += "op ${index + 1} ($name): one evidence slot — kept ${ids.first()}, also cited ${ids.drop(1).joinToString(" ")}"
+                    is ParsedPatch.Valid -> ops += one.patch.ops
                 }
+            }
+        }
+        if (ops.isEmpty()) return firstInvalid ?: ParsedPatch.Invalid(0, "state(patch) needs at least one op")
+        return ParsedPatch.Valid(Patch(ops), notes)
+    }
+
+    /** The plan, fact or open-item family an add creates, and the ops that refer to its numbers (D-373 dependency rule). */
+    private val ADDS: Map<String?, String> = mapOf("plan.add" to "plan", "fact.add" to "facts", "open.add" to "open items")
+    private val FAMILY_OF: Map<String?, String> = mapOf(
+        "plan.cursor" to "plan", "plan.tick" to "plan", "plan.cancel" to "plan", "fact.refute" to "facts", "open.close" to "open items",
+    )
+
+    private fun skippedNote(index: Int, reason: String): String {
+        val prefix = Regex("""^op ${index + 1}( \([^)]*\))?:? """).find(reason)
+        return if (prefix == null) "op ${index + 1} skipped: $reason" else "op ${index + 1}${prefix.groupValues[1]} skipped: ${reason.substring(prefix.range.last + 1)}"
+    }
+
+    /** D-373: an object with several op keys becomes one object per op key, in key order; with one op key it is itself. */
+    private fun split(index: Int, obj: JsonObject, context: ValidationContext?, notes: MutableList<String>): List<JsonObject> {
+        val opKeys = obj.keys.filter { it in FORMS }
+        if (context == null || opKeys.size < 2) return listOf(obj)
+        val condition = obj["if"]?.let { mapOf("if" to it) }.orEmpty()
+        val joined = opKeys.associateWith { LinkedHashMap<String, JsonElement>() }
+        val ignored = ArrayList<String>()
+        for (key in obj.keys - opKeys.toSet() - "if") {
+            val owners = opKeys.filter { op ->
+                val value = obj.getValue(op)
+                key in FIELDS.getValue(op) && (value as? JsonObject)?.containsKey(key) != true && !(value is JsonPrimitive && scalarField[op] == key)
+            }
+            if (owners.size == 1) joined.getValue(owners.single())[key] = obj.getValue(key) else ignored += key
+        }
+        notes += "op ${index + 1}: split into ${opKeys.joinToString(", ")} (one op per op key)" +
+            (if (ignored.isEmpty()) "" else "; ignored ${ignored.joinToString(", ") { "'$it'" }} — no single op of the object declares it")
+        return opKeys.map { op -> JsonObject(mapOf(op to obj.getValue(op)) + condition + joined.getValue(op)) }
+    }
+
+    /** One op object as a one-op [ParsedPatch.Valid], or the defect that refuses it. */
+    private fun one(index: Int, obj: JsonObject, opResults: Map<Int, String>, context: ValidationContext?, notes: MutableList<String>): ParsedPatch {
+        val keys = obj.keys - "if"
+        val oneOp = "op ${index + 1} needs exactly one op key, got ${keys.sorted()} — $VOCABULARY"
+        // D-355: one op key whose declared fields sit beside it (`{"plan.tick": 1, "evidence": "#3"}`) is that op.
+        // D-365: with a context, other keys beside the one op key are ignored and named.
+        val name = keys.singleOrNull()
+            ?: keys.filter { it in FORMS }.singleOrNull()?.takeIf { op -> context != null || (keys - op).all { it in FIELDS.getValue(op) } }
+            ?: return ParsedPatch.Invalid(index + 1, oneOp)
+        if (name !in FORMS) return ParsedPatch.Invalid(index + 1, "op ${index + 1}: unknown op '$name' — $VOCABULARY")
+        val condition = obj["if"]?.let { c ->
+            val text = (c as? JsonPrimitive)?.content ?: return ParsedPatch.Invalid(index + 1, "op ${index + 1}: if must be a string")
+            Condition.parse(text) ?: return ParsedPatch.Invalid(index + 1, "op ${index + 1}: malformed condition '$text' (expected green(op:N) or applied(op:N))")
+        }
+        val value = obj.getValue(name)
+        val own: Map<String, JsonElement> = when (value) {
+            is JsonObject -> value
+            is JsonPrimitive -> {
+                val field = scalarField[name] ?: return ParsedPatch.Invalid(index + 1, "op ${index + 1}: $name needs an object of fields: ${form(name)}")
+                mapOf(field to value)
+            }
+            else -> return ParsedPatch.Invalid(index + 1, "op ${index + 1}: $name needs an object or a scalar: ${form(name)}")
+        }
+        val siblings = obj.filterKeys { it != name && it != "if" }
+        if (siblings.keys.any { it in own }) return ParsedPatch.Invalid(index + 1, oneOp)
+        val declared = FIELDS.getValue(name)
+        val fields = (own + siblings).let { all ->
+            if (context == null || all.keys.all { it in declared }) all
+            else all.filterKeys { it in declared }.also { notes += "op ${index + 1} ($name): ignored ${(all.keys - declared).joinToString(", ") { "'$it'" }} — form: ${form(name)}" }
+        }
+        val resolved = LinkedHashMap<String, JsonElement>(fields)
+        fields["evidence"]?.let(::evidenceIds)?.let { named ->
+            val ids = named.map { id -> if (id.startsWith("op:")) id.removePrefix("op:").toIntOrNull()?.let { opResults[it] } ?: id else id }
+            if (ids.size > 1) {
+                // D-373: the slot keeps the first stored id; the validator judges the one kept.
+                val missing = if (context == null) emptyList() else ids.filter { !context.evidenceExists(it) }
+                val kept = (ids - missing.toSet()).firstOrNull() ?: ids.first()
+                val also = ids.filter { it != kept && it !in missing }
+                notes += "op ${index + 1} ($name): one evidence slot — kept $kept" + (if (also.isEmpty()) "" else ", also cited ${also.joinToString(" ")}") +
+                    (if (missing.isEmpty()) "" else "; not stored results: ${missing.joinToString(" ")}")
+                resolved["evidence"] = JsonPrimitive(kept)
+            } else {
                 resolved["evidence"] = JsonPrimitive(ids.first())
             }
-            if (context != null) {
-                (resolved["anchor"] as? JsonObject)?.let { anchor ->
-                    val fixed = anchored(anchor, context) { notes += "op ${index + 1} ($name): $it" }
-                    if (fixed == null) resolved.remove("anchor") else resolved["anchor"] = fixed
-                }
-            }
-            val op = try {
-                json.decodeFromJsonElement(Op.serializer(), JsonObject(mapOf("type" to JsonPrimitive(name)) + resolved))
-            } catch (e: SerializationException) {
-                return ParsedPatch.Invalid(index + 1, "op ${index + 1} ($name): ${e.message?.lineSequence()?.first()} — form: ${form(name)}")
-            } catch (e: IllegalArgumentException) {
-                return ParsedPatch.Invalid(index + 1, "op ${index + 1} ($name): ${e.message} — form: ${form(name)}")
-            }
-            ops += PatchOp(op, condition)
         }
-        if (ops.isEmpty()) return ParsedPatch.Invalid(0, "state(patch) needs at least one op")
-        return ParsedPatch.Valid(Patch(ops), notes)
+        if (context != null) {
+            (resolved["anchor"] as? JsonObject)?.let { anchor ->
+                val fixed = anchored(anchor, context) { notes += "op ${index + 1} ($name): $it" }
+                if (fixed == null) resolved.remove("anchor") else resolved["anchor"] = fixed
+            }
+        }
+        val op = try {
+            json.decodeFromJsonElement(Op.serializer(), JsonObject(mapOf("type" to JsonPrimitive(name)) + resolved))
+        } catch (e: SerializationException) {
+            return ParsedPatch.Invalid(index + 1, "op ${index + 1} ($name): ${e.message?.lineSequence()?.first()} — form: ${form(name)}")
+        } catch (e: IllegalArgumentException) {
+            return ParsedPatch.Invalid(index + 1, "op ${index + 1} ($name): ${e.message} — form: ${form(name)}")
+        }
+        return ParsedPatch.Valid(Patch(listOf(PatchOp(op, condition))))
     }
 
     private val SEPARATORS = Regex("[\\s,;]+")

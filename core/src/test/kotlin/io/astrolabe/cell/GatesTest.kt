@@ -413,6 +413,24 @@ class GatesTest {
     }
 
     @Test
+    fun `impact nudges come only from code files and never for a symbol without a letter or digit`() {
+        val css = "body {\n  margin: 0;\n}\n.app {\n  color: red;\n}\n".toByteArray()
+        val readmeBefore = "# Todo\n\n```\nnpm run smoke\n```\n".toByteArray()
+        val readmeAfter = "# Todo\n\n```bash\nnpm start\n```\n".toByteArray()
+        val js = listOf(
+            io.astrolabe.atlas.ChangedDefinition("public/app.js", "}", io.astrolabe.atlas.DeclarationKind.Other, io.astrolabe.atlas.DefinitionChange.Removed, false),
+            io.astrolabe.atlas.ChangedDefinition("public/app.js", "api", io.astrolabe.atlas.DeclarationKind.Const, io.astrolabe.atlas.DefinitionChange.Removed, true),
+        )
+        val generic = DefinitionChanges.of("public/styles.css", css, null) + DefinitionChanges.of("README.md", readmeBefore, readmeAfter)
+        assertTrue(generic.isNotEmpty(), "the generic outline reports changed 'definitions' for these files")
+        val ledger = ImpactNudges()
+        ledger.changed(2, generic + js) { 498 }
+
+        assertEquals(listOf("public/app.js" to "api"), ledger.unresolved.map { it.definition.path to it.definition.symbol })
+        assertEquals(emptyList(), ledger.overflow)
+    }
+
+    @Test
     fun `impact skips files the cell created and caps new nudges at three a turn, the rest summarised and never binding the exit`() {
         val before = (1..5).joinToString("") { "def f$it(x):\n    return x\n\n" }.toByteArray()
         val after = (1..5).joinToString("") { "def f$it(x, y):\n    return x\n\n" }.toByteArray()

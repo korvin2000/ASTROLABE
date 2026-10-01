@@ -78,6 +78,10 @@ public class StateTool(
 
     private val misses = ArrayList<RetrievalMiss>()
 
+    /** D-373: steps this cell ticked without usable evidence; never a progress event. */
+    public val unbackedTicks: Set<Int> get() = unbacked.toSet()
+    private val unbacked = LinkedHashSet<Int>()
+
     /** Harness-side (§4.4 cell horizon): `v` facts anchored at the moved path are marked stale in place; only the model clears the mark, by re-verifying. */
     public fun markStale(change: VersionChange) {
         register = register.markStale(change)
@@ -135,12 +139,13 @@ public class StateTool(
                 versions.save(ids, next)
                 register = next
                 lastRejection = null
+                unbacked += validation.unbackedTicks
                 events?.emit(AgentEvent.Cell.RegisterPatched(ids, next.version, validation.appliedOps.size))
                 val lines = ArrayList<String>()
                 lines += "STATE v${next.version} · applied ${validation.appliedOps.size} op${if (validation.appliedOps.size == 1) "" else "s"} · register ${validation.sizes.registerTokens}/${validation.sizes.registerCapTokens} tokens"
                 validation.dropped.forEach { d -> lines += "⟨dropped ${d.op::class.simpleName?.lowercase()}: if ${d.condition} not met⟩" }
                 validation.flags.forEach { lines += "flag: $it" }
-                notes.forEach { lines += "note: $it" }
+                (notes + validation.notes).forEach { lines += "note: $it" }
                 result("ok", lines.joinToString("\n"), applied = true)
             }
         }

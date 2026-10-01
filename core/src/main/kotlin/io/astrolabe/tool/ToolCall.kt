@@ -29,6 +29,8 @@ public data class ToolCall(
     val op: String,
     val args: Args,
     val raw: JsonObject,
+    /** D-373: what the harness normalised in the arguments (a bracket repair); the result shows each as a `note:` line. */
+    val notes: List<String> = emptyList(),
 ) {
     val name: String get() = ToolOps.name(family, op)
 
@@ -60,19 +62,21 @@ public object ToolCalls {
         val out = ArrayList<ToolCall>()
         calls.forEachIndexed { i, call ->
             val family = ToolFamily.byWire(call.name) ?: return ParsedCalls.Invalid(call.id, "unknown tool '${call.name}'")
+            val notes = ArrayList<String>()
             val raw = try {
                 json.parseToJsonElement(call.argsJson).jsonObject
             } catch (e: Exception) {
-                return ParsedCalls.Invalid(call.id, "${call.name}: arguments are not a JSON object (${e.message?.lineSequence()?.first()})${markupNote(call.argsJson, null)}")
+                repaired(call.argsJson)?.also { (_, repair) -> notes += "arguments repaired: ${repair.summary}" }?.first
+                    ?: return ParsedCalls.Invalid(call.id, "${call.name}: arguments are not a JSON object (${e.message?.lineSequence()?.first()})${markupNote(call.argsJson, null)}")
             }
             val args = try {
-                decode(family, raw)
+                decode(family, raw, notes)
             } catch (e: SerializationException) {
                 return ParsedCalls.Invalid(call.id, "${call.name}: ${e.message?.lineSequence()?.first()}${markupNote(call.argsJson, raw)}")
             } catch (e: IllegalArgumentException) {
                 return ParsedCalls.Invalid(call.id, "${call.name}: ${e.message}${markupNote(call.argsJson, raw)}")
             }
-            out += ToolCall(i + 1, call.id, family, opName(family, args, raw), args, raw)
+            out += ToolCall(i + 1, call.id, family, opName(family, args, raw), args, raw, notes)
         }
         return ParsedCalls.Valid(out)
     }
@@ -86,8 +90,14 @@ public object ToolCalls {
 
     private fun carriesMarkup(text: String): Boolean = "<arg_key>" in text || "<arg_value>" in text
 
-    private fun decode(family: ToolFamily, received: JsonObject): Args {
-        val raw = InputTolerance.normalise(family, received)
+    /** D-373: the arguments after the one bracket repair, when that repair yields a JSON object. */
+    private fun repaired(argsJson: String): Pair<JsonObject, JsonRepair.Repaired>? {
+        val (parsed, repair) = JsonRepair.parsed(json, argsJson) ?: return null
+        return (parsed as? JsonObject)?.let { it to repair }
+    }
+
+    private fun decode(family: ToolFamily, received: JsonObject, notes: MutableList<String>): Args {
+        val raw = InputTolerance.normalise(family, received, notes)
         return when (family) {
             ToolFamily.Look -> Args.Look(json.decodeFromJsonElement(LookArgs.serializer(), raw))
             ToolFamily.Edit -> Args.Edit(json.decodeFromJsonElement(EditArgs.serializer(), raw))

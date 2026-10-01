@@ -111,8 +111,8 @@ public data class EditOpArgs(
  * A `patch`/`ops` string that opens like JSON (`[` or `{`) but does not parse is refused with the parser's own message.
  *
  * D-365: an `edit` whose op fields sit at the top level is one op — without `ops` they become `ops: [that op]`; with
- * `ops` holding exactly one op that lacks them, a top-level `expect`/`if` moves into it; any other mix is refused naming
- * the accepted form. `hunks` sent as a JSON string holding an array is parsed like `ops`. A `look` `id` sent as a
+ * `ops` holding exactly one op, every top-level `path`/`expect`/`hunks`/`if` it lacks moves into it (D-373), one it holds
+ * with another value is refused naming both; any other mix is refused naming the accepted form. `hunks` sent as a JSON string holding an array is parsed like `ops`. A `look` `id` sent as a
  * number is that number as text.
  */
 internal object InputTolerance {
@@ -141,15 +141,16 @@ internal object InputTolerance {
 
     private val json = Json { ignoreUnknownKeys = false }
 
-    fun normalise(family: ToolFamily, raw: JsonObject): JsonObject = when (family) {
-        ToolFamily.Edit -> lifted(raw.mapValue("ops") { parsedArray("ops", it) }).mapValue("ops") { ops -> if (ops is JsonArray) JsonArray(ops.map(::editOp)) else ops }
-        ToolFamily.State -> withInferredOp(unglued(raw.mapValue("patch") { parsedArray("patch", it) }))
+    /** [notes] collects what was repaired (D-373), for the call's result. */
+    fun normalise(family: ToolFamily, raw: JsonObject, notes: MutableList<String> = ArrayList()): JsonObject = when (family) {
+        ToolFamily.Edit -> lifted(raw.mapValue("ops") { parsedArray("ops", it, notes) }).mapValue("ops") { ops -> if (ops is JsonArray) JsonArray(ops.map { editOp(it, notes) }) else ops }
+        ToolFamily.State -> withInferredOp(unglued(raw.mapValue("patch") { parsedArray("patch", it, notes) }))
         ToolFamily.Look -> raw.mapValue("id") { id -> if (id is JsonPrimitive && !id.isString && id.content.toIntOrNull() != null) JsonPrimitive(id.content) else id }
         else -> raw
     }
 
-    /** The fields a single op's top-level copy may hand to the one op of `ops`. */
-    private val LIFTABLE: Set<String> = setOf("expect", "if")
+    /** The fields a single op's top-level copy may hand to the one op of `ops` (D-373: `path` and `hunks` too). */
+    private val LIFTABLE: Set<String> = setOf("path", "expect", "hunks", "if")
 
     private const val EDIT_FORM: String =
         "{\"ops\":[{\"path\":\"…\",\"expect\":\"…\",\"hunks\":[{\"anchor\":\"…\",\"new\":\"…\"}]}],\"why\":\"…\"} — every op field inside its op"
@@ -161,8 +162,11 @@ internal object InputTolerance {
         val rest = raw.filterKeys { it !in EDIT_FIELDS }
         val ops = raw["ops"] ?: return JsonObject(rest + ("ops" to JsonArray(listOf(JsonObject(loose)))))
         val single = ((ops as? JsonArray)?.singleOrNull() as? JsonObject)
-        if (single == null || loose.keys.any { it !in LIFTABLE || single[it]?.let(::empty) == false }) {
+        if (single == null || loose.keys.any { it !in LIFTABLE }) {
             throw IllegalArgumentException("top-level ${loose.keys.joinToString(", ") { "'$it'" }} beside ops${(ops as? JsonArray)?.let { " (${it.size} ops)" } ?: ""} has no single op to belong to; send $EDIT_FORM")
+        }
+        loose.entries.firstOrNull { (key, value) -> single[key]?.let { !empty(it) && it != value } == true }?.let { (key, value) ->
+            throw IllegalArgumentException("top-level '$key' $value and the op's '$key' ${single[key]} differ; send $EDIT_FORM")
         }
         return JsonObject(rest + ("ops" to JsonArray(listOf(JsonObject(single + loose)))))
     }
@@ -174,16 +178,20 @@ internal object InputTolerance {
     }
 
     /**
-     * A JSON string whose content is an array becomes that array; text that opens like JSON but does not parse is
-     * refused with the parser's message and position; anything else is left for the schema to refuse.
+     * A JSON string whose content is an array becomes that array; text that opens like JSON but does not parse gets the
+     * one bracket repair of [JsonRepair] (D-373, noted), else is refused with the parser's message and position; anything
+     * else is left for the schema to refuse.
      */
-    private fun parsedArray(key: String, value: JsonElement): JsonElement {
+    private fun parsedArray(key: String, value: JsonElement, notes: MutableList<String>): JsonElement {
         val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content?.trim() ?: return value
         if (!text.startsWith("[") && !text.startsWith("{")) return value
         val parsed = try {
             json.parseToJsonElement(text)
         } catch (e: SerializationException) {
-            throw IllegalArgumentException("$key is a string holding invalid JSON: ${e.message?.lineSequence()?.first()}")
+            val (fixed, repair) = JsonRepair.parsed(json, text)?.takeIf { it.first is JsonArray }
+                ?: throw IllegalArgumentException("$key is a string holding invalid JSON: ${e.message?.lineSequence()?.first()}")
+            notes += "$key string repaired: ${repair.summary}"
+            fixed
         }
         return if (parsed is JsonArray) parsed else value
     }
@@ -223,9 +231,9 @@ internal object InputTolerance {
         return JsonObject(raw + ("op" to JsonPrimitive(op)))
     }
 
-    private fun editOp(element: JsonElement): JsonElement {
+    private fun editOp(element: JsonElement, notes: MutableList<String>): JsonElement {
         if (element !is JsonObject) return element
-        val op = element.mapValue("hunks") { parsedArray("hunks", it) }
+        val op = element.mapValue("hunks") { parsedArray("hunks", it, notes) }
         val form = FORM_FIELDS.keys.filter { key -> op[key]?.let { !empty(it) } == true }.singleOrNull() ?: return op
         val own = FORM_FIELDS.getValue(form)
         val kept = op.filter { (key, value) -> key !in EDIT_FIELDS || key in own || !empty(value) }

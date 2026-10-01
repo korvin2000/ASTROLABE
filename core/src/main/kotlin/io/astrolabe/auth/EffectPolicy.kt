@@ -100,8 +100,10 @@ public data class EffectPolicyConfig(
 /**
  * Effect-class policy (§4.6, §14.1). `D` covers writes outside the workspace, writes under a protected path,
  * network egress, mutation of the user's git refs, package installation (configurable), privilege escalation
- * and destructive filesystem or git commands. `W` covers known builders, formatters, test runners, scripts and
- * redirects inside the workspace. Only known read-only command forms are labelled `R`; unknown executables are `W` with unknown effects — a label, not proof of read-only execution
+ * and destructive git commands or deletes and moves that reach outside the workspace, its root or a protected path.
+ * `W` covers known builders, formatters, test runners, scripts, deletes and moves inside the workspace (D-373) and
+ * redirects inside the workspace. Only known read-only command forms are labelled `R` (existence probes even outside
+ * the workspace, D-373); unknown executables are `W` with unknown effects — a label, not proof of read-only execution
  * in trusted-local mode (§4.6): post-hoc verification is the stamp diff (P1.6.5).
  */
 public object EffectPolicy {
@@ -186,12 +188,14 @@ public object EffectPolicy {
         while (index < tokens.size) {
             val token = tokens[index]
             if (token in REDIRECTS) {
-                if (token != "<") {
+                // D-373: a redirect to the null device writes no file.
+                val target = tokens.getOrNull(index + 1)?.takeUnless { it.lowercase() in NULL_DEVICES }
+                if (token != "<" && target != null) {
                     effect = maxOf(effect, EffectClass.W)
                     capabilities += Capability.WorkspaceWrite
                     reasons += "output redirect '$token'"
                 }
-                tokens.getOrNull(index + 1)?.let { redirects += it }
+                target?.let { redirects += it }
                 index += 2
                 continue
             }
@@ -204,7 +208,10 @@ public object EffectPolicy {
         val args = argv.drop(1)
         // D-283: a command or process substitution runs a command argv cannot see, so it is never read-only.
         val substitution = tokens.any { "$(" in it || '`' in it } || redirects.any { it.startsWith("(") }
-        val recognized = (!substitution && readOnly(argv.first(), program, args)) || program in config.scriptInterpreters ||
+        // D-373: a read-only probe (`where`, `dir`, `if exist`, ...) with no file redirect stays R wherever its paths point.
+        val probe = !substitution && redirects.isEmpty() && probe(argv)
+        val removing = program in DELETE_OR_MOVE
+        val recognized = probe || removing || (!substitution && readOnly(argv.first(), program, args)) || program in config.scriptInterpreters ||
             listOf(
                 config.privilegeCommands, config.networkCommands, config.packageInstallCommands,
                 config.gitRefMutations, config.destructiveFileCommands, config.writingCommands,
@@ -238,16 +245,26 @@ public object EffectPolicy {
             reasons += "mutation of the user's git refs: '$pattern'"
         }
         val destructive = matchedPattern(program, args, config.destructiveFileCommands)
-        if (destructive != null) {
-            val targets = args.filter { !isFlag(it) }
-            val outsideTmp = targets.isEmpty() || targets.any { !underTmp(it, cwd, workspaceRoot, config) }
-            if (outsideTmp) {
-                effect = EffectClass.D
-                reasons += "destructive delete outside tmp: '$destructive'"
-            } else {
-                effect = maxOf(effect, EffectClass.W)
-                capabilities += Capability.WorkspaceWrite
-                reasons += "destructive delete under tmp: '$destructive'"
+        val targets = args.filter { !isFlag(it) }
+        if (destructive != null || (removing && targets.isNotEmpty())) {
+            val label = destructive ?: program
+            // D-373: deleting or moving paths that all stay inside the workspace (never its root, a protected path or a
+            // wildcard at the root) is W; the stamp diff reports what went.
+            when {
+                targets.isNotEmpty() && targets.all { underTmp(it, cwd, workspaceRoot, config) } -> {
+                    effect = maxOf(effect, EffectClass.W)
+                    capabilities += Capability.WorkspaceWrite
+                    reasons += "destructive delete under tmp: '$label'"
+                }
+                targets.isNotEmpty() && targets.all { contained(it, cwd, workspaceRoot, protectedPaths, config) } -> {
+                    effect = maxOf(effect, EffectClass.W)
+                    capabilities += Capability.WorkspaceWrite
+                    reasons += "delete or move inside the workspace: '$label'"
+                }
+                else -> {
+                    effect = EffectClass.D
+                    reasons += "destructive delete or move outside the workspace, of its root, of a protected path or by a root wildcard: '$label'"
+                }
             }
         }
         if (matchesAny(program, args, config.writingCommands)) {
@@ -266,6 +283,10 @@ public object EffectPolicy {
 
         for (token in targetTokens(argv) + redirects) {
             val resolved = resolve(token, cwd, workspaceRoot, config)
+            if (resolved == null && probe) {
+                reasons += "read-only probe '$program' names '$token' outside the workspace"
+                continue
+            }
             if (resolved == null) {
                 effect = EffectClass.D
                 capabilities += Capability.OutsideWorkspace
@@ -336,6 +357,60 @@ public object EffectPolicy {
             "config" -> rest.firstOrNull() in GIT_CONFIG_READS && rest.drop(1).none { it.startsWith("-") }
             else -> false
         }
+    }
+
+    /**
+     * D-373: probes that only report what exists, R even for paths outside the workspace. `if [not] exist <path> <cmd>`
+     * is one when every command it runs (before and after `else`) is one.
+     */
+    private fun probe(argv: List<String>): Boolean {
+        val executable = argv.first()
+        if ('/' in executable || '\\' in executable) return false
+        val program = programName(executable)
+        if (program in PROBES) return true
+        if (program != "if") return false
+        var rest = argv.drop(1).filter { it.lowercase() != "/i" }
+        if (rest.firstOrNull()?.lowercase() == "not") rest = rest.drop(1)
+        if (rest.firstOrNull()?.lowercase() != "exist" || rest.size < 3) return false
+        val command = rest.drop(2).map { it.removePrefix("(").removeSuffix(")") }.filter { it.isNotEmpty() }
+        val parts = ArrayList<List<String>>()
+        var part = ArrayList<String>()
+        for (token in command) {
+            if (token.lowercase() == "else") {
+                parts += part
+                part = ArrayList()
+            } else {
+                part += token
+            }
+        }
+        parts += part
+        return parts.all { it.isNotEmpty() && probe(it) }
+    }
+
+    private val PROBES = setOf("where", "which", "dir", "ls", "type", "cat", "ver", "echo")
+    private val NULL_DEVICES = setOf("nul", "nul:", "/dev/null", "\$null")
+    private val DELETE_OR_MOVE = setOf("rm", "rmdir", "rd", "del", "erase", "mv", "move", "remove-item")
+
+    /**
+     * [token] names a path inside the workspace that is not its root and protects nothing: no protected path is it, holds
+     * it or lies under it, and a wildcard has a parent directory below the root.
+     */
+    private fun contained(token: String, cwd: String?, workspaceRoot: String, protectedPaths: List<String>, config: EffectPolicyConfig): Boolean {
+        val resolved = resolve(token, cwd, workspaceRoot, config) ?: return false
+        val wildcard = resolved.indexOfFirst { it == '*' || it == '?' }
+        val path = if (wildcard < 0) resolved else resolved.substring(0, wildcard).substringBeforeLast('/', "")
+        if (path.isEmpty()) return false
+        return protectedPaths.none { pattern -> matchesPath(path, pattern, config.caseInsensitivePaths) || holds(path, pattern, config.caseInsensitivePaths) }
+    }
+
+    /** A protected [pattern] that could name something under the directory [path]: its literal prefix lies below it, or it starts with a double star. */
+    private fun holds(path: String, pattern: String, caseInsensitive: Boolean): Boolean {
+        val raw = pattern.replace('\\', '/').trim('/').let { if (caseInsensitive) it.lowercase() else it }
+        val dir = if (caseInsensitive) path.lowercase() else path
+        val glob = raw.indexOfFirst { it == '*' || it == '?' }
+        val literal = if (glob < 0) raw else raw.substring(0, glob).substringBeforeLast('/', "")
+        if (literal.isEmpty()) return glob >= 0 && raw.startsWith("**")
+        return literal == dir || literal.startsWith("$dir/")
     }
 
     private val READ_ONLY_ANY_ARGS = setOf(

@@ -32,13 +32,19 @@ public interface ValidationContext {
 public data class Sizes(val registerTokens: Long, val registerCapTokens: Int, val patchTokens: Long, val patchCapTokens: Int)
 
 public sealed interface Validation {
-    /** The patch applied atomically; [dropped] lists conditional ops whose condition failed (rendered, §5.5). */
+    /**
+     * The patch applied atomically; [dropped] lists conditional ops whose condition failed (rendered, §5.5). D-373: [notes]
+     * name the ops skipped or normalised one by one; [unbackedTicks] are the steps ticked without usable evidence, which
+     * are never a progress event.
+     */
     public data class Applied(
         val register: Register,
         val appliedOps: List<Op>,
         val dropped: List<PatchOp>,
         val flags: List<String>,
         val sizes: Sizes,
+        val notes: List<String> = emptyList(),
+        val unbackedTicks: Set<Int> = emptySet(),
     ) : Validation
 
     /** Nothing applied; the violated rule and sizes are returned to the model (§5.4 error policy). */
@@ -49,6 +55,12 @@ public sealed interface Validation {
  * Harness-enforced register invariants (§5.2, TODO P1.5.2). Conditions are evaluated first; the eligible op
  * list is then validated and committed atomically against the current STATE version. Rejection leaves STATE
  * unchanged; prior world effects of the turn stand.
+ *
+ * D-373 (STATE is the model's notes; acceptance is the oracle, D-368): an op that breaks its own rule is skipped and
+ * named, the rest apply — unless a later op refers to a step, fact or open item a skipped add would have created, or
+ * every op was skipped. A tick without usable evidence is recorded without it (never a progress event); a `v` fact whose
+ * evidence does not resolve is kept as `h`; a cursor on a done or unknown step is ignored. Whole-patch rules (caps, one
+ * Next, one `[>]`, red recorded) still reject the patch.
  */
 public class Validator(
     private val estimator: TokenEstimator,
@@ -68,13 +80,14 @@ public class Validator(
 
         val eligible = ArrayList<Op>()
         val dropped = ArrayList<PatchOp>()
-        for (po in patch.ops) {
+        val held = HashSet<Int>()
+        for ((index, po) in patch.ops.withIndex()) {
             val c = po.condition
             val met = c == null || when (c.kind) {
                 ConditionKind.Green -> c.opId in context.greenOps
                 ConditionKind.Applied -> c.opId in context.appliedOps
             }
-            if (met) eligible += po.op else dropped += po
+            if (met) eligible += po.op else { dropped += po; held += index }
         }
         val nextOps = eligible.count { it is Op.Next }
         // D-350: a patch without `next` keeps the Next STATE already has; two still refuse. None yet: D-356 below.
@@ -82,74 +95,113 @@ public class Validator(
 
         var next = register
         val flags = ArrayList<String>()
+        val notes = ArrayList<String>()
+        val unbacked = LinkedHashSet<Int>()
+        val done = ArrayList<Op>()
+        var firstSkip: Pair<String, String>? = null
+        // The first number a skipped add would have taken, per kind: a later op naming it or one above depends on it.
+        val skippedFrom = HashMap<String, Pair<Int, Int>>()
         var cursorMoved = false
-        for (op in eligible) {
-            for ((text, maxChars) in opText(op)) {
-                if (text.length > maxChars) return reject("line ≤ $maxChars chars", "${op::class.simpleName}: ${text.length} chars")
-                if (text.contains("```") || text.contains("~~~")) return reject("no fenced code", "${op::class.simpleName} contains a code fence")
-                if (text.any { it == '\n' || it == '\r' || it == '\u0085' || it == '\u2028' || it == '\u2029' }) {
-                    return reject("single line", "${op::class.simpleName} contains a line break")
+        for ((index, po) in patch.ops.withIndex()) {
+            if (index in held) continue
+            val op = po.op
+            val label = "op ${index + 1} (${wire(op)})"
+            fun skip(rule: String, detail: String) {
+                notes += "$label skipped: $rule — $detail"
+                if (firstSkip == null) firstSkip = rule to "$label: $detail"
+                kindOfAdd(op)?.let { kind -> skippedFrom.putIfAbsent(kind, index + 1 to nextN(numbers(next, kind))) }
+            }
+            fun ignore(rule: String, detail: String) {
+                notes += "$label ignored: $detail"
+                if (firstSkip == null) firstSkip = rule to "$label: $detail"
+            }
+            referenced(op)?.let { (kind, n) ->
+                skippedFrom[kind]?.takeIf { (_, from) -> n >= from }?.let { (at, _) ->
+                    return reject("depends on a skipped op", "$label names $kind $n, which op $at (skipped) would have created")
                 }
+            }
+            val tooLong = opText(op).firstNotNullOfOrNull { (text, maxChars) ->
+                when {
+                    text.length > maxChars -> "line ≤ $maxChars chars" to "${text.length} chars"
+                    text.contains("```") || text.contains("~~~") -> "no fenced code" to "contains a code fence"
+                    text.any { it == '\n' || it == '\r' || it == '\u0085' || it == '\u2028' || it == '\u2029' } -> "single line" to "contains a line break"
+                    else -> null
+                }
+            }
+            if (tooLong != null) {
+                skip(tooLong.first, tooLong.second)
+                continue
             }
             next = when (op) {
                 is Op.PlanAdd -> next.copy(plan = next.plan + Step(nextN(next.plan.map { it.n }), Mark.Todo, op.text, op.accept, op.after, op.req))
                 is Op.PlanCursor -> {
-                    val step = next.step(op.n) ?: return reject("unknown step", "plan.cursor(${op.n})")
-                    if (step.mark != Mark.Todo) return reject("cursor on an open step", "step ${op.n} is ${step.mark.text}")
-                    cursorMoved = true
-                    next.copy(plan = next.plan.map { s -> if (s.n == op.n) s.copy(mark = Mark.Cursor) else if (s.mark == Mark.Cursor) s.copy(mark = Mark.Todo) else s })
+                    val step = next.step(op.n)
+                    when {
+                        step == null -> { ignore("unknown step", "unknown step ${op.n}"); continue }
+                        step.mark == Mark.Cursor -> next
+                        step.mark != Mark.Todo -> { ignore("cursor on an open step", "step ${op.n} is ${step.mark.text}"); continue }
+                        else -> {
+                            cursorMoved = true
+                            next.copy(plan = next.plan.map { s -> if (s.n == op.n) s.copy(mark = Mark.Cursor) else if (s.mark == Mark.Cursor) s.copy(mark = Mark.Todo) else s })
+                        }
+                    }
                 }
                 is Op.PlanTick -> {
-                    val step = next.step(op.n) ?: return reject("unknown step", "plan.tick(${op.n})")
-                    if (step.mark == Mark.Done) return reject("tick needs an open step", "step ${op.n} already done")
+                    val step = next.step(op.n) ?: run { skip("unknown step", "plan.tick(${op.n})"); null } ?: continue
+                    if (step.mark == Mark.Done) {
+                        skip("tick needs an open step", "step ${op.n} already done")
+                        continue
+                    }
                     val evidenceOk = op.evidence != null && context.evidenceExists(op.evidence)
                     val greenOk = step.accept != null && context.acceptGreen(step.accept)
                     if (!evidenceOk && !greenOk) {
-                        return reject(
-                            "tick needs green accept or an evidence id",
-                            "step ${op.n}: ${evidenceForm(op.evidence)}; " + (step.accept?.let { "or tick once its accept '$it' is green" } ?: "the step has no accept to be green"),
-                        )
+                        notes += "tick ${op.n} recorded without evidence: ${unusable(op.evidence)}"
+                        unbacked += op.n
                     }
                     if (step.mark == Mark.Cursor) cursorMoved = true
-                    next.copy(plan = next.plan.map { s -> if (s.n == op.n) s.copy(mark = Mark.Done, evidence = op.evidence ?: s.evidence) else s })
+                    val evidence = op.evidence?.takeIf { evidenceOk }
+                    next.copy(plan = next.plan.map { s -> if (s.n == op.n) s.copy(mark = Mark.Done, evidence = evidence ?: s.evidence) else s })
                 }
                 is Op.PlanCancel -> {
-                    if (op.reason.isBlank()) return reject("[~] needs a reason", "plan.cancel(${op.n})")
-                    val step = next.step(op.n) ?: return reject("unknown step", "plan.cancel(${op.n})")
+                    if (op.reason.isBlank()) { skip("[~] needs a reason", "plan.cancel(${op.n})"); continue }
+                    val step = next.step(op.n) ?: run { skip("unknown step", "plan.cancel(${op.n})"); null } ?: continue
                     if (step.mark == Mark.Cursor) cursorMoved = true
                     next.copy(plan = next.plan.map { s -> if (s.n == op.n) s.copy(mark = Mark.Cancelled, reason = op.reason) else s })
                 }
                 is Op.FactAdd -> {
-                    if (op.kind == ClaimKind.Verified && (op.evidence == null || !context.evidenceExists(op.evidence))) {
-                        return reject("v needs an existing evidence id", "fact.add(v): ${evidenceForm(op.evidence)}")
-                    }
+                    val verified = op.kind != ClaimKind.Verified || (op.evidence != null && context.evidenceExists(op.evidence))
+                    if (!verified) notes += "$label kept as h: ${unusable(op.evidence)}; a v fact needs a stored result as evidence"
+                    val kind = if (verified) op.kind else ClaimKind.Hypothesis
+                    val evidence = if (verified) op.evidence else null
                     val staleAt = op.anchor?.let { anchor ->
                         val current = context.currentVersion(anchor.path)
                         if (current == anchor.version) null else current ?: anchor.version
                     }
-                    next.copy(facts = next.facts + Fact(nextN(next.facts.map { it.n }), op.kind, op.text, op.anchor, op.evidence, staleAt))
+                    next.copy(facts = next.facts + Fact(nextN(next.facts.map { it.n }), kind, op.text, op.anchor, evidence, staleAt))
                 }
                 is Op.FactRefute -> {
-                    val fact = next.fact(op.n) ?: return reject("unknown fact", "fact.refute(${op.n})")
-                    if (!context.evidenceExists(op.evidence)) return reject("refute needs an existing evidence id", "fact.refute(${op.n}): ${op.evidence}")
+                    val fact = next.fact(op.n) ?: run { skip("unknown fact", "fact.refute(${op.n})"); null } ?: continue
+                    if (!context.evidenceExists(op.evidence)) { skip("refute needs an existing evidence id", "fact.refute(${op.n}): ${op.evidence}"); continue }
                     next.copy(facts = next.facts.map { f -> if (f.n == fact.n) f.copy(kind = ClaimKind.Refuted, refutedBy = op.evidence) else f })
                 }
                 is Op.DeadendAdd -> {
-                    if (op.scope.isBlank() || op.reopen.isBlank()) return reject("dead ends need scope and reopen", "deadend.add")
+                    if (op.scope.isBlank() || op.reopen.isBlank()) { skip("dead ends need scope and reopen", "deadend.add"); continue }
                     next.copy(deadEnds = next.deadEnds + DeadEnd(nextN(next.deadEnds.map { it.n }), op.text, op.evidence?.takeIf { it.isNotBlank() }, op.scope, op.reopen))
                 }
                 is Op.DecisionAdd -> next.copy(decisions = next.decisions + Decision(nextN(next.decisions.map { it.n }), op.text, op.because, op.rejected?.takeIf { it.isNotBlank() }, op.probe, op.adrCandidate))
                 is Op.OpenAdd -> next.copy(open = next.open + OpenItem(nextN(next.open.map { it.n }), op.text, op.trip, op.needs))
                 is Op.OpenClose -> {
-                    val item = next.openItem(op.n) ?: return reject("unknown open item", "open.close(${op.n})")
-                    if (!context.evidenceExists(op.evidence)) return reject("close needs an existing evidence id", "open.close(${op.n}): ${op.evidence}")
+                    val item = next.openItem(op.n) ?: run { skip("unknown open item", "open.close(${op.n})"); null } ?: continue
+                    if (!context.evidenceExists(op.evidence)) { skip("close needs an existing evidence id", "open.close(${op.n}): ${op.evidence}"); continue }
                     next.copy(open = next.open.map { o -> if (o.n == item.n) o.copy(closed = true, closedEvidence = op.evidence) else o })
                 }
                 is Op.FocusSet -> next.copy(focus = op.dir)
                 is Op.AmendPropose -> next.copy(amendments = next.amendments + AmendmentLine(op.change, op.reason))
                 is Op.Next -> next.copy(next = op.text)
             }
+            done += op
         }
+        firstSkip?.takeIf { done.isEmpty() }?.let { (rule, _) -> return reject(rule, notes.joinToString("; ")) }
 
         if (next.cursors > 1) return reject("exactly one [>]", "${next.cursors} cursors")
         // D-350: open steps left without [>] get it on the first open step; placing it advances [>], so the red rule below applies.
@@ -177,16 +229,57 @@ public class Validator(
         sizes = sizes.copy(registerTokens = registerTokens)
         if (registerTokens > registerCapTokens) return reject("register cap", "register would be $registerTokens tokens > $registerCapTokens")
         flags += riskFlags(next)
-        return Validation.Applied(next, eligible, dropped, flags, sizes)
+        return Validation.Applied(next, done, dropped, flags, sizes, notes, unbacked)
     }
 
     private fun nextN(existing: List<Int>): Int = (existing.maxOrNull() ?: 0) + 1
 
-    /** Names the allowed evidence forms in a refusal (D-349): `op:N` resolves only within its own turn. */
-    private fun evidenceForm(evidence: String?): String = when {
-        evidence == null -> "no evidence given — name a stored result by its alias #N, or a run or verify call of this turn as op:N"
-        evidence.startsWith("op:") -> "evidence '$evidence' names no run or verify call of this turn with a result — op:N is a call of the same turn; a result of an earlier turn is named by its alias #N"
-        else -> "evidence '$evidence' is not a stored result — name one by its alias #N (as the result header shows it), or a run or verify call of this turn as op:N"
+    /** The `kind.add` wire name of an op ([Op] serial names). */
+    private fun wire(op: Op): String = when (op) {
+        is Op.PlanAdd -> "plan.add"
+        is Op.PlanCursor -> "plan.cursor"
+        is Op.PlanTick -> "plan.tick"
+        is Op.PlanCancel -> "plan.cancel"
+        is Op.FactAdd -> "fact.add"
+        is Op.FactRefute -> "fact.refute"
+        is Op.DeadendAdd -> "deadend.add"
+        is Op.DecisionAdd -> "decision.add"
+        is Op.OpenAdd -> "open.add"
+        is Op.OpenClose -> "open.close"
+        is Op.FocusSet -> "focus.set"
+        is Op.AmendPropose -> "amend.propose"
+        is Op.Next -> "next"
+    }
+
+    /** The numbered kind an add creates, for the D-373 dependency rule. */
+    private fun kindOfAdd(op: Op): String? = when (op) {
+        is Op.PlanAdd -> "step"
+        is Op.FactAdd -> "fact"
+        is Op.OpenAdd -> "open item"
+        else -> null
+    }
+
+    /** The numbered item an op refers to. */
+    private fun referenced(op: Op): Pair<String, Int>? = when (op) {
+        is Op.PlanCursor -> "step" to op.n
+        is Op.PlanTick -> "step" to op.n
+        is Op.PlanCancel -> "step" to op.n
+        is Op.FactRefute -> "fact" to op.n
+        is Op.OpenClose -> "open item" to op.n
+        else -> null
+    }
+
+    private fun numbers(register: Register, kind: String): List<Int> = when (kind) {
+        "step" -> register.plan.map { it.n }
+        "fact" -> register.facts.map { it.n }
+        else -> register.open.map { it.n }
+    }
+
+    /** Why an evidence value cannot back a tick or a `v` fact (D-373 notes). */
+    private fun unusable(evidence: String?): String = when {
+        evidence == null -> "no evidence given"
+        evidence.startsWith("op:") -> "'$evidence' names no call of this turn; a stored result is #N"
+        else -> "'$evidence' is not a stored result; a stored result is #N"
     }
 
     public companion object {

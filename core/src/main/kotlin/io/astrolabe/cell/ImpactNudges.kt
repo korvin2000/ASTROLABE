@@ -1,6 +1,7 @@
 package io.astrolabe.cell
 
 import io.astrolabe.atlas.ChangedDefinition
+import io.astrolabe.atlas.Language
 import io.astrolabe.register.Register
 
 /** One changed definition with `fanin > 0` whose references were not inspected since [turn] (§5.6 Impact). */
@@ -25,6 +26,10 @@ public data class ImpactNudge(val definition: ChangedDefinition, val references:
  * D-366: definitions of a file the cell created itself (absent at its base) never become pending — nothing
  * outside the cell can reference them yet. At most [MAX_PER_TURN] new nudges a turn become pending; the rest
  * are [overflow], summarised in one line and never an exit obligation.
+ *
+ * D-373: only files of a language the outline parsers model ([Language.hasOutlineParser]) raise nudges — a stylesheet,
+ * markup, Markdown or data file's generic outline has no symbols that code references — and never a "symbol" without a
+ * letter or digit (a lone brace or fence).
  */
 public class ImpactNudges {
     private val pending = LinkedHashMap<Pair<String, String>, ImpactNudge>()
@@ -46,7 +51,7 @@ public class ImpactNudges {
     public fun changed(turn: Int, changes: List<ChangedDefinition>, created: Set<String> = emptySet(), fanIn: (ChangedDefinition) -> Int) {
         val fresh = ArrayList<ImpactNudge>()
         for (change in changes) {
-            if (change.path in created) continue
+            if (change.path in created || !Language.of(change.path).hasOutlineParser || change.symbol.none(Char::isLetterOrDigit)) continue
             val references = fanIn(change)
             if (references <= 0) continue
             val key = change.path to change.symbol

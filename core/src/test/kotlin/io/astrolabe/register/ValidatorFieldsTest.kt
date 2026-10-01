@@ -67,7 +67,7 @@ class ValidatorFieldsTest {
         )
         return fields.flatMap { (field, op) -> payloads.map { (kind, payload) ->
             DynamicTest.dynamicTest("$field rejects $kind") {
-                val rejected = assertIs<Validation.Rejected>(check(op(payload.ifEmpty { "x".repeat(maxChars(field) + 1) })))
+                val rejected = assertIs<Validation.Rejected>(check(op(payload.ifEmpty { "x".repeat(maxChars(field) + 1) }), alone = true))
                 if (kind.endsWith("fence")) assertEquals("no fenced code", rejected.rule)
                 else assertTrue(rejected.rule.contains("line"), "must reject the line rule, got ${rejected.rule}")
             }
@@ -87,7 +87,7 @@ class ValidatorFieldsTest {
         val command = "pytest " + (1..60).joinToString(" ") { "tests/unit/module_$it.py" }.take(593)
         assertEquals(600, command.length)
         assertIs<Validation.Applied>(defaults.check(base, Patch.of(Op.PlanAdd("step", accept = command), Op.Next("continue")), context))
-        val rejected = assertIs<Validation.Rejected>(check(Op.PlanAdd("step", accept = "x".repeat(1_001))))
+        val rejected = assertIs<Validation.Rejected>(check(Op.PlanAdd("step", accept = "x".repeat(1_001)), alone = true))
         assertEquals("line ≤ 1000 chars", rejected.rule)
     }
 
@@ -96,9 +96,10 @@ class ValidatorFieldsTest {
     private val references = setOf("plan accept", "plan req", "tick evidence", "fact evidence", "fact anchor path",
         "refute evidence", "deadend evidence", "close evidence", "focus dir")
 
-    private fun check(op: Op): Validation = validator.check(
+    // D-373: a defective op beside a valid one is skipped and named; alone, it rejects the patch with its rule.
+    private fun check(op: Op, alone: Boolean = false): Validation = validator.check(
         base,
-        if (op is Op.Next) Patch.of(op) else Patch.of(op, Op.Next("continue")),
+        if (op is Op.Next || alone) Patch.of(op) else Patch.of(op, Op.Next("continue")),
         context,
     )
 }

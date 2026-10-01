@@ -483,7 +483,10 @@ public class Cell @JvmOverloads constructor(
                 val disposition = result!!.of(call.opId)
                 val outcome = (disposition as? Disposition.Executed)?.outcome
                 val text = when (disposition) {
-                    is Disposition.Executed -> Gauges.result(disposition.outcome, gauge)
+                    is Disposition.Executed -> Gauges.result(
+                        if (call.notes.isEmpty()) disposition.outcome else disposition.outcome.copy(body = call.notes.joinToString("") { "note: $it\n" } + disposition.outcome.body),
+                        gauge,
+                    )
                     is Disposition.NotExecuted -> "${Boundary.RESULT_OPEN}not executed: ${disposition.reason}${Boundary.RESULT_CLOSE}\n${gauge.line()}"
                     is Disposition.Failed -> "${Boundary.RESULT_OPEN}failed: ${disposition.error} — effects unknown; reconciled at the turn boundary${Boundary.RESULT_CLOSE}\n${gauge.line()}"
                 }
@@ -595,7 +598,7 @@ public class Cell @JvmOverloads constructor(
             val work = Progress.work(turn, worked, seenResults)
             worked.filter { (call, outcome) -> (call.family == ToolFamily.Run || call.family == ToolFamily.Verify) && Progress.finished(outcome) }
                 .forEach { (call, outcome) -> seenResults += CallSignature.of(call, outcome) }
-            if (work.isNotEmpty() || Progress.events(registerBefore, register, turn, certifiedBefore, certifiedAfter).isNotEmpty()) lastProgressTurn = turn
+            if (work.isNotEmpty() || Progress.events(registerBefore, register, turn, certifiedBefore, certifiedAfter, tools.state.unbackedTicks).isNotEmpty()) lastProgressTurn = turn
             val completionEvidence = if (proposal && implementingCompletion && dispatchRefusal == null)
                 ctx.completionEvidence?.invoke(flags.values.toList()) else null
             completionEvidence?.flags?.forEach { flag -> flags[flag.path] = flag }

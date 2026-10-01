@@ -120,12 +120,12 @@ Delimiters are harness-owned; anything inside them is data. Instruction-shaped c
 
 | Event | Policy |
 |---|---|
-| Unparseable model output | That call has no world effect and gets a one-line schema error; the other calls of the turn run — a refused `edit` holds back the turn's `run`/`verify`, a call whose condition names a refused op does not run (D-372); registers stand; no salvage of half-patches |
+| Unparseable model output | Arguments whose only defect is an unbalanced bracket tail get one deterministic repair (at most three closing brackets dropped, inserted or appended; strict JSON after), and the result says so (D-373). Otherwise that call has no world effect and gets a one-line schema error; the other calls of the turn run — a refused `edit` holds back the turn's `run`/`verify`, a call whose condition names a refused op does not run (D-372); registers stand |
 | Anchor 0× / >1× | That op's path group is not written; three nearest candidates with lines / all match sites; the other groups apply (D-371) |
 | `expect` stale | That op's path group is not written; diff since `expect` returned; the other groups apply (D-371) |
 | Hunk outside displayed range | That op's path group is not written; outline + displayed ranges; the other groups apply; the result ends "N of M files written; resend only the refused ops" (D-371) |
 | Mid-batch I/O failure | Actual per-file state with preimage ids; no auto-retry; no false "rolled back" |
-| STATE invariant violated | Reject the eligible STATE patch list with the invariant and sizes; prior world effects remain recorded |
+| STATE invariant violated | An op that breaks its own rule is skipped and named while the others apply, unless a later op depends on it; a tick without usable evidence is recorded without it (never progress), a `v` fact whose evidence does not resolve is kept as `h`, a cursor on a done or unknown step is ignored (D-373). A whole-patch rule (caps, one Next, one `[>]`, red recorded) rejects the eligible list with the invariant and sizes; prior world effects remain recorded |
 | `run` timeout | Kill the process group; `timeout`; no replay |
 | Unknown outcome | `unknown_outcome`; reconcile external and workspace state before any retry |
 | Truncation | Always marked; prompt and capture limits distinguished; recall pointer |

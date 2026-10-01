@@ -63,11 +63,13 @@ public object Progress {
         turn: Int,
         certifiedBefore: Set<String> = emptySet(),
         certifiedAfter: Set<String> = emptySet(),
+        /** D-373: steps ticked without usable evidence (the validator records them, noted); never progress. */
+        unbackedTicks: Set<Int> = emptySet(),
     ): List<ProgressEvent> {
         val out = ArrayList<ProgressEvent>()
         val doneBefore = before.plan.filter { it.mark == Mark.Done }.map { it.n }.toSet()
-        // A tick passes the validator only with an evidence id or a green `accept:`; both are evidence-backed.
-        after.plan.filter { it.mark == Mark.Done && it.n !in doneBefore && (it.evidence != null || it.accept != null) }
+        // A backed tick carries an evidence id or had a green `accept:`; an unbacked one is neither.
+        after.plan.filter { it.mark == Mark.Done && it.n !in doneBefore && it.n !in unbackedTicks && (it.evidence != null || it.accept != null) }
             .forEach { out += ProgressEvent(ProgressKind.EvidenceTick, turn, "step ${it.n}") }
         val hypotheses = before.facts.filter { it.kind == ClaimKind.Hypothesis }.map { normalize(it.text) }.toSet()
         val factsBefore = before.facts.map { it.n }.toSet()

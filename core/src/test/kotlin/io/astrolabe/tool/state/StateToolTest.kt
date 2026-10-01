@@ -131,10 +131,10 @@ class StateToolTest {
     fun `a rejected patch returns the rule and the sizes and applies nothing`() = runTest {
         run("""{"op":"patch","patch":[{"plan.add":"a"},{"plan.cursor":1},{"next":"go"}]}""")
         val before = tool.register
-        val rejected = run("""{"op":"patch","patch":[{"fact.add":{"kind":"v","text":"x","evidence":"#99"}},{"next":"n"}]}""")
+        val rejected = run("""{"op":"patch","patch":[{"plan.cancel":{"n":1,"reason":" "}}]}""")
         assertEquals("rejected", status(rejected))
         assertFalse(rejected.applied)
-        assertTrue(rejected.body.startsWith("STATE v1 unchanged · rejected: v needs an existing evidence id — "), rejected.body)
+        assertTrue(rejected.body.startsWith("STATE v1 unchanged · rejected: [~] needs a reason — "), rejected.body)
         assertTrue(Regex("register \\d+/3000 tokens · patch \\d+/1200 tokens").containsMatchIn(rejected.body), rejected.body)
         assertEquals(before, tool.register, "nothing applied")
         assertNull(SqliteRegisterVersions(store, clock).get(ids.context!!, 2))
@@ -143,11 +143,30 @@ class StateToolTest {
         assertTrue(twoNext.body.contains("rejected: exactly one Next"), twoNext.body)
         val schema = run("""{"op":"patch","patch":[{"plan.tick":2,"if":"sometime"}]}""")
         assertTrue(schema.body.contains("rejected: schema — op 1: malformed condition 'sometime'"), schema.body)
-        val twoKeys = run("""{"op":"patch","patch":[{"plan.add":"a","next":"b"}]}""")
-        assertTrue(twoKeys.body.contains("needs exactly one op key"), twoKeys.body)
-        val unknownOp = run("""{"op":"patch","patch":[{"plan.add":"a"},{"plan.remove":1}]}""")
-        assertTrue(unknownOp.body.contains("rejected: schema — op 2: unknown op 'plan.remove'"), unknownOp.body)
+        val unknownOp = run("""{"op":"patch","patch":[{"plan.remove":1}]}""")
+        assertTrue(unknownOp.body.contains("rejected: schema — op 1: unknown op 'plan.remove'"), unknownOp.body)
         assertEquals(before, tool.register)
+    }
+
+    @Test
+    fun `an object with several op keys is split, and an invalid op is skipped while the others apply`() = runTest {
+        run("""{"op":"patch","patch":[{"plan.add":"a"},{"plan.cursor":1},{"next":"go"}]}""")
+        tool.validation = Ctx(evidence = setOf("#13"))
+        // the live run's shape: evidence beside fact.add and next in one object
+        val split = run("""{"op":"patch","patch":[{"evidence":"#13","fact.add":{"kind":"v","text":"the build is in public/"},"next":"rerun smoke","colour":"red"}]}""")
+        assertEquals("ok", status(split), split.body)
+        assertTrue(split.body.contains("note: op 1: split into fact.add, next (one op per op key); ignored 'colour' — no single op of the object declares it"), split.body)
+        assertEquals("#13", tool.register.facts.single().evidenceId, "evidence joins the one op whose form declares it")
+        assertEquals(ClaimKind.Verified, tool.register.facts.single().kind)
+        assertEquals("rerun smoke", tool.register.next)
+
+        val skipped = run("""{"op":"patch","patch":[{"plan.add":"b"},{"plan.remove":1},{"next":"go on"}]}""")
+        assertEquals("ok", status(skipped), skipped.body)
+        assertTrue(skipped.body.contains("note: op 2 skipped: unknown op 'plan.remove'"), skipped.body)
+        assertEquals(listOf("a", "b"), tool.register.plan.map { it.text })
+        val dependent = run("""{"op":"patch","patch":[{"plan.add":{"txt":"c"}},{"plan.tick":{"n":3,"evidence":"#13"}}]}""")
+        assertEquals("rejected", status(dependent), dependent.body)
+        assertTrue(dependent.body.contains("op 2 (plan.tick) refers to the plan of op 1, which was skipped"), dependent.body)
     }
 
     @Test
@@ -169,9 +188,9 @@ class StateToolTest {
         assertEquals(listOf("#35", "#7"), tool.register.facts.map { it.evidenceId })
         assertEquals("#36", tool.register.step(2)!!.evidence)
         assertTrue(several.body.contains("note: op 1 (fact.add): one evidence slot — kept #35, also cited #36 #37"), several.body)
-        val unresolved = run("""{"op":"patch","patch":[{"fact.add":{"kind":"h","text":"x","evidence":"#35 #99"}}]}""")
-        assertEquals("rejected", status(unresolved))
-        assertTrue(unresolved.body.contains("evidence '#99' is not a stored result"), unresolved.body)
+        val unresolved = run("""{"op":"patch","patch":[{"fact.add":{"kind":"h","text":"x","evidence":"#99 #35"}}]}""")
+        assertEquals("ok", status(unresolved), unresolved.body)
+        assertTrue(unresolved.body.contains("note: op 1 (fact.add): one evidence slot — kept #35; not stored results: #99"), unresolved.body)
         val prose = run("""{"op":"patch","patch":[{"fact.add":{"kind":"h","text":"y","evidence":"the pytest run above"}}]}""")
         assertEquals("ok", status(prose), "evidence text that names no ids stays one string: ${prose.body}")
 
@@ -196,7 +215,7 @@ class StateToolTest {
     }
 
     @Test
-    fun `schema and evidence refusals name the allowed op forms`() = runTest {
+    fun `schema refusals name the allowed op forms and unusable evidence is noted, not refused`() = runTest {
         run("""{"op":"patch","patch":[{"plan.add":"a"},{"next":"go"}]}""")
         val unknown = run("""{"op":"patch","patch":[{"fact":{"kind":"h","text":"x"}}]}""")
         assertTrue(unknown.body.contains("rejected: schema — op 1: unknown op 'fact' — one op key per object"), unknown.body)
@@ -205,9 +224,12 @@ class StateToolTest {
         val missing = run("""{"op":"patch","patch":[{"fact.add":{"text":"x"}}]}""")
         assertTrue(missing.body.contains("op 1 (fact.add): ") && missing.body.contains("— form: fact.add{kind: h|v|x"), missing.body)
         val tick = run("""{"op":"patch","patch":[{"plan.tick":{"n":1,"evidence":"op:4"}}]}""")
-        assertTrue(tick.body.contains("rejected: tick needs green accept or an evidence id — step 1: evidence 'op:4' names no run or verify call of this turn with a result — op:N is a call of the same turn; a result of an earlier turn is named by its alias #N"), tick.body)
+        assertEquals("ok", status(tick), tick.body)
+        assertTrue(tick.body.contains("note: tick 1 recorded without evidence: 'op:4' names no call of this turn; a stored result is #N"), tick.body)
+        assertEquals(setOf(1), tool.unbackedTicks)
         val fact = run("""{"op":"patch","patch":[{"fact.add":{"kind":"v","text":"x","evidence":"R-12"}}]}""")
-        assertTrue(fact.body.contains("fact.add(v): evidence 'R-12' is not a stored result — name one by its alias #N"), fact.body)
+        assertTrue(fact.body.contains("note: op 1 (fact.add) kept as h: 'R-12' is not a stored result"), fact.body)
+        assertEquals(ClaimKind.Hypothesis, tool.register.facts.single().kind)
     }
 
     @Test
