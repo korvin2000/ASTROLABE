@@ -556,8 +556,10 @@ public class Cell @JvmOverloads constructor(
             if (batchBefore.isNotEmpty()) {
                 val index = SymbolIndex(atlas)
                 val changes = batchBefore.flatMap { (path, bytes) -> DefinitionChanges.of(path, bytes, ws.registry.read(path)?.bytes) }
-                // D-366: a file absent at the cell's base is the cell's own; nothing outside can reference it yet.
-                val created = batchBefore.keys.filter { it !in baseFiles && base?.members?.containsKey(it) != true }.toSet()
+                // D-366: a file absent at the cell's base is the cell's own; it is exempt only until a file the cell
+                // did not create imports it (an extracted module with a real caller is impact like any other).
+                val own = { path: String -> path !in baseFiles && base?.members?.containsKey(path) != true }
+                val created = batchBefore.keys.filter { path -> own(path) && atlas.importers(path).all(own) }.toSet()
                 // Fan-in outside the edited file: tier-0 lexical refs, which is also the no-index literal fallback (§7.4).
                 impact.changed(turn, changes, created) { c -> index.refs(c.symbol).references.count { it.path != c.path } }
             }
