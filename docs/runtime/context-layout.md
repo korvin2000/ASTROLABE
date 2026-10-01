@@ -26,7 +26,9 @@ The cell is HELM's loop `[HELM §7]` with judje-1's corrections and six changes 
     kernel contract (Appendix A) · tool schemas for the role's mask (masked, never removed) · evidence-category lines ·
     error policy · data/instruction rule · execution-mode label (trusted-local | confined)
 [R] repo prime + project knowledge  (~1.5–3K tok, byte-stable per repo version and role — cache breakpoint)
-    tree digest · languages · sniffed commands · rules file (the ONLY trusted repo text) · hubs ·
+    tree digest · languages · sniffed commands · host block (≤6 lines, D-366: OS family, `run` starts argv without a
+    shell, toolchain programs on/not on PATH, root wrappers, unset JAVA_HOME beside a JVM build; probed once per
+    campaign, no process spawned) · rules file (the ONLY trusted repo text) · hubs ·
     index/contracts.md · index/global.md (one line each) · behaviour-map excerpt for the focus subsystem (≤300)
 [K] compiled increment context  (~2–6K tok, stable within the cell — cache breakpoint)
     contract slice: this increment's requirements (verbatim), ALL constraints and exclusions, acceptance ids and kinds ·
