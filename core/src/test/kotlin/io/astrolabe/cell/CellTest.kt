@@ -347,8 +347,15 @@ class CellTest {
 
     @Test
     fun `a created module a pre-existing file already imported raises the impact nudge`() = runTest {
-        val app = "from src.helpers import helper\n\nprint(helper())\n"
-        CellFixture(stateRoot, files = CellFixture.DEFAULT_FILES + ("src/app.py" to app)).use { f ->
+        // The second mentions the module only on a line that also declares its stem, which `refs` leaves out.
+        listOf(
+            "from src.helpers import helper\n\nprint(helper())\n",
+            "def helpers(): return __import__(\"src.helpers\", fromlist=[\"helper\"]).helper()\n",
+        ).forEachIndexed { n, app -> createdModuleNudge(stateRoot.resolve("app-$n"), app) }
+    }
+
+    private suspend fun createdModuleNudge(root: java.nio.file.Path, app: String) {
+        CellFixture(root, files = CellFixture.DEFAULT_FILES + ("src/app.py" to app)).use { f ->
             val created = "def helper():\n    return 0\n"
             val model = ScriptedModel.of(
                 Scripted.Reply(listOf(say("extract"), call("c1", "edit", """{"ops":[{"create":"src/helpers.py","content":${CellFixture.quote(created)}}],"why":"extract"}"""))),
@@ -360,7 +367,7 @@ class CellTest {
 
             f.run(model, turns = 5)
 
-            assertTrue(f.anchorText(4).contains("impact: `helper` (src/helpers.py) signature changed"), f.anchorText(4))
+            assertTrue(f.anchorText(4).contains("impact: `helper` (src/helpers.py) signature changed"), "$app\n" + f.anchorText(4))
         }
     }
 

@@ -282,6 +282,8 @@ public object EffectPolicy {
                 parsed.unknown != null -> "'${parsed.unknown}' is not a recognised flag of '$program'"
                 parsed.operands.isEmpty() -> "no operand"
                 else -> parsed.operands.firstOrNull { !literal(it, windows) }?.let { "'$it' is not a literal path" }
+                    // `link/../x` normalises lexically to `x`, but the shell follows `link` first.
+                    ?: parsed.operands.firstOrNull { removing && ".." in it.split('/', '\\') }?.let { "'$it' has a '..' segment a link can redirect" }
             }
             when {
                 doubt == null && parsed.operands.all { underTmp(if (parsed.byName) "$it/.." else it, cwd, workspaceRoot, config) } -> {

@@ -183,11 +183,11 @@ class CeilingTest {
             windows to listOf(
                 "rmdir /s /q .tools", "rd /S /Q build\\out", "del notes.txt", "erase /q notes.txt", "del /q .tools\\*.tmp", "del /s /q .tools\\*.tmp",
                 "move a.txt docs\\a.txt", "move /y a.txt docs/a.txt", "Remove-Item -Recurse -Force .tools", "Remove-Item -LiteralPath .tools",
-                "rd /s /q C:\\w\\build", "rm -rf node_modules",
+                "rd /s /q C:\\w\\build", "rm -rf node_modules", "rd /s /q .\\build",
             ),
             posix to listOf(
                 "rm -rf node_modules", "rm -rf src/*", "rm notes.txt", "rm -f -- -odd", "rmdir build", "mv a.txt docs/a.txt", "mv -f a.txt b.txt",
-                "rm -rf /w/build", "rm -Rfv build/out",
+                "rm -rf /w/build", "rm -Rfv build/out", "rm -rf ./build",
             ),
         )
         for ((config, lines) in table) for (line in lines) {
@@ -211,11 +211,13 @@ class CeilingTest {
                 "rd /s /q .", "rd /s /q .\\", "rd /s /q src\\..", "rd /s /q C:\\w", "rd /s /q C:\\Users", "del /q *.json", "del /s /q notes.txt",
                 "rd /s /q ci", "del /q ci\\*.yml", "rd /s /q db", "rd /s /q .GIT\\hooks", "rd /x /q build", "Remove-Item -Include *.js .tools",
                 "Remove-Item a,..\\..\\x", "move a.txt C:\\b.txt", "move a.txt ..\\b.txt", "rmdir /s /q", "rd /s /q (build)",
+                "rd /s /q a\\..\\b", "rm -rf a/../b", "del /q tmp\\..\\tmp\\x", "move a.txt sub\\..\\b.txt",
             ),
             posix to listOf(
                 "rm -rf \$HOME/victim", "rm -rf ~/x", "rm -rf ~", "rm -rf .*", "rm -rf sub/.*", "rm -rf *", "rm -rf ./*", "rm -rf /", "rm -rf .",
                 "rm -rf .\\./x", "rm -rf `pwd`", "rm -rf \$(pwd)", "rm -rf {a,b}", "rm -rf [ab]x", "rm --no-preserve-root -rf x", "mv -t /tmp a.txt",
                 "mv a.txt ../b.txt", "rmdir /s /q build", "/bin/rm -rf build", "rm -rf ci/x", "rm -rf db", "rm -rf src/*/x", "rm", "rm -rf",
+                "rm -rf a/../b", "mv x ../y", "rm -rf tmp/../tmp/x", "mv a.txt sub/../b.txt",
             ),
         )
         for ((config, lines) in table) for (line in lines) {
