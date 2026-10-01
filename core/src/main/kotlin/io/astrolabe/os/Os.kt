@@ -111,7 +111,13 @@ public interface Os : AutoCloseable {
 @Serializable
 public sealed interface Command {
 
-    /** Direct launch of [argv]; `argv[0]` is resolved through `PATH`. No shell is involved. */
+    /**
+     * Direct launch of [argv]; `argv[0]` is resolved through the child's `PATH`. No shell is involved,
+     * except on Windows when `argv[0]` resolves to a `.bat`/`.cmd` script: there it is looked up like
+     * `cmd.exe` does (working directory first, then `PATH`, trying each `PATHEXT` extension when the
+     * name has none) and a script runs through `cmd.exe /d /v:off /s /c` with every argument quoted;
+     * arguments containing `"`, `%`, CR or LF are refused for a script.
+     */
     @Serializable
     @SerialName("argv")
     public data class Argv(public val argv: List<String>) : Command {

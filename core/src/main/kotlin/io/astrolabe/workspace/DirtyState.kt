@@ -340,12 +340,18 @@ public class DirtyState(
                     blobs.put(bytes, BlobKind.PREIMAGE, ids, recovery = true), bytes.size.toLong())
             }
             PathKind.Regular -> {
-                val bytes = workspace.bytes(resolved)
-                    ?: throw SnapshotIntegrityError("'$path' disappeared during capture")
                 // One mode rule with the stamp report the recheck compares against (D-293).
                 val mode = stamper.fileMode(resolved, reportedMode)
+                // D-364: unchanged content already in the recovery store is not read or stored again.
+                val known = workspace.contents.cached(resolved.real)
+                if (known != null && blobs.holds(known.digest, recovery = true)) {
+                    return SnapshotEntry(path, SnapshotEntryKind.File, mode, known.digest, known.sizeBytes)
+                }
+                var bytes: ByteArray? = null
+                workspace.contents.load(resolved.real, null) { workspace.bytes(resolved).also { bytes = it } }
+                val read = bytes ?: throw SnapshotIntegrityError("'$path' disappeared during capture")
                 SnapshotEntry(path, SnapshotEntryKind.File, mode,
-                    blobs.put(bytes, BlobKind.PREIMAGE, ids, recovery = true), bytes.size.toLong())
+                    blobs.put(read, BlobKind.PREIMAGE, ids, recovery = true), read.size.toLong())
             }
             PathKind.Directory -> null
             else -> throw SnapshotIntegrityError("unsupported capture kind ${resolved.kind}: $path")

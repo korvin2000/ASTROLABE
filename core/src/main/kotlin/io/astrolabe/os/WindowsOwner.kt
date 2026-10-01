@@ -10,6 +10,9 @@ import java.lang.foreign.SymbolLookup
 import java.lang.foreign.ValueLayout
 import java.lang.invoke.MethodHandle
 import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.InvalidPathException
+import java.nio.file.Path
 import java.util.TreeMap
 
 /**
@@ -26,7 +29,7 @@ internal class WindowsOwner(private val beforeAssignment: (Long) -> Unit = {}) :
     )
 
     override fun start(start: OwnedStart): OwnedProcess {
-        val commandLine = renderCommandLine(start.command)
+        val launch = plan(start.command, start.workingDirectory, start.environment)
         return Arena.ofConfined().use { arena ->
             val capture = arena.allocate(Win32.CAPTURE)
             val security = arena.allocate(Win32.SECURITY_ATTRIBUTES).also {
@@ -94,8 +97,8 @@ internal class WindowsOwner(private val beforeAssignment: (Long) -> Unit = {}) :
 
                 val created = Win32.createProcessW.callInt(
                     capture,
-                    MemorySegment.NULL,
-                    arena.allocateFrom(commandLine, StandardCharsets.UTF_16LE),
+                    launch.application?.let { arena.allocateFrom(it, StandardCharsets.UTF_16LE) } ?: MemorySegment.NULL,
+                    arena.allocateFrom(launch.commandLine, StandardCharsets.UTF_16LE),
                     MemorySegment.NULL,
                     MemorySegment.NULL,
                     1, // The explicit handle list excludes other simultaneous launches and host handles.
@@ -105,7 +108,12 @@ internal class WindowsOwner(private val beforeAssignment: (Long) -> Unit = {}) :
                     startupInfo,
                     info,
                 )
-                if (created == 0) fail("CreateProcessW", capture)
+                if (created == 0) {
+                    val code = capture.get(ValueLayout.JAVA_INT, Win32.LAST_ERROR)
+                    if (launch.missing != null && (code == ERROR_FILE_NOT_FOUND || code == ERROR_PATH_NOT_FOUND))
+                        throw OsFailure("CreateProcessW", code, launch.missing)
+                    fail("CreateProcessW", capture)
+                }
 
                 val process = info.get(ValueLayout.ADDRESS, Win32.PI_PROCESS)
                 val thread = info.get(ValueLayout.ADDRESS, Win32.PI_THREAD)
@@ -179,18 +187,44 @@ internal class WindowsOwner(private val beforeAssignment: (Long) -> Unit = {}) :
         return arena.allocateFrom(block, StandardCharsets.UTF_16LE)
     }
 
-    private fun renderCommandLine(command: Command): String = when (command) {
+    /**
+     * [application] is the resolved image CreateProcessW starts without searching, or null to let it
+     * parse [commandLine]; [missing] is the failure text when the program was not found (D-363).
+     */
+    private class Launch(val application: String?, val commandLine: String, val missing: String?)
+
+    /**
+     * CreateProcessW only appends `.exe` and searches the *parent's* directories, so `npm` (a
+     * `.cmd` shim) never starts. The program is resolved the way `cmd.exe` would, against the
+     * child's working directory and the PATH/PATHEXT the child receives (D-363).
+     */
+    private fun plan(command: Command, workingDirectory: Path, environment: Map<String, String>): Launch = when (command) {
+        is Command.Shell -> Launch(null, shellLine(command.commandLine, ""), null)
         is Command.Argv -> {
-            val batch = command.argv.first().lowercase().let { it.endsWith(".bat") || it.endsWith(".cmd") }
-            if (batch) {
-                // cmd expands percent/exclamation even inside quotes; refuse argv we cannot preserve exactly.
-                if (command.argv.any { arg -> arg.any { it in "\"%!\r\n" } }) throw java.io.IOException("batch arguments contain unsupported command-interpreter characters")
-                renderCommandLine(Command.Shell(command.argv.joinToString(" ") { "\"$it\"" }))
-            } else command.argv.joinToString(" ") { quoteArgument(it) }
+            val program = command.argv.first()
+            val extensions = pathExtensions(environment)
+            val resolved = resolveProgram(program, workingDirectory, variable(environment, "PATH"), extensions)
+            when {
+                resolved != null && isBatch(resolved.toString()) -> Launch(null, batchLine(listOf(resolved.toString()) + command.argv.drop(1)), null)
+                resolved != null -> Launch(resolved.toString(), argvLine(command.argv), null)
+                isBatch(program) -> Launch(null, batchLine(command.argv), null)
+                else -> Launch(null, argvLine(command.argv), notFound(program, extensions))
+            }
         }
-        // `/s` makes cmd.exe strip exactly the outer quotes and run the rest verbatim.
-        is Command.Shell -> "${quoteArgument(comspec())} /d /s /c \"${command.commandLine}\""
     }
+
+    private fun argvLine(argv: List<String>): String = argv.joinToString(" ") { quoteArgument(it) }
+
+    private fun batchLine(argv: List<String>): String {
+        // cmd expands `%` even inside quotes and a `"` would end the quoting: refuse argv we cannot
+        // preserve exactly. `!` is literal because `/v:off` overrides a registry-enabled delayed expansion.
+        if (argv.any { arg -> arg.any { it in "\"%\r\n" } }) throw java.io.IOException("batch arguments contain unsupported command-interpreter characters")
+        return shellLine(argv.joinToString(" ") { "\"$it\"" }, " /v:off")
+    }
+
+    // `/s` makes cmd.exe strip exactly the outer quotes and run the rest verbatim.
+    private fun shellLine(commandLine: String, options: String): String =
+        "${quoteArgument(comspec())} /d$options /s /c \"$commandLine\""
 
     private fun comspec(): String = System.getenv("COMSPEC")?.takeIf { it.isNotBlank() } ?: "cmd.exe"
 
@@ -217,6 +251,63 @@ internal class WindowsOwner(private val beforeAssignment: (Long) -> Unit = {}) :
         private const val PROCESS_TERMINATE = 0x0000_0001
         private const val INVALID_HANDLE = -1L
         private const val FILETIME_EPOCH_OFFSET = 116_444_736_000_000_000L
+        private const val ERROR_FILE_NOT_FOUND = 2
+        private const val ERROR_PATH_NOT_FOUND = 3
+        private const val DEFAULT_PATHEXT = ".COM;.EXE;.BAT;.CMD"
+
+        /**
+         * The file `cmd.exe` would run for [program], or null. A bare name is looked up in
+         * [workingDirectory], then in each [searchPath] directory; a name with a directory part
+         * (`./gradlew`, `tools\x`, `C:\x`) only against [workingDirectory]. A name without an
+         * extension is tried with each of [extensions] only, so `gradlew` finds `gradlew.bat`, not
+         * the POSIX script beside it.
+         */
+        internal fun resolveProgram(program: String, workingDirectory: Path, searchPath: String?, extensions: List<String>): Path? {
+            val fileName = try {
+                Path.of(program).fileName?.toString()
+            } catch (_: InvalidPathException) {
+                null
+            } ?: return null
+            val dot = fileName.lastIndexOf('.')
+            val extension = if (dot > 0) fileName.substring(dot) else null
+            val names = when {
+                extension == null -> extensions.map { program + it }
+                extensions.any { it.equals(extension, ignoreCase = true) } -> listOf(program)
+                else -> listOf(program) + extensions.map { program + it }
+            }
+            val directories = if (program.any { it == '/' || it == '\\' || it == ':' }) {
+                listOf(workingDirectory)
+            } else {
+                listOf(workingDirectory) + searchPath.orEmpty().split(';')
+                    .map { it.trim().removeSurrounding("\"") }
+                    .filter { it.isNotEmpty() }
+                    .mapNotNull { entry -> try { workingDirectory.resolve(entry) } catch (_: InvalidPathException) { null } }
+            }
+            for (directory in directories) {
+                for (name in names) {
+                    val candidate = try { directory.resolve(name) } catch (_: InvalidPathException) { continue }
+                    if (Files.isRegularFile(candidate)) return candidate.toAbsolutePath().normalize()
+                }
+            }
+            return null
+        }
+
+        /** `PATHEXT` as the child sees it, else the parent's, else the system default. */
+        internal fun pathExtensions(environment: Map<String, String>): List<String> =
+            (variable(environment, "PATHEXT")?.takeIf { it.isNotBlank() } ?: DEFAULT_PATHEXT)
+                .split(';').map { it.trim() }.filter { it.length > 1 && it.startsWith('.') }
+
+        /** [name] in the child's block, compared case-insensitively like Windows does; the parent's value when absent. */
+        private fun variable(environment: Map<String, String>, name: String): String? =
+            environment.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value ?: System.getenv(name)
+
+        private fun isBatch(program: String): Boolean = program.lowercase().let { it.endsWith(".bat") || it.endsWith(".cmd") }
+
+        private fun notFound(program: String, extensions: List<String>): String {
+            val where = if (program.any { it == '/' || it == '\\' || it == ':' }) "relative to the working directory"
+            else "in the working directory or on PATH"
+            return "'$program' was not found $where (PATHEXT ${extensions.joinToString(";")})"
+        }
 
         /**
          * Quotes one argument for the MSVCRT parser `CommandLineToArgvW` implements: backslashes
