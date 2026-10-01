@@ -5,8 +5,8 @@ Rewritten every session (≤40 lines). Workflow: `CLAUDE.md` § Workflow. State 
 **Checkpoint (2026-10-01):** owner-requested out-of-order **plan-handoff fix** (`../harness-fiasco-analysis.md`): a live
 S1 task (Studio `W-tgxiilat7og6a33vtwva`, `../diags/`) burned two 40-turn plan cells because the plan role could not
 execute, the masked refusal read as transient, the loop gate ignored refusals and the plan wire form was invisible.
-Branch `fix/plan-handoff` (merged `--no-ff` from worktree branches `wt/f1-f2`, `wt/f3`, `wt/f4`, `wt/f8`), **not merged
-into `main`, not pushed**. Decisions D-357–D-362. P0–P6 remain 185/185 DONE.
+Branch `fix/plan-handoff` (merged `--no-ff` from worktree branches `wt/f1-f2`, `wt/f3`, `wt/f4`, `wt/f8`) is **merged
+into `main` (`dedb8e4`), not pushed**. Decisions D-357–D-362. P0–P6 remain 185/185 DONE.
 
 ## This session
 - D-357 `cell/Refusals.kt`: masked-op refusal names the cause (role mask / shape / ceiling), the available ops and the
@@ -26,7 +26,7 @@ into `main`, not pushed**. Decisions D-357–D-362. P0–P6 remain 185/185 DONE.
 - Studio (root repo `ASTROUI`, uncommitted): recap says "verified" only when a check passed; "Done · not verified" label.
 
 ## Next
-1. Owner: review `fix/plan-handoff`, then merge `--no-ff` into `main` and push; full `./gradlew build` on both platforms
+1. Owner: push `main`; full `./gradlew build` on both platforms
    (this session: `core` packages cell/tool/campaign/graph/delegate/verify/context + provider-ai-gate offline tests only).
 2. Live re-run of the failed scenario through Studio on `C:\temp\play3` with `z-ai/glm-5.3-flash` ×3 (the analysis §4
    names the expectation: no plan cell, implementing cell runs the three acceptance commands).
