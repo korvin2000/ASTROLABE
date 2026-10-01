@@ -195,6 +195,8 @@ public class Cell @JvmOverloads constructor(
         /** The contract version the refusal history was collected under: an amendment may change masks and ceilings (D-358). */
         private var refusedUnder = -1
         private var lastProgressTurn = 0
+        /** D-366: signatures of every finished `run`/`verify` of the cell; a repeat with the same result is not new information. */
+        private val seenResults = HashSet<CallSignature>()
         private var requiredOp: String? = null
         private var refusals = 0
         private val touched = LinkedHashSet<String>()
@@ -465,6 +467,7 @@ public class Cell @JvmOverloads constructor(
             val after = reconcile("turn $turn")
             val gauge = gauge(currencies(after.candidateId))
             var liveRunOutput = false
+            val worked = ArrayList<Pair<ToolCall, ToolOutcome>>()
             val editedPaths = LinkedHashSet<String>()
             // §7.4 impact nudge: each edited file's bytes before this turn's batch, and the refs looks emitted after its last edit.
             val batchBefore = LinkedHashMap<String, ByteArray>()
@@ -486,6 +489,7 @@ public class Cell @JvmOverloads constructor(
                 appendResult(call.providerCallId, text, isError = outcome == null, label = label(call, outcome), resultClass = ResultClass.of(call.name), alias = alias)
                 journalResult(call.providerCallId, outcome?.header?.line() ?: text.lineSequence().first(), refs)
                 if (outcome == null) return
+                worked += call to outcome
                 // D-358: a `run` the executor denied by policy (read-only role, ceiling, execution mode, D-class without intent)
                 // is a refusal the same call cannot get past: it joins the refusal loop, not the ordinary loop, so the third
                 // identical denial ends the cell blocked instead of nudging twice per turn until the budget is spent.
@@ -590,7 +594,10 @@ public class Cell @JvmOverloads constructor(
             val currenciesNow = currencies(stampNow.candidateId)
             uncertified = outstanding(currenciesNow)
             val certifiedAfter = certified(currenciesNow)
-            if (Progress.events(registerBefore, register, turn, certifiedBefore, certifiedAfter).isNotEmpty()) lastProgressTurn = turn
+            val work = Progress.work(turn, worked, seenResults)
+            worked.filter { (call, outcome) -> (call.family == ToolFamily.Run || call.family == ToolFamily.Verify) && Progress.finished(outcome) }
+                .forEach { (call, outcome) -> seenResults += CallSignature.of(call, outcome) }
+            if (work.isNotEmpty() || Progress.events(registerBefore, register, turn, certifiedBefore, certifiedAfter).isNotEmpty()) lastProgressTurn = turn
             val completionEvidence = if (proposal && implementingCompletion && dispatchRefusal == null)
                 ctx.completionEvidence?.invoke(flags.values.toList()) else null
             completionEvidence?.flags?.forEach { flag -> flags[flag.path] = flag }

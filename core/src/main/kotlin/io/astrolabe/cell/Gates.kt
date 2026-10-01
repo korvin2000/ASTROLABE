@@ -22,7 +22,7 @@ import io.astrolabe.verify.TestIntegrityFlag
 import io.astrolabe.verify.Verdict
 import kotlin.math.ceil
 
-/** The five progress events of §5.6: what distinguishes work from a stall. */
+/** The progress events of §5.6, plus the turn's work (D-366): what distinguishes work from a stall. */
 public enum class ProgressKind {
     /** A plan step ticked `[x]` on an evidence id or a green `accept:` (the validator admits no other tick). */
     EvidenceTick,
@@ -38,6 +38,12 @@ public enum class ProgressKind {
 
     /** A new dead end recorded with scope and reopen condition. */
     DeadEnd,
+
+    /** D-366: an edit batch applied — the world changed. */
+    EditApplied,
+
+    /** D-366: a finished `run`/`verify` whose `(tool, args, result)` signature is new in this cell — new information. */
+    NewResult,
 }
 
 /** One progress event: [kind], the [turn] it happened in and the register or acceptance item it refers to. */
@@ -74,6 +80,34 @@ public object Progress {
         after.deadEnds.filter { it.n !in deadEndsBefore }.forEach { out += ProgressEvent(ProgressKind.DeadEnd, turn, "dead end ${it.n}") }
         return out
     }
+
+    /**
+     * D-366: the turn's work as progress, from its executed calls in emitted order — an applied edit batch, or a
+     * finished `run`/`verify` whose [CallSignature] is in neither [seen] (the cell's earlier finished runs) nor earlier
+     * in [executed]. A repeat of the same command with the same result, a still-running or policy-denied run and reads
+     * are not progress. The caller adds this turn's run and verify signatures to its seen set afterwards.
+     */
+    @JvmStatic
+    public fun work(turn: Int, executed: List<Pair<ToolCall, ToolOutcome>>, seen: Set<CallSignature>): List<ProgressEvent> {
+        val out = ArrayList<ProgressEvent>()
+        val now = HashSet<CallSignature>()
+        for ((call, outcome) in executed) {
+            when (call.family) {
+                ToolFamily.Edit -> if (outcome.applied) out += ProgressEvent(ProgressKind.EditApplied, turn, "op ${call.opId}")
+                ToolFamily.Run, ToolFamily.Verify -> {
+                    if (!finished(outcome)) continue
+                    val signature = CallSignature.of(call, outcome)
+                    if (signature !in seen && now.add(signature)) out += ProgressEvent(ProgressKind.NewResult, turn, "op ${call.opId}")
+                }
+                else -> Unit
+            }
+        }
+        return out
+    }
+
+    /** A `run`/`verify` outcome that carries a result: neither a live handle nor a policy denial. */
+    @JvmStatic
+    public fun finished(outcome: ToolOutcome): Boolean = outcome.header?.runtime?.status.let { it != "running" && it != "denied" }
 
     private fun normalize(text: String): String = text.trim().lowercase().replace(Regex("\\s+"), " ")
 }
@@ -149,7 +183,7 @@ public data class GateState @JvmOverloads constructor(
     val signatures: List<CallSignature> = emptyList(),
     /** The turn's register patch when the validator refused it. */
     val patchRejection: Validation.Rejected? = null,
-    /** The turn of the last progress event; 0 when none since cell start. */
+    /** The turn of the last progress event or work ([Progress.work], D-366); 0 when none since cell start. */
     val lastProgressTurn: Int = 0,
     /** A run handle is live and produced output this turn: work, not a stall (§5.6). */
     val liveRunOutput: Boolean = false,
@@ -374,7 +408,7 @@ public class Gates(gates: List<Gate>) {
         }
     }
 
-    // §5.6 Stall: every stallTurns turns without a progress event (the key counts the periods); live build output is work.
+    // §5.6 Stall: every stallTurns turns without progress (D-366: applied edits and new run results count; the key counts the periods); live build output is work.
     private object Stall : Gate {
         override val name: String get() = STALL
 

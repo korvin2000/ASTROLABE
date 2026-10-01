@@ -32,7 +32,7 @@ All numbers are declared defaults for the first evaluation round, not derived op
 | `θ` risk threshold for early slow checks | 40 | `Σ Δlines·(1+log2(1+fanin))` `[C1 §6]` |
 | Full-suite cadence | every 5 verified increments and at campaign end | |
 | Reserves | cell: verification 15 % + recovery/persist 5 % of tokens and turns; campaign: recovery 10 % | unspendable elsewhere; raised to known check costs before start `[B §11.6]` |
-| Stall / loop / repeated signature / doom-loop guard | 3 turns / 2 identical / 2 repairs / 3 same calls | |
+| Stall / loop / repeated signature / doom-loop guard | 5 turns (D-366) / 2 identical / 2 repairs / 3 same calls | an applied edit batch or a new run result is progress (D-366) |
 | Probe cell | 15 turns / 40K tokens, medium tier | |
 | Review cell | ≤ 10 `look` / 30K tokens (increment), 60K (campaign); high tier for contract, design, campaign scope | |
 | Repair helper / substantive attempts per increment / delegation depth / parallel cells | 2 repair calls / 2 total (initial + one alternative) / 1 writers, 2 probes / 3 (S3 off by default) | |

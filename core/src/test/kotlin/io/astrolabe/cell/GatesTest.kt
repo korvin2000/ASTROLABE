@@ -35,7 +35,11 @@ import io.astrolabe.register.Validation
 import io.astrolabe.tool.Args
 import io.astrolabe.tool.EditArgs
 import io.astrolabe.tool.EditOpArgs
+import io.astrolabe.tool.Effects
+import io.astrolabe.tool.EnvelopeHeader
 import io.astrolabe.tool.LookArgs
+import io.astrolabe.tool.RunArgs
+import io.astrolabe.tool.RuntimeFields
 import io.astrolabe.tool.ToolCall
 import io.astrolabe.tool.ToolFamily
 import io.astrolabe.tool.ToolOutcome
@@ -72,6 +76,7 @@ class GatesTest {
         GateState(turn, register, contract, increment, fired = fired, lastProgressTurn = if (turn > 1) turn - 1 else 0, turnsMax = 40)
 
     private fun edit(opId: Int = 1) = ToolCall(opId, "c$opId", ToolFamily.Edit, "create", Args.Edit(EditArgs(listOf(EditOpArgs(create = "src/a.py", content = "x")), "add")), buildJsonObject { put("why", "add") })
+    private fun run(opId: Int = 1) = ToolCall(opId, "c$opId", ToolFamily.Run, "run", Args.Run(RunArgs(argv = listOf("pytest", "-q"))), buildJsonObject { put("argv", "pytest -q") })
     private fun look(opId: Int = 1) = ToolCall(opId, "c$opId", ToolFamily.Look, "read", Args.Look(LookArgs("read", "src/a.py")), buildJsonObject { put("what", "read") })
     private fun signature(body: String) = CallSignature.of(look(), ToolOutcome(body))
 
@@ -129,22 +134,56 @@ class GatesTest {
     }
 
     @Test
-    fun `stall fires every three idle turns, resets on progress and yields to a live build`() {
+    fun `stall fires every five idle turns, resets on progress and yields to a live build`() {
         val reports = turns(
-            state(3).copy(lastProgressTurn = 1),
-            state(4).copy(lastProgressTurn = 1),
             state(5).copy(lastProgressTurn = 1),
+            state(6).copy(lastProgressTurn = 1),
             state(7).copy(lastProgressTurn = 1),
-            state(8).copy(lastProgressTurn = 1),
-            state(10).copy(lastProgressTurn = 1),
-            state(10).copy(lastProgressTurn = 10),
-            state(13).copy(lastProgressTurn = 10, liveRunOutput = true),
-            state(13).copy(lastProgressTurn = 10),
+            state(11).copy(lastProgressTurn = 1),
+            state(12).copy(lastProgressTurn = 1),
+            state(16).copy(lastProgressTurn = 1),
+            state(16).copy(lastProgressTurn = 16),
+            state(21).copy(lastProgressTurn = 16, liveRunOutput = true),
+            state(21).copy(lastProgressTurn = 16),
         )
         assertEquals(listOf(0, 1, 0, 1, 0, 1, 0, 0, 1), reports.map { it.nudges.count { n -> n.key.gate == Gates.STALL } })
-        assertEquals("stall: 3 turns without progress — re-read the plan · zoom out · run the pending decision probe · surface the blocker · or request a probe cell", reports[1].nudges.single().line)
-        assertEquals("stall: 9 turns without progress — re-read the plan · zoom out · run the pending decision probe · surface the blocker · or request a probe cell", reports[5].nudges.single().line)
-        assertEquals(1, gates.evaluate(state(3).copy(lastProgressTurn = 0)).nudges.size, "no progress since cell start counts from turn 0")
+        assertEquals("stall: 5 turns without progress — re-read the plan · zoom out · run the pending decision probe · surface the blocker · or request a probe cell", reports[1].nudges.single().line)
+        assertEquals("stall: 15 turns without progress — re-read the plan · zoom out · run the pending decision probe · surface the blocker · or request a probe cell", reports[5].nudges.single().line)
+        assertEquals(1, gates.evaluate(state(5).copy(lastProgressTurn = 0)).nudges.size, "no progress since cell start counts from turn 0")
+    }
+
+    @Test
+    fun `an applied edit and a new run result are progress, a repeated identical run and reads are not`() {
+        fun header(status: String) = EnvelopeHeader("#1", "run", null, emptyMap(), null, false, Effects.None, runtime = RuntimeFields("a1", status, null, null, null, "complete"))
+        val pytest = run(2)
+        val applied = edit() to ToolOutcome("applied", applied = true)
+        val failedEdit = edit() to ToolOutcome("anchor not found")
+        val red = pytest to ToolOutcome("1 failed", header("failed"))
+        val green = pytest to ToolOutcome("1 passed", header("ok"))
+        val read = look() to ToolOutcome("def total(): ...")
+
+        assertEquals(listOf(ProgressEvent(ProgressKind.EditApplied, 3, "op 1")), Progress.work(3, listOf(applied, read), emptySet()))
+        assertEquals(listOf(ProgressEvent(ProgressKind.NewResult, 3, "op 2")), Progress.work(3, listOf(red, red), emptySet()), "the same result twice in one turn is one piece of news")
+        val seen = setOf(CallSignature.of(red.first, red.second))
+        assertEquals(emptyList(), Progress.work(4, listOf(red), seen), "the same command with the same result is not new information")
+        assertEquals(listOf(ProgressEvent(ProgressKind.NewResult, 4, "op 2")), Progress.work(4, listOf(green), seen), "the same command with a new result is")
+        assertEquals(emptyList(), Progress.work(4, listOf(read, failedEdit), emptySet()), "reads and an edit that did not apply are not progress")
+        assertEquals(emptyList(), Progress.work(4, listOf(pytest to ToolOutcome("started", header("running")), pytest to ToolOutcome("denied", header("denied"))), emptySet()), "a live handle or a denial is no result")
+
+        // Through the gate: work keeps lastProgressTurn moving, so a cell that edits and tests never stalls; reads alone do.
+        var last = 0
+        var seenRuns = emptySet<CallSignature>()
+        var fired = emptySet<GateKey>()
+        val week = listOf(listOf(read), listOf(applied), listOf(read), listOf(red), listOf(read), listOf(read), listOf(red), listOf(read), listOf(read), listOf(read), listOf(read))
+        val stalls = week.mapIndexed { index, executed ->
+            val turn = index + 1
+            if (Progress.work(turn, executed, seenRuns).isNotEmpty()) last = turn
+            seenRuns = seenRuns + executed.filter { it.first.family == ToolFamily.Run }.map { CallSignature.of(it.first, it.second) }
+            val report = gates.evaluate(state(turn).copy(lastProgressTurn = last, fired = fired))
+            fired = report.fired
+            report.nudges.count { it.key.gate == Gates.STALL }
+        }
+        assertEquals(listOf(0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0), stalls, "progress at turns 2 and 4; the repeated run at 7 is not; the stall fires at 4 + 5")
     }
 
     @Test
@@ -154,7 +193,7 @@ class GatesTest {
             Decision(2, "keep the cache", "cheap", null, probe = "pytest -k cache", adrCandidate = true),
             Decision(3, "rename helper", "clarity", null),
         )
-        val line = gates.evaluate(state(4, register.copy(decisions = decisions)).copy(lastProgressTurn = 1)).nudges.single().line
+        val line = gates.evaluate(state(6, register.copy(decisions = decisions)).copy(lastProgressTurn = 1)).nudges.single().line
         assertTrue(line.contains("run the pending decision probe (decision 2: pytest -k cache) · surface the blocker"), line)
     }
 

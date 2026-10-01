@@ -64,7 +64,7 @@ public data class Defaults(
     val reserveRecoveryAndPersist: Double = 0.05,
     val campaignRecoveryReserve: Double = 0.10,
     // Stall / loop / repeated signature / doom-loop guard
-    val stallTurns: Int = 3,
+    val stallTurns: Int = 5,
     val loopIdentical: Int = 2,
     val repeatedSignatureRepairs: Int = 2,
     val doomLoopSameCalls: Int = 3,
