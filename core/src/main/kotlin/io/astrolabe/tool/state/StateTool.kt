@@ -113,19 +113,21 @@ public class StateTool(
     }
 
     private fun patch(args: StateArgs, context: TurnContext): ToolOutcome {
-        val parsed = when (val p = PatchParser.parse(args.patch.orEmpty(), opResults)) {
+        var notes: List<String> = emptyList()
+        val parsed = when (val p = PatchParser.parse(args.patch.orEmpty(), opResults, validation)) {
             is ParsedPatch.Invalid -> {
                 lastRejection = validator.schemaRejection(register, kotlinx.serialization.json.JsonArray(args.patch.orEmpty()).toString(), p.reason)
                 return result("rejected", "STATE v${register.version} unchanged · rejected: schema — ${p.reason}")
             }
-            is ParsedPatch.Valid -> p.patch
+            is ParsedPatch.Valid -> p.patch.also { notes = p.notes }
         }
+        val noted = notes.joinToString("") { "\nnote: $it" }
         return when (val validation = validator.check(register, parsed, validation)) {
             is Validation.Rejected -> {
                 lastRejection = validation
                 result(
                     "rejected",
-                    "STATE v${register.version} unchanged · rejected: ${validation.rule} — ${validation.detail} · register ${validation.sizes.registerTokens}/${validation.sizes.registerCapTokens} tokens · patch ${validation.sizes.patchTokens}/${validation.sizes.patchCapTokens} tokens",
+                    "STATE v${register.version} unchanged · rejected: ${validation.rule} — ${validation.detail} · register ${validation.sizes.registerTokens}/${validation.sizes.registerCapTokens} tokens · patch ${validation.sizes.patchTokens}/${validation.sizes.patchCapTokens} tokens$noted",
                 )
             }
             is Validation.Applied -> {
@@ -138,6 +140,7 @@ public class StateTool(
                 lines += "STATE v${next.version} · applied ${validation.appliedOps.size} op${if (validation.appliedOps.size == 1) "" else "s"} · register ${validation.sizes.registerTokens}/${validation.sizes.registerCapTokens} tokens"
                 validation.dropped.forEach { d -> lines += "⟨dropped ${d.op::class.simpleName?.lowercase()}: if ${d.condition} not met⟩" }
                 validation.flags.forEach { lines += "flag: $it" }
+                notes.forEach { lines += "note: $it" }
                 result("ok", lines.joinToString("\n"), applied = true)
             }
         }

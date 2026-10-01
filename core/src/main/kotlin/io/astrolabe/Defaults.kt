@@ -38,7 +38,7 @@ public data class Defaults(
     // D-270: the digest cap grows per requirement up to a ceiling; 0 per requirement pins [digestCapTokens]
     val digestTokensPerRequirement: Int = 8,
     val digestCapCeilingTokens: Int = 2_000,
-    val patchCapTokens: Int = 400,
+    val patchCapTokens: Int = 1_200,
     // Fact line / note body / note summary
     val factLineMaxChars: Int = 240,
     val noteBodyMaxTokens: Int = 120,

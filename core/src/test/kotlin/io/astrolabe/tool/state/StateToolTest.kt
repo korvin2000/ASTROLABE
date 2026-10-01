@@ -11,6 +11,7 @@ import io.astrolabe.fixtures.FixedIdGen
 import io.astrolabe.fixtures.TempRepo
 import io.astrolabe.id.AttemptId
 import io.astrolabe.id.ContextId
+import io.astrolabe.id.FileVersion
 import io.astrolabe.id.Identities
 import io.astrolabe.id.WorkId
 import io.astrolabe.provider.ToolCall as ProviderCall
@@ -52,8 +53,14 @@ class StateToolTest {
     private val clock = FakeClock.at("2026-09-20T10:00:00Z")
     private val ids = Identities(WorkId("W-1"), AttemptId("a1"), context = ContextId("cell-1"))
 
-    private class Ctx(val evidence: Set<String> = emptySet(), val green: Set<Int> = emptySet(), val applied: Set<Int> = emptySet()) : ValidationContext {
+    private class Ctx(
+        val evidence: Set<String> = emptySet(),
+        val green: Set<Int> = emptySet(),
+        val applied: Set<Int> = emptySet(),
+        val versions: Map<String, List<FileVersion>> = emptyMap(),
+    ) : ValidationContext {
         override fun evidenceExists(id: String): Boolean = id in evidence
+        override fun knownVersions(path: String): Collection<FileVersion> = versions[path].orEmpty()
         override fun acceptGreen(accept: String): Boolean = false
         override val redChecks: Set<String> = emptySet()
         override val greenOps: Set<Int> get() = green
@@ -128,7 +135,7 @@ class StateToolTest {
         assertEquals("rejected", status(rejected))
         assertFalse(rejected.applied)
         assertTrue(rejected.body.startsWith("STATE v1 unchanged · rejected: v needs an existing evidence id — "), rejected.body)
-        assertTrue(Regex("register \\d+/1200 tokens · patch \\d+/400 tokens").containsMatchIn(rejected.body), rejected.body)
+        assertTrue(Regex("register \\d+/1200 tokens · patch \\d+/1200 tokens").containsMatchIn(rejected.body), rejected.body)
         assertEquals(before, tool.register, "nothing applied")
         assertNull(SqliteRegisterVersions(store, clock).get(ids.context!!, 2))
 
@@ -138,9 +145,43 @@ class StateToolTest {
         assertTrue(schema.body.contains("rejected: schema — op 1: malformed condition 'sometime'"), schema.body)
         val twoKeys = run("""{"op":"patch","patch":[{"plan.add":"a","next":"b"}]}""")
         assertTrue(twoKeys.body.contains("needs exactly one op key"), twoKeys.body)
-        val unknownField = run("""{"op":"patch","patch":[{"plan.add":{"text":"a","colour":"red"}},{"next":"n"}]}""")
-        assertTrue(unknownField.body.contains("rejected: schema — op 1 (plan.add)"), unknownField.body)
+        val unknownOp = run("""{"op":"patch","patch":[{"plan.add":"a"},{"plan.remove":1}]}""")
+        assertTrue(unknownOp.body.contains("rejected: schema — op 2: unknown op 'plan.remove'"), unknownOp.body)
         assertEquals(before, tool.register)
+    }
+
+    @Test
+    fun `unknown keys of a known op are ignored and named, several evidence ids resolve one by one, and short anchor hashes resolve`() = runTest {
+        run("""{"op":"patch","patch":[{"plan.add":"a"},{"plan.add":"b"},{"next":"go"}]}""")
+        val shown = FileVersion.of("x = 1\n".toByteArray())
+        val other = FileVersion.of("x = 2\n".toByteArray())
+        tool.validation = Ctx(evidence = setOf("#35", "#36", "#37", "#7"), versions = mapOf("src/x.py" to listOf(shown, other)))
+        tool.opResults = mapOf(4 to "#7")
+
+        val ignored = run("""{"op":"patch","patch":[{"open.add":{"text":"CLI path?","evidence":"#35"}},{"plan.tick":1,"evidence":"#35","colour":"red"}]}""")
+        assertEquals("ok", status(ignored), ignored.body)
+        assertEquals("CLI path?", tool.register.open.single().text)
+        assertTrue(ignored.body.contains("note: op 1 (open.add): ignored 'evidence' — form: open.add{text, trip?, needs?}"), ignored.body)
+        assertTrue(ignored.body.contains("note: op 2 (plan.tick): ignored 'colour'"), ignored.body)
+
+        val several = run("""{"op":"patch","patch":[{"fact.add":{"kind":"v","text":"rounding is half-up","evidence":"#35 #36 #37"}},{"fact.add":{"kind":"v","text":"ctx flows","evidence":["op:4","#36"]}},{"plan.tick":{"n":2,"evidence":"#36,#37"}}]}""")
+        assertEquals("ok", status(several), several.body)
+        assertEquals(listOf("#35", "#7"), tool.register.facts.map { it.evidenceId })
+        assertEquals("#36", tool.register.step(2)!!.evidence)
+        assertTrue(several.body.contains("note: op 1 (fact.add): one evidence slot — kept #35, also cited #36 #37"), several.body)
+        val unresolved = run("""{"op":"patch","patch":[{"fact.add":{"kind":"h","text":"x","evidence":"#35 #99"}}]}""")
+        assertEquals("rejected", status(unresolved))
+        assertTrue(unresolved.body.contains("evidence '#99' is not a stored result"), unresolved.body)
+        val prose = run("""{"op":"patch","patch":[{"fact.add":{"kind":"h","text":"y","evidence":"the pytest run above"}}]}""")
+        assertEquals("ok", status(prose), "evidence text that names no ids stays one string: ${prose.body}")
+
+        val facts = tool.register.facts.size
+        val anchored = run("""{"op":"patch","patch":[{"fact.add":{"kind":"h","text":"a","anchor":{"path":"src/x.py","version":"${shown.hash8.take(6)}","line":1}}},{"fact.add":{"kind":"h","text":"b","anchor":{"path":"src/x.py","version":"-"}}},{"fact.add":{"kind":"h","text":"c","anchor":{"path":"src/x.py","version":"0000"}}},{"fact.add":{"kind":"h","text":"d","anchor":{"path":"src/x.py","version":"@${other.digest.hex.uppercase()}"}}}]}""")
+        assertEquals("ok", status(anchored), anchored.body)
+        val added = tool.register.facts.drop(facts)
+        assertEquals(listOf(shown, null, null, other), added.map { it.anchor?.version })
+        assertTrue(anchored.body.contains("note: op 2 (fact.add): anchor src/x.py version '-' is not a content hash; fact kept without an anchor"), anchored.body)
+        assertTrue(anchored.body.contains("note: op 3 (fact.add): anchor src/x.py @0000 matches 0 known versions; fact kept without an anchor"), anchored.body)
     }
 
     @Test

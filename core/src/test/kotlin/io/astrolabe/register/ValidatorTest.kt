@@ -72,7 +72,10 @@ class ValidatorTest {
         assertEquals("line ≤ 240 chars", rejected(validator.check(ready, Patch.of(Op.FactAdd(ClaimKind.Hypothesis, "x".repeat(241)), Op.Next("n")), Ctx())))
         assertEquals("no fenced code", rejected(validator.check(ready, Patch.of(Op.FactAdd(ClaimKind.Hypothesis, "```py\nx```"), Op.Next("n")), Ctx())))
         assertEquals("exactly one [>]", rejected(validator.check(ready.copy(plan = ready.plan.map { it.copy(mark = Mark.Cursor) }), Patch.of(Op.PlanAdd("c"), Op.Next("n")), Ctx())))
-        assertEquals("patch cap", rejected(validator.check(ready, Patch.of(Op.FactAdd(ClaimKind.Hypothesis, "w ".repeat(120)), Op.FactAdd(ClaimKind.Hypothesis, "w ".repeat(120)), Op.FactAdd(ClaimKind.Hypothesis, "w ".repeat(120)), Op.FactAdd(ClaimKind.Hypothesis, "w ".repeat(120)), Op.FactAdd(ClaimKind.Hypothesis, "w ".repeat(120)), Op.FactAdd(ClaimKind.Hypothesis, "w ".repeat(120)), Op.Next("n")), Ctx())))
+        val facts = Array<Op>(20) { Op.FactAdd(ClaimKind.Hypothesis, "w ".repeat(120)) }
+        assertEquals("patch cap", rejected(validator.check(ready, Patch.of(*facts, Op.Next("n")), Ctx())))
+        val six = validator.check(ready, Patch.of(*facts.copyOf(6).requireNoNulls(), Op.Next("n")), Ctx())
+        assertTrue(six is Validation.Applied && six.sizes.patchTokens > 400, "D-365: a patch over the old 400-token cap applies: $six")
         assertEquals("unknown step", rejected(validator.check(ready, Patch.of(Op.PlanCursor(9), Op.Next("n")), Ctx())))
         assertEquals(1, ready.version, "rejections never change the register")
     }

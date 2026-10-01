@@ -13,6 +13,9 @@ public interface ValidationContext {
     /** Unknown versions are conservative: an anchored fact cannot claim current evidence. */
     public fun currentVersion(path: String): io.astrolabe.id.FileVersion? = null
 
+    /** Versions of [path] the model may have been shown; a short anchor hash resolves against them (D-365). */
+    public fun knownVersions(path: String): Collection<io.astrolabe.id.FileVersion> = listOfNotNull(currentVersion(path))
+
     /** True when the step's `accept:` is green at the current version. */
     public fun acceptGreen(accept: String): Boolean
 
@@ -49,7 +52,7 @@ public sealed interface Validation {
 public class Validator(
     private val estimator: TokenEstimator,
     private val registerCapTokens: Int = 1_200,
-    private val patchCapTokens: Int = 400,
+    private val patchCapTokens: Int = 1_200,
     private val factLineMaxChars: Int = 240,
     private val referenceMaxChars: Int = 1_000,
 ) {
