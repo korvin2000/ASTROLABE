@@ -19,7 +19,7 @@ import io.astrolabe.provider.Role as ItemRole
  * line is a harness change that takes effect at an attempt boundary (invariant 12).
  */
 public object Kernel {
-    public const val VERSION: String = "kernel/1"
+    public const val VERSION: String = "kernel/2"
 
     /** The three evidence lines §4.3 requires verbatim in `[S]`; line 3 below states the same rule. */
     public val evidenceLines: List<String> = listOf(
@@ -39,7 +39,9 @@ public object Kernel {
         "Exit 0 proves that this invocation succeeded, nothing more. An empty search in a limited scope is " +
             "not absence. \"Pre-existing failure\" requires a baseline receipt. A diff is a fact; a summary " +
             "is a claim.",
-        "Never wrap tests in `|| true` or `|| echo`; run invocations separately or aggregate status explicitly.",
+        "`run` argv starts a program directly, without a shell; a missing program is reported as not found — check the " +
+            "host block in the repository prime before concluding a tool is absent. Never wrap tests in `|| true` or " +
+            "`|| echo`; run invocations separately or aggregate status explicitly.",
         "Before editing across a module boundary, name the fact you are missing — caller, contract, config, " +
             "fixture, test — and look for that, not for more similar snippets. Use `look(impact)` before a " +
             "change with many references. Record unknown edges in Open instead of inventing them.",
@@ -65,7 +67,12 @@ public object Kernel {
             "green. Do not loop to manufacture green.",
         "Be terse: one intent line per turn; do not restate results; update STATE with typed ops; the anchor " +
             "is rendered for you — never re-emit it.",
+        LANGUAGE,
     )
+
+    /** D-366: the user reads the final summary in their own language; every role shares this line ([RoleTexts.shared]). */
+    public const val LANGUAGE: String = "Write everything the user reads — the final summary, questions, blockers — in the " +
+        "language of the user's request; tool arguments and STATE stay as they are."
 
     /** The numbered contract, one line per rule. */
     @JvmStatic

@@ -12,7 +12,7 @@ import io.astrolabe.id.Digest
  * requirement complete ([violations]).
  */
 public object RoleTexts {
-    public const val VERSION: String = "role-texts/1"
+    public const val VERSION: String = "role-texts/2"
 
     @JvmField
     public val probe: List<String> = listOf(
@@ -67,9 +67,9 @@ public object RoleTexts {
         PacketKind.NoteCandidates to "CandidatePacket.completion",
     )
 
-    /** Kernel lines every role shares: the harness and its only oracle (line 1) and the data rule (line 11). */
+    /** Kernel lines every role shares: the harness and its only oracle (line 1), the data rule (line 11) and the user's language (D-366). */
     @JvmField
-    public val shared: List<String> = listOf(Kernel.lines[0], Kernel.lines[10])
+    public val shared: List<String> = listOf(Kernel.lines[0], Kernel.lines[10], Kernel.LANGUAGE)
 
     // D-161: wording that would hand a role authority or a completion it does not have.
     private val FORBIDDEN: List<Pair<Regex, String>> = listOf(
