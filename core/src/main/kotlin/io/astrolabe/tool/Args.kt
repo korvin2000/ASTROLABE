@@ -15,7 +15,7 @@ import kotlinx.serialization.json.JsonPrimitive
 public data class LookArgs(
     val what: String,
     val target: String? = null,
-    val budget: Int = 1_500,
+    val budget: Int = 4_000,
     val near: String? = null,
     val glob: String? = null,
     @SerialName("in") val scope: String = "workspace",
@@ -106,6 +106,11 @@ public data class EditOpArgs(
  * the schema refuses it by name. Then a call without `op` gets `op` = the one of `patch`, `blocked`, `retrieval_miss`
  * that it carries; with none or several present (or an `op` already given) nothing is added.
  * A `patch`/`ops` string that opens like JSON (`[` or `{`) but does not parse is refused with the parser's own message.
+ *
+ * D-365: an `edit` whose op fields sit at the top level is one op — without `ops` they become `ops: [that op]`; with
+ * `ops` holding exactly one op that lacks them, a top-level `expect`/`if` moves into it; any other mix is refused naming
+ * the accepted form. `hunks` sent as a JSON string holding an array is parsed like `ops`. A `look` `id` sent as a
+ * number is that number as text.
  */
 internal object InputTolerance {
     /** The fields each edit form owns (§5.4); every other known field is a placeholder when empty. */
@@ -134,9 +139,29 @@ internal object InputTolerance {
     private val json = Json { ignoreUnknownKeys = false }
 
     fun normalise(family: ToolFamily, raw: JsonObject): JsonObject = when (family) {
-        ToolFamily.Edit -> raw.mapValue("ops") { ops -> parsedArray("ops", ops).let { if (it is JsonArray) JsonArray(it.map(::editOp)) else it } }
+        ToolFamily.Edit -> lifted(raw.mapValue("ops") { parsedArray("ops", it) }).mapValue("ops") { ops -> if (ops is JsonArray) JsonArray(ops.map(::editOp)) else ops }
         ToolFamily.State -> withInferredOp(unglued(raw.mapValue("patch") { parsedArray("patch", it) }))
+        ToolFamily.Look -> raw.mapValue("id") { id -> if (id is JsonPrimitive && !id.isString && id.content.toIntOrNull() != null) JsonPrimitive(id.content) else id }
         else -> raw
+    }
+
+    /** The fields a single op's top-level copy may hand to the one op of `ops`. */
+    private val LIFTABLE: Set<String> = setOf("expect", "if")
+
+    private const val EDIT_FORM: String =
+        "{\"ops\":[{\"path\":\"…\",\"expect\":\"…\",\"hunks\":[{\"anchor\":\"…\",\"new\":\"…\"}]}],\"why\":\"…\"} — every op field inside its op"
+
+    /** D-365: op fields at the top level of an `edit` call, moved into the one op they can belong to. */
+    private fun lifted(raw: JsonObject): JsonObject {
+        val loose = raw.filterKeys { it in EDIT_FIELDS }
+        if (loose.isEmpty()) return raw
+        val rest = raw.filterKeys { it !in EDIT_FIELDS }
+        val ops = raw["ops"] ?: return JsonObject(rest + ("ops" to JsonArray(listOf(JsonObject(loose)))))
+        val single = ((ops as? JsonArray)?.singleOrNull() as? JsonObject)
+        if (single == null || loose.keys.any { it !in LIFTABLE || single[it]?.let(::empty) == false }) {
+            throw IllegalArgumentException("top-level ${loose.keys.joinToString(", ") { "'$it'" }} beside ops${(ops as? JsonArray)?.let { " (${it.size} ops)" } ?: ""} has no single op to belong to; send $EDIT_FORM")
+        }
+        return JsonObject(rest + ("ops" to JsonArray(listOf(JsonObject(single + loose)))))
     }
 
     private fun JsonObject.mapValue(key: String, change: (JsonElement) -> JsonElement): JsonObject {
@@ -195,8 +220,9 @@ internal object InputTolerance {
         return JsonObject(raw + ("op" to JsonPrimitive(op)))
     }
 
-    private fun editOp(op: JsonElement): JsonElement {
-        if (op !is JsonObject) return op
+    private fun editOp(element: JsonElement): JsonElement {
+        if (element !is JsonObject) return element
+        val op = element.mapValue("hunks") { parsedArray("hunks", it) }
         val form = FORM_FIELDS.keys.filter { key -> op[key]?.let { !empty(it) } == true }.singleOrNull() ?: return op
         val own = FORM_FIELDS.getValue(form)
         val kept = op.filter { (key, value) -> key !in EDIT_FIELDS || key in own || !empty(value) }
