@@ -6,7 +6,7 @@ Rewritten every session (≤40 lines). Workflow: `CLAUDE.md` § Workflow. State 
 live Studio tasks took 40–48 turns and 30–50 minutes for simple requests. Cause: the launcher could not start `.cmd`
 shims, tools refused unambiguous calls, gates and the exit rule demanded ritual, snapshots re-read the tree. Owner
 directive: the harness helps the model; strictness stays at the acceptance boundary. Decisions **D-363–D-375**
-(TODO §3). Branch `fix/efficiency`, merged `--no-ff` from eleven worktree branches. P0–P6 remain 185/185 DONE.
+(TODO §3). Branch `fix/efficiency` (thirteen worktree branches, `--no-ff`) merged into `main` and pushed. P0–P6 remain 185/185 DONE.
 
 ## This session
 - D-363 Windows program resolution (`PATH`×`PATHEXT`, batch via `cmd /d /v:off /s /c`). D-364 `ContentCache` for
@@ -44,7 +44,7 @@ Gotcha: two Gradle runs in one checkout corrupt `build/test-results`; a shared d
 failures — trust the checkout's own XML. Worker agents ran in `.claude/worktrees/agent-*`.
 
 ## Last gate
-Full `./gradlew build` on Windows (JDK 26) at the branch tip: see `actual_state.md` § Last verification.
+Full `./gradlew build` on Windows (JDK 26) at the tip (2026-10-01): green, core 1831 tests. No CI run yet for D-363–D-375 (pushed to `main`, CI triggers on push).
 
 ## Blockers
 None. `gh` is not installed locally.
