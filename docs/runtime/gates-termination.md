@@ -24,7 +24,7 @@
 | No cursor / two cursors | register invariant | patch rejected with the rule |
 | Red not recorded | `[>]` advances while a verify line is red and no `Open` item references it | patch rejected |
 | Stale fact in Next | `Next` or a decision rests on an `h` or `v(stale)` fact | flagged risk line |
-| **Impact** `[C §9.3]` | a changed definition (signature, visibility, export) of a symbol with `fanin > 0` whose references were not inspected since the change | "impact: `Router.dispatch` signature changed; 6 references not inspected → look(refs) or scope the plan" |
+| **Impact** `[C §9.3]` | a changed definition (signature, visibility, export) of a symbol with `fanin > 0` whose references were not inspected since the change; never for a file the cell created (absent at its start), and at most 3 new nudges a turn — the rest are one summary line ("impact: … and N more: look(impact, paths)") and never exit obligations (D-366) | "impact: `Router.dispatch` signature changed; 6 references not inspected → look(refs) or scope the plan" |
 | **Contract touch** `[C §8.8]` | an edit set touches anchors of a `CON` note | "contract payments-api@7 touched: an ADR in the main line is required before this lands" |
 | **Repeated failure signature** `[C §8.8]` | same normalized error after 2 repairs | "same failure twice: change the hypothesis, record a dead end, or request an alternative attempt" |
 | Scope `[A §8.6]` | an edit touches a path outside `increment.write_scope` (inside contract scope) | allowed once with a warning; the second requires `task.propose(increment_split)` or a justification in `why` |

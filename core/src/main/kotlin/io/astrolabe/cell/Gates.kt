@@ -204,6 +204,8 @@ public data class GateState @JvmOverloads constructor(
     val unresolvedImpactNudges: List<String> = emptyList(),
     /** Changed definitions with `fanin > 0` whose references are not inspected yet (§5.6 Impact, §7.4). */
     val impactNudges: List<ImpactNudge> = emptyList(),
+    /** D-366: this turn's new impact nudges beyond the per-turn cap, summarised in one line; never exit obligations. */
+    val impactOverflow: List<ImpactNudge> = emptyList(),
     val fired: Set<GateKey> = emptySet(),
     val defaults: Defaults = Defaults(),
     /** Paths this turn's edits wrote inside the contract but outside the increment's write scope (§8.6). */
@@ -312,7 +314,7 @@ public class Gates(gates: List<Gate>) {
 
         override fun evaluate(state: GateState): List<GateOutcome> = state.impactNudges.map {
             GateOutcome.Nudge(GateKey(name, "${it.definition.path}::${it.definition.symbol}@${it.turn}"), it.line)
-        }
+        } + listOfNotNull(state.impactOverflow.takeIf { it.isNotEmpty() }?.let { GateOutcome.Nudge(GateKey(name, "overflow@${state.turn}"), ImpactNudges.summary(it)) })
     }
 
     // §5.6 Contract touch: an edit set touches anchors of a CON note; active once any CON note exists.

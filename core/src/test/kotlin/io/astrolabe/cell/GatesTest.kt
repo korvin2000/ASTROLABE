@@ -402,4 +402,29 @@ class GatesTest {
         assertEquals(emptyList(), ledger.unresolved)
         assertTrue(gates.evaluate(at(5, proposed = true)).outcomes.isEmpty(), "resolved: the exit gate passes")
     }
+
+    @Test
+    fun `impact skips files the cell created and caps new nudges at three a turn, the rest summarised and never binding the exit`() {
+        val before = (1..5).joinToString("") { "def f$it(x):\n    return x\n\n" }.toByteArray()
+        val after = (1..5).joinToString("") { "def f$it(x, y):\n    return x\n\n" }.toByteArray()
+        val scratch = DefinitionChanges.of("src/__probe__/old_env.py", "def env():\n    return 1\n\n\ndef name():\n    return 2\n".toByteArray(), null)
+        assertEquals(2, scratch.size, "deleting the scratch file removes both definitions")
+        val ledger = ImpactNudges()
+        ledger.changed(2, DefinitionChanges.of("src/api.py", before, after) + scratch, created = setOf("src/__probe__/old_env.py")) { 426 }
+
+        assertEquals(listOf("f1", "f2", "f3"), ledger.unresolved.map { it.definition.symbol }, "the cell's own scratch file raises nothing; three new nudges are kept")
+        assertEquals(listOf("f4", "f5"), ledger.overflow.map { it.definition.symbol })
+        val done = register.copy(plan = listOf(Step(1, Mark.Done, "round half-up", accept = "AC-1", evidence = "rcpt-1")))
+        val green = mapOf("CHK-accept-AC-1" to Currency("rcpt-1", Applicability.Current, eligible = true, green = true, reasons = emptyList()))
+        val turn2 = state(2, done).copy(currencies = green, impactNudges = ledger.unresolved, unresolvedImpactNudges = ledger.unresolvedPublic.map { it.missing }, impactOverflow = ledger.overflow)
+        val lines = gates.evaluate(turn2).nudges.filter { it.key.gate == Gates.IMPACT }.map { it.line }
+        assertEquals(4, lines.size, lines.toString())
+        assertEquals("impact: … and 2 more: look(impact, src/api.py)", lines.last())
+
+        val refused = assertIs<GateOutcome.Rejection>(gates.evaluate(turn2.copy(completionProposed = true)).rejections.single())
+        assertEquals(listOf("f1", "f2", "f3"), refused.details.map { it.substringAfter('`').substringBefore('`') }, "summarised nudges are not exit obligations")
+
+        ledger.changed(3, emptyList()) { 426 }
+        assertEquals(emptyList(), ledger.overflow, "the overflow is the last batch's only")
+    }
 }

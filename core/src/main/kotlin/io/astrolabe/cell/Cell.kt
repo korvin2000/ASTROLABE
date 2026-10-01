@@ -212,6 +212,8 @@ public class Cell @JvmOverloads constructor(
         private var reconciledTurn = 0
         private var occupancy: Occupancy? = null
         private var atlas = ws.atlas
+        /** D-366: the files the atlas listed at cell start; with the base stamp's members, what existed before the cell. */
+        private val baseFiles: Set<String> = ws.atlas.rows.mapTo(HashSet()) { it.path }
         private var rebuilds = 0
         private val rebuildNotes = ArrayList<String>()
 
@@ -564,8 +566,10 @@ public class Cell @JvmOverloads constructor(
             if (batchBefore.isNotEmpty()) {
                 val index = SymbolIndex(atlas)
                 val changes = batchBefore.flatMap { (path, bytes) -> DefinitionChanges.of(path, bytes, ws.registry.read(path)?.bytes) }
+                // D-366: a file absent at the cell's base is the cell's own; nothing outside can reference it yet.
+                val created = batchBefore.keys.filter { it !in baseFiles && base?.members?.containsKey(it) != true }.toSet()
                 // Fan-in outside the edited file: tier-0 lexical refs, which is also the no-index literal fallback (§7.4).
-                impact.changed(turn, changes) { c -> index.refs(c.symbol).references.count { it.path != c.path } }
+                impact.changed(turn, changes, created) { c -> index.refs(c.symbol).references.count { it.path != c.path } }
             }
             inspected.forEach(impact::inspected)
             impact.rescoped(registerBefore, register)
@@ -629,6 +633,7 @@ public class Cell @JvmOverloads constructor(
                 reserve = budget.verdict(outstanding(currenciesNow)), turnsMax = budget.turns, completionProposed = proposal,
                 currencies = currenciesNow, verdicts = validEvidence?.verdicts.orEmpty(), unavailable = validEvidence?.unavailable.orEmpty(), flags = gateFlags, fired = fired, defaults = defaults,
                 impactNudges = impact.unresolved, unresolvedImpactNudges = impact.unresolvedPublic.map { it.missing },
+                impactOverflow = if (batchBefore.isNotEmpty()) impact.overflow else emptyList(),
                 outsideIncrement = editedByEdit.filter { p -> contract.scope.covers(p) && increment.writeScope.none { PathPattern.matches(it, p) } },
                 surfaceFlags = flags.values.filter { it.path in editedPaths }, editedPaths = editedPaths.toSet(),
                 contractAnchors = (tools.kb as? KbTool)?.contractAnchors().orEmpty(), repeatedFailures = repeated, acceptance = acceptance,

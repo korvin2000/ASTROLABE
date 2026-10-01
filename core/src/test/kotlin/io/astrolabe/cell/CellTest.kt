@@ -327,6 +327,25 @@ class CellTest {
     }
 
     @Test
+    fun `deleting a scratch file the cell created raises no impact nudge`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val scratch = "def a():\n    return 0\n"
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("probe"), call("c1", "edit", """{"ops":[{"create":"src/scratch.py","content":${CellFixture.quote(scratch)}}],"why":"probe"}"""))),
+                Scripted.Reply(listOf(say("reading"), read("c2", "src/scratch.py"))),
+                Scripted.Reply(listOf(say("cleanup"), call("c3", "edit", """{"ops":[{"delete":"src/scratch.py","expect":"${io.astrolabe.id.Digest.of(scratch.toByteArray()).hex}"}],"why":"cleanup"}"""))),
+                Scripted.Reply(listOf(say("look"), tree("c4"))),
+                Scripted.Reply(listOf(say("look"), tree("c5"))),
+            )
+
+            f.run(model, turns = 5)
+
+            assertFalse(Files.exists(f.repo.resolve("src/scratch.py")), "the scratch file was deleted")
+            assertFalse(f.anchorText(4).contains("impact:"), f.anchorText(4))
+        }
+    }
+
+    @Test
     fun `leaving a step runs its accept check at the step boundary and the packet records what was not tested`() = runTest {
         val pass = javaClass.getResourceAsStream("/shaper/pytest-pass.txt")!!.use { String(it.readAllBytes(), Charsets.UTF_8) }
         CellFixture(stateRoot, files = CellFixture.DEFAULT_FILES + ("pytest_pass.txt" to pass)).use { f ->
