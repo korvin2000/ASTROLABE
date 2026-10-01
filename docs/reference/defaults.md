@@ -23,8 +23,8 @@ All numbers are declared defaults for the first evaluation round, not derived op
 | `k` eviction batch / `m` turns kept on rebuild | 8 / 6 (0 for role switch, alternative attempt and cell end) | ablation: batched vs pressure-only within short cells |
 | `R_max` total live results / `[A]` max | 16K / 2.5K tokens | explicit residency bound |
 | Immediate-stub threshold for stale reads | 800 tokens | [§5.3](../runtime/register-workset.md#sec-5-3) |
-| `look.budget` / `run.budget` | 1,500 / 1,200 tokens | shared across parallel looks in one turn |
-| Register cap / contract digest cap / patch cap | 1,200 / 150 (+8 per requirement, ceiling 2,000; 0 per requirement pins 150, D-270) / 400 tokens | acceptance lives in `[K]` |
+| `look.budget` / `run.budget` | 1,500 / 1,200 tokens (a `look` call without `budget` asks 4,000, D-365; the field sizes the compile reserve) | shared across parallel looks in one turn |
+| Register cap / contract digest cap / patch cap | 1,200 / 150 (+8 per requirement, ceiling 2,000; 0 per requirement pins 150, D-270) / 1,200 tokens (D-365) | acceptance lives in `[K]` |
 | Fact line / note body / note summary | ≤ 240 chars / ≤ 120 tokens / ≤ 200 chars | no code in facts |
 | Workset seeds per cell / KB injection / focus notes / focus zoom | ≤ 4K / ≤ 8 notes 1.5K (CON uncapped) / ≤ 300 / ≤ 300 tokens | |
 | Touched ledger in `[A]` | ≤ 10 files | rest via recall |

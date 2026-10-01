@@ -75,7 +75,7 @@ The economic inequality is not evaluated live per turn (its inputs are estimates
 
 ### 16.4 Session efficiency and output discipline `[A §16.2, §16.4; C §6.8]`
 
-Target shapes `[ESTIMATE, to be measured]`: cold start = 1 compile + 0–1 `look(tree/outline)` turns instead of ~10–15 exploration turns; hand edit + check = 1 turn; failed anchor = bounded diagnostic followed by correction on the next model turn; increment close = 1 verification turn (fused) + 0–1 review; boundary = 0 model turns when pre-compilation hits; continuation after a crash = 1 compile, 0 model turns lost. The anchor is input rendered by the harness; the model emits register *patches* and one intent line per turn; full rewrites are rejected above 400 tokens per patch. `[A]` is uncached every turn (~1.2–1.8K); over a 40-turn cell that is 50–70K tokens, accepted because the alternative reintroduces goal drift, and measured.
+Target shapes `[ESTIMATE, to be measured]`: cold start = 1 compile + 0–1 `look(tree/outline)` turns instead of ~10–15 exploration turns; hand edit + check = 1 turn; failed anchor = bounded diagnostic followed by correction on the next model turn; increment close = 1 verification turn (fused) + 0–1 review; boundary = 0 model turns when pre-compilation hits; continuation after a crash = 1 compile, 0 model turns lost. The anchor is input rendered by the harness; the model emits register *patches* and one intent line per turn; full rewrites are rejected above 1,200 tokens per patch (D-365). `[A]` is uncached every turn (~1.2–1.8K); over a 40-turn cell that is 50–70K tokens, accepted because the alternative reintroduces goal drift, and measured.
 
 ---
 <!-- end-source-section: 16.4 -->
