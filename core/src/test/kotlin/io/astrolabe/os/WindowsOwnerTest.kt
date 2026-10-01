@@ -10,6 +10,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 @EnabledOnOs(OS.WINDOWS)
@@ -100,14 +101,30 @@ class WindowsOwnerTest {
         assertEquals(2, failure.errorCode)
     }
 
+    @Test
+    fun `a child without PATH or PATHEXT resolves from its working directory and the default extensions only`(@TempDir root: Path) {
+        val bare = mapOf("SystemRoot" to System.getenv("SystemRoot"))
+        assertEquals(listOf(".COM", ".EXE", ".BAT", ".CMD"), WindowsOwner.pathExtensions(bare), "never the parent's PATHEXT")
+        assertNotNull(WindowsOwner.resolveFor("where", root, mapOf("PATH" to System.getenv("PATH"))))
+        assertNull(WindowsOwner.resolveFor("where", root, bare), "the parent's PATH is not the child's")
+
+        batch(root.resolve("tool-d375.cmd"), "echo local-only %~1")
+        val (exit, output) = run(root, listOf("tool-d375", "one"), bare, includeEssentials = false)
+        assertEquals(ProcStatus.Exited(0), exit, "log was: $output")
+        assertTrue(output.contains("local-only one"), "log was: $output")
+
+        val failure = assertFailsWith<OsFailure> { run(root, listOf("no-such-program-d375"), bare, includeEssentials = false) }
+        assertTrue(failure.message.orEmpty().contains("in the working directory (the child's environment has no PATH)"), "reason was: ${failure.message}")
+    }
+
     private fun batch(file: Path, vararg lines: String) {
         Files.writeString(file, (listOf("@echo off") + lines).joinToString("\r\n", postfix = "\r\n"))
     }
 
-    private fun run(directory: Path, argv: List<String>, extra: Map<String, String> = emptyMap()): Pair<ProcStatus, String> {
+    private fun run(directory: Path, argv: List<String>, extra: Map<String, String> = emptyMap(), includeEssentials: Boolean = true): Pair<ProcStatus, String> {
         val log = Files.createTempFile(directory, "child", ".log")
         LocalOs().use { os ->
-            val proc = os.spawn(SpawnSpec(Command.Argv(argv), directory, log, EnvPolicy(extra = extra)))
+            val proc = os.spawn(SpawnSpec(Command.Argv(argv), directory, log, EnvPolicy(extra = extra, includeEssentials = includeEssentials)))
             val status = os.awaitTerminal(proc).status
             return status to Files.readString(log)
         }

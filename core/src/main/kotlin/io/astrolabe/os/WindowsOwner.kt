@@ -202,19 +202,22 @@ internal class WindowsOwner(private val beforeAssignment: (Long) -> Unit = {}) :
     /**
      * CreateProcessW only appends `.exe` and searches the *parent's* directories, so `npm` (a
      * `.cmd` shim) never starts. The program is resolved the way `cmd.exe` would, against the
-     * child's working directory and the PATH/PATHEXT the child receives (D-363).
+     * child's working directory and the PATH/PATHEXT the child receives (D-363) — only those: a
+     * child without `PATH` is searched for in its working directory alone, and one without
+     * `PATHEXT` gets the system default (D-375).
      */
     private fun plan(command: Command, workingDirectory: Path, environment: Map<String, String>): Launch = when (command) {
         is Command.Shell -> Launch(null, shellLine(command.commandLine, ""), null)
         is Command.Argv -> {
             val program = command.argv.first()
             val extensions = pathExtensions(environment)
-            val resolved = resolveProgram(program, workingDirectory, variable(environment, "PATH"), extensions)
+            val searchPath = variable(environment, "PATH")
+            val resolved = resolveFor(program, workingDirectory, environment)
             when {
                 resolved != null && isBatch(resolved.toString()) -> Launch(null, batchLine(listOf(resolved.toString()) + command.argv.drop(1)), null)
                 resolved != null -> Launch(resolved.toString(), argvLine(command.argv), null)
                 isBatch(program) -> Launch(null, batchLine(command.argv), null)
-                else -> Launch(null, argvLine(command.argv), notFound(program, extensions))
+                else -> Launch(null, argvLine(command.argv), notFound(program, extensions, searchPath != null))
             }
         }
     }
@@ -298,20 +301,25 @@ internal class WindowsOwner(private val beforeAssignment: (Long) -> Unit = {}) :
             return null
         }
 
-        /** `PATHEXT` as the child sees it, else the parent's, else the system default. */
+        /** [resolveProgram] against the child's own `PATH` and `PATHEXT` in [environment], nothing of the parent's (D-375). */
+        internal fun resolveFor(program: String, workingDirectory: Path, environment: Map<String, String>): Path? =
+            resolveProgram(program, workingDirectory, variable(environment, "PATH"), pathExtensions(environment))
+
+        /** `PATHEXT` as the child sees it, else the system default; never the parent's (D-375). */
         internal fun pathExtensions(environment: Map<String, String>): List<String> =
             (variable(environment, "PATHEXT")?.takeIf { it.isNotBlank() } ?: DEFAULT_PATHEXT)
                 .split(';').map { it.trim() }.filter { it.length > 1 && it.startsWith('.') }
 
-        /** [name] in the child's block, compared case-insensitively like Windows does; the parent's value when absent. */
+        /** [name] in the child's block, compared case-insensitively like Windows does; `null` when the child has none. */
         private fun variable(environment: Map<String, String>, name: String): String? =
-            environment.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value ?: System.getenv(name)
+            environment.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value
 
         private fun isBatch(program: String): Boolean = program.lowercase().let { it.endsWith(".bat") || it.endsWith(".cmd") }
 
-        private fun notFound(program: String, extensions: List<String>): String {
+        private fun notFound(program: String, extensions: List<String>, hasPath: Boolean): String {
             val where = if (program.any { it == '/' || it == '\\' || it == ':' }) "relative to the working directory"
-            else "in the working directory or on PATH"
+            else if (hasPath) "in the working directory or on PATH"
+            else "in the working directory (the child's environment has no PATH)"
             return "'$program' was not found $where (PATHEXT ${extensions.joinToString(";")})"
         }
 
