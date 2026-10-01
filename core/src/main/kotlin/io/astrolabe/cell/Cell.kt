@@ -566,11 +566,11 @@ public class Cell @JvmOverloads constructor(
                 // D-366: a file absent at the cell's base is the cell's own; it is exempt only until a file the cell
                 // did not create imports it (an extracted module with a real caller is impact like any other). D-375: the
                 // atlas leaves a pre-existing dangling import unresolved until its next build, so a lexical mention of the
-                // module stem in a file the cell did not create also ends the exemption.
+                // module stem in a file the cell did not create also ends the exemption, declaring lines included.
                 val own = { path: String -> path !in baseFiles && base?.members?.containsKey(path) != true }
                 val created = batchBefore.keys.filter { path ->
                     own(path) && atlas.importers(path).all(own) &&
-                        index.refs(path.substringAfterLast('/').substringBeforeLast('.')).let { refs -> !refs.truncated && refs.references.all { own(it.path) } }
+                        index.mentions(path.substringAfterLast('/').substringBeforeLast('.')).let { refs -> !refs.truncated && refs.references.all { own(it.path) } }
                 }.toSet()
                 // Fan-in outside the edited file: tier-0 lexical refs, which is also the no-index literal fallback (§7.4).
                 impact.changed(turn, changes, created) { c -> index.refs(c.symbol).references.count { it.path != c.path } }

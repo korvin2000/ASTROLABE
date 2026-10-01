@@ -110,6 +110,14 @@ public class SymbolIndex @JvmOverloads constructor(
     ): Refs {
         if (name.isEmpty()) return Refs(name, emptyList(), tier, complete = false)
         val definitions = def(name).mapTo(HashSet()) { it.path to it.line }
+        return occurrences(name, budgetBytes, maxHits) { (it.path to it.line) !in definitions }
+    }
+
+    /** D-375: every lexical occurrence of [name], declaring lines included, bounded and flagged like [refs]. */
+    internal fun mentions(name: String): Refs =
+        if (name.isEmpty()) Refs(name, emptyList(), tier, complete = false) else occurrences(name, DEFAULT_BUDGET_BYTES, DEFAULT_MAX_HITS) { true }
+
+    private fun occurrences(name: String, budgetBytes: Long, maxHits: Int, keep: (Reference) -> Boolean): Refs {
         val request = SearchRequest(
             pattern = pattern(name),
             mode = if (isIdentifier(name)) SearchMode.Regex else SearchMode.Literal,
@@ -125,8 +133,9 @@ public class SymbolIndex @JvmOverloads constructor(
         }
         val truncated = outcome is SearchOutcome.Incomplete
         val references = hits?.hits.orEmpty()
-            .filter { atlas.row(it.path) != null && (it.path to it.line) !in definitions }
+            .filter { atlas.row(it.path) != null }
             .map { Reference(it.path, it.line, it.text.trim()) }
+            .filter(keep)
             .sortedWith(compareBy({ it.path }, { it.line }))
         return Refs(name, references, tier, complete = false, truncated = truncated)
     }
