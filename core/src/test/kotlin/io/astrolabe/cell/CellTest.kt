@@ -480,6 +480,18 @@ class CellTest {
     }
 
     @Test
+    fun `a state call with one surplus closing brace applies and its result names the repair`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val args = """{"op":"patch","patch":[{"plan.add":"edit a"},{"next":"edit a"}}]}"""
+            f.run(ScriptedModel.of(Scripted.Reply(listOf(say("record"), call("c1", "state", args))), Scripted.Reply(listOf(say("done")))))
+
+            val result = f.transcript(2).filterIsInstance<ToolResult>().single().let(::resultText)
+            assertTrue(result.contains("note: arguments repaired: 1 surplus '}' dropped at offset ${args.length - 3}"), result)
+            assertTrue(result.contains("applied 2 ops") && !result.contains("not executed"), result)
+        }
+    }
+
+    @Test
     fun `three valid reads run beside a look with a bad argument`() = runTest {
         CellFixture(stateRoot).use { f ->
             val model = ScriptedModel.of(

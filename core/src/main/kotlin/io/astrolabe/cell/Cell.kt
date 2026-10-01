@@ -483,7 +483,10 @@ public class Cell @JvmOverloads constructor(
                 val disposition = result!!.of(call.opId)
                 val outcome = (disposition as? Disposition.Executed)?.outcome
                 val text = when (disposition) {
-                    is Disposition.Executed -> Gauges.result(disposition.outcome, gauge)
+                    is Disposition.Executed -> Gauges.result(
+                        if (call.notes.isEmpty()) disposition.outcome else disposition.outcome.copy(body = call.notes.joinToString("") { "note: $it\n" } + disposition.outcome.body),
+                        gauge,
+                    )
                     is Disposition.NotExecuted -> "${Boundary.RESULT_OPEN}not executed: ${disposition.reason}${Boundary.RESULT_CLOSE}\n${gauge.line()}"
                     is Disposition.Failed -> "${Boundary.RESULT_OPEN}failed: ${disposition.error} — effects unknown; reconciled at the turn boundary${Boundary.RESULT_CLOSE}\n${gauge.line()}"
                 }

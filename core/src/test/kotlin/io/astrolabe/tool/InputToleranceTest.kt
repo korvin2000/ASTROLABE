@@ -75,7 +75,8 @@ class InputToleranceTest {
 
     @Test
     fun `a patch or ops string that is not valid JSON names the parse failure instead of Expected JsonArray`() {
-        val patch = refusal("state", """{"op":"patch","patch":"[{\"plan.add\":\"a\""}""")
+        // D-373: a string missing only its closers is repaired; a missing comma is not a bracket problem
+        val patch = refusal("state", """{"op":"patch","patch":"[{\"plan.add\":\"a\" \"b\"}]"}""")
         assertTrue(patch.startsWith("state: patch is a string holding invalid JSON: "), patch)
         assertTrue(patch.contains("offset"), "the parser's position is kept: $patch")
         assertFalse(patch.contains("JsonArray"), patch)
