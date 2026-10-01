@@ -35,7 +35,8 @@ edit(ops, why)
        | { transform: { script | argv, scope_glob, inventory?, expected_matches?, why } } ]                        [§9.2]
   → { ok, views[], versions, syntax{path: ok|error:line}, diffstat, touched_outside_scope[], test_integrity[],
       error?: {kind, candidates[], sites[], diff_since_expect?} }
-  · CAS on content hash; anchors unique (exact → ws-normalised); hunks inside displayed(path, expect); non-overlapping
+  · CAS on content hash; anchors unique (exact → ws-normalised, the op's line then says "anchor matched after
+    whitespace normalisation"; the file keeps its line endings); hunks inside displayed(path, expect); non-overlapping
   · `expect` names a version shown in this cell, never the current bytes: a full hash as given; ≥4 hex → the one shown
     version (KNOWN or dropped as stale) it prefixes; omitted → the one version KNOWN at dispatch; delete and rename alike.
     Unresolved or ambiguous → error kind `expect`, no write; a stale version → `stale_expect` with its diff    (D-346)
@@ -45,9 +46,17 @@ edit(ops, why)
     `expect`/`if` beside exactly one op lacking it moves into it; `hunks` as a JSON string is parsed; any other mix is
     refused naming the accepted form. `delete` then `create` of one path in one batch is a whole-file replace (preimage
     saved, the delete's `expect` guards it)                                                                       (D-365)
+  · `create` over an existing file replaces it in place (preimage saved, revertible) when this cell wrote its current
+    bytes (created or replaced it, then its own anchored edits) or every line is KNOWN at its current version;
+    otherwise `exists`: "read it first, or use {delete} then {create} in one batch"                         (D-371)
   · preflight all ops, then apply; a mid-batch I/O failure reports actual per-file state with preimage ids —
     never "rolled back", never retried blindly                                                                   [J1 §5.2]
-  · inline syntax check; post-edit views ±3 lines become displayed ranges; preimages saved; shadow snapshot per turn
+  · ops are grouped by the paths they touch (a rename both names; several ops on one path, in order): a refused
+    group writes nothing of itself and every other group applies; each refused group is listed with its op's
+    diagnostics, then "N of M files written; resend only the refused ops: <paths (ops)>". A partially applied
+    batch is not applied for the turn: its runs stay not executed ("applied partially (K refused)")         (D-371)
+  · inline syntax check; post-edit views ±3 lines become displayed ranges; lines displayed before that the edit left
+    unchanged stay KNOWN at the new version, shifted (D-371): a second edit of them needs no re-read; preimages saved; shadow snapshot per turn
   · unsupported mutation kinds (binary, modes, symlinks, case-only renames) are rejected explicitly, never dropped   [B §8.3]
 
 run(argv|cmd, cwd?, shape="auto", budget=1200, timeout=120, bg=false, intent?, class_hint?, if?: "applied(op:N)")
@@ -144,6 +153,6 @@ state({patch:[{plan.tick:2, if:"green(op:2)"}, {fact.add:{kind:"v", text:"handle
               {next:"update remaining call sites", if:"green(op:2)"}]})
 ```
 
-Anchored edits apply nothing on *preflight rejection*; publication can partially fail and must report actual per-file outcomes ([§9.1](workspace-editing.md#sec-9-1)); a failed check leaves the applied code and its failure evidence in place; conditional `state` ops fire only when their condition is met, otherwise they are dropped and the drop is rendered. Fusion is allowed only when the follow-up does not require interpreting the preceding result `[RN R05]`. Test and build scripts are executable code and may mutate files; command names do not establish read-only behaviour — the stamp diff does `[B §8.5]`.
+Anchored edits apply nothing of a path group on its *preflight rejection* (the other groups apply, D-371); publication can partially fail and must report actual per-file outcomes ([§9.1](workspace-editing.md#sec-9-1)); a failed check leaves the applied code and its failure evidence in place; conditional `state` ops fire only when their condition is met, otherwise they are dropped and the drop is rendered. Fusion is allowed only when the follow-up does not require interpreting the preceding result `[RN R05]`. Test and build scripts are executable code and may mutate files; command names do not establish read-only behaviour — the stamp diff does `[B §8.5]`.
 <!-- end-source-section: 5.5 -->
 
