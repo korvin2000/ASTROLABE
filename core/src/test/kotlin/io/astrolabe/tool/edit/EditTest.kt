@@ -196,6 +196,77 @@ class EditTest {
         assertTrue(Files.exists(repo.resolve("src/b.py")))
     }
 
+    private fun op(path: String, expect: FileVersion, vararg hunks: String) = """{"path":"$path","expect":"${expect.digest.hex}","hunks":[${hunks.joinToString(",")}]}"""
+
+    private fun batch(vararg ops: String) = """{"ops":[${ops.joinToString(",")}],"why":"w"}"""
+
+    @Test
+    fun `one bad anchor in a ten-file batch refuses only its file and the turn's runs wait for it`() = runTest {
+        val ops = (0 until 10).map { i ->
+            repo.write("src/f$i.py", "v = $i\n")
+            op("src/f$i.py", seen("src/f$i.py", 1, 1), hunk(if (i == 6) "v = 99" else "v = $i", "v = ${i * 10}"))
+        }
+        val ran = ArrayList<Int>()
+        val dispatcher = io.astrolabe.tool.Dispatcher(
+            mapOf(
+                io.astrolabe.tool.ToolFamily.Edit to edit(),
+                io.astrolabe.tool.ToolFamily.Run to io.astrolabe.tool.ToolExecutor { c, _ -> ran += c.opId; ToolOutcome("ran") },
+            ),
+            workset, ids,
+        )
+        val calls = (ToolCalls.parse(listOf(ProviderCall("c1", "edit", batch(*ops.toTypedArray())), ProviderCall("c2", "run", """{"argv":["pytest"]}"""))) as ParsedCalls.Valid).calls
+        val turn = dispatcher.dispatch(1, calls, Tokens(10_000))
+
+        val out = (turn.of(1) as io.astrolabe.tool.Disposition.Executed).outcome
+        assertEquals("partial", status(out), out.body)
+        assertFalse(out.applied)
+        assertFalse(out.header!!.runtime.effectsUnknown, "a refused group is no unknown effect")
+        for (i in 0 until 10) assertEquals(if (i == 6) "v = 6\n" else "v = ${i * 10}\n", Files.readString(repo.resolve("src/f$i.py")))
+        assertTrue(out.body.contains("✗ src/f6.py refused · op 7 anchor: anchor 0× in 'src/f6.py'"), out.body)
+        assertTrue(out.body.contains("9 of 10 files written; resend only the refused ops: src/f6.py (op 7)"), out.body)
+        assertEquals((0 until 10).filter { it != 6 }.map { "src/f$it.py" }.toSet(), preimages.of("edit-1").map { it.path }.toSet(), "preimages cover exactly the applied files")
+        assertEquals(9, out.header!!.versions.size)
+        assertFalse(turn.editsApplied)
+        val run = turn.of(2) as io.astrolabe.tool.Disposition.NotExecuted
+        assertEquals("the edit batch applied partially (1 refused): fix those ops first", run.reason)
+        assertTrue(ran.isEmpty())
+    }
+
+    @Test
+    fun `a group refuses as a whole and leaves every other group to apply`() = runTest {
+        val va = seen("src/a.py", 1, 10)
+        val vb = seen("src/b.py", 1, 2)
+        // Two ops on one path, the second one bad: that path is untouched; the other path applies.
+        val twice = run(batch(op("src/b.py", vb, hunk("x = 1", "x = 3")), op("src/b.py", vb, hunk("nope", "y = 4")), op("src/a.py", va, hunk("    return 1", "    return 10"))))
+        assertEquals("partial", status(twice), twice.body)
+        assertEquals("x = 1\ny = 2\n", Files.readString(repo.resolve("src/b.py")))
+        assertTrue(Files.readString(repo.resolve("src/a.py")).contains("return 10"))
+        assertTrue(twice.body.contains("1 of 2 files written; resend only the refused ops: src/b.py (ops 1, 2)"), twice.body)
+
+        // A rename and an op on its target are one group: the missing target refuses both; the create applies.
+        val renamed = run(batch("""{"rename":"src/b.py","to":"src/r.py","expect":"${vb.digest.hex}"}""", op("src/r.py", vb, hunk("x = 1", "x = 5")), """{"create":"src/c.py","content":"c = 1\n"}"""))
+        assertEquals("partial", status(renamed), renamed.body)
+        assertTrue(Files.exists(repo.resolve("src/b.py")))
+        assertFalse(Files.exists(repo.resolve("src/r.py")))
+        assertEquals("c = 1\n", Files.readString(repo.resolve("src/c.py")))
+        assertTrue(renamed.body.contains("src/b.py, src/r.py refused"), renamed.body)
+
+        // A protected or out-of-contract path refuses only its own group.
+        val mixed = run(batch("""{"create":"migrations/0001.sql","content":"select 1;"}""", """{"create":"src/ok.py","content":"ok = 1\n"}""", """{"create":"docs/n.md","content":"#"}"""))
+        assertEquals("partial", status(mixed), mixed.body)
+        assertEquals("ok = 1\n", Files.readString(repo.resolve("src/ok.py")))
+        assertFalse(Files.exists(repo.resolve("migrations/0001.sql")))
+        assertFalse(Files.exists(repo.resolve("docs/n.md")))
+        assertTrue(mixed.body.contains("scope: migrations/0001.sql: protected"), mixed.body)
+        assertTrue(mixed.body.contains("1 of 3 files written; resend only the refused ops: migrations/0001.sql (op 1), docs/n.md (op 3)"), mixed.body)
+
+        // Every group refused: nothing written, every diagnostic listed at once.
+        val none = run(batch(op("src/ok.py", registry.version("src/ok.py")!!, hunk("zzz", "1")), """{"create":"docs/m.md","content":"#"}"""))
+        assertEquals("refused", status(none), none.body)
+        assertTrue(none.body.contains("anchor 0×") && none.body.contains("outsidecontract"), none.body)
+        assertTrue(none.body.contains("0 of 2 files written"), none.body)
+    }
+
     @Test
     fun `creates that differ only in case refuse the batch on a case-insensitive filesystem`() = runTest {
         org.junit.jupiter.api.Assumptions.assumeTrue(workspace.paths.caseInsensitive)
@@ -593,8 +664,9 @@ class EditTest {
         assertTrue(protectedWrite.body.contains("scope: migrations/0001.sql: protected"), protectedWrite.body)
         assertFalse(Files.exists(repo.resolve("migrations/0001.sql")))
         val mixed = run("""{"ops":[{"create":"src/new.py","content":"x = 1\n"},{"create":"docs/new.md","content":"#"}],"why":"w"}""")
-        assertEquals("refused", status(mixed))
-        assertFalse(Files.exists(repo.resolve("src/new.py")), "one refused path refuses the batch before any write")
+        assertEquals("partial", status(mixed))
+        assertTrue(Files.exists(repo.resolve("src/new.py")), "D-371: a refused path refuses only its own group")
+        assertFalse(Files.exists(repo.resolve("docs/new.md")))
     }
 
     @Test

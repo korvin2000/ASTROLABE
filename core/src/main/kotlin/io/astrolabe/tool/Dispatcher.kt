@@ -29,6 +29,8 @@ public data class ToolOutcome(
     val applied: Boolean = false,
     val green: Boolean = false,
     val tokens: Long = 0,
+    /** Why the runs of this turn stay not executed when the call applied only in part (D-371); null keeps the generic reason. */
+    val notAppliedReason: String? = null,
 ) {
     init {
         require(tokens >= 0) { "tokens must be ≥ 0" }
@@ -151,13 +153,14 @@ public class Dispatcher(
 
         // Edits: one checkpoint, one batch; a call that did not apply stops the batch.
         var editsApplied = ordered.edits.isEmpty()
+        var notApplied: String? = null
         if (ordered.edits.isNotEmpty()) {
             checkpoint?.before(turn)
             var applying = true
             for (call in ordered.edits) {
                 results[call.opId] = if (applying) {
                     (unmet(call, results)?.let { Disposition.NotExecuted(call.opId, it) }
-                        ?: run(call, context, TurnPhase.Edit)).also { applying = it is Disposition.Executed && it.outcome.applied }
+                        ?: run(call, context, TurnPhase.Edit)).also { applying = it is Disposition.Executed && it.outcome.applied; notApplied = (it as? Disposition.Executed)?.outcome?.notAppliedReason }
                 } else {
                     Disposition.NotExecuted(call.opId, "an earlier edit call of this batch did not apply")
                 }
@@ -168,7 +171,7 @@ public class Dispatcher(
         // Runs and verifies: sequential, after a fully applied batch or none, each behind its condition.
         for (call in ordered.executes) {
             results[call.opId] = when {
-                !editsApplied -> Disposition.NotExecuted(call.opId, "the edit batch did not apply fully; runs execute only after a fully applied batch or none")
+                !editsApplied -> Disposition.NotExecuted(call.opId, notApplied ?: "the edit batch did not apply fully; runs execute only after a fully applied batch or none")
                 else -> unmet(call, results)?.let { Disposition.NotExecuted(call.opId, it) } ?: run(call, context, TurnPhase.Execute)
             }
         }

@@ -47,6 +47,10 @@ edit(ops, why)
     saved, the delete's `expect` guards it)                                                                       (D-365)
   · preflight all ops, then apply; a mid-batch I/O failure reports actual per-file state with preimage ids —
     never "rolled back", never retried blindly                                                                   [J1 §5.2]
+  · ops are grouped by the paths they touch (a rename both names; several ops on one path, in order): a refused
+    group writes nothing of itself and every other group applies; each refused group is listed with its op's
+    diagnostics, then "N of M files written; resend only the refused ops: <paths (ops)>". A partially applied
+    batch is not applied for the turn: its runs stay not executed ("applied partially (K refused)")         (D-371)
   · inline syntax check; post-edit views ±3 lines become displayed ranges; preimages saved; shadow snapshot per turn
   · unsupported mutation kinds (binary, modes, symlinks, case-only renames) are rejected explicitly, never dropped   [B §8.3]
 
@@ -144,6 +148,6 @@ state({patch:[{plan.tick:2, if:"green(op:2)"}, {fact.add:{kind:"v", text:"handle
               {next:"update remaining call sites", if:"green(op:2)"}]})
 ```
 
-Anchored edits apply nothing on *preflight rejection*; publication can partially fail and must report actual per-file outcomes ([§9.1](workspace-editing.md#sec-9-1)); a failed check leaves the applied code and its failure evidence in place; conditional `state` ops fire only when their condition is met, otherwise they are dropped and the drop is rendered. Fusion is allowed only when the follow-up does not require interpreting the preceding result `[RN R05]`. Test and build scripts are executable code and may mutate files; command names do not establish read-only behaviour — the stamp diff does `[B §8.5]`.
+Anchored edits apply nothing of a path group on its *preflight rejection* (the other groups apply, D-371); publication can partially fail and must report actual per-file outcomes ([§9.1](workspace-editing.md#sec-9-1)); a failed check leaves the applied code and its failure evidence in place; conditional `state` ops fire only when their condition is met, otherwise they are dropped and the drop is rendered. Fusion is allowed only when the follow-up does not require interpreting the preceding result `[RN R05]`. Test and build scripts are executable code and may mutate files; command names do not establish read-only behaviour — the stamp diff does `[B §8.5]`.
 <!-- end-source-section: 5.5 -->
 
