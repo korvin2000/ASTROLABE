@@ -465,7 +465,12 @@ public class Cell @JvmOverloads constructor(
             // Partition and dispatch what validation left — nothing when the whole turn is refused.
             record.reset()
             val dispatchedAt = clock.millis()
-            val result = if (calls.isNotEmpty()) dispatcher.dispatch(turn, calls, Tokens(defaults.rMaxTokens.toLong())) else null
+            // D-374: this turn's results are exempt from eviction, so they must fit α of the window beside what the next
+            // request already holds, its output reserve and the anchor's growth; one default look always fits.
+            val headroom = (capabilities.contextLimitTokens * defaults.alpha).toLong() - estimate.upperBoundTokens -
+                ctx.model.maxOutputTokens - maxOf(0L, defaults.anchorMaxTokens - anchor.tokens)
+            val readBudget = minOf(defaults.rMaxTokens.toLong(), maxOf(defaults.lookBudgetTokens.toLong(), headroom))
+            val result = if (calls.isNotEmpty()) dispatcher.dispatch(turn, calls, Tokens(readBudget)) else null
             cost = cost.plusToolSeconds((clock.millis() - dispatchedAt) / MILLIS_PER_SECOND)
             val after = reconcile("turn $turn")
             val gauge = gauge(currencies(after.candidateId))

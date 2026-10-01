@@ -709,6 +709,28 @@ class CellTest {
     }
 
     @Test
+    fun `a small window bounds one turn's reads by the context headroom and the cell continues`() = runTest {
+        val reads = (0 until 12).map { read("c$it", "src/r$it.py") }
+        fun results(f: CellFixture) = f.transcript(2).filterIsInstance<ToolResult>().associate { it.callId to resultText(it) }
+        CellFixture(stateRoot).use { f ->
+            (0 until 12).forEach { f.repo.write("src/r$it.py", "r = $it\n") }
+            val small = Profile("small32", FakeProfiles.PROVIDER, "fake-small32", FakeProfiles.capabilities(32_000, 2_000), FakeProfiles.main.priceTable)
+            f.run(ScriptedModel.of(Scripted.Reply(listOf(say("read")) + reads), Scripted.Reply(listOf(say("done")))), profile = small, profiles = FakeProfiles.all + (small.id to small))
+
+            assertEquals(2, f.adapter.calls.size, "the cell continued to the next turn")
+            val spent = results(f).filterValues { it.contains("read budget of this turn spent") }
+            assertTrue(spent.isNotEmpty() && spent.size < reads.size, results(f).toString())
+            assertTrue(results(f).getValue("c0").contains("r = 0"), results(f).getValue("c0"))
+        }
+        CellFixture(stateRoot.resolve("large")).use { f ->
+            (0 until 12).forEach { f.repo.write("src/r$it.py", "r = $it\n") }
+            f.run(ScriptedModel.of(Scripted.Reply(listOf(say("read")) + reads), Scripted.Reply(listOf(say("done")))))
+
+            assertTrue(results(f).values.none { it.contains("read budget of this turn spent") }, "a large window is unaffected")
+        }
+    }
+
+    @Test
     fun `the first pressure rebuilds the projection, a second one ends the cell partial, at admission or from the gate`() = runTest {
         CellFixture(stateRoot).use { f ->
             val overflow = f.run(ScriptedModel.of(Scripted.Reply(listOf(say("look"), tree("c1")))), profile = FakeProfiles.tiny)
