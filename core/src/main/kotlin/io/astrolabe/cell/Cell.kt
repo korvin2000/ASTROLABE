@@ -630,8 +630,12 @@ public class Cell @JvmOverloads constructor(
             fired = report.fired
             report.outcomes.forEach { events?.emit(AgentEvent.Cell.GateFired(ids, it.key.gate, it.line)) }
             report.rejections.firstOrNull { it.endsTurn }?.let { requiredOp = it.requiredOp }
-            // §5.1: at most two lines, the hard gates' refusals before the nudges.
-            nudges = (report.rejections.map { it.line + it.details.take(DETAILS_IN_LINE).joinToString("") { d -> " · $d" } } + report.nudges.map { it.line } + truncationLine(response)).take(MAX_NUDGES)
+            // §5.1: at most MAX_NUDGES lines, the hard gates' refusals first; D-372: the stall and budget lines before the
+            // other nudges, the impact lines last, so a turn of impact nudges never hides how much of the cell is left.
+            val (impactLines, softer) = report.nudges.partition { it.key.gate == Gates.IMPACT }
+            val (budgetLines, otherLines) = softer.partition { it.key.gate in PRIORITY_NUDGES }
+            nudges = (report.rejections.map { it.line + it.details.take(DETAILS_IN_LINE).joinToString("") { d -> " · $d" } } +
+                (budgetLines + otherLines).map { it.line } + truncationLine(response) + impactLines.map { it.line }).take(MAX_NUDGES)
 
             // Checkpoint: the turn's boundary is durable before any exit is decided.
             persist(checkpoint(CellStatus.Running, stampNow.candidateId, null))
@@ -1388,8 +1392,11 @@ public class Cell @JvmOverloads constructor(
         /** The alias executors give a result that observed nothing new. */
         const val NO_ALIAS = "#-"
 
-        /** §5.1 `[A]`: at most two nudge lines per turn. */
-        const val MAX_NUDGES = 2
+        /** §5.1 `[A]`: at most four nudge lines per turn (D-372; [Anchor] applies the same cap). */
+        const val MAX_NUDGES = 4
+
+        /** The nudges that say how much of the cell is left: shown before the other nudges (D-372). */
+        val PRIORITY_NUDGES = setOf(Gates.STALL, Gates.RESERVE, Gates.TURNS)
         const val SIGNATURE_CHARS = 120
 
         /** How much of a launcher's reason the checks view of `[A]` carries. */

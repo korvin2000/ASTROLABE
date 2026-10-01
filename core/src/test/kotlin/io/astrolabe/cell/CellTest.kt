@@ -419,6 +419,30 @@ class CellTest {
     }
 
     @Test
+    fun `the budget and stall lines of the anchor come before impact lines, up to four nudges`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val impact = object : Gate {
+                override val name: String = Gates.IMPACT
+                override fun evaluate(state: GateState): List<GateOutcome> =
+                    (1..4).map { GateOutcome.Nudge(GateKey(name, "s$it@${state.turn}"), "impact: symbol $it changed; references not inspected") }
+            }
+            val turns = object : Gate {
+                override val name: String = Gates.TURNS
+                override fun evaluate(state: GateState): List<GateOutcome> =
+                    listOf(GateOutcome.Nudge(GateKey(name, "t${state.turn}"), "turns: turn ${state.turn} of ${state.turnsMax} — verify and report"))
+            }
+            val cell = Cell(f.clock, f.idGen, f.defaults, Gates(listOf(impact, turns)), f.events)
+
+            cell.run(f.context(ScriptedModel.of(Scripted.Reply(listOf(say("look"), tree("c1"))), Scripted.Reply(listOf(say("done"))))), f.increment, f.budget())
+
+            val anchor = f.anchorText(2)
+            assertTrue(anchor.contains("turns: turn 1 of 12 — verify and report"), anchor)
+            assertEquals(3, (1..4).count { anchor.contains("impact: symbol $it changed") }, anchor)
+            assertTrue(anchor.indexOf("turns: turn 1") < anchor.indexOf("impact: symbol 1"), anchor)
+        }
+    }
+
+    @Test
     fun `the checks view carries the launcher's reason for an unavailable check, bounded`() = runTest {
         CellFixture(stateRoot).use { f ->
             val check = f.checks[Checks.TYPES_TOUCHED]!!

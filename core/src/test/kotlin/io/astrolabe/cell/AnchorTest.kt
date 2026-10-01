@@ -132,15 +132,15 @@ class AnchorTest {
     }
 
     @Test
-    fun `at most two nudges reach the turn`() {
+    fun `at most four nudges reach the turn`() {
         val anchor = Anchor.render(
             estimator, digest, register, workset, touched(), checks,
-            nudges = listOf("first", "second", "third"),
+            nudges = listOf("first", "second", "third", "fourth", "fifth"),
         )
 
-        assertTrue(anchor.text.contains("first") && anchor.text.contains("second"), anchor.text)
-        assertFalse(anchor.text.contains("third"), anchor.text)
-        assertTrue(anchor.reductions.any { it == "nudges: showed 2 of 3" }, anchor.reductions.toString())
+        assertTrue(listOf("first", "second", "third", "fourth").all { anchor.text.contains(it) }, anchor.text)
+        assertFalse(anchor.text.contains("fifth"), anchor.text)
+        assertTrue(anchor.reductions.any { it == "nudges: showed 4 of 5" }, anchor.reductions.toString())
     }
 
     @Test

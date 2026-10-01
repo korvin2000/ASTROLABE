@@ -39,7 +39,7 @@ The cell is HELM's loop `[HELM §7]` with judje-1's corrections and six changes 
 [A] anchor  (≤2.5K tok, typical ~1.2–1.8K, rebuilt every turn, never persisted, never cached)
     contract digest (≤150: exact goal excerpt + ids/status; full authoritative wording remains in [K]/pinned messages) · STATE register (≤1.2K) · Workset KNOWN / NOT SEEN (≤60) ·
     Touched (≤10) · Checks (≤3 lines, Δ + absolute + stamp) · focus atlas zoom (≤300) · focus notes (≤300, each once per cell) ·
-    gauge · nudges (≤2)
+    gauge · nudges (≤4; stall and budget before impact)
 ```
 
 Cache discipline `[MB A2; C §12.2; B §7.1]`: cache breakpoints sit at the end of `[S]`, `[R]`, `[K]` and `[T]`; `[A]` is the volatile tail. No timestamps or counters in cached regions. Tools are masked, never removed, so schemas stay byte-stable; consecutive cells for the same role and profile are scheduled adjacently where latency allows so `[S][R]` stay hot `[C §5.6]`. The contract digest is rendered at the tail (Manus recitation, `[MB §4.6]`) but capped at 150 tokens because it is uncached every turn; the requirement text itself lives in `[K]`. `[A]` size and STATE upkeep are first-class metrics `[C §6.8]`. Segment stability is keyed to its actual inputs, not an entire evolving repository: `[R]` is a labelled compile-time orientation snapshot, while current atlas/Workset views live in `[A]` and tool results. Recompile affected mandatory content when authority or dependencies change; do not keep it stale to preserve a cache hit. Logical breakpoints are adapter-validated provider capabilities, not guaranteed cache entries.
