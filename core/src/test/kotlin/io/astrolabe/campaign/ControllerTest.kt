@@ -477,6 +477,27 @@ class ControllerTest {
     }
 
     @Test
+    fun `plan steps left open on a proven acceptance reach the finish receipt's open items`() = runTest {
+        seedContract()
+        open().use { c ->
+            val v = c.registry.version("src/a.py")!!
+            val plan = """[{"plan.add":{"text":"make a return 10"}},{"plan.add":{"text":"tidy the docs"}},{"plan.cursor":1},{"next":"edit a"}]"""
+            val run = controller().runS0(c, model(
+                Scripted.Reply(listOf(say("planning"), read("c1", "src/a.py"), call("c2", "state", """{"op":"patch","patch":$plan}"""))),
+                Scripted.Reply(listOf(say("editing"), anchored("c3", "src/a.py", v, "    return 1", "    return 10"))),
+                Scripted.Reply(listOf(say("verifying"), call("c4", "verify", """{"what":"acceptance","ids":["AC-1"]}"""))),
+                Scripted.Reply(listOf(say("done: a returns 10"))),
+            ))
+            assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+            assertEquals(listOf("step 1 'make a return 10' left open by the agent", "step 2 'tidy the docs' left open by the agent"),
+                assertIs<CompletionResult.Accepted>(run.completion).leftOpen)
+            val open = assertNotNull(run.finish).openItems
+            assertTrue(open.any { it.endsWith(": step 1 'make a return 10' left open by the agent") }, open.toString())
+            assertTrue(open.any { it.endsWith(": step 2 'tidy the docs' left open by the agent") }, open.toString())
+        }
+    }
+
+    @Test
     fun `FX-13 (D-338) - a required check that cannot run is an unavailable receipt and a decision the campaign waits for`() = runTest {
         seedContract(Command(listOf("no-such-runner-xyz", "-q")))
         open().use { c ->

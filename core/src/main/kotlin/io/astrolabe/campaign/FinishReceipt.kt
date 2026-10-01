@@ -239,7 +239,9 @@ public object FinishReceipts {
             adrCandidates = registers.flatMap { r ->
                 r.decisions.filter { it.adrCandidate }.map { d -> "${d.text} because ${d.because}" + (d.rejected?.let { "; rejected: $it" } ?: "") + (d.probe?.let { "; probe: $it" } ?: "") }
             },
-            openItems = registers.flatMap { r -> r.open.filter { !it.closed }.map { it.text } },
+            openItems = registers.flatMap { r -> r.open.filter { !it.closed }.map { it.text } } +
+                state.graph.increments.filter { it.status == io.astrolabe.contract.IncrementStatus.Verified }
+                    .flatMap { inc -> state.graph.evidence[inc.id]?.leftOpen.orEmpty().map { "${inc.id}: $it" } },
             pendingAmendments = contract.amendmentsPending.map { it.change },
             routingDecisions = emptyList(),
             budget = BudgetLine(totals.quantities.mapKeys { it.key.id }, totals.money, billed?.takeIf { it > 0 }?.let { helper.toDouble() / it }),
