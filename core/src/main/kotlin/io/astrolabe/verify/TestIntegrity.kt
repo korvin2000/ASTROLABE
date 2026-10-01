@@ -274,26 +274,46 @@ public object TestIntegrity {
     private fun names(argv: List<String>, cwd: String?, path: String, manifest: (String) -> String?): Boolean =
         namesPath(argv, cwd, path) || scriptPaths(argv, cwd, manifest).any { path == it || path.startsWith("$it/") }
 
+    /** A package-manager command with its directory option consumed: the directory, and the argv without the option. */
+    private class PackageCommand(val directory: String?, val argv: List<String>)
+
     /**
-     * D-374: what `npm|pnpm|yarn test` or `… run <name>` (`--prefix <dir>` honoured) runs is the `scripts.<name>` string of
-     * the package's `package.json`; its path-like tokens, resolved against the package directory, are named inputs.
-     * One level only, and an unreadable or absent manifest names nothing.
+     * D-375: `npm|pnpm|yarn` with `--prefix|--cwd|--dir|-C <dir>` (or `=<dir>`): the directory is where the manifest is
+     * read, never a named input, so the option and its value leave the argv before path classification. Arguments
+     * after `--` belong to the script and are kept verbatim; `null` for any other tool.
      */
-    private fun scriptPaths(argv: List<String>, cwd: String?, manifest: (String) -> String?): List<String> {
-        val tool = argv.firstOrNull()?.replace('\\', '/')?.substringAfterLast('/')?.lowercase()?.substringBefore('.') ?: return emptyList()
-        if (tool !in PACKAGE_MANAGERS) return emptyList()
-        var prefix: String? = null
-        val positional = ArrayList<String>()
+    private fun packageCommand(argv: List<String>): PackageCommand? {
+        val tool = argv.firstOrNull()?.replace('\\', '/')?.substringAfterLast('/')?.lowercase()?.substringBefore('.') ?: return null
+        if (tool !in PACKAGE_MANAGERS) return null
+        var directory: String? = null
+        val rest = arrayListOf(argv.first())
         var i = 1
-        while (i < argv.size && argv[i] != "--") {
+        while (i < argv.size) {
             val arg = argv[i]
+            if (arg == "--") {
+                rest += argv.subList(i, argv.size)
+                break
+            }
             when {
-                arg in PREFIX_FLAGS -> prefix = argv.getOrNull(++i)
-                PREFIX_FLAGS.any { arg.startsWith("$it=") } -> prefix = arg.substringAfter('=')
-                !arg.startsWith("-") -> positional += arg
+                arg in PREFIX_FLAGS -> directory = argv.getOrNull(++i)
+                PREFIX_FLAGS.any { arg.startsWith("$it=") } -> directory = arg.substringAfter('=')
+                else -> rest += arg
             }
             i++
         }
+        return PackageCommand(directory, rest)
+    }
+
+    /**
+     * D-374: what `npm|pnpm|yarn test` or `… run <name>` runs is the `scripts.<name>` string of the package's
+     * `package.json`, read in the directory option's directory (resolved against the cwd) when one is given; its
+     * path-like tokens, resolved against that package directory, are named inputs. One level only, and an unreadable
+     * or absent manifest names nothing.
+     */
+    private fun scriptPaths(argv: List<String>, cwd: String?, manifest: (String) -> String?): List<String> {
+        val command = packageCommand(argv) ?: return emptyList()
+        val prefix = command.directory
+        val positional = command.argv.drop(1).takeWhile { it != "--" }.filterNot { it.startsWith("-") }
         val name = when (positional.firstOrNull()) {
             "test" -> "test"
             "run", "run-script" -> positional.getOrNull(1) ?: return emptyList()
@@ -334,7 +354,8 @@ public object TestIntegrity {
      * The bare [cwd] names nothing (D-369): it would make every source file of the package a command input; the
      * package's manifest is a check definition by name.
      */
-    private fun namesPath(argv: List<String>, cwd: String?, path: String): Boolean {
+    private fun namesPath(command: List<String>, cwd: String?, path: String): Boolean {
+        val argv = packageCommand(command)?.argv ?: command
         val base = cwd?.let { normalize(it) }?.takeIf { it.isNotEmpty() && it != "." }
         // Test the raw spelling: normalize strips "./", which would drop a root-level `./check.sh`.
         val executable = argv.firstOrNull()?.takeIf {
