@@ -319,13 +319,37 @@ public object TestIntegrity {
             "run", "run-script" -> positional.getOrNull(1) ?: return emptyList()
             else -> return emptyList()
         }
-        val parts = listOfNotNull(cwd, prefix).map(::normalize).filter { it.isNotEmpty() && it != "." }
-        if (parts.any { it.startsWith("/") || it.startsWith("..") || it.matches(DRIVE) }) return emptyList()
-        val base = parts.joinToString("/")
+        val base = packageDirectory(cwd, prefix) ?: return emptyList()
         val script = runCatching {
             ((Json.parseToJsonElement(manifest(base) ?: return emptyList()) as? JsonObject)?.get("scripts") as? JsonObject)?.get(name) as? JsonPrimitive
         }.getOrNull()?.takeIf { it.isString }?.content ?: return emptyList()
         return script.split(SCRIPT_SEPARATORS).mapNotNull(::pathToken).map { if (base.isEmpty()) it else "$base/$it" }
+    }
+
+    /** [cwd] joined with the directory option [prefix], `""` for the root; `null` when either is absolute or escapes. */
+    private fun packageDirectory(cwd: String?, prefix: String?): String? {
+        val parts = listOfNotNull(cwd, prefix).map(::normalize).filter { it.isNotEmpty() && it != "." }
+        if (parts.any { it.startsWith("/") || it.startsWith("..") || it.matches(DRIVE) }) return null
+        return parts.joinToString("/")
+    }
+
+    /**
+     * Index in [argv] (directory option consumed) of the first argument the package manager forwards to the script:
+     * the one after `--`, else the one after the script name (`run <name>`, `test`, or a bare `<name>` for yarn and
+     * pnpm); `argv.size` when there is none.
+     */
+    private fun forwardedFrom(argv: List<String>): Int {
+        var run = false
+        for (i in 1 until argv.size) {
+            val arg = argv[i]
+            when {
+                arg == "--" -> return i + 1
+                arg.startsWith("-") -> Unit
+                !run && (arg == "run" || arg == "run-script") -> run = true
+                else -> return i + 1
+            }
+        }
+        return argv.size
     }
 
     /** A relative path-like script token (`scripts/validate.js`, `--config=cfg/x.json`), normalised; null for anything else. */
@@ -355,17 +379,24 @@ public object TestIntegrity {
      * package's manifest is a check definition by name.
      */
     private fun namesPath(command: List<String>, cwd: String?, path: String): Boolean {
-        val argv = packageCommand(command)?.argv ?: command
+        val pkg = packageCommand(command)
+        val argv = pkg?.argv ?: command
         val base = cwd?.let { normalize(it) }?.takeIf { it.isNotEmpty() && it != "." }
+        // D-375: the script runs in the package directory, so the arguments forwarded to it resolve there.
+        val forwarded = if (pkg?.directory == null) argv.size else forwardedFrom(argv)
+        val scriptBase = packageDirectory(cwd, pkg?.directory)?.takeIf { it.isNotEmpty() } ?: base
         // Test the raw spelling: normalize strips "./", which would drop a root-level `./check.sh`.
         val executable = argv.firstOrNull()?.takeIf {
             val named = it.replace('\\', '/')
             '/' in named && !named.startsWith('/') && !named.matches(Regex("^[A-Za-z]:.*"))
         }
-        val candidates = (argv.drop(1) + listOfNotNull(executable)).map { normalize(it) }.filter { it.isNotEmpty() && !it.startsWith("-") }
-            .map { if (base != null && !it.startsWith("$base/")) "$base/$it" else it }
+        val candidates = resolved(argv.subList(1, forwarded) + listOfNotNull(executable), base) + resolved(argv.drop(forwarded), scriptBase)
         return candidates.any { path == it || path.startsWith("$it/") }
     }
+
+    private fun resolved(tokens: List<String>, base: String?): List<String> =
+        tokens.map { normalize(it) }.filter { it.isNotEmpty() && !it.startsWith("-") }
+            .map { if (base != null && !it.startsWith("$base/")) "$base/$it" else it }
 
     private fun normalize(path: String): String = path.replace('\\', '/').removePrefix("./").trimEnd('/')
 }

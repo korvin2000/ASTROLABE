@@ -186,6 +186,31 @@ class TestIntegrityTest {
     }
 
     @Test
+    fun `arguments forwarded to a package script resolve against the package directory`() {
+        val (base, _) = s0()
+        val manifests = mapOf("server" to """{"scripts":{"check":"node"}}""")
+        val forms = listOf(
+            listOf("npm", "--prefix", "server", "run", "check", "--", "tools/validate.js"),
+            listOf("npm", "run", "check", "--prefix", "server", "--", "tools/validate.js"),
+            listOf("pnpm", "-C", "server", "run", "check", "tools/validate.js"),
+            listOf("yarn", "--cwd", "server", "check", "tools/validate.js"),
+        )
+        for (argv in forms) {
+            val contract = base.strengthen(Acceptance.Run("AC-10", Command(argv), Origin.Model("R1")))
+            val checks = Checks.seed(contract, RunnerCommands(test = Command(listOf("python", "-m", "pytest", "-q"))), packageManifest = { manifests[it] })
+            val flags = TestIntegrity.classify(
+                listOf(
+                    SurfaceChange("server/tools/validate.js", "exit(1)\n", "exit(0)\n"),
+                    SurfaceChange("tools/validate.js", "exit(1)\n", "exit(0)\n"),
+                    SurfaceChange("server/src/app.ts", "a\n", "b\n"),
+                ),
+                "edit #10", contract, checks,
+            )
+            assertEquals(listOf("server/tools/validate.js"), flags.map { it.path }, argv.joinToString(" "))
+        }
+    }
+
+    @Test
     fun `editing a repository executable used by acceptance requires review`() {
         val (base, _) = s0()
         for ((argv0, cwd, path) in listOf(
