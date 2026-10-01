@@ -6,7 +6,9 @@ import io.astrolabe.auth.CapabilitySet
 import io.astrolabe.auth.Ceiling
 import io.astrolabe.auth.Classification
 import io.astrolabe.auth.ContentClass
+import io.astrolabe.auth.ContainmentProbe
 import io.astrolabe.auth.EffectPolicy
+import io.astrolabe.auth.EffectPolicyConfig
 import io.astrolabe.auth.ExecutionDecision
 import io.astrolabe.auth.Executors
 import io.astrolabe.auth.InstructionShape
@@ -55,13 +57,17 @@ import io.astrolabe.tool.ToolOutcome
 import io.astrolabe.tool.ToolSet
 import io.astrolabe.tool.TurnContext
 import io.astrolabe.workspace.Intent as PathIntent
+import io.astrolabe.workspace.PathKind
 import io.astrolabe.workspace.PathResolution
 import io.astrolabe.workspace.Stamper
 import io.astrolabe.workspace.StampReport
 import io.astrolabe.workspace.VersionRegistry
 import io.astrolabe.workspace.Workspace
+import io.astrolabe.workspace.WorkspacePath
 import java.io.IOException
+import java.nio.file.DirectoryIteratorException
 import java.nio.file.Files
+import java.nio.file.InvalidPathException
 import java.nio.file.Path
 import java.time.Clock
 import kotlinx.coroutines.currentCoroutineContext
@@ -197,7 +203,8 @@ public class Run(
         } ?: workspace.root
 
         // Policy label (§4.6), capability ceiling (§14.2) and execution mode (D-11) — all before any effect.
-        val classified = EffectPolicy.classify(if (generated == null) args else args.copy(argv = argv), workspace.root.toString(), contract.scope.protectedPaths)
+        val containment = DiskContainment(workspace.paths, { contract.scope.protects(it, ignoreCase = true) || workspace.paths.isProtected(it, PathIntent.Mutate) })
+        val classified = EffectPolicy.classify(if (generated == null) args else args.copy(argv = argv), workspace.root.toString(), contract.scope.protectedPaths, EffectPolicyConfig(), containment)
         // §12.2: a generated wrapper's declarations only add to its script's classification; the caller's ceiling decides.
         val classification = generated?.let { GeneratedTools.inherit(classified, it) } ?: classified
         authorize(args, argv, contract, classification)?.let { return it }
@@ -585,3 +592,62 @@ public class Run(
 
 /** The longest `run` a model may ask for in one call (D-370); a larger value is clamped to it. */
 private const val MAX_TIMEOUT_SECONDS: Int = 3_600
+
+/**
+ * D-375: [ContainmentProbe] over the real workspace. Every existing segment of the path is a plain directory (the last
+ * may be a file), never a link, junction or special entry; its real path lies strictly below the root; and neither it nor
+ * any of at most [limit] entries below it is protected ([protects]) or a link. Anything unreadable answers false.
+ */
+internal class DiskContainment(
+    private val paths: WorkspacePath,
+    private val protects: (relative: String) -> Boolean,
+    private val limit: Int = 20_000,
+) : ContainmentProbe {
+    override fun contained(relative: String): Boolean = try {
+        inspect(relative)
+    } catch (e: IOException) {
+        false
+    } catch (e: InvalidPathException) {
+        false
+    } catch (e: DirectoryIteratorException) {
+        false
+    } catch (e: SecurityException) {
+        false
+    }
+
+    private fun inspect(relative: String): Boolean {
+        val segments = relative.split('/')
+        if (segments.any { it.isEmpty() || it == "." || it == ".." }) return false
+        var path = paths.root
+        for ((index, segment) in segments.withIndex()) {
+            path = path.resolve(segment)
+            when (WorkspacePath.kindOf(path)) {
+                PathKind.Missing -> return !protects(relative)
+                PathKind.Directory -> Unit
+                PathKind.Regular -> if (index < segments.lastIndex) return false
+                else -> return false
+            }
+        }
+        val real = path.toRealPath()
+        if (real == paths.root || !real.startsWith(paths.root) || protects(relativeOf(real))) return false
+        if (WorkspacePath.kindOf(real) != PathKind.Directory) return true
+        val pending = ArrayDeque(listOf(real))
+        var seen = 0
+        while (pending.isNotEmpty()) {
+            Files.newDirectoryStream(pending.removeLast()).use { entries ->
+                for (entry in entries) {
+                    if (++seen > limit) return false
+                    when (WorkspacePath.kindOf(entry)) {
+                        PathKind.Directory -> pending.addLast(entry)
+                        PathKind.Regular -> Unit
+                        else -> return false
+                    }
+                    if (protects(relativeOf(entry))) return false
+                }
+            }
+        }
+        return true
+    }
+
+    private fun relativeOf(real: Path): String = paths.root.relativize(real).joinToString("/") { it.toString() }
+}

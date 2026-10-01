@@ -459,7 +459,8 @@ public class Cell @JvmOverloads constructor(
             val registerBefore = register
             val certifiedBefore = certified(currencies(before.candidateId))
             val native = response.toolCalls
-            val validated = if (native.isEmpty()) null else validateCalls(native, reserveTurn, mask, contract, repairable)
+            val validated = if (native.isEmpty()) null else validateCalls(native, reserveTurn, mask, contract, repairable,
+                truncated = response.stop == StopReason.OutputLimit || response.stop == StopReason.Truncated)
             val calls = validated?.calls.orEmpty()
 
             // Partition and dispatch what validation left — nothing when the whole turn is refused.
@@ -769,11 +770,11 @@ public class Cell @JvmOverloads constructor(
          * did not apply does. Only a dependency violation among the valid calls or a `state` op the loop gate requires
          * refuses the whole turn — and even then one valid terminal call runs alone (F2b).
          */
-        private fun validateCalls(native: List<NativeCall>, reserveTurn: Boolean, mask: ToolMask, contract: Contract, repairable: Set<String> = emptySet()): Validated {
+        private fun validateCalls(native: List<NativeCall>, reserveTurn: Boolean, mask: ToolMask, contract: Contract, repairable: Set<String> = emptySet(), truncated: Boolean = false): Validated {
             val alone = LinkedHashMap<Int, Pair<String, String>>()
             val valid = ArrayList<ToolCall>()
             native.forEachIndexed { index, call ->
-                when (val parsed = parseOne(call, index + 1)) {
+                when (val parsed = parseOne(call, index + 1, truncated)) {
                     is ParsedCalls.Invalid -> alone[index] = "schema error in call ${parsed.providerCallId}: ${parsed.error}" to "schema error: ${parsed.error}"
                     is ParsedCalls.Valid -> {
                         val one = parsed.calls.single()
@@ -844,9 +845,9 @@ public class Cell @JvmOverloads constructor(
             return Validated(calls, notExecuted, alone.map { (index, refusal) -> Refusal(native[index], refusal.first, refusal.second) })
         }
 
-        /** [call] parsed on its own as op [opId], or the schema error that refuses it. */
-        private fun parseOne(call: NativeCall, opId: Int): ParsedCalls = try {
-            when (val parsed = ToolCalls.parse(listOf(call))) {
+        /** [call] parsed on its own as op [opId], or the schema error that refuses it; a [truncated] response is never repaired (D-375). */
+        private fun parseOne(call: NativeCall, opId: Int, truncated: Boolean = false): ParsedCalls = try {
+            when (val parsed = ToolCalls.parse(listOf(call), truncated)) {
                 is ParsedCalls.Valid -> ParsedCalls.Valid(listOf(parsed.calls.single().copy(opId = opId)))
                 is ParsedCalls.Invalid -> parsed
             }

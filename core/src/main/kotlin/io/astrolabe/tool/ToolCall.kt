@@ -29,7 +29,7 @@ public data class ToolCall(
     val op: String,
     val args: Args,
     val raw: JsonObject,
-    /** D-373: what the harness normalised in the arguments (a bracket repair); the result shows each as a `note:` line. */
+    /** D-373: what the harness normalised in the arguments (a syntax repair); the result shows each as a `note:` line. */
     val notes: List<String> = emptyList(),
 ) {
     val name: String get() = ToolOps.name(family, op)
@@ -56,9 +56,13 @@ public sealed interface ParsedCalls {
 public object ToolCalls {
     private val json = Json { ignoreUnknownKeys = false }
 
-    /** Parses every provider tool call of a turn; the first unparseable or unknown call makes the list [ParsedCalls.Invalid]. */
+    /**
+     * Parses every provider tool call of a turn; the first unparseable or unknown call makes the list [ParsedCalls.Invalid].
+     * [truncated]: the provider stopped the response for length, so malformed arguments are cut, never repaired (D-375).
+     */
     @JvmStatic
-    public fun parse(calls: List<io.astrolabe.provider.ToolCall>): ParsedCalls {
+    @JvmOverloads
+    public fun parse(calls: List<io.astrolabe.provider.ToolCall>, truncated: Boolean = false): ParsedCalls {
         val out = ArrayList<ToolCall>()
         calls.forEachIndexed { i, call ->
             val family = ToolFamily.byWire(call.name) ?: return ParsedCalls.Invalid(call.id, "unknown tool '${call.name}'")
@@ -66,11 +70,15 @@ public object ToolCalls {
             val raw = try {
                 json.parseToJsonElement(call.argsJson).jsonObject
             } catch (e: Exception) {
-                repaired(call.argsJson)?.also { (_, repair) -> notes += "arguments repaired: ${repair.summary}" }?.first
-                    ?: return ParsedCalls.Invalid(call.id, "${call.name}: arguments are not a JSON object (${e.message?.lineSequence()?.first()})${markupNote(call.argsJson, null)}")
+                val outcome = JsonRepair.repair(json, call.argsJson, truncated)
+                val fixed = (outcome as? JsonRepair.Repaired)?.takeIf { it.element is JsonObject }
+                    ?: return ParsedCalls.Invalid(call.id, "${call.name}: arguments are not a JSON object (${e.message?.lineSequence()?.first()})" +
+                        JsonRepair.suffix(outcome) + markupNote(call.argsJson, null))
+                notes += "arguments repaired: ${fixed.summary}"
+                fixed.element.jsonObject
             }
             val args = try {
-                decode(family, raw, notes)
+                decode(family, raw, notes, truncated)
             } catch (e: SerializationException) {
                 return ParsedCalls.Invalid(call.id, "${call.name}: ${e.message?.lineSequence()?.first()}${markupNote(call.argsJson, raw)}")
             } catch (e: IllegalArgumentException) {
@@ -90,14 +98,8 @@ public object ToolCalls {
 
     private fun carriesMarkup(text: String): Boolean = "<arg_key>" in text || "<arg_value>" in text
 
-    /** D-373: the arguments after the one bracket repair, when that repair yields a JSON object. */
-    private fun repaired(argsJson: String): Pair<JsonObject, JsonRepair.Repaired>? {
-        val (parsed, repair) = JsonRepair.parsed(json, argsJson) ?: return null
-        return (parsed as? JsonObject)?.let { it to repair }
-    }
-
-    private fun decode(family: ToolFamily, received: JsonObject, notes: MutableList<String>): Args {
-        val raw = InputTolerance.normalise(family, received, notes)
+    private fun decode(family: ToolFamily, received: JsonObject, notes: MutableList<String>, truncated: Boolean): Args {
+        val raw = InputTolerance.normalise(family, received, notes, truncated)
         return when (family) {
             ToolFamily.Look -> Args.Look(json.decodeFromJsonElement(LookArgs.serializer(), raw))
             ToolFamily.Edit -> Args.Edit(json.decodeFromJsonElement(EditArgs.serializer(), raw))

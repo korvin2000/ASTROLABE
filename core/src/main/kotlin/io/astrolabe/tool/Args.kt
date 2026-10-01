@@ -141,10 +141,11 @@ internal object InputTolerance {
 
     private val json = Json { ignoreUnknownKeys = false }
 
-    /** [notes] collects what was repaired (D-373), for the call's result. */
-    fun normalise(family: ToolFamily, raw: JsonObject, notes: MutableList<String> = ArrayList()): JsonObject = when (family) {
-        ToolFamily.Edit -> lifted(raw.mapValue("ops") { parsedArray("ops", it, notes) }).mapValue("ops") { ops -> if (ops is JsonArray) JsonArray(ops.map { editOp(it, notes) }) else ops }
-        ToolFamily.State -> withInferredOp(unglued(raw.mapValue("patch") { parsedArray("patch", it, notes) }))
+    /** [notes] collects what was repaired (D-373), for the call's result; a [truncated] response repairs nothing (D-375). */
+    fun normalise(family: ToolFamily, raw: JsonObject, notes: MutableList<String> = ArrayList(), truncated: Boolean = false): JsonObject = when (family) {
+        ToolFamily.Edit -> lifted(raw.mapValue("ops") { parsedArray("ops", it, notes, truncated) })
+            .mapValue("ops") { ops -> if (ops is JsonArray) JsonArray(ops.map { editOp(it, notes, truncated) }) else ops }
+        ToolFamily.State -> withInferredOp(unglued(raw.mapValue("patch") { parsedArray("patch", it, notes, truncated) }))
         ToolFamily.Look -> raw.mapValue("id") { id -> if (id is JsonPrimitive && !id.isString && id.content.toIntOrNull() != null) JsonPrimitive(id.content) else id }
         else -> raw
     }
@@ -179,19 +180,20 @@ internal object InputTolerance {
 
     /**
      * A JSON string whose content is an array becomes that array; text that opens like JSON but does not parse gets the
-     * one bracket repair of [JsonRepair] (D-373, noted), else is refused with the parser's message and position; anything
-     * else is left for the schema to refuse.
+     * syntax repair of [JsonRepair] (D-373, D-375, noted), else is refused with the parser's message and position;
+     * anything else is left for the schema to refuse.
      */
-    private fun parsedArray(key: String, value: JsonElement, notes: MutableList<String>): JsonElement {
+    private fun parsedArray(key: String, value: JsonElement, notes: MutableList<String>, truncated: Boolean): JsonElement {
         val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content?.trim() ?: return value
         if (!text.startsWith("[") && !text.startsWith("{")) return value
         val parsed = try {
             json.parseToJsonElement(text)
         } catch (e: SerializationException) {
-            val (fixed, repair) = JsonRepair.parsed(json, text)?.takeIf { it.first is JsonArray }
-                ?: throw IllegalArgumentException("$key is a string holding invalid JSON: ${e.message?.lineSequence()?.first()}")
-            notes += "$key string repaired: ${repair.summary}"
-            fixed
+            val outcome = JsonRepair.repair(json, text, truncated)
+            val fixed = (outcome as? JsonRepair.Repaired)?.takeIf { it.element is JsonArray }
+                ?: throw IllegalArgumentException("$key is a string holding invalid JSON: ${e.message?.lineSequence()?.first()}${JsonRepair.suffix(outcome)}")
+            notes += "$key string repaired: ${fixed.summary}"
+            fixed.element
         }
         return if (parsed is JsonArray) parsed else value
     }
@@ -231,9 +233,9 @@ internal object InputTolerance {
         return JsonObject(raw + ("op" to JsonPrimitive(op)))
     }
 
-    private fun editOp(element: JsonElement, notes: MutableList<String>): JsonElement {
+    private fun editOp(element: JsonElement, notes: MutableList<String>, truncated: Boolean): JsonElement {
         if (element !is JsonObject) return element
-        val op = element.mapValue("hunks") { parsedArray("hunks", it, notes) }
+        val op = element.mapValue("hunks") { parsedArray("hunks", it, notes, truncated) }
         val form = FORM_FIELDS.keys.filter { key -> op[key]?.let { !empty(it) } == true }.singleOrNull() ?: return op
         val own = FORM_FIELDS.getValue(form)
         val kept = op.filter { (key, value) -> key !in EDIT_FIELDS || key in own || !empty(value) }

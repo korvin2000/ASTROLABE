@@ -10,7 +10,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-/** D-373 item 1: the one bracket repair of tool-call arguments, on the calls a live run lost to an unbalanced tail. */
+/** D-373, D-375: the syntax repair of tool-call arguments a model ended malformed, and the refusal of a cut output. */
 class JsonRepairTest {
     /** The live run's calls by provider id (`resources/live/d373-calls.jsonl`, copied verbatim from the run's events). */
     private val live: Map<String, ProviderCall> = javaClass.getResourceAsStream("/live/d373-calls.jsonl")!!.use { String(it.readAllBytes(), Charsets.UTF_8) }
@@ -19,7 +19,11 @@ class JsonRepairTest {
 
     private fun parsed(call: ProviderCall): ToolCall = assertIs<ParsedCalls.Valid>(ToolCalls.parse(listOf(call)), call.argsJson).calls.single()
 
-    private fun parse(tool: String, json: String): ParsedCalls = ToolCalls.parse(listOf(ProviderCall("c1", tool, json)))
+    private fun parse(tool: String, json: String, truncated: Boolean = false): ParsedCalls = ToolCalls.parse(listOf(ProviderCall("c1", tool, json)), truncated)
+
+    private fun repaired(text: String): JsonRepair.Repaired = assertIs<JsonRepair.Repaired>(JsonRepair.repair(Json, text, truncated = false), text)
+
+    private val cut = "the output was cut; send the call again in full"
 
     @Test
     fun `every live call refused for one surplus closing brace now parses and its note names the offset`() {
@@ -31,9 +35,12 @@ class JsonRepairTest {
             val call = live.getValue(id)
             val offset = call.argsJson.length - if (call.name == "edit") 1 else 3
             assertEquals("}", call.argsJson.substring(offset, offset + 1), id)
-            assertEquals(listOf("arguments repaired: 1 surplus '}' dropped at offset $offset"), parsed(call).notes, id)
+            assertEquals(listOf("arguments repaired: dropped '}' at $offset"), parsed(call).notes, id)
+            // A cut response is never repaired, whatever the defect.
+            val refused = assertIs<ParsedCalls.Invalid>(ToolCalls.parse(listOf(call), truncated = true), id).error
+            assertTrue(refused.endsWith(cut), refused)
         }
-        assertEquals(listOf("arguments repaired: 1 surplus '}' dropped at offset 273"), parsed(live.getValue("call_00_xh217fhlbicyy10dppfhyqqt")).notes)
+        assertEquals(listOf("arguments repaired: dropped '}' at 273"), parsed(live.getValue("call_00_xh217fhlbicyy10dppfhyqqt")).notes)
     }
 
     @Test
@@ -41,7 +48,7 @@ class JsonRepairTest {
         for (id in listOf("call_00_3vh197hrppf7u5figs1709jd", "call_00_7nijyfllyjadlpsckks1dt4v")) {
             val call = parsed(live.getValue(id))
             val note = call.notes.single()
-            assertTrue(note.startsWith("arguments repaired: 1 missing '}' inserted at offset "), note)
+            assertTrue(note.startsWith("arguments repaired: inserted '}' at "), note)
             val patch = (call.args as Args.State).args.patch!!
             val names = patch.map { PatchParser.nameOf(it) }
             val decision = names.indexOf("decision.add")
@@ -49,30 +56,70 @@ class JsonRepairTest {
             assertTrue(patch[decision].jsonObject.getValue("decision.add").jsonObject.containsKey("rejected"), patch[decision].toString())
         }
         val first = parsed(live.getValue("call_00_3vh197hrppf7u5figs1709jd"))
-        assertTrue(first.notes.single().endsWith(", 1 surplus '}' dropped at offset 1336"), first.notes.single())
+        assertTrue(first.notes.single().endsWith("; dropped '}' at 1336"), first.notes.single())
         assertEquals(11, (first.args as Args.State).args.patch!!.size)
     }
 
     @Test
-    fun `a patch or hunks string with an unbalanced tail is repaired too and noted`() {
-        val call = assertIs<ParsedCalls.Valid>(parse("state", """{"op":"patch","patch":"[{\"next\":\"go\"}}]"}""")).calls.single()
-        assertEquals(listOf("patch string repaired: 1 surplus '}' dropped at offset 14"), call.notes)
+    fun `a cut edit or run is refused with the schema error, and the same text ended normally is repaired`() {
+        val edit = """{"why":"replace","ops":[{"delete":"a.ts"}"""
+        val refused = assertIs<ParsedCalls.Invalid>(parse("edit", edit, truncated = true)).error
+        assertTrue(refused.startsWith("edit: arguments are not a JSON object (") && refused.endsWith(cut), refused)
+        val ended = parse("edit", edit).let { assertIs<ParsedCalls.Valid>(it, it.toString()) }.calls.single()
+        assertEquals(listOf("arguments repaired: appended ']' at 41; appended '}' at 41"), ended.notes)
+        assertEquals("a.ts", (ended.args as Args.Edit).args.ops.single().delete)
+
+        val run = """{"cmd":"npm test","cwd":"packages/a""""
+        assertTrue(assertIs<ParsedCalls.Invalid>(parse("run", run, truncated = true)).error.endsWith(cut))
+        assertEquals("packages/a", ((assertIs<ParsedCalls.Valid>(parse("run", run)).calls.single().args) as Args.Run).args.cwd)
+        // Whatever the stop reason: the text ends inside a string, or right after ':' or ',' (a value is missing).
+        for (text in listOf("""{"cmd":"npm test","cwd":"pack""", """{"cmd":"npm test",""", """{"cmd":"npm test","cwd": """, """{"cmd":"npm te\""")) {
+            val error = assertIs<ParsedCalls.Invalid>(parse("run", text)).error
+            assertTrue(error.startsWith("run: arguments are not a JSON object") && error.endsWith(cut), error)
+        }
+        val hunks = assertIs<ParsedCalls.Invalid>(parse("edit", """{"ops":[{"path":"a.ts","hunks":"[{\"anchor\":\"a\",\"new\":\"b\"}"}],"why":"w"}""", truncated = true)).error
+        assertTrue(hunks.startsWith("edit: hunks is a string holding invalid JSON: ") && hunks.endsWith(cut), hunks)
+    }
+
+    @Test
+    fun `each repair class applies once and a string's content is never touched`() {
+        // (a) a surplus closer, also inside the text
+        assertEquals(listOf("dropped '}' at 14"), repaired("""[{"next":"go"}}]""").changes)
+        // (b) missing closers at the end
+        assertEquals(listOf("appended ']' at 25"), repaired("""[{"anchor":"a","new":"b"}""").changes)
+        // (c) a container closed before a comma whose next token cannot continue it
+        assertEquals(listOf("inserted ']' at 9"), repaired("""{"a":[1,2, "b":3}""").changes)
+        assertEquals(Json.parseToJsonElement("""{"a":[1,2],"b":3}"""), repaired("""{"a":[1,2, "b":3}""").element)
+        // (d) a trailing comma
+        assertEquals(listOf("removed ',' at 36"), repaired("""{"op":"patch","patch":[{"next":"go"},]}""").changes)
+        // (e) a missing comma between adjacent values
+        assertEquals(listOf("inserted ',' at 14"), repaired("""[{"next":"go"}{"next":"stop"}]""").changes)
+        assertEquals(listOf("inserted ',' at 14"), repaired("""{"op":"patch" "patch":[{"next":"go"}]}""").changes)
+        assertEquals(listOf("inserted ',' at 5"), repaired("""["a" "b"]""").changes)
+
+        val quoted = assertIs<ParsedCalls.Valid>(parse("state", """{"op":"patch","patch":[{"next":"a}b]c"}]}}""")).calls.single()
+        assertEquals("a}b]c", (quoted.args as Args.State).args.patch!!.single().jsonObject.getValue("next").jsonPrimitive.content)
+        assertEquals(listOf("arguments repaired: dropped '}' at 41"), quoted.notes)
+        val patch = assertIs<ParsedCalls.Valid>(parse("state", """{"op":"patch","patch":"[{\"next\":\"go\"}}]"}""")).calls.single()
+        assertEquals(listOf("patch string repaired: dropped '}' at 14"), patch.notes)
         val edit = assertIs<ParsedCalls.Valid>(parse("edit", """{"ops":[{"path":"a.ts","hunks":"[{\"anchor\":\"a\",\"new\":\"b\"}"}],"why":"w"}""")).calls.single()
-        assertEquals(listOf("hunks string repaired: 1 missing ']' appended"), edit.notes)
+        assertEquals(listOf("hunks string repaired: appended ']' at 25"), edit.notes)
         assertEquals(listOf(HunkArgs("a", null, "b")), (edit.args as Args.Edit).args.ops.single().hunks)
     }
 
     @Test
-    fun `only closing brackets change, braces inside strings are text, and anything else stays the parser's error`() {
-        val quoted = assertIs<ParsedCalls.Valid>(parse("state", """{"op":"patch","patch":[{"next":"a}b]c"}]}}""")).calls.single()
-        assertEquals("a}b]c", (quoted.args as Args.State).args.patch!!.single().jsonObject.getValue("next").jsonPrimitive.content)
-        assertEquals(listOf("arguments repaired: 1 surplus '}' dropped at offset 41"), quoted.notes)
-        val tooMany = assertIs<ParsedCalls.Invalid>(parse("state", """{"op":"patch","patch":[{"next":"go"}}}}}]}""")).error
-        assertTrue(tooMany.startsWith("state: arguments are not a JSON object"), tooMany)
-        val comma = assertIs<ParsedCalls.Invalid>(parse("state", """{"op":"patch" "patch":[{"next":"go"}]}""")).error
-        assertTrue(comma.startsWith("state: arguments are not a JSON object"), comma)
-        val open = assertIs<ParsedCalls.Invalid>(parse("state", """{"op":"patch","patch":[{"next":"go""")).error
-        assertTrue(open.startsWith("state: arguments are not a JSON object"), "an unterminated string is not a bracket problem: $open")
+    fun `more than four fixes, quotes, comments and other defects stay the parser's error`() {
+        val tooMany = assertIs<ParsedCalls.Invalid>(parse("state", """{"op":"patch","patch":[{"next":"go"}}}}}}]}""")).error
+        assertTrue(tooMany.startsWith("state: arguments are not a JSON object") && tooMany.endsWith("not repaired: more than 4 syntax fixes would be needed"), tooMany)
+        val single = assertIs<ParsedCalls.Invalid>(parse("state", """{'op':'patch'}""")).error
+        assertTrue(single.endsWith("not repaired: single-quoted strings"), single)
+        val comment = assertIs<ParsedCalls.Invalid>(parse("state", """{"op":"patch" /* x */}""")).error
+        assertTrue(comment.endsWith("not repaired: comments"), comment)
+        for (text in listOf("""{"op" "patch"}""", """{"op":"patch","patch":[{"next":"say "hi" now"}]}""", """{"op":"patch",,"x":1}""", """{"a":1 "b":2}""")) {
+            val error = assertIs<ParsedCalls.Invalid>(parse("state", text), text).error
+            assertTrue(error.startsWith("state: arguments are not a JSON object") && !error.endsWith(cut), error)
+        }
+        assertIs<ParsedCalls.Invalid>(parse("state", """{"op":"patch","patch":<arg_value>[{"next":"go"}]"""))
         assertEquals(emptyList(), parsed(ProviderCall("c1", "state", """{"op":"patch","patch":[{"next":"go"}]}""")).notes, "well-formed calls carry no note")
     }
 }
