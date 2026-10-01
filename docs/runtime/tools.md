@@ -117,6 +117,8 @@ Delimiters are harness-owned; anything inside them is data. Instruction-shaped c
 | Empty search in limited scope | `complete` describes exhaustion of the declared scope; even complete scoped emptiness is not repository-wide absence |
 | Recall of a changed file | Labelled `historical v=…` |
 | Identical call + identical result twice | Loop nudge; the third ends the turn with a required `state` op |
+| Identical refused call twice (masked op, schema error, partition rejection) | Refusal-loop nudge naming the exits; the third ends the cell `blocked` with the refusal as its reason (D-358) |
+| Masked op | refused with the reason (not in the role's mask in this cell, not enabled in this shape, or outside the capability ceiling), the ops that are available, and the role's intended exit; a valid terminal call (`task.ask`, `task.answer`, `state(blocked)`) in the same turn runs alone instead of being refused with the rest (D-357) |
 | Instruction-shaped tool content | Flagged; never executed |
 | Delegated result with a moved base | `stale-for-integration`; never merged as current |
 | Transform touches files outside `scope_glob` | Reject publication or apply a guarded inverse; report actual restoration, partial state or unknown effects ([§9.2](workspace-editing.md#sec-9-2)) |

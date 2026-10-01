@@ -121,6 +121,17 @@ class AnthropicProtocolTest {
     }
 
     @Test
+    fun `gate body deep-merges vendor fields into the encoded request`() {
+        val wire = WireScript().sse(*frames("end_turn", *text))
+        val profile = GateTestKit.sonnetProfile(GateTestKit.gate("""{"body":{"provider":{"ignore":["Together"]},"thinking":{"note":"kept"}}}"""))
+        run(wire, profile) { adapter -> adapter.start(GateTestKit.request(profile, maxOutput = 16_000), InvocationId("inv-1")).await() }
+        val body = wire.body(0)
+        assertEquals(listOf("\"Together\""), body.`object`("provider").array("ignore").map { it.toJson() })
+        assertEquals("enabled", body.`object`("thinking").string("type"), "objects merge: the codec's members stay")
+        assertEquals("kept", body.`object`("thinking").string("note"))
+    }
+
+    @Test
     fun `AX-03 an output-limit stop exposes no call even when it looks complete`() {
         val wire = WireScript().sse(*frames("max_tokens", *text, *toolStart, *toolEnd))
         run(wire) { adapter ->

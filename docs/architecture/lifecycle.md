@@ -45,7 +45,7 @@ campaign(request, repo, policy):
     settle_pending_completion_if_still_valid(C, G, S, W)  # D-340: accept commits, rework continues, none waits — no cell, no model call
     imp = impact_prescan(C, W)
     shape = select_shape(C, imp, plan=None)                 # S0–S2 until a plan exists
-    G = plan_cell(C, W, S, KB) if shape >= S1 else G_single(C)
+    G = plan_cell(C, W, S, KB) if shape >= S1 and plan_needed(C) else G_single(C)   # planCell = WhenNeeded
     shape = select_shape(C, imp, plan=G)                    # S3 only from validated ownership/contracts
     while unfinished_requirements(C, G):
         enforce_cancellation_leases_authority_and_reservations(C)
@@ -112,6 +112,8 @@ cell(ctx, inc, budget):
             if second_pressure_rebuild(ctx): return persist_partial_with_replan_hint(ctx)
     return persist_partial(ctx)
 ```
+
+`plan_needed(C)` is false only under `ShapePolicy.planCell = WhenNeeded` for an S1 contract with no `review:` item, no contract touched and a `G_single(C)` the plan validator admits as it stands (no refactor-mode checklist owed, every requirement with acceptance of its own); the controller then installs `G_single(C)` as the plan, journals `plan cell skipped: <reason>`, and continues into the increment loop. `planCell = Always` runs the plan cell as before; a replan or increment split always does. The plan cell itself may run R-class commands only.
 
 `assess_role_completion` uses the implementing exit gate for implementers/writers, and the declared packet validator for plan/probe/review/QA/helper roles; it never lets a reviewer recursively demand a review of its own verdict. A completion proposal can request scheduler-owned required checks/review, but is accepted only with current evidence. The outer verification step reuses those results instead of invoking a second judge. All terminal branches reconcile/persist already-started actions; a failed check becomes a specific gap, a missing or unverifiable one an acceptance decision (D-337–D-340), never an endless finalization loop and never a `blocked` or `failed` outcome by itself. Boundary pre-compilation may run locally while final checks are pending ([§6.6](../context/continuity.md#sec-6-6)); publication remains contingent on successful verification.
 <!-- end-source-section: 3.7 -->

@@ -29,6 +29,8 @@ class RoleTest {
         assertTrue(Roles.implementing.toolMask.allows("task.delegate") && Roles.implementing.toolMask.allows("task.collect"), "delegation is unmasked per role (P4.4.1); the shape mask and the Delegator bound it")
         assertFalse(Roles.writer.toolMask.allows("task.delegate") || Roles.writer.toolMask.allows("task.collect"), "a writer is a leaf: writers depth 1")
         assertTrue(Roles.plan.toolMask.allows("task.delegate") && Roles.plan.toolMask.allows("task.collect"))
+        assertTrue(Roles.plan.toolMask.allows("run.run") && Roles.plan.toolMask.allows("run.poll") && Roles.plan.toolMask.allows("run.cancel") && !Roles.plan.toolMask.allows("edit.anchored"))
+        assertTrue("read-only: R-class runs only" in Roles.plan.duties && "read-only: R-class runs only" in Roles.probe.duties)
         assertTrue(Roles.probe.toolMask.allows("look.read") && Roles.probe.toolMask.allows("run.run") && !Roles.probe.toolMask.allows("edit.anchored"))
         assertTrue(Roles.review.toolMask.allows("verify.tests") && !Roles.review.toolMask.allows("run.run"))
         assertEquals(ToolMask(ToolOps.kb.map { "kb.$it" }.toSet()), Roles.extractor.toolMask)

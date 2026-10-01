@@ -9,6 +9,8 @@ import io.astrolabe.id.Digest
 import io.astrolabe.id.FileVersion
 import io.astrolabe.provider.ToolCall as ProviderCall
 import kotlinx.serialization.descriptors.elementDescriptors
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -95,6 +97,18 @@ class ToolContractsTest {
         assertEquals("c02e", deleted.expect)
         assertIs<ParsedCalls.Invalid>(parse("edit", """{"ops":[{"delete":"src/a.py","create":"src/b.py","content":"x"}],"why":"w"}"""), "two real forms still refuse")
         assertIs<ParsedCalls.Invalid>(parse("edit", """{"ops":[{"delete":"src/a.py","colour":""}],"why":"w"}"""), "an unknown key still refuses, empty or not")
+    }
+
+    @Test
+    fun `the task schema describes the proposal forms and the description points at them`() {
+        val task = ToolSchemas.schema(ToolFamily.Task)
+        val proposal = task.jsonSchema["properties"]!!.jsonObject["proposal"]!!.jsonObject
+        assertEquals("object", proposal["type"]!!.jsonPrimitive.content)
+        val described = proposal["description"]!!.jsonPrimitive.content
+        for (form in listOf("plan: {increments:[{id, requirements, accept", "increment_split: {increment, reason", "amendment: {change, reason}")) {
+            assertTrue(form in described, described)
+        }
+        assertTrue("propose(kind, proposal) with kind plan|increment_split|amendment — see proposal." in task.description, task.description)
     }
 
     @Test

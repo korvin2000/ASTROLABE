@@ -119,7 +119,7 @@ public object PlanPacketValidator {
     @JvmStatic
     @JvmOverloads
     public fun gaps(contract: Contract, packet: PlanPacket?, conAnchors: Map<String, Set<String>> = emptyMap()): List<String> {
-        if (packet == null) return listOf("no plan proposed: end with task.propose(plan)")
+        if (packet == null) return listOf("no plan proposed: end with task.propose(plan); $PLAN_FORM")
         val gaps = ArrayList<String>()
         val graph = packet.graphProposal
         for (increment in graph.increments) {

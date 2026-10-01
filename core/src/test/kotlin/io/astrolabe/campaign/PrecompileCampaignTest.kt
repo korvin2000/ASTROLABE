@@ -100,7 +100,7 @@ class PrecompileCampaignTest {
                 ),
             )
         }
-        val config = Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all, flags = Flags(precompile = precompile))
+        val config = Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all, flags = Flags(precompile = precompile), defaults = alwaysPlan)
         val ticks = AtomicLong(0)
         val metrics = PrecompileMetrics { ticks.addAndGet(1_000) }
         runBlocking {

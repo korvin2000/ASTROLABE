@@ -202,7 +202,8 @@ class CampaignLoopTest {
         repo.close()
     }
 
-    private fun controller(lease: Duration = Duration.ofHours(1)) = Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all), clock, idGen, leaseDuration = lease)
+    // The run-only contract is its own plan under WhenNeeded; these tests exercise the plan cell, so it always runs.
+    private fun controller(lease: Duration = Duration.ofHours(1)) = Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all, defaults = alwaysPlan), clock, idGen, leaseDuration = lease)
 
     private val plan = """{"increments":[
         {"id":"I1","requirements":["R1"],"accept":["AC-1"],"write_scope":["src/"],"expected_files":1,"produces":"artifact"},
@@ -263,7 +264,7 @@ class CampaignLoopTest {
             val planRequest = adapter.calls[0].request
             val firstImplementing = adapter.calls[2].request
             assertTrue(planRequest.mask!!.allows("task.propose") && !planRequest.mask!!.allows("edit.anchored"))
-            assertTrue(firstImplementing.mask!!.allows("edit.anchored") && firstImplementing.mask!!.allows("run.run") && !planRequest.mask!!.allows("run.run"), "the implementing mask replaces the plan mask")
+            assertTrue(firstImplementing.mask!!.allows("edit.anchored") && firstImplementing.mask!!.allows("run.run") && !planRequest.mask!!.allows("edit.anchored"), "the implementing mask replaces the plan mask")
             val tail = firstImplementing.segment(io.astrolabe.provider.SegmentKind.T)!!.items
             assertTrue(tail.none { it is io.astrolabe.provider.ToolCall || it is io.astrolabe.provider.ToolResult || (it is io.astrolabe.provider.Message && it.role == io.astrolabe.provider.Role.Assistant) }, "nothing of the plan cell's transcript is inherited")
             assertTrue(adapter.validations.all { it.result == io.astrolabe.provider.Validation.Ok }, "FX-56: every request kept valid call/result pairing")

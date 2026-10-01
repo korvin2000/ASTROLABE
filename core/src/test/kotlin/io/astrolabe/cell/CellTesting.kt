@@ -178,7 +178,10 @@ internal class CellFixture(
         workspace, registry, workset, os, preimages, ScopeGuard(workspace), contracts, checks, observations, aliases, store.blobs, Redaction(), estimator, idGen, ids, SyntaxCheck { _, _, _ -> SyntaxResult.Ok },
         transforms = TransformExecution(TrustedLocalRunner(os), stamper, logs),
     )
-    val run = Run(workspace, registry, stamper, TrustedLocalRunner(os), os, intents, SqliteHandles(store, clock), observations, aliases, store.blobs, Redaction(), estimator, idGen, ids, contracts, AutonomousAuthority(), Config(), clock, logs)
+    val run = newRun(null)
+
+    /** D-360: the plan and probe roles run R-class commands only; the executor enforces it when it knows the role. */
+    private fun newRun(readOnlyRole: String?) = Run(workspace, registry, stamper, TrustedLocalRunner(os), os, intents, SqliteHandles(store, clock), observations, aliases, store.blobs, Redaction(), estimator, idGen, ids, contracts, AutonomousAuthority(), Config(), clock, logs, readOnlyRole = readOnlyRole)
     val verify = Verify(checks, scheduler, checker, null, null, workspace, TrustedLocalRunner(os), os, stamper, store.blobs, Redaction(), estimator, idGen, ids, contracts, logs)
     val task = TaskTool(AutonomousAuthority(), contracts, journal, estimator, idGen, ids, clock, events)
     val kb = KbTool(EmptyKb, estimator, idGen)
@@ -193,7 +196,7 @@ internal class CellFixture(
             role = role,
             contracts = contracts,
             model = CellModel(adapter, profile, estimator),
-            tools = CellTools(state, look, edit, run, verify, task, kb),
+            tools = CellTools(state, look, edit, if (Roles.readOnlyRuns(role)) newRun(role.name) else run, verify, task, kb),
             workspace = CellWorkspace(workspace, registry, coherence, stamper, workset, checks, scheduler, atlas, checker),
             evidence = CellEvidence(journal, observations, aliases, receipts, intents, registerVersions, checkpoints, preimages),
             prime = Prime.render(atlas, Sniff.commands(atlas)),

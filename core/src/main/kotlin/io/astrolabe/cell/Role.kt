@@ -65,7 +65,7 @@ public data class Role(
 
 /** The declared role table (§3.4) and the shape masks that bound it. */
 public object Roles {
-    public const val POLICY_TEXT_VERSION: String = "roles/3"
+    public const val POLICY_TEXT_VERSION: String = "roles/4"
 
     private fun ops(vararg names: String): ToolMask = ToolMask(names.toSet())
 
@@ -92,14 +92,14 @@ public object Roles {
         contextView = setOf(ContextPart.Kernel, ContextPart.ContractSlice, ContextPart.Prime, ContextPart.Notes, ContextPart.BehaviourMaps, ContextPart.CalibrationPrior, ContextPart.Transcript, ContextPart.Anchor),
         noteScope = setOf("GLOBAL", "CON", "ADR"),
         skillFilter = setOf("*"),
-        toolMask = ToolMask(ToolOps.look.map { ToolOps.name(io.astrolabe.tool.ToolFamily.Look, it) }.toSet() + ToolOps.kb.filter { it != "propose" }.map { "kb.$it" } + ToolOps.state.map { "state.$it" } + setOf("task.ask", "task.delegate", "task.collect", "task.propose", "verify.baseline")),
+        toolMask = ToolMask(ToolOps.look.map { ToolOps.name(io.astrolabe.tool.ToolFamily.Look, it) }.toSet() + ToolOps.kb.filter { it != "propose" }.map { "kb.$it" } + ToolOps.state.map { "state.$it" } + setOf("task.ask", "task.delegate", "task.collect", "task.propose", "verify.baseline", "run.run", "run.poll", "run.cancel")),
         permission = Stage.Patch,
         tierPrior = Tier.High,
-        duties = listOf("requirement graph and acceptance proposals", "increments with write scopes and an ownership map", "decision packets, CON/ADR candidates, shape suggestion"),
+        duties = listOf("requirement graph and acceptance proposals", "increments with write scopes and an ownership map", "decision packets, CON/ADR candidates, shape suggestion", "read-only: R-class runs only"),
         askBack = true,
         packetKind = PacketKind.PlanArtifacts,
         personaLines = listOf(
-            "Plan, do not implement: end with task.propose(plan) holding pending increments, each with a run: or a check: naming its evidence kind.",
+            """Plan, do not implement: hand the work over with task.propose(plan) — {"increments":[{"id":"inc-1","requirements":["R1"],"accept":["AC-1"],"title":"…"}]} using the Contract's R-/AC- ids (optional per increment: write_scope, depends_on, produces artifact|resolves:<question>; optional "acceptance":[{id, requirement, run|check|review}] adds items) — then reply with a one-line summary and no tool call.""",
             "A requirement no command can decide gets a review: item naming the judgment it needs, never an invented oracle.",
             "Record consequential choices with decision.add; mark those that cross a boundary as ADR candidates.",
         ),
@@ -194,6 +194,12 @@ public object Roles {
 
     @JvmField
     public val defaults: Map<String, Role> = listOf(implementing, plan, probe, review, qa, writer, repair, extractor).associateBy { it.name }
+
+    /**
+     * The roles whose duty is `read-only: R-class runs only`: their run executor refuses every W- and D-class
+     * command before dispatch. Keyed by name because a host override changes wording only (D-38).
+     */
+    internal fun readOnlyRuns(role: Role): Boolean = role.name == plan.name || role.name == probe.name
 
     /**
      * What a shape enables (§3.5 collapsibility): S0 = one implementing cell without delegation, proposals or

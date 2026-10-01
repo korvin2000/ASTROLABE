@@ -24,11 +24,14 @@ tasks.withType<Test>().configureEach {
 
 // Doc phase 7: billable smoke calls against real providers (LiveSmokeTest), keys from the environment; never part of `check`.
 tasks.register<Test>("liveTest") {
-    description = "Runs LiveSmokeTest against real providers; keys come from the environment (see the test's KDoc)"
+    description = "Runs LiveSmokeTest and GlmToolCallProbeTest against real providers; keys come from the environment (see the test's KDoc)"
     group = "verification"
     testClassesDirs = sourceSets.test.get().output.classesDirs
     classpath = sourceSets.test.get().runtimeClasspath
-    filter { includeTestsMatching("io.astrolabe.provider.aigate.LiveSmokeTest") }
+    filter {
+        includeTestsMatching("io.astrolabe.provider.aigate.LiveSmokeTest")
+        includeTestsMatching("io.astrolabe.provider.aigate.GlmToolCallProbeTest")
+    }
     systemProperty("astrolabe.live", "true")
     testLogging.showStandardStreams = true
     outputs.upToDateWhen { false }

@@ -3,6 +3,7 @@ package io.astrolabe.tool
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -62,19 +63,28 @@ public object ToolCalls {
             val raw = try {
                 json.parseToJsonElement(call.argsJson).jsonObject
             } catch (e: Exception) {
-                return ParsedCalls.Invalid(call.id, "${call.name}: arguments are not a JSON object (${e.message?.lineSequence()?.first()})")
+                return ParsedCalls.Invalid(call.id, "${call.name}: arguments are not a JSON object (${e.message?.lineSequence()?.first()})${markupNote(call.argsJson, null)}")
             }
             val args = try {
                 decode(family, raw)
             } catch (e: SerializationException) {
-                return ParsedCalls.Invalid(call.id, "${call.name}: ${e.message?.lineSequence()?.first()}")
+                return ParsedCalls.Invalid(call.id, "${call.name}: ${e.message?.lineSequence()?.first()}${markupNote(call.argsJson, raw)}")
             } catch (e: IllegalArgumentException) {
-                return ParsedCalls.Invalid(call.id, "${call.name}: ${e.message}")
+                return ParsedCalls.Invalid(call.id, "${call.name}: ${e.message}${markupNote(call.argsJson, raw)}")
             }
             out += ToolCall(i + 1, call.id, family, opName(family, args, raw), args, raw)
         }
         return ParsedCalls.Valid(out)
     }
+
+    /** F8: models that leak their native tool markup into the arguments get told so, not just the symptom. */
+    private fun markupNote(argsJson: String, raw: JsonObject?): String {
+        val carried = carriesMarkup(argsJson) ||
+            listOf("patch", "ops").any { key -> (raw?.get(key) as? JsonPrimitive)?.takeIf { it.isString }?.content?.let(::carriesMarkup) == true }
+        return if (carried) " — the arguments carry tool-call markup (<arg_key>); send the arguments as one JSON object" else ""
+    }
+
+    private fun carriesMarkup(text: String): Boolean = "<arg_key>" in text || "<arg_value>" in text
 
     private fun decode(family: ToolFamily, received: JsonObject): Args {
         val raw = InputTolerance.normalise(family, received)

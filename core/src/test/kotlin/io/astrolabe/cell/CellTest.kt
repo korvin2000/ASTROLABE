@@ -128,8 +128,9 @@ class CellTest {
         for (role in listOf(Roles.probe, Roles.plan, Roles.review)) {
             CellFixture(stateRoot.resolve(role.name)).use { f ->
                 val before = f.version("src/a.py")
-                val masked = if (role == Roles.probe) anchored("c2", "src/a.py", before, "    return 1", "    return 10")
-                    else runCmd("c2", "echo masked > src/forbidden.txt")
+                // Plan and probe run R-class commands; an edit is what their masks refuse.
+                val masked = if (role == Roles.review) runCmd("c2", "echo masked > src/forbidden.txt")
+                    else anchored("c2", "src/a.py", before, "    return 1", "    return 10")
                 f.run(ScriptedModel.of(
                     Scripted.Reply(listOf(read("c1", "src/a.py"))),
                     Scripted.Reply(listOf(masked)),
@@ -137,7 +138,7 @@ class CellTest {
                 ), role = role)
                 assertEquals(before, f.version("src/a.py"))
                 assertFalse(Files.exists(f.repo.root.resolve("src/forbidden.txt")))
-                assertTrue(f.transcript(3).filterIsInstance<ToolResult>().any { "is masked in this turn" in resultText(it) })
+                assertTrue(f.transcript(3).filterIsInstance<ToolResult>().any { "is not available to the ${role.name} role in this cell (any turn)" in resultText(it) })
             }
         }
     }
@@ -394,6 +395,88 @@ class CellTest {
             assertEquals(CellFixture.A_PY, Files.readString(f.repo.resolve("src/a.py")), "no edit executed")
             assertTrue(f.intents.open().isEmpty() && f.intents.get("intent-1") == null, "no run executed")
             assertEquals(listOf(1, 2, 3), f.checkpoints.turns(f.ids.context!!).map { it.turn })
+        }
+    }
+
+    @Test
+    fun `a call refused three times for the same reason ends the cell blocked with that reason`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("run it"), runCmd("c1", "make"))),
+                Scripted.Reply(listOf(say("run it again"), runCmd("c2", "make"))),
+                Scripted.Reply(listOf(say("and again"), runCmd("c3", "make"))),
+            )
+
+            val blocked = assertIs<CellExit.Blocked>(f.run(model, role = Roles.plan))
+
+            assertEquals(3, f.adapter.calls.size, "the third identical refusal ends the cell")
+            val reason = blocked.request.reason
+            // D-360: the plan role may call run, but only R-class commands; `make` is a W-class build, denied by the executor.
+            assertTrue(reason.startsWith("refusal loop: denied: the plan role runs R-class commands only; this command is W-class"), reason)
+            assertEquals(listOf("3 identical refused calls of run.run since turn 1"), blocked.request.evidence)
+            assertNull(blocked.request.question)
+            assertTrue(f.anchorText(3).contains("refusal loop: run.run was refused 2 times for the same reason"), f.anchorText(3))
+            assertEquals(CellStatus.Blocked, f.checkpoints.latest(f.ids.context!!)!!.status)
+        }
+    }
+
+    @Test
+    fun `three identical masked edits refused by the validator end the plan cell blocked`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val before = f.version("src/a.py")
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(anchored("c1", "src/a.py", before, "    return 1", "    return 10"))),
+                Scripted.Reply(listOf(anchored("c2", "src/a.py", before, "    return 1", "    return 10"))),
+                Scripted.Reply(listOf(anchored("c3", "src/a.py", before, "    return 1", "    return 10"))),
+            )
+
+            val blocked = assertIs<CellExit.Blocked>(f.run(model, role = Roles.plan))
+
+            assertEquals(3, f.adapter.calls.size)
+            assertTrue(blocked.request.reason.startsWith("refusal loop: edit.anchored is not available to the plan role in this cell (any turn)"), blocked.request.reason)
+            assertEquals(before, f.version("src/a.py"))
+        }
+    }
+
+    @Test
+    fun `denials interleaved with other calls still end the cell because the refusal history lives for the cell`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(runCmd("c1", "make"))),
+                Scripted.Reply(listOf(read("c2", "src/a.py"))),
+                Scripted.Reply(listOf(runCmd("c3", "make"))),
+                Scripted.Reply(listOf(read("c4", "src/a.py"))),
+                Scripted.Reply(listOf(runCmd("c5", "make"))),
+            )
+
+            val blocked = assertIs<CellExit.Blocked>(f.run(model, role = Roles.plan))
+
+            assertEquals(5, f.adapter.calls.size, "reads between the denials do not reset the refusal history")
+            assertTrue(blocked.request.reason.startsWith("refusal loop: denied: the plan role runs R-class commands only"), blocked.request.reason)
+            assertEquals(listOf("3 identical refused calls of run.run since turn 1"), blocked.request.evidence)
+        }
+    }
+
+    @Test
+    fun `a terminal ask survives a whole-turn refusal and runs alone`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(
+                    say("recording and asking"),
+                    call("c1", "state", "not json"),
+                    call("c2", "task", """{"op":"ask","question":"Which value should a return?"}"""),
+                )),
+            )
+
+            val blocked = assertIs<CellExit.Blocked>(f.run(model))
+
+            assertEquals("Which value should a return?", blocked.request.question)
+            assertEquals(1, blocked.turns)
+            val results = f.journal.events(JournalScope(f.ids.work, kinds = setOf(JournalKind.Result))).filter { it.turn == 1 }.map { it.text }
+            val refused = results.single { it.startsWith("call c1: ") }
+            assertTrue(refused.contains("schema error in call c1") && refused.endsWith(" — the terminal call task(ask) ran alone"), refused)
+            assertFalse(refused.contains("no call of this turn executed"), refused)
+            assertTrue(results.single { it.startsWith("call c2: ") }.contains("tool=task"), results.toString())
         }
     }
 

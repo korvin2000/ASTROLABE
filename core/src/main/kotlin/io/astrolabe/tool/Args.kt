@@ -2,6 +2,7 @@ package io.astrolabe.tool
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -96,6 +97,15 @@ public data class EditOpArgs(
  * `ops` and `patch` sent as a JSON string holding an array are parsed; an edit op's empty placeholders of the
  * *other* forms (and an empty `if`) are dropped by the per-form whitelist [FORM_FIELDS]. A form's own fields keep
  * their empty values (`content: ""` creates an empty file, `new: ""` deletes the match), unknown keys still refuse.
+ *
+ * `state` gets two more repairs, each with one reading only (F8). A key that carries the model's own tool markup
+ * (`blocked<arg_key>evidence`: the nested `blocked` object flattened, its first field glued to the parent key) is split
+ * at the first `<arg_key>`, the `</arg_key>`/`<arg_value>`/`</arg_value>` remnants are dropped from both halves, and
+ * when the outer half is `blocked` or `retrieval_miss` the object is rebuilt with that form's fields (the glued one and
+ * its top-level siblings `reason|evidence|question`, `need|why`) nested again; any other key stays where it is and
+ * the schema refuses it by name. Then a call without `op` gets `op` = the one of `patch`, `blocked`, `retrieval_miss`
+ * that it carries; with none or several present (or an `op` already given) nothing is added.
+ * A `patch`/`ops` string that opens like JSON (`[` or `{`) but does not parse is refused with the parser's own message.
  */
 internal object InputTolerance {
     /** The fields each edit form owns (§5.4); every other known field is a placeholder when empty. */
@@ -110,11 +120,22 @@ internal object InputTolerance {
 
     private val EDIT_FIELDS: Set<String> = FORM_FIELDS.values.flatten().toSet() + "if"
 
+    /** The nested `state` forms and the fields each owns; `patch` is an array, so it is never rebuilt. */
+    private val STATE_NESTED: Map<String, Set<String>> = mapOf(
+        "blocked" to setOf("reason", "evidence", "question"),
+        "retrieval_miss" to setOf("need", "why"),
+    )
+
+    private val STATE_FORMS: List<String> = listOf("patch") + STATE_NESTED.keys
+
+    private const val ARG_KEY = "<arg_key>"
+    private val MARKUP_REMNANTS = listOf("</arg_key>", "<arg_value>", "</arg_value>")
+
     private val json = Json { ignoreUnknownKeys = false }
 
     fun normalise(family: ToolFamily, raw: JsonObject): JsonObject = when (family) {
-        ToolFamily.Edit -> raw.mapValue("ops") { ops -> parsedArray(ops).let { if (it is JsonArray) JsonArray(it.map(::editOp)) else it } }
-        ToolFamily.State -> raw.mapValue("patch", ::parsedArray)
+        ToolFamily.Edit -> raw.mapValue("ops") { ops -> parsedArray("ops", ops).let { if (it is JsonArray) JsonArray(it.map(::editOp)) else it } }
+        ToolFamily.State -> withInferredOp(unglued(raw.mapValue("patch") { parsedArray("patch", it) }))
         else -> raw
     }
 
@@ -124,11 +145,54 @@ internal object InputTolerance {
         return if (changed == value) this else JsonObject(this + (key to changed))
     }
 
-    /** A JSON string whose content is an array becomes that array; anything else is left for the schema to refuse. */
-    private fun parsedArray(value: JsonElement): JsonElement {
+    /**
+     * A JSON string whose content is an array becomes that array; text that opens like JSON but does not parse is
+     * refused with the parser's message and position; anything else is left for the schema to refuse.
+     */
+    private fun parsedArray(key: String, value: JsonElement): JsonElement {
         val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content?.trim() ?: return value
-        if (!text.startsWith("[")) return value
-        return (runCatching { json.parseToJsonElement(text) }.getOrNull() as? JsonArray) ?: value
+        if (!text.startsWith("[") && !text.startsWith("{")) return value
+        val parsed = try {
+            json.parseToJsonElement(text)
+        } catch (e: SerializationException) {
+            throw IllegalArgumentException("$key is a string holding invalid JSON: ${e.message?.lineSequence()?.first()}")
+        }
+        return if (parsed is JsonArray) parsed else value
+    }
+
+    private fun markupFree(text: String): String = MARKUP_REMNANTS.fold(text) { acc, tag -> acc.replace(tag, "") }.trim()
+
+    /** `blocked<arg_key>evidence` and its siblings become `blocked: {evidence, ...}` again; other shapes are left alone. */
+    private fun unglued(raw: JsonObject): JsonObject {
+        val glued = raw.keys.filter { ARG_KEY in it }
+        if (glued.isEmpty()) return raw
+        val rebuilt = LinkedHashMap<String, LinkedHashMap<String, JsonElement>>()
+        val moved = HashSet<String>()
+        for (key in glued) {
+            val outer = markupFree(key.substringBefore(ARG_KEY))
+            val inner = markupFree(key.substringAfter(ARG_KEY))
+            if (outer !in STATE_NESTED || inner.isEmpty() || outer in raw) continue
+            rebuilt.getOrPut(outer) { LinkedHashMap() }[inner] = raw.getValue(key)
+            moved += key
+        }
+        if (rebuilt.isEmpty()) return raw
+        for ((outer, nested) in rebuilt) {
+            for ((key, value) in raw) {
+                if (key in STATE_NESTED.getValue(outer)) {
+                    nested.putIfAbsent(key, value)
+                    moved += key
+                }
+            }
+        }
+        val kept: Map<String, JsonElement> = raw.filterKeys { it !in moved }
+        return JsonObject(kept + rebuilt.mapValues { (_, nested) -> JsonObject(nested) })
+    }
+
+    /** D-347 style: a `state` call without `op` that carries exactly one form names that form. */
+    private fun withInferredOp(raw: JsonObject): JsonObject {
+        if ("op" in raw) return raw
+        val op = STATE_FORMS.filter { it in raw }.singleOrNull() ?: return raw
+        return JsonObject(raw + ("op" to JsonPrimitive(op)))
     }
 
     private fun editOp(op: JsonElement): JsonElement {

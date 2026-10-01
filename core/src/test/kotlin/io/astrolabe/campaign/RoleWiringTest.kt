@@ -105,7 +105,7 @@ class RoleWiringTest {
     @Test
     fun `the plan packet carries the plan cell's decisions and a path-triggered skill reaches the implementing K`() = runBlocking<Unit> {
         val hosted = Roles.implementing.copy(personaLines = listOf("Keep each edit to one hunk."))
-        val controller = Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all, roles = mapOf("implementing" to hosted)), clock, idGen)
+        val controller = Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all, roles = mapOf("implementing" to hosted), defaults = alwaysPlan), clock, idGen)
         controller.open(repo.root, request, policy).use { c ->
             val plan = """{"increments":[{"id":"I1","requirements":["R1","R2"],"accept":["AC-1","AC-2"],"write_scope":["src/"],"expected_files":1,"produces":"artifact"}]}"""
             val decision = """[{"decision.add":{"text":"one increment is enough","because":"one requirement, one file","rejected":"split per function"}},{"next":"propose the plan"}]"""

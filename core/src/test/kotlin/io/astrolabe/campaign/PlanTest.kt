@@ -125,7 +125,7 @@ class PlanTest {
     fun `the validator rejects think-more nodes, unjudged requirements and harness-owned fields`() {
         val c = contract(Mode.Autonomous)
         assertEquals(emptyList(), PlanPacketValidator.gaps(c, plan()))
-        assertEquals(listOf("no plan proposed: end with task.propose(plan)"), PlanPacketValidator.gaps(c, null))
+        assertEquals(listOf("no plan proposed: end with task.propose(plan); $PLAN_FORM"), PlanPacketValidator.gaps(c, null))
 
         val unjudged = PlanPacketValidator.gaps(c, plan(extra).copy(graphProposal = RequirementGraph(listOf(increment("I1", "R1", listOf("AC1"))))))
         assertTrue(unjudged.any { it.startsWith("UncoveredRequirement: uncovered requirement R2") }, unjudged.toString())
@@ -134,7 +134,7 @@ class PlanTest {
         val thinkMore = plan().copy(graphProposal = RequirementGraph(listOf(
             increment("I1", "R1", listOf("AC1"), produces = null), increment("I2", "R2", listOf("AC1", "AC-R2")),
         )))
-        assertEquals(listOf("MissingProduction I1: needs an artifact or named uncertainty"), PlanPacketValidator.gaps(c, thinkMore))
+        assertEquals(listOf("MissingProduction I1: needs produces: artifact or resolves:<question>"), PlanPacketValidator.gaps(c, thinkMore))
 
         val claimed = plan().copy(graphProposal = RequirementGraph(listOf(
             increment("I1", "R1", listOf("AC1")).copy(status = IncrementStatus.Verified), increment("I2", "R2", listOf("AC1", "AC-R2")),
@@ -176,7 +176,7 @@ class PlanTest {
             val exit = assertIs<CellExit.Completed>(f.run(model, role = Roles.plan, completion = completion))
 
             assertEquals(PacketStatus.Done, exit.packet.status)
-            assertEquals(listOf("no plan proposed: end with task.propose(plan)"), exit.packet.gaps, "the first proposal is refused with its gap")
+            assertEquals(listOf("no plan proposed: end with task.propose(plan); $PLAN_FORM"), exit.packet.gaps, "the first proposal is refused with its gap")
             assertEquals(listOf(proposals.latest(f.ids.work, f.ids.context)!!.id), exit.packet.evidenceRefs)
             assertEquals("plan", exit.packet.role)
         }
@@ -264,6 +264,7 @@ class PlanTest {
         val out = tool.propose("plan", wirePlan)
         assertEquals("proposed", out.header!!.runtime.status, out.body)
         assertTrue("2 increments, 1 acceptance proposals; passes the controller's checks" in out.body, out.body)
+        assertTrue(out.body.endsWith("; end the turn now with a one-line summary and no tool call"), out.body)
         val stored = plans.latest(work, cell)!!.packet
         assertEquals(listOf("I1", "I2"), stored.graphProposal.increments.map { it.id })
         assertEquals(Origin.Model("R2"), stored.acceptanceProposals.single().item.origin)
@@ -276,6 +277,81 @@ class PlanTest {
         assertTrue("produces must be artifact or resolves:<question>" in bad.body, bad.body)
         val gaps = tool.propose("plan", """{"increments":[{"id":"I1","requirements":["R1"],"accept":["AC1"],"produces":"artifact"}]}""")
         assertTrue("gaps: " in gaps.body && "R2 has no acceptance" in gaps.body, gaps.body)
+        assertTrue("end the turn now" !in gaps.body, "a plan with gaps keeps the turn going")
+    }
+
+    /** R1 decided by three runnable items: the contract of the minimal-proposal cases. */
+    private fun threeRuns() = contract(Mode.Autonomous).copy(
+        requirements = listOf(Requirement("R1", "the parser accepts trailing commas", listOf("AC-1", "AC-2", "AC-3"), authorityRef = "U1")),
+        acceptance = listOf("AC-1", "AC-2", "AC-3").map { Acceptance.Run(it, Command(listOf("pytest", "-k", it)), Origin.User) },
+    )
+
+    private fun intake(c: Contract?, gen: FixedIdGen, plans: PlanProposals = InMemoryPlanProposals(gen)) =
+        CampaignProposals(plans, InMemorySplitRequests(gen), { c }, { null })
+
+    private fun wire(json: String) = kotlinx.serialization.json.Json.parseToJsonElement(json)
+
+    @Test
+    fun `a minimal plan proposal takes proportional defaults from the contract and passes`() {
+        val gen = FixedIdGen()
+        val plans = InMemoryPlanProposals(gen)
+        val c = threeRuns()
+        val out = assertIs<io.astrolabe.tool.task.ProposalOutcome.Recorded>(intake(c, gen, plans).plan(Identities(work, AttemptId("a1"), context = cell), wire("""{"increments":[{"title":"verify"}]}""")))
+        assertEquals("1 increments, 0 acceptance proposals; passes the controller's checks", out.summary)
+        val increment = plans.latest(work, cell)!!.packet.graphProposal.increments.single()
+        assertEquals("inc-1", increment.id)
+        assertEquals(listOf("R1"), increment.requirementIds)
+        assertEquals(listOf("AC-1", "AC-2", "AC-3"), increment.accept)
+        assertEquals(Production.Artifact, increment.produces)
+        assertEquals("verify", increment.title)
+        assertEquals(emptyList(), PlanPacketValidator.gaps(c, plans.latest(work, cell)!!.packet))
+    }
+
+    @Test
+    fun `a one-increment plan defaults from accept and its own proposed items while a multi-increment plan states every field`() {
+        val gen = FixedIdGen()
+        val plans = InMemoryPlanProposals(gen)
+        val c = contract(Mode.Autonomous)
+        val at = Identities(work, AttemptId("a1"), context = cell)
+        val single = wire("""{"increments":[{"accept":["AC-R2"],"produces":"resolves:is the wording clear"}],
+            "acceptance":[{"id":"AC-R2","requirement":"R2","review":"a maintainer judges the message readable"}]}""")
+        assertIs<io.astrolabe.tool.task.ProposalOutcome.Recorded>(intake(c, gen, plans).plan(at, single))
+        val increment = plans.latest(work, cell)!!.packet.graphProposal.increments.single()
+        assertEquals(listOf("R2"), increment.requirementIds, "requirements follow accept, proposed items included")
+        assertEquals(Production.Resolves("is the wording clear"), increment.produces)
+
+        // S3 admission tells decision work apart only by produces: resolves, so two or more increments never default it.
+        val two = wire("""{"increments":[{"id":"I1","requirements":["R1"],"accept":["AC1"],"produces":"artifact"},{"id":"I2","requirements":["R2"],"accept":["AC1"],"why":"w"}]}""")
+        val refused = assertIs<io.astrolabe.tool.task.ProposalOutcome.Refused>(intake(c, gen, plans).plan(at, two))
+        assertEquals("increments[1].produces is required in a multi-increment plan: artifact | resolves:<question>; $PLAN_FORM", refused.reason)
+        val noId = assertIs<io.astrolabe.tool.task.ProposalOutcome.Refused>(intake(c, gen, plans).plan(at, wire("""{"increments":[{"title":"a"},{"title":"b"}]}""")))
+        assertEquals("increments[0].id is required in a multi-increment plan; $PLAN_FORM", noId.reason)
+    }
+
+    @Test
+    fun `unknown plan keys are ignored and named with their true paths`() {
+        val gen = FixedIdGen()
+        val plans = InMemoryPlanProposals(gen)
+        val proposal = wire("""{"goal":"x","increments":[{"title":"verify","check":"pytest","steps":["a"]}],
+            "acceptance":[{"id":"AC-4","requirement":"R1","run":["pytest"],"why":"w"}]}""")
+        val out = assertIs<io.astrolabe.tool.task.ProposalOutcome.Recorded>(intake(threeRuns(), gen, plans).plan(Identities(work, AttemptId("a1"), context = cell), proposal))
+        assertTrue(out.summary.endsWith("; ignored keys: goal, increments[0].check, increments[0].steps, acceptance[0].why — see the form"), out.summary)
+        assertTrue("passes the controller's checks" in out.summary, out.summary)
+        assertEquals(listOf("AC-1", "AC-2", "AC-3", "AC-4"), plans.latest(work, cell)!!.packet.graphProposal.increments.single().accept)
+    }
+
+    @Test
+    fun `a wrong type or a missing required plan field is refused with its path and the form`() {
+        val proposals = intake(threeRuns(), FixedIdGen())
+        val at = Identities(work, AttemptId("a1"), context = cell)
+        fun refusal(json: String) = assertIs<io.astrolabe.tool.task.ProposalOutcome.Refused>(proposals.plan(at, wire(json))).reason
+        assertEquals("increments must be an array; $PLAN_FORM", refusal("""{"increments":{"title":"x"}}"""))
+        assertEquals("increments is missing; $PLAN_FORM", refusal("""{"steps":["x"]}"""))
+        assertEquals("increments[1] must be an object; $PLAN_FORM", refusal("""{"increments":[{"title":"a"},"b"]}"""))
+        assertEquals("increments[0].requirements must be an array; $PLAN_FORM", refusal("""{"increments":[{"requirements":"R1"}]}"""))
+        assertEquals("acceptance[0].id is missing; $PLAN_FORM", refusal("""{"increments":[{"title":"a"}],"acceptance":[{"requirement":"R1","run":["x"]}]}"""))
+        assertEquals("increments[0].expected_files must be an integer; $PLAN_FORM", refusal("""{"increments":[{"expected_files":"two"}]}"""))
+        assertTrue(PLAN_FORM.length < 400, PLAN_FORM.length.toString())
     }
 
     @Test
