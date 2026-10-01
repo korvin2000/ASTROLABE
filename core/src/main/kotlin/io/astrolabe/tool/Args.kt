@@ -111,8 +111,8 @@ public data class EditOpArgs(
  * A `patch`/`ops` string that opens like JSON (`[` or `{`) but does not parse is refused with the parser's own message.
  *
  * D-365: an `edit` whose op fields sit at the top level is one op — without `ops` they become `ops: [that op]`; with
- * `ops` holding exactly one op that lacks them, a top-level `expect`/`if` moves into it; any other mix is refused naming
- * the accepted form. `hunks` sent as a JSON string holding an array is parsed like `ops`. A `look` `id` sent as a
+ * `ops` holding exactly one op, every top-level `path`/`expect`/`hunks`/`if` it lacks moves into it (D-373), one it holds
+ * with another value is refused naming both; any other mix is refused naming the accepted form. `hunks` sent as a JSON string holding an array is parsed like `ops`. A `look` `id` sent as a
  * number is that number as text.
  */
 internal object InputTolerance {
@@ -149,8 +149,8 @@ internal object InputTolerance {
         else -> raw
     }
 
-    /** The fields a single op's top-level copy may hand to the one op of `ops`. */
-    private val LIFTABLE: Set<String> = setOf("expect", "if")
+    /** The fields a single op's top-level copy may hand to the one op of `ops` (D-373: `path` and `hunks` too). */
+    private val LIFTABLE: Set<String> = setOf("path", "expect", "hunks", "if")
 
     private const val EDIT_FORM: String =
         "{\"ops\":[{\"path\":\"…\",\"expect\":\"…\",\"hunks\":[{\"anchor\":\"…\",\"new\":\"…\"}]}],\"why\":\"…\"} — every op field inside its op"
@@ -162,8 +162,11 @@ internal object InputTolerance {
         val rest = raw.filterKeys { it !in EDIT_FIELDS }
         val ops = raw["ops"] ?: return JsonObject(rest + ("ops" to JsonArray(listOf(JsonObject(loose)))))
         val single = ((ops as? JsonArray)?.singleOrNull() as? JsonObject)
-        if (single == null || loose.keys.any { it !in LIFTABLE || single[it]?.let(::empty) == false }) {
+        if (single == null || loose.keys.any { it !in LIFTABLE }) {
             throw IllegalArgumentException("top-level ${loose.keys.joinToString(", ") { "'$it'" }} beside ops${(ops as? JsonArray)?.let { " (${it.size} ops)" } ?: ""} has no single op to belong to; send $EDIT_FORM")
+        }
+        loose.entries.firstOrNull { (key, value) -> single[key]?.let { !empty(it) && it != value } == true }?.let { (key, value) ->
+            throw IllegalArgumentException("top-level '$key' $value and the op's '$key' ${single[key]} differ; send $EDIT_FORM")
         }
         return JsonObject(rest + ("ops" to JsonArray(listOf(JsonObject(single + loose)))))
     }
