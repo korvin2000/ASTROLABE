@@ -133,7 +133,7 @@ class BenchTest {
         // Stands in for an agent that fixed the bug: the reference solution lands in the workspace during the attempt.
         val adapter = script {
             val workspace = tree(plan.temp).single { p -> p.fileName.toString() == "workspace" && p.parent.parent == plan.temp }
-            Trees.copy(task.reference, workspace)
+            task.reference.write(workspace)
         }
         val models = ModelSource { ModelBinding(adapter, FakeProfiles.main, EstimatorFactory { HeuristicEstimator() }) }
 
