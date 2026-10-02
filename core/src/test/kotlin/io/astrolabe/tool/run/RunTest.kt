@@ -805,6 +805,7 @@ class RunTest {
 
         assertEquals("running", status(out), out.body)
         assertTrue(out.body.contains("ready: line matched: listening on port 8080"), out.body)
+        assertTrue(out.body.contains("process deadline ${Defaults().runTimeoutSeconds}s from its start"), out.body)
         assertTrue(out.body.contains("booting"), "the launch's own first output is part of the wait: ${out.body}")
         assertEquals("running", SqliteHandles(store, clock).get("handle-1")!!.status)
         assertTrue(run("""{"op":"cancel","handle":"handle-1"}""").body.contains("cancel requested"))
@@ -825,13 +826,83 @@ class RunTest {
     fun `a server launch waits until its loopback port accepts connections`() = runTest {
         val closed = java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress()).use { it.localPort }
         assertFalse(os.listening(closed), "nothing listens on a closed port")
-        java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress()).use { listener ->
-            val out = run("""{"cmd":"${shell("ping -n 30 127.0.0.1 >NUL", "sleep 30")}","until_port":${listener.localPort}}""")
+        var listener: java.net.ServerSocket? = null
+        var probes = 0
+        // The server comes up after the launch: the first probe (before the spawn) finds the port closed, the next one opens it.
+        val serving = object : Os by os {
+            override fun listening(port: Int): Boolean {
+                if (++probes == 2) listener = java.net.ServerSocket(port, 1, java.net.InetAddress.getLoopbackAddress())
+                return os.listening(port)
+            }
+        }
+        try {
+            val out = run("""{"cmd":"${shell("ping -n 30 127.0.0.1 >NUL", "sleep 30")}","until_port":$closed}""", runner(os = serving))
 
             assertEquals("running", status(out), out.body)
-            assertTrue(out.body.contains("ready: port ${listener.localPort} accepts connections"), out.body)
+            assertTrue(out.body.contains("ready: port $closed accepts connections"), out.body)
+            assertFalse(out.body.contains("already open"), out.body)
+        } finally {
+            listener?.close()
         }
         run("""{"op":"cancel","handle":"handle-1"}""")
+    }
+
+    @Test
+    fun `a port that is already open before the launch is no readiness of the launched process`() = runTest {
+        java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress()).use { foreign ->
+            val port = foreign.localPort
+            val scripted = ScriptedOs(listOf("" to ProcStatus.Running))
+            scripted.portOpen = { os.listening(it) }
+
+            val out = run("""{"argv":["git","status"],"until_port":$port,"timeout":3}""", runner(os = scripted))
+
+            assertEquals("running", status(out), out.body)
+            assertFalse(out.body.contains("ready:"), out.body)
+            assertTrue(out.body.contains("wait timed out after 3s before port $port accepting connections"), out.body)
+            assertTrue(out.body.contains("port $port was already open before the wait"), out.body)
+        }
+    }
+
+    @Test
+    fun `a wait on a running handle is ready at once when its port is already open on arrival`() = runTest {
+        val scripted = ScriptedOs(listOf("" to ProcStatus.Running))
+        scripted.portOpen = { true }
+        val tool = runner(os = scripted)
+        run("""{"argv":["git","status"],"bg":true}""", tool)
+        val pollsBefore = scripted.polls
+        val arrived = clock.instant()
+
+        val out = run("""{"op":"wait","handle":"handle-1","until_port":8080,"timeout":60}""", tool)
+
+        assertEquals("running", status(out), out.body)
+        assertTrue(out.body.contains("ready: port 8080 already accepted connections when the wait began (it may belong to another process)"), out.body)
+        assertFalse(out.body.contains("was already open before the wait"), "that wording is the launch case: ${out.body}")
+        assertEquals(1, scripted.polls - pollsBefore, "one look, no waiting for the port")
+        assertEquals(arrived, clock.instant(), "nothing waited on the clock")
+    }
+
+    @Test
+    fun `an end that is already there wins over a port that is open on arrival`() = runTest {
+        val scripted = ScriptedOs(listOf("" to ProcStatus.Running, "bye\n" to ProcStatus.Exited(0)))
+        scripted.portOpen = { true }
+        val tool = runner(os = scripted)
+        run("""{"argv":["git","status"],"bg":true}""", tool)
+
+        val out = run("""{"op":"wait","handle":"handle-1","until_port":8080}""", tool)
+
+        assertTrue(status(out) != "running", out.body)
+        assertTrue(out.body.contains("wait ended: the process ended before port 8080 accepting connections"), out.body)
+    }
+
+    @Test
+    fun `a server that listens right after the spawn is ready on its port`() = runTest {
+        val scripted = ScriptedOs(listOf("" to ProcStatus.Running))
+        scripted.portOpen = { scripted.spawns > 0 }
+
+        val out = run("""{"argv":["git","status"],"until_port":8080}""", runner(os = scripted))
+
+        assertTrue(out.body.contains("ready: port 8080 accepts connections"), out.body)
+        assertFalse(out.body.contains("already open"), out.body)
     }
 
     @Test
@@ -893,5 +964,100 @@ class RunTest {
         assertEquals(0, terminations, "a cancelled wait is no cancel of the process")
         assertEquals("running", SqliteHandles(store, clock).get("handle-1")!!.status)
         assertEquals(1, controlled.spawns)
+    }
+
+    /**
+     * A process that exists only as a script: poll number k reveals step k's output and status (the last step stays), and
+     * a quiet poll's own timeout passes on the injected clock. The launch's first look is poll 0.
+     */
+    private inner class ScriptedOs(private val steps: List<Pair<String, ProcStatus>>) : Os by os {
+        var spawns = 0
+        var polls = 0
+        var portOpen: (Int) -> Boolean = { false }
+        private var log = ByteArray(0)
+        private var status: ProcStatus = ProcStatus.Running
+
+        override fun spawn(spec: io.astrolabe.os.SpawnSpec): Proc {
+            spawns++
+            Files.write(spec.logPath, ByteArray(0))
+            return Proc(42, clock.millis(), IdentityKey(42, 1000), token, spec.logPath.toString(), 0,
+                ProcStatus.Running, spec.command, spec.workingDirectory.toString(), deadlineSeconds = spec.deadlineSeconds)
+        }
+
+        override fun poll(proc: Proc, sinceCursorBytes: Long, observationTimeoutSeconds: Long): Poll {
+            steps.getOrNull(polls)?.let { (text, end) ->
+                log += text.toByteArray()
+                status = end
+                Files.write(proc.log, log)
+            }
+            polls++
+            val news = log.copyOfRange(sinceCursorBytes.toInt(), log.size)
+            // A poll returns at once with new bytes or a terminal status; only a quiet one spends its whole timeout.
+            if (news.isEmpty() && !status.isTerminal) clock.advance(java.time.Duration.ofSeconds(observationTimeoutSeconds))
+            return Poll(news, log.size.toLong(), status, false)
+        }
+
+        override fun reattach(proc: Proc): Proc = proc.copy(status = status)
+
+        override fun terminate(proc: Proc): Proc = proc.copy(status = ProcStatus.Cancelled)
+
+        override fun listening(port: Int): Boolean = portOpen(port)
+    }
+
+    @Test
+    fun `a readiness line that arrives with the end of the process still counts`() = runTest {
+        // LocalOs.poll hands over the last bytes together with the terminal status.
+        val scripted = ScriptedOs(listOf("" to ProcStatus.Running, "starting\nlistening on port 8080\n" to ProcStatus.Exited(0)))
+
+        val out = run("""{"argv":["git","status"],"until_line":"listening on port \\d+"}""", runner(os = scripted))
+
+        assertTrue(status(out) != "running", out.body)
+        assertTrue(out.body.contains("wait ended: the process ended; readiness line matched: listening on port 8080"), out.body)
+        assertFalse(out.body.contains("before a line matching"), out.body)
+        assertEquals("exited", SqliteHandles(store, clock).get("handle-1")!!.status)
+    }
+
+    @Test
+    fun `an unfinished last line is matched once the process has ended`() = runTest {
+        val scripted = ScriptedOs(listOf("" to ProcStatus.Running, "starting\nlistening on port 8080" to ProcStatus.Running, "" to ProcStatus.Exited(0)))
+
+        val out = run("""{"argv":["git","status"],"until_line":"listening on port \\d+"}""", runner(os = scripted))
+
+        assertTrue(out.body.contains("wait ended: the process ended; readiness line matched: listening on port 8080"), out.body)
+        assertEquals(3, scripted.polls, "the line stayed unfinished while the process ran, so only the end matched it")
+    }
+
+    @Test
+    fun `a line break that closes the last line does not open an empty line for an anchored pattern`() = runTest {
+        val scripted = ScriptedOs(listOf("" to ProcStatus.Running, "starting\n" to ProcStatus.Running, "\n" to ProcStatus.Running))
+
+        val out = run("""{"argv":["git","status"],"until_line":"^$","timeout":30}""", runner(os = scripted))
+
+        assertTrue(out.body.contains("ready: line matched: "), out.body)
+        assertEquals(3, scripted.polls, "starting alone is no blank line; the empty line that follows it is")
+    }
+
+    @Test
+    fun `a launch wait that expires with the process deadline does not claim the process keeps running`() = runTest {
+        val scripted = ScriptedOs(listOf("" to ProcStatus.Running))
+
+        val out = run("""{"argv":["git","status"],"until_line":"ready","timeout":5}""", runner(os = scripted))
+
+        assertEquals("running", status(out), out.body)
+        assertTrue(out.body.contains("wait timed out after 5s before a line matching /ready/"), out.body)
+        assertTrue(out.body.contains("the process deadline (5s from its start) is reached and the process is being stopped"), out.body)
+        assertFalse(out.body.contains("keeps running"), out.body)
+    }
+
+    @Test
+    fun `a wait shorter than the process deadline keeps running and names that deadline`() = runTest {
+        val scripted = ScriptedOs(listOf("" to ProcStatus.Running))
+        val tool = runner(os = scripted)
+        run("""{"argv":["git","status"],"bg":true,"timeout":60}""", tool)
+
+        val out = run("""{"op":"wait","handle":"handle-1","until_line":"ready","timeout":5}""", tool)
+
+        assertTrue(out.body.contains("wait timed out after 5s before a line matching /ready/, the process keeps running (no relaunch)"), out.body)
+        assertTrue(out.body.contains("process deadline 60s from its start"), out.body)
     }
 }

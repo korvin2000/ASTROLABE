@@ -237,6 +237,8 @@ public class Run(
         var started: String? = null
         // The fence throws before any intent is recorded, so a lapsed lease never leaves an open intent (§13.1).
         beforeDispatch()
+        // Probed before the spawn: a server that listens at once must not be mistaken for a port that was open already.
+        val portOpenBefore = args.until().port?.let { listeningOffThread(it) }
         val outcome = Consequential.run(
             journal = intents,
             intent = intent,
@@ -271,7 +273,7 @@ public class Run(
         )
         return when (outcome) {
             // The launch is committed and its handle persisted before the wait, so a cancelled wait leaves no open intent.
-            is ActionOutcome.Completed -> started?.takeUnless { args.until().none }?.let { wait(args.copy(op = "wait", handle = it, since = 0)) } ?: checkNotNull(rendered)
+            is ActionOutcome.Completed -> started?.takeUnless { args.until().none }?.let { wait(args.copy(op = "wait", handle = it, since = 0), portOpenBefore) } ?: checkNotNull(rendered)
             is ActionOutcome.Unknown -> unknown(args, alias.text, actionId, before, intent.intentId, outcome.cause)
             is ActionOutcome.NotDispatched -> refused(args, Outcome.Denied, outcome.reason)
         }
@@ -523,10 +525,14 @@ public class Run(
         return Until(pattern, regex, untilPort)
     }
 
+    /** Whether the awaited port already accepted connections when the wait began, and what that proves. */
+    private enum class PortAtStart { Closed, OpenBeforeLaunch, OpenOnArrival }
+
     private sealed interface Waited {
         val cursor: Long
 
-        class Ended(val status: ProcStatus, override val cursor: Long, val tail: ByteArray) : Waited
+        /** [matched] is the readiness line that arrived with the end, if one did. */
+        class Ended(val status: ProcStatus, override val cursor: Long, val tail: ByteArray, val matched: String?) : Waited
         class Ready(val reason: String, override val cursor: Long, val tail: ByteArray, val dropped: Long) : Waited
         class Expired(override val cursor: Long, val tail: ByteArray, val dropped: Long) : Waited
     }
@@ -534,15 +540,28 @@ public class Run(
     /**
      * `run(op=wait)`: one call observes the handle until its process ends, a readiness condition holds, or the wait
      * deadline passes (`timeout`, clamped like a run's, measured on the injected clock). The deadline ends only the
-     * observation, never the process (§13.1), and a cancelled wait leaves the handle as it was.
+     * observation, never the process (§13.1); the process has its own deadline from its launch, which a launch with
+     * `until_*` sets to the same `timeout`. A cancelled wait leaves the handle as it was.
      */
-    private suspend fun wait(args: RunArgs): ToolOutcome {
+    private suspend fun wait(args: RunArgs, portOpenBefore: Boolean? = null): ToolOutcome {
         val handle = ownedHandle(args.handle!!) ?: return refused(args, Outcome.Denied, "no handle '${args.handle}' in this campaign workspace")
         val until = args.until()
+        // Any loopback listener makes a port "ready". Open before a launch, it cannot be this process's; open when a wait
+        // on a running handle begins, it is the usual case (`run(bg)` then `wait`), so the wait answers ready at once.
+        val portAtStart = when {
+            until.port == null || !(portOpenBefore ?: listeningOffThread(until.port)) -> PortAtStart.Closed
+            portOpenBefore != null -> PortAtStart.OpenBeforeLaunch
+            else -> PortAtStart.OpenOnArrival
+        }
+        val portNote = if (portAtStart == PortAtStart.OpenBeforeLaunch) "port ${until.port} was already open before the wait, so an open port alone is not readiness" else null
         val proc = os.reattach(handle.proc)
         val limitSeconds = args.timeoutSeconds.toLong()
+        val waitDeadline = clock.instant().plusSeconds(limitSeconds)
+        val processSeconds = proc.deadlineSeconds
+        // The supervisor stops the process at its own deadline: a wait that is not shorter never outlives it.
+        val stoppedFirst = processSeconds != null && !waitDeadline.isBefore(java.time.Instant.ofEpochMilli(proc.startedAtEpochMillis).plusSeconds(processSeconds))
         val waited = try {
-            kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { await(proc, args.since ?: handle.cursor, until, clock.instant().plusSeconds(limitSeconds)) }
+            kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { await(proc, args.since ?: handle.cursor, until, waitDeadline, portAtStart) }
         } catch (failure: IOException) {
             handles.save(handle.copy(status = wire(ProcStatus.Lost)))
             return refused(args, Outcome.UnknownOutcome, "handle ${handle.handleId}: the log cannot be read (${failure.message}); the process state is unknown — reconcile, never relaunch")
@@ -551,23 +570,37 @@ public class Run(
             is Waited.Ended -> {
                 handles.save(handle.copy(proc = proc.copy(status = waited.status), status = wire(waited.status), cursor = waited.cursor))
                 // §14 risk: an end before readiness interrupts the wait, and the terminal diagnostics are its result.
-                return ended(args, handle, proc, waited.status, waited.tail, if (until.none) null else "wait ended: the process ended before $until")
+                val note = when {
+                    until.none -> null
+                    waited.matched != null -> "wait ended: the process ended; readiness line matched: ${waited.matched}"
+                    else -> "wait ended: the process ended before $until"
+                }
+                return ended(args, handle, proc, waited.status, waited.tail, listOfNotNull(note, portNote).joinToString("; ").ifEmpty { null })
             }
-            is Waited.Ready -> Triple("ready: ${waited.reason}", waited.tail, waited.dropped)
-            is Waited.Expired -> Triple("wait timed out after ${limitSeconds}s before $until, the process keeps running (no relaunch)", waited.tail, waited.dropped)
+            is Waited.Ready -> Triple("ready: ${waited.reason}" + (portNote?.let { " · $it" } ?: ""), waited.tail, waited.dropped)
+            is Waited.Expired -> Triple(
+                (if (stoppedFirst) "wait timed out after ${limitSeconds}s before $until; the process deadline (${processSeconds}s from its start) is reached and the process is being stopped (no relaunch), poll the handle for its final status"
+                else "wait timed out after ${limitSeconds}s before $until, the process keeps running (no relaunch)") + (portNote?.let { "; $it" } ?: ""),
+                waited.tail, waited.dropped,
+            )
         }
         handles.save(handle.copy(proc = proc.copy(status = ProcStatus.Running), status = wire(ProcStatus.Running), cursor = waited.cursor))
         val safe = redaction.applyBytes(tail, ContentClass.ModelFacing)
         val shown = tailWithin(safe.text, args.budgetTokens)
         val elided = dropped > 0 || shown.length < safe.text.length
-        val view = "handle ${handle.handleId} running · $line · cursor ${waited.cursor}" +
+        val deadlineView = if (processSeconds == null || (waited is Waited.Expired && stoppedFirst)) "" else " · process deadline ${processSeconds}s from its start"
+        val view = "handle ${handle.handleId} running · $line · cursor ${waited.cursor}$deadlineView" +
             (if (elided) "\n… earlier output elided; the log holds it" else "") + (if (shown.isBlank()) "" else "\n$shown")
         val result = RunResult(handle.alias, handle.actionId, null, Outcome.NotRun, view, elided, null, handle.effectClass, CandidateId(Digest(handle.stampBefore)), null, false, emptyList(), handle.handleId, null, null, emptyList())
         return render(args, result, handle.argv, handle.shell, null, null, effectsUnknown = handle.effectsUnknown, statusWire = "running", captureMask = safe.mask)
     }
 
+    private suspend fun listeningOffThread(port: Int): Boolean =
+        kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { os.listening(port) }
+
     /** The blocking wait loop; an interrupted (cancelled) caller propagates and leaves the process alone. */
-    private fun await(start: Proc, since: Long, until: Until, deadline: java.time.Instant): Waited {
+    private fun await(start: Proc, since: Long, until: Until, deadline: java.time.Instant, portAtStart: PortAtStart): Waited {
+        val watchedPort = until.port?.takeUnless { portAtStart == PortAtStart.OpenBeforeLaunch }
         var proc = start
         var cursor = since
         val tail = TailBuffer(WAIT_TAIL_BYTES)
@@ -577,24 +610,36 @@ public class Run(
             val remainingMillis = java.time.Duration.between(clock.instant(), deadline).toMillis()
             if (remainingMillis <= 0) return Waited.Expired(cursor, tail.bytes(), tail.dropped)
             // A port opens silently, so a port wait looks again every second; otherwise output or the end wakes the poll.
-            val slice = if (until.port != null) 1L else minOf(pollSliceSeconds, (remainingMillis + 999) / 1_000)
+            // On arrival at an open port the one look only collects what has already happened: output, a line, or the end.
+            val slice = when {
+                portAtStart == PortAtStart.OpenOnArrival -> 0L
+                watchedPort != null -> 1L
+                else -> minOf(pollSliceSeconds, (remainingMillis + 999) / 1_000)
+            }
             val poll = os.poll(proc, cursor, slice)
             if (poll.newBytes.isNotEmpty() && poll.nextCursorBytes <= cursor) throw IOException("the log cursor did not advance")
             tail.add(poll.newBytes)
             cursor = poll.nextCursorBytes
             proc = proc.copy(status = poll.status)
-            if (proc.status.isTerminal) return Waited.Ended(proc.status, cursor, tail.bytes())
+            val terminal = proc.status.isTerminal
+            var matched: String? = null
+            // The last bytes arrive together with the terminal status, so the line is matched before the end is reported.
             if (until.line != null) {
-                val lines = partial + poll.newBytes
-                val end = lines.lastIndexOf('\n'.code.toByte())
-                val cut = if (end >= 0) end + 1 else if (lines.size > WAIT_LINE_BYTES) lines.size else 0
-                partial = lines.copyOfRange(cut, lines.size)
+                val pending = partial + poll.newBytes
+                val end = pending.lastIndexOf('\n'.code.toByte())
+                // Nothing completes a line once the process has ended, so the unfinished one counts as it stands.
+                val cut = if (terminal) pending.size else if (end >= 0) end + 1 else if (pending.size > WAIT_LINE_BYTES) pending.size else 0
+                partial = pending.copyOfRange(cut, pending.size)
                 // Matched on the redacted line: a pattern is no oracle for a secret the model is never shown.
-                val matched = lines.copyOfRange(0, cut).toString(Charsets.UTF_8).lineSequence()
-                    .map { redaction.apply(it.trimEnd('\r')).text }.firstOrNull { until.line.containsMatchIn(it) }
-                if (matched != null) return Waited.Ready("line matched: ${matched.take(200)}", cursor, tail.bytes(), tail.dropped)
+                matched = linesOf(pending.copyOfRange(0, cut).toString(Charsets.UTF_8))
+                    .map { redaction.apply(it.trimEnd('\r')).text }.firstOrNull { until.line.containsMatchIn(it) }?.take(200)
             }
-            if (until.port != null && os.listening(until.port)) return Waited.Ready("port ${until.port} accepts connections", cursor, tail.bytes(), tail.dropped)
+            if (terminal) return Waited.Ended(proc.status, cursor, tail.bytes(), matched)
+            if (matched != null) return Waited.Ready("line matched: $matched", cursor, tail.bytes(), tail.dropped)
+            if (watchedPort != null && portAtStart == PortAtStart.OpenOnArrival) {
+                return Waited.Ready("port $watchedPort already accepted connections when the wait began (it may belong to another process)", cursor, tail.bytes(), tail.dropped)
+            }
+            if (watchedPort != null && os.listening(watchedPort)) return Waited.Ready("port $watchedPort accepts connections", cursor, tail.bytes(), tail.dropped)
         }
     }
 
@@ -719,6 +764,9 @@ private const val WAIT_TAIL_BYTES: Int = 256 * 1024
 
 /** A line longer than this without a newline is matched as it stands. */
 private const val WAIT_LINE_BYTES: Int = 64 * 1024
+
+/** The lines of [text]; a closing line break ends the last line instead of opening an empty one that `^$` would match. */
+private fun linesOf(text: String): Sequence<String> = text.lineSequence().toList().let { if (it.last().isEmpty()) it.dropLast(1) else it }.asSequence()
 
 /** The last [capacity] bytes added, and how many earlier ones were [dropped]. */
 private class TailBuffer(private val capacity: Int) {
