@@ -1,0 +1,5 @@
+[project]
+name = "units"
+version = "0.1.0"
+description = "Unit conversions of the weather station"
+requires-python = ">=3.10"
