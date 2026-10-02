@@ -14,7 +14,7 @@ class DefaultsTest {
         "k eviction batch / m turns kept on rebuild" to listOf("k", "m"),
         "R_max total live results / [A] max" to listOf("rMaxTokens", "anchorMaxTokens"),
         "Immediate-stub threshold for stale reads" to listOf("immediateStubTokens"),
-        "look.budget / run.budget" to listOf("lookBudgetTokens", "runBudgetTokens"),
+        "look.budget / run.budget" to listOf("lookBudgetTokens", "runBudgetTokens", "growthReserveFullWindowTokens"),
         "Register cap / contract digest cap / patch cap" to listOf("registerCapTokens", "digestCapTokens", "digestTokensPerRequirement", "digestCapCeilingTokens", "patchCapTokens"),
         "Fact line / note body / note summary" to listOf("factLineMaxChars", "noteBodyMaxTokens", "noteSummaryMaxChars"),
         "Workset seeds per cell / KB injection / focus notes / focus zoom" to

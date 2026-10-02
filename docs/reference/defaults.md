@@ -23,7 +23,7 @@ All numbers are declared defaults for the first evaluation round, not derived op
 | `k` eviction batch / `m` turns kept on rebuild | 8 / 6 (0 for role switch, alternative attempt and cell end) | ablation: batched vs pressure-only within short cells |
 | `R_max` total live results / `[A]` max | 48K / 5K tokens (D-370) | explicit residency bound; also one turn's read budget |
 | Immediate-stub threshold for stale reads | 2,400 tokens (D-370) | [§5.3](../runtime/register-workset.md#sec-5-3) |
-| `look.budget` / `run.budget` | 4,000 / 4,000 tokens: what a call without `budget` gets (D-370); the larger sizes the compile reserve | looks of one turn share `R_max`; a look is admitted with what is left (cut, not refused) down to 300 tokens |
+| `look.budget` / `run.budget` | 4,000 / 4,000 tokens: what a call without `budget` gets (D-370); the larger sizes the compile's growth reserve with `[A]` max — in full from a 65,536-token window, proportionally below it | looks of one turn share `R_max`; a look is admitted with what is left (cut, not refused) down to 300 tokens |
 | Register cap / contract digest cap / patch cap | 3,000 (D-370) / 150 (+8 per requirement, ceiling 2,000; 0 per requirement pins 150, D-270) / 1,200 tokens (D-365) | acceptance lives in `[K]` |
 | Fact line / note body / note summary | ≤ 600 chars (D-370) / ≤ 120 tokens / ≤ 200 chars | no code in facts |
 | Workset seeds per cell / KB injection / focus notes / focus zoom | ≤ 4K / ≤ 8 notes 1.5K (CON uncapped) / ≤ 300 / ≤ 300 tokens | |

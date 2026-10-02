@@ -56,6 +56,7 @@ import io.astrolabe.context.CarryForward
 import io.astrolabe.context.CompileInputs
 import io.astrolabe.context.Compiled
 import io.astrolabe.context.Compiler
+import io.astrolabe.context.ContextSelectionStatus
 import io.astrolabe.context.Fingerprint
 import io.astrolabe.context.Manifest
 import io.astrolabe.context.Precompile
@@ -232,6 +233,7 @@ import io.astrolabe.delegate.CellReviewJudge
 import io.astrolabe.delegate.ChildBrief
 import io.astrolabe.delegate.ChildBudget
 import io.astrolabe.delegate.ChildCell
+import io.astrolabe.delegate.ChildNotStarted
 import io.astrolabe.delegate.DelegationLimits
 import io.astrolabe.delegate.Delegator
 import io.astrolabe.delegate.EvidencePacket
@@ -820,9 +822,9 @@ public class Controller @JvmOverloads public constructor(
                     }
                 }
             }
-            val routing = route(c, if (ready.cells.isEmpty()) RoutingFunction.Implementing else RoutingFunction.Continuation, ready, model, listOfNotNull(tiers[ready.id], attempts.tier(ready.id)).maxOrNull(), take?.compiled ?: compiler.compile(
-                ready, contract, model.profile, Roles.implementing, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = inputs,
-            )) { profile -> compiler.compile(ready, contract, profile, Roles.implementing, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = inputs) }
+            val routing = route(c, if (ready.cells.isEmpty()) RoutingFunction.Implementing else RoutingFunction.Continuation, ready, model, listOfNotNull(tiers[ready.id], attempts.tier(ready.id)).maxOrNull(), take?.compiled) { bound ->
+                Compiler(bound.estimator, c.attempt.config).compile(ready, contract, bound.profile, Roles.implementing, c.prime, maxOutputTokens = bound.maxOutputTokens, inputs = inputs)
+            }
             val compiled = routing.compiled
             val cellModel = routing.model
             closed?.let { (cell, at) -> precompiles.record(PrecompileSample(cell, ready.id, take?.outcome ?: PrecompileOutcome.None, take?.reason, (precompiles.now() - at).coerceAtLeast(0))) }
@@ -1116,9 +1118,8 @@ public class Controller @JvmOverloads public constructor(
         val planning = Increment(PLAN, contract.requirements.map { it.id }, contract.acceptance.map { it.id }, emptyList(), 0, title = "plan ${c.ids.work.value}")
         val knowledge = knowledge(c, planning, Roles.plan, model)
         val planInputs = CompileInputs(notes = knowledge.notes, contractsIndex = knowledge.contractsIndex, skills = knowledge.skills, skillConflicts = knowledge.skillConflicts)
-        val compiler = Compiler(model.estimator, c.attempt.config)
-        val routing = route(c, RoutingFunction.Plan, planning, model, null, compiler.compile(planning, contract, model.profile, Roles.plan, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = planInputs, pinned = pinnedSplits)) { profile ->
-            compiler.compile(planning, contract, profile, Roles.plan, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = planInputs, pinned = pinnedSplits)
+        val routing = route(c, RoutingFunction.Plan, planning, model, null, null) { bound ->
+            Compiler(bound.estimator, c.attempt.config).compile(planning, contract, bound.profile, Roles.plan, c.prime, maxOutputTokens = bound.maxOutputTokens, inputs = planInputs, pinned = pinnedSplits)
         }
         val compiled = routing.compiled
         if (compiled !is Compiled.Ready) return blocked("the plan cell cannot be compiled: $compiled")
@@ -1326,10 +1327,9 @@ public class Controller @JvmOverloads public constructor(
         val resume = resumeNote(c, ready, carry)
         val knowledge = knowledge(c, ready, role, model, touched = carry?.seeds.orEmpty().map { it.path }.toSet())
         val inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) }, notes = knowledge.notes, contractsIndex = knowledge.contractsIndex, skills = knowledge.skills, skillConflicts = knowledge.skillConflicts)
-        val compiler = Compiler(model.estimator, config)
-        val routing = route(c, if (ready.cells.isEmpty()) RoutingFunction.Implementing else RoutingFunction.Continuation, ready, model, null, compiler.compile(
-            ready, contract, model.profile, role, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = inputs,
-        )) { profile -> compiler.compile(ready, contract, profile, role, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = inputs) }
+        val routing = route(c, if (ready.cells.isEmpty()) RoutingFunction.Implementing else RoutingFunction.Continuation, ready, model, null, null) { bound ->
+            Compiler(bound.estimator, config).compile(ready, contract, bound.profile, role, c.prime, maxOutputTokens = bound.maxOutputTokens, inputs = inputs)
+        }
         val compiled = routing.compiled
         val cellModel = routing.model
         when (compiled) {
@@ -1645,34 +1645,82 @@ public class Controller @JvmOverloads public constructor(
      * attempt's configured profiles under its tier table; untiered, the supplied cell model serves every tier, so
      * a fake-profile campaign routes to the profile it was given (D-108). The risk floor reads the increment's (else
      * the contract's) declared risk and the open-time impact pre-scan; tokens are admitted by the cell itself (D-06),
-     * so only a monetary budget caps affordability here (D-109). A routed profile other than the supplied one recompiles.
+     * so only a monetary budget caps affordability here (D-109). The router sees the compiled context's wire input,
+     * growth reserve and output headroom apart. [compile] builds the context for a bound model — its own estimator and
+     * output headroom; [initial] is the supplied model's context when one was already built (§6.6).
+     *
+     * Capacity fallback: a context the supplied profile's window cannot hold is compiled again on the candidates with a
+     * larger window, smallest first; a routed profile whose window turns out too small for its own compile leaves the
+     * candidates and the router is asked again. Only when no candidate fits does the context stay a rescoping.
      */
-    private fun route(c: OpenedCampaign, function: RoutingFunction, increment: Increment, model: CellModel, previousTier: Tier?, compiled: Compiled, recompile: (io.astrolabe.provider.Profile) -> Compiled): Routing {
-        if (compiled !is Compiled.Ready) return Routing(model, compiled, null, null)
+    private fun route(c: OpenedCampaign, function: RoutingFunction, increment: Increment, model: CellModel, previousTier: Tier?, initial: Compiled?, compile: (CellModel) -> Compiled): Routing {
         val config = c.attempt.config
         val contract = c.contract
         val tiered = config.tierTable.profiles.isNotEmpty() && config.tierTable.profileIds.all { it in config.profiles }
         val table = if (tiered) config.tierTable else TierTable.single(model.profile.id)
         val candidates = if (tiered) config.profiles else mapOf(model.profile.id to model.profile)
-        val arithmetic = compiled.selection.arithmetic
-        val contextTokens = (arithmetic.totalTokens ?: arithmetic.knownFixedTokens + arithmetic.selectedTokens).toLong()
+        val factory = estimators ?: io.astrolabe.provider.EstimatorFactory { model.estimator }
+        // Always bound from the supplied model, so a narrowing is capped by each routed limit once, never compounded.
+        fun bind(profile: Profile, effort: io.astrolabe.provider.Effort) =
+            if (profile.id == model.profile.id && effort == model.effort) model else model.rebind(profile, effort, factory)
+        val first = initial ?: compile(model)
+        val misfits = LinkedHashMap<String, String>()
+        var base = model to first
+        if (first.windowBound()) {
+            misfits[model.profile.id] = (first as Compiled.NeedsRescoping).reason
+            val window = model.profile.capabilities.contextLimitTokens
+            val larger = candidates.values.filter { it.capabilities.contextLimitTokens > window }
+                .sortedWith(compareBy<Profile>({ it.capabilities.contextLimitTokens }, { it.id }))
+            base = larger.firstNotNullOfOrNull { profile ->
+                val bound = bind(profile, model.effort)
+                val compiled = compile(bound)
+                if (compiled is Compiled.Ready) bound to compiled else null.also { misfits[profile.id] = compiled.why() }
+            } ?: return Routing(model, first.copy(reason = fallbackReason(first.reason, misfits)), null, null)
+        }
+        if (base.second !is Compiled.Ready) return Routing(model, first, null, null)
         val reserves = contract.budget.reserves
         val cost = Accounting(c.store, clock).remainingCost(c.ids.work, contract.budget.cost)
         val budget = RoutingBudget(remainingCost = cost, reservedCost = cost?.let { Money(it.currency, it.amount.multiply(java.math.BigDecimal.valueOf(reserves.verification + reserves.recoveryAndPersist)), it.unknown) })
-        val policy = RoutingPolicy(table, candidates, budget, configuredEffort = model.effort)
-        val packet = RoutingPacket(increment.risk ?: contract.risk, contextTokens, model.maxOutputTokens, previousTier = previousTier, featureClass = "${contract.shape.name.lowercase()}:${increment.expectedFiles}")
         val prescan = c.impactPrescan
         val impact = RiskFloorInput(prescan.contractsTouched.size, prescan.complete, prescan.prescan.fanIn, prescan.complete)
-        return when (val routed = router.selectProfile(function, packet, impact, policy)) {
-            is Routed.Deterministic -> Routing(model, compiled, null, null)
-            is Routed.Refused -> Routing(model, compiled, null, routed)
-            is Routed.Selected -> {
-                if (routed.profile.id == model.profile.id && routed.effort == model.effort) return Routing(model, compiled, routed, null)
-                val cellModel = model.rebind(routed.profile, routed.effort, estimators ?: io.astrolabe.provider.EstimatorFactory { model.estimator })
-                Routing(cellModel, if (routed.profile.id == model.profile.id) compiled else recompile(routed.profile), routed, null)
+        while (true) {
+            val (current, compiled) = base
+            val arithmetic = compiled.selection.arithmetic
+            val wire = (arithmetic.wireTokens ?: arithmetic.knownFixedTokens - arithmetic.reserveTokens - arithmetic.outputTokens + arithmetic.selectedTokens).toLong()
+            val packet = RoutingPacket(increment.risk ?: contract.risk, wire, current.maxOutputTokens, previousTier = previousTier,
+                featureClass = "${contract.shape.name.lowercase()}:${increment.expectedFiles}", reserveTokens = arithmetic.reserveTokens.toLong())
+            val policy = RoutingPolicy(table, candidates - misfits.keys, budget, configuredEffort = model.effort)
+            when (val routed = router.selectProfile(function, packet, impact, policy)) {
+                is Routed.Deterministic -> return Routing(current, compiled, null, null)
+                is Routed.Refused -> {
+                    if (misfits.isEmpty()) return Routing(current, compiled, null, routed)
+                    // The refusal names the candidates set aside for their window beside the router's own exclusions.
+                    val excluded = misfits.mapValues { (_, why) -> "its window does not hold the context: $why" } + routed.excluded
+                    return Routing(current, compiled, null, Routed.Refused(routed.function, routed.tier, routed.options, excluded, routed.trace))
+                }
+                is Routed.Selected -> {
+                    if (routed.profile.id == current.profile.id && routed.effort == current.effort) return Routing(current, compiled, routed, null)
+                    val bound = bind(routed.profile, routed.effort)
+                    // The same profile keeps its estimator and headroom; another one compiles with its own.
+                    val again = if (routed.profile.id == current.profile.id) compiled else compile(bound)
+                    if (!again.windowBound()) return Routing(bound, again, routed, null)
+                    misfits[routed.profile.id] = again.why()
+                }
             }
         }
     }
+
+    /** A context a larger window could hold: the selection itself overflowed, not a carry-forward gap or missing evidence. */
+    private fun Compiled.windowBound(): Boolean = this is Compiled.NeedsRescoping && selection.status == ContextSelectionStatus.Capacity
+
+    private fun Compiled.why(): String = when (this) {
+        is Compiled.NeedsRescoping -> reason
+        is Compiled.NeedsEvidence -> "needs evidence $missing"
+        is Compiled.Ready -> "ready"
+    }
+
+    private fun fallbackReason(reason: String, misfits: Map<String, String>): String =
+        if (misfits.size <= 1) reason else "$reason; no candidate window fits — " + misfits.entries.joinToString("; ") { (id, why) -> "$id: $why" }
 
     /**
      * The verified outcome of a cell for the calibration log: the harness's exit and the verifier's resolution, never the
@@ -1789,7 +1837,7 @@ public class Controller @JvmOverloads public constructor(
         val delegator = children?.let { scope ->
             val reviews: (io.astrolabe.delegate.TaskPacket) -> EvidencePacket = { evidence(c, increment, listOf("delegated by ${cellId.value}"), emptyList(), compiled.k.ledger, authority) }
             val arithmetic = compiled.selection.arithmetic
-            val fixed = (arithmetic.totalTokens ?: arithmetic.knownFixedTokens + arithmetic.selectedTokens).toLong()
+            val fixed = (arithmetic.wireTokens ?: arithmetic.knownFixedTokens - arithmetic.reserveTokens - arithmetic.outputTokens + arithmetic.selectedTokens).toLong()
             val worth = { kind: io.astrolabe.delegate.ChildKind, packet: io.astrolabe.delegate.TaskPacket ->
                 WorthTest.estimate(kind, packet, estimator.estimate(ChildBrief.render(packet, Probe.OUTPUT)).upperBoundTokens, fixed, config.defaults)
             }
@@ -1920,13 +1968,12 @@ public class Controller @JvmOverloads public constructor(
         ChildCell { seat, declared, completion, budget, brief ->
             // D-38: the frozen attempt configuration words the child's role; its mask and packet stay the caller's.
             val role = RoleTexts.worded(declared, c.attempt.config.role(declared.name))
-            val compiler = Compiler(model.estimator, c.attempt.config)
-            fun compile(profile: io.astrolabe.provider.Profile) = compiler.compile(increment, c.contract, profile, role, c.prime, pinned = listOf(brief), maxOutputTokens = model.maxOutputTokens)
             // §11.1: a child is routed by its own function row, never by the parent's tier; an escalated tier is its floor.
-            val routing = route(c, seat.function, increment, model, seat.tier, compile(model.profile), ::compile)
-            val compiled = routing.compiled
-            check(compiled is Compiled.Ready) { "the ${role.name} child of ${increment.id} cannot be compiled: $compiled" }
-            routing.refused?.let { error("the ${role.name} child of ${increment.id} is unaffordable: ${it.reason}") }
+            val routing = route(c, seat.function, increment, model, seat.tier, null) { bound ->
+                Compiler(bound.estimator, c.attempt.config).compile(increment, c.contract, bound.profile, role, c.prime, pinned = listOf(brief), maxOutputTokens = bound.maxOutputTokens)
+            }
+            val compiled = routing.compiled as? Compiled.Ready ?: throw ChildNotStarted("the ${role.name} child of ${increment.id} cannot be compiled: ${routing.compiled}")
+            routing.refused?.let { throw ChildNotStarted("the ${role.name} child of ${increment.id} is unaffordable: ${it.reason}") }
             runCell(c, seat.context, increment, role, routing.model, authority, syntax, compiled, span, null, completion = completion, pinned = listOf(brief), child = ChildForm(seat.cancellation, budget, isolated = role.name == Roles.review.name))
                 .exit.also { exit -> routing.selected?.let { router.record(it, outcomeOf(exit)) } }
         }
@@ -1940,12 +1987,11 @@ public class Controller @JvmOverloads public constructor(
         WriterCell { seat, dispatch, declared, budget, brief ->
             val increment = checkNotNull(c.state).graph.increments.first { it.id == dispatch.task.incrementId }
             val role = RoleTexts.worded(declared, c.attempt.config.role(declared.name))
-            val compiler = Compiler(model.estimator, c.attempt.config)
-            fun compile(profile: Profile) = compiler.compile(increment, c.contract, profile, role, c.prime, pinned = listOf(brief), maxOutputTokens = model.maxOutputTokens)
-            val routing = route(c, seat.function, increment, model, seat.tier, compile(model.profile), ::compile)
-            val compiled = routing.compiled
-            check(compiled is Compiled.Ready) { "the writer of ${increment.id} cannot be compiled: $compiled" }
-            routing.refused?.let { error("the writer of ${increment.id} is unaffordable: ${it.reason}") }
+            val routing = route(c, seat.function, increment, model, seat.tier, null) { bound ->
+                Compiler(bound.estimator, c.attempt.config).compile(increment, c.contract, bound.profile, role, c.prime, pinned = listOf(brief), maxOutputTokens = bound.maxOutputTokens)
+            }
+            val compiled = routing.compiled as? Compiled.Ready ?: throw ChildNotStarted("the writer of ${increment.id} cannot be compiled: ${routing.compiled}")
+            routing.refused?.let { throw ChildNotStarted("the writer of ${increment.id} is unaffordable: ${it.reason}") }
             val tree = CellTree.writer(c, dispatch.worktree, EnvFingerprint.compute(env), clock)
             runCell(c, seat.context, increment, role, routing.model, authority, syntax, compiled, span, checkNotNull(c.state).ledger, pinned = listOf(brief), child = ChildForm(seat.cancellation, budget), tree = tree)
                 .exit.also { exit ->
@@ -1963,7 +2009,8 @@ public class Controller @JvmOverloads public constructor(
         return checkNotNull(c.state).graph.increments.filter { it.status == IncrementStatus.Pending }.associate { increment ->
             val compiled = compiler.compile(increment, c.contract, model.profile, role, c.prime, maxOutputTokens = model.maxOutputTokens) as? Compiled.Ready ?: return null
             val arithmetic = compiled.selection.arithmetic
-            increment.id to writerEstimate((arithmetic.totalTokens ?: arithmetic.knownFixedTokens + arithmetic.selectedTokens).toLong(), model.maxOutputTokens)
+            // The writer's turn input is its wire context and growth; writerEstimate adds the output once.
+            increment.id to writerEstimate((arithmetic.totalTokens ?: arithmetic.knownFixedTokens + arithmetic.selectedTokens).toLong() - arithmetic.outputTokens.toLong(), model.maxOutputTokens)
         }
     }
 

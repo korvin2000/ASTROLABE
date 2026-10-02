@@ -37,6 +37,12 @@ public fun interface ChildCell {
 }
 
 /**
+ * A child cell that never started (§10.1): no candidate window holds its context or none is affordable. Nothing was
+ * dispatched, so nothing was spent; the runner turns it into a failed outcome, never a crash of the parent.
+ */
+internal class ChildNotStarted(val reason: String) : RuntimeException(reason)
+
+/**
  * The [ChildRunner] of the probe and review cells (P4.4.2/P4.4.3): it runs the child on [cell] with its role and
  * validator and turns the validated packet into a [ChildOutcome]; the child's spend is its packet's reported usage.
  * A review child needs its [evidence] packet, assembled by the runtime from records, never from the parent's words.
@@ -59,8 +65,11 @@ public class CellChildRunner @JvmOverloads constructor(
         var investigation: InvestigationPacket? = null
         val budget = ChildBudget(probeBudget.turns, Tokens(minOf(probeBudget.tokens.value, child.packet.reservedBudget.value)))
         val seat = ChildSeat(child.handle.child, child.cancellation, RoutingFunction.Probe)
-        val exit = cell.run(seat, Roles.probe, Probe.completion(child.packet.base, { investigation = it }), budget, ChildBrief.render(child.packet, Probe.OUTPUT))
-            ?: return ChildOutcome.Failed("probe ${child.handle.id} was cancelled before it ended; usage unknown", budget.tokens)
+        val exit = try {
+            cell.run(seat, Roles.probe, Probe.completion(child.packet.base, { investigation = it }), budget, ChildBrief.render(child.packet, Probe.OUTPUT))
+        } catch (refused: ChildNotStarted) {
+            return ChildOutcome.Failed("probe ${child.handle.id} not started: ${refused.reason}", Tokens.ZERO)
+        } ?: return ChildOutcome.Failed("probe ${child.handle.id} was cancelled before it ended; usage unknown", budget.tokens)
         val spend = spendOf(exit.packet.cost)
         val packet = investigation
         return if (exit is CellExit.Completed && packet != null) ChildOutcome.Published(ChildPacket.Investigation(packet), spend)
@@ -83,8 +92,11 @@ public class CellChildRunner @JvmOverloads constructor(
 
         internal suspend fun judge(cell: ChildCell, seat: ChildSeat, packet: EvidencePacket, budget: ChildBudget): JudgeRun {
             var verdict: Verdict? = null
-            val exit = cell.run(seat, Roles.review, Judge.completion(packet, { verdict = it }), budget, packet.render(Judge.OUTPUT))
-                ?: return JudgeRun(null, budget.tokens, "the review cell was cancelled before it ended; usage unknown")
+            val exit = try {
+                cell.run(seat, Roles.review, Judge.completion(packet, { verdict = it }), budget, packet.render(Judge.OUTPUT))
+            } catch (refused: ChildNotStarted) {
+                return JudgeRun(null, Tokens.ZERO, "the review cell was not started: ${refused.reason}")
+            } ?: return JudgeRun(null, budget.tokens, "the review cell was cancelled before it ended; usage unknown")
             val published = verdict.takeIf { exit is CellExit.Completed }
             return JudgeRun(published, spendOf(exit.packet.cost), if (published == null) "the review cell ended ${exit.packet.status.wire}: ${exit.packet.reason ?: "no verdict"}" else null)
         }
