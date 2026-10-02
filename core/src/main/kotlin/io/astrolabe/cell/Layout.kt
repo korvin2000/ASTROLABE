@@ -16,7 +16,7 @@ import io.astrolabe.provider.Role as ItemRole
 
 /**
  * The implementing-cell kernel contract rendered into `[S]` (Appendix A): the lines the structure
- * cannot say. Frozen text — [VERSION] travels in attempt and compile fingerprints, so changing a
+ * cannot say. Frozen text — [VERSION] heads `[S]`, whose digest is in the compile fingerprint, so changing a
  * line is a harness change that takes effect at an attempt boundary (invariant 12).
  */
 public object Kernel {
@@ -166,7 +166,7 @@ public object Layout {
     /**
      * The `[S]` text for [role] under [mode]: the kernel contract for the implementing and writer roles, the role's own
      * text and the shared kernel lines for every other role (§3.4, P4.4.6). Public because the same bytes are hashed
-     * into the attempt fingerprint and asserted by stability tests. The turn's mask is not an input: it is `[A]`'s.
+     * into the compile fingerprint (`Fingerprint.system`) and asserted by stability tests. The turn's mask is not an input: it is `[A]`'s.
      */
     @JvmStatic
     public fun system(role: Role, mode: ExecutionMode): String {

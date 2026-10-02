@@ -1,6 +1,7 @@
 package io.astrolabe.context
 
 import io.astrolabe.AttemptConfig
+import io.astrolabe.cell.Layout
 import io.astrolabe.cell.Role
 import io.astrolabe.cell.RoleTexts
 import io.astrolabe.contract.Contract
@@ -16,6 +17,7 @@ import io.astrolabe.id.Identities
 import io.astrolabe.provider.Profile
 import io.astrolabe.provider.TokenEstimator
 import io.astrolabe.telemetry.PrecompileOutcome
+import io.astrolabe.tool.ToolSchemas
 import io.astrolabe.verify.Check
 import io.astrolabe.verify.CostClass
 import kotlinx.coroutines.CancellationException
@@ -29,7 +31,7 @@ import java.time.Clock
 /**
  * The full compile-input fingerprint of one `[K]` (§6.6, F06): the candidate stamp, the contract and authority
  * revision, the selected increment, the carry-forward and register version, the note, contracts-index and skill
- * versions, the role and its policy-text version (D-38), the profile and the frozen policy. Matching the tree stamp
+ * versions, the role and its policy-text version (D-38), the role's `[S]` bytes and schema set, the profile and the frozen policy. Matching the tree stamp
  * alone is insufficient: checks, amendments or knowledge admission change non-tree inputs. Beyond the §6.6 list it
  * also pins the `[R]` prime, the rules and calibration texts, the estimator, the output limit and the pinned
  * messages (D-83): every input the compile reads, so a match implies a byte-identical compile.
@@ -48,6 +50,10 @@ public data class Fingerprint(
     val skills: List<String>,
     val role: String,
     val roleTextVersion: String,
+    /** Digest of the role's `[S]` bytes under the attempt's execution mode (invariant 12). */
+    val system: String,
+    /** The role's schema set fingerprint: a changed tool mask or schema text moves it (D-20). */
+    val schemas: String,
     val profile: String,
     val policy: String,
     val prime: String,
@@ -74,6 +80,8 @@ public data class Fingerprint(
         if (skills != other.skills) add("skills")
         if (role != other.role) add("role")
         if (roleTextVersion != other.roleTextVersion) add("role text version")
+        if (system != other.system) add("system")
+        if (schemas != other.schemas) add("schemas")
         if (profile != other.profile) add("profile")
         if (policy != other.policy) add("policy")
         if (prime != other.prime) add("prime")
@@ -122,6 +130,8 @@ public data class Fingerprint(
             role = role.name,
             // The compiled role's own wording: the frozen attempt map already enters through `policy`.
             roleTextVersion = RoleTexts.version(role),
+            system = Digest.ofUtf8(Layout.system(role, attempt.config.executionMode)).hex,
+            schemas = ToolSchemas.fingerprint(role.toolMask).hex,
             profile = profile.id,
             policy = attempt.fingerprint.hex,
             prime = Digest.ofUtf8(prime).hex,
