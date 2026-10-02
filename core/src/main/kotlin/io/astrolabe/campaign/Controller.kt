@@ -724,10 +724,20 @@ public class Controller @JvmOverloads public constructor(
         c.refusal()?.let { return S0Run(c.advance(Transition.Stopped(stopOutcome(c), "nothing dispatched: $it")), null, null, null) }
         // D-340: a completion waiting for a decision is settled first — no cell, no budget check, no model call.
         var resumed: CompletionResult? = null
+        // A continuation of a red increment never drops below the tier its failing cell ran at (§11.1).
+        val tiers = HashMap<String, Tier>()
+        // §11.3: verified failures escalate with evidence, at most budget.attempts per increment, then blocked (P4.5.2).
+        val attempts = IncrementAttempts(c.journal, idGen, clock)
+        // §13.1–§13.3 (D-171, D-254): verified failures go through the ladder and the campaign's guards, rebuilt from the journal.
+        val recovery = CampaignRecovery(c.journal, idGen, clock, c.ids.work, GuardLimits.of(c.attempt.config.defaults))
         val review: suspend (Increment, ReturnedCompletion) -> ReviewOutcome? = { increment, kept ->
             if (c.contract.shape >= Shape.S2 && c.refusal() == null) incrementReview(c, increment, kept, model, authority, syntax, span) else null
         }
-        when (val pending = resumePending(c, authority) ?: resumeReturned(c, authority, continues = true, review)) {
+        val refused: suspend (Increment, ReturnedCompletion, List<String>) -> CampaignState? = { increment, kept, missing ->
+            kept.tier?.let { tiers[increment.id] = it }
+            verifiedFailure(c, c.contract, recovery, attempts, c.ids.copy(context = kept.cell), increment, missing, kept.register, kept.receipts, kept.tier, kept.profile, model, authority, syntax, span)
+        }
+        when (val pending = resumePending(c, authority) ?: resumeReturned(c, authority, refused, review)) {
             null, Resumed.Continue -> Unit
             is Resumed.Committed -> resumed = pending.result
             is Resumed.Stopped -> return S0Run(pending.state, null, null, null)
@@ -762,12 +772,6 @@ public class Controller @JvmOverloads public constructor(
         // §6.6 `[O]`: boundary pre-compilation only under the frozen `precompile` flag; off, nothing below runs.
         val precompile = if (c.attempt.config.flags.precompile) Precompile(c.journal, idGen, clock) else null
         var closed: Pair<ContextId, Long>? = null
-        // A continuation of a red increment never drops below the tier its failing cell ran at (§11.1).
-        val tiers = HashMap<String, Tier>()
-        // §11.3: verified failures escalate with evidence, at most budget.attempts per increment, then blocked (P4.5.2).
-        val attempts = IncrementAttempts(c.journal, idGen, clock)
-        // §13.1–§13.3 (D-171, D-254): verified failures go through the ladder and the campaign's guards, rebuilt from the journal.
-        val recovery = CampaignRecovery(c.journal, idGen, clock, c.ids.work, GuardLimits.of(c.attempt.config.defaults))
         var lastKey: CacheKey? = null
         while (true) {
             c.refusal()?.let { return last.copy(state = c.advance(Transition.Stopped(stopOutcome(c), "dispatch refused: $it"))) }
@@ -875,7 +879,7 @@ public class Controller @JvmOverloads public constructor(
             }
             packets += exit.packet
             snapshot(c)
-            val kept = returned(c, run.ids, exit, routing.selected?.tier, compiled.k.ledger)
+            val kept = returned(c, run.ids, exit, routing.selected, compiled.k.ledger)
             refreshPrescan(c, run.ids, exit.checkpoint.touched, exit.turns)?.let { return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, it)), exit, null, compiled) }
             boundary(c, cellId, RebuildReason.CellEnd(if (exit is CellExit.Completed) RebuildReason.CellEnd.Next.NextIncrement else RebuildReason.CellEnd.Next.Continuation))
             val stampNow = c.stamper.report(fresh = true).candidateId
@@ -908,17 +912,8 @@ public class Controller @JvmOverloads public constructor(
                 // S1: a partial continues the same increment from its carry-forward; the cell cap bounds it (D-70).
                 // §11.3: a refused or stalled completion is a verified failure of the increment's attempt.
                 is Disposition.Continue -> IncrementAttempts.verifiedFailure(exit, completion)?.let { missing ->
-                    val kind = CampaignRecovery.classify(increment.accept.flatMap { c.checks.forAcceptance(it) }.mapNotNull { it.last?.outcome })
-                    val hypothesis = CampaignRecovery.hypothesis(exit.register)
-                    val routed = recovery.failed(run.ids, increment.id, kind, missing.joinToString("; "), exit.packet.receipts, hypothesis, c.stamper.report().candidateId)
-                    (routed.verdict as? GuardVerdict.Trip)?.let { return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, it.line))) }
-                    if (routed.recovery is Recovery.Repair) repair(c, recovery, run.ids, increment, routed, cellModel, authority, syntax, span)
-                    when (val step = attempts.refused(run.ids, increment.id, contract.budget.attempts, routing.selected, exit.register, missing, exit.packet.receipts, kind)) {
-                        is EscalationStep.Ask -> return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, step.question)))
-                        is EscalationStep.Blocked -> return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, step.reason)))
-                        is EscalationStep.Escalate, is EscalationStep.NotEscalated -> Unit
-                    }
-                    recovery.alternative(run.ids, attempts.allowance(c.ids.work, increment.id, contract.budget.attempts), exit.register, exit.packet.receipts, contract.version, hypothesis)
+                    verifiedFailure(c, contract, recovery, attempts, run.ids, increment, missing, exit.register, exit.packet.receipts, routing.selected?.tier, routing.selected?.profile?.id, cellModel, authority, syntax, span)
+                        ?.let { return last.copy(state = it) }
                 }
                 is Disposition.Stop -> {
                     if (completion !is CompletionResult.Pending) return last.copy(state = c.advance(Transition.Stopped(disposition.outcome, disposition.reason, disposition.code)))
@@ -941,6 +936,30 @@ public class Controller @JvmOverloads public constructor(
             }
             last = last.copy(state = c.state)
         }
+    }
+
+    /**
+     * §11.3, §13.1–§13.3: a refused or stalled completion of [increment] is a verified failure of its attempt — the
+     * campaign's guards, the scoped repair, the escalation ladder and the alternative — whether the cell returned live
+     * or its kept return was verified again on open (P8.C.8). The stop state when a guard or the ladder stops the
+     * campaign; `null` lets the continuation cell run.
+     */
+    private suspend fun verifiedFailure(
+        c: OpenedCampaign, contract: Contract, recovery: CampaignRecovery, attempts: IncrementAttempts, ids: Identities, increment: Increment, missing: List<String>,
+        register: Register, receipts: List<String>, tier: Tier?, profile: String?, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?,
+    ): CampaignState? {
+        val kind = CampaignRecovery.classify(increment.accept.flatMap { c.checks.forAcceptance(it) }.mapNotNull { it.last?.outcome })
+        val hypothesis = CampaignRecovery.hypothesis(register)
+        val routed = recovery.failed(ids, increment.id, kind, missing.joinToString("; "), receipts, hypothesis, c.stamper.report().candidateId)
+        (routed.verdict as? GuardVerdict.Trip)?.let { return c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, it.line)) }
+        if (routed.recovery is Recovery.Repair) repair(c, recovery, ids, increment, routed, model, authority, syntax, span)
+        when (val step = attempts.refused(ids, increment.id, contract.budget.attempts, tier, profile, register, missing, receipts, kind)) {
+            is EscalationStep.Ask -> return c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, step.question))
+            is EscalationStep.Blocked -> return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, step.reason))
+            is EscalationStep.Escalate, is EscalationStep.NotEscalated -> Unit
+        }
+        recovery.alternative(ids, attempts.allowance(c.ids.work, increment.id, contract.budget.attempts), register, receipts, contract.version, hypothesis)
+        return null
     }
 
     /**
@@ -988,11 +1007,14 @@ public class Controller @JvmOverloads public constructor(
     /**
      * §3.7/I-23 pre-scan refresh: once a cell's touched paths are known the pre-scan reruns over them; a contract touch
      * it now finds stops an S0/S1 campaign before the commit it no longer allows (S2 with an ADR in the main line).
+     * With [once], a refresh the cell's return already logged is not logged again (a kept return verified on open).
      */
-    private fun refreshPrescan(c: OpenedCampaign, ids: Identities, touched: List<String>, turns: Int): String? {
+    private fun refreshPrescan(c: OpenedCampaign, ids: Identities, touched: List<String>, turns: Int, once: Boolean = false): String? {
         if (touched.isEmpty()) return null
         val refreshed = ImpactPrescan.of(c.atlas.refresh(touched), WORKSPACE, c.impactPrescan.inputs.copy(touched = touched.sorted()), c.kb.contractAnchors(), plugged(c).tiers)
-        c.journal.append(JournalEvent(idGen.next("ev"), ids, turns, JournalKind.Boundary, refs = refreshed.contractsTouched, text = "impact pre-scan refreshed: ${refreshed.log}", at = clock.instant()))
+        val text = "$PRESCAN_REFRESHED${refreshed.log}"
+        val logged = once && c.journal.events(JournalScope(c.ids.work, kinds = setOf(JournalKind.Boundary))).any { it.ids.context == ids.context && it.text == text }
+        if (!logged) c.journal.append(JournalEvent(idGen.next("ev"), ids, turns, JournalKind.Boundary, refs = refreshed.contractsTouched, text = text, at = clock.instant()))
         if (refreshed.prescan.contractTouch != true || c.contract.shape !in setOf(Shape.S0, Shape.S1)) return null
         return "impact pre-scan refresh: contract ${refreshed.contractsTouched.joinToString(", ")} touched — S2 with an ADR in the main line is required before this lands (I-23)"
     }
@@ -1309,7 +1331,7 @@ public class Controller @JvmOverloads public constructor(
         val config = c.attempt.config
         c.refusal()?.let { return S0Run(c.advance(Transition.Stopped(stopOutcome(c), "nothing dispatched: $it")), null, null, null) }
         // D-340: a completion waiting for a decision is settled first — no cell, no budget check, no model call.
-        when (val resumed = resumePending(c, authority) ?: resumeReturned(c, authority, continues = false) { _, _ -> null }) {
+        when (val resumed = resumePending(c, authority) ?: resumeReturned(c, authority, refused = null) { _, _ -> null }) {
             null, Resumed.Continue -> Unit
             is Resumed.Committed -> return S0Run(stopOrFinish(c, "requirements remain unverified after ${resumed.result.incrementId}", scheduler(c), authority = authority), null, resumed.result, null)
             is Resumed.Stopped -> return S0Run(resumed.state, null, null, null)
@@ -1363,7 +1385,7 @@ public class Controller @JvmOverloads public constructor(
         }
         // The tree after the cell is the base the next open reconciles against: only moves after this are external.
         snapshot(c)
-        val kept = returned(c, ids, exit, routing.selected?.tier, compiled.k.ledger)
+        val kept = returned(c, ids, exit, routing.selected, compiled.k.ledger)
         refreshPrescan(c, ids, exit.checkpoint.touched, exit.turns)?.let {
             routing.selected?.let { selected -> router.record(selected, outcomeOf(exit)) }
             return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, it)), exit, null, compiled)
@@ -1619,14 +1641,14 @@ public class Controller @JvmOverloads public constructor(
      * Returns [exit]; a completed one is kept first (P8.C.8), with the sequence number of the row that says it returned.
      * [preexisting] is the compiled context's pre-existing ledger, which an owed increment review shows (§8.8).
      */
-    private fun returned(c: OpenedCampaign, ids: Identities, exit: CellExit, tier: Tier?, preexisting: io.astrolabe.verify.PreexistingLedger?): ReturnedCompletion? {
+    private fun returned(c: OpenedCampaign, ids: Identities, exit: CellExit, selected: Routed.Selected?, preexisting: io.astrolabe.verify.PreexistingLedger?): ReturnedCompletion? {
         if (exit !is CellExit.Completed) {
             c.advance(Transition.Returned(exit))
             return null
         }
         var kept: ReturnedCompletion? = null
         c.advance(Transition.Returned(exit)) { next ->
-            kept = ReturnedCompletion.of(idGen.next("returned"), next.seq, exit, tier, preexistingLines(preexisting)).also { ReturnedCompletions(c.store, clock).save(ids, it) }
+            kept = ReturnedCompletion.of(idGen.next("returned"), next.seq, exit, selected?.tier, selected?.profile?.id, preexistingLines(preexisting)).also { ReturnedCompletions(c.store, clock).save(ids, it) }
         }
         return kept
     }
@@ -1636,16 +1658,23 @@ public class Controller @JvmOverloads public constructor(
      * campaign row is still the one the return wrote and no pending completion names the cell — is verified again from
      * its kept record with no cell and no model call, then takes the live return's paths: commit, a pending completion
      * settled with a decision, or a stop. An owed S2+ increment review comes from [review]: a current one is reused.
-     * A refused completion lets the continuation cell run when [continues], else stops with its fallback (S0, D-64).
-     * A tree, contract or environment that moved since voids it: the work continues in a cell. `null`: nothing to verify.
+     * A refused completion is a verified failure counted by [refused] like a live one, then the continuation cell runs;
+     * without [refused] (S0, D-64) it stops with its fallback. A tree, contract or environment that moved since voids it:
+     * the work continues in a cell. `null`: nothing to verify.
      */
-    private suspend fun resumeReturned(c: OpenedCampaign, authority: Authority, continues: Boolean, review: suspend (Increment, ReturnedCompletion) -> ReviewOutcome?): Resumed? {
+    private suspend fun resumeReturned(
+        c: OpenedCampaign, authority: Authority,
+        refused: (suspend (Increment, ReturnedCompletion, List<String>) -> CampaignState?)?, review: suspend (Increment, ReturnedCompletion) -> ReviewOutcome?,
+    ): Resumed? {
         val kept = ReturnedCompletions(c.store, clock).latest(c.ids.work, c.ids.attempt) ?: return null
         val state = checkNotNull(c.state)
         // Every outcome of a return is a later transition or a pending completion of its cell: either retires the record.
         if (state.seq != kept.seq || Acceptances(c.store, clock).pending(c.ids.work, c.ids.attempt).any { it.cell == kept.cell }) return null
+        // A stop between the record and its `Returned` row leaves the cell running; open marks it lost at that same seq.
+        val increment = state.graph.increments.firstOrNull { it.id == kept.incrementId }
+        if (increment?.status != IncrementStatus.InProgress || increment.cells.lastOrNull() != kept.cell ||
+            state.cells.firstOrNull { it.cell == kept.cell }?.status != CellStatus.Completed) return null
         val ids = c.ids.copy(context = kept.cell)
-        val increment = state.graph.increments.first { it.id == kept.incrementId }
         val report = c.stamper.report(fresh = true)
         val void = when {
             kept.contractVersion != c.contract.version -> "the contract moved to v${c.contract.version}"
@@ -1663,12 +1692,13 @@ public class Controller @JvmOverloads public constructor(
             val receipt = receipts.forCheck(check.id).lastOrNull { it.ids.work == c.ids.work && it.ids.attempt == c.ids.attempt } ?: continue
             c.checks.record(check.id, io.astrolabe.verify.LastResult(receipt.receiptId, receipt.stampAfter, receipt.checkDefinitionVersion, receipt.outcome, receipt.parsed, io.astrolabe.verify.Applicability.Current))
         }
-        refreshPrescan(c, ids, kept.touched, kept.turns)?.let { return Resumed.Stopped(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, it))) }
+        refreshPrescan(c, ids, kept.touched, kept.turns, once = true)?.let { return Resumed.Stopped(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, it))) }
         kept.answer?.let { return Resumed.Stopped(c.advance(Transition.Answered(report.candidateId, it))) }
         val completion = verify(c, kept, increment, report.candidateId, currencies(c, scheduler(c), report.candidateId), review(increment, kept))
         return when (val disposition = Lifecycle.completed(completion)) {
             is Disposition.Close -> commit(c, ids, kept.turns, increment, disposition.accepted, report.candidateId)?.let { Resumed.Stopped(it) } ?: Resumed.Committed(disposition.accepted)
-            is Disposition.Continue -> if (continues) Resumed.Continue else Resumed.Stopped(c.advance(Transition.Stopped(disposition.fallback, disposition.reason)))
+            is Disposition.Continue -> if (refused == null) Resumed.Stopped(c.advance(Transition.Stopped(disposition.fallback, disposition.reason)))
+                else IncrementAttempts.refusedFailure(completion as CompletionResult.Refused)?.let { missing -> refused(increment, kept, missing)?.let { Resumed.Stopped(it) } } ?: Resumed.Continue
             is Disposition.Stop -> if (completion is CompletionResult.Pending) resumed(c, ids, increment, settle(c, ids, increment, kept, completion, authority))
                 else Resumed.Stopped(c.advance(Transition.Stopped(disposition.outcome, disposition.reason, disposition.code)))
         }
@@ -2467,6 +2497,7 @@ public class Controller @JvmOverloads public constructor(
         /** The agent's final text kept with a pending completion, for the decider. */
         private const val MAX_SUMMARY_CHARS: Int = 4_000
         private const val HOST_ANSWER: String = "host answer for "
+        private const val PRESCAN_REFRESHED: String = "impact pre-scan refreshed: "
 
         /** The heading of the host's notes in a cell's pinned context (D-345): the user did not write them. */
         public const val HOST_NOTES: String = "Notes from the host application (not from the user):\n"

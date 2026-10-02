@@ -16,7 +16,6 @@ import io.astrolabe.route.AttemptAllowance
 import io.astrolabe.route.Escalation
 import io.astrolabe.route.EscalationChange
 import io.astrolabe.route.EscalationStep
-import io.astrolabe.route.Routed
 import io.astrolabe.route.SubstantiveAttempt
 import io.astrolabe.route.Tier
 import io.astrolabe.route.VerifiedFailure
@@ -54,15 +53,15 @@ internal class IncrementAttempts(private val journal: Journal, private val idGen
         AttemptAllowance(increment, budget, journal.events(JournalScope(work, kinds = setOf(JournalKind.Boundary))).mapNotNull { decode(it.payload as? JsonObject, increment) }.take(budget))
 
     /**
-     * The completion of [increment] was refused by the verifier: record the attempt that ran at [selected] and decide.
-     * An [EscalationStep.Escalate] is remembered as the stated change of the increment's next attempt.
+     * The completion of [increment] was refused by the verifier: record the attempt that ran at [tier] on [profile] and
+     * decide. An [EscalationStep.Escalate] is remembered as the stated change of the increment's next attempt.
      */
-    fun refused(ids: Identities, increment: String, budget: Int, selected: Routed.Selected?, register: Register, missing: List<String>, evidenceRefs: List<String>, failureClass: FailureClass = FailureClass.BehaviouralTestFailure): EscalationStep {
+    fun refused(ids: Identities, increment: String, budget: Int, tier: Tier?, profile: String?, register: Register, missing: List<String>, evidenceRefs: List<String>, failureClass: FailureClass = FailureClass.BehaviouralTestFailure): EscalationStep {
         val before = allowance(ids.work, increment, budget)
         val attempt = SubstantiveAttempt(
             ids.attempt,
-            selected?.tier ?: Tier.High,
-            selected?.profile?.id ?: "unrouted",
+            tier ?: Tier.High,
+            profile ?: "unrouted",
             register.decisions.lastOrNull()?.text ?: register.focus ?: "unstated",
             changes[increment],
             evidenceRefs,

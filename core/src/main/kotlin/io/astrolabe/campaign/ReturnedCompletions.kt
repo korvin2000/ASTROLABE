@@ -48,9 +48,12 @@ internal data class ReturnedCompletion(
     /** What the cell touched (the pre-scan refresh) and changed (the increment review's triggers). */
     val touched: List<String>,
     val changed: List<String>,
-    /** The tier the cell was routed at and its pre-existing ledger lines: the increment review's inputs (§8.8). */
+    /** The tier and profile the cell was routed at and its pre-existing ledger lines: the increment review's and the attempt ladder's inputs. */
     val tier: Tier?,
+    val profile: String?,
     val preexisting: List<String>,
+    /** The packet's receipt ids: a refused completion's evidence (§11.3). */
+    val receipts: List<String>,
 ) {
     /** The proposal as the cell's packet states it (§8.7). */
     fun proposal(): CompletionProposal = CompletionProposal(incrementId, claimedStatus, contractVersion, baseStamp, resultingStamp, null, envId, reason)
@@ -60,12 +63,12 @@ internal data class ReturnedCompletion(
     companion object {
         const val KIND: String = "returned_completion"
 
-        fun of(id: String, seq: Long, exit: CellExit.Completed, tier: Tier?, preexisting: List<String>): ReturnedCompletion {
+        fun of(id: String, seq: Long, exit: CellExit.Completed, tier: Tier?, profile: String?, preexisting: List<String>): ReturnedCompletion {
             val proposal = exit.packet.proposal()
             return ReturnedCompletion(
                 id, seq, checkNotNull(exit.packet.ids.context), proposal.incrementId, exit.turns, exit.register, proposal.claimedStatus, proposal.contractVersion,
                 proposal.baseStamp, proposal.resultingStamp, proposal.envId, proposal.reason, exit.packet.flags.testIntegrity.map(KeptFlag::of), exit.text,
-                exit.pending != null, exit.answer, exit.checkpoint.touched, exit.packet.changes.map { it.path }, tier, preexisting,
+                exit.pending != null, exit.answer, exit.checkpoint.touched, exit.packet.changes.map { it.path }, tier, profile, preexisting, exit.packet.receipts,
             )
         }
     }
