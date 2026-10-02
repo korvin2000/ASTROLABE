@@ -1180,6 +1180,33 @@ class RunTest {
     }
 
     @Test
+    fun `a progress line without breaks gets one more look and is then handed over as it stands`() = runTest {
+        val scripted = ScriptedOs(listOf("" to ProcStatus.Running, "10%\r" to ProcStatus.Running, "20%\r" to ProcStatus.Running, "30%\r" to ProcStatus.Running, "40%\r" to ProcStatus.Running))
+        val tool = runner(os = scripted)
+        run("""{"argv":["git","status"],"bg":true,"timeout":60}""", tool)
+        val before = scripted.polls
+
+        val out = run("""{"op":"poll","handle":"handle-1"}""", tool)
+
+        assertEquals(2, scripted.polls - before, "one look for the slice and exactly one more for its line break")
+        assertTrue(out.body.contains("20%"), out.body)
+        assertEquals("10%\r20%\r".length.toLong(), SqliteHandles(store, clock).get("handle-1")!!.cursor)
+    }
+
+    @Test
+    fun `a readiness line is redacted with the log before the wait`() = runTest {
+        val scripted = ScriptedOs(listOf("" to ProcStatus.Running, "client_secret:\n" to ProcStatus.Running, "  abcdefsecretvalue ready\n" to ProcStatus.Running))
+        val tool = runner(os = scripted)
+        run("""{"argv":["git","status"],"bg":true,"timeout":60}""", tool)
+        run("""{"op":"poll","handle":"handle-1"}""", tool)
+
+        val out = run("""{"op":"wait","handle":"handle-1","until_line":"ready","timeout":5}""", tool)
+
+        assertTrue(out.body.contains("ready: line matched: [REDACTED:secret-assignment] ready"), out.body)
+        assertFalse(out.body.contains("abcdefsecretvalue"), out.body)
+    }
+
+    @Test
     fun `a closed key block on the shaper's cut line leaves the tail of the output visible`() = runTest {
         val payload = (1..300).joinToString("") { "MIIpayload$it\n" }
         // Long enough on both sides that the head keeps BEGIN and the tail never reaches END.

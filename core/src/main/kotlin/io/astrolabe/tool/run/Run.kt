@@ -494,19 +494,26 @@ public class Run(
      * than [WAIT_LINE_BYTES], or the end hands the unfinished line over as it stands, as a wait does.
      */
     private fun wholeLines(proc: Proc, first: io.astrolabe.os.Poll): io.astrolabe.os.Poll {
-        var bytes = first.newBytes
-        var last = first
-        while (!last.status.isTerminal && bytes.isNotEmpty()) {
-            val cut = bytes.lastIndexOf('\n'.code.toByte()) + 1
-            if (cut == bytes.size || bytes.size - cut > WAIT_LINE_BYTES) break
-            if (cut > 0) return io.astrolabe.os.Poll(bytes.copyOfRange(0, cut), last.nextCursorBytes - (bytes.size - cut), last.status, first.timedOut)
-            val next = os.poll(proc, last.nextCursorBytes, LINE_COMPLETION_SECONDS)
-            if (next.newBytes.isNotEmpty() && next.nextCursorBytes <= last.nextCursorBytes) throw IOException("the log cursor did not advance")
-            bytes += next.newBytes
-            last = next
-            if (next.newBytes.isEmpty()) break
-        }
-        return if (last === first) first else io.astrolabe.os.Poll(bytes, last.nextCursorBytes, last.status, first.timedOut)
+        if (first.status.isTerminal || first.newBytes.isEmpty()) return first
+        atLineBreak(first.newBytes, first)?.let { return it }
+        // One unfinished line: one more look (at most a second) for its break, never a loop, since a `\r` progress bar
+        // writes without pause and would hold the poll until the line cap.
+        val next = os.poll(proc, first.nextCursorBytes, LINE_COMPLETION_SECONDS)
+        if (next.newBytes.isNotEmpty() && next.nextCursorBytes <= first.nextCursorBytes) throw IOException("the log cursor did not advance")
+        val bytes = first.newBytes + next.newBytes
+        val joined = io.astrolabe.os.Poll(bytes, next.nextCursorBytes, next.status, first.timedOut)
+        return if (next.status.isTerminal) joined else atLineBreak(bytes, joined) ?: joined
+    }
+
+    /**
+     * [bytes] cut after their last line break, the cursor moved back to it; whole when they end at a break or the unfinished
+     * line is longer than [WAIT_LINE_BYTES]; `null` when they are one unfinished line.
+     */
+    private fun atLineBreak(bytes: ByteArray, poll: io.astrolabe.os.Poll): io.astrolabe.os.Poll? {
+        val cut = bytes.lastIndexOf('\n'.code.toByte()) + 1
+        if (cut == bytes.size || bytes.size - cut > WAIT_LINE_BYTES) return poll
+        if (cut == 0) return null
+        return io.astrolabe.os.Poll(bytes.copyOfRange(0, cut), poll.nextCursorBytes - (bytes.size - cut), poll.status, poll.timedOut)
     }
 
     /** A background process reached its terminal [status]: the whole log is stored and shaped, the interval diffed. */
@@ -644,7 +651,7 @@ public class Run(
         // so a marker cut by the cursor is read whole (D-387).
         val before = logBefore(start, since).orEmpty()
         var partial = before.substring(before.lastIndexOf('\n') + 1).toByteArray(Charsets.UTF_8)
-        val scan = ReadinessScan(redaction, until.line, leavesKeyBlockOpen(before))
+        val scan = ReadinessScan(redaction, until.line, leavesKeyBlockOpen(before), before.substring(0, before.lastIndexOf('\n') + 1))
         while (true) {
             if (Thread.currentThread().isInterrupted) throw InterruptedException("wait interrupted")
             val remainingMillis = java.time.Duration.between(clock.instant(), deadline).toMillis()
@@ -857,7 +864,13 @@ private fun linesOf(text: String): Sequence<String> = text.lineSequence().toList
  * across polls, then redacted with it. A block that never closes within the scan cap, or that was open where the scan
  * began ([skipping]), is never matched nor shown. So `until_line` is no oracle for a secret and never echoes one.
  */
-private class ReadinessScan(private val redaction: Redaction, private val pattern: Regex?, private var skipping: Boolean) {
+private class ReadinessScan(
+    private val redaction: Redaction,
+    private val pattern: Regex?,
+    private var skipping: Boolean,
+    /** The log right before the first fed text: the first run is redacted with it (D-387), later runs follow their own. */
+    private var context: String = "",
+) {
     /** Characters per redaction run, so a run never exceeds the byte cap and its tail is always scanned. */
     private val runChars = maxOf(1, redaction.config.maxBytes / 4)
     private val held = StringBuilder()
@@ -871,14 +884,20 @@ private class ReadinessScan(private val redaction: Redaction, private val patter
         var matched: String? = null
         fun flush() {
             if (matched == null && pattern != null && run.isNotEmpty()) {
-                matched = linesOf(redaction.apply(run.toString(), ContentClass.ReusableEvidence).text)
-                    .map { it.trimEnd('\r') }.firstOrNull { pattern.containsMatchIn(it) }?.take(200)
+                val safe = if (context.isEmpty()) redaction.apply(run.toString(), ContentClass.ReusableEvidence)
+                else redaction.applyLive(run.toString().toByteArray(Charsets.UTF_8), ContentClass.ReusableEvidence, openAtEnd = false, context = context)
+                matched = linesOf(safe.text).map { it.trimEnd('\r') }.firstOrNull { pattern.containsMatchIn(it) }?.take(200)
             }
+            if (run.isNotEmpty()) context = ""
             run.setLength(0)
         }
         for (line in linesWithBreaks(text)) {
             when {
-                skipping -> if (Redaction.PRIVATE_KEY_END.containsMatchIn(line)) skipping = false
+                // Dropped lines part the context from the first run.
+                skipping -> {
+                    context = ""
+                    if (Redaction.PRIVATE_KEY_END.containsMatchIn(line)) skipping = false
+                }
                 held.isNotEmpty() -> {
                     held.append(line)
                     if (Redaction.PRIVATE_KEY_END.containsMatchIn(line)) {
