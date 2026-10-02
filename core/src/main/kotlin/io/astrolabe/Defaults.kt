@@ -5,6 +5,8 @@ import io.astrolabe.auth.Stage
 import io.astrolabe.route.Tier
 import kotlinx.serialization.Serializable
 
+private const val GROWTH_RESERVE_FULL_WINDOW_TOKENS: Int = 65_536
+
 /**
  * Declared defaults (§17): one named field per table row, all configurable per task, none hard-coded
  * elsewhere. They are first-round estimates, not derived optima. Harness changes take effect only at attempt
@@ -33,7 +35,7 @@ public data class Defaults(
     val lookBudgetTokens: Int = 4_000,
     val runBudgetTokens: Int = 4_000,
     // The window from which the compile's growth reserve ([A] max + the larger budget) is reserved in full
-    val growthReserveFullWindowTokens: Int = 65_536,
+    val growthReserveFullWindowTokens: Int = GROWTH_RESERVE_FULL_WINDOW_TOKENS,
     // Register cap / contract digest cap / patch cap
     val registerCapTokens: Int = 3_000,
     val digestCapTokens: Int = 150,
@@ -106,6 +108,94 @@ public data class Defaults(
     /** Deadline of one git command (D-303); at most one hour, the [io.astrolabe.os.Git] bound. */
     val gitDeadlineSeconds: Int = 600,
 ) {
+    /** The v1.0 full constructor: [growthReserveFullWindowTokens] takes its default. Kept for Java callers. */
+    public constructor(
+        shapePolicy: ShapePolicy,
+        turnsPerCell: Int,
+        turnNudgeFraction: Double,
+        providerTerminalWaitSeconds: Int,
+        alpha: Double,
+        k: Int,
+        m: Int,
+        rMaxTokens: Int,
+        anchorMaxTokens: Int,
+        immediateStubTokens: Int,
+        lookBudgetTokens: Int,
+        runBudgetTokens: Int,
+        registerCapTokens: Int,
+        digestCapTokens: Int,
+        digestTokensPerRequirement: Int,
+        digestCapCeilingTokens: Int,
+        patchCapTokens: Int,
+        factLineMaxChars: Int,
+        noteBodyMaxTokens: Int,
+        noteSummaryMaxChars: Int,
+        seedsMaxTokens: Int,
+        injectionMaxNotes: Int,
+        injectionMaxTokens: Int,
+        focusNotesMaxTokens: Int,
+        focusZoomMaxTokens: Int,
+        touchedInAnchor: Int,
+        checkerTimeBoxSeconds: Int,
+        checkerFallbackTimeBoxSeconds: Int,
+        theta: Int,
+        fullSuiteCadence: Int,
+        reserveVerification: Double,
+        reserveRecoveryAndPersist: Double,
+        campaignRecoveryReserve: Double,
+        stallTurns: Int,
+        loopIdentical: Int,
+        repeatedSignatureRepairs: Int,
+        doomLoopSameCalls: Int,
+        probeTurns: Int,
+        probeTokens: Int,
+        probeTier: Tier,
+        reviewLookMax: Int,
+        reviewIncrementTokens: Int,
+        reviewCampaignTokens: Int,
+        reviewTier: Tier,
+        reviewRoutineTier: Tier,
+        repairCalls: Int,
+        attemptsPerIncrement: Int,
+        writerDepth: Int,
+        probeDepth: Int,
+        parallelCells: Int,
+        campaignCells: Int,
+        flakyIsolatedReruns: Int,
+        admissionConfidenceMax: Double,
+        profileRoles: ProfileRoles,
+        mode: Mode,
+        executionMode: ExecutionMode,
+        dClass: DClassPolicy,
+        integrityApproval: IntegrityApproval,
+        unknownOutcomeReconciliation: UnknownOutcomeReconciliation,
+        ceiling: Stage,
+        runTimeoutSeconds: Int,
+        gitDeadlineSeconds: Int,
+    ) : this(
+        shapePolicy = shapePolicy, turnsPerCell = turnsPerCell, turnNudgeFraction = turnNudgeFraction,
+        providerTerminalWaitSeconds = providerTerminalWaitSeconds, alpha = alpha, k = k, m = m, rMaxTokens = rMaxTokens,
+        anchorMaxTokens = anchorMaxTokens, immediateStubTokens = immediateStubTokens, lookBudgetTokens = lookBudgetTokens,
+        runBudgetTokens = runBudgetTokens, registerCapTokens = registerCapTokens, digestCapTokens = digestCapTokens,
+        digestTokensPerRequirement = digestTokensPerRequirement, digestCapCeilingTokens = digestCapCeilingTokens,
+        patchCapTokens = patchCapTokens, factLineMaxChars = factLineMaxChars, noteBodyMaxTokens = noteBodyMaxTokens,
+        noteSummaryMaxChars = noteSummaryMaxChars, seedsMaxTokens = seedsMaxTokens, injectionMaxNotes = injectionMaxNotes,
+        injectionMaxTokens = injectionMaxTokens, focusNotesMaxTokens = focusNotesMaxTokens, focusZoomMaxTokens = focusZoomMaxTokens,
+        touchedInAnchor = touchedInAnchor, checkerTimeBoxSeconds = checkerTimeBoxSeconds,
+        checkerFallbackTimeBoxSeconds = checkerFallbackTimeBoxSeconds, theta = theta, fullSuiteCadence = fullSuiteCadence,
+        reserveVerification = reserveVerification, reserveRecoveryAndPersist = reserveRecoveryAndPersist,
+        campaignRecoveryReserve = campaignRecoveryReserve, stallTurns = stallTurns, loopIdentical = loopIdentical,
+        repeatedSignatureRepairs = repeatedSignatureRepairs, doomLoopSameCalls = doomLoopSameCalls, probeTurns = probeTurns,
+        probeTokens = probeTokens, probeTier = probeTier, reviewLookMax = reviewLookMax, reviewIncrementTokens = reviewIncrementTokens,
+        reviewCampaignTokens = reviewCampaignTokens, reviewTier = reviewTier, reviewRoutineTier = reviewRoutineTier,
+        repairCalls = repairCalls, attemptsPerIncrement = attemptsPerIncrement, writerDepth = writerDepth, probeDepth = probeDepth,
+        parallelCells = parallelCells, campaignCells = campaignCells, flakyIsolatedReruns = flakyIsolatedReruns,
+        admissionConfidenceMax = admissionConfidenceMax, profileRoles = profileRoles, mode = mode, executionMode = executionMode,
+        dClass = dClass, integrityApproval = integrityApproval, unknownOutcomeReconciliation = unknownOutcomeReconciliation,
+        ceiling = ceiling, runTimeoutSeconds = runTimeoutSeconds, gitDeadlineSeconds = gitDeadlineSeconds,
+        growthReserveFullWindowTokens = GROWTH_RESERVE_FULL_WINDOW_TOKENS,
+    )
+
     /** Values that would disable a mandatory control or make a bound meaningless (D-48, IX-18). */
     public fun violations(): List<ConfigViolation> {
         val v = ArrayList<ConfigViolation>()

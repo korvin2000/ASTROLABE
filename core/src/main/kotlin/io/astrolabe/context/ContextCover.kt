@@ -71,7 +71,11 @@ public data class ContextArithmetic(
     val wireTokens: BigInteger?,
     val reserveTokens: BigInteger,
     val outputTokens: BigInteger,
-)
+) {
+    /** The v1.0 constructor, which charged neither a reserve nor an output headroom: the request as sent is the total. */
+    public constructor(limitTokens: BigInteger, knownFixedTokens: BigInteger, availableTokens: BigInteger?, selectedTokens: BigInteger, totalTokens: BigInteger?) :
+        this(limitTokens, knownFixedTokens, availableTokens, selectedTokens, totalTokens, totalTokens, BigInteger.ZERO, BigInteger.ZERO)
+}
 
 public enum class ContextSelectionStatus { Fit, Capacity, NeedsEvidence, UnknownHistory }
 public enum class ContextOmission { Dependency, NoGain, Budget, SelectionRefused }

@@ -98,7 +98,7 @@ public enum class OpDisposition { Written, Refused, Failed, NotAttempted }
 public data class RefusedGroup(val paths: List<String>, val ops: List<Int>, val error: EditError)
 
 /** The typed result of one `edit` call (§5.4). [applied] is the actual per-file state, never a claimed rollback. */
-public data class EditResult(
+public data class EditResult @JvmOverloads constructor(
     val ok: Boolean,
     val editId: String,
     val applied: List<AppliedOp>,
