@@ -1,0 +1,5 @@
+[project]
+name = "shop"
+version = "0.1.0"
+description = "Documents of a small shop: invoices, receipts, daily report"
+requires-python = ">=3.10"

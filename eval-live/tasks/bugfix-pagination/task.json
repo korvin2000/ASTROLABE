@@ -1,0 +1,9 @@
+{
+  "id": "bugfix-pagination",
+  "class": "bugfix",
+  "title": "Last partly filled page of the catalog cannot be opened",
+  "acceptance": {
+    "argv": ["{python}", "_acceptance/accept.py"],
+    "timeoutSeconds": 120
+  }
+}

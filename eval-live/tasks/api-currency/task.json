@@ -1,0 +1,9 @@
+{
+  "id": "api-currency",
+  "class": "api-change",
+  "title": "format_amount takes the currency; invoices, receipts and the report follow",
+  "acceptance": {
+    "argv": ["{python}", "_acceptance/accept.py"],
+    "timeoutSeconds": 120
+  }
+}
