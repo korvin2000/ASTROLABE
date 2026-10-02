@@ -10,6 +10,7 @@ import io.astrolabe.provider.EstimatorFactory
 import io.astrolabe.provider.Message
 import io.astrolabe.provider.Request
 import io.astrolabe.provider.Role
+import io.astrolabe.provider.ToolCall
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.jsonObject
@@ -123,6 +124,100 @@ class BenchTest {
         // A second bench over the same results directory keeps them and calls no model.
         assertEquals(results.toSet(), Bench(plan, models, interpreters, Clock.systemUTC(), FixedIdGen()).run().toSet())
         assertEquals(2, binds.get())
+    }
+
+    private fun text(request: Request): String = request.items.filterIsInstance<Message>().joinToString("\n") { it.text }
+
+    /** The interrupt task with its interruption after [afterResponses] responses. */
+    private fun interruptPlan(afterResponses: Int? = null): BenchPlan {
+        val task = BenchTask.select(tasks, listOf("interrupt-csv")).single()
+        val spec = assertNotNull(task.interrupt)
+        val chosen = afterResponses?.let {
+            BenchTask(task.id, task.kind, task.title, task.prompt, task.dir, task.acceptance, task.hidden, task.reference, task.wrong, InterruptSpec(it, spec.constraint))
+        } ?: task
+        return BenchPlan(
+            tasks = listOf(chosen), models = listOf("fake-main"), provider = "fake", repeats = 1, seed = 3,
+            out = dir.resolve("out"), temp = dir.resolve("tmp"), maxCells = 1, deadline = Duration.ofMinutes(5),
+        )
+    }
+
+    /** Reads a different file of the base at every call, so the attempt never ends on its own; the follow-up finishes. */
+    private fun interruptScript(constraint: String, followUps: MutableList<String>, endFirst: Boolean): FakeAdapter {
+        val files = listOf("reports/export.py", "reports/weekly.py", "reports/daily.py", "tests/test_reports.py", "pyproject.toml")
+        val calls = AtomicInteger()
+        val done = Scripted.Reply(listOf(Message.text(Role.Assistant, "done")))
+        return FakeAdapter(ScriptedModel(listOf(
+            ScriptedModel.Turn({ constraint in text(it) }, { request -> followUps += text(request); done }, once = false),
+            ScriptedModel.Turn({ true }, {
+                if (endFirst) {
+                    done
+                } else {
+                    val n = calls.incrementAndGet()
+                    Scripted.Reply(listOf(ToolCall("c$n", "look", """{"what":"read","target":"${files[(n - 1) % files.size]}"}""")))
+                }
+            }, once = false),
+        )))
+    }
+
+    @Test
+    fun `an interrupted task is stopped after K responses and continued with the constraint as the Studio's follow-up`() {
+        assumeTrue(runCatching { interpreters.expand(Interpreters.PYTHON) }.isSuccess, "no Python 3 on the PATH")
+        val plan = interruptPlan()
+        val spec = assertNotNull(plan.tasks.single().interrupt)
+        assertEquals(3, spec.afterResponses)
+        val followUps = CopyOnWriteArrayList<String>()
+        val adapter = interruptScript(spec.constraint, followUps, endFirst = false)
+        val models = ModelSource { ModelBinding(adapter, FakeProfiles.main, EstimatorFactory { HeuristicEstimator() }) }
+
+        val result = Bench(plan, models, interpreters, Clock.systemUTC(), FixedIdGen()).run().single()
+
+        assertNull(result.failure, result.failure)
+        val interrupt = assertNotNull(result.interrupt)
+        assertEquals(InterruptMode.CancelResume, interrupt.mode)
+        assertEquals(3, interrupt.atResponse)
+        assertEquals(2, interrupt.segments.size)
+        val (first, second) = interrupt.segments
+        assertEquals("cancelled", first.outcome, first.reason)
+        assertTrue(assertNotNull(first.totals).modelResponses >= 3, "${first.totals}")
+        assertTrue(first.workId != second.workId, "the follow-up is a new run of the same task")
+        assertNotNull(second.outcome)
+        assertEquals(second.workId, result.workId)
+        assertEquals(second.outcome, result.outcome)
+
+        val request = followUps.first()
+        assertTrue("[Context from earlier in this task." in request && "Outcome: stopped by the user before it finished." in request, request)
+        assertTrue(request.substringAfter("[End of context]").trim().startsWith(spec.constraint), request)
+
+        val totals = assertNotNull(result.totals)
+        assertEquals(interrupt.segments.sumOf { it.totals!!.modelResponses }, totals.modelResponses, "the run's totals are the sum of its segments")
+        assertEquals(interrupt.segments.sumOf { it.totals!!.modelRequests }, totals.modelRequests)
+        assertEquals(interrupt.segments.sumOf { it.attemptWallMillis!! }, result.attemptWallMillis)
+
+        val runDir = PlannedRun(result.order, plan.tasks.single(), result.model, result.repeat).dir(plan.out)
+        assertEquals(result, Summary.read(runDir.resolve("result.json")))
+        assertTrue("\"mode\": \"cancelResume\"" in runDir.resolve("result.json").readText())
+        assertEquals("cancelResume", plan.out.resolve("summary.csv").readLines().filter { it.isNotBlank() }.last().substringAfterLast(','))
+    }
+
+    @Test
+    fun `an agent that ends before K responses gets the constraint as a follow-up`() {
+        assumeTrue(runCatching { interpreters.expand(Interpreters.PYTHON) }.isSuccess, "no Python 3 on the PATH")
+        val plan = interruptPlan(afterResponses = 50)
+        val spec = assertNotNull(plan.tasks.single().interrupt)
+        val followUps = CopyOnWriteArrayList<String>()
+        val adapter = interruptScript(spec.constraint, followUps, endFirst = true)
+        val models = ModelSource { ModelBinding(adapter, FakeProfiles.main, EstimatorFactory { HeuristicEstimator() }) }
+
+        val result = Bench(plan, models, interpreters, Clock.systemUTC(), FixedIdGen()).run().single()
+
+        val interrupt = assertNotNull(result.interrupt)
+        assertEquals(InterruptMode.FollowUp, interrupt.mode)
+        assertNull(interrupt.atResponse)
+        assertEquals(2, interrupt.segments.size)
+        assertTrue(interrupt.segments[0].outcome != "cancelled", "${interrupt.segments[0]}")
+        val request = followUps.first()
+        assertTrue("Outcome: stopped by the user" !in request && spec.constraint in request, request)
+        assertEquals(interrupt.segments.sumOf { it.totals!!.modelResponses }, assertNotNull(result.totals).modelResponses)
     }
 
     @Test
