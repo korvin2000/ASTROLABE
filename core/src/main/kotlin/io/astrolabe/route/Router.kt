@@ -4,10 +4,10 @@ import io.astrolabe.atlas.RiskFloorInput
 import io.astrolabe.budget.Tokens
 import io.astrolabe.contract.Reversibility
 import io.astrolabe.contract.Risk
-import io.astrolabe.provider.BillingDimension
 import io.astrolabe.provider.Effort
 import io.astrolabe.provider.Money
 import io.astrolabe.provider.Profile
+import io.astrolabe.telemetry.Accounting
 import java.math.BigDecimal
 import java.util.Collections
 
@@ -219,14 +219,12 @@ public class Router @JvmOverloads constructor(public val calibration: Calibratio
         }
 
         /**
-         * One full-context turn at the profile's dated prices: the wire input as uncached input plus the output headroom
-         * (D-109). The growth reserve is room, not a paid input.
+         * One full-context turn of the wire input plus the output headroom (D-109), priced by the cell's own reservation
+         * rule (D-385): the dearest reachable price table, so routing never selects what the cell then refuses. `null`
+         * when that reservation is unknown. The growth reserve is room, not a paid input.
          */
         @JvmStatic
-        public fun conservativeCost(profile: Profile, packet: RoutingPacket): Money? {
-            val input = profile.priceTable.price(BillingDimension.UNCACHED_INPUT, packet.contextTokens) ?: return null
-            val output = profile.priceTable.price(BillingDimension.OUTPUT, packet.outputTokens.toLong()) ?: return null
-            return input + output
-        }
+        public fun conservativeCost(profile: Profile, packet: RoutingPacket): Money? =
+            Accounting.estimateCost(profile, packet.contextTokens, packet.outputTokens.toLong()).takeUnless { it.unknown }
     }
 }
