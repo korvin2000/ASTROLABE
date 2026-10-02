@@ -249,9 +249,8 @@ public class Run(
                     is Launch.Background -> launch.firstOutput
                     is Launch.Unavailable -> ByteArray(0)
                 }
-                // A background launch's first output is the first slice of a live stream: a key block it opens stays hidden.
-                val safeBytes = if (launch is Launch.Background) redaction.applyLive(bytes, ContentClass.ReusableEvidence, openAtEnd = false) else redaction.applyBytes(bytes, ContentClass.ReusableEvidence)
-                logBlob = blobs.put(safeBytes.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
+                // A capture is (the start of) a live stream: a key block it opens and never closes stays hidden (D-387).
+                logBlob = blobs.put(redaction.applyLive(bytes, ContentClass.ReusableEvidence, openAtEnd = false).text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
                 rendered = when (launch) {
                     is Launch.Unavailable -> {
                         val result = RunResult(alias.text, actionId, null, Outcome.Unavailable, "cannot start: ${launch.reason}", false, logBlob, classification.effectClass, before.candidateId, before.candidateId, true, emptyList(), null, null, null, listOf(launch.reason), intent.intentId)
@@ -426,13 +425,13 @@ public class Run(
             else -> shaped.status
         }
         val touched = if (changed.isEmpty()) null else "touched (by run $alias ${argv.joinToString(" ").take(60)}: ${changed.size} path${if (changed.size == 1) "" else "s"}) " + changed.take(10).joinToString(", ") + (if (changed.size > 10) " …" else "")
-        val view = shaped.view + (touched?.let { "\n$it" } ?: "")
+        val view = safeView(shaped.view, output) + (touched?.let { "\n$it" } ?: "")
         val result = RunResult(
             alias, actionId, capture.exitCode, outcome, view, shaped.viewTruncated, logBlob, effectClass, before.candidateId, after.candidateId,
             current = true, changedPaths = changed, handle = null, parsed = shaped.counts, shaped = shaped, limits = shaped.limitations, intentId = intentId,
         )
         return render(args, result, argv, shell, before, after, effectsUnknown || status is ProcStatus.Lost,
-            captureMask = redaction.applyBytes(output, ContentClass.ReusableEvidence).mask, completedPlainly = completedPlainly(capture, outcome, shaped))
+            captureMask = redaction.applyLive(output, ContentClass.ReusableEvidence, openAtEnd = false).mask, completedPlainly = completedPlainly(capture, outcome, shaped))
     }
 
     private fun completedPlainly(capture: RunCapture, outcome: Outcome, shaped: Shaped): Boolean =
@@ -489,6 +488,7 @@ public class Run(
     private fun ended(args: RunArgs, handle: Handle, proc: Proc, status: ProcStatus, fallback: ByteArray, note: String?): ToolOutcome {
         val after = stamper.report()
         var complete = true
+        var fromStart = true
         val log = try {
             Files.newInputStream(proc.log).use {
                 val bytes = it.readNBytes(Executions.MAX_CAPTURE_BYTES)
@@ -497,16 +497,19 @@ public class Run(
             }
         } catch (missing: IOException) {
             complete = false
+            fromStart = false
             fallback
         }
-        val safeLog = redaction.applyBytes(log, ContentClass.ReusableEvidence)
+        // D-387: the log is read from byte 0, so it has no context before it; the fallback is the last slice alone, whose
+        // prefix is gone with the log, so a block it may continue is assumed open.
+        val safeLog = redaction.applyLive(log, ContentClass.ReusableEvidence, openAtEnd = !fromStart)
         val logBlob = blobs.put(safeLog.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
         val stampBefore = CandidateId(Digest(handle.stampBefore))
         val changed = announceBackground(handle, after)
         val capture = RunCapture(handle.actionId, handle.argv, handle.shell, handle.cwd, (status as? ProcStatus.Exited)?.exitCode, status == ProcStatus.DeadlineExceeded, log, complete && status !is ProcStatus.Lost)
         val shaped = Shapers.shape(capture, ShapeBudget(args.budgetTokens, estimator, handle.alias))
         val outcome = if (status is ProcStatus.Lost || status is ProcStatus.Cancelled) Outcome.UnknownOutcome else shaped.status
-        val view = "handle ${handle.handleId} ${wire(status)}\n" + (note?.let { "$it\n" } ?: "") + shaped.view + "\nBackground effects cannot be attributed exclusively to this process." + (if (changed.isEmpty()) "" else "\nchanged during background run (${changed.size} paths): " + changed.take(10).joinToString(", "))
+        val view = "handle ${handle.handleId} ${wire(status)}\n" + (note?.let { "$it\n" } ?: "") + safeView(shaped.view, log, unknownEnd = !fromStart) +"\nBackground effects cannot be attributed exclusively to this process." + (if (changed.isEmpty()) "" else "\nchanged during background run (${changed.size} paths): " + changed.take(10).joinToString(", "))
         val effectClass = observedClass(handle.effectClass, changed)
         val result = RunResult(handle.alias, handle.actionId, capture.exitCode, outcome, view, shaped.viewTruncated, logBlob, effectClass, stampBefore, after.candidateId, true, changed, handle.handleId, shaped.counts, shaped, shaped.limitations)
         return render(args, result, handle.argv, handle.shell, null, after, effectsUnknown = true, captureMask = safeLog.mask, completedPlainly = completedPlainly(capture, outcome, shaped))
@@ -650,10 +653,21 @@ public class Run(
      * wait that starts there must not read the block's payload lines as ordinary output. An unreadable log answers no; the
      * poll that follows reports it.
      */
-    private fun insideKeyBlock(proc: Proc, since: Long): Boolean {
-        val before = logBefore(proc, since) ?: return false
-        val begin = Redaction.PRIVATE_KEY_BEGIN.findAll(before).lastOrNull() ?: return false
-        return Redaction.PRIVATE_KEY_END.find(before, begin.range.last + 1) == null
+    private fun insideKeyBlock(proc: Proc, since: Long): Boolean = leavesKeyBlockOpen(logBefore(proc, since) ?: return false)
+
+    private fun leavesKeyBlockOpen(text: String): Boolean {
+        val begin = Redaction.PRIVATE_KEY_BEGIN.findAll(text).lastOrNull() ?: return false
+        return Redaction.PRIVATE_KEY_END.find(text, begin.range.last + 1) == null
+    }
+
+    /**
+     * The shaped view of a whole capture, redacted as the end of a live stream (D-387): the shaper reads the raw capture,
+     * so a private-key block the capture leaves open (judged from its last scan cap's worth, or [unknownEnd]) hides the
+     * view's part of it, and a view that begins inside a block hides it up to its end.
+     */
+    private fun safeView(view: String, capture: ByteArray, unknownEnd: Boolean = false): String {
+        val last = String(capture, maxOf(0, capture.size - redaction.config.maxBytes), minOf(capture.size, redaction.config.maxBytes), Charsets.UTF_8)
+        return redaction.applyLive(view.toByteArray(Charsets.UTF_8), ContentClass.ModelFacing, openAtEnd = unknownEnd || leavesKeyBlockOpen(last)).text
     }
 
     /** The scan cap's worth of log before byte [since]: the scanner state a handle's reader resumes from; `null` when unreadable. */

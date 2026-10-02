@@ -1118,6 +1118,40 @@ class RunTest {
     private fun assertNoKeyLine(body: String) = assertFalse(body.contains("MIIEvQ") || body.contains("MIIpayload"), body)
 
     @Test
+    fun `a foreground command that prints a key block without its end shows none of the block`() = runTest {
+        repo.write("key.txt", "booting\n${keyHead}MIIpayloadSecondLineOfTheKey\n")
+
+        val out = run("""{"cmd":"${shell("type key.txt", "cat key.txt")}"}""")
+
+        assertTrue(out.body.contains("booting") && out.body.contains("[REDACTED:private-key-block]"), out.body)
+        assertNoKeyLine(out.body)
+        assertTrue(out.header!!.runtime.redactionApplied)
+        val stored = String(store.blobs.get(io.astrolabe.id.Digest(out.header!!.runtime.artifactRefs.first())))
+        assertNoKeyLine(stored)
+    }
+
+    @Test
+    fun `a background process that ends inside a key block shows none of it in the terminal poll or wait`() = runTest {
+        val steps = listOf("" to ProcStatus.Running, "booting\n$keyHead" to ProcStatus.Running, "MIIpayloadSecondLineOfTheKey\n" to ProcStatus.Exited(0))
+        val polling = runner(os = ScriptedOs(steps))
+        run("""{"argv":["git","status"],"bg":true,"timeout":60}""", polling)
+        run("""{"op":"poll","handle":"handle-1"}""", polling)
+
+        val terminal = run("""{"op":"poll","handle":"handle-1"}""", polling)
+
+        assertEquals("exited", SqliteHandles(store, clock).get("handle-1")!!.status)
+        assertTrue(terminal.body.contains("handle handle-1 exited"), terminal.body)
+        assertNoKeyLine(terminal.body)
+        assertNoKeyLine(String(store.blobs.get(io.astrolabe.id.Digest(terminal.header!!.runtime.artifactRefs.first()))))
+
+        val waiting = runner(os = ScriptedOs(steps))
+        val waited = run("""{"argv":["git","status"],"until_line":"^MII","timeout":5}""", waiting)
+
+        assertTrue(waited.body.contains("wait ended: the process ended before a line matching /^MII/"), waited.body)
+        assertNoKeyLine(waited.body)
+    }
+
+    @Test
     fun `a private key split across two polls shows none of its lines in either slice`() = runTest {
         val scripted = ScriptedOs(listOf("" to ProcStatus.Running, "booting\n$keyHead" to ProcStatus.Running, keyTail + "after\n" to ProcStatus.Running))
         val tool = runner(os = scripted)
