@@ -48,8 +48,7 @@ CI (Ubuntu + Windows, JDK 26, full `check`): run 37049344584 green at `4bb181b` 
 run only locally (CI has no SDK checkout). Earlier CI: P4–P6 gates; `f68032f` 36905875813.
 
 ## Recorded deviations
-Local choices D-112–D-113, D-120–D-126, D-135–D-137, D-145–D-155, D-160–D-165, D-170–D-174, D-180–D-183, D-190–D-195,
-D-200–D-202, D-210–D-213, D-220–D-223, D-230–D-233, D-240–D-244, D-250–D-254, D-260 (TODO §3); owner D-175 (deps).
+Local choices D-112–D-260 and later rows in TODO §3; owner D-175 (deps).
 ## History (details in `audit/SESSION-HISTORY.md`)
 Audit remediation 2026-09-28 (D-321–D-325); AI Gate transport (D-326–D-336, `liveTest` not run); phase 0 acceptance rule
 (D-337–D-355); plan-handoff fix (D-357–D-362); efficiency fix (D-363–D-375): Windows program resolution, `ContentCache`
