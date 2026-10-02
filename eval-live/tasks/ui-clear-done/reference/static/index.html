@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Todos</title>
+  <style>
+    body { font-family: sans-serif; max-width: 32rem; margin: 2rem auto; }
+    ul { list-style: none; padding: 0; }
+    li.done span { text-decoration: line-through; color: #777; }
+    footer { display: flex; justify-content: space-between; align-items: center; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Todos</h1>
+    <form id="new-todo-form">
+      <input id="new-title" type="text" placeholder="What needs to be done?" autocomplete="off" required>
+      <button type="submit">Add</button>
+    </form>
+    <ul id="todo-list"></ul>
+    <footer>
+      <span id="todo-count">0 items left</span>
+      <button id="clear-completed" type="button" hidden>Clear completed</button>
+    </footer>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
