@@ -117,6 +117,11 @@ public data class EditResult(
     val notes: Map<Int, String> = emptyMap(),
     /** Per 1-based op index of a batch that reached application (D-375); empty when the batch stopped before it. */
     val dispositions: Map<Int, OpDisposition> = emptyMap(),
+    /**
+     * Whole-file contents a `create` (or its in-place replace) wrote from the call's own arguments, as raw lines. They
+     * are not rendered back: the result is a receipt, and the lines are KNOWN through the call that sent them.
+     */
+    val authored: List<View> = emptyList(),
 ) {
     /** Some ops reached the workspace before the batch stopped (mid-batch failure, §9.1). */
     val partial: Boolean get() = !ok && (applied.isNotEmpty() || error?.kind == "io")
@@ -566,6 +571,7 @@ public class Edit(
     private fun apply(plans: List<Plan>, contract: Contract, context: TurnContext, editId: String, alias: String, outside: List<String>, why: String, carries: MutableList<() -> Unit>): EditResult {
         val applied = ArrayList<AppliedOp>()
         val views = ArrayList<View>()
+        val sent = ArrayList<View>()
         val versions = LinkedHashMap<String, FileVersion?>()
         val diffstat = LinkedHashMap<String, DiffStat>()
         val written = LinkedHashMap<String, PathResolution.Resolved>()
@@ -608,7 +614,8 @@ public class Edit(
                         diffstat[plan.path] = DiffStat(lines.size, 0)
                         written[plan.path] = plan.resolved
                         authored[owned(plan.resolved)] = after
-                        if (lines.isNotEmpty()) views += View(plan.path, LineRange(1, lines.size), after, lines.mapIndexed { i, l -> "${i + 1}| $l" }.joinToString("\n"))
+                        notes[plan.index] = sizeNote(lines.size, plan.bytes.size)
+                        if (lines.isNotEmpty()) sent += View(plan.path, LineRange(1, lines.size), after, lines.joinToString("\n"))
                     }
                     is ReplacePlan -> {
                         val preimage = preimages.saveThenWrite(editId, plan.path, plan.expect, plan.oldBytes) { os.replaceFileAtomically(plan.resolved.real, plan.bytes) }
@@ -624,7 +631,8 @@ public class Edit(
                         written[plan.path] = plan.resolved
                         authored[owned(plan.resolved)] = after
                         val lines = decodeStrict(plan.bytes)?.let { contentLines(it) } ?: emptyList()
-                        if (lines.isNotEmpty()) views += View(plan.path, LineRange(1, lines.size), after, lines.mapIndexed { i, l -> "${i + 1}| $l" }.joinToString("\n"))
+                        notes[plan.index] = "${plan.note}; ${sizeNote(lines.size, plan.bytes.size)}"
+                        if (lines.isNotEmpty()) sent += View(plan.path, LineRange(1, lines.size), after, lines.joinToString("\n"))
                     }
                     is DeletePlan -> {
                         val preimage = preimages.save(editId, plan.path, plan.expect, plan.oldBytes)
@@ -725,7 +733,7 @@ public class Edit(
             .mapValues { (path, resolved) -> beforeDispatch(); syntax.check(path, resolved.real, Language.of(path)) }
         val flags = TestIntegrity.classify(surfaceChanges(plans, applied), cause, contract, checks).map { it.copy(reason = why) }
         flagsByAlias[alias] = flags
-        return EditResult(error == null, editId, applied, views, versions, syntaxResults, diffstat, outside, flags, error, notes = notes, dispositions = dispositions)
+        return EditResult(error == null, editId, applied, views, versions, syntaxResults, diffstat, outside, flags, error, notes = notes, dispositions = dispositions, authored = sent)
     }
 
     /** Each applied path's text before and after, for the §8.6 classifier; an unknown before-text stays unknown. */
@@ -810,14 +818,27 @@ public class Edit(
         }
     }
 
-    private fun show(view: View, alias: String, turn: Int) {
+    private fun show(view: View, alias: String, turn: Int) = grant(view, mask(view), alias, turn)
+
+    /** D-49: the lines of [view] the redactor hides, in file line numbers. */
+    private fun mask(view: View): RedactionMask {
         val redacted = redaction.apply(view.text, ContentClass.ReusableEvidence)
         val hidden = Ranges.of(redacted.mask.hiddenLines.ranges.map { LineRange(it.from + view.range.from - 1, it.to + view.range.from - 1) })
-        val mask = RedactionMask(hidden, redacted.mask.limitations)
-        registry.show(ids.context!!, generation, workspace.id, view.path, view.version, Ranges.of(view.range), mask)
-        val granted = Ranges.of(view.range) - hidden
-        if (!granted.isEmpty) workset.register(Entry(view.path, Ranges.of(view.range), view.version, EntrySource.PostEdit, turn, alias, estimator.estimate(view.text).tokens, hidden))
+        return RedactionMask(hidden, redacted.mask.limitations)
     }
+
+    /** Authored lines are never rendered, so a capped scan, whose tail went unchecked, hides the whole file (D-49). */
+    private fun authoredMask(view: View): RedactionMask =
+        mask(view).let { if (it.limitations.isEmpty()) it else RedactionMask(Ranges.of(view.range), it.limitations) }
+
+    /** Registers [view]'s unhidden lines as displayed and KNOWN at its version; [resultId] null: no result carries the bytes. */
+    private fun grant(view: View, mask: RedactionMask, resultId: String?, turn: Int) {
+        registry.show(ids.context!!, generation, workspace.id, view.path, view.version, Ranges.of(view.range), mask)
+        val granted = Ranges.of(view.range) - mask.hiddenLines
+        if (!granted.isEmpty) workset.register(Entry(view.path, Ranges.of(view.range), view.version, EntrySource.PostEdit, turn, resultId, estimator.estimate(view.text).tokens, mask.hiddenLines))
+    }
+
+    private fun sizeNote(lines: Int, bytes: Int): String = "$lines line${if (lines == 1) "" else "s"}, $bytes bytes"
 
     // ---------------------------------------------------------------- render
 
@@ -846,6 +867,11 @@ public class Edit(
             lines += "  post-edit ${view.path}:${view.range} @${view.version.hash8}"
             lines += view.text.lines().map { "  $it" }
         }
+        // A4: a create answers with a receipt; its content is the call's own argument, so it is not echoed back.
+        val sent = result.authored.map { it to authoredMask(it) }
+        for ((view, mask) in sent) {
+            if (!mask.hiddenLines.isEmpty) lines += "  ${view.path}:${mask.hiddenLines} redacted, NOT SEEN: read it before an anchored edit there"
+        }
         for (group in result.refused) {
             val e = group.error
             lines += "✗ ${group.paths.joinToString(", ").ifEmpty { "op ${group.ops.joinToString(", ")}" }} refused · ${e.opIndex?.let { "op $it " } ?: ""}${e.kind}: ${e.detail}"
@@ -859,7 +885,12 @@ public class Edit(
         val safe = redaction.apply(lines.joinToString("\n"), ContentClass.ReusableEvidence)
         val body = safe.text
         // Coverage follows the final displayed output; omitted or redacted views grant no new reads.
-        if (!safe.applied && safe.limitations.isEmpty()) result.views.forEach { show(it, alias, context.turn) }
+        if (!safe.applied && safe.limitations.isEmpty()) {
+            result.views.forEach { show(it, alias, context.turn) }
+            // A4: the call that sent these bytes stays in `[T]` (calls are never stubbed, §5.7), so no result alias
+            // carries them and a stubbed receipt does not take their coverage away.
+            sent.forEach { (view, mask) -> grant(view, mask, null, context.turn) }
+        }
         val blob = blobs.put(body.toByteArray(Charsets.UTF_8), BlobKind.OUTPUT, ids)
         val newVersions = result.versions.filterValues { it != null }.mapValues { it.value!! }
         observations.record(

@@ -444,7 +444,7 @@ public class Cell @JvmOverloads constructor(
             val usage = terminal?.usage ?: response.usage
             if (terminal?.cancelled == true) return cancelled("provider terminal reconciliation confirmed cancellation")
             contextAdmission.observed(estimate, usage?.takeIf { it.isComplete }?.totalInput)
-            events?.emit(AgentEvent.Cell.ModelResponded(ids, invocationId.value, response.stop, usage))
+            events?.emit(AgentEvent.Cell.ModelResponded(ids, invocationId.value, response.stop, usage, facts = response.facts))
             if (response.toolCalls.isNotEmpty()) authority.check(turn)?.let { return if (it.cancelled) cancelled(it.reason) else failed(it.reason) }
 
             // §3.7: the native output is durable before any result exists, then appended (calls before results).

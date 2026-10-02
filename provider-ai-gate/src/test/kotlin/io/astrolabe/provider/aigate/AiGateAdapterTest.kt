@@ -6,6 +6,7 @@ import io.astrolabe.provider.InvocationId
 import io.astrolabe.provider.InvocationProgress
 import io.astrolabe.provider.InvocationState
 import io.astrolabe.provider.Message
+import io.astrolabe.provider.Money
 import io.astrolabe.provider.OpaqueContinuation
 import io.astrolabe.provider.ProblemKind
 import io.astrolabe.provider.ProviderError
@@ -27,7 +28,9 @@ import net.ai.gate.chat.UserMessage
 import net.ai.gate.json.Json
 import net.ai.gate.testing.FakeProvider
 import net.ai.gate.testing.LlmErrors
+import java.math.BigDecimal
 import java.time.Duration
+import java.time.LocalDate
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -106,9 +109,39 @@ class AiGateAdapterTest {
             assertEquals(StopReason.Truncated, response.stop)
             assertTrue(response.toolCalls.isEmpty())
             assertEquals("Let me look", response.text)
+            assertNotNull(response.facts?.latencyMillis, "the partial reply keeps its timings")
             val usage = invocation.terminal().usage!!
             assertEquals(90L, usage.quantities[BillingDimension.UNCACHED_INPUT], "input observed before the cut is kept")
             assertTrue(BillingDimension.OUTPUT in usage.unknown, "output may have grown after the last update: unknown, never zero (AX-09)")
+        }
+    }
+
+    @Test
+    fun `the billed amount, reasoning tokens and call facts reach the response`() {
+        val wire = WireScript().sse(
+            """{"id":"gen-1","provider":"Anthropic","model":"anthropic/claude-4.5-sonnet-20250929","choices":[{"index":0,"delta":{"content":"Done."},"finish_reason":"stop"}]}""",
+            """{"id":"gen-1","provider":"Anthropic","choices":[],"usage":{"prompt_tokens":250000,"completion_tokens":9,"cost":0.75,""" +
+                """"cost_details":{"upstream_inference_cost":0.7},"prompt_tokens_details":{"cached_tokens":0},"completion_tokens_details":{"reasoning_tokens":4}}}""",
+            "[DONE]",
+        )
+        wire.runtime(GateTestKit.openRouter(), "OPENROUTER_API_KEY").use { llm ->
+            val profile = AiGateProfiles.draft(llm, "openrouter", GateTestKit.SONNET_ON_OPENROUTER, "main", LocalDate.of(2026, 9, 1))
+            AiGateAdapter(llm, listOf(profile)).use { adapter ->
+                runBlocking {
+                    withTimeout(20_000) {
+                        val response = adapter.start(GateTestKit.request(profile), InvocationId("inv-1")).await()
+                        val usage = response.usage!!
+                        assertEquals(Money("USD", BigDecimal("0.75")), usage.billed)
+                        assertEquals(Money("USD", BigDecimal("0.7")), usage.billedUpstream)
+                        assertEquals(4L, usage.reasoningTokens)
+                        val facts = response.facts!!
+                        assertEquals("Anthropic", facts.upstream)
+                        assertEquals("anthropic/claude-4.5-sonnet-20250929", facts.responseModel)
+                        assertEquals(200_000L, facts.priceTierInputTokensAbove, "250 000 input tokens are priced by the long-context tier")
+                        assertTrue(facts.firstOutputMillis!! <= facts.latencyMillis!!)
+                    }
+                }
+            }
         }
     }
 

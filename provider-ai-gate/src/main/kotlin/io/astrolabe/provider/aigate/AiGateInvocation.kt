@@ -141,12 +141,13 @@ internal class AiGateInvocation(
             else -> UsageMapper.missing(binding)
         }
         val late = partial?.let { ResponseTranslator.items(it, calls = false) }.orEmpty()
+        val facts = partial?.let { ResponseTranslator.facts(it, binding) }
         return when {
             error is RequestCancelledException || error.code() == ErrorCode.CANCELLED ->
-                Terminal(id, Response(emptyList(), StopReason.Cancelled, usage), null, late, usage, cancelled = true)
+                Terminal(id, Response(emptyList(), StopReason.Cancelled, usage, facts = facts), null, late, usage, cancelled = true)
             // AX-01: an interrupted stream is a truncated response: its text stays, a half-generated call never does.
             error.code() == ErrorCode.STREAM_INTERRUPTED ->
-                Response(late, StopReason.Truncated, usage).let { Terminal(id, it, null, emptyList(), usage, cancelled = false) }
+                Response(late, StopReason.Truncated, usage, facts = facts).let { Terminal(id, it, null, emptyList(), usage, cancelled = false) }
             else -> Terminal(id, null, ErrorMapper.error(error), late, usage, cancelled = false)
         }
     }

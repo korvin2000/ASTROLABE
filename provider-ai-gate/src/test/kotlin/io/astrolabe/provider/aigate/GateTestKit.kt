@@ -19,6 +19,11 @@ import kotlinx.serialization.json.JsonObject
 import net.ai.gate.Llm
 import net.ai.gate.Provider
 import net.ai.gate.auth.Environment
+import net.ai.gate.model.Capability
+import net.ai.gate.model.Model
+import net.ai.gate.model.Prices
+import net.ai.gate.model.ReasoningLevel
+import net.ai.gate.vendors.openai.OpenAiCompatible
 import net.ai.gate.json.JsonObject as GateObject
 import net.ai.gate.spi.http.HttpCall
 import net.ai.gate.spi.http.HttpReply
@@ -81,6 +86,20 @@ object GateTestKit {
     )
 
     fun gate(json: String): JsonObject = Json.parseToJsonElement("""{"gate":$json}""") as JsonObject
+
+    const val SONNET_ON_OPENROUTER: String = "anthropic/claude-sonnet-4.5"
+
+    /**
+     * OpenRouter with [SONNET_ON_OPENROUTER] described as a host's provider configuration would (the offline catalog has
+     * no limits for it), long-context price tier included.
+     */
+    fun openRouter(contextWindow: Long = 1_000_000): Provider = OpenAiCompatible.openRouter().toBuilder().model(
+        Model.builder("openrouter", SONNET_ON_OPENROUTER).contextWindow(contextWindow).maxOutputTokens(64_000)
+            .reasoningLevels(ReasoningLevel.LOW, ReasoningLevel.MEDIUM, ReasoningLevel.HIGH)
+            .supports(Capability.STREAMING, Capability.TOOLS, Capability.PARALLEL_TOOLS, Capability.REASONING)
+            .prices(Prices.usd().input("3").output("15").cacheRead("0.3").cacheWrite("3.75").tier(200_000, Prices.usd().input("6").output("22.5").build()).build())
+            .build(),
+    ).build()
 
     /** The SDK `FakeProvider`'s model `fake` (128 000 context, 4 096 output, automatic caching). */
     fun fakeProfile(id: String = "main", config: JsonObject = JsonObject(emptyMap()), output: Int = 4_000, context: Int = 128_000): Profile =
