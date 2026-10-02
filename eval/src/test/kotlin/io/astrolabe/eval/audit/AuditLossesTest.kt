@@ -83,6 +83,11 @@ class AuditLossesTest {
             cache.breaks.map { it.turn to it.cause },
         )
         assertEquals(listOf(3_900L, 7_400L, 3_400L, 5_000L), cache.breaks.map { it.step.shortfall })
+        val switched = AuditLog(JournalFormat.Bus).turn(1).call(5_000, 0, 10, upstream = "A").turn(2).call(5_000, 900, 10, upstream = "B")
+            .turn(3).call(1_100, 4_900, 10, upstream = "B")
+        val routed = audit(switched).cache
+        assertEquals(listOf(BreakCause.Upstream), routed.breaks.map { it.cause })
+        assertEquals(1, routed.eligibleSteps)
     }
 
     @Test fun `every loss is measured from the Studio journal`() {
@@ -111,7 +116,7 @@ class AuditLossesTest {
             .turn(4).call(1_000, 6_900, 10, billed = "0.0001")
         val tail = audit(log).wastes.first { it.waste == Waste.TailAfterResult }
         assertEquals(1, tail.calls)
-        assertEquals("after call 2 (verify green at turn 3)", tail.detail)
+        assertTrue(tail.detail!!.startsWith("after call 2 (verify green at turn 3); later 0 calls changed the workspace and 0 verdicts came out green"), tail.detail)
     }
 
     @Test fun `what the bus cannot show is unmeasured with a reason`() {

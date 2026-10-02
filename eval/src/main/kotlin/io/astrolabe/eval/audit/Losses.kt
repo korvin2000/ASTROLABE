@@ -15,6 +15,9 @@ public enum class BreakCause {
     /** W7: the Workset dropped files in the previous turn, and their stale bodies are stubbed at once (§5.3). */
     ImmediateStub,
 
+    /** The gateway routed the call to another upstream than the previous one: a cold cache, not a harness rewrite (§10.4). */
+    Upstream,
+
     /** No harness rewrite before the step: the provider did not serve an unchanged prefix (F §2.3). */
     Provider,
 }
@@ -26,8 +29,8 @@ public data class CacheBreak(val call: Int, val cell: String, val turn: Int, val
 /**
  * A run's cache share three ways (§10.4): [hitShare] `Σ cache_read / Σ input` over every call with known input — the
  * "share of hits" of F §6.1 (86,7 % on `live1/W-letk4`); [qHat] `Σ c_i / Σ b_i` over [eligibleSteps], the steps no
- * harness rewrite preceded (no eviction, Workset drop, mask gate or rebuild); [reliability] the share of eligible steps
- * served any cache at all (F §2.3's "reliability at an unchanged prefix").
+ * harness rewrite preceded (no eviction, Workset drop, mask gate or rebuild) on the same upstream; [reliability] the
+ * share of eligible steps served any cache at all (F §2.3's "reliability at an unchanged prefix").
  */
 @Serializable
 public data class CacheReport(
@@ -96,12 +99,14 @@ public class Losses(private val trace: RunTrace, private val format: JournalForm
             val mask = between.any { a -> a.gates.any { it in MASK_GATES } }
             val eviction = between.any { a -> a.eviction != null || (format == JournalFormat.Bus && a.turn >= 2 * k && a.turn % k == 0) }
             val immediate = between.any { it.worksetDropped.isNotEmpty() }
-            if (!mask && !eviction && !immediate) eligible += step
+            val switched = previous.binding?.upstream != call.binding?.upstream
+            if (!mask && !eviction && !immediate && !switched) eligible += step
             if (!step.broken) continue
             val cause = when {
                 mask && step.fullMiss -> BreakCause.Mask
                 eviction -> BreakCause.Eviction
                 immediate -> BreakCause.ImmediateStub
+                switched -> BreakCause.Upstream
                 else -> BreakCause.Provider
             }
             val cost = prices[call.index]?.let { AuditMath.missCost(step.shortfall, it.perMillion) }
@@ -157,7 +162,13 @@ public class Losses(private val trace: RunTrace, private val format: JournalForm
         result += if (working == null) {
             none(Waste.TailAfterResult, "no check green after the workspace changed and green to the end (verify verdict, test verdict or repeated check command)")
         } else {
-            spent(Waste.TailAfterResult, trace.calls.filter { it.index > working.first }, "after call ${working.first} (${working.second})")
+            val after = laterWork(working.first)
+            val pure = trace.calls.filter { it.index > maxOf(working.first, after.lastChange) }
+            val pureMoney = sum(pure)
+            val detail = "after call ${working.first} (${working.second}); later ${after.changes} calls changed the workspace and " +
+                "${after.greens} verdicts came out green; after the last change (call ${maxOf(working.first, after.lastChange)}): " +
+                "${pure.size} calls, ${text(pureMoney)} (${AuditMath.share(pureMoney, total)?.let { String.format(java.util.Locale.ROOT, "%.1f %%", it * 100) } ?: "—"})"
+            spent(Waste.TailAfterResult, trace.calls.filter { it.index > working.first }, detail)
         }
         val polls = trace.calls.filter { c -> trace.at(c.cell, c.turn)?.ops?.contains("run.poll") == true }
         result += spent(Waste.BackgroundPolls, polls, polls.joinToString(", ") { "${it.turn}" }.ifEmpty { null }?.let { "turns $it" })
@@ -230,6 +241,17 @@ public class Losses(private val trace: RunTrace, private val format: JournalForm
         }
         val detail = "harness-estimated tokens" + if (known.size < used.size) "; anchor known on ${known.size} of ${used.size} calls" else ""
         return WasteShare(Waste.AnchorTail, money?.stripTrailingZeros(), AuditMath.share(money, anatomy.total), known.size, known.sumOf { it.anchorTokens!! }, detail, null)
+    }
+
+    private class LaterWork(val changes: Int, val greens: Int, val lastChange: Int)
+
+    /** What followed call [after] (§9.1: spend after the first green run, with what was checked later): calls that changed the workspace, green verdicts. */
+    private fun laterWork(after: Int): LaterWork {
+        val callAt = trace.calls.associateBy { it.cell to it.turn }
+        val outcomes = trace.activity.flatMap { a -> callAt[a.cell to a.turn]?.index?.let { call -> a.outcomes.map { call to it } }.orEmpty() }
+            .filter { it.first > after }
+        val changes = outcomes.filter { it.second.changed }.map { it.first }
+        return LaterWork(changes.distinct().size, outcomes.count { trace.verdict(it.second)?.second == true }, changes.maxOrNull() ?: -1)
     }
 
     /**

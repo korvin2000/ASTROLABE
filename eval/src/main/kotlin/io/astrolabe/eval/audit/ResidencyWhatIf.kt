@@ -86,6 +86,9 @@ public object ResidencyReplay {
 
     private val ESTIMATOR = HeuristicEstimator()
 
+    /** Misses no eviction schedule causes or prevents: they stay as observed in every scenario. */
+    private val KEPT = setOf(BreakCause.Provider, BreakCause.ImmediateStub, BreakCause.Upstream)
+
     private fun complete(c: ModelCall): Boolean = c.usage?.let { it.input != null && it.cacheRead != null && it.output != null } == true
 
     /** Maximal chains of steps whose calls all have usage: a call without usage ends a lineage, the next complete pair starts one. */
@@ -196,7 +199,7 @@ public object ResidencyReplay {
                 val kept = if (rewrittenAt < 0) null else minOf(old, base + residents.take(rewrittenAt).sumOf { it.tokens })
                 val cached = when {
                     observed?.cause == BreakCause.Mask && observed.step.fullMiss -> 0L
-                    observed?.cause == BreakCause.Provider || observed?.cause == BreakCause.ImmediateStub -> minOf(usage.cacheRead!!, old)
+                    observed?.cause in KEPT -> minOf(usage.cacheRead!!, old)
                     kept != null -> kept
                     observed?.cause == BreakCause.Eviction -> old
                     // The provider's own deviation from the cacheable prefix (block rounding, anchor estimate) on this step.
