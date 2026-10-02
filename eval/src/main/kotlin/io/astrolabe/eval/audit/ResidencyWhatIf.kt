@@ -22,7 +22,11 @@ public data class LoggedBatch(val turn: Int, val trigger: String, val stubbed: I
 @Serializable
 public data class ReplayedBatch(val turn: Int, val trigger: String, val stubbed: Int, val losses: Int, val freedTokens: Long)
 
-/** One eviction schedule replayed on the run's requests: its conditional cost, its batches, and the prefix tokens they made the next request re-pay. */
+/**
+ * One eviction schedule replayed on the run's requests: its conditional cost, its batches, and the prefix tokens its
+ * rewrites — batches, and the immediate stubs and unexplained shrinks every schedule replays alike — made the next
+ * request re-pay.
+ */
 @Serializable
 public data class ResidencyScenario(
     val label: String,

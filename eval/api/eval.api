@@ -1298,6 +1298,7 @@ public final class io/astrolabe/eval/audit/Agreement : java/lang/Enum {
 	public static final field Approximate Lio/astrolabe/eval/audit/Agreement;
 	public static final field Determined Lio/astrolabe/eval/audit/Agreement;
 	public static final field Exact Lio/astrolabe/eval/audit/Agreement;
+	public static final field Negative Lio/astrolabe/eval/audit/Agreement;
 	public static final field Unidentified Lio/astrolabe/eval/audit/Agreement;
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;
 	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/eval/audit/Agreement;
@@ -1306,15 +1307,17 @@ public final class io/astrolabe/eval/audit/Agreement : java/lang/Enum {
 
 public final class io/astrolabe/eval/audit/Anatomy {
 	public static final field Companion Lio/astrolabe/eval/audit/Anatomy$Companion;
-	public fun <init> (IIILjava/lang/String;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Lio/astrolabe/eval/audit/MoneyBasis;Ljava/math/BigDecimal;Ljava/util/List;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Ljava/math/BigDecimal;)V
+	public fun <init> (IIILjava/lang/String;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Lio/astrolabe/eval/audit/MoneyBasis;Ljava/math/BigDecimal;ZLjava/util/List;ZLio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Ljava/math/BigDecimal;)V
 	public final fun component1 ()I
-	public final fun component10 ()Ljava/util/List;
-	public final fun component11 ()Lio/astrolabe/eval/audit/Category;
-	public final fun component12 ()Lio/astrolabe/eval/audit/Category;
+	public final fun component10 ()Z
+	public final fun component11 ()Ljava/util/List;
+	public final fun component12 ()Z
 	public final fun component13 ()Lio/astrolabe/eval/audit/Category;
 	public final fun component14 ()Lio/astrolabe/eval/audit/Category;
 	public final fun component15 ()Lio/astrolabe/eval/audit/Category;
-	public final fun component16 ()Ljava/math/BigDecimal;
+	public final fun component16 ()Lio/astrolabe/eval/audit/Category;
+	public final fun component17 ()Lio/astrolabe/eval/audit/Category;
+	public final fun component18 ()Ljava/math/BigDecimal;
 	public final fun component2 ()I
 	public final fun component3 ()I
 	public final fun component4 ()Ljava/lang/String;
@@ -1323,8 +1326,8 @@ public final class io/astrolabe/eval/audit/Anatomy {
 	public final fun component7 ()Ljava/math/BigDecimal;
 	public final fun component8 ()Lio/astrolabe/eval/audit/MoneyBasis;
 	public final fun component9 ()Ljava/math/BigDecimal;
-	public final fun copy (IIILjava/lang/String;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Lio/astrolabe/eval/audit/MoneyBasis;Ljava/math/BigDecimal;Ljava/util/List;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Ljava/math/BigDecimal;)Lio/astrolabe/eval/audit/Anatomy;
-	public static synthetic fun copy$default (Lio/astrolabe/eval/audit/Anatomy;IIILjava/lang/String;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Lio/astrolabe/eval/audit/MoneyBasis;Ljava/math/BigDecimal;Ljava/util/List;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Ljava/math/BigDecimal;ILjava/lang/Object;)Lio/astrolabe/eval/audit/Anatomy;
+	public final fun copy (IIILjava/lang/String;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Lio/astrolabe/eval/audit/MoneyBasis;Ljava/math/BigDecimal;ZLjava/util/List;ZLio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Ljava/math/BigDecimal;)Lio/astrolabe/eval/audit/Anatomy;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/audit/Anatomy;IIILjava/lang/String;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Lio/astrolabe/eval/audit/MoneyBasis;Ljava/math/BigDecimal;ZLjava/util/List;ZLio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Ljava/math/BigDecimal;ILjava/lang/Object;)Lio/astrolabe/eval/audit/Anatomy;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getBasis ()Lio/astrolabe/eval/audit/MoneyBasis;
 	public final fun getBilled ()Ljava/math/BigDecimal;
@@ -1334,10 +1337,12 @@ public final class io/astrolabe/eval/audit/Anatomy {
 	public final fun getCacheWrite ()Lio/astrolabe/eval/audit/Category;
 	public final fun getCalls ()I
 	public final fun getCallsWithUsage ()I
+	public final fun getComplete ()Z
 	public final fun getCurrency ()Ljava/lang/String;
 	public final fun getEstimate ()Ljava/math/BigDecimal;
 	public final fun getOutput ()Lio/astrolabe/eval/audit/Category;
 	public final fun getPrices ()Ljava/util/List;
+	public final fun getPricesEstimated ()Z
 	public final fun getReasoning ()Lio/astrolabe/eval/audit/Category;
 	public final fun getTotal ()Ljava/math/BigDecimal;
 	public final fun getUncachedInput ()Lio/astrolabe/eval/audit/Category;
@@ -1609,15 +1614,19 @@ public final class io/astrolabe/eval/audit/CacheStep$Companion {
 
 public final class io/astrolabe/eval/audit/CallPrices {
 	public static final field Companion Lio/astrolabe/eval/audit/CallPrices$Companion;
-	public fun <init> (Lio/astrolabe/eval/audit/PriceSource;Ljava/lang/String;Ljava/lang/String;Ljava/util/Map;)V
+	public fun <init> (Lio/astrolabe/eval/audit/PriceSource;Ljava/lang/String;Ljava/lang/String;Ljava/util/Map;Lio/astrolabe/eval/audit/Agreement;)V
+	public synthetic fun <init> (Lio/astrolabe/eval/audit/PriceSource;Ljava/lang/String;Ljava/lang/String;Ljava/util/Map;Lio/astrolabe/eval/audit/Agreement;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Lio/astrolabe/eval/audit/PriceSource;
 	public final fun component2 ()Ljava/lang/String;
 	public final fun component3 ()Ljava/lang/String;
 	public final fun component4 ()Ljava/util/Map;
-	public final fun copy (Lio/astrolabe/eval/audit/PriceSource;Ljava/lang/String;Ljava/lang/String;Ljava/util/Map;)Lio/astrolabe/eval/audit/CallPrices;
-	public static synthetic fun copy$default (Lio/astrolabe/eval/audit/CallPrices;Lio/astrolabe/eval/audit/PriceSource;Ljava/lang/String;Ljava/lang/String;Ljava/util/Map;ILjava/lang/Object;)Lio/astrolabe/eval/audit/CallPrices;
+	public final fun component5 ()Lio/astrolabe/eval/audit/Agreement;
+	public final fun copy (Lio/astrolabe/eval/audit/PriceSource;Ljava/lang/String;Ljava/lang/String;Ljava/util/Map;Lio/astrolabe/eval/audit/Agreement;)Lio/astrolabe/eval/audit/CallPrices;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/audit/CallPrices;Lio/astrolabe/eval/audit/PriceSource;Ljava/lang/String;Ljava/lang/String;Ljava/util/Map;Lio/astrolabe/eval/audit/Agreement;ILjava/lang/Object;)Lio/astrolabe/eval/audit/CallPrices;
 	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAgreement ()Lio/astrolabe/eval/audit/Agreement;
 	public final fun getCurrency ()Ljava/lang/String;
+	public final fun getEstimate ()Z
 	public final fun getFrom ()Ljava/lang/String;
 	public final fun getPerMillion ()Ljava/util/Map;
 	public final fun getSource ()Lio/astrolabe/eval/audit/PriceSource;
@@ -1642,15 +1651,18 @@ public final class io/astrolabe/eval/audit/CallPrices$Companion {
 
 public final class io/astrolabe/eval/audit/CallUsage {
 	public static final field Companion Lio/astrolabe/eval/audit/CallUsage$Companion;
-	public fun <init> (Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;)V
+	public fun <init> (Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/util/Set;)V
+	public synthetic fun <init> (Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/util/Set;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Ljava/lang/Long;
 	public final fun component2 ()Ljava/lang/Long;
 	public final fun component3 ()Ljava/lang/Long;
 	public final fun component4 ()Ljava/lang/Long;
 	public final fun component5 ()Ljava/lang/Long;
-	public final fun copy (Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;)Lio/astrolabe/eval/audit/CallUsage;
-	public static synthetic fun copy$default (Lio/astrolabe/eval/audit/CallUsage;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;ILjava/lang/Object;)Lio/astrolabe/eval/audit/CallUsage;
+	public final fun component6 ()Ljava/util/Set;
+	public final fun copy (Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/util/Set;)Lio/astrolabe/eval/audit/CallUsage;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/audit/CallUsage;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/util/Set;ILjava/lang/Object;)Lio/astrolabe/eval/audit/CallUsage;
 	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAbsent ()Ljava/util/Set;
 	public final fun getCacheRead ()Ljava/lang/Long;
 	public final fun getCacheWrite ()Ljava/lang/Long;
 	public final fun getInput ()Ljava/lang/Long;
@@ -1692,14 +1704,17 @@ public final class io/astrolabe/eval/audit/Catalog$Companion {
 
 public final class io/astrolabe/eval/audit/Category {
 	public static final field Companion Lio/astrolabe/eval/audit/Category$Companion;
-	public fun <init> (Ljava/lang/Long;Ljava/math/BigDecimal;Ljava/lang/Double;)V
+	public fun <init> (Ljava/lang/Long;Ljava/math/BigDecimal;Ljava/lang/Double;Z)V
+	public synthetic fun <init> (Ljava/lang/Long;Ljava/math/BigDecimal;Ljava/lang/Double;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Ljava/lang/Long;
 	public final fun component2 ()Ljava/math/BigDecimal;
 	public final fun component3 ()Ljava/lang/Double;
-	public final fun copy (Ljava/lang/Long;Ljava/math/BigDecimal;Ljava/lang/Double;)Lio/astrolabe/eval/audit/Category;
-	public static synthetic fun copy$default (Lio/astrolabe/eval/audit/Category;Ljava/lang/Long;Ljava/math/BigDecimal;Ljava/lang/Double;ILjava/lang/Object;)Lio/astrolabe/eval/audit/Category;
+	public final fun component4 ()Z
+	public final fun copy (Ljava/lang/Long;Ljava/math/BigDecimal;Ljava/lang/Double;Z)Lio/astrolabe/eval/audit/Category;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/audit/Category;Ljava/lang/Long;Ljava/math/BigDecimal;Ljava/lang/Double;ZILjava/lang/Object;)Lio/astrolabe/eval/audit/Category;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getMoney ()Ljava/math/BigDecimal;
+	public final fun getReported ()Z
 	public final fun getShare ()Ljava/lang/Double;
 	public final fun getTokens ()Ljava/lang/Long;
 	public fun hashCode ()I
@@ -1721,6 +1736,39 @@ public final class io/astrolabe/eval/audit/Category$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
 }
 
+public final class io/astrolabe/eval/audit/EvictionRecord {
+	public static final field Companion Lio/astrolabe/eval/audit/EvictionRecord$Companion;
+	public fun <init> (Ljava/lang/String;III)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()I
+	public final fun component3 ()I
+	public final fun component4 ()I
+	public final fun copy (Ljava/lang/String;III)Lio/astrolabe/eval/audit/EvictionRecord;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/audit/EvictionRecord;Ljava/lang/String;IIIILjava/lang/Object;)Lio/astrolabe/eval/audit/EvictionRecord;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getLosses ()I
+	public final fun getStubbed ()I
+	public final fun getTrigger ()Ljava/lang/String;
+	public final fun getTrimmed ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/eval/audit/EvictionRecord$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/eval/audit/EvictionRecord$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/eval/audit/EvictionRecord;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/eval/audit/EvictionRecord;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/eval/audit/EvictionRecord$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
 public final class io/astrolabe/eval/audit/FitRow {
 	public fun <init> (Ljava/util/Map;Ljava/math/BigDecimal;)V
 	public final fun component1 ()Ljava/util/Map;
@@ -1736,15 +1784,16 @@ public final class io/astrolabe/eval/audit/FitRow {
 
 public final class io/astrolabe/eval/audit/GroupAudit {
 	public static final field Companion Lio/astrolabe/eval/audit/GroupAudit$Companion;
-	public fun <init> (Ljava/lang/String;IILjava/lang/Integer;ILjava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/List;)V
+	public fun <init> (Ljava/lang/String;IILjava/lang/Integer;ILjava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;ZLio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/List;)V
 	public final fun component1 ()Ljava/lang/String;
 	public final fun component10 ()Lio/astrolabe/eval/audit/Category;
 	public final fun component11 ()Lio/astrolabe/eval/audit/Category;
 	public final fun component12 ()Lio/astrolabe/eval/audit/Category;
 	public final fun component13 ()Lio/astrolabe/eval/audit/Category;
-	public final fun component14 ()Ljava/lang/Double;
+	public final fun component14 ()Lio/astrolabe/eval/audit/Category;
 	public final fun component15 ()Ljava/lang/Double;
-	public final fun component16 ()Ljava/util/List;
+	public final fun component16 ()Ljava/lang/Double;
+	public final fun component17 ()Ljava/util/List;
 	public final fun component2 ()I
 	public final fun component3 ()I
 	public final fun component4 ()Ljava/lang/Integer;
@@ -1752,15 +1801,16 @@ public final class io/astrolabe/eval/audit/GroupAudit {
 	public final fun component6 ()Ljava/math/BigDecimal;
 	public final fun component7 ()Ljava/math/BigDecimal;
 	public final fun component8 ()Ljava/math/BigDecimal;
-	public final fun component9 ()Lio/astrolabe/eval/audit/Category;
-	public final fun copy (Ljava/lang/String;IILjava/lang/Integer;ILjava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/List;)Lio/astrolabe/eval/audit/GroupAudit;
-	public static synthetic fun copy$default (Lio/astrolabe/eval/audit/GroupAudit;Ljava/lang/String;IILjava/lang/Integer;ILjava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/eval/audit/GroupAudit;
+	public final fun component9 ()Z
+	public final fun copy (Ljava/lang/String;IILjava/lang/Integer;ILjava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;ZLio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/List;)Lio/astrolabe/eval/audit/GroupAudit;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/audit/GroupAudit;Ljava/lang/String;IILjava/lang/Integer;ILjava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;ZLio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/eval/audit/GroupAudit;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getAcceptUnverified ()I
 	public final fun getBilled ()Ljava/math/BigDecimal;
 	public final fun getCacheRead ()Lio/astrolabe/eval/audit/Category;
 	public final fun getCacheWrite ()Lio/astrolabe/eval/audit/Category;
 	public final fun getCalls ()I
+	public final fun getComplete ()Z
 	public final fun getEstimate ()Ljava/math/BigDecimal;
 	public final fun getExternallyAccepted ()Ljava/lang/Integer;
 	public final fun getGroup ()Ljava/lang/String;
@@ -1829,6 +1879,39 @@ public final class io/astrolabe/eval/audit/JournalFormat : java/lang/Enum {
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;
 	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/eval/audit/JournalFormat;
 	public static fun values ()[Lio/astrolabe/eval/audit/JournalFormat;
+}
+
+public final class io/astrolabe/eval/audit/LoggedBatch {
+	public static final field Companion Lio/astrolabe/eval/audit/LoggedBatch$Companion;
+	public fun <init> (ILjava/lang/String;II)V
+	public final fun component1 ()I
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()I
+	public final fun component4 ()I
+	public final fun copy (ILjava/lang/String;II)Lio/astrolabe/eval/audit/LoggedBatch;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/audit/LoggedBatch;ILjava/lang/String;IIILjava/lang/Object;)Lio/astrolabe/eval/audit/LoggedBatch;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getLosses ()I
+	public final fun getStubbed ()I
+	public final fun getTrigger ()Ljava/lang/String;
+	public final fun getTurn ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/eval/audit/LoggedBatch$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/eval/audit/LoggedBatch$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/eval/audit/LoggedBatch;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/eval/audit/LoggedBatch;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/eval/audit/LoggedBatch$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
 }
 
 public final class io/astrolabe/eval/audit/Losses {
@@ -1932,22 +2015,29 @@ public final class io/astrolabe/eval/audit/PriceClass : java/lang/Enum {
 
 public final class io/astrolabe/eval/audit/PriceFit {
 	public static final field Companion Lio/astrolabe/eval/audit/PriceFit$Companion;
-	public fun <init> (Lio/astrolabe/eval/audit/Binding;ILjava/util/Map;Lio/astrolabe/eval/audit/Agreement;Ljava/math/BigDecimal;Ljava/lang/Double;)V
+	public fun <init> (Lio/astrolabe/eval/audit/Binding;ILjava/util/Map;Lio/astrolabe/eval/audit/Agreement;Ljava/math/BigDecimal;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/Map;Ljava/util/Map;)V
+	public synthetic fun <init> (Lio/astrolabe/eval/audit/Binding;ILjava/util/Map;Lio/astrolabe/eval/audit/Agreement;Ljava/math/BigDecimal;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/Map;Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Lio/astrolabe/eval/audit/Binding;
 	public final fun component2 ()I
 	public final fun component3 ()Ljava/util/Map;
 	public final fun component4 ()Lio/astrolabe/eval/audit/Agreement;
 	public final fun component5 ()Ljava/math/BigDecimal;
 	public final fun component6 ()Ljava/lang/Double;
-	public final fun copy (Lio/astrolabe/eval/audit/Binding;ILjava/util/Map;Lio/astrolabe/eval/audit/Agreement;Ljava/math/BigDecimal;Ljava/lang/Double;)Lio/astrolabe/eval/audit/PriceFit;
-	public static synthetic fun copy$default (Lio/astrolabe/eval/audit/PriceFit;Lio/astrolabe/eval/audit/Binding;ILjava/util/Map;Lio/astrolabe/eval/audit/Agreement;Ljava/math/BigDecimal;Ljava/lang/Double;ILjava/lang/Object;)Lio/astrolabe/eval/audit/PriceFit;
+	public final fun component7 ()Ljava/lang/Double;
+	public final fun component8 ()Ljava/util/Map;
+	public final fun component9 ()Ljava/util/Map;
+	public final fun copy (Lio/astrolabe/eval/audit/Binding;ILjava/util/Map;Lio/astrolabe/eval/audit/Agreement;Ljava/math/BigDecimal;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/Map;Ljava/util/Map;)Lio/astrolabe/eval/audit/PriceFit;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/audit/PriceFit;Lio/astrolabe/eval/audit/Binding;ILjava/util/Map;Lio/astrolabe/eval/audit/Agreement;Ljava/math/BigDecimal;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/Map;Ljava/util/Map;ILjava/lang/Object;)Lio/astrolabe/eval/audit/PriceFit;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getAgreement ()Lio/astrolabe/eval/audit/Agreement;
 	public final fun getBinding ()Lio/astrolabe/eval/audit/Binding;
 	public final fun getCalls ()I
+	public final fun getCondition ()Ljava/lang/Double;
 	public final fun getMaxRelativeResidual ()Ljava/lang/Double;
 	public final fun getMaxResidual ()Ljava/math/BigDecimal;
 	public final fun getPerMillion ()Ljava/util/Map;
+	public final fun getSensitivityPerMillion ()Ljava/util/Map;
+	public final fun getStandardErrorPerMillion ()Ljava/util/Map;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
 }
@@ -1968,8 +2058,9 @@ public final class io/astrolabe/eval/audit/PriceFit$Companion {
 }
 
 public final class io/astrolabe/eval/audit/PriceSource : java/lang/Enum {
-	public static final field Billed Lio/astrolabe/eval/audit/PriceSource;
 	public static final field Catalog Lio/astrolabe/eval/audit/PriceSource;
+	public static final field Fitted Lio/astrolabe/eval/audit/PriceSource;
+	public static final field Pooled Lio/astrolabe/eval/audit/PriceSource;
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;
 	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/eval/audit/PriceSource;
 	public static fun values ()[Lio/astrolabe/eval/audit/PriceSource;
@@ -2022,9 +2113,45 @@ public final class io/astrolabe/eval/audit/Provenance$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
 }
 
+public final class io/astrolabe/eval/audit/ReplayedBatch {
+	public static final field Companion Lio/astrolabe/eval/audit/ReplayedBatch$Companion;
+	public fun <init> (ILjava/lang/String;IIJ)V
+	public final fun component1 ()I
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()I
+	public final fun component4 ()I
+	public final fun component5 ()J
+	public final fun copy (ILjava/lang/String;IIJ)Lio/astrolabe/eval/audit/ReplayedBatch;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/audit/ReplayedBatch;ILjava/lang/String;IIJILjava/lang/Object;)Lio/astrolabe/eval/audit/ReplayedBatch;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFreedTokens ()J
+	public final fun getLosses ()I
+	public final fun getStubbed ()I
+	public final fun getTrigger ()Ljava/lang/String;
+	public final fun getTurn ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/eval/audit/ReplayedBatch$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/eval/audit/ReplayedBatch$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/eval/audit/ReplayedBatch;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/eval/audit/ReplayedBatch;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/eval/audit/ReplayedBatch$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
 public final class io/astrolabe/eval/audit/ResidencyReplay {
 	public static final field INSTANCE Lio/astrolabe/eval/audit/ResidencyReplay;
 	public static final field OFF I
+	public static final field SMALL_RESULT_TOKENS J
 	public static final fun of (Lio/astrolabe/eval/audit/RunTrace;Lio/astrolabe/eval/audit/Losses;Lio/astrolabe/eval/audit/PriceBook;Lio/astrolabe/eval/audit/JournalFormat;)Lio/astrolabe/eval/audit/ResidencyWhatIf;
 	public static final fun of (Lio/astrolabe/eval/audit/RunTrace;Lio/astrolabe/eval/audit/Losses;Lio/astrolabe/eval/audit/PriceBook;Lio/astrolabe/eval/audit/JournalFormat;Lio/astrolabe/Defaults;)Lio/astrolabe/eval/audit/ResidencyWhatIf;
 	public static final fun of (Lio/astrolabe/eval/audit/RunTrace;Lio/astrolabe/eval/audit/Losses;Lio/astrolabe/eval/audit/PriceBook;Lio/astrolabe/eval/audit/JournalFormat;Lio/astrolabe/Defaults;Ljava/util/List;)Lio/astrolabe/eval/audit/ResidencyWhatIf;
@@ -2033,25 +2160,21 @@ public final class io/astrolabe/eval/audit/ResidencyReplay {
 
 public final class io/astrolabe/eval/audit/ResidencyScenario {
 	public static final field Companion Lio/astrolabe/eval/audit/ResidencyScenario$Companion;
-	public fun <init> (Ljava/lang/String;ILjava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/util/List;JJ)V
+	public fun <init> (Ljava/lang/String;ILjava/math/BigDecimal;Ljava/util/List;JJ)V
 	public final fun component1 ()Ljava/lang/String;
 	public final fun component2 ()I
 	public final fun component3 ()Ljava/math/BigDecimal;
-	public final fun component4 ()Ljava/math/BigDecimal;
-	public final fun component5 ()Ljava/math/BigDecimal;
-	public final fun component6 ()Ljava/util/List;
-	public final fun component7 ()J
-	public final fun component8 ()J
-	public final fun copy (Ljava/lang/String;ILjava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/util/List;JJ)Lio/astrolabe/eval/audit/ResidencyScenario;
-	public static synthetic fun copy$default (Lio/astrolabe/eval/audit/ResidencyScenario;Ljava/lang/String;ILjava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/util/List;JJILjava/lang/Object;)Lio/astrolabe/eval/audit/ResidencyScenario;
+	public final fun component4 ()Ljava/util/List;
+	public final fun component5 ()J
+	public final fun component6 ()J
+	public final fun copy (Ljava/lang/String;ILjava/math/BigDecimal;Ljava/util/List;JJ)Lio/astrolabe/eval/audit/ResidencyScenario;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/audit/ResidencyScenario;Ljava/lang/String;ILjava/math/BigDecimal;Ljava/util/List;JJILjava/lang/Object;)Lio/astrolabe/eval/audit/ResidencyScenario;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getBatches ()Ljava/util/List;
 	public final fun getCost ()Ljava/math/BigDecimal;
-	public final fun getHigh ()Ljava/math/BigDecimal;
 	public final fun getInputTokens ()J
 	public final fun getK ()I
 	public final fun getLabel ()Ljava/lang/String;
-	public final fun getLow ()Ljava/math/BigDecimal;
 	public final fun getRepaidTokens ()J
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
@@ -2084,8 +2207,8 @@ public final class io/astrolabe/eval/audit/ResidencyWhatIf {
 	public final fun copy (ILjava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/util/List;Ljava/util/List;Ljava/lang/String;)Lio/astrolabe/eval/audit/ResidencyWhatIf;
 	public static synthetic fun copy$default (Lio/astrolabe/eval/audit/ResidencyWhatIf;ILjava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/util/List;Ljava/util/List;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/eval/audit/ResidencyWhatIf;
 	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCalibrationError ()Ljava/math/BigDecimal;
 	public final fun getLoggedBatches ()Ljava/util/List;
-	public final fun getModelError ()Ljava/math/BigDecimal;
 	public final fun getObservedCost ()Ljava/math/BigDecimal;
 	public final fun getObservedK ()I
 	public final fun getScenarios ()Ljava/util/List;
@@ -2207,17 +2330,19 @@ public final class io/astrolabe/eval/audit/RunTrace$Companion {
 
 public final class io/astrolabe/eval/audit/ToolOutcome {
 	public static final field Companion Lio/astrolabe/eval/audit/ToolOutcome$Companion;
-	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Z)V
-	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;ZLjava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;ZLjava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Ljava/lang/String;
 	public final fun component2 ()Ljava/lang/String;
 	public final fun component3 ()Ljava/util/List;
 	public final fun component4 ()Ljava/lang/String;
 	public final fun component5 ()Ljava/lang/String;
 	public final fun component6 ()Z
-	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Z)Lio/astrolabe/eval/audit/ToolOutcome;
-	public static synthetic fun copy$default (Lio/astrolabe/eval/audit/ToolOutcome;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;ZILjava/lang/Object;)Lio/astrolabe/eval/audit/ToolOutcome;
+	public final fun component7 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;ZLjava/lang/String;)Lio/astrolabe/eval/audit/ToolOutcome;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/audit/ToolOutcome;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;ZLjava/lang/String;ILjava/lang/Object;)Lio/astrolabe/eval/audit/ToolOutcome;
 	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAlias ()Ljava/lang/String;
 	public final fun getChanged ()Z
 	public final fun getCommand ()Ljava/lang/String;
 	public final fun getOp ()Ljava/lang/String;
@@ -2245,31 +2370,29 @@ public final class io/astrolabe/eval/audit/ToolOutcome$Companion {
 
 public final class io/astrolabe/eval/audit/TurnActivity {
 	public static final field Companion Lio/astrolabe/eval/audit/TurnActivity$Companion;
-	public fun <init> (Ljava/lang/String;ILjava/util/List;ILjava/util/List;Ljava/util/List;Ljava/util/List;Ljava/lang/String;ZLjava/lang/Long;Ljava/lang/Long;Ljava/util/Map;)V
+	public fun <init> (Ljava/lang/String;ILjava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/List;Lio/astrolabe/eval/audit/EvictionRecord;ZLjava/lang/Long;Ljava/lang/Long;Ljava/util/Map;)V
 	public final fun component1 ()Ljava/lang/String;
 	public final fun component10 ()Ljava/lang/Long;
-	public final fun component11 ()Ljava/lang/Long;
-	public final fun component12 ()Ljava/util/Map;
+	public final fun component11 ()Ljava/util/Map;
 	public final fun component2 ()I
 	public final fun component3 ()Ljava/util/List;
-	public final fun component4 ()I
+	public final fun component4 ()Ljava/util/List;
 	public final fun component5 ()Ljava/util/List;
 	public final fun component6 ()Ljava/util/List;
-	public final fun component7 ()Ljava/util/List;
-	public final fun component8 ()Ljava/lang/String;
-	public final fun component9 ()Z
-	public final fun copy (Ljava/lang/String;ILjava/util/List;ILjava/util/List;Ljava/util/List;Ljava/util/List;Ljava/lang/String;ZLjava/lang/Long;Ljava/lang/Long;Ljava/util/Map;)Lio/astrolabe/eval/audit/TurnActivity;
-	public static synthetic fun copy$default (Lio/astrolabe/eval/audit/TurnActivity;Ljava/lang/String;ILjava/util/List;ILjava/util/List;Ljava/util/List;Ljava/util/List;Ljava/lang/String;ZLjava/lang/Long;Ljava/lang/Long;Ljava/util/Map;ILjava/lang/Object;)Lio/astrolabe/eval/audit/TurnActivity;
+	public final fun component7 ()Lio/astrolabe/eval/audit/EvictionRecord;
+	public final fun component8 ()Z
+	public final fun component9 ()Ljava/lang/Long;
+	public final fun copy (Ljava/lang/String;ILjava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/List;Lio/astrolabe/eval/audit/EvictionRecord;ZLjava/lang/Long;Ljava/lang/Long;Ljava/util/Map;)Lio/astrolabe/eval/audit/TurnActivity;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/audit/TurnActivity;Ljava/lang/String;ILjava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/List;Lio/astrolabe/eval/audit/EvictionRecord;ZLjava/lang/Long;Ljava/lang/Long;Ljava/util/Map;ILjava/lang/Object;)Lio/astrolabe/eval/audit/TurnActivity;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getCell ()Ljava/lang/String;
 	public final fun getCreated ()Ljava/util/Map;
 	public final fun getEditArgsChars ()Ljava/lang/Long;
-	public final fun getEviction ()Ljava/lang/String;
+	public final fun getEviction ()Lio/astrolabe/eval/audit/EvictionRecord;
 	public final fun getGates ()Ljava/util/List;
 	public final fun getOps ()Ljava/util/List;
 	public final fun getOutcomes ()Ljava/util/List;
 	public final fun getRebuilt ()Z
-	public final fun getResults ()I
 	public final fun getTurn ()I
 	public final fun getVisibleChars ()Ljava/lang/Long;
 	public final fun getWorksetDropped ()Ljava/util/List;
