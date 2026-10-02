@@ -35,6 +35,7 @@ import io.astrolabe.fixtures.TempRepo
 import io.astrolabe.id.AttemptId
 import io.astrolabe.id.CandidateId
 import io.astrolabe.id.Digest
+import io.astrolabe.id.FileVersion
 import io.astrolabe.id.WorkId
 import io.astrolabe.evidence.SqliteReceipts
 import io.astrolabe.store.Store
@@ -54,6 +55,7 @@ import io.astrolabe.verify.ProvenanceKind
 import io.astrolabe.verify.Resolution
 import io.astrolabe.verify.Resolver
 import io.astrolabe.verify.ResultStatus
+import io.astrolabe.verify.ReviewScope
 import io.astrolabe.verify.ReviewRequest
 import io.astrolabe.verify.RiskAcceptor
 import io.astrolabe.verify.Verdict
@@ -124,6 +126,8 @@ class ProvenanceTest {
     private fun run(
         authority: Authority = AutonomousAuthority(),
         integrity: IntegrityApproval = IntegrityApproval.Autonomous,
+        /** Runs before the reply at each index: what changes the tree outside the agent's tools. */
+        before: (Int) -> Unit = {},
         replies: (OpenedCampaign) -> List<Scripted> = { listOf(Scripted.Reply(listOf(say("done")))) },
     ): Pair<S0Run, AgentEvent.Campaign.Finished> = runBlocking {
         val events = Events(clock)
@@ -131,7 +135,8 @@ class ProvenanceTest {
         events.use {
             val controller = Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all, integrityApproval = integrity), clock, idGen, events)
             controller.open(repo.root, request, policy).use { c ->
-                val model = CellModel(FakeAdapter(ScriptedModel.of(*replies(c).toTypedArray())), FakeProfiles.main, HeuristicEstimator(), maxOutputTokens = 4_000)
+                val turns = replies(c).mapIndexed { i, reply -> ScriptedModel.Turn({ true }, { before(i); reply }) }
+                val model = CellModel(FakeAdapter(ScriptedModel(turns)), FakeProfiles.main, HeuristicEstimator(), maxOutputTokens = 4_000)
                 val run = controller.run(c, model, authority)
                 val finished = withTimeout(5_000) {
                     while (recorder.ofType<AgentEvent.Campaign.Finished>().isEmpty()) delay(10)
@@ -338,6 +343,42 @@ class ProvenanceTest {
         assertEquals("tested" to ProvenanceClass.AgentTest, finish.acceptance.single().let { it.provenance to it.provenanceClass })
         assertEquals(ProvenanceClass.AgentTest, finish.provenanceClass)
         assertEquals("agent_test", finished.provenanceClass)
+    }
+
+    @Test
+    fun `a test file back at its s0 text, line endings aside, is no surface change at the final tree`() {
+        seed(listOf(Acceptance.Run("AC-1", printing, Origin.User)), r1 = listOf("AC-1"))
+        val path = "tests/test_a.py"
+        // A checkout with other line endings rewrites the test between turns: its bytes moved, its lines did not.
+        val (run, finished) = run(accepting(Decider.Policy, "studio:policy(auto)"), IntegrityApproval.Human,
+            replies = { listOf(Scripted.Reply(listOf(read("read-src", "src/a.py"))), Scripted.Reply(listOf(say("done")))) },
+            before = { i -> if (i == 1) repo.write(path, "def test_a():\r\n    assert 1 == 1   \r\n\r\n") })
+        assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+        val finish = assertNotNull(run.finish)
+        assertTrue(path in finish.changes.agent + finish.changes.byRun + finish.changes.unattributed, "the path moved since s0")
+        assertEquals(emptyList(), finish.acceptanceSurfaceUnreviewed)
+        assertEquals(ProvenanceClass.Independent, finish.provenanceClass)
+        assertEquals("independent", finished.provenanceClass)
+    }
+
+    @Test
+    fun `an approving review clears a surface change only for this contract, this version and, under human approval, a human`() {
+        val path = "tests/test_a.py"
+        val candidate = CandidateId(Digest.ofUtf8("final"))
+        val now = FileVersion.of("now".toByteArray())
+        val verdict = Verdict("rq-1", 1, candidate, VerdictOutcome.Approve, confidence = 0.9, signedBy = "judge")
+        val line = "acceptance surface: $path (test_file) modified by edit #1 · unclassified · required: CHK-accept-AC-1 · review: pending"
+        val record = io.astrolabe.delegate.ReviewRecord("p-1", ReviewScope.Increment, "inc-1", 1, candidate, emptyList(), mapOf(path to now), verdict,
+            path = listOf("high"), integrity = listOf(line))
+        fun covers(r: io.astrolabe.delegate.ReviewRecord, human: Boolean = false) = FinishReceipts.covers(r, path, now, candidate, 1, human)
+        assertTrue(covers(record))
+        assertTrue(!covers(record, human = true), "under human approval a judge's verdict clears no flag (D-320)")
+        assertTrue(covers(record.copy(path = listOf("high", "human")), human = true))
+        assertTrue(!covers(record.copy(evidenceVersions = mapOf(path to FileVersion.of("before".toByteArray())))), "a later edit of the path is not covered")
+        assertTrue(!covers(record.copy(evidenceVersions = emptyMap(), candidate = CandidateId(Digest.ofUtf8("earlier")))), "no version of the path and another candidate")
+        assertTrue(covers(record.copy(evidenceVersions = emptyMap())), "no version of the path, but this very candidate")
+        assertTrue(!covers(record.copy(contractVersion = 2)), "another contract version")
+        assertTrue(!covers(record.copy(integrity = listOf(line.replace(path, "tests/test_b.py")))), "it names another path")
     }
 
     @Test

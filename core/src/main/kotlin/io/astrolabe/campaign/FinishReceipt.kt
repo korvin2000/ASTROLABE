@@ -247,7 +247,7 @@ public object FinishReceipts {
         val surface = TestIntegrity.classify(
             (separated.agent + separated.byRun + separated.unattributed).distinct()
                 .filter { TestIntegrity.surfaceOf(it, contract, c.checks.packageManifest) != null }
-                .map { SurfaceChange(it, textAtS0(c, it), textNow(c, it)) },
+                .map { SurfaceChange(it, textAtS0(c, it), textNow(c, it)) }.filterNot { sameText(it.before, it.after) },
             "finish", contract, c.checks,
         ).filter { flag ->
             flag.requiredChecks.isNotEmpty() && flag.kind != TestIntegrity.ADDITIONS_ONLY && !reviewed(c, flag.path, reviews, report)
@@ -384,15 +384,38 @@ public object FinishReceipts {
             ?.takeIf { Files.isRegularFile(it) }?.let { Files.readAllBytes(it).toString(Charsets.UTF_8) }
 
     /**
+     * Text that differs in line endings, trailing blanks or blank lines only is the same text: a path back at its s0
+     * bytes, or close to them, holds nothing for the §8.6 diff to find.
+     */
+    private fun sameText(a: String?, b: String?): Boolean = a == b || a != null && b != null && content(a) == content(b)
+
+    private fun content(text: String): List<String> = text.lines().map { it.trimEnd() }.filter { it.isNotEmpty() }
+
+    /**
      * Whether an approving review covered [path] as it is at [report]'s stamp: a `reviewed` integrity obligation of an
-     * increment verified at that stamp, or an approving review whose integrity lines name it, unless the path moved since.
+     * increment verified at that stamp and contract, or an approving review that [covers] it.
      */
     private fun reviewed(c: OpenedCampaign, path: String, reviews: List<io.astrolabe.delegate.ReviewRecord>, report: StampReport): Boolean {
         val state = checkNotNull(c.state)
         val obligation = Obligations.INTEGRITY + path
-        return state.graph.evidence.values.any { e -> e.stamp == report.candidateId && e.provenance.any { it.item == obligation && it.how == ProvenanceKind.Reviewed } } ||
-            reviews.any { r -> r.approved && r.integrity.any { it.startsWith("acceptance surface: $path (") } && r.evidenceVersions[path].let { it == null || it == c.registry.version(path) } }
+        val human = c.attempt.config.integrityApproval == io.astrolabe.IntegrityApproval.Human
+        return state.graph.evidence.values.any { e ->
+            e.stamp == report.candidateId && e.contractVersion == c.contract.version && e.provenance.any { it.item == obligation && it.how == ProvenanceKind.Reviewed }
+        } || reviews.any { covers(it, path, c.registry.version(path), report.candidateId, c.contract.version, human) }
     }
+
+    /**
+     * Whether approving review [r] covers [path] as it is now — [current] at [candidate], contract v[contractVersion]: it
+     * names the path among its integrity lines, binds this contract, and saw this very version of the path (or, when it
+     * recorded none, this very candidate); under [human] integrity approval only the human path clears a flag (D-320).
+     */
+    internal fun covers(r: io.astrolabe.delegate.ReviewRecord, path: String, current: io.astrolabe.id.FileVersion?, candidate: io.astrolabe.id.CandidateId, contractVersion: Int, human: Boolean): Boolean =
+        r.approved && r.contractVersion == contractVersion && (!human || r.path.lastOrNull() == HUMAN) &&
+            r.integrity.any { it.startsWith("acceptance surface: $path (") } &&
+            (r.evidenceVersions[path]?.let { it == current } ?: (r.candidate == candidate))
+
+    /** The last tier of a review that went to the host's authority (`ReviewCell`). */
+    private const val HUMAN: String = "human"
 
     /** Stores [receipt] as a packet blob and writes `exports/<work>/finish-receipt.json`; returns the blob ref and file. */
     @JvmStatic
