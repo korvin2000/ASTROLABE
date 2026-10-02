@@ -70,6 +70,29 @@ public data class Config(
      */
     val modelChecks: Boolean = true,
 ) {
+    /** The v1.0 full constructor: [modelChecks] takes its default. Kept for Java callers. */
+    public constructor(
+        defaults: Defaults,
+        profiles: Map<String, Profile>,
+        profileRoles: ProfileRoles,
+        mode: Mode,
+        executionMode: ExecutionMode,
+        dClass: DClassPolicy,
+        integrityApproval: IntegrityApproval,
+        unknownOutcomeReconciliation: UnknownOutcomeReconciliation,
+        ceiling: Stage,
+        rulesFile: RulesBinding?,
+        redaction: RedactionConfig,
+        stateRoot: String?,
+        flags: Flags,
+        roles: Map<String, Role>,
+        qualityGates: List<io.astrolabe.contract.Command>,
+        tierTable: TierTable,
+    ) : this(
+        defaults, profiles, profileRoles, mode, executionMode, dClass, integrityApproval, unknownOutcomeReconciliation, ceiling,
+        rulesFile, redaction, stateRoot, flags, roles, qualityGates, tierTable, true,
+    )
+
     /** Java hosts (D-07): the fields a host sets most, without the full constructor. */
     public fun withStateRoot(stateRoot: String?): Config = copy(stateRoot = stateRoot)
 
