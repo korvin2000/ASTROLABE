@@ -18,9 +18,10 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
-/** A frozen schema set for one adapter/profile/role lineage (D-20, IX-24): identical bytes for the whole session. */
+/** A frozen schema set for one adapter/profile/role lineage (D-20, IX-24): identical bytes for the whole line. */
 public data class SchemaSet(
     val schemas: List<ToolSchema>,
+    /** The role's mask the set was selected by — never a turn's mask, which a reserve or a shape narrows. */
     val mask: ToolMask,
     val dialect: SchemaDialect,
     /** Digest of the serialized schemas; recorded in compile fingerprints. */
@@ -35,27 +36,33 @@ public sealed interface SchemaSelection {
 }
 
 /**
- * The seven logical tool schemas (§5.4). All operations stay in the schema; the mask says which ones the
- * executor accepts this turn. A schema set is frozen only after the adapter validated the dialect for the
- * profile (D-20); schemas never change mid-session.
+ * The seven logical tool schemas (§5.4). A line carries the schemas of the families its role's mask names, chosen
+ * once by the role (invariant 12): a turn's narrower mask (shape, ceiling, reserve) never changes the set, it is named
+ * in `[A]` and enforced by the executor. All operations stay in a family's schema. A schema set is frozen only after
+ * the adapter validated the dialect for the profile (D-20); schemas never change mid-line.
  */
 public object ToolSchemas {
     public val dialect: SchemaDialect = SchemaDialect.JSON_SCHEMA_2020_12
 
     private val stableJson = Json { prettyPrint = false }
 
+    /** The schema set of the line whose role has [roleMask] (`Role.toolMask`): pass the role's mask, never a turn's. */
     @JvmStatic
-    public fun forLineage(adapter: ProviderAdapter, profile: Profile, mask: ToolMask): SchemaSelection {
+    public fun forLineage(adapter: ProviderAdapter, profile: Profile, roleMask: ToolMask): SchemaSelection {
         val capabilities = adapter.capabilities(profile)
         if (dialect !in capabilities.schemaDialects) {
             return SchemaSelection.Unsupported(profile.id, "profile ${profile.id} supports ${capabilities.schemaDialects}, not $dialect")
         }
-        val unknown = mask.allowed - ToolOps.all
+        val unknown = roleMask.allowed - ToolOps.all
         require(unknown.isEmpty()) { "mask names unknown ops $unknown" }
-        val schemas = ToolFamily.entries.map { schema(it) }
+        val schemas = families(roleMask).map { schema(it) }
         val bytes = stableJson.encodeToString(kotlinx.serialization.builtins.ListSerializer(ToolSchema.serializer()), schemas)
-        return SchemaSelection.Supported(SchemaSet(schemas, mask, dialect, Digest.ofUtf8(bytes)))
+        return SchemaSelection.Supported(SchemaSet(schemas, roleMask, dialect, Digest.ofUtf8(bytes)))
     }
+
+    /** The families [roleMask] names at least one operation of, in declaration order. */
+    internal fun families(roleMask: ToolMask): List<ToolFamily> =
+        ToolFamily.entries.filter { family -> ToolOps.of(family).any { roleMask.allows(ToolOps.name(family, it)) } }
 
     @JvmStatic
     public fun schema(family: ToolFamily): ToolSchema = ToolSchema(family.wire, description(family), jsonSchema(family), dialect)
@@ -63,7 +70,7 @@ public object ToolSchemas {
     private fun description(family: ToolFamily): String = when (family) {
         ToolFamily.Look -> "Observe: tree, outline, read (path | path:a-b | path::Symbol), find (in workspace|store|kb), def, refs, importers, impact, recall(id), bmap, catalog. Budgeted; results carry scope, complete and versions."
         ToolFamily.Edit -> "Mutate, one form per op: {path, expect?, hunks} anchored hunks inside displayed ranges; {create, content}; {delete, expect?}; {rename, to, expect?}; {revert: #id|turn:N}; {transform: {script|argv, scope_glob, why}}. expect is the content hash the file was shown with (4+ hex, e.g. c02e); omitted, it is the version you last read. Preflighted; partial failures are reported, never rolled back."
-        ToolFamily.Run -> "Execute argv (preferred) or one shell cmd; cwd defaults to the workspace root; op=wait(handle) blocks until the process ends or until_line (regex) / until_port (loopback) is ready — one call, no polling; until_* on a launch implies bg; op=poll/cancel for background handles. Non-zero exit is information; timeouts kill the process tree."
+        ToolFamily.Run -> "Execute argv (preferred) or one shell cmd; cwd defaults to the workspace root; op=wait(handle) blocks until the process ends or until_line (regex) / until_port (loopback) is ready — one call, no polling; a server never ends, so wait on it with until_line/until_port or a short timeout; until_* on a launch implies bg; op=poll/cancel for background handles. Non-zero exit is information; a launch's timeout kills the process tree, a wait's timeout ends only the wait and the process keeps running."
         ToolFamily.Verify -> "check(paths?) now; tests(selection=blast|accept|full|ids); acceptance(ids?); baseline(); review(scope?)."
         ToolFamily.State -> "STATE ops: patch = a JSON array of typed ops — ${PatchParser.VOCABULARY}. blocked(reason, evidence, question?); retrieval_miss(need, why)."
         ToolFamily.Task -> "ask(question, options?) ends the turn blocked-with-question; delegate/collect (probe|review|writer|qa); propose(kind, proposal) with kind plan|increment_split|amendment — see proposal."
@@ -157,7 +164,7 @@ public object ToolSchemas {
         put("items", items)
     }
 
-    /** An object property whose form lives in its description only: the schema set is shared by every role (cached prefix). */
+    /** An object property whose form lives in its description only: a family's schema bytes are the same in every role that carries it. */
     private fun describedObject(description: String): JsonObject = buildJsonObject {
         put("type", "object")
         put("description", description)

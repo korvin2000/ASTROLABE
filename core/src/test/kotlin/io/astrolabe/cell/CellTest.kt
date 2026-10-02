@@ -30,6 +30,7 @@ import io.astrolabe.os.Proc
 import io.astrolabe.provider.InvocationId
 import io.astrolabe.provider.Items
 import io.astrolabe.provider.Profile
+import io.astrolabe.provider.SegmentKind
 import io.astrolabe.provider.ToolResult
 import io.astrolabe.provider.Validation
 import io.astrolabe.verify.Check
@@ -557,6 +558,24 @@ class CellTest {
     }
 
     @Test
+    fun `plan and probe cells may wait on a run handle, the cell gate does not mask run wait`() = runTest {
+        for (role in listOf(Roles.plan, Roles.probe)) {
+            CellFixture(stateRoot.resolve(role.name)).use { f ->
+                val model = ScriptedModel.of(
+                    Scripted.Reply(listOf(say("wait"), call("c1", "run", """{"op":"wait","handle":"handle-x","timeout":5}"""))),
+                    Scripted.Reply(listOf(say("packet"))),
+                )
+
+                f.run(model, role = role, completion = RoleCompletion { _, _ -> CompletionDecision.Accepted(emptyList()) })
+
+                val waited = resultText(f.transcript(2).filterIsInstance<ToolResult>().single { it.callId == "c1" })
+                assertFalse(waited.contains("not available to the ${role.name} role"), "${role.name}: $waited")
+                assertTrue(waited.contains("no handle 'handle-x'"), "${role.name}: the call reached the run executor: $waited")
+            }
+        }
+    }
+
+    @Test
     fun `a masked op is refused alone while the other calls of the turn run`() = runTest {
         CellFixture(stateRoot).use { f ->
             val before = f.version("src/a.py")
@@ -837,6 +856,13 @@ class CellTest {
             assertEquals(3, f.adapter.calls.size)
             assertTrue(f.anchorText(2).contains(CellBudget.GATE), f.anchorText(2))
             assertFalse(f.request(2).mask!!.allows("edit.anchored"), "edits are masked on a reserve turn")
+            // Invariant 12: the reserve narrows the mask in [A] only; the cached regions and the schema set keep their bytes.
+            assertTrue(f.anchorText(2).contains("enabled this turn: all role tools except ") && f.anchorText(2).contains("edit.anchored"), f.anchorText(2))
+            assertFalse(f.anchorText(1).lineSequence().first { it.startsWith("enabled this turn") }.contains("edit.anchored"), f.anchorText(1))
+            val cached = setOf(SegmentKind.S, SegmentKind.R, SegmentKind.K)
+            assertEquals(f.request(1).segments.filter { it.kind in cached }, f.request(2).segments.filter { it.kind in cached })
+            assertEquals(f.request(1).tools, f.request(2).tools)
+            assertEquals(f.request(1).segments.filter { it.breakpoint }.map { it.kind }, f.request(2).segments.filter { it.breakpoint }.map { it.kind })
             val refused = resultText(f.transcript(3).filterIsInstance<ToolResult>().last())
             assertTrue(refused.contains("not executed: ${CellBudget.GATE}; no call of this turn executed"), refused)
             assertEquals(CellFixture.A_PY, Files.readString(f.repo.resolve("src/a.py")))

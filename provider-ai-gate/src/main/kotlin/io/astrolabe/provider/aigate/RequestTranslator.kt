@@ -41,7 +41,7 @@ internal class TranslationException(message: String) : RuntimeException(message)
  *
  * Provenance (A-04, D-326): an assistant turn takes the origin of its reasoning, so the SDK replays same-origin
  * reasoning natively and applies its hand-off rules to any other; a turn without reasoning has the neutral origin
- * [HISTORY], whose text and calls every API accepts losslessly. The mask is not sent: `[S]` states it and the executor
+ * [HISTORY], whose text and calls every API accepts losslessly. The mask is not sent: `[A]` states it and the executor
  * enforces it.
  */
 internal object RequestTranslator {
