@@ -1,7 +1,6 @@
 package io.astrolabe.context
 
 import io.astrolabe.Config
-import io.astrolabe.auth.Ceiling
 import io.astrolabe.budget.Tokens
 import io.astrolabe.cell.CompiledK
 import io.astrolabe.cell.ContextPart
@@ -96,9 +95,8 @@ public class Compiler(
         inputs: CompileInputs = CompileInputs(),
     ): Compiled {
         val slice = ContractSlice.forIncrement(contract, increment)
-        val mask = role.effectiveOps(contract.shape, Ceiling.of(contract.authorization, config.executionMode))
         val transcript = Transcript(contract.requests.map { it.text } + pinned)
-        val fixed = Layout.render(role, mask, config.executionMode, prime, CompiledK(slice, preexisting), transcript)
+        val fixed = Layout.render(role, config.executionMode, prime, CompiledK(slice, preexisting), transcript)
         val defaults = config.defaults
         val growth = defaults.growthReserveTokens(profile.capabilities.contextLimitTokens)
         val budget = ContextBudget(

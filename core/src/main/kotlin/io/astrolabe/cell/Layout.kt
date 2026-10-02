@@ -195,11 +195,6 @@ public object Layout {
         return out.toString()
     }
 
-    /** The mask left `[S]` (invariant 12); [mask] is ignored. */
-    @Deprecated("the turn's mask is rendered into [A]; [S] depends on the role and the mode only", ReplaceWith("system(role, mode)"))
-    @JvmStatic
-    public fun system(role: Role, @Suppress("UNUSED_PARAMETER") mask: ToolMask, mode: ExecutionMode): String = system(role, mode)
-
     /**
      * The `[A]` line naming what [mask] enables this turn, relative to [role]'s tools listed in `[S]`: `all role tools`,
      * `all role tools except …` while that is the shorter form, else the enabled operations themselves. The executor
@@ -269,20 +264,6 @@ public object Layout {
         }
         return segments
     }
-
-    /** The mask left the cached regions (invariant 12); [mask] is ignored. */
-    @Deprecated("the turn's mask is rendered into [A]; the cached regions do not depend on it", ReplaceWith("render(role, mode, prime, k, transcript, explicitBreakpoints)"))
-    @JvmStatic
-    @JvmOverloads
-    public fun render(
-        role: Role,
-        @Suppress("UNUSED_PARAMETER") mask: ToolMask,
-        mode: ExecutionMode,
-        prime: String,
-        k: CompiledK,
-        transcript: Transcript,
-        explicitBreakpoints: Boolean = true,
-    ): List<Segment> = render(role, mode, prime, k, transcript, explicitBreakpoints)
 
     // `[R]` and `[K]` are harness-supplied context, not policy: only `[S]` speaks as the system, which
     // keeps the data/instruction rule true of everything the model reads below it.

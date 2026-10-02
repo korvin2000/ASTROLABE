@@ -6,9 +6,12 @@ import io.astrolabe.budget.Tokens
 import io.astrolabe.contract.Reversibility
 import io.astrolabe.contract.Risk
 import io.astrolabe.fixtures.FakeProfiles
+import io.astrolabe.provider.BillingDimension
 import io.astrolabe.provider.Effort
 import io.astrolabe.provider.Money
+import io.astrolabe.provider.PriceTier
 import io.astrolabe.provider.StratumOutcome
+import io.astrolabe.telemetry.Accounting
 import java.math.BigDecimal
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -105,7 +108,7 @@ class RouterTest {
         // A monetary cap refuses the same way; an unpriced profile is unaffordable under it.
         val priced = RoutingBudget(remainingCost = usd("0.05"), reservedCost = usd("0.01"))
         val costly = assertIs<Routed.Refused>(router.selectProfile(RoutingFunction.Implementing, packet(), null, policy(priced)))
-        assertTrue(costly.excluded.getValue("main").startsWith("costs 0.09"), costly.excluded.getValue("main"))
+        assertTrue(costly.excluded.getValue("main").startsWith("costs 0.12"), costly.excluded.getValue("main"))
         val plan = assertIs<Routed.Refused>(Router().selectProfile(RoutingFunction.Plan, packet(), null, policy(priced)))
         assertEquals(listOf(Refusal.NarrowUnit, Refusal.AskForChangedConstraint), plan.options)
     }
@@ -115,7 +118,7 @@ class RouterTest {
         val wide = TierTable("t2", null, mapOf(Tier.High to setOf("main", "escalation")))
         val cheap = assertIs<Routed.Selected>(router.selectProfile(RoutingFunction.Implementing, packet(), null, policy(tiers = wide)))
         assertEquals("main", cheap.profile.id)
-        assertEquals(0, BigDecimal("0.09").compareTo(cheap.conservativeCost!!.amount), message = "10k input at 3/M plus 4k output at 15/M")
+        assertEquals(0, BigDecimal("0.12").compareTo(cheap.conservativeCost!!.amount), message = "10k input at the dearest input rate 6/M plus 4k output at 15/M")
         assertEquals(cheap.conservativeCost, cheap.expectedCost)
         assertEquals(Tokens(14_000), cheap.conservativeTokens)
         fun attempt(id: String, first: String, retry: String) = AttemptPolicy(id, "v1", "synthetic", "start", "USD", mapOf(
@@ -158,12 +161,58 @@ class RouterTest {
         assertEquals("main", assertIs<Routed.Selected>(router.selectProfile(RoutingFunction.Implementing, exact, null, policy(tiers = main))).profile.id)
         val over = assertIs<Routed.Refused>(router.selectProfile(RoutingFunction.Implementing, exact.copy(reserveTokens = 16_001), null, policy(tiers = main)))
         assertEquals("context 180000+16001+4000 does not fit 200000", over.excluded["main"])
-        // One turn at main's prices: 10,000 input at 3/M and 4,000 output at 15/M; the 9,000 reserve is room, not input.
+        // One turn at main's prices: 10,000 input at its dearest input rate 6/M and 4,000 output at 15/M; the 9,000 reserve is room, not input.
         val reserved = RoutingPacket(null, 10_000, 4_000, reserveTokens = 9_000)
-        assertEquals(0, BigDecimal("0.09").compareTo(Router.conservativeCost(FakeProfiles.main, reserved)!!.amount))
+        assertEquals(0, BigDecimal("0.12").compareTo(Router.conservativeCost(FakeProfiles.main, reserved)!!.amount))
         assertEquals(Router.conservativeCost(FakeProfiles.main, reserved.copy(reserveTokens = 0)), Router.conservativeCost(FakeProfiles.main, reserved))
         val selected = assertIs<Routed.Selected>(router.selectProfile(RoutingFunction.Implementing, reserved, null, policy(tiers = main)))
         assertEquals(Tokens(14_000), selected.conservativeTokens)
+    }
+
+    /** A profile billing only uncached input and output, with a 1M window, priced by [perMillion] and [tiers]. */
+    private fun plain(id: String, perMillion: Map<BillingDimension, String>, vararg tiers: Pair<Long, Map<BillingDimension, String>>) = FakeProfiles.main.copy(
+        id = id,
+        capabilities = FakeProfiles.main.capabilities.copy(
+            contextLimitTokens = 1_000_000,
+            usageFields = setOf(BillingDimension.UNCACHED_INPUT, BillingDimension.OUTPUT),
+            caching = FakeProfiles.main.capabilities.caching.copy(writeClasses = emptySet()),
+        ),
+        priceTable = FakeProfiles.main.priceTable.copy(
+            perMillion = perMillion.mapValues { BigDecimal(it.value) },
+            tiers = tiers.map { (above, prices) -> PriceTier(above, prices.mapValues { BigDecimal(it.value) }) },
+        ),
+    )
+
+    @Test fun `a long-context tier prices the route as the cell reserves it so routing never selects what the cell refuses`() {
+        val input = BillingDimension.UNCACHED_INPUT
+        val tiered = plain("main", mapOf(input to "1", BillingDimension.OUTPUT to "0"), 200_000L to mapOf(input to "2"))
+        val only = TierTable("t4", null, mapOf(Tier.High to setOf("main")))
+        val long = packet(context = 250_000)
+        // 250k input crosses the 200k tier: $0.50, not the base table's $0.25.
+        val cost = Router.conservativeCost(tiered, long)!!
+        assertEquals(0, BigDecimal("0.50").compareTo(cost.amount))
+        assertEquals(Accounting.estimateCost(tiered, 250_000, 4_000), cost, "the router and the cell's reservation agree")
+        val tight = RoutingPolicy(only, mapOf("main" to tiered), RoutingBudget(remainingCost = usd("0.30")))
+        val refused = assertIs<Routed.Refused>(Router().selectProfile(RoutingFunction.Implementing, long, null, tight))
+        assertTrue(refused.excluded.getValue("main").startsWith("costs 0.5 USD"), refused.excluded.getValue("main"))
+        val enough = RoutingPolicy(only, mapOf("main" to tiered), RoutingBudget(remainingCost = usd("0.50")))
+        assertEquals(0, BigDecimal("0.50").compareTo(assertIs<Routed.Selected>(Router().selectProfile(RoutingFunction.Implementing, long, null, enough)).conservativeCost!!.amount))
+    }
+
+    @Test fun `a partially priced table is an unknown cost not a known low one`() {
+        // The route can bill cache reads, which this table does not price: the cell's reservation is unknown.
+        val partial = plain("main", mapOf(BillingDimension.UNCACHED_INPUT to "0.1", BillingDimension.OUTPUT to "0.1")).let {
+            it.copy(capabilities = it.capabilities.copy(usageFields = it.capabilities.usageFields + BillingDimension.CACHE_READ))
+        }
+        assertTrue(Accounting.estimateCost(partial, 10_000, 4_000).unknown)
+        assertNull(Router.conservativeCost(partial, packet()))
+        val wide = TierTable("t5", null, mapOf(Tier.High to setOf("main", "escalation")))
+        val profiles = mapOf("main" to partial, "escalation" to FakeProfiles.escalation)
+        val capped = assertIs<Routed.Selected>(Router().selectProfile(RoutingFunction.Implementing, packet(), null, RoutingPolicy(wide, profiles, RoutingBudget(remainingCost = usd("10")))))
+        assertEquals("escalation", capped.profile.id)
+        assertEquals("cost unknown at its price table", capped.excluded["main"])
+        val uncapped = assertIs<Routed.Selected>(Router().selectProfile(RoutingFunction.Implementing, packet(), null, RoutingPolicy(wide, profiles)))
+        assertEquals("escalation", uncapped.profile.id, "an unknown cost ranks after every known one")
     }
 
     @Test fun `tier tables serve a tier from it upwards and the configuration rejects untiered profile ids`() {
