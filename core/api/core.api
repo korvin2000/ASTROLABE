@@ -4923,7 +4923,8 @@ public final class io/astrolabe/cell/Anchor {
 	public static final fun render (Lio/astrolabe/provider/TokenEstimator;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;)Lio/astrolabe/cell/AnchorRender;
 	public static final fun render (Lio/astrolabe/provider/TokenEstimator;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/util/List;)Lio/astrolabe/cell/AnchorRender;
 	public static final fun render (Lio/astrolabe/provider/TokenEstimator;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/util/List;Lio/astrolabe/Defaults;)Lio/astrolabe/cell/AnchorRender;
-	public static synthetic fun render$default (Lio/astrolabe/provider/TokenEstimator;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/util/List;Lio/astrolabe/Defaults;ILjava/lang/Object;)Lio/astrolabe/cell/AnchorRender;
+	public static final fun render (Lio/astrolabe/provider/TokenEstimator;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/util/List;Lio/astrolabe/Defaults;Ljava/lang/String;)Lio/astrolabe/cell/AnchorRender;
+	public static synthetic fun render$default (Lio/astrolabe/provider/TokenEstimator;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/util/List;Lio/astrolabe/Defaults;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/cell/AnchorRender;
 }
 
 public final class io/astrolabe/cell/AnchorRender {
@@ -5776,9 +5777,13 @@ public final class io/astrolabe/cell/Kernel {
 public final class io/astrolabe/cell/Layout {
 	public static final field INSTANCE Lio/astrolabe/cell/Layout;
 	public static final fun compiled (Lio/astrolabe/cell/CompiledK;)Ljava/lang/String;
+	public static final fun render (Lio/astrolabe/cell/Role;Lio/astrolabe/auth/ExecutionMode;Ljava/lang/String;Lio/astrolabe/cell/CompiledK;Lio/astrolabe/cell/Transcript;)Ljava/util/List;
+	public static final fun render (Lio/astrolabe/cell/Role;Lio/astrolabe/auth/ExecutionMode;Ljava/lang/String;Lio/astrolabe/cell/CompiledK;Lio/astrolabe/cell/Transcript;Z)Ljava/util/List;
 	public static final fun render (Lio/astrolabe/cell/Role;Lio/astrolabe/provider/ToolMask;Lio/astrolabe/auth/ExecutionMode;Ljava/lang/String;Lio/astrolabe/cell/CompiledK;Lio/astrolabe/cell/Transcript;)Ljava/util/List;
 	public static final fun render (Lio/astrolabe/cell/Role;Lio/astrolabe/provider/ToolMask;Lio/astrolabe/auth/ExecutionMode;Ljava/lang/String;Lio/astrolabe/cell/CompiledK;Lio/astrolabe/cell/Transcript;Z)Ljava/util/List;
+	public static synthetic fun render$default (Lio/astrolabe/cell/Role;Lio/astrolabe/auth/ExecutionMode;Ljava/lang/String;Lio/astrolabe/cell/CompiledK;Lio/astrolabe/cell/Transcript;ZILjava/lang/Object;)Ljava/util/List;
 	public static synthetic fun render$default (Lio/astrolabe/cell/Role;Lio/astrolabe/provider/ToolMask;Lio/astrolabe/auth/ExecutionMode;Ljava/lang/String;Lio/astrolabe/cell/CompiledK;Lio/astrolabe/cell/Transcript;ZILjava/lang/Object;)Ljava/util/List;
+	public static final fun system (Lio/astrolabe/cell/Role;Lio/astrolabe/auth/ExecutionMode;)Ljava/lang/String;
 	public static final fun system (Lio/astrolabe/cell/Role;Lio/astrolabe/provider/ToolMask;Lio/astrolabe/auth/ExecutionMode;)Ljava/lang/String;
 }
 
