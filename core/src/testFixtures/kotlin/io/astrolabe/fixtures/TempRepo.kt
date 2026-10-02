@@ -227,6 +227,7 @@ public class TempRepoError(message: String) : RuntimeException(message)
  */
 private fun runGit(directory: Path, argv: List<String>) {
     val command = listOf("git") + argv
+    val started = System.nanoTime()
     val builder = ProcessBuilder(command).directory(directory.toFile()).redirectErrorStream(true)
     val environment = builder.environment()
     environment["GIT_TERMINAL_PROMPT"] = "0"
@@ -258,8 +259,11 @@ private fun runGit(directory: Path, argv: List<String>) {
         capture.cancel(true)
     }
     if (exitCode != 0) {
+        // The hex form tells a Windows NTSTATUS (0xC0000142: DLL initialisation failed) from a kill (-1, 1) at a glance.
+        val hex = "0x%08X".format(exitCode)
+        val elapsed = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
         throw TempRepoError(
-            "fixture git exited $exitCode in $directory: ${command.joinToString(" ")}\n$output",
+            "fixture git exited $exitCode ($hex) after $elapsed ms in $directory: ${command.joinToString(" ")}\n$output",
         )
     }
 }

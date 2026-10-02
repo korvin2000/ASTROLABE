@@ -111,13 +111,27 @@ class ProcOwnershipTest {
         assertEquals("\"c:\\dir with space\\\\\"", WindowsOwner.quoteArgument("c:\\dir with space\\"))
     }
 
-    /** Seconds this host needs to get the grandchild launcher's interpreter to its first output. */
+    /**
+     * Seconds this host needs to get the grandchild launcher's interpreter to its first output. A probe still silent
+     * after its wait is terminated and a fresh one measured: on the Windows runner one `powershell.exe` sat running
+     * with no output for the whole 120 s (CI 36026485370, attempt 1), which is a hung process, not a start-up time.
+     */
     private fun launcherStartupSeconds(): Long {
-        val started = System.nanoTime()
-        val probe = spawn(ChildCommands.launcherReady())
-        os.awaitLogMatch(probe, Regex(ChildCommands.READY_MARKER), timeoutSeconds = 120L)
-        os.awaitTerminal(probe, 30L)
-        return TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - started) + 1L
+        val silent = ArrayList<String>()
+        for (waitSeconds in PROBE_WAITS_SECONDS) {
+            val started = System.nanoTime()
+            val probe = spawn(ChildCommands.launcherReady())
+            try {
+                os.awaitLogMatch(probe, Regex(ChildCommands.READY_MARKER), timeoutSeconds = waitSeconds)
+            } catch (failure: AssertionError) {
+                silent += failure.message.orEmpty()
+                os.terminate(probe)
+                continue
+            }
+            os.awaitTerminal(probe, 30L)
+            return TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - started) + 1L
+        }
+        throw AssertionError("no launcher probe printed ${ChildCommands.READY_MARKER}: ${silent.joinToString(" | ")}")
     }
 
     private fun grandchildPidOf(proc: Proc): Long {
@@ -140,5 +154,8 @@ class ProcOwnershipTest {
 
         /** Keeps the scenario bounded when a host is pathologically slow to start an interpreter. */
         const val MAX_DEADLINE_SECONDS = 90L
+
+        /** One wait per launcher probe: a hung first probe gives way to a second with the old full wait. */
+        val PROBE_WAITS_SECONDS = listOf(60L, 120L)
     }
 }
