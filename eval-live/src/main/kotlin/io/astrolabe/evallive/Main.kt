@@ -101,7 +101,7 @@ internal object Cli {
         LiveModels.runtime(catalog, credentials).use { llm ->
             val models = LiveModels(llm, provider, LocalDate.now(clock))
             models.requireKey()
-            log("eval-live: ${plan.runs().size} run(s) of ${tasks.size} task(s) × ${plan.models.size} model(s) × ${plan.repeats}, seed ${plan.seed}, results in $out")
+            log("eval-live: ${plan.runs().size} run(s) of ${tasks.size} task(s) x ${plan.models.size} model(s) x ${plan.repeats}, seed ${plan.seed}, results in $out")
             val results = Bench(plan, models, interpreters, clock, RandomIdGen(), log).run()
             log("eval-live: ${results.count { it.acceptance?.passed == true }}/${results.size} accepted; summary in ${out.resolve("summary.csv")}")
         }

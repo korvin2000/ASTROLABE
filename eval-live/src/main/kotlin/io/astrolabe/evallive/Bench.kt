@@ -72,15 +72,15 @@ internal class Bench(
             val dir = run.dir(plan.out)
             val existing = dir.resolve("result.json")
             if (Files.isRegularFile(existing)) {
-                log("[${run.order}/${runs.size}] ${run.task.id} · ${run.model} · r${run.repeat}: kept the earlier result")
+                log("[${run.order}/${runs.size}] ${run.task.id} / ${run.model} / r${run.repeat}: kept the earlier result")
                 results += Summary.read(existing)
                 continue
             }
-            log("[${run.order}/${runs.size}] ${run.task.id} · ${run.model} · r${run.repeat}: started")
+            log("[${run.order}/${runs.size}] ${run.task.id} / ${run.model} / r${run.repeat}: started")
             val result = runOne(run, dir)
             results += result
             Summary.write(plan.out, results)
-            log("[${run.order}/${runs.size}] ${run.task.id} · ${run.model} · r${run.repeat}: ${result.outcome ?: "no outcome"}, " +
+            log("[${run.order}/${runs.size}] ${run.task.id} / ${run.model} / r${run.repeat}: ${result.outcome ?: "no outcome"}, " +
                 "acceptance ${if (result.acceptance?.passed == true) "passed" else "failed"}" + (result.failure?.let { " ($it)" } ?: ""))
         }
         Summary.write(plan.out, results)
