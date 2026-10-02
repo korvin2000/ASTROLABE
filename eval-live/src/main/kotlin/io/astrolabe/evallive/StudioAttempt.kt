@@ -185,9 +185,9 @@ internal object StudioPolicy {
 @Serializable
 internal data class VerificationSetup(val kind: String, val source: String, val commands: List<List<String>>, val hints: List<List<String>> = emptyList())
 
-/** One decision the auto policy made on the agent's behalf, as the Studio records it (`DecisionService.byPolicy`). */
+/** One decision the auto policy made on the agent's behalf, as the Studio records it (`DecisionService.byPolicy`); [detail] says what it was about. */
 @Serializable
-internal data class PolicyDecision(val kind: String, val outcome: String)
+internal data class PolicyDecision(val kind: String, val outcome: String, val detail: String? = null)
 
 /**
  * The Studio's `auto` host policy (`DecisionService` with `HostPolicy.auto()`): questions get the standard assumption;
@@ -223,16 +223,24 @@ internal class StudioAutoAuthority : Authority {
         return Resolution(proposal.id, proposal.contractRevision, outcome, "policy:studio", why)
     }
 
-    override suspend fun review(request: ReviewRequest): Verdict? = null
+    override suspend fun review(request: ReviewRequest): Verdict? {
+        decisions += PolicyDecision("review", "no reviewer")
+        return null
+    }
 
     override suspend fun decide(request: AcceptanceDecisionRequest): AcceptanceDecision? {
+        val why = request.items.joinToString("; ") { it.reason.ifBlank { it.obligation } }
+        val detail = request.items.joinToString("; ") { "${it.obligation} ${it.kind} ${it.status}: ${it.reason}" }.take(DETAIL_CHARS)
         if (request.items.any { it.status == ResultStatus.Failed }) {
-            decisions += PolicyDecision("acceptance", "waiting")
+            decisions += PolicyDecision("acceptance", "waiting", detail)
             return null
         }
-        val why = request.items.joinToString("; ") { it.reason.ifBlank { it.obligation } }
-        decisions += PolicyDecision("acceptance", "accepted")
+        decisions += PolicyDecision("acceptance", "accepted", detail)
         return AcceptanceDecision(request.id, request.contractRevision, request.candidate, DecisionKind.Accept, Decider.Policy, "studio:policy(auto)", "not verified: $why")
+    }
+
+    private companion object {
+        const val DETAIL_CHARS = 2_000
     }
 }
 
