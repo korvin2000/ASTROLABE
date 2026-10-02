@@ -33,10 +33,8 @@ and `rg -c '^#### P8\..*· DONE' TODO.md`. P7 out of scope except the AI Gate tr
 - **`route`:** `Router`, `TierTable`, `FunctionTable`, `Escalation`, `CacheSchedule`, `ShadowRouting`.
 - **`kb`:** `StoreKb`, `Queue`, `Curator`, `Extractor`, `Skill`/`SkillViews`, `BehaviourMaps`, `Retriever`,
   `PromotionProposals`. **`tool`:** `Look`, `Edit`, `Run`, `Verify`, `TaskTool`, `KbTool`, `Mount`/`Catalog`, `GeneratedTools`.
-- **`workspace`:** `Worktrees`, `Ownership`, `ScopeAlgebra`. **`atlas`:** `ImportGraph`, `OutlineSource`/`OutlineIndex`,
-  `LanguageService`. **`verify`:** `Scheduler`, `Measurement`, `Watcher`, `CampaignReview`.
-- **Modules:** `provider-api`, `core`, `eval`, `index-treesitter` (tree-sitter-ng 0.26.6 + grammar jars, D-175/D-210),
-  `provider-ai-gate` (`AiGateAdapter` over `net.ai.gate:ai-gate`; present only with the SDK checkout, D-332).
+- **`workspace`:** `Worktrees`, `Ownership`, `ScopeAlgebra`. **`atlas`:** `ImportGraph`, `OutlineIndex`, `LanguageService`; **`verify`:** `Scheduler`, `Watcher`.
+- **Modules:** `provider-api`, `core`, `eval`, `index-treesitter` (D-175/D-210); with the SDK checkout only: `provider-ai-gate` (D-332), `eval-live` (D-380).
 
 ## Store
 Schema **v5** (phase 0: `pending_completions`, `acceptance_decisions`); skills/behaviour maps are `BlobKind.MODULE` blobs.
