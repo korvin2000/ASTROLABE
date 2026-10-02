@@ -328,6 +328,10 @@ public class Cell @JvmOverloads constructor(
                 is SchemaSelection.Supported -> selection.set
                 is SchemaSelection.Unsupported -> return failed("tool schemas unsupported for ${selection.profileId}: ${selection.reason}")
             }
+            // Invariant 12: the turn mask narrows the role's set and never names a family the line does not carry.
+            check(mask.allowed.all { op -> schemas.schemas.any { it.name == op.substringBefore('.') } }) {
+                "turn mask names ops outside the line's schema set: ${mask.allowed.filter { op -> schemas.schemas.none { it.name == op.substringBefore('.') } }}"
+            }
             val anchor = try {
                 renderAnchor(contract, mask, repairable.isNotEmpty())
             } catch (capacity: DigestCapacity) {
