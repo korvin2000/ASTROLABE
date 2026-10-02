@@ -526,7 +526,8 @@ public class Run(
     private sealed interface Waited {
         val cursor: Long
 
-        class Ended(val status: ProcStatus, override val cursor: Long, val tail: ByteArray) : Waited
+        /** [matched] is the readiness line that arrived with the end, if one did. */
+        class Ended(val status: ProcStatus, override val cursor: Long, val tail: ByteArray, val matched: String?) : Waited
         class Ready(val reason: String, override val cursor: Long, val tail: ByteArray, val dropped: Long) : Waited
         class Expired(override val cursor: Long, val tail: ByteArray, val dropped: Long) : Waited
     }
@@ -551,7 +552,12 @@ public class Run(
             is Waited.Ended -> {
                 handles.save(handle.copy(proc = proc.copy(status = waited.status), status = wire(waited.status), cursor = waited.cursor))
                 // §14 risk: an end before readiness interrupts the wait, and the terminal diagnostics are its result.
-                return ended(args, handle, proc, waited.status, waited.tail, if (until.none) null else "wait ended: the process ended before $until")
+                val note = when {
+                    until.none -> null
+                    waited.matched != null -> "wait ended: the process ended; readiness line matched: ${waited.matched}"
+                    else -> "wait ended: the process ended before $until"
+                }
+                return ended(args, handle, proc, waited.status, waited.tail, note)
             }
             is Waited.Ready -> Triple("ready: ${waited.reason}", waited.tail, waited.dropped)
             is Waited.Expired -> Triple("wait timed out after ${limitSeconds}s before $until, the process keeps running (no relaunch)", waited.tail, waited.dropped)
@@ -583,17 +589,21 @@ public class Run(
             tail.add(poll.newBytes)
             cursor = poll.nextCursorBytes
             proc = proc.copy(status = poll.status)
-            if (proc.status.isTerminal) return Waited.Ended(proc.status, cursor, tail.bytes())
+            val terminal = proc.status.isTerminal
+            var matched: String? = null
+            // The last bytes arrive together with the terminal status, so the line is matched before the end is reported.
             if (until.line != null) {
-                val lines = partial + poll.newBytes
-                val end = lines.lastIndexOf('\n'.code.toByte())
-                val cut = if (end >= 0) end + 1 else if (lines.size > WAIT_LINE_BYTES) lines.size else 0
-                partial = lines.copyOfRange(cut, lines.size)
+                val pending = partial + poll.newBytes
+                val end = pending.lastIndexOf('\n'.code.toByte())
+                // Nothing completes a line once the process has ended, so the unfinished one counts as it stands.
+                val cut = if (terminal) pending.size else if (end >= 0) end + 1 else if (pending.size > WAIT_LINE_BYTES) pending.size else 0
+                partial = pending.copyOfRange(cut, pending.size)
                 // Matched on the redacted line: a pattern is no oracle for a secret the model is never shown.
-                val matched = lines.copyOfRange(0, cut).toString(Charsets.UTF_8).lineSequence()
-                    .map { redaction.apply(it.trimEnd('\r')).text }.firstOrNull { until.line.containsMatchIn(it) }
-                if (matched != null) return Waited.Ready("line matched: ${matched.take(200)}", cursor, tail.bytes(), tail.dropped)
+                matched = pending.copyOfRange(0, cut).toString(Charsets.UTF_8).lineSequence()
+                    .map { redaction.apply(it.trimEnd('\r')).text }.firstOrNull { until.line.containsMatchIn(it) }?.take(200)
             }
+            if (terminal) return Waited.Ended(proc.status, cursor, tail.bytes(), matched)
+            if (matched != null) return Waited.Ready("line matched: $matched", cursor, tail.bytes(), tail.dropped)
             if (until.port != null && os.listening(until.port)) return Waited.Ready("port ${until.port} accepts connections", cursor, tail.bytes(), tail.dropped)
         }
     }

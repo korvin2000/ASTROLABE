@@ -894,4 +894,63 @@ class RunTest {
         assertEquals("running", SqliteHandles(store, clock).get("handle-1")!!.status)
         assertEquals(1, controlled.spawns)
     }
+
+    /**
+     * A process that exists only as a script: poll number k reveals step k's output and status (the last step stays), and
+     * the poll's own timeout passes on the injected clock. The launch's first look is poll 0.
+     */
+    private inner class ScriptedOs(private val steps: List<Pair<String, ProcStatus>>) : Os by os {
+        var spawns = 0
+        var polls = 0
+        var portOpen: (Int) -> Boolean = { false }
+        private var log = ByteArray(0)
+        private var status: ProcStatus = ProcStatus.Running
+
+        override fun spawn(spec: io.astrolabe.os.SpawnSpec): Proc {
+            spawns++
+            Files.write(spec.logPath, ByteArray(0))
+            return Proc(42, clock.millis(), IdentityKey(42, 1000), token, spec.logPath.toString(), 0,
+                ProcStatus.Running, spec.command, spec.workingDirectory.toString(), deadlineSeconds = spec.deadlineSeconds)
+        }
+
+        override fun poll(proc: Proc, sinceCursorBytes: Long, observationTimeoutSeconds: Long): Poll {
+            steps.getOrNull(polls)?.let { (text, end) ->
+                log += text.toByteArray()
+                status = end
+                Files.write(proc.log, log)
+            }
+            polls++
+            clock.advance(java.time.Duration.ofSeconds(observationTimeoutSeconds))
+            return Poll(log.copyOfRange(sinceCursorBytes.toInt(), log.size), log.size.toLong(), status, false)
+        }
+
+        override fun reattach(proc: Proc): Proc = proc.copy(status = status)
+
+        override fun terminate(proc: Proc): Proc = proc.copy(status = ProcStatus.Cancelled)
+
+        override fun listening(port: Int): Boolean = portOpen(port)
+    }
+
+    @Test
+    fun `a readiness line that arrives with the end of the process still counts`() = runTest {
+        // LocalOs.poll hands over the last bytes together with the terminal status.
+        val scripted = ScriptedOs(listOf("" to ProcStatus.Running, "starting\nlistening on port 8080\n" to ProcStatus.Exited(0)))
+
+        val out = run("""{"argv":["git","status"],"until_line":"listening on port \\d+"}""", runner(os = scripted))
+
+        assertTrue(status(out) != "running", out.body)
+        assertTrue(out.body.contains("wait ended: the process ended; readiness line matched: listening on port 8080"), out.body)
+        assertFalse(out.body.contains("before a line matching"), out.body)
+        assertEquals("exited", SqliteHandles(store, clock).get("handle-1")!!.status)
+    }
+
+    @Test
+    fun `an unfinished last line is matched once the process has ended`() = runTest {
+        val scripted = ScriptedOs(listOf("" to ProcStatus.Running, "starting\nlistening on port 8080" to ProcStatus.Running, "" to ProcStatus.Exited(0)))
+
+        val out = run("""{"argv":["git","status"],"until_line":"listening on port \\d+"}""", runner(os = scripted))
+
+        assertTrue(out.body.contains("wait ended: the process ended; readiness line matched: listening on port 8080"), out.body)
+        assertEquals(3, scripted.polls, "the line stayed unfinished while the process ran, so only the end matched it")
+    }
 }
