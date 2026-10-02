@@ -64,8 +64,10 @@ base, passes on the reference, visible tests green on the reference).
   policy decisions, acceptance (passed, exit code, timeout, output tail) and its digest, attempt wall time, totals
   (model requests and responses — every dispatched call ends in one `ModelResponded`, answered, failed or cancelled,
   with its reconciled usage — failed calls, cells, turns, tool calls, tokens uncached/cache read/cache write/output, cost from
-  the profile's price table, span costs, provider models, stop reasons, sums of any other numeric `ModelResponded`
-  field), dropped events, changed files. Anything not observed is `null`, never 0.
+  the profile's price table, span costs, provider models, stop reasons, any other numeric `ModelResponded` field as
+  `responded.<path>` = `{sum, known, calls}` — the sum over the `known` of `calls` responses that reported it, partial
+  when they differ — and `priceTiers`, the responses per price-tier threshold, `none` when a response named no tier),
+  dropped events, changed files. Anything not observed is `null`, never 0.
 - `events.jsonl` — every `EventRecord` of the run's bus, whole: fields the events gain later are kept without a change.
 - `acceptance.log` — the acceptance output; `workspace.diff` — the agent's changes against the base commit.
 

@@ -7,6 +7,7 @@ import io.astrolabe.id.Identities
 import io.astrolabe.id.WorkId
 import io.astrolabe.provider.BillableUsage
 import io.astrolabe.provider.BillingDimension
+import io.astrolabe.provider.CallFacts
 import io.astrolabe.provider.StopReason
 import io.astrolabe.provider.UsageProvenance
 import kotlin.test.Test
@@ -64,6 +65,23 @@ class TotalsTest {
         assertNull(totals.cost)
         // 2 000 × 3 + 200 × 15 per million: the cancelled call's known usage is priced.
         assertEquals("0.0090", totals.costPricedPart)
+    }
+
+    @Test
+    fun `facts aggregate with known counts and price tiers are buckets never sums`() {
+        fun facts(id: String, facts: CallFacts?) = AgentEvent.Cell.ModelResponded(ids, id, StopReason.EndTurn, null, facts = facts)
+        val events = listOf(
+            facts("i-1", CallFacts(latencyMillis = 1_200, priceTierInputTokensAbove = 200_000)),
+            facts("i-2", CallFacts(priceTierInputTokensAbove = 200_000)),
+            facts("i-3", CallFacts(latencyMillis = 800)),
+            facts("i-4", null),
+        )
+
+        val totals = Totals.of(events, prices)
+
+        assertEquals(Quantity("2000", known = 2, calls = 4), totals.responded["facts.latencyMillis"], "a partial sum says how many calls it covers")
+        assertNull(totals.responded["facts.priceTierInputTokensAbove"], "a tier threshold is no quantity")
+        assertEquals(mapOf("200000" to 2, "none" to 2), totals.priceTiers)
     }
 
     @Test
