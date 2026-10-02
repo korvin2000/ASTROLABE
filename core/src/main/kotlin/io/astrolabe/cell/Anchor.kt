@@ -87,7 +87,8 @@ public data class AnchorRender(
 /**
  * Renders `[A]` (§5.1, §5.10): the volatile tail the harness rebuilds every turn and the model never
  * writes. Blocks appear in a fixed order — contract digest, STATE, Workset, Touched, Checks, focus
- * zoom, focus notes, gauge, nudges, fired trips — and each carries its own cap.
+ * zoom, focus notes, the turn's enabled tools, gauge, nudges, fired trips — and each carries its own cap.
+ * The enabled line is here, not in `[S]`, so a turn's mask never rewrites the cached prefix (invariant 12).
  *
  * **Caps are enforced here even though the producers cap too** (except the contract digest, which
  * [io.astrolabe.register.ContractDigest] bounds or refuses with a typed error), because a caller may hand over an
@@ -97,7 +98,7 @@ public data class AnchorRender(
  *
  * **Reduction order is fixed** so the render is a pure function of its inputs: focus notes, then the
  * focus zoom, then the Touched ledger down to three lines, then STATE at a halved cap. The contract
- * digest, the checks, the gauge, the nudges and fired trips are never reduced — they are the lines a
+ * digest, the checks, the enabled tools, the gauge, the nudges and fired trips are never reduced — they are the lines a
  * cell must not miss. If the anchor is still over its cap, that is reported rather than papered over.
  */
 public object Anchor {
@@ -117,6 +118,7 @@ public object Anchor {
         nudges: List<String> = emptyList(),
         firedTrips: List<String> = emptyList(),
         defaults: Defaults = Defaults(),
+        enabled: String? = null,
     ): AnchorRender {
         val reductions = ArrayList<String>()
         var registerText = cap(estimator, register, defaults.registerCapTokens, "STATE", reductions)
@@ -129,7 +131,7 @@ public object Anchor {
         if (nudgeLines.size < nudges.size) reductions += "nudges: showed ${nudgeLines.size} of ${nudges.size}"
 
         // D-270: the digest is mandatory and already bounded by ContractDigest (typed DigestCapacity); never line-capped here.
-        fun compose() = compose(digest, registerText, worksetText, touchedLines, checks, zoom, notes, gauge, nudgeLines, firedTrips)
+        fun compose() = compose(digest, registerText, worksetText, touchedLines, checks, zoom, notes, enabled, gauge, nudgeLines, firedTrips)
 
         var text = compose()
         // One pass per lever, in the declared order; each is recorded even when it does not suffice.
@@ -165,6 +167,7 @@ public object Anchor {
         checks: String,
         focusZoom: String?,
         focusNotes: String?,
+        enabled: String?,
         gauge: String?,
         nudges: List<String>,
         firedTrips: List<String>,
@@ -177,6 +180,7 @@ public object Anchor {
         appendBlock(out, checks)
         focusZoom?.let { appendBlock(out, "── Focus    ${it.replace("\n", "\n            ")}") }
         focusNotes?.let { appendBlock(out, "── Notes    ${it.replace("\n", "\n            ")}") }
+        appendBlock(out, enabled)
         appendBlock(out, gauge)
         nudges.forEach { appendBlock(out, it) }
         firedTrips.forEach { appendBlock(out, it) }

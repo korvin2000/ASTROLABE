@@ -177,6 +177,8 @@ public class Cell @JvmOverloads constructor(
         private val estimator = ctx.model.estimator
         private val contextAdmission = ctx.admission ?: ContextAdmission()
         private val capabilities = ctx.model.adapter.capabilities(ctx.model.profile)
+        // Invariant 12: the schema set is the role's, chosen once for the line; a turn's mask lives in [A].
+        private val schemaSelection = ToolSchemas.forLineage(ctx.model.adapter, ctx.model.profile, ctx.role.toolMask)
         private val residency = Residency.of(defaults, estimator)
         private val record = TurnRecord()
         private val dispatcher = Dispatcher(executors(), ws.workset, ids, events, ctx.turnCheckpoint)
@@ -322,16 +324,16 @@ public class Cell @JvmOverloads constructor(
             // D-366: a reserve reached by the turn count, with working tokens left, still lets the cell repair what it changed.
             val repairable = if (reserveTurn && budget.working.available.value > 0) ownPaths() else emptySet()
             val mask = maskFor(contract, reserveTurn, repairable.isNotEmpty())
-            val schemas = when (val selection = ToolSchemas.forLineage(ctx.model.adapter, ctx.model.profile, mask)) {
+            val schemas = when (val selection = schemaSelection) {
                 is SchemaSelection.Supported -> selection.set
                 is SchemaSelection.Unsupported -> return failed("tool schemas unsupported for ${selection.profileId}: ${selection.reason}")
             }
             val anchor = try {
-                renderAnchor(contract)
+                renderAnchor(contract, mask)
             } catch (capacity: DigestCapacity) {
                 return partial(PartialReason.Pressure, "replan: ${capacity.message}")
             }
-            val layout = Layout.render(ctx.role, mask, ctx.config.executionMode, ctx.prime, CompiledK(ContractSlice.forIncrement(contract, increment), ctx.preexisting, sections), transcript(contract), capabilities.caching.breakpoints)
+            val layout = Layout.render(ctx.role, ctx.config.executionMode, ctx.prime, CompiledK(ContractSlice.forIncrement(contract, increment), ctx.preexisting, sections), transcript(contract), capabilities.caching.breakpoints)
             val request = Request(layout + anchor.segment(), schemas.schemas, ctx.model.profile, ctx.model.effort, ctx.model.maxOutputTokens, mask)
             val estimate = estimator.estimate(request)
             when (val validation = ctx.model.adapter.validate(request, estimate)) {
@@ -701,7 +703,7 @@ public class Cell @JvmOverloads constructor(
 
         // ----------------------------------------------------------- render
 
-        private fun renderAnchor(contract: Contract): AnchorRender {
+        private fun renderAnchor(contract: Contract, mask: ToolMask): AnchorRender {
             val stampNow = lastReport?.candidateId
             val currencies = currencies(stampNow)
             val digest = ContractDigest.render(contract, ctx.ledger ?: Ledger.initial(contract), obligations(contract, currencies), estimator, defaults.effectiveDigestCapTokens(contract.requirements.size))
@@ -710,7 +712,7 @@ public class Cell @JvmOverloads constructor(
             return Anchor.render(
                 estimator, digest, RegisterRender.markdown(register), worksetLine, touchedLedger.toList(),
                 ChecksRender.render(stampNow, checkLines(currencies)), null, focusNotes, gauge(currencies).line(), nudges,
-                RegisterRender.firedTrips(register) + ctx.diagnoses?.lines().orEmpty(), defaults,
+                RegisterRender.firedTrips(register) + ctx.diagnoses?.lines().orEmpty(), defaults, Layout.enabled(ctx.role, mask),
             )
         }
 

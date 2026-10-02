@@ -38,6 +38,21 @@ class ToolContractsTest {
     }
 
     @Test
+    fun `the schema set is chosen by the role's mask and carries only its families`() {
+        fun families(role: io.astrolabe.cell.Role) =
+            assertIs<SchemaSelection.Supported>(ToolSchemas.forLineage(adapter, FakeProfiles.main, role.toolMask)).set.schemas.map { it.name }
+        val roles = io.astrolabe.cell.Roles
+        assertEquals(listOf("look", "run", "state", "task", "kb"), families(roles.probe))
+        assertEquals(listOf("look", "run", "verify", "state", "task", "kb"), families(roles.plan), "plan does not edit")
+        assertEquals(listOf("kb"), families(roles.extractor))
+        assertEquals(ToolFamily.entries.map { it.wire }, families(roles.implementing))
+        // A family's schema bytes do not depend on which role carries it.
+        val probeLook = assertIs<SchemaSelection.Supported>(ToolSchemas.forLineage(adapter, FakeProfiles.main, roles.probe.toolMask)).set.schemas.first()
+        assertEquals(ToolSchemas.schema(ToolFamily.Look), probeLook)
+        assertTrue(roles.plan.toolMask.allows("run.wait") && roles.probe.toolMask.allows("run.wait"), "roles that poll may wait")
+    }
+
+    @Test
     fun `calls parse once at the boundary with emitted op ids and fail closed on any bad call`() {
         val valid = ToolCalls.parse(
             listOf(

@@ -10,6 +10,7 @@ import io.astrolabe.provider.Segment
 import io.astrolabe.provider.SegmentKind
 import io.astrolabe.provider.ToolMask
 import io.astrolabe.tool.ToolFamily
+import io.astrolabe.tool.ToolOps
 import io.astrolabe.verify.PreexistingLedger
 import io.astrolabe.provider.Role as ItemRole
 
@@ -150,11 +151,12 @@ public data class Transcript @JvmOverloads constructor(
  * compiled increment context and `[T]` transcript, each ending in a cache breakpoint. `[A]` is the
  * volatile tail and belongs to `Anchor`, which is rebuilt every turn and never cached.
  *
- * **Byte-stability is the contract.** `[S]` is a pure function of the role, the effective mask and the
- * execution mode; `[R]` of the prime text its compiler produced; `[K]` of the slice and ledger. Nothing
- * here reads a clock, a counter or an absolute path, so two turns with equal inputs produce identical
- * bytes and the prefix stays cacheable. Tools are masked, never removed: the schema list travels in
- * `Request.tools` unchanged for the session and only the `enabled this turn` line varies.
+ * **Byte-stability is the contract.** `[S]` is a pure function of the role and the execution mode; `[R]` of
+ * the prime text its compiler produced; `[K]` of the slice and ledger. Nothing here reads a clock, a counter,
+ * an absolute path or the turn's mask, so two turns with equal inputs produce identical bytes and the prefix
+ * stays cacheable. Tools are masked, never removed: the role's schema set travels in `Request.tools` unchanged
+ * for the line, and the turn's `enabled this turn` line ([enabled]) lives in the volatile `[A]`, so a reserve
+ * turn or a narrowed mask rewrites no cached byte (invariant 12).
  *
  * A role renders only the parts its context view declares (§3.4), and an empty region is omitted rather
  * than sent as an empty segment.
@@ -162,12 +164,12 @@ public data class Transcript @JvmOverloads constructor(
 public object Layout {
 
     /**
-     * The `[S]` text for [role] under [mask] and [mode]: the kernel contract for the implementing and writer roles,
-     * the role's own text and the shared kernel lines for every other role (§3.4, P4.4.6). Public because the same
-     * bytes are hashed into the attempt fingerprint and asserted by stability tests.
+     * The `[S]` text for [role] under [mode]: the kernel contract for the implementing and writer roles, the role's own
+     * text and the shared kernel lines for every other role (§3.4, P4.4.6). Public because the same bytes are hashed
+     * into the attempt fingerprint and asserted by stability tests. The turn's mask is not an input: it is `[A]`'s.
      */
     @JvmStatic
-    public fun system(role: Role, mask: ToolMask, mode: ExecutionMode): String {
+    public fun system(role: Role, mode: ExecutionMode): String {
         val out = StringBuilder()
         out.append("astrolabe · role ").append(role.name)
             .append(" · ").append(Kernel.VERSION)
@@ -181,9 +183,8 @@ public object Layout {
         if (role.duties.isNotEmpty()) out.append("duties: ").append(role.duties.joinToString(" · ")).append('\n')
         out.append("ask-back: ").append(if (role.askBack) "ask the parent" else "no parent to ask").append('\n')
         out.append("packet: ").append(role.packetKind.name).append('\n')
-        out.append("tools: ").append(ToolFamily.entries.joinToString(", ") { it.wire })
-            .append(" (masked, never removed)\n")
-        out.append("enabled this turn: ").append(mask.allowed.sorted().joinToString(", ")).append('\n')
+        out.append("tools: ").append(grouped(role.toolMask.allowed))
+            .append(" (the role's tools, masked, never removed; [A] names those enabled this turn)\n")
         // §4.3 requires these three verbatim in [S]; kernel line 3 states the same rule, and the
         // restatement is deliberate — they are the assertions cells get wrong most often.
         out.append("evidence:\n")
@@ -193,6 +194,37 @@ public object Layout {
         out.append(ExecutionModeLabel.render(mode)).append('\n')
         return out.toString()
     }
+
+    /** The mask left `[S]` (invariant 12); [mask] is ignored. */
+    @Deprecated("the turn's mask is rendered into [A]; [S] depends on the role and the mode only", ReplaceWith("system(role, mode)"))
+    @JvmStatic
+    public fun system(role: Role, @Suppress("UNUSED_PARAMETER") mask: ToolMask, mode: ExecutionMode): String = system(role, mode)
+
+    /**
+     * The `[A]` line naming what [mask] enables this turn, relative to [role]'s tools listed in `[S]`: `all role tools`,
+     * `all role tools except …` while that is the shorter form, else the enabled operations themselves. The executor
+     * refuses a masked call whatever this line says.
+     */
+    internal fun enabled(role: Role, mask: ToolMask): String {
+        val roleOps = role.toolMask.allowed
+        val excluded = roleOps - mask.allowed
+        val text = when {
+            mask.allowed.isEmpty() -> "none"
+            !roleOps.containsAll(mask.allowed) || excluded.size >= mask.allowed.size -> grouped(mask.allowed)
+            excluded.isEmpty() -> "all role tools"
+            else -> "all role tools except " + ordered(excluded).joinToString(", ")
+        }
+        return "enabled this turn: $text"
+    }
+
+    /** `look(tree, read) · run(run, wait)`: families and operations in declaration order, so the bytes are stable. */
+    private fun grouped(ops: Set<String>): String = ToolFamily.entries.mapNotNull { family ->
+        val names = ToolOps.of(family).filter { ToolOps.name(family, it) in ops }
+        if (names.isEmpty()) null else "${family.wire}(${names.joinToString(", ")})"
+    }.joinToString(" · ")
+
+    private fun ordered(ops: Set<String>): List<String> =
+        ToolFamily.entries.flatMap { family -> ToolOps.of(family).map { ToolOps.name(family, it) } }.filter { it in ops }
 
     /** The `[K]` text: the contract slice verbatim, then the pre-existing-failure ledger. */
     @JvmStatic
@@ -212,7 +244,6 @@ public object Layout {
     @JvmOverloads
     public fun render(
         role: Role,
-        mask: ToolMask,
         mode: ExecutionMode,
         prime: String,
         k: CompiledK,
@@ -221,7 +252,7 @@ public object Layout {
     ): List<Segment> {
         val segments = ArrayList<Segment>(4)
         if (ContextPart.Kernel in role.contextView) {
-            segments += segment(SegmentKind.S, ItemRole.System, system(role, mask, mode), explicitBreakpoints)
+            segments += segment(SegmentKind.S, ItemRole.System, system(role, mode), explicitBreakpoints)
         }
         if (ContextPart.Prime in role.contextView && prime.isNotBlank()) {
             segments += segment(SegmentKind.R, ItemRole.User, prime, explicitBreakpoints)
@@ -235,6 +266,20 @@ public object Layout {
         }
         return segments
     }
+
+    /** The mask left the cached regions (invariant 12); [mask] is ignored. */
+    @Deprecated("the turn's mask is rendered into [A]; the cached regions do not depend on it", ReplaceWith("render(role, mode, prime, k, transcript, explicitBreakpoints)"))
+    @JvmStatic
+    @JvmOverloads
+    public fun render(
+        role: Role,
+        @Suppress("UNUSED_PARAMETER") mask: ToolMask,
+        mode: ExecutionMode,
+        prime: String,
+        k: CompiledK,
+        transcript: Transcript,
+        explicitBreakpoints: Boolean = true,
+    ): List<Segment> = render(role, mode, prime, k, transcript, explicitBreakpoints)
 
     // `[R]` and `[K]` are harness-supplied context, not policy: only `[S]` speaks as the system, which
     // keeps the data/instruction rule true of everything the model reads below it.

@@ -71,7 +71,7 @@ class LayoutTest {
 
     @Test
     fun `regions render in S R K T order, each closed by a cache breakpoint`() {
-        val segments = Layout.render(role, mask, ExecutionMode.TrustedLocal, prime, k(), transcript())
+        val segments = Layout.render(role, ExecutionMode.TrustedLocal, prime, k(), transcript())
 
         assertEquals(listOf(SegmentKind.S, SegmentKind.R, SegmentKind.K, SegmentKind.T), segments.map { it.kind })
         assertTrue(segments.all { it.breakpoint }, "every cached region ends in a breakpoint (§5.1)")
@@ -84,18 +84,18 @@ class LayoutTest {
 
     @Test
     fun `a profile without explicit cache markers gets the same regions without breakpoints`() {
-        val marked = Layout.render(role, mask, ExecutionMode.TrustedLocal, prime, k(), transcript())
-        val automatic = Layout.render(role, mask, ExecutionMode.TrustedLocal, prime, k(), transcript(), explicitBreakpoints = false)
+        val marked = Layout.render(role, ExecutionMode.TrustedLocal, prime, k(), transcript())
+        val automatic = Layout.render(role, ExecutionMode.TrustedLocal, prime, k(), transcript(), explicitBreakpoints = false)
 
         assertTrue(automatic.none { it.breakpoint })
         assertEquals(marked.map { it.copy(breakpoint = false) }, automatic, "the flag changes no byte of any region (D-329)")
     }
 
     @Test
-    fun `S carries the kernel contract, the mask, the evidence lines, the error policy, the data rule and the mode`() {
-        val system = Layout.system(role, mask, ExecutionMode.TrustedLocal)
+    fun `S carries the kernel contract, the role's tools, the evidence lines, the error policy, the data rule and the mode`() {
+        val system = Layout.system(role, ExecutionMode.TrustedLocal)
 
-        assertTrue(system.startsWith("astrolabe · role implementing · kernel/2 · roles/4 · error-policy/5\n"), system)
+        assertTrue(system.startsWith("astrolabe · role implementing · kernel/2 · roles/5 · error-policy/5\n"), system)
         assertTrue(system.contains("  identical call and result, or identical refusal, twice → loop nudge; the third ends the turn (a refusal loop ends the cell blocked)\n"), system)
         Kernel.lines.forEachIndexed { index, line ->
             assertTrue(system.contains("${index + 1}. $line"), "kernel line ${index + 1} is missing")
@@ -108,27 +108,57 @@ class LayoutTest {
         assertTrue(system.contains("execution: trusted-local —"), "the execution mode is labelled honestly")
         assertTrue(system.contains("an R label is not proof of read-only execution"), system)
 
-        // Masked, never removed: every family is listed, only the enabled set narrows.
-        ToolFamily.entries.forEach { assertTrue(system.contains(it.wire), "family ${it.wire} left the schema list") }
-        val enabled = system.lineSequence().first { it.startsWith("enabled this turn: ") }.removePrefix("enabled this turn: ")
-        assertEquals(mask.allowed.sorted().joinToString(", "), enabled)
-        assertTrue("task.delegate" !in enabled.split(", "), "S0 does not delegate: $enabled")
+        // Masked, never removed: the role's tools are listed; the turn's enabled set is [A]'s (invariant 12).
+        val tools = system.lineSequence().first { it.startsWith("tools: ") }
+        ToolFamily.entries.forEach { assertTrue(tools.contains("${it.wire}("), "family ${it.wire} left the role's tools: $tools") }
+        assertTrue(tools.contains("run(run, poll, wait, cancel)"), tools)
+        assertTrue(system.lineSequence().none { it.startsWith("enabled this turn") }, "the turn's mask is not in [S]")
     }
 
     @Test
-    fun `S changes only with the role, the mask and the execution mode`() {
-        val base = Layout.system(role, mask, ExecutionMode.TrustedLocal)
+    fun `S changes only with the role and the execution mode, never with the turn's mask`() {
+        val base = Layout.system(role, ExecutionMode.TrustedLocal)
 
-        assertEquals(base, Layout.system(role, mask, ExecutionMode.TrustedLocal), "same inputs, same bytes")
-        assertTrue(base != Layout.system(role, mask, ExecutionMode.Confined), "the mode is visible")
-        assertTrue(base != Layout.system(role, ToolMask.of("look.read"), ExecutionMode.TrustedLocal), "the mask is visible")
-        assertTrue(base != Layout.system(Roles.probe, mask, ExecutionMode.TrustedLocal), "the role is visible")
+        assertEquals(base, Layout.system(role, ExecutionMode.TrustedLocal), "same inputs, same bytes")
+        assertTrue(base != Layout.system(role, ExecutionMode.Confined), "the mode is visible")
+        assertTrue(base != Layout.system(Roles.probe, ExecutionMode.TrustedLocal), "the role is visible")
+        @Suppress("DEPRECATION")
+        assertEquals(base, Layout.system(role, ToolMask.of("look.read"), ExecutionMode.TrustedLocal), "a turn's mask changes no byte of [S]")
+        val reserve = ToolMask(mask.allowed.filterNot { it.startsWith("edit.") }.toSet())
+        @Suppress("DEPRECATION")
+        assertEquals(
+            Layout.render(role, mask, ExecutionMode.TrustedLocal, prime, k(), transcript()),
+            Layout.render(role, reserve, ExecutionMode.TrustedLocal, prime, k(), transcript()),
+            "a reserve turn rewrites no cached region",
+        )
+    }
+
+    @Test
+    fun `golden S and schema set are fixed by the role and change only with a text version`() {
+        // Invariant 12: a change here is a harness change — bump Kernel, Roles or ErrorPolicy VERSION and refresh the goldens.
+        val system = Layout.system(role, ExecutionMode.TrustedLocal)
+        assertEquals(GOLDEN_S_IMPLEMENTING, Digest.ofUtf8(system).hex, "the [S] bytes moved:\n$system")
+        val adapter = FakeAdapter(ScriptedModel.of())
+        val set = assertIs<SchemaSelection.Supported>(ToolSchemas.forLineage(adapter, FakeProfiles.main, role.toolMask)).set
+        assertEquals(GOLDEN_SCHEMAS_IMPLEMENTING, set.fingerprint.hex, "the implementing schema bytes moved")
+        assertEquals(ToolFamily.entries.map { it.wire }, set.schemas.map { it.name })
+    }
+
+    @Test
+    fun `the enabled line names the turn's mask against the role's tools`() {
+        assertEquals("enabled this turn: all role tools", Layout.enabled(role, role.toolMask))
+        val s0 = Layout.enabled(role, mask)
+        assertTrue(s0.startsWith("enabled this turn: all role tools except ") && "task.delegate" in s0 && "look.read" !in s0, s0)
+        val reserve = Layout.enabled(role, ToolMask(mask.allowed.filterNot { it.startsWith("edit.") }.toSet()))
+        assertTrue("edit.anchored" in reserve && "edit.create" in reserve, "a reserve turn names the masked edits: $reserve")
+        assertEquals("enabled this turn: look(read) · run(run, wait)", Layout.enabled(role, ToolMask.of("look.read", "run.run", "run.wait")))
+        assertEquals("enabled this turn: none", Layout.enabled(role, ToolMask(emptySet())))
     }
 
     @Test
     fun `the same inputs render identical bytes across turns`() {
-        val first = Layout.render(role, mask, ExecutionMode.TrustedLocal, prime, k(), transcript())
-        val second = Layout.render(role, mask, ExecutionMode.TrustedLocal, prime, k(), transcript())
+        val first = Layout.render(role, ExecutionMode.TrustedLocal, prime, k(), transcript())
+        val second = Layout.render(role, ExecutionMode.TrustedLocal, prime, k(), transcript())
 
         assertEquals(first, second, "no clock, counter or host path may enter a cached region (§5.1)")
         // Appending to [T] leaves the [S][R][K] prefix byte-identical, which is what makes it cacheable.
@@ -157,10 +187,10 @@ class LayoutTest {
     @Test
     fun `a region the role does not view, or has nothing for, is omitted rather than sent empty`() {
         // The probe role's view carries no Prime and no ContractSlice (§3.4).
-        val probe = Layout.render(Roles.probe, mask, ExecutionMode.TrustedLocal, prime, k(), transcript())
+        val probe = Layout.render(Roles.probe, ExecutionMode.TrustedLocal, prime, k(), transcript())
         assertEquals(listOf(SegmentKind.S, SegmentKind.T), probe.map { it.kind })
 
-        val noPrime = Layout.render(role, mask, ExecutionMode.TrustedLocal, "", k(), Transcript())
+        val noPrime = Layout.render(role, ExecutionMode.TrustedLocal, "", k(), Transcript())
         assertEquals(listOf(SegmentKind.S, SegmentKind.K), noPrime.map { it.kind })
         assertNull(noPrime.firstOrNull { it.kind == SegmentKind.T })
     }
@@ -169,11 +199,11 @@ class LayoutTest {
     fun `the rendered request is accepted by the adapter, breakpoints and tool pairing included`() {
         val adapter = FakeAdapter(ScriptedModel.of())
         val profile = FakeProfiles.main
-        val selection = ToolSchemas.forLineage(adapter, profile, mask)
+        val selection = ToolSchemas.forLineage(adapter, profile, role.toolMask)
         val set = assertIs<SchemaSelection.Supported>(selection).set
 
         val request = Request(
-            segments = Layout.render(role, mask, ExecutionMode.TrustedLocal, prime, k(), transcript()),
+            segments = Layout.render(role, ExecutionMode.TrustedLocal, prime, k(), transcript()),
             tools = set.schemas,
             profile = profile,
             effort = Effort.Medium,
@@ -187,5 +217,10 @@ class LayoutTest {
 
         assertEquals(Validation.Ok, adapter.validate(request, estimate))
         assertEquals(4, request.segments.count { it.breakpoint }, "S R K T, within the provider's four")
+    }
+
+    private companion object {
+        const val GOLDEN_S_IMPLEMENTING: String = "311827f81e8390431317be6be1732eef68fc76872729623f6dcc12b1c7dce024"
+        const val GOLDEN_SCHEMAS_IMPLEMENTING: String = "ab8f9799ecedcf0a524e77247b152b73bcf2bac363f3bd18eadbb9997a438e9a"
     }
 }

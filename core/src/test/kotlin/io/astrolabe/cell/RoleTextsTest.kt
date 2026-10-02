@@ -28,8 +28,7 @@ class RoleTextsTest {
 
     @Test
     fun `S of a non-implementing role carries its text and the shared lines, never the implementing kernel`() {
-        val mask = ToolMask.of("look.read", "kb.search")
-        val probe = Layout.system(Roles.probe, mask, ExecutionMode.TrustedLocal)
+        val probe = Layout.system(Roles.probe, ExecutionMode.TrustedLocal)
         RoleTexts.probe.forEach { assertTrue(probe.contains(it), "probe text line missing: $it") }
         RoleTexts.shared.forEach { assertTrue(probe.contains(it), "shared kernel line missing: $it") }
         assertTrue(probe.contains("in the language of the user's request"), "every role answers in the user's language")
@@ -39,10 +38,10 @@ class RoleTextsTest {
         assertFalse(probe.contains("STATE is yours and validated"), probe)
         assertTrue(probe.contains("packet: Investigation"))
 
-        val implementing = Layout.system(Roles.implementing, mask, ExecutionMode.TrustedLocal)
+        val implementing = Layout.system(Roles.implementing, ExecutionMode.TrustedLocal)
         Kernel.lines.forEach { assertTrue(implementing.contains(it), "the implementing role keeps Appendix A") }
-        assertTrue(Layout.system(Roles.writer, mask, ExecutionMode.TrustedLocal).contains(Kernel.lines[12]), "writers keep Appendix A")
-        assertEquals(probe, Layout.system(Roles.probe, mask, ExecutionMode.TrustedLocal), "byte-stable")
+        assertTrue(Layout.system(Roles.writer, ExecutionMode.TrustedLocal).contains(Kernel.lines[12]), "writers keep Appendix A")
+        assertEquals(probe, Layout.system(Roles.probe, ExecutionMode.TrustedLocal), "byte-stable")
     }
 
     @Test

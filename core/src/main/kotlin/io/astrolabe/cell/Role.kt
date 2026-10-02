@@ -65,7 +65,7 @@ public data class Role(
 
 /** The declared role table (§3.4) and the shape masks that bound it. */
 public object Roles {
-    public const val POLICY_TEXT_VERSION: String = "roles/4"
+    public const val POLICY_TEXT_VERSION: String = "roles/5"
 
     private fun ops(vararg names: String): ToolMask = ToolMask(names.toSet())
 
@@ -92,7 +92,7 @@ public object Roles {
         contextView = setOf(ContextPart.Kernel, ContextPart.ContractSlice, ContextPart.Prime, ContextPart.Notes, ContextPart.BehaviourMaps, ContextPart.CalibrationPrior, ContextPart.Transcript, ContextPart.Anchor),
         noteScope = setOf("GLOBAL", "CON", "ADR"),
         skillFilter = setOf("*"),
-        toolMask = ToolMask(ToolOps.look.map { ToolOps.name(io.astrolabe.tool.ToolFamily.Look, it) }.toSet() + ToolOps.kb.filter { it != "propose" }.map { "kb.$it" } + ToolOps.state.map { "state.$it" } + setOf("task.ask", "task.delegate", "task.collect", "task.propose", "verify.baseline", "run.run", "run.poll", "run.cancel")),
+        toolMask = ToolMask(ToolOps.look.map { ToolOps.name(io.astrolabe.tool.ToolFamily.Look, it) }.toSet() + ToolOps.kb.filter { it != "propose" }.map { "kb.$it" } + ToolOps.state.map { "state.$it" } + setOf("task.ask", "task.delegate", "task.collect", "task.propose", "verify.baseline", "run.run", "run.poll", "run.wait", "run.cancel")),
         permission = Stage.Patch,
         tierPrior = Tier.High,
         duties = listOf("requirement graph and acceptance proposals", "increments with write scopes and an ownership map", "decision packets, CON/ADR candidates, shape suggestion", "read-only: R-class runs only"),
@@ -111,7 +111,7 @@ public object Roles {
         contextView = setOf(ContextPart.Kernel, ContextPart.Question, ContextPart.Transcript, ContextPart.Anchor),
         noteScope = setOf("GLOBAL", "CON"),
         skillFilter = emptySet(),
-        toolMask = ToolMask(ToolOps.look.map { "look.$it" }.toSet() + setOf("kb.search", "kb.get", "run.run", "run.poll", "run.cancel", "state.patch", "state.blocked", "state.retrieval_miss", "task.ask")),
+        toolMask = ToolMask(ToolOps.look.map { "look.$it" }.toSet() + setOf("kb.search", "kb.get", "run.run", "run.poll", "run.wait", "run.cancel", "state.patch", "state.blocked", "state.retrieval_miss", "task.ask")),
         permission = Stage.Patch,
         tierPrior = Tier.Medium,
         duties = listOf("bounded findings with coverage and completeness", "read-only: R-class runs only"),
