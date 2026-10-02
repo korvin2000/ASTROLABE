@@ -30,7 +30,8 @@ public data class CacheBreak(val call: Int, val cell: String, val turn: Int, val
  * A run's cache share three ways (§10.4): [hitShare] `Σ cache_read / Σ input` over every call with known input — the
  * "share of hits" of F §6.1 (86,7 % on `live1/W-letk4`); [qHat] `Σ c_i / Σ b_i` over [eligibleSteps], the steps no
  * harness rewrite preceded (no eviction, Workset drop, mask gate or rebuild) on the same upstream; [reliability] the
- * share of eligible steps served any cache at all (F §2.3's "reliability at an unchanged prefix").
+ * share of eligible steps served any cache at all (F §2.3's "reliability at an unchanged prefix"). [cacheableTokens] and
+ * [cachedTokens] are `Σ b_i` and `Σ min(c_i, b_i)` over the eligible steps, so groups pool `q̂` exactly.
  */
 @Serializable
 public data class CacheReport(
@@ -39,6 +40,8 @@ public data class CacheReport(
     val inputTokens: Long,
     val qHat: Double?,
     val eligibleSteps: Int,
+    val cacheableTokens: Long,
+    val cachedTokens: Long,
     val reliability: Double?,
     val breaks: List<CacheBreak>,
 )
@@ -114,7 +117,7 @@ public class Losses(private val trace: RunTrace, private val format: JournalForm
         }
         return CacheReport(
             AuditMath.hitShare(known.sumOf { it.first }, known.sumOf { it.second }), known.sumOf { it.first }, known.sumOf { it.second },
-            AuditMath.qHat(eligible), eligible.size,
+            AuditMath.qHat(eligible), eligible.size, eligible.sumOf { it.cacheable }, eligible.sumOf { minOf(it.cached, it.cacheable) },
             if (eligible.isEmpty()) null else eligible.count { it.cached > 0 }.toDouble() / eligible.size,
             breaks,
         )

@@ -140,8 +140,7 @@ public object Audit {
             output = category { it.output },
             reasoning = category { it.reasoning },
             hitShare = AuditMath.hitShare(read, input),
-            qHat = runs.mapNotNull { r -> r.cache.qHat?.let { it to r.cache.eligibleSteps } }.takeIf { it.isNotEmpty() }
-                ?.let { weighted -> weighted.sumOf { it.first * it.second } / weighted.sumOf { it.second }.coerceAtLeast(1) },
+            qHat = runs.sumOf { it.cache.cacheableTokens }.takeIf { it > 0 }?.let { b -> runs.sumOf { it.cache.cachedTokens }.toDouble() / b },
             wastes = wastes,
         )
     }
