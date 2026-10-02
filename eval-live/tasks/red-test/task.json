@@ -1,0 +1,9 @@
+{
+  "id": "red-test",
+  "class": "red-test",
+  "title": "CI is red: a stock item at its reorder point is not reordered",
+  "acceptance": {
+    "argv": ["{python}", "_acceptance/accept.py"],
+    "timeoutSeconds": 120
+  }
+}
