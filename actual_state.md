@@ -39,8 +39,7 @@ and `rg -c '^#### P8\..*· DONE' TODO.md`. P7 out of scope except the AI Gate tr
   `provider-ai-gate` (`AiGateAdapter` over `net.ai.gate:ai-gate`; present only with the SDK checkout, D-332).
 
 ## Store
-Schema **v5** (phase 0: `pending_completions`, `acceptance_decisions`); `packets` holds behaviour-snapshot, campaign-review, increment-review and
-`integration` rows; skills and behaviour maps are `BlobKind.MODULE` blobs linked as a note's `procedure` module.
+Schema **v5** (phase 0: `pending_completions`, `acceptance_decisions`); skills/behaviour maps are `BlobKind.MODULE` blobs.
 
 ## Last verification
 CI (Ubuntu + Windows, JDK 26, full `check`): run 37049344584 green at `4bb181b` (ASTROLABE 2.0 wave A + review fixes,

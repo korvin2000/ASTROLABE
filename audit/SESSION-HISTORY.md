@@ -738,4 +738,6 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - Lines: tasks A0, A2a, A1, A6 (owner-started sessions); sub-agents A4, A5, A3, A2b; review fixes A5r, A3r, A1r.
 - Reviews: Fable (A4+A5, A3, A6 security: 6 classifier bypasses fixed), Codex (A1 in line, A2b 2 × P2, router follow-up).
 - BL baseline from `v2/BL`: 12/12 accepted, billed $0.106, N 150; telemetry complete (`../plan2/reports/WP-BL.md`).
-- L2 at every merge, green; merge order deviated from plan §7 (recorded in plan §17); CI on push of `main`.
+- L2 at every merge, green; merge order deviated from plan §7 (recorded in plan §17).
+- Codex adversarial review of the wave (2 P1 + 4 P2) fixed (D-387); CI 37044497216 and 37049344584 green on Ubuntu +
+  Windows; tag `v2-wave-A` (three repos). Next: S2 (B2 → B1 → B4, C1a, C2).
