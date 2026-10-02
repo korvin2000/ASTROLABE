@@ -25,6 +25,8 @@ tasks.withType<Test>().configureEach {
     // Sample fixtures with deliberate failures run only inside the runner's own tests.
     useJUnitPlatform { excludeTags("runner-sample") }
     jvmArgs("--enable-native-access=ALL-UNNAMED")
+    // B1: the live journals the auditor is checked against sit beside the repository, never in it; the test skips without them.
+    systemProperty("astrolabe.audit.live", providers.gradleProperty("astrolabe.audit.live").getOrElse(rootProject.file("../diags/live-2026-10-01").path))
 }
 
 tasks.register<JavaExec>("fixtures") {
@@ -38,4 +40,13 @@ tasks.register<JavaExec>("fixtures") {
         "--report", layout.buildDirectory.file("reports/fixtures/report.json").get().asFile.path,
         "--junit-xml", project(":core").layout.buildDirectory.dir("test-results/test").get().asFile.path,
     )
+}
+
+// B1: `./gradlew :eval:audit --args="<journal | results dir>... [--out <dir>] [--catalog <file>]"` writes audit.json and audit.md.
+tasks.register<JavaExec>("audit") {
+    group = "verification"
+    description = "Audits run logs offline: cost anatomy, cache share, losses W1–W7, Residency what-if, provenance (B1)."
+    mainClass.set("io.astrolabe.eval.audit.AuditCli")
+    classpath = sourceSets["main"].runtimeClasspath
+    workingDir = rootProject.projectDir
 }

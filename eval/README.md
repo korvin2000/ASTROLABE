@@ -156,6 +156,24 @@ execution time) pass through the container that names them and are dropped at co
 coerced to `0`: a `null` `violations` means unmeasured, and a report with no `results` has empty `invariants`
 metrics (`tests: 0, violations: null`) rather than a fabricated zero.
 
+## Offline auditor (B1)
+
+`io.astrolabe.eval.audit` reads run logs and never runs anything: eval-live's `events.jsonl` (bus `EventRecord`s,
+with the sibling `result.json`) and Studio's `W-*.jsonl` journals, which add the model's tool arguments. Per run it
+reports the cost anatomy (uncached input, cache read, cache write, output and its reasoning, in tokens and money), the
+cache share three ways (hit share `Σ cache_read / Σ input`, `q̂` over unchanged-prefix steps, reliability), the losses
+W1–W7 of F §2.2, a `Residency` what-if for other eviction cadences, and a provenance summary; and sums per group
+(arm × model). Prices are fitted exactly from the billed calls of each provider route (`AuditMath.fitPrices`); a route
+without enough billed calls falls back to the catalog's list prices, reported as an estimate. Whatever a log cannot
+show is `null` with its reason, never zero. All formulas sit in `AuditMath` and the KDoc of the records.
+
+```
+./gradlew :eval:audit --args="<journal | results directory>... [--out <dir>] [--catalog <catalog-snapshot.json>]"
+```
+
+writes `audit.json` (`AuditReport`) and `audit.md`. `LiveAuditTest` checks the auditor against the live journals of
+2026-10-01 when `-Pastrolabe.audit.live=<dir>` (default `../diags/live-2026-10-01`) exists, and is skipped otherwise.
+
 ## Campaigns, comparators and arms
 
 P6.1.2 `CampaignManifest` freezes a campaign: harness version, the comparators' (`Variants.configure`, §19.1) and
