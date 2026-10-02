@@ -1,0 +1,5 @@
+[project]
+name = "inventory"
+version = "0.1.0"
+description = "Stock levels and reorder decisions"
+requires-python = ">=3.10"
