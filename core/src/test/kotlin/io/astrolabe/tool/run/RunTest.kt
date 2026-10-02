@@ -805,6 +805,7 @@ class RunTest {
 
         assertEquals("running", status(out), out.body)
         assertTrue(out.body.contains("ready: line matched: listening on port 8080"), out.body)
+        assertTrue(out.body.contains("process deadline ${Defaults().runTimeoutSeconds}s from its start"), out.body)
         assertTrue(out.body.contains("booting"), "the launch's own first output is part of the wait: ${out.body}")
         assertEquals("running", SqliteHandles(store, clock).get("handle-1")!!.status)
         assertTrue(run("""{"op":"cancel","handle":"handle-1"}""").body.contains("cancel requested"))
@@ -952,5 +953,29 @@ class RunTest {
 
         assertTrue(out.body.contains("wait ended: the process ended; readiness line matched: listening on port 8080"), out.body)
         assertEquals(3, scripted.polls, "the line stayed unfinished while the process ran, so only the end matched it")
+    }
+
+    @Test
+    fun `a launch wait that expires with the process deadline does not claim the process keeps running`() = runTest {
+        val scripted = ScriptedOs(listOf("" to ProcStatus.Running))
+
+        val out = run("""{"argv":["git","status"],"until_line":"ready","timeout":5}""", runner(os = scripted))
+
+        assertEquals("running", status(out), out.body)
+        assertTrue(out.body.contains("wait timed out after 5s before a line matching /ready/"), out.body)
+        assertTrue(out.body.contains("the process deadline (5s from its start) is reached and the process is being stopped"), out.body)
+        assertFalse(out.body.contains("keeps running"), out.body)
+    }
+
+    @Test
+    fun `a wait shorter than the process deadline keeps running and names that deadline`() = runTest {
+        val scripted = ScriptedOs(listOf("" to ProcStatus.Running))
+        val tool = runner(os = scripted)
+        run("""{"argv":["git","status"],"bg":true,"timeout":60}""", tool)
+
+        val out = run("""{"op":"wait","handle":"handle-1","until_line":"ready","timeout":5}""", tool)
+
+        assertTrue(out.body.contains("wait timed out after 5s before a line matching /ready/, the process keeps running (no relaunch)"), out.body)
+        assertTrue(out.body.contains("process deadline 60s from its start"), out.body)
     }
 }

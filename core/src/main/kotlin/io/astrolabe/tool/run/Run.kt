@@ -535,15 +535,20 @@ public class Run(
     /**
      * `run(op=wait)`: one call observes the handle until its process ends, a readiness condition holds, or the wait
      * deadline passes (`timeout`, clamped like a run's, measured on the injected clock). The deadline ends only the
-     * observation, never the process (§13.1), and a cancelled wait leaves the handle as it was.
+     * observation, never the process (§13.1); the process has its own deadline from its launch, which a launch with
+     * `until_*` sets to the same `timeout`. A cancelled wait leaves the handle as it was.
      */
     private suspend fun wait(args: RunArgs): ToolOutcome {
         val handle = ownedHandle(args.handle!!) ?: return refused(args, Outcome.Denied, "no handle '${args.handle}' in this campaign workspace")
         val until = args.until()
         val proc = os.reattach(handle.proc)
         val limitSeconds = args.timeoutSeconds.toLong()
+        val waitDeadline = clock.instant().plusSeconds(limitSeconds)
+        val processSeconds = proc.deadlineSeconds
+        // The supervisor stops the process at its own deadline: a wait that is not shorter never outlives it.
+        val stoppedFirst = processSeconds != null && !waitDeadline.isBefore(java.time.Instant.ofEpochMilli(proc.startedAtEpochMillis).plusSeconds(processSeconds))
         val waited = try {
-            kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { await(proc, args.since ?: handle.cursor, until, clock.instant().plusSeconds(limitSeconds)) }
+            kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { await(proc, args.since ?: handle.cursor, until, waitDeadline) }
         } catch (failure: IOException) {
             handles.save(handle.copy(status = wire(ProcStatus.Lost)))
             return refused(args, Outcome.UnknownOutcome, "handle ${handle.handleId}: the log cannot be read (${failure.message}); the process state is unknown — reconcile, never relaunch")
@@ -560,13 +565,18 @@ public class Run(
                 return ended(args, handle, proc, waited.status, waited.tail, note)
             }
             is Waited.Ready -> Triple("ready: ${waited.reason}", waited.tail, waited.dropped)
-            is Waited.Expired -> Triple("wait timed out after ${limitSeconds}s before $until, the process keeps running (no relaunch)", waited.tail, waited.dropped)
+            is Waited.Expired -> Triple(
+                if (stoppedFirst) "wait timed out after ${limitSeconds}s before $until; the process deadline (${processSeconds}s from its start) is reached and the process is being stopped (no relaunch), poll the handle for its final status"
+                else "wait timed out after ${limitSeconds}s before $until, the process keeps running (no relaunch)",
+                waited.tail, waited.dropped,
+            )
         }
         handles.save(handle.copy(proc = proc.copy(status = ProcStatus.Running), status = wire(ProcStatus.Running), cursor = waited.cursor))
         val safe = redaction.applyBytes(tail, ContentClass.ModelFacing)
         val shown = tailWithin(safe.text, args.budgetTokens)
         val elided = dropped > 0 || shown.length < safe.text.length
-        val view = "handle ${handle.handleId} running · $line · cursor ${waited.cursor}" +
+        val deadlineView = if (processSeconds == null || (waited is Waited.Expired && stoppedFirst)) "" else " · process deadline ${processSeconds}s from its start"
+        val view = "handle ${handle.handleId} running · $line · cursor ${waited.cursor}$deadlineView" +
             (if (elided) "\n… earlier output elided; the log holds it" else "") + (if (shown.isBlank()) "" else "\n$shown")
         val result = RunResult(handle.alias, handle.actionId, null, Outcome.NotRun, view, elided, null, handle.effectClass, CandidateId(Digest(handle.stampBefore)), null, false, emptyList(), handle.handleId, null, null, emptyList())
         return render(args, result, handle.argv, handle.shell, null, null, effectsUnknown = handle.effectsUnknown, statusWire = "running", captureMask = safe.mask)
