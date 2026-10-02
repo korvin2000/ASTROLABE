@@ -1,0 +1,9 @@
+{
+  "id": "ui-clear-done",
+  "class": "ui-change",
+  "title": "Clear completed button in a plain-JavaScript todo page",
+  "acceptance": {
+    "argv": ["{python}", "_acceptance/accept.py"],
+    "timeoutSeconds": 120
+  }
+}

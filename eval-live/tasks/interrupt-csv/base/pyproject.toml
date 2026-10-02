@@ -1,0 +1,5 @@
+[project]
+name = "reports"
+version = "0.1.0"
+description = "Sales reports and their CSV exports"
+requires-python = ">=3.10"
