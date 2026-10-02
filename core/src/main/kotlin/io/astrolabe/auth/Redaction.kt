@@ -137,7 +137,19 @@ public class Redaction @JvmOverloads constructor(public val config: RedactionCon
     public fun apply(text: String): Redacted = apply(text, ContentClass.ModelFacing)
 
     /** Redacts [text] for [content]; refuses a content class that must stay byte-exact. */
-    public fun apply(text: String, content: ContentClass): Redacted {
+    public fun apply(text: String, content: ContentClass): Redacted = redact(text, content, live = false, openAtEnd = false)
+
+    /**
+     * Redacts a window of a live stream, which may begin or end inside a private-key block: an end marker with no
+     * opening before it hides everything up to it, an opening with no end hides the rest, and [openAtEnd] (the reader
+     * knows a block is still open where the window ends) hides the window when no opening in it explains that.
+     */
+    internal fun applyLive(bytes: ByteArray, content: ContentClass, openAtEnd: Boolean): Redacted {
+        if (bytes.isEmpty() || looksBinary(bytes)) return applyBytes(bytes, content)
+        return redact(String(bytes, Charsets.UTF_8), content, live = true, openAtEnd = openAtEnd)
+    }
+
+    private fun redact(text: String, content: ContentClass, live: Boolean, openAtEnd: Boolean): Redacted {
         val refusal = refuse(content)
         require(refusal == null) { refusal.toString() }
         if (text.isEmpty()) return Redacted(text, RedactionMask.NONE)
@@ -161,7 +173,9 @@ public class Redaction @JvmOverloads constructor(public val config: RedactionCon
                 if (!match.range.isEmpty()) found += Found(match.range.first, match.range.last + 1, pattern.kind, index)
             }
         }
-        if (wasCapped) unterminatedBlock(scanned)?.let {
+        if (live) {
+            found += liveBlocks(scanned, openAtEnd)
+        } else if (wasCapped) unterminatedBlock(scanned)?.let {
             found += it
             limitations += "the byte cap cut a private-key block; the rest of the capture is hidden"
         }
@@ -237,10 +251,24 @@ public class Redaction @JvmOverloads constructor(public val config: RedactionCon
         return Found(open.range.first, text.length, "private-key-block", priority = -1)
     }
 
+    private fun liveBlocks(text: String, openAtEnd: Boolean): List<Found> = buildList {
+        val firstBegin = PRIVATE_KEY_BEGIN.find(text)
+        val firstEnd = PRIVATE_KEY_END.find(text)
+        if (firstEnd != null && (firstBegin == null || firstEnd.range.first < firstBegin.range.first)) {
+            add(Found(0, firstEnd.range.last + 1, "private-key-block", priority = -1))
+        }
+        val unclosed = PRIVATE_KEY_BEGIN.findAll(text).lastOrNull()?.takeIf { PRIVATE_KEY_END.find(text, it.range.last + 1) == null }
+        when {
+            unclosed != null -> add(Found(unclosed.range.first, text.length, "private-key-block", priority = -1))
+            openAtEnd -> add(Found(0, text.length, "private-key-block", priority = -1))
+        }
+    }
+
     private data class Found(val start: Int, val end: Int, val kind: String, val priority: Int)
 
     public companion object {
-        private val PRIVATE_KEY_BEGIN = Regex("-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----")
+        internal val PRIVATE_KEY_BEGIN: Regex = Regex("-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----")
+        internal val PRIVATE_KEY_END: Regex = Regex("-----END (?:[A-Z]+ )?PRIVATE KEY-----")
 
         /** Content classes that must never be rewritten (D-25 native replay items, D-14 recovery preimages). */
         @JvmStatic

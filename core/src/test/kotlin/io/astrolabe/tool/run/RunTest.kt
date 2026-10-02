@@ -1060,4 +1060,58 @@ class RunTest {
         assertTrue(out.body.contains("wait timed out after 5s before a line matching /ready/, the process keeps running (no relaunch)"), out.body)
         assertTrue(out.body.contains("process deadline 60s from its start"), out.body)
     }
+
+    private val keyHead = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n"
+    private val keyTail = "MIIpayloadSecondLineOfTheKey\n-----END PRIVATE KEY-----\n"
+
+    private fun assertNoKey(body: String) {
+        assertFalse(body.contains("MIIEvQ") || body.contains("MIIpayload"), body)
+        assertFalse(body.contains("line matched"), body)
+    }
+
+    @Test
+    fun `a readiness pattern never matches inside a complete private key block`() = runTest {
+        val scripted = ScriptedOs(listOf("" to ProcStatus.Running, "booting\n$keyHead$keyTail" to ProcStatus.Running))
+
+        val out = run("""{"argv":["git","status"],"until_line":"^MII","timeout":5}""", runner(os = scripted))
+
+        assertEquals("running", status(out), out.body)
+        assertTrue(out.body.contains("wait timed out after 5s before a line matching /^MII/"), out.body)
+        assertTrue(out.body.contains("[REDACTED:private-key-block]"), out.body)
+        assertNoKey(out.body)
+    }
+
+    @Test
+    fun `a private key block split across two polls is recognised as one block`() = runTest {
+        val scripted = ScriptedOs(listOf("" to ProcStatus.Running, "booting\n$keyHead" to ProcStatus.Running, keyTail to ProcStatus.Running))
+
+        val out = run("""{"argv":["git","status"],"until_line":"^MII","timeout":5}""", runner(os = scripted))
+
+        assertTrue(out.body.contains("wait timed out after 5s"), out.body)
+        assertNoKey(out.body)
+    }
+
+    @Test
+    fun `a wait that stops inside an open key block hides it and the next wait skips its rest`() = runTest {
+        val scripted = ScriptedOs(listOf("" to ProcStatus.Running, "booting\n$keyHead" to ProcStatus.Running, "" to ProcStatus.Running, keyTail + "ready\n" to ProcStatus.Running))
+        val tool = runner(os = scripted)
+
+        val first = run("""{"argv":["git","status"],"until_line":"^MII","timeout":5}""", tool)
+        assertTrue(first.body.contains("wait timed out after 5s"), first.body)
+        assertNoKey(first.body)
+
+        val second = run("""{"op":"wait","handle":"handle-1","until_line":"^MII|ready","timeout":5}""", tool)
+        assertTrue(second.body.contains("ready: line matched: ready"), second.body)
+        assertFalse(second.body.contains("MIIpayload"), second.body)
+    }
+
+    @Test
+    fun `a private key block that arrives with the terminal poll is neither matched nor shown`() = runTest {
+        val scripted = ScriptedOs(listOf("" to ProcStatus.Running, "booting\n$keyHead${keyTail}done\n" to ProcStatus.Exited(0)))
+
+        val out = run("""{"argv":["git","status"],"until_line":"^MII"}""", runner(os = scripted))
+
+        assertTrue(out.body.contains("wait ended: the process ended before a line matching /^MII/"), out.body)
+        assertNoKey(out.body)
+    }
 }
