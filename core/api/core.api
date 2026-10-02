@@ -715,6 +715,7 @@ public final class io/astrolabe/atlas/CollapseReason : java/lang/Enum {
 	public static final field Lockfile Lio/astrolabe/atlas/CollapseReason;
 	public static final field Minified Lio/astrolabe/atlas/CollapseReason;
 	public static final field TooLarge Lio/astrolabe/atlas/CollapseReason;
+	public static final field Toolchain Lio/astrolabe/atlas/CollapseReason;
 	public static final field Vendored Lio/astrolabe/atlas/CollapseReason;
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;
 	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/atlas/CollapseReason;
@@ -1824,6 +1825,11 @@ public final class io/astrolabe/auth/Classification$Companion {
 
 public abstract interface class io/astrolabe/auth/ContainmentProbe {
 	public abstract fun contained (Ljava/lang/String;)Z
+	public fun containedWithInnerLinks (Ljava/lang/String;)Z
+}
+
+public final class io/astrolabe/auth/ContainmentProbe$DefaultImpls {
+	public static fun containedWithInnerLinks (Lio/astrolabe/auth/ContainmentProbe;Ljava/lang/String;)Z
 }
 
 public final class io/astrolabe/auth/ContentClass : java/lang/Enum {

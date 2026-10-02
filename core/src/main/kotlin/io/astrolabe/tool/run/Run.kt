@@ -788,15 +788,21 @@ private class TailBuffer(private val capacity: Int) {
 /**
  * D-375: [ContainmentProbe] over the real workspace. Every existing segment of the path is a plain directory (the last
  * may be a file), never a link, junction or special entry; its real path lies strictly below the root; and neither it nor
- * any of at most [limit] entries below it is protected ([protects]) or a link. Anything unreadable answers false.
+ * any of at most [limit] entries below it is protected ([protects]) or a link — for [containedWithInnerLinks], a link below
+ * it whose real target lies strictly below the root and is not protected passes (never followed). Anything unreadable
+ * answers false.
  */
 internal class DiskContainment(
     private val paths: WorkspacePath,
     private val protects: (relative: String) -> Boolean,
     private val limit: Int = 20_000,
 ) : ContainmentProbe {
-    override fun contained(relative: String): Boolean = try {
-        inspect(relative)
+    override fun contained(relative: String): Boolean = guarded { inspect(relative, innerLinks = false) }
+
+    override fun containedWithInnerLinks(relative: String): Boolean = guarded { inspect(relative, innerLinks = true) }
+
+    private inline fun guarded(answer: () -> Boolean): Boolean = try {
+        answer()
     } catch (e: IOException) {
         false
     } catch (e: InvalidPathException) {
@@ -807,7 +813,7 @@ internal class DiskContainment(
         false
     }
 
-    private fun inspect(relative: String): Boolean {
+    private fun inspect(relative: String, innerLinks: Boolean): Boolean {
         val segments = relative.split('/')
         if (segments.any { it.isEmpty() || it == "." || it == ".." }) return false
         var path = paths.root
@@ -832,6 +838,7 @@ internal class DiskContainment(
                     when (WorkspacePath.kindOf(entry)) {
                         PathKind.Directory -> pending.addLast(entry)
                         PathKind.Regular -> Unit
+                        PathKind.Symlink, PathKind.Junction -> if (!innerLinks || !inside(entry.toRealPath())) return false
                         else -> return false
                     }
                     if (protects(relativeOf(entry))) return false
@@ -840,6 +847,8 @@ internal class DiskContainment(
         }
         return true
     }
+
+    private fun inside(real: Path): Boolean = real != paths.root && real.startsWith(paths.root) && !protects(relativeOf(real))
 
     private fun relativeOf(real: Path): String = paths.root.relativize(real).joinToString("/") { it.toString() }
 }

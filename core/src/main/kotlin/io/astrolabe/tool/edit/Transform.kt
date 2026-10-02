@@ -6,6 +6,7 @@ import io.astrolabe.atlas.Language
 import io.astrolabe.auth.CapabilitySet
 import io.astrolabe.auth.Ceiling
 import io.astrolabe.auth.EffectPolicy
+import io.astrolabe.auth.EffectPolicyConfig
 import io.astrolabe.auth.ExecutionDecision
 import io.astrolabe.auth.ExecutionMode
 import io.astrolabe.auth.ExecutionModeLabel
@@ -28,6 +29,7 @@ import io.astrolabe.tool.EffectClass
 import io.astrolabe.tool.ExpectedMatches
 import io.astrolabe.tool.RunArgs
 import io.astrolabe.tool.TransformArgs
+import io.astrolabe.tool.run.DiskContainment
 import io.astrolabe.tool.run.Runner
 import io.astrolabe.verify.SurfaceChange
 import io.astrolabe.workset.Entry
@@ -168,7 +170,9 @@ internal class TransformRun(
         // Authority before any effect (D-41): the capability ceiling and execution mode of `run`, D-class refused outright.
         val argv = args.argv ?: listOf(args.script!!)
         val runArgs = if (args.argv != null) RunArgs(argv = args.argv) else RunArgs(cmd = args.script)
-        val classification = EffectPolicy.classify(runArgs, workspace.root.toString(), contract.scope.protectedPaths)
+        // D-375: the same disk probe as `run`, so a delete or move the script names is classified as `run` would classify it.
+        val containment = DiskContainment(workspace.paths, { contract.scope.protects(it, ignoreCase = true) || workspace.paths.isProtected(it, Intent.Mutate) })
+        val classification = EffectPolicy.classify(runArgs, workspace.root.toString(), contract.scope.protectedPaths, EffectPolicyConfig(), containment)
         val ceiling = try {
             Ceiling.of(contract.authorization, exec.executionMode, exec.hostSets)
         } catch (misconfigured: IllegalArgumentException) {

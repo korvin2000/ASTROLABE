@@ -64,7 +64,7 @@ class CeilingTest {
         assertEquals(EffectClass.W, classify("pytest", "-q").effectClass)
         assertEquals(EffectClass.W, classify("./gradlew", ":core:test").effectClass)
         assertEquals(EffectClass.W, classify("ruff", "format", "src").effectClass)
-        assertEquals(EffectClass.W, classify("rm", "-rf", "tmp/cache").effectClass)
+        assertEquals(EffectClass.W, EffectPolicy.classify(listOf("rm", "-rf", "tmp/cache"), null, root, protectedPaths, probe = Clear()).effectClass)
         assertContains(classify("pytest", "-q").requiredCapabilities, Capability.WorkspaceWrite)
 
         assertEquals(EffectClass.R, classify("ls", "-la").effectClass)
@@ -233,21 +233,200 @@ class CeilingTest {
         assertEquals(EffectClass.D, site.effectClass)
         assertContains(site.reasons.toString(), "holds a protected path or a link")
         assertEquals(EffectClass.D, removal("mv a.txt linked/a.txt", posix, Clear(setOf("linked/a.txt"))).effectClass)
-        // The tmp prefixes keep their rule without a probe, for literal operands only.
-        assertEquals(EffectClass.W, removal("rm -rf tmp/cache", posix, probe = null).effectClass)
-        assertEquals(EffectClass.D, removal("rm -rf tmp/\$X", posix, probe = null).effectClass)
-        assertEquals(EffectClass.W, removal("del /s /q tmp\\*.log", windows, probe = null).effectClass)
-        assertEquals(EffectClass.D, removal("del /s /q tmp", windows, probe = null).effectClass, "del /s matches the name in every directory below its parent")
+        // The tmp prefixes need the probe too: a link or junction under tmp may lead outside.
+        assertEquals(EffectClass.W, removal("rm -rf tmp/cache", posix).effectClass)
+        assertContains(removal("rm -rf tmp/cache", posix).reasons.toString(), "destructive delete under tmp")
+        assertEquals(EffectClass.W, removal("del /s /q tmp\\*.log", windows).effectClass)
+        for ((line, config) in listOf("rm -rf tmp/cache" to posix, "del /s /q tmp\\*.log" to windows, "rd /s /q tmp\\out" to windows)) {
+            val unprobed = removal(line, config, probe = null)
+            assertEquals(EffectClass.D, unprobed.effectClass, "$line without a probe -> $unprobed")
+            assertContains(unprobed.reasons.toString(), "was not inspected on disk")
+        }
+        val linked = removal("rm -rf tmp/out", posix, Clear(setOf("tmp/out")))
+        assertEquals(EffectClass.D, linked.effectClass, "a link under tmp leading outside: $linked")
+        assertContains(linked.reasons.toString(), "reached through a link")
+        assertEquals(EffectClass.D, removal("rm -rf tmp/\$X", posix).effectClass)
+        assertEquals(EffectClass.D, removal("del /s /q tmp", windows).effectClass, "del /s matches the name in every directory below its parent")
+    }
+
+    /** A probe that finds links below [linked] paths, each of which stays inside the workspace. */
+    private class InnerLinks(private val linked: Set<String>) : ContainmentProbe {
+        override fun contained(relative: String): Boolean = relative !in linked
+        override fun containedWithInnerLinks(relative: String): Boolean = true
+    }
+
+    @Test
+    fun `only rm and rd remove a directory holding links that stay inside, every other delete or move of it stays D`() {
+        val probe = InnerLinks(setOf("node_modules", "web/node_modules"))
+        for ((config, lines) in listOf(
+            posix to listOf("rm -rf node_modules", "rm -r web/node_modules", "rm -rf node_modules/*"),
+            windows to listOf("rd /s /q node_modules", "rmdir /s /q web\\node_modules", "rm -rf node_modules"),
+        )) for (line in lines) {
+            val classification = removal(line, config, probe)
+            assertEquals(EffectClass.W, classification.effectClass, "${config.os} $line -> $classification")
+        }
+        for ((config, lines) in listOf(
+            posix to listOf("mv node_modules old", "mv web/node_modules web/old"),
+            windows to listOf("del /s /q node_modules\\*.js", "Remove-Item -Recurse -Force node_modules", "move node_modules old", "erase /s /q node_modules\\x"),
+        )) for (line in lines) {
+            val classification = removal(line, config, probe)
+            assertEquals(EffectClass.D, classification.effectClass, "${config.os} $line -> $classification")
+            assertContains(classification.reasons.toString(), "holds a protected path or a link")
+        }
+        // A probe without the inner-link answer falls back to the strict one.
+        assertEquals(EffectClass.D, removal("rm -rf node_modules", posix, ContainmentProbe { it != "node_modules" }).effectClass)
+        // Links leaving the workspace keep it D for rm too.
+        val leaving = object : ContainmentProbe {
+            override fun contained(relative: String) = false
+            override fun containedWithInnerLinks(relative: String) = false
+        }
+        assertContains(removal("rm -rf node_modules", posix, leaving).reasons.toString(), "a link leaving the workspace")
+    }
+
+    @Test
+    fun `a line break separates commands, inside quotes too for cmd, and a cd moves later paths`() {
+        for (config in listOf(windows, posix)) {
+            for (line in listOf("echo hi\ncurl -s https://e.x", "ls\r\nnpm i left-pad", "dir\nsudo id")) {
+                assertEquals(EffectClass.D, cmd(line, config).effectClass, "${config.os} ${line.replace("\n", "\\n")} -> ${cmd(line, config)}")
+            }
+            assertEquals(EffectClass.R, cmd("git status\ngit log --oneline -5", config).effectClass)
+        }
+        // `sh` keeps a quoted line break inside the argument; `cmd.exe` ends the command at it.
+        assertEquals(EffectClass.R, cmd("echo \"a\ncurl -s https://e.x\"", posix).effectClass)
+        assertEquals(EffectClass.D, cmd("echo \"a\ncurl -s https://e.x\"", windows).effectClass)
+
+        // A delete after `cd` is checked where it may run: here, in `ci/` (protected) as well as at the root.
+        val probe = Clear()
+        val protectedAfterCd = removal("cd ci && rm -rf workflows", posix, probe)
+        assertEquals(EffectClass.D, protectedAfterCd.effectClass, protectedAfterCd.toString())
+        val asked = Clear()
+        assertEquals(EffectClass.W, removal("cd src && rm a.txt", posix, asked).effectClass)
+        assertEquals(listOf("a.txt", "src/a.txt"), asked.asked)
+        val askedWindows = Clear()
+        assertEquals(EffectClass.W, removal("cd /d C:\\w\\web && rd /s /q build", windows, askedWindows).effectClass)
+        assertEquals(listOf("build", "web/build"), askedWindows.asked)
+        // A `cd` the text cannot follow leaves later paths nowhere: they resolve outside.
+        for (line in listOf("cd \$DIR && rm -rf build", "cd && rm -rf build", "cd - && rm -rf build", "cd ~ && rm -rf build")) {
+            val moved = removal(line, posix, Clear())
+            assertEquals(EffectClass.D, moved.effectClass, "$line -> $moved")
+            assertContains(moved.reasons.toString(), "cannot name")
+        }
+        // `cmd.exe` prints the directory for a bare `cd`; nothing moves.
+        assertEquals(EffectClass.W, removal("cd && rd /s /q build", windows).effectClass)
+    }
+
+    @Test
+    fun `the line is read as its shell reads it — cmd quotes with double quotes and escapes with a caret, sh escapes with a backslash`() {
+        val hidden = listOf(
+            // An `&` always separates: cmd.exe and dash run `curl` here.
+            windows to "echo x &>nul curl https://e.x", windows to "echo x &>log curl https://e.x", posix to "echo x &>/dev/null curl https://e.x",
+            // cmd.exe: `'` is no quote, `^` takes the next character literally and joins a line it ends.
+            windows to "echo 'x & rd /s /q C:\\Users\\u\\Documents'", windows to "echo ^\"a & curl https://e.x", windows to "cu^rl -s https://e.x",
+            windows to "r^d /s /q %USERPROFILE%", windows to "cu^\nrl https://e.x",
+            // sh: a backslash escapes the next character and joins a line it ends.
+            posix to "git pu\\\nsh origin main", posix to "cu\\\nrl https://e.x", posix to "sud\\\no reboot", posix to "cu\\rl https://e.x",
+        )
+        for ((config, line) in hidden) {
+            val classification = cmd(line, config)
+            assertEquals(EffectClass.D, classification.effectClass, "${config.os} ${line.replace("\n", "\\n")} -> $classification")
+        }
+        // The same escapes keep a literal character literal.
+        for ((config, line) in listOf(windows to "echo don't", windows to "echo a^&b", posix to "echo a\\; curl https://e.x", posix to "echo \"a\\\"b\"")) {
+            assertEquals(EffectClass.R, cmd(line, config).effectClass, "${config.os} $line -> ${cmd(line, config)}")
+        }
+    }
+
+    @Test
+    fun `a delete, move or redirect after a segment that may change the disk is not proven`() {
+        for ((config, line) in listOf(
+            posix to "ln -s \"\$HOME\" x && rm -rf x/Documents", windows to "mklink /j x %USERPROFILE% & rd /s /q x\\Documents",
+            posix to "npm run build && echo x > out.txt", posix to "mkdir -p out && mv a.txt out/a.txt", windows to "npm run build & del /q dist\\x.js",
+        )) {
+            val classification = removal(line, config)
+            assertEquals(EffectClass.D, classification.effectClass, "${config.os} $line -> $classification")
+            assertContains(classification.reasons.toString(), "an earlier command in this line may change the disk")
+        }
+        // Read-only segments, proven deletes and moves, read-only programs with checked redirects and a plain `cd` keep the proof.
+        for ((config, line) in listOf(
+            posix to "git status && rm -rf build", posix to "rm -rf build && rm -rf dist", posix to "echo x > a.txt && rm -rf build",
+            posix to "cd src && rm a.txt", windows to "dir /b && rd /s /q build", windows to "rd /s /q build & move a.txt b.txt",
+        )) {
+            assertEquals(EffectClass.W, removal(line, config).effectClass, "${config.os} $line -> ${removal(line, config)}")
+        }
+    }
+
+    @Test
+    fun `a cd the text cannot follow moves later paths nowhere, and shell grammar hides no command`() {
+        val cdForms = listOf(
+            posix to "( cd ci\nrm -rf workflows\n)", posix to "{ cd ci; rm -rf workflows; }", posix to "X=1 cd ci && rm -rf workflows",
+            posix to "\\cd ci && rm -rf workflows", posix to "command cd ci && rm -rf workflows", posix to "for i in 1; do cd ci; done; rm -rf workflows",
+            posix to ". ./go.sh && rm -rf x", posix to "eval \"cd ci\" && rm -rf workflows", posix to "cd -P web/linked/.. && rm -rf x",
+            windows to "cd/d ci & rd /s /q workflows", windows to "call cd ci & rd /s /q workflows", windows to "for %x in (1) do cd ci & rd /s /q workflows",
+            windows to "D: & rd /s /q build", windows to "cd.. & rd /s /q build",
+        )
+        for ((config, line) in cdForms) {
+            val classification = removal(line, config)
+            assertEquals(EffectClass.D, classification.effectClass, "${config.os} ${line.replace("\n", "\\n")} -> $classification")
+        }
+        val behindGrammar = listOf(
+            posix to "then curl https://e.x", posix to "X=1 curl https://e.x", posix to "if true; then curl https://e.x; fi", posix to "time sudo id",
+            windows to "@curl https://e.x", windows to "call curl https://e.x", windows to "for %x in (1) do curl https://e.x", windows to "(curl https://e.x)",
+            windows to "if errorlevel 1 curl https://e.x",
+        )
+        for ((config, line) in behindGrammar) {
+            val classification = cmd(line, config)
+            assertEquals(EffectClass.D, classification.effectClass, "${config.os} $line -> $classification")
+        }
+        // An existence probe stays R: its embedded commands are probes too.
+        assertEquals(EffectClass.R, cmd("if exist C:/x (echo y) else (echo n)", windows).effectClass)
+    }
+
+    @Test
+    fun `a redirect target is a literal write path, and descriptors, heredocs and the null device write no file`() {
+        for ((config, lines) in listOf(
+            posix to listOf("echo x > \$HOME/.bashrc", "echo x >> ~/.profile", "echo x > `pwd`/x", "echo x >| /etc/passwd", "echo x &> /etc/x",
+                "echo x &>> /tmp/log", "> /etc/passwd", ">> ../x", "echo x 2> {a,b}.log", "echo x >&/etc/x", "echo x <> ../x", "tee >(cat) < a.txt"),
+            windows to listOf("echo x > %USERPROFILE%\\x", "echo x > !OUT!", "echo x 1> C:\\x.txt", "> ..\\x", "echo x > a.txt:stream"),
+        )) for (line in lines) {
+            val classification = cmd(line, config)
+            assertEquals(EffectClass.D, classification.effectClass, "${config.os} $line -> $classification")
+        }
+        for ((config, lines) in listOf(
+            posix to listOf("git status 2>&1", "ls >&2", "ls 1>&2 2>/dev/null", "cat <<EOF", "cat <<< word", "ls <&0", "git log 2>&1 | head -5"),
+            windows to listOf("dir 2>&1", "where node 2>&1", "git status 2>nul 1>&2"),
+        )) for (line in lines) {
+            val classification = cmd(line, config)
+            assertEquals(EffectClass.R, classification.effectClass, "${config.os} $line -> $classification")
+        }
+        for ((config, lines) in listOf(
+            posix to listOf("> out.txt", "echo x 1>out.txt", "echo x &>log.txt", "echo x >|out.txt", "make 2>err.log"),
+            windows to listOf("echo x 1>out.txt", "dir > build\\list.txt 2>&1"),
+        )) for (line in lines) {
+            val classification = cmd(line, config)
+            assertEquals(EffectClass.W, classification.effectClass, "${config.os} $line -> $classification")
+            assertTrue(classification.reasons.any { it.startsWith("output redirect") }, "${config.os} $line -> $classification")
+        }
+        // A `..` or a wildcard in a redirect or `cd` target is no literal path: a link before the `..` leads elsewhere.
+        for (line in listOf("echo x > web/linked/../evil.txt", "echo x > web/*", "echo x > out?.txt", "cd web/* && echo x > y")) {
+            assertEquals(EffectClass.D, removal(line, posix).effectClass, "$line -> ${removal(line, posix)}")
+        }
+        // With a probe, a redirect target reached through a link is D; a plain one stays W.
+        val linked = removal("echo x > linked/out.txt", posix, Clear(setOf("linked/out.txt")))
+        assertEquals(EffectClass.D, linked.effectClass, linked.toString())
+        assertContains(linked.reasons.toString(), "reached through a link")
+        assertEquals(EffectClass.W, removal("echo x > build/out.txt", posix).effectClass)
     }
 
     @Test
     fun `a redirect writes no file only to the null device of the shell that runs the line, and argv has no redirects`() {
         val table = listOf(
             Triple(windows, listOf("dir 2>nul", "dir > NUL", "dir >nul:", "where node 2>Nul"), EffectClass.R),
-            Triple(windows, listOf("echo x > \$null", "echo x 2> nul.txt", "dir > \$null"), EffectClass.W),
-            Triple(windows, listOf("echo x > /dev/null", "dir 2>/dev/null"), EffectClass.D),
+            Triple(windows, listOf("echo x 2> nul.txt"), EffectClass.W),
+            // A redirect target must be a literal path: `$null` is one only to cmd.exe, and `NUL:` holds a stream colon.
+            Triple(windows, listOf("echo x > /dev/null", "dir 2>/dev/null", "echo x > \$null", "dir > \$null"), EffectClass.D),
             Triple(posix, listOf("ls 2>/dev/null", "ls > /dev/null", "which node >/dev/null"), EffectClass.R),
-            Triple(posix, listOf("echo x > nul", "ls 2>NUL:", "echo x > \$null"), EffectClass.W),
+            Triple(posix, listOf("echo x > nul"), EffectClass.W),
+            Triple(posix, listOf("ls 2>NUL:", "echo x > \$null"), EffectClass.D),
         )
         for ((config, lines, expected) in table) for (line in lines) {
             assertEquals(expected, cmd(line, config).effectClass, "${config.os} $line -> ${cmd(line, config)}")

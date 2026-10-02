@@ -144,7 +144,7 @@ public sealed interface Command {
         }
     }
 
-    /** One shell invocation: `cmd.exe /d /s /c "<commandLine>"` on Windows, `sh -c` on POSIX. */
+    /** One shell invocation: `cmd.exe /d /v:off /s /c "<commandLine>"` on Windows, `sh -c` on POSIX. */
     @Serializable
     @SerialName("shell")
     public data class Shell(public val commandLine: String) : Command {
