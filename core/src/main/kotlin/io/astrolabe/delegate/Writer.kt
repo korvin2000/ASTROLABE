@@ -72,8 +72,12 @@ public class Writers @JvmOverloads constructor(
         val dispatch = WriterDispatch(child.handle, task, worktree)
         synchronized(dispatches) { dispatches[child.handle.id] = dispatch }
         val seat = ChildSeat(child.handle.child, child.cancellation, RoutingFunction.Implementing)
-        val exit = cell.run(seat, dispatch, Roles.writer, ChildBudget(budget.turns, task.reservedBudget), ChildBrief.render(task, OUTPUT))
-            ?: return ChildOutcome.Failed("writer ${child.handle.id} was cancelled before it ended; usage unknown", task.reservedBudget)
+        val exit = try {
+            cell.run(seat, dispatch, Roles.writer, ChildBudget(budget.turns, task.reservedBudget), ChildBrief.render(task, OUTPUT))
+        } catch (refused: ChildNotStarted) {
+            // Nothing was dispatched, so nothing was spent; the dispatch and its worktree stay as for any failed writer.
+            return ChildOutcome.Failed("writer ${child.handle.id} not started: ${refused.reason}", Tokens.ZERO)
+        } ?: return ChildOutcome.Failed("writer ${child.handle.id} was cancelled before it ended; usage unknown", task.reservedBudget)
         val spend = CellChildRunner.spendOf(exit.packet.cost)
         val gaps = validate(dispatch, exit.packet)
         return if (exit is CellExit.Completed && gaps.isEmpty()) ChildOutcome.Published(ChildPacket.Result(exit.packet), spend)

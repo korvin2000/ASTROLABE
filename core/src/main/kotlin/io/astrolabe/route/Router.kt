@@ -15,6 +15,9 @@ import java.util.Collections
  * What the router reads of a task packet (§11.2). Until P4.4.1's `TaskPacket` exists this is the router's own
  * record; [risk] is the packet's declared risk, [planSuggestion] the plan cell's tier (informs, never decides),
  * [previousTier] the failing cell's tier a continuation never drops below, [featureClass] the calibration key.
+ * Three quantities stay apart: [contextTokens] is the request as sent (its wire input), [reserveTokens] the input the
+ * cell will add (its growth reserve) and [outputTokens] the output headroom. All three must fit a window; only the
+ * wire input and the output are priced.
  */
 public data class RoutingPacket @JvmOverloads constructor(
     val risk: Risk?,
@@ -23,9 +26,11 @@ public data class RoutingPacket @JvmOverloads constructor(
     val planSuggestion: Tier? = null,
     val previousTier: Tier? = null,
     val featureClass: String? = null,
+    val reserveTokens: Long = 0,
 ) {
     init {
         require(contextTokens >= 0 && outputTokens > 0) { "context tokens are ≥ 0 and output headroom positive" }
+        require(reserveTokens >= 0) { "the growth reserve is ≥ 0" }
         require(planSuggestion?.model != false && previousTier?.model != false) { "tier suggestions are model tiers" }
     }
 }
@@ -140,7 +145,8 @@ public class Router @JvmOverloads constructor(public val calibration: Calibratio
                 policy.authorized?.contains(id) == false -> "not authorized"
                 policy.available?.contains(id) == false -> "unavailable"
                 packet.outputTokens > profile.capabilities.outputLimitTokens -> "output headroom ${packet.outputTokens} exceeds its ${profile.capabilities.outputLimitTokens}"
-                packet.contextTokens + packet.outputTokens > profile.capabilities.contextLimitTokens -> "context ${packet.contextTokens}+${packet.outputTokens} does not fit ${profile.capabilities.contextLimitTokens}"
+                packet.contextTokens + packet.reserveTokens + packet.outputTokens > profile.capabilities.contextLimitTokens ->
+                    "context ${packet.contextTokens}${if (packet.reserveTokens > 0) "+${packet.reserveTokens}" else ""}+${packet.outputTokens} does not fit ${profile.capabilities.contextLimitTokens}"
                 policy.qualityFloor != null && !meetsQualityFloor(profile, policy.qualityFloor) -> "below the calibrated quality floor"
                 else -> null
             }
@@ -212,7 +218,10 @@ public class Router @JvmOverloads constructor(public val calibration: Calibratio
             return maxOf(declared, supplement)
         }
 
-        /** One full-context turn at the profile's dated prices: uncached input plus the output headroom (D-109). */
+        /**
+         * One full-context turn at the profile's dated prices: the wire input as uncached input plus the output headroom
+         * (D-109). The growth reserve is room, not a paid input.
+         */
         @JvmStatic
         public fun conservativeCost(profile: Profile, packet: RoutingPacket): Money? {
             val input = profile.priceTable.price(BillingDimension.UNCACHED_INPUT, packet.contextTokens) ?: return null

@@ -72,8 +72,10 @@ public data class CompileInputs @JvmOverloads constructor(
  * pre-existing ledger, the contracts index, CON/ADR notes anchored in the increment's write scope and the
  * carry-forward; optional units follow in the §6.1 order — affected contracts, carry-forward, seeds, local
  * implementation, lessons/pitfalls, skills, background — chosen by the D-18/D-55 greedy cover within
- * `C·α − |S| − |R| − |T| − reserves`. A mandatory part that does not fit is `NEEDS_RESCOPING_OR_LARGER_PROFILE`,
- * never a silent drop; a coverage gap in the rendered projection is `NEEDS_MORE_EVIDENCE`.
+ * `C·α − |S| − |R| − |T| − output − growth`, where the growth reserve (`[A]` max and the next observation) scales
+ * with the window ([io.astrolabe.Defaults.growthReserveTokens]). A mandatory part that does not fit is
+ * `NEEDS_RESCOPING_OR_LARGER_PROFILE`, never a silent drop; a coverage gap in the rendered projection is
+ * `NEEDS_MORE_EVIDENCE`.
  */
 public class Compiler(
     private val estimator: TokenEstimator,
@@ -98,7 +100,7 @@ public class Compiler(
         val transcript = Transcript(contract.requests.map { it.text } + pinned)
         val fixed = Layout.render(role, mask, config.executionMode, prime, CompiledK(slice, preexisting), transcript)
         val defaults = config.defaults
-        val reserves = maxOutputTokens.toLong() + defaults.anchorMaxTokens + maxOf(defaults.lookBudgetTokens, defaults.runBudgetTokens)
+        val growth = defaults.growthReserveTokens(profile.capabilities.contextLimitTokens)
         val budget = ContextBudget(
             profileTokens = Tokens(profile.capabilities.contextLimitTokens.toLong()),
             alpha = BigDecimal.valueOf(defaults.alpha),
@@ -108,7 +110,8 @@ public class Compiler(
             retainedProtocol = ContextCost(Tokens(0), SOURCE, estimated = false),
             // A fresh lineage: no effective history yet, which is known, not unknown (D-06).
             effectiveHistory = ContextCost(Tokens(0), SOURCE, estimated = false),
-            reserves = ContextCost(Tokens(reserves), "reserve(output + [A]_max + next observation)", estimated = false),
+            reserves = ContextCost(Tokens(growth), "reserve([A]_max + next observation, scaled to the window)", estimated = false),
+            outputHeadroomTokens = Tokens(maxOutputTokens.toLong()),
         )
         val sections = candidates(increment, contract, role, prime, inputs)
         val units = listOf(ContextUnit(MANDATORY, cost(fixed, SegmentKind.K), mandatory = true)) + sections.map { it.unit }

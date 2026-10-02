@@ -36,9 +36,11 @@ public class ContextUnit @JvmOverloads public constructor(
 
 /**
  * Disjoint serialized charges. System/repository unit costs are subsets of their corresponding charges.
- * Effective history is additional to pinned/retained text; null means unknown, never zero (D-06).
+ * Effective history is additional to pinned/retained text; null means unknown, never zero (D-06). [reserves] is the
+ * growth reserve — input the cell adds after this request — and [outputHeadroomTokens] the request's output limit:
+ * both are charged against `C·α`, neither is sent.
  */
-public data class ContextBudget(
+public data class ContextBudget @JvmOverloads constructor(
     val profileTokens: Tokens,
     val alpha: BigDecimal,
     val system: ContextCost,
@@ -47,17 +49,28 @@ public data class ContextBudget(
     val retainedProtocol: ContextCost,
     val effectiveHistory: ContextCost?,
     val reserves: ContextCost,
+    val outputHeadroomTokens: Tokens = Tokens.ZERO,
 ) {
-    init { require(alpha > BigDecimal.ZERO && alpha <= BigDecimal.ONE) { "alpha must be in (0, 1]" } }
+    init {
+        require(alpha > BigDecimal.ZERO && alpha <= BigDecimal.ONE) { "alpha must be in (0, 1]" }
+        require(outputHeadroomTokens.value >= 0) { "output headroom must be ≥ 0" }
+    }
 }
 
-/** Null totals retain unknown effective history; knownFixedTokens is only the known subtotal. */
+/**
+ * Null totals retain unknown effective history; knownFixedTokens is only the known subtotal. The three quantities a
+ * dispatch decision reads apart: [wireTokens] is the request as sent (fixed charges and the selection, without
+ * reserves), [reserveTokens] the growth reserve and [outputTokens] the output headroom; [totalTokens] is their sum.
+ */
 public data class ContextArithmetic(
     val limitTokens: BigInteger,
     val knownFixedTokens: BigInteger,
     val availableTokens: BigInteger?,
     val selectedTokens: BigInteger,
     val totalTokens: BigInteger?,
+    val wireTokens: BigInteger?,
+    val reserveTokens: BigInteger,
+    val outputTokens: BigInteger,
 )
 
 public enum class ContextSelectionStatus { Fit, Capacity, NeedsEvidence, UnknownHistory }
@@ -112,8 +125,10 @@ public object ContextCover {
         val selected = mandatory.toMutableSet()
         val limit = budget.alpha.multiply(BigDecimal.valueOf(budget.profileTokens.value))
             .setScale(0, RoundingMode.FLOOR).toBigIntegerExact()
+        val reserve = budget.reserves.tokens.value.toBigInteger()
+        val output = budget.outputHeadroomTokens.value.toBigInteger()
         val fixed = sum(listOfNotNull(budget.system, budget.repository, budget.pinnedHistory,
-            budget.retainedProtocol, budget.effectiveHistory, budget.reserves)) { it.tokens.value }
+            budget.retainedProtocol, budget.effectiveHistory, budget.reserves)) { it.tokens.value } + output
         val available = if (budget.effectiveHistory == null) null else limit - fixed
         fun tokens(ids: Collection<ContextUnitId>): BigInteger = sum(ids.map(byId::getValue)
             .filter { it.placement == ContextPlacement.K }) { it.cost.tokens.value }
@@ -148,7 +163,8 @@ public object ContextCover {
             }
         }
         return ContextSelection(status, byId, budget,
-            ContextArithmetic(limit, fixed, available, used, if (available == null) null else fixed + used),
+            ContextArithmetic(limit, fixed, available, used, if (available == null) null else fixed + used,
+                if (available == null) null else fixed - reserve - output + used, reserve, output),
             mandatory, selected, omissions, bundles.values.flatMap { it.issues }, picks)
     }
 

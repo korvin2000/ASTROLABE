@@ -86,6 +86,21 @@ class ProbeTest {
     }
 
     @Test
+    fun `a probe whose context no candidate window holds fails without a crash and without spend`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val cell = ChildCell { _, _, _, _, _ -> throw ChildNotStarted("the probe child of inc-1 cannot be compiled: no candidate window fits") }
+            val delegator = Delegator(CellChildRunner(cell), { null }, Cancellation(), DelegationLimits(Tokens(200_000)), Shape.S2, this, f.idGen, f.clock)
+            val packets = TaskPackets(WorkspaceId("ws-1"), Ceiling(CapabilitySet.WORKSPACE_READ_ONLY, Stage.Patch, ExecutionMode.TrustedLocal), ExecutionGeneration.INITIAL)
+            val parent = TaskTool(AutonomousAuthority(), f.contracts, f.journal, estimator, f.idGen, f.ids.withCandidate(f.stamper.report().candidateId), f.clock, null, ToolMask(ToolOps.all), null, delegator, packets, f.registry::version)
+            parent.execute(call("task", """{"op":"delegate","kind":"probe","mode":"sync","packet":{"increment":"inc-1","requirements":["R1"],"uncertainties":["what does a return?"],"readScope":["src/"],"budgetTokens":40000}}"""),
+                TurnContext(2, f.workset.snapshot(), Reservations(Tokens(10_000))))
+            val failed = assertIs<Collected.Failed>(delegator.collect(delegator.handles.single()))
+            assertTrue("not started" in failed.reason && "no candidate window fits" in failed.reason, failed.reason)
+            assertEquals(Tokens.ZERO, failed.spend, "nothing was dispatched, so the reservation is released")
+        }
+    }
+
+    @Test
     fun `FX-41 - findings for ranges that changed since are marked stale and the parent re-looks`() = runTest {
         CellFixture(stateRoot).use { f ->
             val shownVersion = f.version("src/a.py")

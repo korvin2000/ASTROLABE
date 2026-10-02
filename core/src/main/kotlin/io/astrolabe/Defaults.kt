@@ -32,6 +32,8 @@ public data class Defaults(
     // look.budget / run.budget
     val lookBudgetTokens: Int = 4_000,
     val runBudgetTokens: Int = 4_000,
+    // The window from which the compile's growth reserve ([A] max + the larger budget) is reserved in full
+    val growthReserveFullWindowTokens: Int = 65_536,
     // Register cap / contract digest cap / patch cap
     val registerCapTokens: Int = 3_000,
     val digestCapTokens: Int = 150,
@@ -130,6 +132,7 @@ public data class Defaults(
         positive("immediateStubTokens", immediateStubTokens)
         positive("lookBudgetTokens", lookBudgetTokens)
         positive("runBudgetTokens", runBudgetTokens)
+        positive("growthReserveFullWindowTokens", growthReserveFullWindowTokens)
         positive("registerCapTokens", registerCapTokens)
         positive("digestCapTokens", digestCapTokens)
         if (digestTokensPerRequirement < 0) v += ConfigViolation("digestTokensPerRequirement", "must be ≥ 0")
@@ -174,6 +177,18 @@ public data class Defaults(
     public fun effectiveDigestCapTokens(requirements: Int): Int {
         val scaled = digestCapTokens.toLong() + digestTokensPerRequirement.toLong() * requirements.coerceAtLeast(0)
         return minOf(scaled, maxOf(digestCapTokens, digestCapCeilingTokens).toLong()).toInt()
+    }
+
+    /**
+     * The compile's growth reserve for a window of [contextLimitTokens] (§6.1): the input a cell adds before its first
+     * rebuild — `[A]` up to [anchorMaxTokens] and the next observation, the larger of [lookBudgetTokens] and
+     * [runBudgetTokens]. A window of [growthReserveFullWindowTokens] or more reserves all of it; a smaller one its
+     * proportional share, since the cell cuts its reads to what the window leaves.
+     */
+    public fun growthReserveTokens(contextLimitTokens: Int): Long {
+        val full = anchorMaxTokens.toLong() + maxOf(lookBudgetTokens, runBudgetTokens)
+        if (contextLimitTokens >= growthReserveFullWindowTokens) return full
+        return full * contextLimitTokens.coerceAtLeast(0) / growthReserveFullWindowTokens
     }
 }
 
