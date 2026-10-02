@@ -889,6 +889,11 @@ class CellTest {
             assertEquals(PartialReason.TurnBudget, assertIs<CellExit.Partial>(exit).reason)
             assertTrue(f.request(3).mask!!.allows("edit.delete") && f.request(3).mask!!.allows("edit.anchored"), "path-addressed edits stay enabled for a repair")
             assertFalse(f.request(3).mask!!.allows("edit.transform"), "a transform is never a repair")
+            // [A] agrees with the executor: the enabled edits are held to the cell's own files, and the gate says so.
+            val anchor3 = f.anchorText(3)
+            assertTrue(anchor3.lineSequence().first { it.startsWith("enabled this turn") }.endsWith(" (edits: own files only)"), anchor3)
+            assertTrue(anchor3.contains("reserve reached: verify and report; repairs to your own files only"), anchor3)
+            assertFalse(anchor3.contains(CellBudget.GATE), anchor3)
             val refused = resultText(f.transcript(4).filterIsInstance<ToolResult>().last { "c3" == it.callId })
             assertTrue(refused.contains("not executed: reserve reached: edits are limited to files this cell already changed (src/new.py); verify and report; this call was refused; the other 1 call of the turn ran"), refused)
             val beside = f.transcript(4).filterIsInstance<ToolResult>().associate { it.callId to resultText(it) }

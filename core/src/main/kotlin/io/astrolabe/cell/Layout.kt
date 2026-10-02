@@ -203,9 +203,10 @@ public object Layout {
     /**
      * The `[A]` line naming what [mask] enables this turn, relative to [role]'s tools listed in `[S]`: `all role tools`,
      * `all role tools except …` while that is the shorter form, else the enabled operations themselves. The executor
-     * refuses a masked call whatever this line says.
+     * refuses a masked call whatever this line says. On a D-366 repair turn ([ownFilesOnly]) the enabled edits are held
+     * to the cell's own files, and the line says so.
      */
-    internal fun enabled(role: Role, mask: ToolMask): String {
+    internal fun enabled(role: Role, mask: ToolMask, ownFilesOnly: Boolean = false): String {
         val roleOps = role.toolMask.allowed
         val excluded = roleOps - mask.allowed
         val text = when {
@@ -214,7 +215,9 @@ public object Layout {
             excluded.isEmpty() -> "all role tools"
             else -> "all role tools except " + ordered(excluded).joinToString(", ")
         }
-        return "enabled this turn: $text"
+        val edit = ToolFamily.Edit.wire + "."
+        val repair = if (ownFilesOnly && mask.allowed.any { it.startsWith(edit) }) " (edits: own files only)" else ""
+        return "enabled this turn: $text$repair"
     }
 
     /** `look(tree, read) · run(run, wait)`: families and operations in declaration order, so the bytes are stable. */

@@ -329,7 +329,7 @@ public class Cell @JvmOverloads constructor(
                 is SchemaSelection.Unsupported -> return failed("tool schemas unsupported for ${selection.profileId}: ${selection.reason}")
             }
             val anchor = try {
-                renderAnchor(contract, mask)
+                renderAnchor(contract, mask, repairable.isNotEmpty())
             } catch (capacity: DigestCapacity) {
                 return partial(PartialReason.Pressure, "replan: ${capacity.message}")
             }
@@ -703,7 +703,8 @@ public class Cell @JvmOverloads constructor(
 
         // ----------------------------------------------------------- render
 
-        private fun renderAnchor(contract: Contract, mask: ToolMask): AnchorRender {
+        /** On a [repair] turn (D-366) the enabled line and the reserve gate both say edits are held to the cell's own files. */
+        private fun renderAnchor(contract: Contract, mask: ToolMask, repair: Boolean = false): AnchorRender {
             val stampNow = lastReport?.candidateId
             val currencies = currencies(stampNow)
             val digest = ContractDigest.render(contract, ctx.ledger ?: Ledger.initial(contract), obligations(contract, currencies), estimator, defaults.effectiveDigestCapTokens(contract.requirements.size))
@@ -711,8 +712,9 @@ public class Cell @JvmOverloads constructor(
             val focusNotes = ctx.knowledge?.focusNotes(register.focus, editedThisTurn)
             return Anchor.render(
                 estimator, digest, RegisterRender.markdown(register), worksetLine, touchedLedger.toList(),
-                ChecksRender.render(stampNow, checkLines(currencies)), null, focusNotes, gauge(currencies).line(), nudges,
-                RegisterRender.firedTrips(register) + ctx.diagnoses?.lines().orEmpty(), defaults, Layout.enabled(ctx.role, mask),
+                ChecksRender.render(stampNow, checkLines(currencies)), null, focusNotes, gauge(currencies).line(),
+                if (repair) nudges.map { if (it == CellBudget.GATE) REPAIR_GATE else it } else nudges,
+                RegisterRender.firedTrips(register) + ctx.diagnoses?.lines().orEmpty(), defaults, Layout.enabled(ctx.role, mask, repair),
             )
         }
 
@@ -1429,6 +1431,9 @@ public class Cell @JvmOverloads constructor(
 
         /** D-366: how many of the cell's own paths a reserve-repair refusal names before it counts the rest. */
         const val REPAIR_PATHS_SHOWN = 12
+
+        /** D-366: the §5.9 gate line on a repair turn, where path-addressed edits of the cell's own files stay enabled. */
+        const val REPAIR_GATE = "reserve reached: verify and report; repairs to your own files only"
 
         /** Edit ops not addressed by a path: never a reserve repair (D-366). */
         val NOT_PATH_ADDRESSED = setOf("transform", "revert")

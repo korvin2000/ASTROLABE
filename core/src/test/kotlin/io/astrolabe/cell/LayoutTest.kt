@@ -153,6 +153,10 @@ class LayoutTest {
         assertTrue("edit.anchored" in reserve && "edit.create" in reserve, "a reserve turn names the masked edits: $reserve")
         assertEquals("enabled this turn: look(read) · run(run, wait)", Layout.enabled(role, ToolMask.of("look.read", "run.run", "run.wait")))
         assertEquals("enabled this turn: none", Layout.enabled(role, ToolMask(emptySet())))
+        val repair = ToolMask(mask.allowed - "edit.transform" - "edit.revert")
+        assertTrue(Layout.enabled(role, repair, ownFilesOnly = true).endsWith(" (edits: own files only)"), "a repair turn holds its edits to own files")
+        val noEdits = ToolMask(mask.allowed.filterNot { it.startsWith("edit.") }.toSet())
+        assertEquals(Layout.enabled(role, noEdits), Layout.enabled(role, noEdits, ownFilesOnly = true), "no edit enabled, nothing to qualify")
     }
 
     @Test
