@@ -53,7 +53,7 @@ select_profile(function, packet, impact, policy):
     return argmin over affordable of expected TOTAL task cost incl. retries, reviews and integration
 ```
 
-Metadata from the plan cell informs the policy and never decides alone (self-assessed difficulty is poorly calibrated) `[MB §7.3]`. Model boundaries coincide with cell/packet boundaries and never cut through a reasoning chain; provider reasoning artifacts are opaque blobs replayed only to the same provider; cross-provider handoffs transfer explicit goals, decisions, evidence references and open questions `[MB §11.4]`.
+Context fit counts the compiled context's wire input, its growth reserve and the output headroom once each; the conservative estimate prices the wire input and the output, never the reserve. A context the supplied profile's window cannot hold is compiled again on the candidates with a larger window, smallest first, each with its own estimator and output headroom; a routed profile whose own compile does not fit leaves the candidates. `NEEDS_RESCOPING_OR_LARGER_PROFILE` stands only when no candidate window holds the context. Metadata from the plan cell informs the policy and never decides alone (self-assessed difficulty is poorly calibrated) `[MB §7.3]`. Model boundaries coincide with cell/packet boundaries and never cut through a reasoning chain; provider reasoning artifacts are opaque blobs replayed only to the same provider; cross-provider handoffs transfer explicit goals, decisions, evidence references and open questions `[MB §11.4]`.
 <!-- end-source-section: 11.2 -->
 
 <!-- source-section: 11.3 -->
