@@ -10,8 +10,10 @@ import io.astrolabe.auth.Redaction
 import io.astrolabe.budget.HeuristicEstimator
 import io.astrolabe.budget.Reservations
 import io.astrolabe.budget.Tokens
+import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Contracts
 import io.astrolabe.contract.InMemoryContractRepository
+import io.astrolabe.contract.Origin
 import io.astrolabe.event.AmendmentProposal
 import io.astrolabe.event.Answer
 import io.astrolabe.event.Authority
@@ -21,6 +23,7 @@ import io.astrolabe.event.Decision
 import io.astrolabe.event.Question
 import io.astrolabe.event.Resolution
 import io.astrolabe.evidence.Coherence
+import io.astrolabe.evidence.EvidenceKind
 import io.astrolabe.evidence.InMemoryIntentJournal
 import io.astrolabe.evidence.IntentJournal
 import io.astrolabe.evidence.IntentStatus
@@ -28,6 +31,7 @@ import io.astrolabe.evidence.Observation
 import io.astrolabe.evidence.Observations
 import io.astrolabe.evidence.SqliteAliases
 import io.astrolabe.evidence.SqliteObservations
+import io.astrolabe.evidence.SqliteReceipts
 import io.astrolabe.fixtures.FakeClock
 import io.astrolabe.fixtures.FixedIdGen
 import io.astrolabe.fixtures.TempRepo
@@ -54,7 +58,11 @@ import io.astrolabe.tool.ToolCalls
 import io.astrolabe.tool.ToolOps
 import io.astrolabe.tool.ToolOutcome
 import io.astrolabe.tool.TurnContext
+import io.astrolabe.tool.verify.Verify
+import io.astrolabe.verify.Checks
 import io.astrolabe.verify.ReviewRequest
+import io.astrolabe.verify.RunnerCommands
+import io.astrolabe.verify.Scheduler
 import io.astrolabe.verify.Verdict
 import io.astrolabe.workset.Entry
 import io.astrolabe.workset.EntrySource
@@ -84,6 +92,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -1115,6 +1124,268 @@ class RunTest {
         assertNoKey(out.body)
     }
 
+    // ------------------------------------------------------------- C1a (plan §4.4)
+
+    private fun recorded(name: String) = javaClass.getResourceAsStream("/shaper/$name")!!.use { String(it.readAllBytes(), Charsets.UTF_8) }
+
+    /** A declared command that prints [file] through one plain shell line, the way a host declares a suite. */
+    private fun printing(file: String) = io.astrolabe.contract.Command(if (windows) listOf("cmd.exe", "/d", "/s", "/c", "type $file") else listOf("/bin/sh", "-c", "cat $file"))
+
+    /** The model's request for the same line: `cmd` form, which the shell wraps. */
+    private fun printingCmd(file: String) = shell("type $file", "cat $file")
+
+    /** A tool named [name] in the repository root that prints [file]: `name.cmd` on Windows, an executable `./name` on POSIX. */
+    private fun tool(name: String, file: String): String {
+        if (windows) {
+            repo.write("$name.cmd", "@type $file\r\n")
+            return "$name.cmd"
+        }
+        repo.write(name, "#!/bin/sh\ncat $file\n")
+        Files.setPosixFilePermissions(repo.root.resolve(name), java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x"))
+        return "./$name"
+    }
+
+    /** A contract amended (by the host) to [items], its check registry, scheduler and `verify`, and a `run` that recognises them. */
+    private inner class Recognizing(items: List<Acceptance>, config: Config = Config()) {
+        val contract = contracts.amendByHost(ids.work, "C1a acceptance") { c ->
+            c.copy(acceptance = items, requirements = c.requirements.map { it.copy(acceptance = items.map { a -> a.id }) })
+        }
+        val checks: Checks = Checks.seed(contract, RunnerCommands()).also { coherence.register(it) }
+        val receipts = SqliteReceipts(store, clock)
+        val scheduler = Scheduler(checks, workspace, registry, stamper, receipts, SqliteAliases(store, clock), idGen, ids, clock)
+        val verify = Verify(checks, scheduler, null, null, null, workspace, TrustedLocalRunner(os), os, stamper, store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, contracts, stateRoot.resolve("logs"))
+            .also { v -> v.inputs = Files.list(repo.root).use { files -> files.map { it.fileName.toString() }.filter { !it.startsWith(".") && Files.isRegularFile(repo.root.resolve(it)) }.toList() } + "src/a.py" }
+        val run = runner(config = config).also { it.verify = verify }
+
+        fun receiptsOf(checkId: String) = receipts.forCheck(checkId)
+
+        /** Every launch the verify invocation logged for [checkId]: one log per execution (the process sidecar aside). */
+        fun executions(checkId: String): Int = Files.list(stateRoot.resolve("logs")).use { files -> files.filter { it.fileName.toString().let { name -> name.startsWith("$checkId-") && name.endsWith(".log") } }.count().toInt() }
+    }
+
+    @Test
+    fun `a declared acceptance command run through run yields the receipt verify would record, with no second run`() = runTest {
+        repo.write("pytest_pass.txt", recorded("pytest-pass.txt"))
+        val r = Recognizing(listOf(Acceptance.Run("AC-1", printing("pytest_pass.txt"), Origin.User, evidence = EvidenceKind.Tests)))
+
+        val out = run("""{"cmd":"${printingCmd("pytest_pass.txt")}"}""", r.run)
+
+        assertEquals("passed", status(out), out.body)
+        assertTrue(out.green)
+        val receipt = r.receiptsOf("CHK-accept-AC-1").single()
+        assertEquals(io.astrolabe.evidence.Outcome.Passed, receipt.outcome)
+        assertEquals(printing("pytest_pass.txt").argv, receipt.command, "the receipt names the declared command, as verify would")
+        assertEquals(EvidenceKind.Tests, receipt.evidenceKind)
+        assertEquals(Origin.User, receipt.checkOrigin)
+        assertTrue(receipt.independent && receipt.greenForFinalTree)
+        assertEquals(stamper.stamp().id, receipt.stampAfter, "a fresh stamp: the receipt is current for the tree now")
+        assertTrue(out.body.contains("receipt CHK-accept-AC-1: accept AC-1: ✓"), out.body)
+        assertTrue(out.body.contains(" · tests"), out.body)
+        assertTrue(r.scheduler.currency(r.checks["CHK-accept-AC-1"]!!, stamper.stamp().id).certifies)
+
+        // Verify-on-stop finds the receipt current: nothing runs a second time.
+        val stop = r.verify.onStop(listOf("AC-1"))
+        assertTrue(stop.receipts.isEmpty(), stop.toString())
+        assertEquals(1, r.receiptsOf("CHK-accept-AC-1").size)
+        assertEquals(1, r.executions("CHK-accept-AC-1"))
+    }
+
+    @Test
+    fun `one execution is the receipt of the declared command it ran, never of a different declaration that matched`() = runTest {
+        repo.write("pytest_pass.txt", recorded("pytest-pass.txt"))
+        // The same line declared twice, verbatim and with a doubled blank: equal tokens, different declarations.
+        val twin = io.astrolabe.contract.Command(if (windows) listOf("cmd.exe", "/d", "/s", "/c", "type  pytest_pass.txt") else listOf("/bin/sh", "-c", "cat  pytest_pass.txt"))
+        val r = Recognizing(listOf(
+            Acceptance.Run("AC-1", printing("pytest_pass.txt"), Origin.User),
+            Acceptance.Run("AC-3", twin, Origin.User),
+            Acceptance.Run("AC-4", printing("pytest_pass.txt"), Origin.Harness),
+        ))
+
+        run("""{"cmd":"${printingCmd("pytest_pass.txt")}"}""", r.run)
+
+        assertEquals(1, r.receiptsOf("CHK-accept-AC-1").size)
+        assertEquals(1, r.receiptsOf("CHK-accept-AC-4").size, "a verbatim declaration shares the execution")
+        assertTrue(r.receiptsOf("CHK-accept-AC-3").isEmpty(), "a different declaration is not credited by another's execution")
+        assertEquals(1, r.executions("CHK-accept-AC-1"))
+    }
+
+    @Test
+    fun `a command that is not a declared one, or the model's own addition, records no receipt`() = runTest {
+        repo.write("pytest_pass.txt", recorded("pytest-pass.txt"))
+        val r = Recognizing(listOf(
+            Acceptance.Run("AC-1", printing("pytest_pass.txt"), Origin.User),
+            Acceptance.Run("AC-2", printing("README.md"), Origin.Model("R1")),
+        ))
+
+        val plain = run("""{"cmd":"echo hello"}""", r.run)
+        assertFalse(plain.body.contains("receipt "), plain.body)
+        // A variant is not the declared command: one token more, shell syntax around it, another directory.
+        run("""{"cmd":"${shell("type pytest_pass.txt README.md", "cat pytest_pass.txt README.md")}"}""", r.run)
+        run("""{"cmd":"${shell("type pytest_pass.txt | findstr passed", "cat pytest_pass.txt | cat")}"}""", r.run)
+        run("""{"cmd":"${shell("type ..\\\\pytest_pass.txt", "cat ../pytest_pass.txt")}","cwd":"src"}""", r.run)
+        // A model-added acceptance item is not a declared command (D-262): its run stays plain.
+        val added = run("""{"cmd":"${printingCmd("README.md")}"}""", r.run)
+        assertFalse(added.body.contains("receipt "), added.body)
+
+        assertTrue(r.receiptsOf("CHK-accept-AC-1").isEmpty())
+        assertTrue(r.receiptsOf("CHK-accept-AC-2").isEmpty())
+        assertTrue(r.checks.all().none { it.id.startsWith(Checks.MODEL_PREFIX) }, "printing a file is no test, build or typecheck")
+    }
+
+    @Test
+    fun `a test command of the model becomes its own check of origin model, an agent test that verify never launches`() = runTest {
+        repo.write("pytest_pass.txt", recorded("pytest-pass.txt"))
+        val r = Recognizing(listOf(Acceptance.Run("AC-1", printing("pytest_pass.txt"), Origin.User)))
+        val pytest = tool("pytest", "pytest_pass.txt")
+
+        val out = run("""{"argv":["$pytest","-q"]}""", r.run)
+
+        val check = r.checks.all().single { it.id.startsWith(Checks.MODEL_PREFIX) }
+        assertEquals(Origin.Model("R1"), check.origin)
+        assertEquals(EvidenceKind.Tests, check.evidenceKind)
+        assertFalse(check.required, "never a required check")
+        assertTrue(check.acceptanceIds.isEmpty(), "never an acceptance item")
+        assertEquals(1, r.contract.acceptance.size)
+        val receipt = r.receiptsOf(check.id).single()
+        assertEquals(io.astrolabe.evidence.Outcome.Passed, receipt.outcome)
+        assertFalse(receipt.independent)
+        assertTrue(out.body.contains("receipt ${check.id}: agent tests: ✓"), out.body)
+        assertTrue(out.body.contains("an agent test, not independent acceptance"), out.body)
+        assertTrue(r.receiptsOf("CHK-accept-AC-1").isEmpty(), "the declared acceptance is not satisfied by the agent's test")
+
+        // The same command again is the same check.
+        run("""{"argv":["$pytest","-q"]}""", r.run)
+        assertEquals(1, r.checks.all().count { it.id.startsWith(Checks.MODEL_PREFIX) })
+        assertEquals(2, r.receiptsOf(check.id).size)
+
+        // Switched off, a test command of the model stays a plain run.
+        val off = Recognizing(listOf(Acceptance.Run("AC-1", printing("pytest_pass.txt"), Origin.User)), Config(modelChecks = false))
+        val plain = run("""{"argv":["$pytest","-x"]}""", off.run)
+        assertFalse(plain.body.contains("receipt "), plain.body)
+        assertTrue(off.checks.all().none { it.id.startsWith(Checks.MODEL_PREFIX) })
+    }
+
+    @Test
+    fun `a host build passes on its exit while the model's own build stays inconclusive without counts`() = runTest {
+        repo.write("build_ok.txt", "compiled 3 files\n")
+        val r = Recognizing(listOf(Acceptance.Run("AC-B", printing("build_ok.txt"), Origin.User, evidence = EvidenceKind.Build)))
+
+        val declared = run("""{"cmd":"${printingCmd("build_ok.txt")}"}""", r.run)
+        val receipt = r.receiptsOf("CHK-accept-AC-B").single()
+        assertEquals(io.astrolabe.evidence.Outcome.Passed, receipt.outcome, receipt.limits.toString())
+        assertEquals(null, receipt.parsed, "nothing is counted: the exit is the evidence")
+        assertEquals(EvidenceKind.Build, receipt.evidenceKind)
+        assertTrue(receipt.passesOnExit && receipt.greenForFinalTree)
+        assertTrue(declared.body.contains("build passes on exit 0 (no test counts)"), declared.body)
+
+        val tsc = tool("tsc", "build_ok.txt")
+        run("""{"argv":["$tsc"]}""", r.run)
+        val mine = r.checks.all().single { it.id.startsWith(Checks.MODEL_PREFIX) }
+        assertEquals(EvidenceKind.Build, mine.evidenceKind)
+        val own = r.receiptsOf(mine.id).single()
+        assertEquals(io.astrolabe.evidence.Outcome.Inconclusive, own.outcome, "D-50 holds for the model's own command")
+        assertFalse(own.passesOnExit)
+    }
+
+    @Test
+    fun `a recognised background run records a non-certifying receipt when a wait sees it end, and a cancelled one records none`() = runTest {
+        repo.write("pytest_pass.txt", recorded("pytest-pass.txt"))
+        val long = io.astrolabe.contract.Command(if (windows) listOf("cmd.exe", "/d", "/s", "/c", "ping -n 30 127.0.0.1") else listOf("/bin/sh", "-c", "sleep 30"))
+        val r = Recognizing(listOf(
+            Acceptance.Run("AC-1", printing("pytest_pass.txt"), Origin.User, evidence = EvidenceKind.Tests),
+            Acceptance.Run("AC-L", long, Origin.User),
+        ))
+
+        val started = run("""{"cmd":"${printingCmd("pytest_pass.txt")}","bg":true}""", r.run)
+        assertTrue(started.body.contains("receipt at its end: CHK-accept-AC-1"), started.body)
+        val handle = assertNotNull(Regex("handle (handle-\\d+)").find(started.body)).groupValues[1]
+        val ended = run("""{"op":"wait","handle":"$handle","timeout":60}""", r.run)
+
+        assertEquals("passed", status(ended), ended.body)
+        val receipt = r.receiptsOf("CHK-accept-AC-1").single()
+        assertEquals(io.astrolabe.evidence.Outcome.Passed, receipt.outcome, "the outcome is recorded as it happened")
+        // Nothing held the workspace between launch and end (D-45): evidence of the outcome, never of the final tree.
+        assertEquals(io.astrolabe.evidence.InputStability.Unknown, receipt.testedInputs.stability)
+        assertFalse(receipt.greenForFinalTree)
+        assertTrue(receipt.limits.any { it.kind == "input_stability" && it.detail.startsWith("background run") })
+        assertTrue(ended.body.contains("receipt CHK-accept-AC-1: accept AC-1: stale"), ended.body)
+        assertTrue(ended.body.contains("a background run is evidence of its outcome, not of the final tree"), ended.body)
+        // The stop's verification certifies it with one exclusive run.
+        assertEquals(1, r.verify.onStop(listOf("AC-1")).receipts.size)
+        assertTrue(r.scheduler.currency(r.checks["CHK-accept-AC-1"]!!, stamper.stamp().id).certifies)
+
+        val slow = run("""{"cmd":"${shell("ping -n 30 127.0.0.1", "sleep 30")}","bg":true}""", r.run)
+        val slowHandle = assertNotNull(Regex("handle (handle-\\d+)").find(slow.body)).groupValues[1]
+        run("""{"op":"cancel","handle":"$slowHandle"}""", r.run)
+        val after = run("""{"op":"wait","handle":"$slowHandle","timeout":30}""", r.run)
+        assertFalse(after.body.contains("receipt CHK-accept-AC-L"), after.body)
+        assertTrue(r.receiptsOf("CHK-accept-AC-L").isEmpty(), "a cancelled run records no receipt")
+    }
+
+    @Test
+    fun `recognition compares normalized commands exactly`() {
+        assertEquals(listOf("pytest", "-q"), CommandMatch.tokens(listOf("pytest  -q"), shell = true, windows = false))
+        assertEquals(listOf("pytest", "tests/test a.py"), CommandMatch.tokens(listOf("pytest \"tests/test a.py\""), shell = true, windows = false))
+        for (line in listOf("pytest -q | tail", "pytest > log", "pytest \$ARGS", "pytest 'a b'", "pytest && echo ok", "pytest -k a*", "pytest \"a\"b", "pytest \"\"", "pytest \"a")) {
+            assertNull(CommandMatch.tokens(listOf(line), shell = true, windows = false), line)
+        }
+        assertNull(CommandMatch.tokens(listOf("pytest tests\\a.py"), shell = true, windows = false), "an escape on POSIX")
+        assertEquals(listOf("pytest", "tests\\a.py"), CommandMatch.tokens(listOf("pytest tests\\a.py"), shell = true, windows = true))
+        assertNull(CommandMatch.tokens(listOf("echo %PATH%"), shell = true, windows = true))
+
+        assertTrue(CommandMatch.matches(listOf("pytest", "-q"), listOf("/bin/sh", "-c", "pytest -q"), windows = false))
+        assertTrue(CommandMatch.matches(listOf("npm", "test"), listOf("cmd.exe", "/d", "/s", "/c", "npm test"), windows = true))
+        assertTrue(CommandMatch.matches(listOf("cmd", "/c", "npm test"), listOf("npm", "test"), windows = true))
+        assertFalse(CommandMatch.matches(listOf("cmd", "/k", "npm test"), listOf("npm", "test"), windows = true))
+        assertFalse(CommandMatch.matches(listOf("pytest", "-q", "-x"), listOf("pytest", "-q"), windows = false))
+        assertFalse(CommandMatch.matches(listOf("pytest"), listOf("pytest", "-q"), windows = false))
+        assertFalse(CommandMatch.matches(listOf("-q", "pytest"), listOf("pytest", "-q"), windows = false))
+        assertTrue(CommandMatch.matches(listOf(".\\gradlew.bat", "test"), listOf("gradlew.bat", "test"), windows = true))
+        assertTrue(CommandMatch.matches(listOf("PYTEST.EXE"), listOf("pytest.exe"), windows = true))
+        assertFalse(CommandMatch.matches(listOf("gradlew.bat", "test"), listOf("gradlew", "test"), windows = true), "an extension names a file")
+        assertFalse(CommandMatch.matches(listOf("pytest.exe", "-q"), listOf("pytest.cmd", "-q"), windows = true))
+        assertFalse(CommandMatch.matches(listOf("./gradlew", "test"), listOf("gradlew", "test"), windows = false))
+        assertFalse(CommandMatch.matches(listOf("pytest", "Tests"), listOf("pytest", "tests"), windows = true), "only the program name folds case")
+        assertFalse(CommandMatch.matches(listOf("./sh", "-c", "pytest -q"), listOf("pytest", "-q"), windows = false), "a relative shell is any file")
+        assertEquals(listOf("pytest", "-q"), CommandMatch.tokens(listOf("pytest\t-q"), shell = true, windows = false))
+        assertNull(CommandMatch.tokens(listOf("pytest -q"), shell = true, windows = false), "a shell does not split on a non-breaking space")
+        assertNull(CommandMatch.tokens(listOf("pytest\u0007"), shell = true, windows = false))
+        assertTrue(CommandMatch.exitPropagates(listOf("make")))
+        assertTrue(CommandMatch.exitPropagates(listOf("/bin/sh", "-c", "make build"), windows = false))
+        assertFalse(CommandMatch.exitPropagates(listOf("sh", "-c", "false; exit 0"), windows = false))
+        assertFalse(CommandMatch.exitPropagates(listOf("cmd.exe", "/d", "/s", "/c", "type x&exit /b 0"), windows = true))
+        assertFalse(CommandMatch.exitPropagates(listOf("powershell", "-Command", "build"), windows = true))
+        // `make` told to go on past a failing recipe never proves anything by its exit.
+        for (argv in listOf(listOf("make", "-k"), listOf("make", "-i", "build"), listOf("make", "-ik"), listOf("make", "--keep-going"), listOf("gmake", "--ignore-errors"), listOf("/bin/sh", "-c", "make -k all"))) {
+            assertFalse(CommandMatch.exitPropagates(argv, windows = false), argv.toString())
+        }
+        assertTrue(CommandMatch.exitPropagates(listOf("make", "-j4", "build"), windows = false))
+
+        // A declared command runs under the request's authorization only when its label is no broader.
+        fun label(effect: EffectClass, unknown: Boolean = false, vararg extra: Capability) =
+            io.astrolabe.auth.Classification(effect, emptyList(), setOf(Capability.RunLocal, Capability.WorkspaceRead) + extra, "x", effectsUnknown = unknown)
+        val request = label(EffectClass.W, false, Capability.WorkspaceWrite)
+        assertTrue(CommandMatch.covered(label(EffectClass.R), request))
+        assertTrue(CommandMatch.covered(label(EffectClass.W, false, Capability.WorkspaceWrite), request))
+        assertFalse(CommandMatch.covered(label(EffectClass.D, false, Capability.WorkspaceWrite), request), "a higher class")
+        assertFalse(CommandMatch.covered(label(EffectClass.W, true, Capability.WorkspaceWrite), request), "effects the request did not leave unknown")
+        assertFalse(CommandMatch.covered(label(EffectClass.W, false, Capability.WorkspaceWrite, Capability.Network), request), "another capability")
+        assertTrue(CommandMatch.covered(label(EffectClass.W, true, Capability.WorkspaceWrite), label(EffectClass.W, true, Capability.WorkspaceWrite)))
+
+        val kinds = mapOf(
+            listOf("npm", "test") to EvidenceKind.Tests, listOf("npm", "run", "test:unit") to EvidenceKind.Tests, listOf("pnpm", "build") to EvidenceKind.Build,
+            listOf("yarn", "typecheck") to EvidenceKind.Typecheck, listOf("npx", "tsc", "--noEmit") to EvidenceKind.Typecheck, listOf("tsc", "-p", ".") to EvidenceKind.Build,
+            listOf("python", "-m", "pytest", "-q") to EvidenceKind.Tests, listOf("uv", "run", "mypy", "src") to EvidenceKind.Typecheck, listOf("./gradlew", "test") to EvidenceKind.Tests,
+            listOf("gradle", "assemble") to EvidenceKind.Build, listOf("mvn", "-q", "verify") to EvidenceKind.Tests, listOf("mvn", "package") to EvidenceKind.Build,
+            listOf("go", "vet", "./...") to EvidenceKind.Typecheck, listOf("cargo", "check") to EvidenceKind.Typecheck, listOf("cargo", "test") to EvidenceKind.Tests,
+            listOf("dotnet", "build") to EvidenceKind.Build, listOf("/bin/sh", "-c", "npm test") to EvidenceKind.Tests,
+        )
+        kinds.forEach { (argv, kind) -> assertEquals(kind, EvidenceKinds.recognize(argv, windows = false), argv.toString()) }
+        for (argv in listOf(listOf("npm", "run", "lint"), listOf("eslint", "."), listOf("ruff", "check"), listOf("echo", "test"), listOf("npm", "install"), listOf("git", "status"))) {
+            assertNull(EvidenceKinds.recognize(argv, windows = false), argv.toString())
+        }
+    }
+
     private fun assertNoKeyLine(body: String) = assertFalse(body.contains("MIIEvQ") || body.contains("MIIpayload"), body)
 
     @Test
@@ -1326,5 +1597,74 @@ class RunTest {
         assertFalse(slices[0].body.contains("more"), "the rest of the output stays hidden while the block is open: ${slices[0].body}")
         assertTrue(slices[0].header!!.runtime.redactionApplied)
         assertFalse(String(store.blobs.get(io.astrolabe.id.Digest(launched.header!!.runtime.artifactRefs.first()))).contains("MIIEvQ"), "the launch's stored slice hides the open block too")
+    }
+
+    @Test
+    fun `a recognised kind is a label only - a declared command without a declared kind never passes on its exit`() = runTest {
+        repo.write("build_ok.txt", "compiled 3 files\n")
+        val tsc = tool("tsc", "build_ok.txt")
+        val r = Recognizing(listOf(Acceptance.Run("AC-T", io.astrolabe.contract.Command(listOf(tsc)), Origin.User)))
+
+        val out = run("""{"argv":["$tsc"]}""", r.run)
+
+        val receipt = r.receiptsOf("CHK-accept-AC-T").single()
+        assertEquals(EvidenceKind.Build, receipt.evidenceKind, "recognised from tsc: a label")
+        assertFalse(receipt.evidenceDeclared)
+        assertEquals(io.astrolabe.evidence.Outcome.Inconclusive, receipt.outcome, "only a declared build passes on its exit (D-50)")
+        assertFalse(receipt.passesOnExit)
+        assertEquals("inconclusive", status(out), out.body)
+    }
+
+    @Test
+    fun `the model's own check joins the registry only after the run passed its gates`() = runTest {
+        repo.write("pytest_pass.txt", recorded("pytest-pass.txt"))
+        val r = Recognizing(listOf(Acceptance.Run("AC-1", printing("pytest_pass.txt"), Origin.User)))
+        val pytest = tool("pytest", "pytest_pass.txt")
+        r.run.beforeDispatch = { throw IllegalStateException("lease lapsed") }
+
+        assertFailsWith<IllegalStateException> { run("""{"argv":["$pytest","-q"]}""", r.run) }
+
+        assertTrue(r.checks.all().none { it.id.startsWith(Checks.MODEL_PREFIX) }, "a refused run leaves no check behind")
+        r.run.beforeDispatch = {}
+        run("""{"argv":["$pytest","-q"]}""", r.run)
+        assertEquals(1, r.checks.all().count { it.id.startsWith(Checks.MODEL_PREFIX) })
+    }
+
+    @Test
+    fun `a secret in the output of a recognised run is not shown, foreground or background`() = runTest {
+        val secret = "AKIA" + "IOSFODNN7EXAMPLE"
+        repo.write("leaky.txt", "booting\n$secret\n$keyHead")
+        val r = Recognizing(listOf(Acceptance.Run("AC-S", printing("leaky.txt"), Origin.User)))
+
+        val out = run("""{"cmd":"${printingCmd("leaky.txt")}"}""", r.run)
+        assertTrue(out.body.contains("receipt CHK-accept-AC-S"), out.body)
+        assertFalse(out.body.contains(secret), out.body)
+        assertNoKey(out.body)
+        val receipt = r.receiptsOf("CHK-accept-AC-S").single()
+        val stored = String(store.blobs.get(assertNotNull(receipt.raw)))
+        assertFalse(stored.contains(secret) || stored.contains("MIIEvQ"), "the receipt's log hides the open block too")
+
+        val started = run("""{"cmd":"${printingCmd("leaky.txt")}","bg":true}""", r.run)
+        val handle = assertNotNull(Regex("handle (handle-\\d+)").find(started.body)).groupValues[1]
+        val ended = run("""{"op":"wait","handle":"$handle","timeout":60}""", r.run)
+        assertTrue(ended.body.contains("receipt CHK-accept-AC-S"), ended.body)
+        assertFalse(ended.body.contains(secret), ended.body)
+        assertNoKey(ended.body)
+    }
+
+    @Test
+    fun `a recognised background run that lost its pin ends without a receipt and says so`() = runTest {
+        repo.write("pytest_pass.txt", recorded("pytest-pass.txt"))
+        val r = Recognizing(listOf(Acceptance.Run("AC-1", printing("pytest_pass.txt"), Origin.User)))
+        val started = run("""{"cmd":"${printingCmd("pytest_pass.txt")}","bg":true}""", r.run)
+        val handle = assertNotNull(Regex("handle (handle-\\d+)").find(started.body)).groupValues[1]
+
+        // A restart: a new executor over the same store, with no pin from the launch.
+        val restarted = runner().also { it.verify = r.verify }
+        val ended = run("""{"op":"wait","handle":"$handle","timeout":60}""", restarted)
+
+        assertTrue(ended.body.contains("no receipt: pin lost on restart"), ended.body)
+        assertTrue(ended.body.contains("CHK-accept-AC-1"), ended.body)
+        assertTrue(r.receiptsOf("CHK-accept-AC-1").isEmpty())
     }
 }

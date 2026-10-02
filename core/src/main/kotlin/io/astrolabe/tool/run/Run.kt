@@ -57,6 +57,10 @@ import io.astrolabe.tool.ToolOps
 import io.astrolabe.tool.ToolOutcome
 import io.astrolabe.tool.ToolSet
 import io.astrolabe.tool.TurnContext
+import io.astrolabe.tool.verify.PinnedRun
+import io.astrolabe.tool.verify.RecognizedRun
+import io.astrolabe.tool.verify.Verify
+import io.astrolabe.verify.Check
 import io.astrolabe.workspace.Intent as PathIntent
 import io.astrolabe.workspace.PathKind
 import io.astrolabe.workspace.PathResolution
@@ -150,6 +154,16 @@ public class Run(
     private val readOnlyRole: String? = null,
 ) : ToolExecutor {
     internal var beforeDispatch: () -> Unit = {}
+
+    /**
+     * C1a (plan §4.4): the cell's `verify`, whose registered checks a command may realize; the cell sets it. Recognition
+     * grants no authority: the command passes every gate of a plain run first.
+     */
+    internal var verify: Verify? = null
+
+    /** Recognised background runs by handle, pinned at launch until their end (C1a); in memory, so a restart records none. */
+    private val pins = HashMap<String, PinnedRun>()
+
     init {
         require(ids.context != null) { "run runs inside a cell: ids.context is its lineage" }
         require(pollSliceSeconds > 0) { "pollSliceSeconds must be positive" }
@@ -217,6 +231,11 @@ public class Run(
         val classification = generated?.let { GeneratedTools.inherit(classified, it) } ?: classified
         authorize(args, argv, contract, classification)?.let { return it }
         val replaySafe = classification.effectClass == EffectClass.R && !classification.effectsUnknown
+        // C1a (plan §4.4): recognised before dispatch, so a registered check's command runs once, with a fresh stamp.
+        val verification = verify?.takeIf { generated == null }
+        val recognized = verification?.recognize(requested, shell, args.cwd, contract, config.modelChecks).orEmpty()
+            .takeIf { it.isEmpty() || authorizes(classification, it.first(), contract, containment) }.orEmpty()
+        if (verification != null && recognized.isNotEmpty() && !args.bg) return scheduled(args, verification, recognized, argv, shell, classification, contract)
 
         val actionId = idGen.next("act")
         val alias = aliases.allocate(ids.work, actionId, "result", ids.context, workspace.id)
@@ -226,7 +245,8 @@ public class Run(
             classification.requiredCapabilities.all { it in setOf(Capability.WorkspaceRead, Capability.WorkspaceWrite, Capability.RunLocal) }
         val intent = Intent(idGen.next("intent"), ids, actionId, argv, args.cwd, classification.toString(), at = clock.instant(), replaySafe = replaySafe, workspaceConfined = confined)
         val spec = SpawnSpec(
-            command = if (shell) Command.Shell(args.cmd!!) else Command.Argv(argv),
+            // A recognised check runs as its registry declares it: the command its receipt names (C1a).
+            command = recognized.firstOrNull()?.command?.let { Command.Argv(it.argv) } ?: if (shell) Command.Shell(args.cmd!!) else Command.Argv(argv),
             workingDirectory = cwd,
             logPath = logPath(actionId),
             environment = EnvPolicy(inheritedNames = config.redaction.envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")),
@@ -237,6 +257,8 @@ public class Run(
         var started: String? = null
         // The fence throws before any intent is recorded, so a lapsed lease never leaves an open intent (§13.1).
         beforeDispatch()
+        verification?.adopt(recognized)
+        val pinned = if (verification != null && recognized.isNotEmpty()) verification.pinRecognized(recognized, contract, actionId) else null
         // Probed before the spawn: a server that listens at once must not be mistaken for a port that was open already.
         val portOpenBefore = args.until().port?.let { listeningOffThread(it) }
         val outcome = Consequential.run(
@@ -254,7 +276,8 @@ public class Run(
                 logBlob = blobs.put(redaction.applyLive(bytes, ContentClass.ReusableEvidence, openAtEnd = false).text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
                 rendered = when (launch) {
                     is Launch.Unavailable -> {
-                        val result = RunResult(alias.text, actionId, null, Outcome.Unavailable, "cannot start: ${launch.reason}", false, logBlob, classification.effectClass, before.candidateId, before.candidateId, true, emptyList(), null, null, null, listOf(launch.reason), intent.intentId)
+                        val receipts = pinned?.let { "\n" + verification!!.receiptLines(verification.settleUnavailable(it, launch.reason)) } ?: ""
+                        val result = RunResult(alias.text, actionId, null, Outcome.Unavailable, "cannot start: ${launch.reason}$receipts", false, logBlob, classification.effectClass, before.candidateId, before.candidateId, true, emptyList(), null, null, null, listOf(launch.reason), intent.intentId)
                         render(args, result, argv, shell, before, before, classification.effectsUnknown)
                     }
                     is Launch.Background -> {
@@ -262,9 +285,11 @@ public class Run(
                             classification.effectClass, classification.effectsUnknown, before.members, before.baseCommit)
                         handles.save(handle)
                         started = handle.handleId
+                        pinned?.let { pins[handle.handleId] = it }
                         val safe = redaction.applyLive(launch.firstOutput, ContentClass.ModelFacing, openAtEnd = false)
                         val slice = safe.text
-                        val view = "background run ${alias.text} handle ${handle.handleId} · ${wire(launch.proc.status)} · wait with run(op=wait, handle=\"${handle.handleId}\")" + (if (slice.isBlank()) "" else "\n$slice")
+                        val pending = pinned?.let { "\nreceipt at its end: " + it.pin.checks.joinToString(", ") { check -> check.id } } ?: ""
+                        val view = "background run ${alias.text} handle ${handle.handleId} · ${wire(launch.proc.status)} · wait with run(op=wait, handle=\"${handle.handleId}\")" + pending + (if (slice.isBlank()) "" else "\n$slice")
                         val result = RunResult(alias.text, actionId, null, Outcome.NotRun, view, false, logBlob, classification.effectClass, before.candidateId, null, false, emptyList(), handle.handleId, null, null, emptyList(), intent.intentId)
                         render(args, result, argv, shell, before, null, classification.effectsUnknown, statusWire = wire(launch.proc.status), captureMask = safe.mask)
                     }
@@ -278,6 +303,75 @@ public class Run(
             is ActionOutcome.Unknown -> unknown(args, alias.text, actionId, before, intent.intentId, outcome.cause)
             is ActionOutcome.NotDispatched -> refused(args, Outcome.Denied, outcome.reason)
         }
+    }
+
+    /**
+     * C1a (plan §4.4): a command that realizes registered [checks] runs once, through the scheduler's exclusive protocol
+     * with a fresh stamp — the receipt `verify` would record, with no second launch. The model sees the run's own result
+     * and one line per receipt; the runner and the scheduler assign every status, never the model (L9).
+     */
+    private suspend fun scheduled(args: RunArgs, verification: Verify, checks: List<Check>, argv: List<String>, shell: Boolean, classification: Classification, contract: Contract): ToolOutcome {
+        val actionId = idGen.next("act")
+        val alias = aliases.allocate(ids.work, actionId, "result", ids.context, workspace.id)
+        val before = stamper.report()
+        val confined = classification.effectClass != EffectClass.D && !classification.effectsUnknown &&
+            classification.requiredCapabilities.all { it in setOf(Capability.WorkspaceRead, Capability.WorkspaceWrite, Capability.RunLocal) }
+        val replaySafe = classification.effectClass == EffectClass.R && !classification.effectsUnknown
+        val intent = Intent(idGen.next("intent"), ids, actionId, argv, args.cwd, classification.toString(), at = clock.instant(), replaySafe = replaySafe, workspaceConfined = confined)
+        var rendered: ToolOutcome? = null
+        var lost = false
+        beforeDispatch()
+        // Past every gate: only now does the model's own check join the registry (C1a).
+        verification.adopt(checks)
+        val outcome = Consequential.run(
+            journal = intents,
+            intent = intent,
+            reserve = { true },
+            dispatch = {
+                verification.runRecognized(checks, contract, actionId, args.timeoutSeconds.toLong(), ShapeBudget(args.budgetTokens, estimator, alias.text)).also {
+                    // The receipt records the lost observation; the intent stays open and nothing relaunches (§13.1).
+                    lost = it.invocation.lost
+                    if (lost) throw IOException("process observation lost; reconcile before retry")
+                }
+            },
+            persist = { done -> rendered = recognizedView(args, verification, done, alias.text, actionId, argv, shell, classification, before, intent.intentId) },
+        )
+        return when (outcome) {
+            is ActionOutcome.Completed -> checkNotNull(rendered)
+            // The scheduler already announced what a lost run moved.
+            is ActionOutcome.Unknown -> unknown(args, alias.text, actionId, before, intent.intentId, outcome.cause, announcing = !lost)
+            is ActionOutcome.NotDispatched -> refused(args, Outcome.Denied, outcome.reason)
+        }
+    }
+
+    /**
+     * C1a: a recognised check runs its declared command under this request's authorization only when that command's own
+     * policy label is no broader — class, unknown effects and capabilities; otherwise the request runs plain, as asked.
+     */
+    private fun authorizes(authorized: Classification, check: Check, contract: Contract, containment: DiskContainment): Boolean {
+        val command = check.command ?: return false
+        // A one-shell wrapper around a plain line is what `run` itself launches for that line: it is labelled as the line.
+        val form = CommandMatch.line(command.argv)?.let { RunArgs(cmd = it, cwd = command.cwd) } ?: RunArgs(argv = command.argv, cwd = command.cwd)
+        val declared = EffectPolicy.classify(form, workspace.root.toString(), contract.scope.protectedPaths, EffectPolicyConfig(), containment)
+        return CommandMatch.covered(declared, authorized)
+    }
+
+    /** The run view of a recognised execution: the shaped output, what it touched, and its receipts; the status is the receipt's. */
+    private fun recognizedView(args: RunArgs, verification: Verify, recognized: RecognizedRun, alias: String, actionId: String, argv: List<String>, shell: Boolean, classification: Classification, before: StampReport, intentId: String): ToolOutcome {
+        val after = stamper.report()
+        val invocation = recognized.invocation
+        val shaped = invocation.shaped
+        val receipt = recognized.receipts.first()
+        val changed = recognized.changed
+        val touched = if (changed.isEmpty()) null else "touched (by run $alias ${argv.joinToString(" ").take(60)}: ${changed.size} path${if (changed.size == 1) "" else "s"}) " + changed.take(10).joinToString(", ") + (if (changed.size > 10) " …" else "")
+        // D-390: the shaped view is guarded like a plain run's, so a key block cut by the view never shows its lines.
+        val shown = invocation.capture?.let { safeView(shaped?.view ?: invocation.view, it.output) } ?: invocation.view
+        val view = shown + (touched?.let { "\n$it" } ?: "") + "\n" + verification.receiptLines(recognized.receipts)
+        val result = RunResult(
+            alias, actionId, invocation.executed.exit, receipt.outcome, view, shaped?.viewTruncated ?: false, invocation.executed.raw, observedClass(classification.effectClass, changed),
+            receipt.stampBefore, after.candidateId, current = true, changedPaths = changed, handle = null, parsed = shaped?.counts, shaped = shaped, limits = shaped?.limitations.orEmpty(), intentId = intentId,
+        )
+        return render(args, result, argv, shell, before, after, classification.effectsUnknown, captureMask = invocation.mask)
     }
 
     /**
@@ -451,9 +545,9 @@ public class Run(
     /** Announces every stamped member that moved; a path nobody read before has `from = null` (conservative marking). */
     private fun announce(before: StampReport, after: StampReport, cause: String): List<String> = announceMoved(registry, before, after, cause)
 
-    private fun unknown(args: RunArgs, alias: String, actionId: String, before: StampReport, intentId: String, cause: Throwable?): ToolOutcome {
+    private fun unknown(args: RunArgs, alias: String, actionId: String, before: StampReport, intentId: String, cause: Throwable?, announcing: Boolean = true): ToolOutcome {
         val after = runCatching { stamper.report() }.getOrNull()
-        after?.let { announce(before, it, "run $alias") }
+        if (announcing) after?.let { announce(before, it, "run $alias") }
         val view = "unknown_outcome: the observation was lost (${cause?.message ?: "no cause"}); intent $intentId stays open — reconcile before any retry (§13.1), never relaunch"
         val result = RunResult(alias, actionId, null, Outcome.UnknownOutcome, view, false, null, EffectClass.D, before.candidateId, after?.candidateId, false, emptyList(), null, null, null, emptyList(), intentId)
         return render(args, result, args.argv ?: listOf(args.cmd!!), args.argv == null, before, after, effectsUnknown = true)
@@ -516,9 +610,14 @@ public class Run(
         return io.astrolabe.os.Poll(bytes.copyOfRange(0, cut), poll.nextCursorBytes - (bytes.size - cut), poll.status, poll.timedOut)
     }
 
-    /** A background process reached its terminal [status]: the whole log is stored and shaped, the interval diffed. */
-    private fun ended(args: RunArgs, handle: Handle, proc: Proc, status: ProcStatus, fallback: ByteArray, note: String?): ToolOutcome {
-        val after = stamper.report()
+    /**
+     * A background process reached its terminal [status]: the whole log is stored and shaped, the interval diffed. A run
+     * pinned as a recognised check gets its receipts here (C1a); a cancelled or lost one gets none.
+     */
+    private suspend fun ended(args: RunArgs, handle: Handle, proc: Proc, status: ProcStatus, fallback: ByteArray, note: String?): ToolOutcome {
+        val pinned = pins.remove(handle.handleId)?.takeIf { status is ProcStatus.Exited || status == ProcStatus.DeadlineExceeded }
+        // A recognised end announces what a fresh report sees, so no cached digest hides a moved input from coherence.
+        val after = if (pinned != null) stamper.report(fresh = true) else stamper.report()
         var complete = true
         var fromStart = true
         val log = try {
@@ -538,13 +637,32 @@ public class Run(
         val logBlob = blobs.put(safeLog.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
         val stampBefore = CandidateId(Digest(handle.stampBefore))
         val changed = announceBackground(handle, after)
-        val capture = shapeable(RunCapture(handle.actionId, handle.argv, handle.shell, handle.cwd, (status as? ProcStatus.Exited)?.exitCode, status == ProcStatus.DeadlineExceeded, log, complete && status !is ProcStatus.Lost), safeLog)
-        val shaped = Shapers.shape(capture, ShapeBudget(args.budgetTokens, estimator, handle.alias))
-        val outcome = if (status is ProcStatus.Lost || status is ProcStatus.Cancelled) Outcome.UnknownOutcome else shaped.status
-        val view = "handle ${handle.handleId} ${wire(status)}\n" + (note?.let { "$it\n" } ?: "") + safeView(shaped.view, capture.output, unknownEnd = !fromStart && !shapedRedacted(safeLog)) +"\nBackground effects cannot be attributed exclusively to this process." + (if (changed.isEmpty()) "" else "\nchanged during background run (${changed.size} paths): " + changed.take(10).joinToString(", "))
+        val raw = RunCapture(handle.actionId, handle.argv, handle.shell, handle.cwd, (status as? ProcStatus.Exited)?.exitCode, status == ProcStatus.DeadlineExceeded, log, complete && status !is ProcStatus.Lost)
+        val plain = shapeable(raw, safeLog)
+        val budget = ShapeBudget(args.budgetTokens, estimator, handle.alias)
+        // Evidence is read from the raw capture, never from redacted bytes; safeView guards what the model sees of it.
+        val settled = pinned?.let { verify?.settleRecognized(it, raw, logBlob, safeLog.limitations, budget) }
+        val capture = settled?.capture ?: plain
+        val shaped = settled?.shaped ?: Shapers.shape(capture, budget)
+        val outcome = settled?.receipts?.firstOrNull()?.outcome ?: if (status is ProcStatus.Lost || status is ProcStatus.Cancelled) Outcome.UnknownOutcome else shaped.status
+        val receipts = settled?.let { "\n" + verify!!.receiptLines(it.receipts) } ?: lostPin(handle, status)
+        val view = "handle ${handle.handleId} ${wire(status)}\n" + (note?.let { "$it\n" } ?: "") + safeView(shaped.view, capture.output, unknownEnd = !fromStart && !shapedRedacted(safeLog)) +"\nBackground effects cannot be attributed exclusively to this process." + (if (changed.isEmpty()) "" else "\nchanged during background run (${changed.size} paths): " + changed.take(10).joinToString(", ")) + receipts
         val effectClass = observedClass(handle.effectClass, changed)
         val result = RunResult(handle.alias, handle.actionId, capture.exitCode, outcome, view, shaped.viewTruncated, logBlob, effectClass, stampBefore, after.candidateId, true, changed, handle.handleId, shaped.counts, shaped, shaped.limitations)
         return render(args, result, handle.argv, handle.shell, null, after, effectsUnknown = true, captureMask = safeLog.mask, completedPlainly = completedPlainly(capture, outcome, shaped))
+    }
+
+    /**
+     * C1a: a background run that ended without a pin though it matches a declared check — the pin was taken by an earlier
+     * process or cell, or never — has no receipt, and its view says so.
+     */
+    private fun lostPin(handle: Handle, status: ProcStatus): String {
+        if (status !is ProcStatus.Exited && status != ProcStatus.DeadlineExceeded) return ""
+        val contract = contracts.current(ids.work) ?: return ""
+        val matching = verify?.recognize(handle.argv, handle.shell, handle.cwd, contract, modelChecks = false).orEmpty()
+        if (matching.isEmpty()) return ""
+        return "\nno receipt: pin lost on restart (or taken in another cell) — this run matches " + matching.joinToString(", ") { it.id } +
+            "; run it in the foreground or let the stop verify it"
     }
 
     // ------------------------------------------------------------------ wait
@@ -768,6 +886,8 @@ public class Run(
 
     private fun cancel(args: RunArgs): ToolOutcome {
         val handle = ownedHandle(args.handle!!) ?: return refused(args, Outcome.Denied, "no handle '${args.handle}' in this campaign workspace")
+        // A cancelled run records no receipt (C1a).
+        pins.remove(handle.handleId)
         val proc = try {
             os.terminate(os.reattach(handle.proc))
         } catch (failure: IOException) {

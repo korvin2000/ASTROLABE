@@ -468,4 +468,22 @@ class ContractsTest {
         assertEquals(listOf("R1"), ledger.unfinished())
         assertEquals(RequirementStatus.Pending, ledger["R1"]!!.status)
     }
+
+    @Test
+    fun `a declared evidence kind is stored with its item, shown in its criterion and carried by its check with the item's origin`() {
+        val build = Acceptance.Run("AC-4", Command(listOf("npm", "run", "build")), Origin.User, evidence = io.astrolabe.evidence.EvidenceKind.Build)
+        assertEquals("run: npm run build [build]", build.criterion)
+        assertEquals("run: pytest tests/payments -q", contract().acceptance("AC-1")!!.criterion, "an undeclared kind changes no criterion")
+        openStore(root).use { store ->
+            val contracts = Contracts(SqliteContractRepository(store, clock), FixedIdGen(), clock)
+            contracts.open(contract().copy(acceptance = contract().acceptance + build))
+            assertEquals(build, contracts.current(work)!!.acceptance("AC-4"))
+        }
+        val checks = io.astrolabe.verify.Checks.seed(contract().copy(acceptance = contract().acceptance + build), io.astrolabe.verify.RunnerCommands())
+        val check = checks[io.astrolabe.verify.Checks.acceptId("AC-4")]!!
+        assertEquals(Origin.User, check.origin)
+        assertEquals(io.astrolabe.evidence.EvidenceKind.Build, check.evidenceKind)
+        assertEquals(io.astrolabe.evidence.EvidenceKind.Tests, checks[io.astrolabe.verify.Checks.acceptId("AC-1")]!!.evidenceKind, "recognised from pytest")
+        assertTrue(check.definitionVersion != check.copy(evidence = null).definitionVersion, "a declared kind is part of the definition")
+    }
 }
