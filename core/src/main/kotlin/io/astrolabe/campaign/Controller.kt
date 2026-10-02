@@ -1665,49 +1665,59 @@ public class Controller @JvmOverloads public constructor(
             if (profile.id == model.profile.id && effort == model.effort) model else model.rebind(profile, effort, factory)
         val first = initial ?: compile(model)
         val misfits = LinkedHashMap<String, String>()
-        var base = model to first
-        if (first.windowBound()) {
-            misfits[model.profile.id] = (first as Compiled.NeedsRescoping).reason
+        val fallback = first.windowBound()
+        if (!fallback && first !is Compiled.Ready) return Routing(model, first, null, null)
+        val bases = if (!fallback) sequenceOf(model to first) else {
+            misfits[model.profile.id] = first.why()
             val window = model.profile.capabilities.contextLimitTokens
-            val larger = candidates.values.filter { it.capabilities.contextLimitTokens > window }
-                .sortedWith(compareBy<Profile>({ it.capabilities.contextLimitTokens }, { it.id }))
-            base = larger.firstNotNullOfOrNull { profile ->
-                val bound = bind(profile, model.effort)
-                val compiled = compile(bound)
-                if (compiled is Compiled.Ready) bound to compiled else null.also { misfits[profile.id] = compiled.why() }
-            } ?: return Routing(model, first.copy(reason = fallbackReason(first.reason, misfits)), null, null)
+            candidates.values.filter { it.capabilities.contextLimitTokens > window }
+                .sortedWith(compareBy<Profile>({ it.capabilities.contextLimitTokens }, { it.id })).asSequence()
+                .mapNotNull { profile ->
+                    val bound = bind(profile, model.effort)
+                    val compiled = compile(bound)
+                    if (compiled is Compiled.Ready) bound to compiled else null.also { misfits[profile.id] = compiled.why() }
+                }
         }
-        if (base.second !is Compiled.Ready) return Routing(model, first, null, null)
         val reserves = contract.budget.reserves
         val cost = Accounting(c.store, clock).remainingCost(c.ids.work, contract.budget.cost)
         val budget = RoutingBudget(remainingCost = cost, reservedCost = cost?.let { Money(it.currency, it.amount.multiply(java.math.BigDecimal.valueOf(reserves.verification + reserves.recoveryAndPersist)), it.unknown) })
         val prescan = c.impactPrescan
         val impact = RiskFloorInput(prescan.contractsTouched.size, prescan.complete, prescan.prescan.fanIn, prescan.complete)
-        while (true) {
-            val (current, compiled) = base
-            val arithmetic = compiled.selection.arithmetic
-            val wire = (arithmetic.wireTokens ?: arithmetic.knownFixedTokens - arithmetic.reserveTokens - arithmetic.outputTokens + arithmetic.selectedTokens).toLong()
-            val packet = RoutingPacket(increment.risk ?: contract.risk, wire, current.maxOutputTokens, previousTier = previousTier,
-                featureClass = "${contract.shape.name.lowercase()}:${increment.expectedFiles}", reserveTokens = arithmetic.reserveTokens.toLong())
-            val policy = RoutingPolicy(table, candidates - misfits.keys, budget, configuredEffort = model.effort)
-            when (val routed = router.selectProfile(function, packet, impact, policy)) {
-                is Routed.Deterministic -> return Routing(current, compiled, null, null)
-                is Routed.Refused -> {
-                    if (misfits.isEmpty()) return Routing(current, compiled, null, routed)
-                    // The refusal names the candidates set aside for their window beside the router's own exclusions.
-                    val excluded = misfits.mapValues { (_, why) -> "its window does not hold the context: $why" } + routed.excluded
-                    return Routing(current, compiled, null, Routed.Refused(routed.function, routed.tier, routed.options, excluded, routed.trace))
-                }
-                is Routed.Selected -> {
-                    if (routed.profile.id == current.profile.id && routed.effort == current.effort) return Routing(current, compiled, routed, null)
-                    val bound = bind(routed.profile, routed.effort)
-                    // The same profile keeps its estimator and headroom; another one compiles with its own.
-                    val again = if (routed.profile.id == current.profile.id) compiled else compile(bound)
-                    if (!again.windowBound()) return Routing(bound, again, routed, null)
-                    misfits[routed.profile.id] = again.why()
+        // One base's routing: asked from that compile until a selection holds its own compile, or refused.
+        fun routeFrom(current: CellModel, compiled: Compiled): Routing {
+            while (true) {
+                val arithmetic = compiled.selection.arithmetic
+                val wire = (arithmetic.wireTokens ?: arithmetic.knownFixedTokens - arithmetic.reserveTokens - arithmetic.outputTokens + arithmetic.selectedTokens).toLong()
+                val packet = RoutingPacket(increment.risk ?: contract.risk, wire, current.maxOutputTokens, previousTier = previousTier,
+                    featureClass = "${contract.shape.name.lowercase()}:${increment.expectedFiles}", reserveTokens = arithmetic.reserveTokens.toLong())
+                val policy = RoutingPolicy(table, candidates - misfits.keys, budget, configuredEffort = model.effort)
+                when (val routed = router.selectProfile(function, packet, impact, policy)) {
+                    is Routed.Deterministic -> return Routing(current, compiled, null, null)
+                    is Routed.Refused -> {
+                        if (misfits.isEmpty()) return Routing(current, compiled, null, routed)
+                        // The refusal names the candidates set aside for their window beside the router's own exclusions.
+                        val excluded = misfits.mapValues { (_, why) -> "its window does not hold the context: $why" } + routed.excluded
+                        return Routing(current, compiled, null, Routed.Refused(routed.function, routed.tier, routed.options, excluded, routed.trace))
+                    }
+                    is Routed.Selected -> {
+                        if (routed.profile.id == current.profile.id && routed.effort == current.effort) return Routing(current, compiled, routed, null)
+                        val bound = bind(routed.profile, routed.effort)
+                        // The same profile keeps its estimator and headroom; another one compiles with its own.
+                        val again = if (routed.profile.id == current.profile.id) compiled else compile(bound)
+                        if (!again.windowBound()) return Routing(bound, again, routed, null)
+                        misfits[routed.profile.id] = again.why()
+                    }
                 }
             }
         }
+        var refusal: Routing? = null
+        for ((current, compiled) in bases) {
+            val routing = routeFrom(current, compiled)
+            // A refused fallback base gives way to the next: its own output headroom may admit candidates this one's excluded.
+            if (routing.refused == null || !fallback) return routing
+            refusal = routing
+        }
+        return refusal ?: Routing(model, (first as Compiled.NeedsRescoping).copy(reason = fallbackReason(first.reason, misfits)), null, null)
     }
 
     /** A context a larger window could hold: the selection itself overflowed, not a carry-forward gap or missing evidence. */

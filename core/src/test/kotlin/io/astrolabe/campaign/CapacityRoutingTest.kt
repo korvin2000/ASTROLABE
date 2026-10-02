@@ -118,6 +118,22 @@ class CapacityRoutingTest {
     }
 
     @Test
+    fun `a fallback base that is refused gives way to the next larger window with its own headroom`() = runTest {
+        // mid holds the context but does not serve the implementing tier; its 8,192 headroom would exclude wide's 4,096 limit.
+        val mid = windowed("mid", 32_768, 8_192)
+        val wide = windowed("wide", 65_536, 4_096)
+        val config = Config(profiles = mapOf("small" to small, "mid" to mid, "wide" to wide), profileRoles = ProfileRoles(main = "wide", helper = null),
+            tierTable = TierTable("t", null, mapOf(Tier.Medium to setOf("mid"), Tier.High to setOf("small", "wide"))))
+        controller(config).open(repo.root, request, policy).use { c ->
+            val adapter = done()
+            val run = controller(config).runS0(c, CellModel(adapter, small, HeuristicEstimator()))
+            assertIs<Compiled.Ready>(run.compiled, run.state?.reason)
+            assertEquals("wide", adapter.calls.first().request.profile.id)
+            assertEquals(4_096, adapter.calls.first().request.maxOutputTokens)
+        }
+    }
+
+    @Test
     fun `when no candidate window holds the context the campaign blocks without a model call`() = runTest {
         val larger = windowed("larger", 5_000, 1_000)
         val config = Config(profiles = mapOf("small" to small, "larger" to larger), profileRoles = ProfileRoles(main = "small", helper = null),
