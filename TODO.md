@@ -2097,6 +2097,116 @@ Listed so the contracts above stay clean; none of these tasks start under this p
 
 ---
 
+## P8 ASTROLABE 2.0
+Goal: the model decides; the runtime executes, waits, records and finishes. Plan, design and order: [`../ASTROLABE-2-PLAN.md`](../ASTROLABE-2-PLAN.md) (changes only through its §17); one task per work package (WP) of plan §6, `Done` = the plan's "done when" column. Task cards `../plan2/WP-<id>.md`, line reports `../plan2/reports/WP-<id>.md`; branches `v2/<id>`, merged `--no-ff` into `main` by the orchestrator (plan §8.7). Verification: plan §8.4 (L1 focused, L2 touched packages at merge, L3 = CI on push to `main`). `Repo:` names the repository when not `ASTROLABE`. Counts: `rg -c '^#### P8\..*· DONE' TODO.md`. Frozen in 2.0 (plan §12): S2/S3, review judge, KB curation, QA cell, generated tools, MCP, recovery ladder, learned routing — their debts stay as they are.
+**Rollback point:** tag `v1.0.1-final` in all three repositories (2026-10-02).
+
+### P8.A Wave A — foundation: free and visible
+#### P8.A.1 [M] A0 Headless live runner `eval-live` + three v0 tasks · TODO
+- Pkg: new module `eval-live` (only when the SDK is present, like `provider-ai-gate`), `eval`. Spec: plan §4.7, §6 A0, §9.
+- Build: CLI run from an installed distribution `bench/<tag>/`, one temporary directory per run, acceptance out of the agent's write reach; v0 tasks: bugfix with a reproducer, greenfield REST with an external smoke script, API change + caller.
+- Done: new runner tests on the fake provider; the runner reproducibly runs the three tasks on a live provider.
+#### P8.A.2 [M] A2a Pure telemetry (no behaviour change) · TODO
+- Repo: ASTROLABE + llm-transport-sdk. Pkg: SDK `CompletionsCodec`, `Usage`, `DefaultChatStream`; `provider-ai-gate` `ResponseTranslator`, `AiGateAdapter`; `provider-api` `Usage`; core `AgentEvent`. Spec: plan §1 rows 22–23, §4.5, §6 A2a.
+- Build: `usage.cost` (and upstream cost when the gateway reports it), reasoning tokens, timings (first output, total), upstream (`ResponseInfo.route`), price tiers in events; fields on `ModelResponded`.
+- Done: `ModelResponded` carries the bill and timings; request bytes unchanged.
+#### P8.A.3 [V] BL Baseline: `f68032f` + A0 + A2a · TODO
+- Deps: P8.A.1, P8.A.2. Spec: plan §6 BL, §8.5, §9.
+- Build: 3 tasks × 2 models × 2 repeats from `bench/baseline/` (Bash in the background, spend approved by the owner 2026-10-02); the same event fields as after the wave.
+- Done: baseline report: money, time, N, output, acceptance.
+#### P8.A.4 [M] A1 Admission and routing: wire / reserve / output apart · TODO
+- Pkg: `context/Compiler.kt`, `context/ContextCover.kt`, `campaign/Controller.kt` (route), `route/Router.kt`. Spec: plan §1 rows 1–5, §4.5, §6 A1.
+- Build: reserve scaled to the window (decision), recompilation with the routed profile's headroom, capacity fallback to larger windows instead of `BlockedExternal`.
+- Done: 16K and 32K compile; output is not counted twice; fallback covered by a test.
+#### P8.A.5 [M] A2b Behaviour-changing transport · TODO
+- Deps: P8.A.2. Repo: ASTROLABE (+ SDK if needed). Pkg: `AiGateProfiles`, `ProfileBinding`, adapter estimators. Spec: plan §1 rows 12, 22–23, §4.5, §6 A2b.
+- Build: session key from the campaign id (OpenRouter, Responses); price tiers in `PriceTable` not flattened; reasoning counted in fill by codec capability.
+- Done: the session key is visible in the serialized request; tiers change the price.
+#### P8.A.6 [M] A3 Stable prefix · TODO
+- Pkg: `cell/Layout.kt`, `cell/Cell.kt`, `tool/ToolSchemas.kt`. Spec: plan §1 row 8, §4.5, §6 A3.
+- Build: the mask line leaves `[S]`; the schema set is chosen by role and fixed per line.
+- Done: enabling the reserve does not change the `[S]` bytes (golden `[S]`).
+#### P8.A.7 [M] A4 `create` returns a receipt, not the body · TODO
+- Pkg: `tool/edit/Edit.kt` (`CreatePlan`), `workset/`. Spec: plan §1 row 9, §6 A4.
+- Build: receipt (version, lines, bytes); coverage kept from the arguments.
+- Done: after `create`, an edit without re-reading passes.
+#### P8.A.8 [M] A5 `run(wait)` · TODO
+- Pkg: `tool/run/Run.kt`, `os/`. Spec: plan §1 row 14, §6 A5.
+- Build: wait until exit / a line / a port, deadline, cancel; `poll` → `wait(handle)`.
+- Done: a background build is awaited in one call; a server until its ready line.
+#### P8.A.9 [V] A6 Hygiene and safety · TODO
+- Pkg: `auth/EffectPolicy.kt`, `tool/`, `atlas/`, `campaign/`. Spec: plan §5, §6 A6; CONTINUE-TASK Next 4–6 (2026-10-01).
+- Build: `EffectPolicy` ×3 (newline separator in `cmd`, literal redirect targets, tmp link check), recursive delete with links, `Transform` probe, pending-save crash re-proposal, D-356 (merge on a clean rebase with green tests, else close), flaky tests (`StamperTest`, `ProcOwnershipTest`, FX-22), `devtools/` in the atlas and shape choice, 64-hex anchor version.
+- Done: every CT item 4–6 closed or recorded as a decision; flaky tests repeated ×5.
+- [ ] **Gate P8.A:** L2 at every merge → push `main` → CI green on Ubuntu + Windows; Codex adversarial review of the wave diff; tag `v2-wave-A`.
+
+### P8.B Wave B — measure
+#### P8.B.1 [M] B1 Offline auditor · TODO
+- Deps: P8.A.2 (fields; also works on old journals). Pkg: `eval/`. Spec: plan §4.7, §6 B1, §9.
+- Done: on `diags/live-2026-10-01` reproduces the measured hit share 86.7 % ± 5 % and the anatomy of F §2.1.
+#### P8.B.2 [V] B2 Screening set of up to 8 tasks · TODO
+- Deps: P8.A.1. Pkg: `eval-live/tasks/`. Spec: plan §6 B2, §9.2.
+- Done: every task passes its validity self-check (unchanged base, known-wrong patch, reference patch).
+#### P8.B.3 [V] B4 Baseline vs wave A on the screening set · TODO
+- Deps: P8.A.3, Gate P8.A, P8.B.2. Spec: plan §6 B4, §9.3, §11 №9a.
+- Done: report with confidence bounds and a keep / revert decision per wave-A line.
+- [ ] **Gate P8.B:** L2 → push `main` → CI green on Ubuntu + Windows.
+
+### P8.C Wave C — completion (C1 before D; C2 parallel to D)
+#### P8.C.1 [M] C1a Declared acceptance recognised in `run` · TODO
+- Deps: P8.A.8. Pkg: `tool/run`, `verify/Scheduler.kt`, `contract/`, `tool/verify/Verify.kt`. Spec: plan §4.4, §6 C1a.
+#### P8.C.2 [M] C1b Red optional check recorded by the runtime; sufficiency hint; Studio card · TODO
+- Deps: P8.C.1. Repo: ASTROLABE + root (Studio). Pkg: `verify/Resolution.kt`, `cell/Gates.kt`, Studio. Spec: plan §4.4, §6 C1b.
+#### P8.C.3 [M] C2 Provenance axis · TODO
+- Repo: ASTROLABE + root (Studio). Pkg: `verify/Resolution.kt`, `campaign/CampaignFinish.kt`, Studio. Spec: plan §1 row 16, §4.4, §6 C2.
+#### P8.C.4 [M] C3 Hard per-task limits and static profiles · TODO
+- Deps: P8.C.1. Pkg: `budget/`, `campaign/`, `AttemptConfig.kt`, `Defaults.kt`. Spec: plan §4.6, §6 C3, §11 №8.
+#### P8.C.5 [M] C4 Studio: per-task limits, profile choice, live counter, provenance labels · TODO
+- Deps: P8.C.3, P8.C.4 (released together). Repo: root (Studio). Spec: plan §6 C4.
+#### P8.C.6 [M] Dp1 Seeds v2 behind a selector interface; dropped fact anchors keep staleness · TODO
+- Pkg: `context/CarryForward.kt`, `context/Rebuild.kt`, `register/`. Spec: plan §1 row 18, §6 Dp1.
+#### P8.C.7 [C] Dp2 Direct protocol specification (`kernel-direct/1`) · TODO
+- Deps: owner decisions plan §11 №2–4, 6, 7. Pkg: `docs/`. Spec: plan §4.3, §4.6, §6 Dp2, appendix A.8.
+- [ ] **Gate P8.C:** L2 → push `main` → CI green on Ubuntu + Windows; Codex review.
+
+### P8.D Wave D — direct protocol
+#### P8.D.1 [M] D1 `Roles.direct`, `kernel-direct/1`, schema subset, `protocol` switch · TODO
+- Deps: P8.A.6, P8.C.6, P8.C.7. Pkg: `cell/`, `register/Validator.kt`, `cell/Gates.kt`, `tool/ToolSchemas.kt`. Spec: plan §4.3, §6 D1.
+#### P8.D.2 [M] D2 Direct anchor: no STATE, Runs block, notes; `note` op · TODO
+- Deps: P8.D.1. Pkg: `cell/Anchor.kt`, `tool/state/`. Spec: plan §4.3, §6 D2.
+#### P8.D.3 [M] D3 `finish` / `finish(after_checks)`, `PartialReason.Handoff`, handoff limit · TODO
+- Deps: P8.C.1, P8.D.1. Pkg: `cell/CellContext.kt`, `campaign/Controller.kt`, `Escalations.kt`, `Lifecycle.kt`. Spec: plan §4.3, §4.6, §6 D3.
+#### P8.D.4 [V] D4 Golden `[S]` per protocol, ≤ 15 direct fixtures; protocol choice in Studio · TODO
+- Deps: P8.D.1–P8.D.3. Repo: ASTROLABE + root (Studio). Spec: plan §6 D4.
+#### P8.D.5 [V] D5 Paired benchmark direct vs structured; default protocol per model class · TODO
+- Deps: P8.D.1–P8.D.4, P8.B.2. Spec: plan §6 D5, §9, appendix A.6.
+- [ ] **Gate P8.D:** L2 → push `main` → CI green on Ubuntu + Windows; Fable review of D5.
+
+### P8.E Wave E — balance (owner goal)
+#### P8.E.1 [M] E1 Binding key and binding-physics table (store v6), estimators, `routing_log` · TODO
+- Deps: P8.A.2, P8.A.5. Pkg: `route/`, `store/Migrations.kt`, `telemetry/`. Spec: plan §4.6, §6 E1, §10.4, §11 №5.
+#### P8.E.2 [M] E2 Changes during work: `Dials` journal record, limits any time, profile at a cell boundary · TODO
+- Deps: P8.C.7, P8.C.4. Pkg: `AttemptConfig.kt`, `campaign/Controls.kt`, `budget/`, `cell/`, store. Spec: plan §4.6, §6 E2.
+#### P8.E.3 [M] E3 Studio: live profile/limit changes, binding view, decision journal · TODO
+- Deps: P8.E.1, P8.E.2. Repo: root (Studio). Spec: plan §6 E3.
+#### P8.E.4 [O] E4 Shadow stop-loss · TODO
+- Deps: P8.E.2. Pkg: `cell/Gates.kt`, `campaign/`, `telemetry/`. Spec: plan §6 E4, §10.3.
+- [ ] **Gate P8.E:** L2 → push `main` → CI green on Ubuntu + Windows; Codex review.
+
+### P8.F Wave F — context economics (shadow and safe only)
+#### P8.F.1 [O] F1 Hysteresis at R_max (on); payback eviction rule (shadow) · TODO
+- Spec: plan §6 F1, §10.2.
+#### P8.F.2 [O] F2 Epoch trigger (shadow) · TODO
+- Spec: plan §6 F2, §10.3.
+- [ ] **Gate P8.F:** L2 → push `main` → CI green on Ubuntu + Windows.
+
+### P8.R Release
+#### P8.R.1 [V] R1 Release 2.0.0 · TODO
+- Deps: plan §7.1. Build: `docs/` (INDEX, decisions, defaults, roadmap), `CHANGELOG`, version 2.0.0, ABI dumps, migration v6, Studio notes; final Codex and Fable reviews.
+- [ ] **Gate P8.R:** CI ×2 green on Ubuntu + Windows; tag `v2.0.0`.
+
+---
+
 ## 5 Fixture map
 Rows of [§19.3](docs/evaluation/fixtures.md#sec-19-3) in document order (`FX`), and [§15.4](docs/platform/adapters.md#sec-15-4) adapter fixtures (`AX`). "Phase" = where the fixture must first pass; later phases keep it green.
 

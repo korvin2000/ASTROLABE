@@ -2,6 +2,7 @@
 
 A Kotlin/JVM SDK for a coding agent harness that Java can consume, with host events/hooks and no UI coupling.
 It is built offline through phases P0–P6 against a fake provider. Live transports are P7.
+**Active program: ASTROLABE 2.0 — `../ASTROLABE-2-PLAN.md`, status — phase P8 in `TODO.md`.**
 This file is the **only workflow source**. `TODO.md` is the progress authority: statuses, `Log:`, `Deps`, `D-nn`.
 The handoff below is already loaded; do not re-read it at startup.
 
@@ -54,8 +55,6 @@ Skip at startup: `PREPARE_IMPLEMENTATION_PLAN.md` (historical), `sources/`, `REV
 - **Delegation (owner rule):** route complex, non-trivial tasks to opus(or fable) worktree agents according to
   (`.claude/worktrees/agent-*`). Merge with `--no-ff` after reviewing; don't take the work on trust.
   Resolve ABI dump conflicts by regenerating, never by hand. Delegated agents follow the same verification tiers.
-- **Out-of-order work** only on an explicit owner request. An ACTIVE card in TODO §1.2 takes precedence;
-  the protocol is `OUT-OF-ORDER-PROPOSAL-TASKS.md`, with this file's verification tiers and session-end state rules replacing its per-substep builds and handoff updates.
 
 ## Commands
 | Purpose | Windows (JDK 26, Git Bash; PowerShell: `./gradlew.bat`) | Linux cloud sandbox (JDK 25 scratch copy) |
