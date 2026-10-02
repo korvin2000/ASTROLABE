@@ -2,10 +2,10 @@
 
 Snapshot: TODO owns task status; CONTINUE-TASK.md owns next work; audit/SESSION-HISTORY.md records history.
 
-## Counts (2026-09-26, from `#### P… · STATUS` headings)
-**185/185 DONE, 0 IN_PROGRESS, 0 TODO.** P0 19/19 · P1 64/64 · P2 30/30 · P3 25/25 · P4 25/25 · P5 15/15 · P6 7/7.
-Recount: `rg -c '^#### P\d+\.\d+\.\d+ .*· DONE' TODO.md`. P7 is out of scope except the owner-requested AI Gate
-transport (2026-09-28, merged into local `main`, D-326–D-336).
+## Counts (2026-10-02, from `#### P… · STATUS` headings)
+**P0–P6 185/185 DONE.** P8 (ASTROLABE 2.0, plan `../ASTROLABE-2-PLAN.md`): wave A **9/9 DONE** (A0, A2a, BL, A1, A2b,
+A3, A4, A5, A6), 23 TODO in waves B–F + release (incl. P8.C.8). Recount: `rg -c '^#### P\d+\.\d+\.\d+ .*· DONE' TODO.md`
+and `rg -c '^#### P8\..*· DONE' TODO.md`. P7 out of scope except the AI Gate transport (D-326–D-336).
 
 ## Completion levels
 - **P0–P6:** `FIXTURE_VALIDATED` on Windows + Linux CI (JDK 26). Every live gate is `UNMEASURED` (P7).
@@ -50,20 +50,15 @@ Earlier CI (Ubuntu + Windows): P4–P6 gates 36159227747, 36162949349, 361676898
 ## Recorded deviations
 Local choices D-112–D-113, D-120–D-126, D-135–D-137, D-145–D-155, D-160–D-165, D-170–D-174, D-180–D-183, D-190–D-195,
 D-200–D-202, D-210–D-213, D-220–D-223, D-230–D-233, D-240–D-244, D-250–D-254, D-260 (TODO §3); owner D-175 (deps).
-## Audit remediation (2026-09-28): 142 findings fixed (`audit/BUGFIX-REVIEW.md`); follow-ups D-321–D-325; CI green 36468171641.
-## Plan-handoff fix (2026-10-01, D-357–D-362, merged into local `main`)
-Masked-op refusals explain themselves; refusal loop ends the cell blocked; plan form visible/lenient; `planCell = WhenNeeded`;
-plan/probe run R-class only; GLM input tolerance; `gate.body` pass-through.
-## Efficiency fix (2026-10-01, owner request, D-363–D-375, merged into `main`)
-Windows `PATH`×`PATHEXT` program resolution; `ContentCache` for stamps/snapshots with fresh stamps at every acceptance,
-publication and delegation boundary; look/edit/state input tolerance and `JsonRepair` (malformed, never truncated); a refused
-call refuses only itself; edit batches independent per path group; stall counts work, 80 turns, repair edits on reserve; host
-block + language line (`kernel/2`, `error-policy/5`); raised and wired defaults; open plan steps do not block a proven
-acceptance; delete/move W only with proven containment. Live runs and Codex reviews: `../harness-efficiency-analysis.md`.
-## AI Gate transport (2026-09-28, merged into local `main`)
-`AiGateAdapter(llm, profiles)` + `Astrolabe(…, estimators = adapter.estimators(HeuristicEstimator()))`; profiles bind via
-`Profile.config.gate`, drafts/probes via `AiGateProfiles` (D-326–D-336); AX-01..10 pass offline; `liveTest` not yet run.
-## Phase 0 — acceptance rule (2026-09-30, owner request, D-337–D-355)
-`verify/Resolution.kt` resolves every obligation to passed/failed/unverified; unverified waits for `Authority.decide`
-(stop code `acceptance_decision` / `review_rejected`), resumes without a cell, records per-item provenance; `answered`
-outcome, host notes, tool ergonomics (E1–E7). Targeted tests only (journal); full build pending (CONTINUE-TASK).
+## History (details in `audit/SESSION-HISTORY.md`)
+Audit remediation 2026-09-28 (D-321–D-325); AI Gate transport (D-326–D-336, `liveTest` not run); phase 0 acceptance rule
+(D-337–D-355); plan-handoff fix (D-357–D-362); efficiency fix (D-363–D-375): Windows program resolution, `ContentCache`
+with fresh stamps at every acceptance boundary, input tolerance + `JsonRepair`, a refused call refuses only itself.
+## ASTROLABE 2.0 wave A (2026-10-02, P8, D-376–D-385)
+`create` answers with a receipt (D-376); `run(op=wait)` until exit/line/port (D-377, D-381); `ModelResponded` carries the
+billed amount, reasoning tokens, timings, upstream, price tier (D-378); stable `[S]`, mask in `[A]`, schema set by role,
+fingerprints cover `[S]`/schemas (D-379, D-382); `eval-live` headless runner + 3 v0 tasks (D-380); shell-accurate
+`EffectPolicy`, proven deletes/redirects, toolchain collapse in the atlas (D-383); wire/reserve/output apart, window-scaled
+growth reserve, capacity fallback (D-384); session key, price tiers, conservative tiered reservation (D-385).
+Baseline BL (before A1/A3–A6/A2b): 12/12 accepted, billed $0.106, N 150 (`../plan2/reports/WP-BL.md`).
+Reviews: Fable (A4+A5, A3, A6 security), Codex (A1 in line, A2b) — all findings fixed or recorded.
