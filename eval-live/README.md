@@ -80,3 +80,10 @@ rewritten after every run.
 `prompt.md` (the request), `base/` (the repository), `acceptance/` (hidden), `reference/` (files of a known-good
 solution laid over the base). v0: `bugfix-pagination` (bug with a reproducer), `rest-todo` (greenfield REST API with
 an external smoke test), `api-currency` (API change and its callers) — Python 3 standard library only.
+
+Screening set (WP-B2, B2b): `red-test` (a visible test already red on the base; the same bug sits in a second code path,
+the batch recount, which only the hidden acceptance covers; the acceptance also refuses a changed `tests/test_reorder.py`),
+`ui-clear-done` (a "Clear completed" button in a plain-JavaScript todo page plus a new `DELETE /api/todos?done=true`;
+the API is driven over HTTP, the HTML is parsed with `html.parser` and `static/app.js` is checked as text — there is
+no browser or JavaScript engine), `investigate-totals` (monthly invoice totals off by one invoice at midnight on the
+1st; the request blames float rounding, the cause is an inclusive month end).
