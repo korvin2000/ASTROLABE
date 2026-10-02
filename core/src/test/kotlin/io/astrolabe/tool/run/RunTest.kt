@@ -826,13 +826,66 @@ class RunTest {
     fun `a server launch waits until its loopback port accepts connections`() = runTest {
         val closed = java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress()).use { it.localPort }
         assertFalse(os.listening(closed), "nothing listens on a closed port")
-        java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress()).use { listener ->
-            val out = run("""{"cmd":"${shell("ping -n 30 127.0.0.1 >NUL", "sleep 30")}","until_port":${listener.localPort}}""")
+        var listener: java.net.ServerSocket? = null
+        var probes = 0
+        // The server comes up after the launch: the first probe (before the spawn) finds the port closed, the next one opens it.
+        val serving = object : Os by os {
+            override fun listening(port: Int): Boolean {
+                if (++probes == 2) listener = java.net.ServerSocket(port, 1, java.net.InetAddress.getLoopbackAddress())
+                return os.listening(port)
+            }
+        }
+        try {
+            val out = run("""{"cmd":"${shell("ping -n 30 127.0.0.1 >NUL", "sleep 30")}","until_port":$closed}""", runner(os = serving))
 
             assertEquals("running", status(out), out.body)
-            assertTrue(out.body.contains("ready: port ${listener.localPort} accepts connections"), out.body)
+            assertTrue(out.body.contains("ready: port $closed accepts connections"), out.body)
+            assertFalse(out.body.contains("already open"), out.body)
+        } finally {
+            listener?.close()
         }
         run("""{"op":"cancel","handle":"handle-1"}""")
+    }
+
+    @Test
+    fun `a port that is already open before the launch is no readiness of the launched process`() = runTest {
+        java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress()).use { foreign ->
+            val port = foreign.localPort
+            val scripted = ScriptedOs(listOf("" to ProcStatus.Running))
+            scripted.portOpen = { os.listening(it) }
+
+            val out = run("""{"argv":["git","status"],"until_port":$port,"timeout":3}""", runner(os = scripted))
+
+            assertEquals("running", status(out), out.body)
+            assertFalse(out.body.contains("ready:"), out.body)
+            assertTrue(out.body.contains("wait timed out after 3s before port $port accepting connections"), out.body)
+            assertTrue(out.body.contains("port $port was already open before the wait"), out.body)
+        }
+    }
+
+    @Test
+    fun `a port that is open when a wait starts is probed once and left to the line or the end`() = runTest {
+        val scripted = ScriptedOs(listOf("" to ProcStatus.Running, "" to ProcStatus.Running, "listening on 8080\n" to ProcStatus.Running))
+        scripted.portOpen = { true }
+        val tool = runner(os = scripted)
+        run("""{"argv":["git","status"],"bg":true}""", tool)
+
+        val out = run("""{"op":"wait","handle":"handle-1","until_line":"listening","until_port":8080}""", tool)
+
+        assertTrue(out.body.contains("ready: line matched: listening on 8080"), out.body)
+        assertTrue(out.body.contains("port 8080 was already open before the wait"), out.body)
+        assertFalse(out.body.contains("accepts connections"), out.body)
+    }
+
+    @Test
+    fun `a server that listens right after the spawn is ready on its port`() = runTest {
+        val scripted = ScriptedOs(listOf("" to ProcStatus.Running))
+        scripted.portOpen = { scripted.spawns > 0 }
+
+        val out = run("""{"argv":["git","status"],"until_port":8080}""", runner(os = scripted))
+
+        assertTrue(out.body.contains("ready: port 8080 accepts connections"), out.body)
+        assertFalse(out.body.contains("already open"), out.body)
     }
 
     @Test

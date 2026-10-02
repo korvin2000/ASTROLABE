@@ -237,6 +237,8 @@ public class Run(
         var started: String? = null
         // The fence throws before any intent is recorded, so a lapsed lease never leaves an open intent (§13.1).
         beforeDispatch()
+        // Probed before the spawn: a server that listens at once must not be mistaken for a port that was open already.
+        val portOpenBefore = args.until().port?.let { listeningOffThread(it) }
         val outcome = Consequential.run(
             journal = intents,
             intent = intent,
@@ -271,7 +273,7 @@ public class Run(
         )
         return when (outcome) {
             // The launch is committed and its handle persisted before the wait, so a cancelled wait leaves no open intent.
-            is ActionOutcome.Completed -> started?.takeUnless { args.until().none }?.let { wait(args.copy(op = "wait", handle = it, since = 0)) } ?: checkNotNull(rendered)
+            is ActionOutcome.Completed -> started?.takeUnless { args.until().none }?.let { wait(args.copy(op = "wait", handle = it, since = 0), portOpenBefore) } ?: checkNotNull(rendered)
             is ActionOutcome.Unknown -> unknown(args, alias.text, actionId, before, intent.intentId, outcome.cause)
             is ActionOutcome.NotDispatched -> refused(args, Outcome.Denied, outcome.reason)
         }
@@ -538,9 +540,12 @@ public class Run(
      * observation, never the process (§13.1); the process has its own deadline from its launch, which a launch with
      * `until_*` sets to the same `timeout`. A cancelled wait leaves the handle as it was.
      */
-    private suspend fun wait(args: RunArgs): ToolOutcome {
+    private suspend fun wait(args: RunArgs, portOpenBefore: Boolean? = null): ToolOutcome {
         val handle = ownedHandle(args.handle!!) ?: return refused(args, Outcome.Denied, "no handle '${args.handle}' in this campaign workspace")
         val until = args.until()
+        // Any loopback listener makes a port "ready", so a port that is open before the wait proves nothing about this process.
+        val portAlreadyOpen = until.port != null && (portOpenBefore ?: listeningOffThread(until.port))
+        val portNote = if (portAlreadyOpen) "port ${until.port} was already open before the wait, so an open port alone is not readiness" else null
         val proc = os.reattach(handle.proc)
         val limitSeconds = args.timeoutSeconds.toLong()
         val waitDeadline = clock.instant().plusSeconds(limitSeconds)
@@ -548,7 +553,7 @@ public class Run(
         // The supervisor stops the process at its own deadline: a wait that is not shorter never outlives it.
         val stoppedFirst = processSeconds != null && !waitDeadline.isBefore(java.time.Instant.ofEpochMilli(proc.startedAtEpochMillis).plusSeconds(processSeconds))
         val waited = try {
-            kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { await(proc, args.since ?: handle.cursor, until, waitDeadline) }
+            kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { await(proc, args.since ?: handle.cursor, until, waitDeadline, portAlreadyOpen) }
         } catch (failure: IOException) {
             handles.save(handle.copy(status = wire(ProcStatus.Lost)))
             return refused(args, Outcome.UnknownOutcome, "handle ${handle.handleId}: the log cannot be read (${failure.message}); the process state is unknown — reconcile, never relaunch")
@@ -562,12 +567,12 @@ public class Run(
                     waited.matched != null -> "wait ended: the process ended; readiness line matched: ${waited.matched}"
                     else -> "wait ended: the process ended before $until"
                 }
-                return ended(args, handle, proc, waited.status, waited.tail, note)
+                return ended(args, handle, proc, waited.status, waited.tail, listOfNotNull(note, portNote).joinToString("; ").ifEmpty { null })
             }
-            is Waited.Ready -> Triple("ready: ${waited.reason}", waited.tail, waited.dropped)
+            is Waited.Ready -> Triple("ready: ${waited.reason}" + (portNote?.let { " · $it" } ?: ""), waited.tail, waited.dropped)
             is Waited.Expired -> Triple(
-                if (stoppedFirst) "wait timed out after ${limitSeconds}s before $until; the process deadline (${processSeconds}s from its start) is reached and the process is being stopped (no relaunch), poll the handle for its final status"
-                else "wait timed out after ${limitSeconds}s before $until, the process keeps running (no relaunch)",
+                (if (stoppedFirst) "wait timed out after ${limitSeconds}s before $until; the process deadline (${processSeconds}s from its start) is reached and the process is being stopped (no relaunch), poll the handle for its final status"
+                else "wait timed out after ${limitSeconds}s before $until, the process keeps running (no relaunch)") + (portNote?.let { "; $it" } ?: ""),
                 waited.tail, waited.dropped,
             )
         }
@@ -582,8 +587,12 @@ public class Run(
         return render(args, result, handle.argv, handle.shell, null, null, effectsUnknown = handle.effectsUnknown, statusWire = "running", captureMask = safe.mask)
     }
 
+    private suspend fun listeningOffThread(port: Int): Boolean =
+        kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { os.listening(port) }
+
     /** The blocking wait loop; an interrupted (cancelled) caller propagates and leaves the process alone. */
-    private fun await(start: Proc, since: Long, until: Until, deadline: java.time.Instant): Waited {
+    private fun await(start: Proc, since: Long, until: Until, deadline: java.time.Instant, portAlreadyOpen: Boolean): Waited {
+        val watchedPort = until.port?.takeUnless { portAlreadyOpen }
         var proc = start
         var cursor = since
         val tail = TailBuffer(WAIT_TAIL_BYTES)
@@ -593,7 +602,7 @@ public class Run(
             val remainingMillis = java.time.Duration.between(clock.instant(), deadline).toMillis()
             if (remainingMillis <= 0) return Waited.Expired(cursor, tail.bytes(), tail.dropped)
             // A port opens silently, so a port wait looks again every second; otherwise output or the end wakes the poll.
-            val slice = if (until.port != null) 1L else minOf(pollSliceSeconds, (remainingMillis + 999) / 1_000)
+            val slice = if (watchedPort != null) 1L else minOf(pollSliceSeconds, (remainingMillis + 999) / 1_000)
             val poll = os.poll(proc, cursor, slice)
             if (poll.newBytes.isNotEmpty() && poll.nextCursorBytes <= cursor) throw IOException("the log cursor did not advance")
             tail.add(poll.newBytes)
@@ -614,7 +623,7 @@ public class Run(
             }
             if (terminal) return Waited.Ended(proc.status, cursor, tail.bytes(), matched)
             if (matched != null) return Waited.Ready("line matched: $matched", cursor, tail.bytes(), tail.dropped)
-            if (until.port != null && os.listening(until.port)) return Waited.Ready("port ${until.port} accepts connections", cursor, tail.bytes(), tail.dropped)
+            if (watchedPort != null && os.listening(watchedPort)) return Waited.Ready("port $watchedPort accepts connections", cursor, tail.bytes(), tail.dropped)
         }
     }
 
