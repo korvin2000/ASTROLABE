@@ -54,7 +54,7 @@ internal class AuditLog(private val format: JournalFormat, private val cell: Str
     /** One model call: request and response; [billed] as A2a reports it, [nativeCost] as OpenRouter's raw usage did before. */
     fun call(
         uncached: Long?, cached: Long?, output: Long?, reasoning: Long? = null, billed: String? = null, nativeCost: String? = null,
-        anchor: Long? = 100, provider: String = "openrouter", upstream: String? = null, respond: Boolean = true,
+        anchor: Long? = 100, provider: String = "openrouter", upstream: String? = null, respond: Boolean = true, write: Long? = null,
     ): AuditLog {
         val id = "inv-${++invocation}"
         event("cell.model_requested", mapOf("invocationId" to id, "estimatedTokens" to 1000, "profileId" to "p", "anchorTokens" to anchor))
@@ -64,6 +64,7 @@ internal class AuditLog(private val format: JournalFormat, private val cell: Str
         uncached?.let { quantities["uncached_input"] = it } ?: unknown.add("uncached_input")
         cached?.let { quantities["cache_read"] = it } ?: unknown.add("cache_read")
         output?.let { quantities["output"] = it } ?: unknown.add("output")
+        write?.let { quantities["cache_write_5m"] = it }
         val usage = linkedMapOf<String, Any?>(
             "quantities" to quantities,
             "provenance" to mapOf("provider" to provider, "model" to "m/one", "protocol" to "openai-completions"),

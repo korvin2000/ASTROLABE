@@ -1411,6 +1411,7 @@ public final class io/astrolabe/eval/audit/AuditMath {
 	public static final field BREAK_TOKENS J
 	public static final field FULL_MISS_SHARE D
 	public static final field INSTANCE Lio/astrolabe/eval/audit/AuditMath;
+	public static final field NUMERICAL_FLOOR D
 	public static final fun fitPrices (Lio/astrolabe/eval/audit/Binding;Ljava/util/List;)Lio/astrolabe/eval/audit/PriceFit;
 	public final fun getAGREEMENT ()Ljava/math/BigDecimal;
 	public static final fun hitShare (JJ)Ljava/lang/Double;
@@ -2015,9 +2016,10 @@ public final class io/astrolabe/eval/audit/PriceClass : java/lang/Enum {
 
 public final class io/astrolabe/eval/audit/PriceFit {
 	public static final field Companion Lio/astrolabe/eval/audit/PriceFit$Companion;
-	public fun <init> (Lio/astrolabe/eval/audit/Binding;ILjava/util/Map;Lio/astrolabe/eval/audit/Agreement;Ljava/math/BigDecimal;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/Map;Ljava/util/Map;)V
-	public synthetic fun <init> (Lio/astrolabe/eval/audit/Binding;ILjava/util/Map;Lio/astrolabe/eval/audit/Agreement;Ljava/math/BigDecimal;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/Map;Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Lio/astrolabe/eval/audit/Binding;ILjava/util/Map;Lio/astrolabe/eval/audit/Agreement;Ljava/math/BigDecimal;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/Map;Ljava/util/Map;Z)V
+	public synthetic fun <init> (Lio/astrolabe/eval/audit/Binding;ILjava/util/Map;Lio/astrolabe/eval/audit/Agreement;Ljava/math/BigDecimal;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/Map;Ljava/util/Map;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Lio/astrolabe/eval/audit/Binding;
+	public final fun component10 ()Z
 	public final fun component2 ()I
 	public final fun component3 ()Ljava/util/Map;
 	public final fun component4 ()Lio/astrolabe/eval/audit/Agreement;
@@ -2026,8 +2028,8 @@ public final class io/astrolabe/eval/audit/PriceFit {
 	public final fun component7 ()Ljava/lang/Double;
 	public final fun component8 ()Ljava/util/Map;
 	public final fun component9 ()Ljava/util/Map;
-	public final fun copy (Lio/astrolabe/eval/audit/Binding;ILjava/util/Map;Lio/astrolabe/eval/audit/Agreement;Ljava/math/BigDecimal;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/Map;Ljava/util/Map;)Lio/astrolabe/eval/audit/PriceFit;
-	public static synthetic fun copy$default (Lio/astrolabe/eval/audit/PriceFit;Lio/astrolabe/eval/audit/Binding;ILjava/util/Map;Lio/astrolabe/eval/audit/Agreement;Ljava/math/BigDecimal;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/Map;Ljava/util/Map;ILjava/lang/Object;)Lio/astrolabe/eval/audit/PriceFit;
+	public final fun copy (Lio/astrolabe/eval/audit/Binding;ILjava/util/Map;Lio/astrolabe/eval/audit/Agreement;Ljava/math/BigDecimal;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/Map;Ljava/util/Map;Z)Lio/astrolabe/eval/audit/PriceFit;
+	public static synthetic fun copy$default (Lio/astrolabe/eval/audit/PriceFit;Lio/astrolabe/eval/audit/Binding;ILjava/util/Map;Lio/astrolabe/eval/audit/Agreement;Ljava/math/BigDecimal;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/Map;Ljava/util/Map;ZILjava/lang/Object;)Lio/astrolabe/eval/audit/PriceFit;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getAgreement ()Lio/astrolabe/eval/audit/Agreement;
 	public final fun getBinding ()Lio/astrolabe/eval/audit/Binding;
@@ -2035,6 +2037,7 @@ public final class io/astrolabe/eval/audit/PriceFit {
 	public final fun getCondition ()Ljava/lang/Double;
 	public final fun getMaxRelativeResidual ()Ljava/lang/Double;
 	public final fun getMaxResidual ()Ljava/math/BigDecimal;
+	public final fun getNumericallySingular ()Z
 	public final fun getPerMillion ()Ljava/util/Map;
 	public final fun getSensitivityPerMillion ()Ljava/util/Map;
 	public final fun getStandardErrorPerMillion ()Ljava/util/Map;

@@ -90,7 +90,7 @@ public object ResidencyReplay {
         val breaks = losses.cache().breaks.associateBy { it.call }
         val observedSteps = losses.observedSteps()
         lineages.forEach { it.derive(defaults, breaks) }
-        val observed = calls.fold(BigDecimal.ZERO) { s, c -> c.usage!!.let { u -> s + cost(c, u.uncachedInput!!, u.cacheRead!!, prices) } }
+        val observed = calls.fold(BigDecimal.ZERO) { s, c -> c.usage!!.let { u -> s + cost(c, u.uncachedInput!!, u.cacheRead!!, u.cacheWrite!!, prices) } }
         val runs = cadences.map { k -> k to lineages.map { it.replay(Residency(k, defaults.rMaxTokens, ESTIMATOR), breaks, observedSteps, prices) } }
         val error = runs.first { it.first == defaults.k }.second.fold(BigDecimal.ZERO) { s, r -> s + r.cost } - observed
         return ResidencyWhatIf(defaults.k, observed.stripTrailingZeros(), error.stripTrailingZeros(), logged, runs.map { (k, replays) ->
@@ -102,6 +102,9 @@ public object ResidencyReplay {
     }
 
     private val ESTIMATOR = HeuristicEstimator()
+
+    /** The fixed point `R = G − M + F(R)` moves in whole stubbed results; a handful of rounds settles it. */
+    private const val MAX_ITERATIONS: Int = 20
     private val NEEDED = listOf(PriceClass.UncachedInput, PriceClass.CacheRead)
 
     /** Misses no eviction schedule causes or prevents: they stay as observed in every scenario. */
@@ -126,11 +129,10 @@ public object ResidencyReplay {
     }
 
     /** One call's cost at [prices] with the given split of its input; every class it uses is priced (checked in [of]). */
-    private fun cost(call: ModelCall, uncached: Long, cached: Long, prices: Map<Int, Map<PriceClass, BigDecimal?>?>): BigDecimal {
-        val usage = call.usage!!
+    private fun cost(call: ModelCall, uncached: Long, cached: Long, written: Long, prices: Map<Int, Map<PriceClass, BigDecimal?>?>): BigDecimal {
         val p = prices.getValue(call.index)!!
         fun m(tokens: Long, c: PriceClass): BigDecimal = if (tokens == 0L) BigDecimal.ZERO else AuditMath.money(tokens, p[c])!!
-        return m(uncached, PriceClass.UncachedInput) + m(cached, PriceClass.CacheRead) + m(usage.cacheWrite!!, PriceClass.CacheWrite) + m(usage.output!!, PriceClass.Output)
+        return m(uncached, PriceClass.UncachedInput) + m(cached, PriceClass.CacheRead) + m(written, PriceClass.CacheWrite) + m(call.usage!!.output!!, PriceClass.Output)
     }
 
     /** A result as the replay keeps it: recoverable or not, its class, the paths it read, and whether it is a small aliasless line. */
@@ -139,6 +141,7 @@ public object ResidencyReplay {
     private class Step(val previous: ModelCall, val call: ModelCall, between: List<TurnActivity>) {
         val turn: Int = previous.turn
         val dropped: Set<String> = between.flatMap { it.worksetDropped }.toSet()
+        val logged: Boolean = between.any { it.eviction != null }
         val specs: List<Spec> = run {
             val queues = between.flatMap { it.ops }.groupBy { it.substringBefore('.') }.mapValues { ArrayDeque(it.value) }
             between.flatMap { it.outcomes }.map { o ->
@@ -151,18 +154,23 @@ public object ResidencyReplay {
         var unexplained = 0L
         var staleStub = false
 
-        /** [results] split over [specs]: aliasless lines take at most [SMALL_RESULT_TOKENS] each, the rest is shared evenly. */
+        /**
+         * [results] split over [specs]: aliasless lines take at most [SMALL_RESULT_TOKENS] each, the rest is shared evenly
+         * by the others; with no other result the rest stays with the message ([messageTokens]).
+         */
         fun sizes(): List<Long> {
             if (specs.isEmpty()) return emptyList()
             val small = specs.count { it.small }
             val large = specs.size - small
-            val each = if (large == 0) results / specs.size else minOf(SMALL_RESULT_TOKENS, results / specs.size)
-            val share = if (large == 0) 0 else (results - each * small) / large
-            val last = specs.indexOfLast { large == 0 || !it.small }
-            val sizes = specs.map { if (it.small || large == 0) each else share }.toMutableList()
-            sizes[last] += results - sizes.sum()
+            val each = minOf(SMALL_RESULT_TOKENS, results / specs.size)
+            if (large == 0) return specs.map { each }
+            val sizes = specs.map { if (it.small) each else (results - each * small) / large }.toMutableList()
+            sizes[specs.indexOfLast { !it.small }] += results - sizes.sum()
             return sizes
         }
+
+        /** The message carries what no result does: the visible output and any growth the results cannot hold (gauge and state lines). */
+        fun messageTokens(): Long = message + results - sizes().sum()
     }
 
     private class Replay(val cost: BigDecimal, val batches: List<ReplayedBatch>, val repaid: Long, val input: Long)
@@ -175,27 +183,55 @@ public object ResidencyReplay {
 
         private fun content(c: ModelCall): Long = c.usage!!.input!! - (c.anchorTokens ?: 0)
 
-        /** Phase A: the per-turn results `R_t`, replaying the observed cadence and stubs to learn what each freed. */
+        /**
+         * Phase A: the per-turn results `R_t`, replaying the observed cadence and stubs to learn what each freed. The
+         * bound counts the turn's own results, so `R = G − M + F(R)` is solved by iteration from `F = 0` (it only grows);
+         * when the log shows a rewrite after the turn that no batch explains, the bound is tried with results of the
+         * median clean size, since the iteration from zero cannot find a budget batch the turn's own results triggered.
+         */
         fun derive(defaults: Defaults, breaks: Map<Int, CacheBreak>) {
             val residency = Residency(defaults.k, defaults.rMaxTokens, ESTIMATOR)
+            fun visible(s: Step) = s.previous.usage!!.let { (it.output!! - (it.reasoning ?: 0)).coerceAtLeast(0) }
+            fun growth(s: Step) = content(s.call) - content(s.previous)
+            val prior = steps.filter { it.specs.isNotEmpty() && breaks[it.call.index] == null && it.dropped.isEmpty() && !it.logged }
+                .map { (growth(it) - visible(it)).coerceAtLeast(0).toDouble() / it.specs.size }.sorted().let { if (it.isEmpty()) 0.0 else it[it.size / 2] }
             var residents: List<Resident> = emptyList()
             for (s in steps) {
-                val usage = s.previous.usage!!
-                val visible = (usage.output!! - (usage.reasoning ?: 0)).coerceAtLeast(0)
-                s.message = visible
-                residents = residents + residentsOf(s)
-                val before = total(residents)
+                val visible = visible(s)
+                val growth = growth(s)
+                var earlier = residents
+                var freedNow = 0L
                 s.staleStub = breaks[s.call.index]?.cause == BreakCause.ImmediateStub
-                if (s.staleStub) residents = stale(residency, residents, s)?.residents ?: residents.also { s.staleStub = false }
-                residency.due(residents, s.turn)?.let { residents = residency.batch(residents, s.turn, it).residents }
-                // What the turn's items add once the stub and the batch freed their share: the message takes the visible
-                // output, the results the rest; a turn that shrank further is freed from the oldest live results.
-                val available = content(s.call) - content(s.previous) + before - total(residents)
-                s.message = visible.coerceIn(0, available.coerceAtLeast(0))
-                s.results = (available - s.message).coerceAtLeast(0)
+                if (s.staleStub) stale(residency, earlier, s)?.let { stub -> freedNow = total(earlier) - total(stub.residents); earlier = stub.residents } ?: run { s.staleStub = false }
+                fun attempt(message: Long, results: Long): Pair<List<Resident>, Long> {
+                    s.message = message
+                    s.results = results
+                    val all = earlier + residentsOf(s)
+                    val batch = residency.due(all, s.turn)?.let { residency.batch(all, s.turn, it) } ?: return all to 0L
+                    return batch.residents to total(all) - total(batch.residents)
+                }
+                fun solve(start: Long): Pair<Long, Long> {
+                    var r = start
+                    var freed = attempt(visible, r).second
+                    repeat(MAX_ITERATIONS) {
+                        val next = (growth - visible + freedNow + freed).coerceAtLeast(0)
+                        if (next == r) return r to freed
+                        r = next
+                        freed = attempt(visible, r).second
+                    }
+                    return r to freed
+                }
+                var (results, freed) = solve((growth - visible + freedNow).coerceAtLeast(0))
+                val rewrote = s.logged || breaks[s.call.index]?.cause in setOf(BreakCause.Eviction, BreakCause.Provider)
+                if (freed == 0L && rewrote && prior > 0) {
+                    val trial = attempt(visible, maxOf(results, (prior * s.specs.size).toLong())).second
+                    if (trial > 0) solve((growth - visible + freedNow + trial).coerceAtLeast(0)).let { (r, f) -> if (f > 0) { results = r; freed = f } }
+                }
+                val available = growth + freedNow + freed
+                val message = visible.coerceIn(0, available.coerceAtLeast(0))
+                val (after, _) = attempt(message, (available - message).coerceAtLeast(0))
                 s.unexplained = (-available).coerceAtLeast(0)
-                val sizes = s.sizes()
-                residents = shrink(residents.map { r -> if (r.turn != s.turn) r else r.copy(tokens = if (r.isResult) sizes[index(r)] else tokensOf(s)) }, s.unexplained).first
+                residents = shrink(after, s.unexplained).first
             }
         }
 
@@ -203,20 +239,18 @@ public object ResidencyReplay {
         fun replay(residency: Residency, breaks: Map<Int, CacheBreak>, observedSteps: Map<Int, CacheStep>, prices: Map<Int, Map<PriceClass, BigDecimal?>?>): Replay {
             val base = content(first)
             val firstUsage = first.usage!!
-            var cost = cost(first, firstUsage.uncachedInput!!, firstUsage.cacheRead!!, prices)
+            var cost = cost(first, firstUsage.uncachedInput!!, firstUsage.cacheRead!!, firstUsage.cacheWrite!!, prices)
             var input = firstUsage.input!!
             var residents: List<Resident> = emptyList()
             val batches = ArrayList<ReplayedBatch>()
             var repaid = 0L
             for (s in steps) {
-                val sizes = s.sizes()
-                residents = residents + residentsOf(s).map { r -> r.copy(tokens = if (r.isResult) sizes[index(r)] else tokensOf(s)) }
                 var rewrittenAt = Int.MAX_VALUE
                 if (s.staleStub) stale(residency, residents, s)?.let { stub ->
                     rewrittenAt = minOf(rewrittenAt, changedAt(residents, stub.residents))
                     residents = stub.residents
                 }
-                shrink(residents, s.unexplained).let { (shrunk, at) -> if (at >= 0) rewrittenAt = minOf(rewrittenAt, at); residents = shrunk }
+                residents = residents + residentsOf(s)
                 residency.due(residents, s.turn)?.let { due ->
                     val batch = residency.batch(residents, s.turn, due)
                     if (batch.rewritten) {
@@ -225,10 +259,12 @@ public object ResidencyReplay {
                     }
                     residents = batch.residents
                 }
+                shrink(residents, s.unexplained).let { (shrunk, at) -> if (at >= 0) rewrittenAt = minOf(rewrittenAt, at); residents = shrunk }
                 val usage = s.call.usage!!
                 val content = base + total(residents)
-                val write = usage.cacheWrite!!
                 val all = content + (s.call.anchorTokens ?: 0)
+                // The observed write, but never more than this scenario sends.
+                val write = minOf(usage.cacheWrite!!, all)
                 val old = (content - s.message - s.results).coerceAtLeast(0)
                 val observed = breaks[s.call.index]
                 val estimate = when {
@@ -242,19 +278,21 @@ public object ResidencyReplay {
                 val kept = if (rewrittenAt == Int.MAX_VALUE) null else base + residents.take(rewrittenAt).sumOf { it.tokens }
                 val cached = minOf(estimate, kept ?: Long.MAX_VALUE).coerceIn(0, all - write)
                 if (kept != null) repaid += (minOf(estimate, old) - cached).coerceAtLeast(0)
-                cost += cost(s.call, all - cached - write, cached, prices)
+                cost += cost(s.call, all - cached - write, cached, write, prices)
                 input += all
             }
             return Replay(cost, batches, repaid, input)
         }
 
+        /** The turn's message and results, sized from the step's current message and results. */
         private fun residentsOf(s: Step): List<Resident> {
-            val message = Resident.message(Message.text(Role.Assistant, "turn ${s.turn}"), s.turn, tokensOf(s))
+            val sizes = s.sizes()
+            val message = Resident.message(Message.text(Role.Assistant, "turn ${s.turn}"), s.turn, s.messageTokens())
             return listOf(message) + s.specs.mapIndexed { i, spec ->
                 val label = "turn ${s.turn} #$i"
                 paths[label] = spec.paths
                 val pointer = if (spec.pointer) RecallPointer("#${s.turn}.$i", "obs-${s.turn}-$i", Digest.ofUtf8("${s.call.cell}/${s.turn}/$i")) else null
-                Resident.result(ToolResult.text("call-${s.turn}-$i", label), s.turn, 0, spec.resultClass, pointer, label)
+                Resident.result(ToolResult.text("call-${s.turn}-$i", label), s.turn, sizes[i], spec.resultClass, pointer, label)
             }
         }
 
@@ -262,11 +300,6 @@ public object ResidencyReplay {
         private fun stale(residency: Residency, residents: List<Resident>, s: Step) = residents
             .filter { r -> r.isLiveResult && r.turn < s.turn && r.alias != null && paths[r.label].orEmpty().any { it in s.dropped } }
             .mapNotNull { it.alias }.toSet().takeIf { it.isNotEmpty() }?.let { residency.stubNow(residents, it, s.turn) }
-
-        private fun index(r: Resident): Int = r.label.substringAfterLast('#').toInt()
-
-        /** A turn's message carries its growth when the turn had no results (gauge and state lines). */
-        private fun tokensOf(s: Step): Long = if (s.specs.isEmpty()) s.message + s.results else s.message
 
         private fun total(residents: List<Resident>): Long = residents.sumOf { it.tokens }
 

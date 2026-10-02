@@ -19,8 +19,9 @@ public data class Category(val tokens: Long?, val money: SerializableBigDecimal?
  * The cost anatomy of one run (F §2.1): tokens and money per billing class, with reasoning as part of output. Billed
  * and estimated money stay apart: [billed] sums the reported charges, [estimate] prices every call with usage.
  * [unexplained] is the basis total minus every category — zero when the prices reproduce the bill, `null` when a
- * category is unknown. [complete] is false when a call has no usage, an unknown class or (on a billed basis) no charge:
- * the totals then cover only part of the run. [pricesEstimated] is true when any call was priced by a pooled fit,
+ * category is unknown. [complete] is false when a call has no usage or an unknown class, when there is no money total
+ * at all (no charge and no price), or (on a billed basis) when a call has no charge: the totals then cover only part
+ * of the run, or none of it. [pricesEstimated] is true when any call was priced by a pooled fit,
  * the catalog or a fit that does not reproduce its bills.
  */
 @Serializable
@@ -92,7 +93,7 @@ public data class Anatomy(
                 estimate = estimate?.stripTrailingZeros(),
                 basis = basis,
                 total = total?.stripTrailingZeros(),
-                complete = used.size == calls.size && known && (basis != MoneyBasis.Billed || billedCalls.size == calls.size),
+                complete = used.size == calls.size && known && basis != MoneyBasis.None && (basis != MoneyBasis.Billed || billedCalls.size == calls.size),
                 prices = prices.values.mapNotNull { it?.from }.distinct(),
                 pricesEstimated = prices.values.any { it?.estimate == true },
                 uncachedInput = categories[0],
