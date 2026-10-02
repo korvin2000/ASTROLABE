@@ -175,13 +175,30 @@ public class Accounting(private val store: Store, private val clock: Clock) {
     public companion object {
         internal fun add(a: Long, b: Long): Long = if (b > Long.MAX_VALUE - a) Long.MAX_VALUE else a + b
 
+        /**
+         * The conservative charge of a call of at most [input] input and [output] output tokens: every input token at the
+         * dearest input rate, under every price table the call can be billed at — the base and each tier whose threshold
+         * is below [input] (tiers do not accumulate, so effective rates can fall as input grows). Unknown, never zero,
+         * when a table lacks the output price or a price for an input dimension the route can bill.
+         */
         internal fun estimateCost(profile: Profile, input: Long, output: Long): Money {
-            // A request of [input] tokens is priced at its tier (a long-context tier raises every rate it states).
-            val table = profile.priceTable.at(input)
-            val rate = table.perMillion.filterKeys { it.isInput }.values.maxOrNull() ?: return Money.unknown(table.currency)
-            val out = table.price(BillingDimension.OUTPUT, output) ?: return Money.unknown(table.currency)
-            return Money(table.currency, rate.multiply(BigDecimal.valueOf(input)).divide(BigDecimal.valueOf(1_000_000))) + out
+            val prices = profile.priceTable
+            val billable = billableInput(profile)
+            val reachable = listOf(prices.at(0)) + prices.tiers.filter { it.inputTokensAbove < input }.map { prices.at(it.inputTokensAbove + 1) }
+            var worst = Money.zero(prices.currency)
+            for (table in reachable) {
+                if (billable.any { it !in table.perMillion }) return Money.unknown(prices.currency)
+                val rate = table.perMillion.filterKeys { it.isInput }.values.max()
+                val out = table.price(BillingDimension.OUTPUT, output) ?: return Money.unknown(prices.currency)
+                val cost = Money(prices.currency, rate.multiply(BigDecimal.valueOf(input)).divide(BigDecimal.valueOf(1_000_000))) + out
+                if (cost.amount > worst.amount) worst = cost
+            }
+            return worst
         }
+
+        /** Input dimensions a call on [profile] can be billed in: uncached input, the declared input usage fields and the cache-write classes. */
+        private fun billableInput(profile: Profile): Set<BillingDimension> =
+            setOf(BillingDimension.UNCACHED_INPUT) + profile.capabilities.usageFields.filter { it.isInput } + profile.capabilities.caching.writeClasses
 
         internal val JSON: Json = Json { encodeDefaults = true }
 
