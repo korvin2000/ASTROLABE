@@ -476,7 +476,9 @@ public class Verify(
         val kind = EvidenceKinds.recognize(tokens) ?: return emptyList()
         val strengthens = requirementIds.ifEmpty { contract.requirements.map { it.id } }.joinToString("+").ifEmpty { return emptyList() }
         val check = Checks.modelCheck(io.astrolabe.contract.Command(tokens, dir.ifEmpty { null }), kind, strengthens)
-        return listOf(checks[check.id] ?: checks.register(check))
+        // An id taken by another command (a digest collision) is never reused: that run stays plain.
+        val known = checks[check.id] ?: return listOf(checks.register(check))
+        return if (known.command == check.command) listOf(known) else emptyList()
     }
 
     /** Declared by the host or the user (plan §4.4): `run:` items of another origin than the model's, the sniffed suite and its blast narrowing, quality gates. */
