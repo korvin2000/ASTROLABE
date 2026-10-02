@@ -1,6 +1,7 @@
 package io.astrolabe.verify
 
 import io.astrolabe.Astrolabe
+import io.astrolabe.contract.Origin
 import io.astrolabe.evidence.Aliases
 import io.astrolabe.evidence.Closure
 import io.astrolabe.evidence.ClosureCompleteness
@@ -133,30 +134,89 @@ public class Scheduler(
     public suspend fun runCheck(check: Check, contractVersion: Int, inputs: Collection<String> = emptyList(), execute: suspend (root: Path) -> Executed): Receipt {
         val isolatedRoot = candidates?.takeIf { isolateAll || check.costClass == CostClass.Slow || check.costClass == CostClass.Expensive }
         if (isolatedRoot != null) runIsolated(check, contractVersion, inputs, isolatedRoot, execute)?.let { return it }
-        val limits = ArrayList<Limit>()
+        return exclusive(listOf(check), contractVersion, inputs, execute).receipts.single()
+    }
+
+    /**
+     * C1a (plan §4.4): one invocation for a `run` that realizes [checks] (the same command), under [runCheck]'s exclusive
+     * protocol but always in the workspace — the model ran the command there, so its effects land there. Every check whose
+     * tested inputs are the first one's gets its own receipt of the one execution; another gets none.
+     */
+    internal suspend fun runInWorkspace(checks: List<Check>, contractVersion: Int, inputs: Collection<String>, execute: suspend (root: Path) -> Executed): Scheduled =
+        exclusive(checks, contractVersion, inputs, execute)
+
+    private suspend fun exclusive(checks: List<Check>, contractVersion: Int, inputs: Collection<String>, execute: suspend (root: Path) -> Executed): Scheduled {
+        val check = checks.first()
         return workspace.mutation.withLock {
             val before = stamper.report(fresh = true)
             val paths = testedInputsFor(check, inputs)
+            val sharing = checks.filter { it === check || testedInputsFor(it, inputs) == paths }
             val seenBefore = paths.associateWith { snapshot(it) }
-            val manifest = manifestOf(check.inputClosure)
+            val manifests = sharing.map { manifestOf(it.inputClosure) }
             val executed = execute(workspace.root)
             val after = stamper.report(fresh = true)
-            announceMoved(registry, before, after, "check ${check.id}")
-            val afterPaths = testedInputsFor(check, inputs)
-            val pathSet = paths.toHashSet()
-            val afterSet = afterPaths.toHashSet()
-            val mutated = (pathSet + afterSet).filter { it !in pathSet || it !in afterSet || snapshot(it) != seenBefore[it] }.toSet()
-            val stability = when {
-                check.inputClosure == Closure.Unknown && paths.isEmpty() -> {
-                    limits += Limit("input_stability", "closure unknown and no inputs enumerated: the tested inputs could not be rescanned")
-                    InputStability.Unknown
-                }
-                else -> InputStability.Exclusive
-            }
-            val versions = seenBefore.mapNotNull { (path, seen) -> seen.version?.let { path to it } }.toMap()
-            recordRun(check, contractVersion, executed, before, after.candidateId, TestedInputs(versions, stability, mutated), manifest, limits)
+            val changed = announceMoved(registry, before, after, "check ${check.id}")
+            val limits = ArrayList<Limit>()
+            val tested = rescanned(check, inputs, paths, seenBefore, InputStability.Exclusive, limits)
+            Scheduled(sharing.zip(manifests).map { (each, manifest) -> recordRun(each, contractVersion, executed, before, after.candidateId, tested, manifest, ArrayList(limits)) }, changed)
         }
     }
+
+    /** The tested inputs after a check: what moved against [seenBefore] (content or metadata, added or removed) is a mutation. */
+    private fun rescanned(check: Check, inputs: Collection<String>, paths: List<String>, seenBefore: Map<String, Seen>, stable: InputStability, limits: MutableList<Limit>): TestedInputs {
+        val afterPaths = testedInputsFor(check, inputs)
+        val pathSet = paths.toHashSet()
+        val afterSet = afterPaths.toHashSet()
+        val mutated = (pathSet + afterSet).filter { it !in pathSet || it !in afterSet || snapshot(it) != seenBefore[it] }.toSet()
+        val stability = when {
+            check.inputClosure == Closure.Unknown && paths.isEmpty() -> {
+                limits += Limit("input_stability", "closure unknown and no inputs enumerated: the tested inputs could not be rescanned")
+                InputStability.Unknown
+            }
+            else -> stable
+        }
+        val versions = seenBefore.mapNotNull { (path, seen) -> seen.version?.let { path to it } }.toMap()
+        return TestedInputs(versions, stability, mutated)
+    }
+
+    /**
+     * C1a (plan §4.4), a recognised background `run`: [checks]' inputs are pinned at its launch (stamp, hashes and metadata,
+     * under the lock), and [settle] rescans them at its end. The workspace is not locked in between, so every write of the
+     * interval — the model's own edits included — is a mutation that leaves the receipt ineligible, never a silent pass.
+     */
+    internal suspend fun pin(checks: List<Check>, inputs: Collection<String>): Pin = workspace.mutation.withLock {
+        val check = checks.first()
+        val before = stamper.report(fresh = true)
+        val paths = testedInputsFor(check, inputs)
+        val sharing = checks.filter { it === check || testedInputsFor(it, inputs) == paths }
+        Pin(sharing, inputs.toList(), before, paths, paths.associateWith { snapshot(it) }, sharing.map { manifestOf(it.inputClosure) })
+    }
+
+    /**
+     * The receipts of a [pin]ned background run that ended with [executed]; a check no longer registered gets none. Moved
+     * paths are announced by the caller, which diffs the interval itself.
+     */
+    internal suspend fun settle(pin: Pin, contractVersion: Int, executed: Executed): List<Receipt> = workspace.mutation.withLock {
+        val after = stamper.report(fresh = true)
+        val limits = arrayListOf(Limit("input_stability", "background run: inputs pinned at its launch and rescanned at its end, unlocked in between; any write of the interval is a mutation"))
+        val tested = rescanned(pin.checks.first(), pin.inputs, pin.paths, pin.seen, InputStability.Exclusive, limits)
+        pin.checks.zip(pin.manifests).filter { (check, _) -> checks[check.id] != null }.map { (check, manifest) ->
+            recordRun(check, contractVersion, executed, pin.before, after.candidateId, tested, manifest, ArrayList(limits))
+        }
+    }
+
+    /** The receipts of one recognised `run` and the paths it moved (announced by the scheduler). */
+    internal class Scheduled(val receipts: List<Receipt>, val changed: List<String>)
+
+    /** What [pin] took at a background run's launch. */
+    internal class Pin(
+        val checks: List<Check>,
+        val inputs: List<String>,
+        val before: StampReport,
+        val paths: List<String>,
+        val seen: Map<String, Seen>,
+        val manifests: List<ClosureManifest>,
+    )
 
     /** A retry must export the original candidate; it never falls back to the live workspace. */
     internal suspend fun retryIsolated(check: Check, contractVersion: Int, first: Receipt, inputs: Collection<String>, execute: suspend (Path) -> Executed): Receipt? {
@@ -214,7 +274,10 @@ public class Scheduler(
             limits += Limit("input_mutation", "inputs moved during the check: ${testedInputs.mutatedDuringCheck.sorted().joinToString(", ")}; the receipt is ineligible for the final tree — rerun")
         }
         executed.limits.forEach { limits += Limit("runner", it) }
-        val outcome = if (executed.outcome == Outcome.Passed && (executed.counts == null || (executed.counts.executed == 0 && executed.counts.discovered == 0))) {
+        val kind = check.evidenceKind
+        // Plan §4.4 (D-50 relaxed by the owner): a host or user build or typecheck passes on its expected exit, uncounted.
+        val passesOnExit = kind?.exitSuffices == true && check.origin !is Origin.Model && executed.counts == null && executed.exit == executed.expectedExitCode
+        val outcome = if (executed.outcome == Outcome.Passed && !passesOnExit && (executed.counts == null || (executed.counts.executed == 0 && executed.counts.discovered == 0))) {
             limits += Limit("evidence", "a pass without parsed counts is inconclusive, never green (D-50)")
             Outcome.Inconclusive
         } else {
@@ -227,6 +290,7 @@ public class Scheduler(
             verifierVersion = verifierVersion, checkDefinitionVersion = check.definitionVersion, contractVersion = contractVersion,
             outcome = outcome, parsed = executed.counts, inputClosure = check.inputClosure, testedInputs = testedInputs,
             raw = executed.raw, limits = limits, exitCode = executed.exit, at = clock.instant(), closureManifest = manifest, expectedExitCode = executed.expectedExitCode,
+            evidenceKind = kind, checkOrigin = check.origin,
         )
         receipts.record(receipt)
         aliasByReceipt[receipt.receiptId] = aliases.allocate(ids.work, receipt.receiptId, "receipt", ids.context, workspace.id).text
@@ -317,7 +381,7 @@ public class Scheduler(
             verifierVersion = verifierVersion, checkDefinitionVersion = check.definitionVersion, contractVersion = contractVersion,
             outcome = result.outcome, parsed = result.counts, inputClosure = check.inputClosure,
             testedInputs = TestedInputs(result.touched.mapNotNull { path -> registry.version(path)?.let { path to it } }.toMap(), InputStability.Unknown),
-            raw = result.log, limits = limits, exitCode = result.exit, at = clock.instant(),
+            raw = result.log, limits = limits, exitCode = result.exit, at = clock.instant(), evidenceKind = check.evidenceKind, checkOrigin = check.origin,
         )
         receipts.record(receipt)
         aliasByReceipt[receipt.receiptId] = aliases.allocate(ids.work, receipt.receiptId, "receipt", ids.context, workspace.id).text
@@ -414,7 +478,7 @@ public class Scheduler(
     }
 
     /** Content and metadata of one input: a restore-after-write leaves the version equal but moves the metadata. */
-    private data class Seen(val version: FileVersion?, val sizeBytes: Long?, val modified: java.nio.file.attribute.FileTime?, val executable: Boolean? = null)
+    internal data class Seen(val version: FileVersion?, val sizeBytes: Long?, val modified: java.nio.file.attribute.FileTime?, val executable: Boolean? = null)
 
     private fun snapshot(path: String): Seen {
         val resolved = workspace.resolve(path, Intent.Read) as? PathResolution.Resolved ?: return Seen(null, null, null)

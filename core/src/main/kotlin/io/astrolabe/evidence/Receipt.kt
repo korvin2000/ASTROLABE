@@ -1,5 +1,6 @@
 package io.astrolabe.evidence
 
+import io.astrolabe.contract.Origin
 import io.astrolabe.id.CandidateId
 import io.astrolabe.id.Digest
 import io.astrolabe.id.FileVersion
@@ -81,6 +82,22 @@ public data class TestedInputs(
 public data class Limit(val kind: String, val detail: String)
 
 /**
+ * What a check's pass proves (plan §4.4): the build passes, the typecheck passes, or tests were executed and passed.
+ * Exit 0 never reads as "tests passed"; only a host or user command's [Build] and [Typecheck] evidence may pass on its
+ * expected exit without test counts (owner-approved relaxation of D-50). [wire] is the spelling in renders.
+ */
+@Serializable
+public enum class EvidenceKind(public val wire: String) {
+    Tests("tests"),
+    Build("build"),
+    Typecheck("typecheck"),
+    ;
+
+    /** The expected exit alone is the evidence: nothing is counted when a build or a typecheck passes. */
+    public val exitSuffices: Boolean get() = this != Tests
+}
+
+/**
  * Immutable verification receipt (§4.3, §8.4, TODO P1.4.2). It supports exactly the candidate it tested:
  * `current` for a later candidate is computed from closures (P1.4.4/P3.1.2), never stored here.
  */
@@ -114,6 +131,10 @@ public data class Receipt(
     val closureManifest: ClosureManifest? = null,
     /** The check's expected process exit; null when a product QA case asserts only output. HTTP has no process exit. */
     val expectedExitCode: Int? = 0,
+    /** What the check's pass proves (plan §4.4); null for a receipt that predates evidence kinds. */
+    val evidenceKind: EvidenceKind? = null,
+    /** Who created the check (plan §4.4, C2 provenance axis); `model(…)` marks an agent's own test, null when unknown. */
+    val checkOrigin: Origin? = null,
 ) {
     init {
         require(receiptId.isNotBlank() && checkId.isNotBlank()) { "receipt needs ids" }
@@ -121,7 +142,7 @@ public data class Receipt(
             require(parsed == null || (parsed.failed == 0 && parsed.errors == 0)) { "a passed receipt cannot contain failures" }
             require(exitCode == null || expectedExitCode == null || exitCode == expectedExitCode) { "a passed receipt cannot contradict its expected exit" }
         }
-        require(!(outcome == Outcome.Passed && parsed == null)) { "a passed receipt needs parsed counts" }
+        require(!(outcome == Outcome.Passed && parsed == null) || passesOnExit) { "a passed receipt needs parsed counts" }
         require(!(outcome == Outcome.Passed && parsed != null && parsed.executed == 0 && parsed.discovered == 0)) {
             "a passed receipt with nothing executed is inconclusive, not green"
         }
@@ -129,6 +150,12 @@ public data class Receipt(
 
     /** Green only with parsed counts and a mutation-free, non-unknown input stability (D-45). */
     val greenForFinalTree: Boolean get() = outcome.green && testedInputs.eligible
+
+    /** Build or typecheck evidence of a host or user command: its expected exit is the evidence (plan §4.4, D-50 relaxed). */
+    val passesOnExit: Boolean get() = evidenceKind?.exitSuffices == true && checkOrigin !is Origin.Model
+
+    /** False for an agent's own test (plan §4.4): evidence of the model's check, never independent acceptance. */
+    val independent: Boolean get() = checkOrigin !is Origin.Model
 }
 
 /** Source line ↔ rendered line mapping of a redacted view (D-49); hidden lines grant no coverage. */

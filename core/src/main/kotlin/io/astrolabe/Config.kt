@@ -63,6 +63,12 @@ public data class Config(
     val qualityGates: List<io.astrolabe.contract.Command> = emptyList(),
     /** The §11.1 tier table (P4.5.1): profiles per tier with its calibration date; untiered, the router serves every tier with the cell's profile (D-108). */
     val tierTable: TierTable = TierTable.UNTIERED,
+    /**
+     * Plan §4.4, owner decision №4: a test, build or typecheck command the model runs through `run` becomes its own check,
+     * origin `model` — an agent test, never independent acceptance. On by default; `false` turns it off. A declared
+     * acceptance command is recognised in `run` either way.
+     */
+    val modelChecks: Boolean = true,
 ) {
     /** Java hosts (D-07): the fields a host sets most, without the full constructor. */
     public fun withStateRoot(stateRoot: String?): Config = copy(stateRoot = stateRoot)
@@ -72,6 +78,8 @@ public data class Config(
     public fun withFlags(flags: Flags): Config = copy(flags = flags)
 
     public fun withTierTable(tierTable: TierTable): Config = copy(tierTable = tierTable)
+
+    public fun withModelChecks(modelChecks: Boolean): Config = copy(modelChecks = modelChecks)
 
     /** The role [name] as configured, else the SDK default; `null` for a name neither declares. */
     public fun role(name: String): Role? = roles[name] ?: Roles.defaults[name]

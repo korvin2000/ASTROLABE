@@ -19,7 +19,9 @@ import io.astrolabe.contract.Contracts
 import io.astrolabe.contract.Origin
 import io.astrolabe.evidence.Outcome
 import io.astrolabe.evidence.Receipt
+import io.astrolabe.evidence.RedactionMask
 import io.astrolabe.id.CandidateId
+import io.astrolabe.id.Digest
 import io.astrolabe.id.IdGen
 import io.astrolabe.id.Identities
 import io.astrolabe.os.Command
@@ -43,11 +45,15 @@ import io.astrolabe.tool.ToolOps
 import io.astrolabe.tool.ToolOutcome
 import io.astrolabe.tool.TurnContext
 import io.astrolabe.tool.VerifyArgs
+import io.astrolabe.tool.run.CommandMatch
+import io.astrolabe.tool.run.DiagnosticsParser
+import io.astrolabe.tool.run.EvidenceKinds
 import io.astrolabe.tool.run.JUnitReports
 import io.astrolabe.tool.run.Executions
 import io.astrolabe.tool.run.RunCapture
 import io.astrolabe.tool.run.Runner
 import io.astrolabe.tool.run.ShapeBudget
+import io.astrolabe.tool.run.Shaped
 import io.astrolabe.tool.run.Shapers
 import io.astrolabe.tool.run.namesWorkspaceRoot
 import io.astrolabe.verify.Applicability
@@ -135,6 +141,9 @@ public class Verify(
 
     /** The campaign's current atlas; the blast selection builds its import graph from it (P3.2.5). */
     public var atlas: Atlas? = null
+
+    /** The requirements the cell's increment serves: what the model's own check strengthens (C1a); the cell sets it. */
+    internal var requirementIds: List<String> = emptyList()
 
     private var graphOf: Pair<Atlas, ImportGraph>? = null
 
@@ -361,6 +370,8 @@ public class Verify(
             // D-262: adding an obligation never grants authority to launch a new executable command.
             val refusal = when {
                 contracts.current(ids.work)?.version != contract.version -> "contract changed before verification dispatch"
+                // Plan §4.4: the model's own check launches only through `run`, under the effect policy.
+                check.id.startsWith(Checks.MODEL_PREFIX) -> "${check.id} is the model's own check: it runs through run(${command.argv.joinToString(" ")}) under the effect policy, never on verify's authority (D-262)"
                 modelAdded && !approvedCommand -> "model-added verification command needs explicit host/user authorization"
                 else -> null
             }
@@ -368,50 +379,192 @@ public class Verify(
                 view = "  ${check.id}: denied — $refusal"
                 return@execution Executed(command.argv, command.cwd, false, null, Outcome.Denied, null, null, listOf(refusal))
             }
-            val actionId = idGen.next("act")
-            val cwd = when (val path = command.cwd) {
-                null -> root
-                else -> if (namesWorkspaceRoot(path)) root else (WorkspacePath.of(root).resolve(path, Intent.Read) as? PathResolution.Resolved)?.real
-            }
-            if (cwd == null || !Files.isDirectory(cwd)) {
-                view = "  ${check.id}: denied — working directory must be a directory inside the verification workspace"
-                return@execution Executed(command.argv, command.cwd, false, null, Outcome.Denied, null, null, listOf("working directory refused"))
-            }
-            val reports = JUnitReports.forCommand(cwd, command.argv, actionId)
-            val proc = try {
-                beforeDispatch()
-                reports?.prepare(logsDir.resolve("reports-$actionId"))
-                runner.start(SpawnSpec(Command.Argv(command.argv), cwd, logPath(check.id, actionId), EnvPolicy(inheritedNames = envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")), timeoutSeconds))
-            } catch (failure: IOException) {
-                view = "  ${check.id}: unavailable — cannot start ${command.argv.first()}: ${failure.message}"
-                return@execution Executed(command.argv, command.cwd, false, null, Outcome.Unavailable, null, null, listOf("cannot start ${command.argv.first()}: ${failure.message}"))
-            }
-            val observed = Executions.observeCancellable(os, proc, POLL_SLICE_SECONDS, timeoutSeconds)
-            val safeLog = redaction.applyBytes(observed.output, ContentClass.ReusableEvidence)
-            val blob = blobs.put(safeLog.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
-            val collected = try { reports?.collect().orEmpty() } catch (failure: IOException) {
-                view = "  ${check.id}: report capture failed: ${failure.message}"
-                return@execution Executed(command.argv, command.cwd, false, null, Outcome.Inconclusive, null, blob, listOf("report capture failed: ${failure.message}"))
-            }
-            val capture = RunCapture(
-                reports = collected,
-                actionId = actionId, argv = command.argv, shell = false, cwd = command.cwd,
-                executionRoot = runCatching { cwd.toRealPath() }.getOrDefault(cwd.toAbsolutePath()).toString(),
-                exitCode = (observed.proc.status as? ProcStatus.Exited)?.exitCode, timedOut = observed.proc.status == ProcStatus.DeadlineExceeded,
-                output = observed.output, captureComplete = !observed.lost && !observed.truncated && observed.proc.status !is ProcStatus.Lost, checkId = check.id, selector = check.selector.toString(),
-            )
-            val shaped = Shapers.shape(capture, ShapeBudget(estimator = estimator))
-            val outcome = when {
-                observed.lost || observed.proc.status is ProcStatus.Lost -> Outcome.UnknownOutcome
-                observed.proc.status == ProcStatus.DeadlineExceeded -> Outcome.Timeout
-                else -> shaped.status
-            }
-            view = "  ${check.id}: " + shaped.view.lines().joinToString("\n  ")
-            Executed(command.argv, command.cwd, false, capture.exitCode, outcome, shaped.counts, blob, shaped.limitations + safeLog.limitations)
+            val invocation = invoke(check, command, root, idGen.next("act"), timeoutSeconds, ShapeBudget(estimator = estimator))
+            view = "  ${check.id}: " + invocation.view.lines().joinToString("\n  ")
+            invocation.executed
         }
         val receipt = if (retryOf == null) scheduler.runCheck(check, contract.version, inputs, execute)
             else scheduler.retryIsolated(check, contract.version, retryOf, inputs, execute) ?: return null
         return receipt to view
+    }
+
+    /**
+     * One invocation of [check]'s [command] in [root] (§8.4): started by the runner, observed to its end, its output kept
+     * as a redacted log blob and shaped once at the boundary with the check's identity (D-27, D-50). Refusals are the
+     * caller's; a runner that cannot start is `unavailable` (FX-13).
+     */
+    private suspend fun invoke(check: Check, command: io.astrolabe.contract.Command, root: Path, actionId: String, timeoutSeconds: Long, budget: ShapeBudget): Invocation {
+        val cwd = when (val path = command.cwd) {
+            null -> root
+            else -> if (namesWorkspaceRoot(path)) root else (WorkspacePath.of(root).resolve(path, Intent.Read) as? PathResolution.Resolved)?.real
+        }
+        if (cwd == null || !Files.isDirectory(cwd)) {
+            return Invocation(Executed(command.argv, command.cwd, false, null, Outcome.Denied, null, null, listOf("working directory refused")), "denied — working directory must be a directory inside the verification workspace")
+        }
+        val reports = JUnitReports.forCommand(cwd, command.argv, actionId)
+        val proc = try {
+            beforeDispatch()
+            reports?.prepare(logsDir.resolve("reports-$actionId"))
+            runner.start(SpawnSpec(Command.Argv(command.argv), cwd, logPath(check.id, actionId), EnvPolicy(inheritedNames = envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")), timeoutSeconds))
+        } catch (failure: IOException) {
+            val reason = "cannot start ${command.argv.first()}: ${failure.message}"
+            return Invocation(Executed(command.argv, command.cwd, false, null, Outcome.Unavailable, null, null, listOf(reason)), "unavailable — $reason")
+        }
+        val observed = Executions.observeCancellable(os, proc, POLL_SLICE_SECONDS, timeoutSeconds)
+        val safeLog = redaction.applyBytes(observed.output, ContentClass.ReusableEvidence)
+        val blob = blobs.put(safeLog.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
+        val lost = observed.lost || observed.proc.status is ProcStatus.Lost
+        val collected = try { reports?.collect().orEmpty() } catch (failure: IOException) {
+            return Invocation(Executed(command.argv, command.cwd, false, null, Outcome.Inconclusive, null, blob, listOf("report capture failed: ${failure.message}")), "report capture failed: ${failure.message}", lost = lost, mask = safeLog.mask)
+        }
+        val capture = RunCapture(
+            reports = collected,
+            actionId = actionId, argv = command.argv, shell = false, cwd = command.cwd,
+            executionRoot = runCatching { cwd.toRealPath() }.getOrDefault(cwd.toAbsolutePath()).toString(),
+            exitCode = (observed.proc.status as? ProcStatus.Exited)?.exitCode, timedOut = observed.proc.status == ProcStatus.DeadlineExceeded,
+            output = observed.output, captureComplete = !observed.lost && !observed.truncated && observed.proc.status !is ProcStatus.Lost, checkId = check.id, selector = check.selector.toString(),
+        )
+        val shaped = Shapers.shape(capture, budget)
+        return Invocation(executedOf(check, command, capture, shaped, lost, blob, safeLog.limitations), shaped.view, shaped, capture, lost, safeLog.mask)
+    }
+
+    /** The scheduler's record of a shaped invocation: the runner's outcome, or a host or user build or typecheck passing on its exit. */
+    private fun executedOf(check: Check, command: io.astrolabe.contract.Command, capture: RunCapture, shaped: Shaped, lost: Boolean, blob: Digest?, limits: List<String>): Executed {
+        val passes = !lost && passesOnExit(check, capture, shaped)
+        val outcome = when {
+            lost -> Outcome.UnknownOutcome
+            capture.timedOut -> Outcome.Timeout
+            passes -> Outcome.Passed
+            else -> shaped.status
+        }
+        val note = if (passes) listOf("${check.evidenceKind?.wire} evidence of a host or user command: exit ${capture.exitCode}, no test counts (plan §4.4, D-50 relaxed)") else emptyList()
+        return Executed(command.argv, command.cwd, false, capture.exitCode, outcome, shaped.counts, blob, shaped.limitations + limits + note)
+    }
+
+    /**
+     * Plan §4.4 (D-50 relaxed by the owner): a build or a typecheck the host or the user declared passes on its exit 0 alone
+     * — no exit-hiding wrapper, nothing lost or cut from the capture, and no error diagnostic from a typecheck tool the
+     * harness can parse. Tests still need parsed counts, and the model's own check never passes this way.
+     */
+    private fun passesOnExit(check: Check, capture: RunCapture, shaped: Shaped): Boolean {
+        val kind = check.evidenceKind ?: return false
+        if (!kind.exitSuffices || check.origin is Origin.Model) return false
+        if (shaped.status != Outcome.Inconclusive || shaped.counts != null || shaped.wrapper != null) return false
+        if (capture.exitCode != 0 || capture.timedOut || !capture.captureComplete || shaped.captureTruncated) return false
+        val diagnostics = DiagnosticsParser.parse(capture.argv, capture.text(), capture.exitCode) ?: return true
+        return diagnostics.errorCount == 0 && (diagnostics.summaryErrors ?: 0) == 0
+    }
+
+    // ----------------------------------------------------------- run · C1a
+
+    /**
+     * C1a (plan §4.4): the registered checks a `run` of [requested] in [cwd] realizes, recognised before dispatch so the
+     * scheduler runs the command once. A declared check — a `run:` item of the host or the user, the sniffed suite, its
+     * blast narrowing, a quality gate — matches on the normalized command and the directory ([CommandMatch]). Otherwise,
+     * with [modelChecks], a test, build or typecheck command becomes the model's own check ([Checks.modelCheck]): an agent
+     * test, never an acceptance item nor a required check. Recognition reads records only and grants no authority; every
+     * status stays the runner's and the scheduler's (L9). Empty: a plain run.
+     */
+    internal fun recognize(requested: List<String>, shell: Boolean, cwd: String?, contract: Contract, modelChecks: Boolean): List<Check> {
+        val tokens = CommandMatch.tokens(requested, shell) ?: return emptyList()
+        val dir = directoryOf(cwd) ?: return emptyList()
+        fun realizes(check: Check) = check.command?.let { CommandMatch.matches(tokens, it.argv) && directoryOf(it.cwd) == dir } == true
+        val declared = checks.all().filter { declared(it, contract) && realizes(it) }
+        if (declared.isNotEmpty() || !modelChecks) return declared
+        checks.all().firstOrNull { it.id.startsWith(Checks.MODEL_PREFIX) && realizes(it) }?.let { return listOf(it) }
+        val kind = EvidenceKinds.recognize(tokens) ?: return emptyList()
+        val strengthens = requirementIds.ifEmpty { contract.requirements.map { it.id } }.joinToString("+").ifEmpty { return emptyList() }
+        val check = Checks.modelCheck(io.astrolabe.contract.Command(tokens, dir.ifEmpty { null }), kind, strengthens)
+        return listOf(checks[check.id] ?: checks.register(check))
+    }
+
+    /** Declared by the host or the user (plan §4.4): `run:` items of another origin than the model's, the sniffed suite and its blast narrowing, quality gates. */
+    private fun declared(check: Check, contract: Contract): Boolean {
+        if (check.command == null || check.origin is Origin.Model || check.selector == Selector.Touched) return false
+        return when (check.kind) {
+            CheckKind.Acceptance -> check.acceptanceIds.isNotEmpty() && check.acceptanceIds.all { id -> (contract.acceptance(id) as? Acceptance.Run)?.origin.let { it != null && it !is Origin.Model } }
+            CheckKind.Full, CheckKind.Quality -> true
+            else -> check.selector == Selector.Blast
+        }
+    }
+
+    /** A command directory as a workspace-relative path, `""` for the root; null when it is not a directory inside the workspace. */
+    private fun directoryOf(cwd: String?): String? {
+        if (cwd == null || namesWorkspaceRoot(cwd)) return ""
+        val resolved = workspace.resolve(cwd, Intent.Read) as? PathResolution.Resolved ?: return null
+        return resolved.relative.takeIf { Files.isDirectory(resolved.real) }
+    }
+
+    /**
+     * C1a: the one execution of a recognised foreground `run` — in the workspace, under the scheduler's exclusive protocol
+     * with a fresh stamp — and a receipt for each of [recognized] that shares its inputs; no flaky rerun follows it.
+     */
+    internal suspend fun runRecognized(recognized: List<Check>, contract: Contract, actionId: String, timeoutSeconds: Long, budget: ShapeBudget): RecognizedRun {
+        val check = recognized.first()
+        val command = checkNotNull(check.command) { "a recognised check declares a command" }
+        var invocation: Invocation? = null
+        val scheduled = scheduler.runInWorkspace(recognized, contract.version, inputs) { root ->
+            invoke(check, command, root, actionId, timeoutSeconds, budget).also { invocation = it }.executed
+        }
+        return RecognizedRun(scheduled.receipts, checkNotNull(invocation), scheduled.changed)
+    }
+
+    /**
+     * C1a, a recognised background `run`: pins [recognized]'s inputs and archives earlier JUnit reports before its launch;
+     * null when the reports cannot be archived (a stale report must never read as this run's), and the run stays plain.
+     */
+    internal suspend fun pinRecognized(recognized: List<Check>, contract: Contract, actionId: String): PinnedRun? {
+        val check = recognized.first()
+        val command = check.command ?: return null
+        val cwd = directoryOf(command.cwd)?.let { if (it.isEmpty()) workspace.root else workspace.root.resolve(it) } ?: return null
+        val reports = JUnitReports.forCommand(cwd, command.argv, actionId)
+        try {
+            reports?.prepare(logsDir.resolve("reports-$actionId"))
+        } catch (failure: IOException) {
+            return null
+        }
+        return PinnedRun(scheduler.pin(recognized, inputs), check, command, contract.version, reports, runCatching { cwd.toRealPath() }.getOrDefault(cwd.toAbsolutePath()).toString())
+    }
+
+    /**
+     * The receipts of a pinned background run that ended (C1a): [capture] (the run's own) is bound to the check — its
+     * declared command, identity and fresh reports — shaped once, and recorded by the scheduler after its rescan.
+     */
+    internal suspend fun settleRecognized(pinned: PinnedRun, capture: RunCapture, blob: Digest?, limits: List<String>, budget: ShapeBudget): SettledRun {
+        val collected = try { pinned.reports?.collect().orEmpty() } catch (failure: IOException) { null }
+        val bound = capture.copy(
+            argv = pinned.command.argv, shell = false, cwd = pinned.command.cwd, reports = collected.orEmpty(),
+            checkId = pinned.check.id, selector = pinned.check.selector.toString(), executionRoot = pinned.executionRoot,
+        )
+        val shaped = Shapers.shape(bound, budget)
+        val executed = if (collected == null) {
+            Executed(pinned.command.argv, pinned.command.cwd, false, null, Outcome.Inconclusive, null, blob, listOf("report capture failed"))
+        } else {
+            executedOf(pinned.check, pinned.command, bound, shaped, lost = false, blob, limits)
+        }
+        return SettledRun(scheduler.settle(pinned.pin, pinned.contractVersion, executed), shaped, bound)
+    }
+
+    /** A pinned background run that could not start: its checks still get an explicit `unavailable` receipt (FX-13). */
+    internal suspend fun settleUnavailable(pinned: PinnedRun, reason: String): List<Receipt> =
+        scheduler.settle(pinned.pin, pinned.contractVersion, Executed(pinned.command.argv, pinned.command.cwd, false, null, Outcome.Unavailable, null, null, listOf("cannot start: $reason")))
+
+    /** One line per receipt for the `run` view (C1a): the check, its state at the stamp now, the receipt alias, and what it proves. */
+    internal fun receiptLines(receipts: List<Receipt>): String {
+        val stampNow = stamper.stamp().id
+        return receipts.joinToString("\n") { receipt ->
+            val check = checks[receipt.checkId]
+                ?: return@joinToString "receipt ${receipt.checkId}: ${receipt.outcome.name.lowercase()} (${scheduler.aliasOf(receipt.receiptId) ?: receipt.receiptId})"
+            val line = ChecksRender.line(lineOf(check, receipt, scheduler.currency(check, stampNow), scheduler.aliasOf(receipt.receiptId)))
+            val proves = receipt.evidenceKind?.let { kind ->
+                when {
+                    !receipt.independent -> "${kind.wire} · the model's own check: an agent test, not independent acceptance"
+                    receipt.passesOnExit && receipt.outcome == Outcome.Passed && receipt.parsed == null -> "${kind.wire} passes on exit ${receipt.exitCode} (no test counts)"
+                    else -> kind.wire
+                }
+            }
+            "receipt ${receipt.checkId}: $line" + (proves?.let { " · $it" } ?: "")
+        }
     }
 
     // ---------------------------------------------------------------- render
@@ -428,6 +581,7 @@ public class Verify(
             else -> CheckState.Inconclusive(receipt.limits.firstOrNull()?.detail ?: receipt.outcome.name.lowercase())
         }
         val label = when {
+            check.id.startsWith(Checks.MODEL_PREFIX) -> "agent ${check.evidenceKind?.wire ?: "check"}"
             check.selector == Selector.Blast -> "tests"
             check.kind == CheckKind.Acceptance -> "accept ${check.acceptanceIds.joinToString("+")}"
             check.kind == CheckKind.Type -> "types"
@@ -486,3 +640,29 @@ public class Verify(
 
 /** What [Verify.runLayer] recorded: the receipts of the checks it ran, and what the layer could not test. */
 public data class LayerRun(val layer: Layer, val receipts: List<Receipt>, val notTested: List<String>)
+
+/** One invocation of a check's command: the scheduler's record, and what the caller shows of it. */
+internal class Invocation(
+    val executed: Executed,
+    val view: String,
+    val shaped: Shaped? = null,
+    val capture: RunCapture? = null,
+    val lost: Boolean = false,
+    val mask: RedactionMask = RedactionMask.NONE,
+)
+
+/** A recognised foreground `run` (C1a): the receipts of its one execution, the invocation, and the paths it moved. */
+internal class RecognizedRun(val receipts: List<Receipt>, val invocation: Invocation, val changed: List<String>)
+
+/** A recognised background `run` between its launch and its end (C1a): held in memory, so a restart records no receipt. */
+internal class PinnedRun(
+    val pin: Scheduler.Pin,
+    val check: Check,
+    val command: io.astrolabe.contract.Command,
+    val contractVersion: Int,
+    val reports: JUnitReports?,
+    val executionRoot: String,
+)
+
+/** A pinned background run at its end: its receipts, and the capture bound to the check with its shaped view. */
+internal class SettledRun(val receipts: List<Receipt>, val shaped: Shaped, val capture: RunCapture)
