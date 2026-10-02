@@ -75,6 +75,27 @@ class AuditMathTest {
         assertFalse(book.prices(calls[0])!!.estimate)
     }
 
+    @Test fun `a bill's own precision sets the sensitivity, trailing zeros included`() {
+        val fit = AuditMath.fitPrices(route, listOf(FitRow(mapOf(PriceClass.UncachedInput to 1_000L, PriceClass.CacheRead to 0L, PriceClass.Output to 0L), BigDecimal("0.0010"))))
+        assertEquals(Agreement.Determined, fit.agreement)
+        // 1000 tokens billed to 10⁻⁴: the price is known to 10⁻⁷ per token, 0.1 per million.
+        assertEquals(0.1, fit.sensitivityPerMillion.getValue(PriceClass.UncachedInput)!!, 1e-12)
+    }
+
+    @Test fun `the condition comes from the design matrix and a numerically singular one says so`() {
+        fun m(vararg rows: List<Long>) = rows.map { r -> r.map(BigInteger::valueOf) }
+        // det X = 1, so κ of the column-scaled matrix is 2·‖x₁‖·‖x₂‖ ≈ 4·10⁸; through XᵀX it would be lost.
+        val expected = 2.0 * kotlin.math.sqrt(200_020_001.0) * kotlin.math.sqrt(199_980_001.0)
+        assertEquals(1.0, AuditMath.condition(m(listOf(10_000L, 9_999L), listOf(10_001L, 10_000L)))!! / expected, 1e-6)
+        assertNull(AuditMath.condition(m(listOf(100_000_000L, 100_000_001L), listOf(100_000_001L, 100_000_002L))))
+        val singular = AuditMath.fitPrices(route, listOf(
+            FitRow(mapOf(PriceClass.UncachedInput to 100_000_000L, PriceClass.CacheRead to 0L, PriceClass.Output to 100_000_001L), BigDecimal("1")),
+            FitRow(mapOf(PriceClass.UncachedInput to 100_000_001L, PriceClass.CacheRead to 0L, PriceClass.Output to 100_000_002L), BigDecimal("1")),
+        ))
+        assertTrue(singular.numericallySingular)
+        assertNull(singular.condition)
+    }
+
     @Test fun `a determinant stays exact on integers`() {
         fun m(vararg rows: List<Int>) = rows.map { r -> r.map { BigInteger.valueOf(it.toLong()) } }
         assertEquals(BigInteger.valueOf(6), AuditMath.determinant(m(listOf(2, 0, 1), listOf(1, 3, 2), listOf(1, 1, 2))))

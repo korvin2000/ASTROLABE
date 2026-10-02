@@ -35,9 +35,10 @@ public data class FitRow(val tokens: Map<PriceClass, Long>, val billed: BigDecim
 /**
  * Prices per million tokens of one [binding], fitted from billed calls. A class no call used has no price (`null`);
  * the other prices do not depend on it. [maxResidual] is the largest `|C_i − x_i·p|` over the calls. [condition] is the
- * condition number of the design matrix with unit-norm columns (how collinear the classes are); [sensitivityPerMillion]
- * the largest move of each price if every charge moved by one unit of its last reported decimal; and
- * [standardErrorPerMillion] each price's standard error from the residuals, with `n > d` calls.
+ * condition number of the design matrix with unit-norm columns (how collinear the classes are), `null` with
+ * [numericallySingular] when it is beyond double resolution; [sensitivityPerMillion] the largest move of each price if
+ * every charge moved by one unit of its last reported decimal; and [standardErrorPerMillion] each price's standard
+ * error from the residuals, with `n > d` calls.
  */
 @Serializable
 public data class PriceFit(
@@ -50,6 +51,7 @@ public data class PriceFit(
     val condition: Double? = null,
     val sensitivityPerMillion: Map<PriceClass, Double?> = emptyMap(),
     val standardErrorPerMillion: Map<PriceClass, Double?> = emptyMap(),
+    val numericallySingular: Boolean = false,
 )
 
 /**
@@ -116,6 +118,7 @@ public object AuditMath {
             agrees -> Agreement.Exact
             else -> Agreement.Approximate
         }
+        val condition = condition(x)
         // (XᵀX)⁻¹ = adj / det: cofactors of the transpose, exact before the division.
         val inverse = List(d) { i -> List(d) { j ->
             val minor = List(d - 1) { r -> List(d - 1) { c -> a[if (r < j) r else r + 1][if (c < i) c else c + 1] } }
@@ -124,40 +127,55 @@ public object AuditMath {
         } }
         val residuals = rows.indices.map { n -> (y[n] * det - (0 until d).fold(BigInteger.ZERO) { s, j -> s + x[n][j] * dets[j] }).toDouble() / denominator.toDouble() }
         val sigma = if (rows.size > d) sqrt(residuals.sumOf { it * it } / (rows.size - d)) else null
-        val unit = rows.map { BigDecimal.ONE.movePointLeft(it.billed.stripTrailingZeros().scale().coerceAtLeast(0)).toDouble() }
+        // The charge as reported: `0.0010` is known to 10⁻⁴, its trailing zero included.
+        val unit = rows.map { BigDecimal.ONE.scaleByPowerOfTen(-it.billed.scale()).toDouble() }
         fun byClass(f: (Int) -> Double?): Map<PriceClass, Double?> = PriceClass.entries.associateWith { c -> classes.indexOf(c).takeIf { it >= 0 }?.let(f) }
         val sensitivity = byClass { j -> 1e6 * rows.indices.sumOf { n -> abs((0 until d).sumOf { k -> inverse[j][k] * x[n][k].toDouble() }) * unit[n] } }
         val error = byClass { j -> sigma?.let { 1e6 * it * sqrt(maxOf(0.0, inverse[j][j])) } }
         return PriceFit(
             binding, rows.size, if (agreement == Agreement.Negative) PriceClass.entries.associateWith { null } else perMillion, agreement,
-            maxResidual.stripTrailingZeros(), maxRelative, condition(a), sensitivity, error,
+            maxResidual.stripTrailingZeros(), maxRelative, condition, sensitivity, error, condition == null,
         )
     }
 
+    /** Below this `σ_min / σ_max` a design matrix is numerically singular: double arithmetic no longer resolves `σ_min`. */
+    public const val NUMERICAL_FLOOR: Double = 1e-12
+
     /**
-     * The condition number of `X` with unit-norm columns, `√(λ_max / λ_min)` of `D⁻¹ XᵀX D⁻¹`, `D = diag(‖x_j‖)`, by
-     * Jacobi rotations; `null` when not finite.
+     * The condition number `σ_max / σ_min` of the design matrix [design] (`n` rows of `d` token counts) with unit-norm
+     * columns, by one-sided Jacobi rotations on the matrix itself (Hestenes): columns are orthogonalized pairwise and the
+     * singular values are their norms, so the condition is never squared as it is through `XᵀX`. `null` when `σ_min`
+     * falls below [NUMERICAL_FLOOR] of `σ_max` — numerically singular, though the exact determinant may not be zero.
      */
-    internal fun condition(normal: List<List<BigInteger>>): Double? {
-        val d = normal.size
-        val norms = DoubleArray(d) { sqrt(normal[it][it].toDouble()) }
-        val m = Array(d) { i -> DoubleArray(d) { j -> normal[i][j].toDouble() / (norms[i] * norms[j]) } }
-        repeat(100) {
-            var p = 0
-            var q = 0
-            var largest = 0.0
-            for (i in 0 until d) for (j in i + 1 until d) if (abs(m[i][j]) > largest) { largest = abs(m[i][j]); p = i; q = j }
-            if (largest < 1e-15) return@repeat
-            val theta = (m[q][q] - m[p][p]) / (2 * m[p][q])
-            val t = (if (theta >= 0) 1.0 else -1.0) / (abs(theta) + sqrt(theta * theta + 1))
-            val c = 1 / sqrt(t * t + 1)
-            val s = t * c
-            for (k in 0 until d) { val kp = m[k][p]; val kq = m[k][q]; m[k][p] = c * kp - s * kq; m[k][q] = s * kp + c * kq }
-            for (k in 0 until d) { val pk = m[p][k]; val qk = m[q][k]; m[p][k] = c * pk - s * qk; m[q][k] = s * pk + c * qk }
+    internal fun condition(design: List<List<BigInteger>>): Double? {
+        val n = design.size
+        val d = design.first().size
+        val columns = Array(d) { j -> DoubleArray(n) { i -> design[i][j].toDouble() } }
+        for (column in columns) {
+            val norm = sqrt(column.sumOf { it * it })
+            for (i in 0 until n) column[i] /= norm
         }
-        val eigen = DoubleArray(d) { m[it][it] }
-        val ratio = sqrt(eigen.max() / eigen.min())
-        return ratio.takeIf { it.isFinite() && eigen.min() > 0 }
+        for (sweep in 0 until 60) {
+            var rotated = false
+            for (p in 0 until d) for (q in p + 1 until d) {
+                val up = columns[p]
+                val uq = columns[q]
+                var alpha = 0.0
+                var beta = 0.0
+                var gamma = 0.0
+                for (i in 0 until n) { alpha += up[i] * up[i]; beta += uq[i] * uq[i]; gamma += up[i] * uq[i] }
+                if (abs(gamma) <= 1e-15 * sqrt(alpha * beta)) continue
+                rotated = true
+                val zeta = (beta - alpha) / (2 * gamma)
+                val t = (if (zeta >= 0) 1.0 else -1.0) / (abs(zeta) + sqrt(1 + zeta * zeta))
+                val c = 1 / sqrt(1 + t * t)
+                val s = c * t
+                for (i in 0 until n) { val a = up[i]; val b = uq[i]; up[i] = c * a - s * b; uq[i] = s * a + c * b }
+            }
+            if (!rotated) break
+        }
+        val sigma = columns.map { column -> sqrt(column.sumOf { it * it }) }
+        return if (sigma.min() <= NUMERICAL_FLOOR * sigma.max()) null else sigma.max() / sigma.min()
     }
 
     /** Fraction-free Gaussian elimination (Bareiss): every division is exact, so the determinant of an integer matrix stays an integer. */
