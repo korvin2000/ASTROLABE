@@ -168,8 +168,7 @@ public class Run(
         require(call.family == ToolFamily.Run) { "not a run call: ${call.name}" }
         // D-352: a cwd naming the root is no cwd, so intents, handles and the unknown-outcome guard see one command.
         val args = (call.args as Args.Run).args.let { if (it.cwd != null && namesWorkspaceRoot(it.cwd)) it.copy(cwd = null) else it }
-        // A wait observes a handle exactly as a poll does, so a role allowed to poll may wait.
-        if (!mask.allows(call.name) && !(args.op == "wait" && mask.allows(ToolOps.name(ToolFamily.Run, "poll")))) {
+        if (!ToolOps.implied(mask).allows(call.name)) {
             return refused(args, Outcome.Denied, "${call.name} is masked in this role")
         }
         return when (args.op) {

@@ -839,7 +839,7 @@ public class Cell @JvmOverloads constructor(
                     repairable.take(REPAIR_PATHS_SHOWN).joinToString(", ") + (if (repairable.size > REPAIR_PATHS_SHOWN) ", … +${repairable.size - REPAIR_PATHS_SHOWN}" else "") + "); verify and report"
             }
             val op = call.operationNames.firstOrNull { !mask.allows(it) } ?: return null
-            val ceiling = Ceiling.of(contract.authorization, ctx.config.executionMode, ctx.hostSets).allows(op, ctx.role.toolMask)?.detail
+            val ceiling = Ceiling.of(contract.authorization, ctx.config.executionMode, ctx.hostSets).allows(op, ctx.role.ops)?.detail
             return Refusals.masked(op, ctx.role, contract.shape, mask, ceiling)
         }
 

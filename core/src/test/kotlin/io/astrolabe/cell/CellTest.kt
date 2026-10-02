@@ -154,6 +154,25 @@ class CellTest {
     }
 
     @Test
+    fun `a custom role that may poll may wait in its request mask refusals and lines`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val poller = Roles.implementing.copy(name = "poller", toolMask = io.astrolabe.provider.ToolMask(Roles.implementing.toolMask.allowed - "run.wait"))
+            f.run(ScriptedModel.of(
+                Scripted.Reply(listOf(call("c1", "run", """{"op":"wait","handle":"handle-9","timeout":1}"""))),
+                Scripted.Reply(listOf(say("done"))),
+            ), role = poller)
+
+            assertTrue(f.request(1).mask!!.allows("run.wait"), f.request(1).mask.toString())
+            val system = f.request(1).segment(SegmentKind.S)!!.items.filterIsInstance<io.astrolabe.provider.Message>().joinToString("\n") { it.text }
+            assertTrue(system.lineSequence().first { it.startsWith("tools: ") }.contains("run(run, poll, wait, cancel)"), system)
+            assertFalse(f.anchorText(1).lineSequence().first { it.startsWith("enabled this turn") }.contains("run.wait"), f.anchorText(1))
+            val result = f.transcript(2).filterIsInstance<ToolResult>().joinToString("\n") { resultText(it) }
+            assertFalse(result.contains("is not available to the poller role"), result)
+            assertTrue(result.contains("no handle 'handle-9'"), result)
+        }
+    }
+
+    @Test
     fun `profile request estimator participates in dispatch admission`() = runTest {
         CellFixture(stateRoot).use { f ->
             val base = f.context(ScriptedModel.of())
