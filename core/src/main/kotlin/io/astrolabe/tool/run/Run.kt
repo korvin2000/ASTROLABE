@@ -618,7 +618,7 @@ public class Run(
                 val cut = if (terminal) pending.size else if (end >= 0) end + 1 else if (pending.size > WAIT_LINE_BYTES) pending.size else 0
                 partial = pending.copyOfRange(cut, pending.size)
                 // Matched on the redacted line: a pattern is no oracle for a secret the model is never shown.
-                matched = pending.copyOfRange(0, cut).toString(Charsets.UTF_8).lineSequence()
+                matched = linesOf(pending.copyOfRange(0, cut).toString(Charsets.UTF_8))
                     .map { redaction.apply(it.trimEnd('\r')).text }.firstOrNull { until.line.containsMatchIn(it) }?.take(200)
             }
             if (terminal) return Waited.Ended(proc.status, cursor, tail.bytes(), matched)
@@ -748,6 +748,9 @@ private const val WAIT_TAIL_BYTES: Int = 256 * 1024
 
 /** A line longer than this without a newline is matched as it stands. */
 private const val WAIT_LINE_BYTES: Int = 64 * 1024
+
+/** The lines of [text]; a closing line break ends the last line instead of opening an empty one that `^$` would match. */
+private fun linesOf(text: String): Sequence<String> = text.lineSequence().toList().let { if (it.last().isEmpty()) it.dropLast(1) else it }.asSequence()
 
 /** The last [capacity] bytes added, and how many earlier ones were [dropped]. */
 private class TailBuffer(private val capacity: Int) {

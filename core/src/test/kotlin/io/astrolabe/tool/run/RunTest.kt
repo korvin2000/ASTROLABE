@@ -951,7 +951,7 @@ class RunTest {
 
     /**
      * A process that exists only as a script: poll number k reveals step k's output and status (the last step stays), and
-     * the poll's own timeout passes on the injected clock. The launch's first look is poll 0.
+     * a quiet poll's own timeout passes on the injected clock. The launch's first look is poll 0.
      */
     private inner class ScriptedOs(private val steps: List<Pair<String, ProcStatus>>) : Os by os {
         var spawns = 0
@@ -974,8 +974,10 @@ class RunTest {
                 Files.write(proc.log, log)
             }
             polls++
-            clock.advance(java.time.Duration.ofSeconds(observationTimeoutSeconds))
-            return Poll(log.copyOfRange(sinceCursorBytes.toInt(), log.size), log.size.toLong(), status, false)
+            val news = log.copyOfRange(sinceCursorBytes.toInt(), log.size)
+            // A poll returns at once with new bytes or a terminal status; only a quiet one spends its whole timeout.
+            if (news.isEmpty() && !status.isTerminal) clock.advance(java.time.Duration.ofSeconds(observationTimeoutSeconds))
+            return Poll(news, log.size.toLong(), status, false)
         }
 
         override fun reattach(proc: Proc): Proc = proc.copy(status = status)
@@ -1006,6 +1008,16 @@ class RunTest {
 
         assertTrue(out.body.contains("wait ended: the process ended; readiness line matched: listening on port 8080"), out.body)
         assertEquals(3, scripted.polls, "the line stayed unfinished while the process ran, so only the end matched it")
+    }
+
+    @Test
+    fun `a line break that closes the last line does not open an empty line for an anchored pattern`() = runTest {
+        val scripted = ScriptedOs(listOf("" to ProcStatus.Running, "starting\n" to ProcStatus.Running, "\n" to ProcStatus.Running))
+
+        val out = run("""{"argv":["git","status"],"until_line":"^$","timeout":30}""", runner(os = scripted))
+
+        assertTrue(out.body.contains("ready: line matched: "), out.body)
+        assertEquals(3, scripted.polls, "starting alone is no blank line; the empty line that follows it is")
     }
 
     @Test
