@@ -5,6 +5,7 @@ import io.astrolabe.Defaults
 import io.astrolabe.atlas.Atlas
 import io.astrolabe.budget.HeuristicEstimator
 import io.astrolabe.budget.Tokens
+import io.astrolabe.cell.CellFixture.Companion.anchored
 import io.astrolabe.cell.CellFixture.Companion.call
 import io.astrolabe.cell.CellFixture.Companion.read
 import io.astrolabe.cell.CellFixture.Companion.say
@@ -16,7 +17,10 @@ import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Command
 import io.astrolabe.contract.Contracts
 import io.astrolabe.contract.Origin
+import io.astrolabe.contract.Shape
 import io.astrolabe.contract.SqliteContractRepository
+import io.astrolabe.event.Authority
+import io.astrolabe.event.AutonomousAuthority
 import io.astrolabe.evidence.Intent
 import io.astrolabe.evidence.IntentStatus
 import io.astrolabe.evidence.SqliteIntentJournal
@@ -38,13 +42,20 @@ import io.astrolabe.provider.SegmentKind
 import io.astrolabe.store.BlobPoint
 import io.astrolabe.store.FaultPoints
 import io.astrolabe.store.Store
+import io.astrolabe.verify.AcceptanceDecision
+import io.astrolabe.verify.AcceptanceDecisionRequest
+import io.astrolabe.verify.Decider
+import io.astrolabe.verify.DecisionKind
+import io.astrolabe.verify.StopCode
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Path
 import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFails
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** P2.2.4: the §13.4 resume protocol across controller deaths — handles, unknown outcomes, a rebuild — with a resume note. */
@@ -136,6 +147,184 @@ class ResumeTest {
                 val note = pinnedResume(adapter)
                 assertTrue("unknown outcomes int-lost (reconcile before any retry)" in note, note)
                 assertEquals(IntentStatus.Unknown, SqliteIntentJournal(c.store, clock).get("int-lost")!!.status, "never replayed")
+            }
+        }
+    }
+
+    /** The host of a pending completion (D-339): records each decision request and accepts it or gives none. */
+    private class Host(private val accept: Boolean) : Authority by AutonomousAuthority() {
+        val asked = ArrayList<AcceptanceDecisionRequest>()
+
+        override suspend fun decide(request: AcceptanceDecisionRequest): AcceptanceDecision? {
+            asked += request
+            return if (!accept) null else AcceptanceDecision(request.id, request.contractRevision, request.candidate, DecisionKind.Accept, Decider.User, "user:test", "checked it by hand")
+        }
+    }
+
+    private fun idle(): Pair<CellModel, FakeAdapter> = model(FakeProfiles.main)
+
+    /** Store-level fault injection: [trigger] aborts the write the controller would make next, as a process death there would. */
+    private fun arm(repo: TempRepo, trigger: String) = Store.open(stateRoot, repo.git, clock).use { store -> store.db.tx { it.execute(trigger) } }
+
+    private fun disarm(repo: TempRepo, name: String) = Store.open(stateRoot, repo.git, clock).use { store -> store.db.tx { it.execute("DROP TRIGGER $name") } }
+
+    private fun receipts(c: OpenedCampaign): Long = c.store.db.query("SELECT count(*) AS n FROM receipts") { it.long("n") }.single()
+
+    private fun reverified(c: OpenedCampaign): List<String> = c.journal.events(io.astrolabe.evidence.JournalScope(c.ids.work, kinds = setOf(io.astrolabe.evidence.JournalKind.Reconcile)))
+        .map { it.text }.filter { "returned but its outcome was never applied" in it }
+
+    /** A contract of [shape] whose one acceptance runs [run]. */
+    private fun seeded(shape: Shape, run: Command): TempRepo = TempRepo.create().also { repo ->
+        repo.write("src/a.py", "def a():\n    return 1\n")
+        repo.write("pytest_pass.txt", javaClass.getResourceAsStream("/shaper/pytest-pass.txt")!!.use { String(it.readAllBytes(), Charsets.UTF_8) })
+        repo.commit("initial")
+        Store.open(stateRoot, repo.git, clock).use { store ->
+            val contracts = Contracts(SqliteContractRepository(store, clock), idGen, clock)
+            val derived = contracts.deriveS0(request.work, request.attempt, request.text, Atlas.build(repo.root), Config(), Tokens(400_000)).contract
+            contracts.open(derived.copy(
+                shape = shape,
+                scope = derived.scope.copy(writePaths = listOf("src/")),
+                requirements = derived.requirements.map { it.copy(acceptance = listOf("AC-1")) },
+                acceptance = listOf(Acceptance.Run("AC-1", run, Origin.User)),
+            ))
+        }
+    }
+
+    /** A contract whose runner is not installed: its receipt is `unavailable`, so the completion waits for a decision. */
+    private fun undecidable(shape: Shape): TempRepo = seeded(shape, Command(listOf("astrolabe-missing-runner-p0")))
+
+    private val passing = if (WINDOWS) Command(listOf("cmd.exe", "/d", "/s", "/c", "type pytest_pass.txt")) else Command(listOf("/bin/sh", "-c", "cat pytest_pass.txt"))
+
+    private fun attempts(c: OpenedCampaign): List<String> = c.journal.events(io.astrolabe.evidence.JournalScope(c.ids.work, kinds = setOf(io.astrolabe.evidence.JournalKind.Boundary)))
+        .map { it.text }.filter { it.startsWith("substantive attempt") }
+
+    /** A small contract opens at S0; one expected to resume opens at S1 (§3.5). */
+    private fun policy(shape: Shape) = CampaignPolicy(Tokens(400_000), resumeExpected = shape == Shape.S1)
+
+    private fun deathBeforePendingSave(shape: Shape) = runBlocking<Unit> {
+        undecidable(shape).use { repo ->
+            arm(repo, "CREATE TRIGGER die_before_pending BEFORE INSERT ON pending_completions BEGIN SELECT RAISE(ABORT, 'process death'); END")
+            val (first, firstAdapter) = model(FakeProfiles.main, reply(say("done")))
+            Controller(config(), clock, idGen).let { controller ->
+                controller.open(repo.root, request, policy(shape)).use { c ->
+                    assertEquals(shape, (c.shape as ShapeDecision.Selected).shape)
+                    assertFails { controller.run(c, first, Host(accept = false)) }
+                    assertEquals(1, firstAdapter.calls.size)
+                    assertEquals(CellStatus.Completed, c.state!!.cells.single().status, "the return was saved, its pending completion was not")
+                    assertNull(Acceptances(c.store, clock).open(request.work, request.attempt))
+                }
+            }
+            disarm(repo, "die_before_pending")
+            val before = Store.open(stateRoot, repo.git, clock).use { store -> store.db.query("SELECT count(*) AS n FROM receipts") { it.long("n") }.single() }
+
+            val waiting = Host(accept = false)
+            Controller(config(), clock, idGen).let { controller ->
+                controller.open(repo.root, request, policy(shape)).use { c ->
+                    val (model, adapter) = idle()
+                    val run = controller.run(c, model, waiting)
+                    assertEquals(CampaignOutcome.WaitingForInput, run.outcome, run.state?.reason)
+                    assertEquals(StopCode.AcceptanceDecision, run.state?.stopCode)
+                    assertEquals(0, adapter.calls.size, "the kept return is verified again: no cell, no model call")
+                    val item = waiting.asked.single().items.single()
+                    assertTrue(item.reason.contains("cannot start"), "verified from the stopped controller's receipt: ${item.reason}")
+                    assertTrue(reverified(c).single().endsWith("with no model call"), reverified(c).toString())
+                }
+            }
+            // Idempotent: opening again settles the one pending completion; nothing is verified, run or recorded twice.
+            Controller(config(), clock, idGen).let { controller ->
+                controller.open(repo.root, request, policy(shape)).use { c ->
+                    val (model, adapter) = idle()
+                    assertEquals(CampaignOutcome.WaitingForInput, controller.run(c, model, Host(accept = false)).outcome)
+                    assertEquals(0, adapter.calls.size)
+                    assertEquals(1, Acceptances(c.store, clock).pending(request.work, request.attempt).size, "no second pending completion")
+                    assertEquals(before, receipts(c), "no check ran again")
+                    assertEquals(1, reverified(c).size)
+                }
+            }
+            Controller(config(), clock, idGen).let { controller ->
+                controller.open(repo.root, request, policy(shape)).use { c ->
+                    val (model, adapter) = idle()
+                    val run = controller.run(c, model, Host(accept = true))
+                    assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+                    assertEquals(0, adapter.calls.size, "an accept completes with no model call")
+                    assertNull(Acceptances(c.store, clock).open(request.work, request.attempt))
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `a death between an S0 cell's return and its pending save is verified again on reopen with no model call`() = deathBeforePendingSave(Shape.S0)
+
+    @Test
+    fun `a death between an S1 cell's return and its pending save is verified again on reopen with no model call`() = deathBeforePendingSave(Shape.S1)
+
+    @Test
+    fun `a death between a return and its commit commits on reopen with no model call`() = runBlocking<Unit> {
+        repo().use { repo ->
+            arm(repo, "CREATE TRIGGER die_at_commit BEFORE INSERT ON increments WHEN NEW.status = 'Verified' BEGIN SELECT RAISE(ABORT, 'process death'); END")
+            val (first, _) = model(FakeProfiles.main, *verifyAndFinish())
+            Controller(config(), clock, idGen).let { controller ->
+                controller.open(repo.root, request, CampaignPolicy(Tokens(400_000))).use { c -> assertFails { controller.runS0(c, first) } }
+            }
+            disarm(repo, "die_at_commit")
+            val controller = Controller(config(), clock, idGen)
+            controller.open(repo.root, request, CampaignPolicy(Tokens(400_000))).use { c ->
+                val (model, adapter) = idle()
+                val run = controller.runS0(c, model)
+                assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+                assertEquals(0, adapter.calls.size, "the kept return is committed: no cell, no model call")
+                assertEquals(1, reverified(c).size)
+            }
+        }
+    }
+
+    @Test
+    fun `a death between the kept return and its campaign row leaves the cell lost and a continuation runs`() = runBlocking<Unit> {
+        repo().use { repo ->
+            arm(repo, "CREATE TRIGGER die_at_return BEFORE INSERT ON campaigns WHEN EXISTS (SELECT 1 FROM packets WHERE kind = 'returned_completion') BEGIN SELECT RAISE(ABORT, 'process death'); END")
+            val (first, _) = model(FakeProfiles.main, *verifyAndFinish())
+            Controller(config(), clock, idGen).let { controller ->
+                controller.open(repo.root, request, CampaignPolicy(Tokens(400_000))).use { c -> assertFails { controller.runS0(c, first) } }
+            }
+            disarm(repo, "die_at_return")
+            val controller = Controller(config(), clock, idGen)
+            controller.open(repo.root, request, CampaignPolicy(Tokens(400_000))).use { c ->
+                assertEquals(CellStatus.Failed, c.state!!.cells.single().status, "the cell never returned: open marks it lost")
+                val (model, adapter) = model(FakeProfiles.main, *verifyAndFinish())
+                val run = controller.runS0(c, model)
+                assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+                assertEquals(2, adapter.calls.size, "a continuation cell runs; the kept record of a lost cell is never verified")
+                assertTrue(reverified(c).isEmpty(), reverified(c).toString())
+            }
+        }
+    }
+
+    @Test
+    fun `a refusal when a kept return is verified again counts as a failed attempt`() = runBlocking<Unit> {
+        seeded(Shape.S1, passing).use { repo ->
+            arm(repo, "CREATE TRIGGER die_at_commit BEFORE INSERT ON increments WHEN NEW.status = 'Verified' BEGIN SELECT RAISE(ABORT, 'process death'); END")
+            val (first, _) = model(FakeProfiles.main, *verifyAndFinish())
+            Controller(config(), clock, idGen).let { controller ->
+                controller.open(repo.root, request, policy(Shape.S1)).use { c ->
+                    assertEquals(Shape.S1, (c.shape as ShapeDecision.Selected).shape)
+                    assertFails { controller.run(c, first) }
+                }
+            }
+            disarm(repo, "die_at_commit")
+            // The stopped controller's latest receipt is red: verified again, the completion is refused.
+            Store.open(stateRoot, repo.git, clock).use { store ->
+                store.db.tx { it.execute("UPDATE receipts SET outcome = 'Failed', body = json_set(body, '$.outcome', 'Failed')") }
+            }
+            val controller = Controller(config(), clock, idGen)
+            controller.open(repo.root, request, policy(Shape.S1)).use { c ->
+                val version = c.registry.version("src/a.py")!!
+                val (model, adapter) = model(FakeProfiles.main, reply(say("fixing"), anchored("e1", "src/a.py", version, "    return 1", "    return 10")), *verifyAndFinish())
+                val run = controller.run(c, model)
+                assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+                assertEquals(1, reverified(c).size)
+                assertEquals(1, attempts(c).size, "the refusal is a substantive attempt, as a live one: ${attempts(c)}")
+                assertEquals(3, adapter.calls.size, "then the continuation cell runs")
             }
         }
     }
