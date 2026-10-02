@@ -5,6 +5,7 @@ import io.astrolabe.id.Identities
 import io.astrolabe.id.InstantSerializer
 import io.astrolabe.id.StringWrapperSerializer
 import io.astrolabe.provider.BillableUsage
+import io.astrolabe.provider.CallFacts
 import io.astrolabe.provider.StopReason
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -98,9 +99,13 @@ public sealed interface AgentEvent {
         @SerialName("cell.model_requested")
         public data class ModelRequested(override val ids: Identities, val invocationId: String, val estimatedTokens: Long, val profileId: String, override val phase: Phase = Phase.Understand, override val span: SpanId? = null, override val parent: SpanId? = null, val anchorTokens: Long? = null) : Cell
 
+        /**
+         * A model call answered: its [usage] (billed amount and reasoning tokens included, when reported) and its [facts]
+         * — timings, upstream, answering model and price tier — which are telemetry, never identity (I-05).
+         */
         @Serializable
         @SerialName("cell.model_responded")
-        public data class ModelResponded(override val ids: Identities, val invocationId: String, val stop: StopReason, val usage: BillableUsage?, override val phase: Phase = Phase.Understand, override val span: SpanId? = null, override val parent: SpanId? = null) : Cell
+        public data class ModelResponded @JvmOverloads constructor(override val ids: Identities, val invocationId: String, val stop: StopReason, val usage: BillableUsage?, override val phase: Phase = Phase.Understand, override val span: SpanId? = null, override val parent: SpanId? = null, val facts: CallFacts? = null) : Cell
 
         /**
          * Content-free progress of an in-flight model call (D-330), from an `ObservableAdapter`: [stage] is `started`,

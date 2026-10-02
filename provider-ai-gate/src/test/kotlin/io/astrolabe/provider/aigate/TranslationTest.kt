@@ -1,7 +1,9 @@
 package io.astrolabe.provider.aigate
 
 import io.astrolabe.provider.BillingDimension
+import io.astrolabe.provider.CallFacts
 import io.astrolabe.provider.Message
+import io.astrolabe.provider.Money
 import io.astrolabe.provider.Opaque
 import io.astrolabe.provider.Profile
 import io.astrolabe.provider.ReasoningRef
@@ -13,13 +15,19 @@ import net.ai.gate.Llm
 import net.ai.gate.auth.Environment
 import net.ai.gate.cache.CacheRetention
 import net.ai.gate.chat.AssistantMessage
+import net.ai.gate.metadata.Charge
+import net.ai.gate.metadata.ResponseInfo
 import net.ai.gate.metadata.Usage
 import net.ai.gate.model.ModelRef
 import net.ai.gate.testing.FakeProvider
+import java.math.BigDecimal
+import java.time.Duration
+import java.util.Currency
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** Pure translation and usage rules, over a binding to the SDK's fake model. */
@@ -75,6 +83,38 @@ class TranslationTest {
         assertEquals(7L, split.quantities[BillingDimension.CACHE_WRITE_5M])
         assertEquals(9L, split.quantities[BillingDimension.CACHE_WRITE_1H])
         assertEquals(16L, split.totalCacheWrite, "each class once (I-16)")
+    }
+
+    @Test
+    fun `a reported charge and reasoning tokens stay apart from the priced dimensions and unknown when absent`() {
+        val binding = bind(GateTestKit.fakeProfile())
+        val charge = Charge(Currency.getInstance("USD"), BigDecimal("0.0021"), BigDecimal("0.002"))
+        val reported = Usage.builder().input(10).cacheRead(0).output(5).reasoning(3).charge(charge).build()
+        val usage = UsageMapper.billable(reported, null, binding)
+        assertEquals(Money("USD", BigDecimal("0.0021")), usage.billed)
+        assertEquals(Money("USD", BigDecimal("0.002")), usage.billedUpstream)
+        assertEquals(3L, usage.reasoningTokens)
+        assertEquals(
+            mapOf(BillingDimension.UNCACHED_INPUT to 10L, BillingDimension.CACHE_READ to 0L, BillingDimension.OUTPUT to 5L), usage.quantities,
+            "reasoning is inside output, never a priced dimension of its own",
+        )
+        val silent = UsageMapper.billable(Usage.builder().input(10).cacheRead(0).output(5).build(), null, binding)
+        assertNull(silent.billed, "no charge reported: unknown, never zero (AX-09)")
+        assertNull(silent.billedUpstream)
+        assertNull(silent.reasoningTokens)
+        val observed = UsageMapper.billable(reported.toBuilder().finalForCall(false).build(), null, binding)
+        assertNull(observed.billed, "a call that did not end has no final charge")
+        assertNull(observed.reasoningTokens)
+    }
+
+    @Test
+    fun `call facts come from the reply's call and are absent for a reply no call produced`() {
+        val binding = bind(GateTestKit.fakeProfile())
+        val info = ResponseInfo.builder("req_1", "fake").latency(Duration.ofMillis(1_500)).timeToFirstOutput(Duration.ofMillis(400)).route("Groq").build()
+        val reply = AssistantMessage.builder(ModelRef("fake", "fake"), "fake-chat").text("hi").responseModel("fake-2026").info(info).build()
+        assertEquals(CallFacts(1_500, 400, "Groq", "fake-2026", null), ResponseTranslator.facts(reply, binding))
+        val archived = reply.toBuilder().info(ResponseInfo.empty()).build()
+        assertEquals(CallFacts(responseModel = "fake-2026"), ResponseTranslator.facts(archived, binding), "no call, no timings: unknown, not zero")
     }
 
     @Test

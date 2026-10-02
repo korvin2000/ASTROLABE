@@ -2,8 +2,10 @@ package io.astrolabe.provider.aigate
 
 import io.astrolabe.provider.BillableUsage
 import io.astrolabe.provider.BillingDimension
+import io.astrolabe.provider.CallFacts
 import io.astrolabe.provider.Item
 import io.astrolabe.provider.Message
+import io.astrolabe.provider.Money
 import io.astrolabe.provider.ReasoningRef
 import io.astrolabe.provider.Response
 import io.astrolabe.provider.Role
@@ -33,7 +35,24 @@ internal object ResponseTranslator {
     fun response(reply: AssistantMessage, binding: ProfileBinding, cancelRequested: Boolean): Response {
         val stop = stop(reply, cancelRequested)
         val calls = stop == StopReason.ToolUse
-        return Response(items(reply, calls), stop, UsageMapper.billable(reply.usage(), reply.responseModel().orElse(null), binding))
+        return Response(items(reply, calls), stop, UsageMapper.billable(reply.usage(), reply.responseModel().orElse(null), binding), facts = facts(reply, binding))
+    }
+
+    /**
+     * The SDK's call facts of [reply]: timings from its `ResponseInfo` (none for a reply not obtained by a call), the
+     * gateway's route, the answering model and the price tier the SDK's prices apply to its usage — the tiers stay out
+     * of the profile's `PriceTable`.
+     */
+    fun facts(reply: AssistantMessage, binding: ProfileBinding): CallFacts {
+        val info = reply.info()
+        val called = info.requestId().isNotEmpty()
+        return CallFacts(
+            latencyMillis = if (called) info.latency().toMillis() else null,
+            firstOutputMillis = if (called) info.timeToFirstOutput().orElse(null)?.toMillis() else null,
+            upstream = info.route().orElse(null),
+            responseModel = reply.responseModel().orElse(null),
+            priceTierInputTokensAbove = binding.model.prices().flatMap { it.tier(reply.usage()) }.map { it.inputTokensAbove() }.orElse(null),
+        )
     }
 
     fun stop(reply: AssistantMessage, cancelRequested: Boolean): StopReason = when (reply.stopReason()) {
@@ -85,7 +104,9 @@ internal object ResponseTranslator {
  * AI Gate `Usage` → `BillableUsage` (G-07, §15.2). The SDK's buckets are already disjoint (input excludes cache reads and
  * writes) and absent counters stay absent (S-04), so no wire format is parsed here. A dimension the profile expects
  * but the call did not report is unknown, never zero (AX-09); output observed before a call ended may still grow and
- * is unknown too. An undifferentiated cache-write count belongs to the only retention class the request could write.
+ * is unknown too, as are its reasoning tokens and the charge. An undifferentiated cache-write count belongs to the only
+ * retention class the request could write. The provider's reported charge (`Usage.charge()`) is kept as billed, apart
+ * from the estimate.
  */
 internal object UsageMapper {
     fun billable(usage: Usage, responseModel: String?, binding: ProfileBinding): BillableUsage {
@@ -124,9 +145,13 @@ internal object UsageMapper {
         }
         put(BillingDimension.OUTPUT, if (usage.finalForCall()) usage.output().orNull() else null)
         val raw = JsonBridge.toKotlin(usage.raw()).takeIf { it != JsonNull }
+        val charge = if (usage.finalForCall()) usage.charge().orElse(null) else null
         return BillableUsage(
             quantities, UsageProvenance(binding.profile.provider, responseModel ?: binding.profile.model, binding.api),
             unknown, raw, reasoningIncludedInOutput = true,
+            billed = charge?.let { Money(it.currency().currencyCode, it.amount()) },
+            billedUpstream = charge?.upstream()?.let { Money(charge.currency().currencyCode, it) },
+            reasoningTokens = if (usage.finalForCall()) usage.reasoning().orNull() else null,
         )
     }
 
