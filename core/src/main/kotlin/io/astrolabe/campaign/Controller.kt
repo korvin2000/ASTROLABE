@@ -1248,7 +1248,7 @@ public class Controller @JvmOverloads public constructor(
         extract(c, packets)
         val receipt = FinishReceipts.build(c, packets, currencies(c, scheduler, c.stamper.report(fresh = true).candidateId), receipts::get)
         val (ref, _) = FinishReceipts.export(c, receipt)
-        events?.emit(AgentEvent.Campaign.Finished(c.ids, outcome.wire, ref, stopCode = result.state?.stopCode?.wire))
+        events?.emit(AgentEvent.Campaign.Finished(c.ids, outcome.wire, ref, stopCode = result.state?.stopCode?.wire, provenanceClass = receipt.provenanceClass.wire))
         return result.copy(finish = receipt)
     }
 

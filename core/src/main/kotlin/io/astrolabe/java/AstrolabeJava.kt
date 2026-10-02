@@ -7,6 +7,7 @@ import io.astrolabe.Project
 import io.astrolabe.campaign.CampaignOutcome
 import io.astrolabe.campaign.CampaignPolicy
 import io.astrolabe.campaign.Deployer
+import io.astrolabe.campaign.FinishReceipt
 import io.astrolabe.campaign.OptionalLayers
 import io.astrolabe.campaign.PublicationRequest
 import io.astrolabe.campaign.PublicationRun
@@ -127,6 +128,9 @@ public class JavaCampaignHandle internal constructor(
 
     /** The publication run after the campaign finished, when one was requested; `null` before or without one. */
     public fun publication(): PublicationRun? = handle.publication
+
+    /** The finish receipt with its provenance class (§4.4 C2); `null` until [await] completes, or when the campaign ended without one. */
+    public fun finish(): FinishReceipt? = handle.finish
 
     /** The outcome; cancelling this future cancels the campaign. */
     public fun await(): CompletableFuture<CampaignOutcome> {

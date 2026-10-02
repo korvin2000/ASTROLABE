@@ -58,7 +58,7 @@ public sealed interface AgentEvent {
 
         @Serializable
         @SerialName("campaign.finished")
-        public data class Finished(
+        public data class Finished @JvmOverloads constructor(
             override val ids: Identities,
             val outcome: String,
             val finishReceiptRef: String?,
@@ -67,6 +67,8 @@ public sealed interface AgentEvent {
             override val parent: SpanId? = null,
             /** Why a `waiting_for_input` campaign waits, machine-readable (D-339): `acceptance_decision` · `review_rejected`. */
             val stopCode: String? = null,
+            /** Who verified the result, from the finish receipt (§4.4 C2): `independent` · `agent_test` · `unverified`. */
+            val provenanceClass: String? = null,
         ) : Campaign
     }
 
