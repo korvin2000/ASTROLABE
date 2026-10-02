@@ -1,0 +1,9 @@
+{
+  "id": "env-launcher",
+  "class": "environment",
+  "title": "The developer launcher runs the tests on any OS and reports failures",
+  "acceptance": {
+    "argv": ["{python}", "_acceptance/accept.py"],
+    "timeoutSeconds": 120
+  }
+}

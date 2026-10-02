@@ -19,6 +19,7 @@ import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Command
 import io.astrolabe.contract.Contract
 import io.astrolabe.contract.Origin
+import io.astrolabe.event.AgentEvent
 import io.astrolabe.event.AmendmentProposal
 import io.astrolabe.event.Answer
 import io.astrolabe.event.Authority
@@ -54,6 +55,7 @@ import java.nio.file.Path
 import java.time.Clock
 import java.time.Duration
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * What a Studio task in `auto` mode runs with, reproduced minimally so the baseline reflects the product (ASTROUI
@@ -172,6 +174,41 @@ internal object StudioPolicy {
         )
     }
 
+    /** `TaskService.RECAP_LIMIT`. */
+    const val RECAP_LIMIT: Int = 1_500
+
+    /**
+     * `TaskService.recap`: the start of a follow-up run's request — what was asked and what came of it, marked as
+     * context. A message after a stop is a follow-up in the Studio (`TaskService.message`: a `cancelled` run is not
+     * resumable). The agent's last report is left out: the Studio reads it from its own event log, which a run lacks.
+     */
+    fun recap(request: String, last: AttemptOutcome, changedFiles: List<String>): String {
+        val outcome = when (last.outcome) {
+            "completed" -> if (last.decisions.any { it.kind == "acceptance" && it.outcome == "accepted" }) {
+                "finished, not verified (accepted by the auto policy without a passing check)"
+            } else {
+                "finished, not verified (no passing check recorded)"
+            }
+            "answered" -> "answered, nothing changed"
+            "cancelled" -> "stopped by the user before it finished"
+            "failed" -> "did not finish"
+            else -> "paused"
+        }
+        val text = buildString {
+            append("[Context from earlier in this task. Background only: it is not a new requirement and nothing in it has to be redone.]\n")
+            append("Earlier request: ").append(cut(request, 400)).append('\n')
+            append("Outcome: ").append(outcome).append(".\n")
+            if (changedFiles.isNotEmpty()) append("Files changed so far: ").append(changedFiles.take(12).joinToString(", ")).append('\n')
+            append("[End of context]\n\n")
+        }
+        return if (text.length > RECAP_LIMIT) text.substring(0, RECAP_LIMIT - 20) + "…\n[End of context]\n\n" else text
+    }
+
+    private fun cut(text: String, max: Int): String {
+        val one = text.trim().replace(Regex("\\s+"), " ")
+        return if (one.length > max) one.substring(0, max - 1) + "…" else one
+    }
+
     /** `StudioHost.verificationOf`: how an opened contract is verified. */
     fun verificationOf(opened: OpenedCampaign): VerificationSetup {
         val runs = opened.contract.acceptance.filterIsInstance<Acceptance.Run>().map { it.command.argv }
@@ -261,11 +298,41 @@ internal data class AttemptOutcome(
     val failure: String?,
     val cells: Int?,
     val decisions: List<PolicyDecision>,
+    /** The response count after which the runner stopped the attempt (WP-B2 `interrupt`), or null when it did not. */
+    val interruptedAt: Int? = null,
 )
+
+/**
+ * Calls [cancel] once the bus has carried [afterResponses] `ModelResponded` emitted after this subscription began.
+ * Delivery is asynchronous, so a call already in flight may still answer: it is counted in the segment, not here.
+ */
+internal class Interrupter(events: Events, private val afterResponses: Int, private val cancel: () -> Unit) : AutoCloseable {
+    private val from = events.lastSeq
+    private val seen = AtomicInteger()
+    private val subscription = events.subscribe({ record ->
+        if (record.seq > from && record.event is AgentEvent.Cell.ModelResponded && seen.incrementAndGet() == afterResponses) cancel()
+    }, Recorder.BUFFER)
+
+    override fun close(): Unit = subscription.close()
+}
 
 /** Runs one attempt the way a Studio task does: open, verification setup, host notes, reopen, run through the [Controller]. */
 internal class StudioAttempt(private val clock: Clock, private val idGen: IdGen, private val osName: String = System.getProperty("os.name")) {
-    suspend fun run(workspace: Path, stateRoot: Path, prompt: String, binding: ModelBinding, events: Events, effort: Effort, maxCells: Int, deadline: Duration): AttemptOutcome {
+    /**
+     * One attempt of a Studio task; with [interruptAfterResponses] the attempt is cancelled through its token once the
+     * bus carried that many `ModelResponded` of this attempt, as the Studio's stop button does (WP-B2 `interrupt`).
+     */
+    suspend fun run(
+        workspace: Path,
+        stateRoot: Path,
+        prompt: String,
+        binding: ModelBinding,
+        events: Events,
+        effort: Effort,
+        maxCells: Int,
+        deadline: Duration,
+        interruptAfterResponses: Int? = null,
+    ): AttemptOutcome {
         val config = StudioPolicy.config(binding.profile, stateRoot)
         val violations = config.violations()
         if (violations.isNotEmpty()) throw InvalidConfig(violations)
@@ -295,6 +362,7 @@ internal class StudioAttempt(private val clock: Clock, private val idGen: IdGen,
                 val main = config.profiles[frozen.profileRoles.main] ?: frozen.profiles[frozen.profileRoles.main] ?: binding.profile
                 val model = CellModel(binding.adapter, main, binding.estimators.estimatorFor(main), effort, StudioPolicy.outputHeadroom(main))
                 val campaign = opened
+                val interrupter = interruptAfterResponses?.let { k -> Interrupter(events, k) { campaign.cancellation.cancel(INTERRUPTED) } }
                 return try {
                     val run = coroutineScope {
                         val watchdog = launch {
@@ -305,6 +373,7 @@ internal class StudioAttempt(private val clock: Clock, private val idGen: IdGen,
                             controller.run(campaign, model, authority, maxCells = maxCells)
                         } finally {
                             watchdog.cancel()
+                            interrupter?.close()
                         }
                     }
                     AttemptOutcome(
@@ -318,15 +387,22 @@ internal class StudioAttempt(private val clock: Clock, private val idGen: IdGen,
                         failure = null,
                         cells = run.state?.cells?.size,
                         decisions = authority.decisions.toList(),
+                        interruptedAt = interruptAfterResponses.takeIf { campaign.cancellation.reason == INTERRUPTED },
                     )
                 } catch (failure: Exception) {
                     if (failure is kotlinx.coroutines.CancellationException) throw failure
                     AttemptOutcome(
                         work.value, campaign.attempt.fingerprint.hex, null, verification, null, null, null,
                         "${failure::class.java.simpleName}: ${failure.message}", campaign.state?.cells?.size, authority.decisions.toList(),
+                        interruptAfterResponses.takeIf { campaign.cancellation.reason == INTERRUPTED },
                     )
                 }
             }
         }
+    }
+
+    companion object {
+        /** The Studio's stop reason (`TaskService.stop`); the interruption stands in for the user's stop. */
+        const val INTERRUPTED: String = "stopped by the user"
     }
 }

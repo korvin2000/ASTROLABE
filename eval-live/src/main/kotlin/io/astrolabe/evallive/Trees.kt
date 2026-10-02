@@ -116,6 +116,13 @@ internal object GitRepo {
         return git(dir, "diff", "--cached", "--binary", base)
     }
 
+    /** The paths of [dir] changed against [base], untracked ones included, without touching the index. */
+    fun changedFiles(dir: Path, base: String): List<String> {
+        val tracked = git(dir, "diff", "--name-only", base).lines()
+        val untracked = git(dir, "ls-files", "--others", "--exclude-standard").lines()
+        return (tracked + untracked).map { it.trim() }.filter { it.isNotEmpty() }.distinct().sorted()
+    }
+
     private fun git(dir: Path, vararg args: String): String {
         val result = Proc.run(listOf("git") + settings + args, dir, Duration.ofMinutes(2))
         check(result.exitCode == 0) { "git ${args.first()} failed in $dir (exit ${result.exitCode}): ${result.output.take(2000)}" }

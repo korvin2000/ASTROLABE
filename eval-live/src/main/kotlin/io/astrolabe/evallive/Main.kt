@@ -119,14 +119,19 @@ internal object Cli {
         for (task in tasks) {
             val v = acceptance.validate(task, Acceptance.VISIBLE_TESTS)
             if (v.sound) sound++
-            log("${task.id}: base ${if (v.onBase.passed) "PASSES (unsound)" else "fails"}, reference ${if (v.onReference.passed) "passes" else "FAILS (unsound)"}" +
+            log("${task.id}: base ${if (v.onBase.passed) "PASSES (unsound)" else "fails"} (exit ${v.onBase.exitCode})" +
+                ", wrong ${if (v.onWrong.passed) "PASSES (unsound)" else "fails"} (exit ${v.onWrong.exitCode})" +
+                ", reference ${if (v.onReference.passed) "passes" else "FAILS (unsound)"} (exit ${v.onReference.exitCode})" +
                 ", visible tests on reference ${when (v.visibleGreenOnReference) { true -> "green"; false -> "RED"; null -> "not run" }}")
         }
         log("$sound/${tasks.size} task(s) sound")
         return if (sound == tasks.size) 0 else 1
     }
 
-    /** `--tasks-dir`, else `-Devallive.tasks`, else `tasks/` of the installed distribution (beside `lib/`). */
+    /**
+     * `--tasks-dir`, else `-Devallive.tasks`, else `tasks/` of the installed distribution (beside `lib/`); there the
+     * hidden parts come from the packaged [HiddenBundle].
+     */
     private fun tasksDir(options: Options): Path {
         options.get("tasks-dir")?.let { return Path.of(it) }
         System.getProperty("evallive.tasks")?.let { return Path.of(it) }

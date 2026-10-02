@@ -26,7 +26,7 @@ import java.util.concurrent.CopyOnWriteArrayList
  */
 internal class Recorder(private val events: Events, file: Path) : AutoCloseable {
     private val writer: BufferedWriter = Files.newBufferedWriter(file, StandardCharsets.UTF_8)
-    private val kept = CopyOnWriteArrayList<AgentEvent>()
+    private val kept = CopyOnWriteArrayList<EventRecord>()
 
     @Volatile
     private var written = 0L
@@ -37,7 +37,7 @@ internal class Recorder(private val events: Events, file: Path) : AutoCloseable 
             writer.write(json.encodeToString(EventRecord.serializer(), record))
             writer.newLine()
         }
-        kept += record.event
+        kept += record
         written = record.seq
     }
 
@@ -49,7 +49,10 @@ internal class Recorder(private val events: Events, file: Path) : AutoCloseable 
 
     val dropped: Long get() = subscription.dropped
 
-    fun events(): List<AgentEvent> = kept.toList()
+    fun events(): List<AgentEvent> = kept.map { it.event }
+
+    /** The events with a sequence number in [from] exclusive to [to] inclusive: one segment of the run. */
+    fun events(from: Long, to: Long): List<AgentEvent> = kept.filter { it.seq > from && it.seq <= to }.map { it.event }
 
     override fun close() {
         subscription.close()
