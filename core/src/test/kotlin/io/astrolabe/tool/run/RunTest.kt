@@ -1118,6 +1118,100 @@ class RunTest {
     private fun assertNoKeyLine(body: String) = assertFalse(body.contains("MIIEvQ") || body.contains("MIIpayload"), body)
 
     @Test
+    fun `a marker cut by a poll boundary is read whole by the next poll and by a wait`() = runTest {
+        val cutAt = "booting\n-----BEGIN PRIV"
+        val scripted = ScriptedOs(listOf(
+            "" to ProcStatus.Running, cutAt to ProcStatus.Running, "ATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n" to ProcStatus.Running,
+            "" to ProcStatus.Running, keyTail + "ready\n" to ProcStatus.Running,
+        ))
+        val tool = runner(os = scripted)
+        run("""{"argv":["git","status"],"bg":true,"timeout":60}""", tool)
+
+        val polled = run("""{"op":"poll","handle":"handle-1"}""", tool)
+        assertTrue(polled.body.contains("booting") && !polled.body.contains("BEGIN PRIV"), polled.body)
+        assertEquals("booting\n".length.toLong(), SqliteHandles(store, clock).get("handle-1")!!.cursor, "the cursor stays at the last line break")
+
+        // A wait from inside the cut marker: the scan is seeded with the unfinished line, the tail with the log before it.
+        val expired = run("""{"op":"wait","handle":"handle-1","since":${cutAt.length},"until_line":"^MII|ATE","timeout":5}""", tool)
+        assertTrue(expired.body.contains("wait timed out after 5s"), expired.body)
+        assertNoKey(expired.body)
+        assertFalse(expired.body.contains("ATE KEY"), expired.body)
+
+        val ready = run("""{"op":"wait","handle":"handle-1","until_line":"^MII|ready","timeout":5}""", tool)
+        assertTrue(ready.body.contains("ready: line matched: ready"), ready.body)
+        assertNoKeyLine(ready.body)
+    }
+
+    @Test
+    fun `a CRLF key split across two polls shows none of its lines`() = runTest {
+        val scripted = ScriptedOs(listOf(
+            "" to ProcStatus.Running,
+            "booting\r\n-----BEGIN PRIVATE KEY-----\r\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\r\n" to ProcStatus.Running,
+            "MIIpayloadSecondLineOfTheKey\r\n-----END PRIVATE KEY-----\r\nafter\r\n" to ProcStatus.Running,
+        ))
+        val tool = runner(os = scripted)
+        run("""{"argv":["git","status"],"bg":true,"timeout":60}""", tool)
+
+        val first = run("""{"op":"poll","handle":"handle-1"}""", tool)
+        val second = run("""{"op":"poll","handle":"handle-1"}""", tool)
+
+        assertTrue(first.body.contains("booting"), first.body)
+        assertTrue(second.body.contains("after"), second.body)
+        assertNoKeyLine(first.body)
+        assertNoKeyLine(second.body)
+    }
+
+    @Test
+    fun `a token split mid-line between polls is never shown in part`() = runTest {
+        val scripted = ScriptedOs(listOf(
+            "" to ProcStatus.Running, "booting\nkey AKIAIOSFOD" to ProcStatus.Running, "NN7EXAMPLE done\n" to ProcStatus.Running,
+            "again AKIAIOSFOD" to ProcStatus.Running, "NN7EXAMPLE\n" to ProcStatus.Running,
+        ))
+        val tool = runner(os = scripted)
+        run("""{"argv":["git","status"],"bg":true,"timeout":60}""", tool)
+
+        val slices = List(3) { run("""{"op":"poll","handle":"handle-1"}""", tool) }
+
+        slices.forEach { assertFalse(it.body.contains("AKIAIOSFOD"), it.body) }
+        assertTrue(slices[0].body.contains("booting"), slices[0].body)
+        assertTrue(slices[1].body.contains("key [REDACTED:aws-access-key-id] done"), slices[1].body)
+        // A slice that is one unfinished line waits for its break within the same poll.
+        assertTrue(slices[2].body.contains("again [REDACTED:aws-access-key-id]"), slices[2].body)
+    }
+
+    @Test
+    fun `a closed key block on the shaper's cut line leaves the tail of the output visible`() = runTest {
+        val payload = (1..300).joinToString("") { "MIIpayload$it\n" }
+        // Long enough on both sides that the head keeps BEGIN and the tail never reaches END.
+        val tail = (1..200).joinToString("") { "tail-$it\n" }
+        repo.write("long.txt", "head-1\n-----BEGIN PRIVATE KEY-----\n$payload-----END PRIVATE KEY-----\n${tail}TAIL-VISIBLE\n")
+
+        val out = run("""{"cmd":"${shell("type long.txt", "cat long.txt")}","budget":200}""")
+
+        assertTrue(out.body.contains("view truncated"), out.body)
+        assertTrue(out.body.contains("TAIL-VISIBLE"), out.body)
+        assertNoKeyLine(out.body)
+    }
+
+    @Test
+    fun `an ended process whose log is gone hides the last slice`() = runTest {
+        val scripted = ScriptedOs(listOf("" to ProcStatus.Running, "booting\n" to ProcStatus.Running, "MIIpayloadSecondLineOfTheKey\nlast-slice-line\n" to ProcStatus.Exited(0)))
+        val vanishing = object : Os by scripted {
+            override fun poll(proc: Proc, sinceCursorBytes: Long, observationTimeoutSeconds: Long): Poll =
+                scripted.poll(proc, sinceCursorBytes, observationTimeoutSeconds).also { if (it.status.isTerminal) Files.delete(proc.log) }
+        }
+        val tool = runner(os = vanishing)
+        run("""{"argv":["git","status"],"bg":true,"timeout":60}""", tool)
+        run("""{"op":"poll","handle":"handle-1"}""", tool)
+
+        val terminal = run("""{"op":"poll","handle":"handle-1"}""", tool)
+
+        assertTrue(terminal.body.contains("handle handle-1 exited"), terminal.body)
+        assertNoKeyLine(terminal.body)
+        assertFalse(terminal.body.contains("last-slice-line"), terminal.body)
+    }
+
+    @Test
     fun `a foreground command that prints a key block without its end shows none of the block`() = runTest {
         repo.write("key.txt", "booting\n${keyHead}MIIpayloadSecondLineOfTheKey\n")
 
