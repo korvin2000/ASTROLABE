@@ -63,6 +63,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -206,6 +207,22 @@ class MountTest {
         val java = JavaMcpClient { server, tool, arguments -> CompletableFuture.completedFuture(McpReply("java $server/$tool $arguments")) }
         val viaJava = run("""{"argv":["mcp:docs/search","{\"q\":\"j\"}"]}""", runner(client = McpClients.fromJava(java)))
         assertTrue(viaJava.body.contains("java docs/search"), viaJava.body)
+    }
+
+    @Test
+    fun `a mounted reply that opens a key block and never closes it shows none of the block`() = runTest {
+        val leaking = object : McpClient {
+            override suspend fun call(server: String, tool: String, arguments: String) =
+                McpReply("intro\n-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\nMIIpayloadSecondLineOfTheKey\n")
+        }
+
+        val out = run("""{"argv":["mcp:docs/search","{\"q\":\"k\"}"]}""", runner(client = leaking))
+
+        assertTrue(out.body.contains("intro") && out.body.contains("[REDACTED:private-key-block]"), out.body)
+        assertFalse(out.body.contains("MIIEvQ") || out.body.contains("MIIpayload"), out.body)
+        assertTrue(out.header!!.runtime.redactionApplied)
+        val stored = String(store.blobs.get(io.astrolabe.id.Digest(out.header!!.runtime.artifactRefs.first())))
+        assertFalse(stored.contains("MIIEvQ") || stored.contains("MIIpayload"), stored)
     }
 
     @Test

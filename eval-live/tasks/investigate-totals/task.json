@@ -1,0 +1,9 @@
+{
+  "id": "investigate-totals",
+  "class": "investigation",
+  "title": "Monthly invoice totals do not add up; the first hypothesis is wrong",
+  "acceptance": {
+    "argv": ["{python}", "_acceptance/accept.py"],
+    "timeoutSeconds": 120
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "interrupt-csv",
+  "class": "interrupt",
+  "title": "CSV export of the weekly report, with a requirement added mid-task",
+  "acceptance": {
+    "argv": ["{python}", "_acceptance/accept.py"],
+    "timeoutSeconds": 120
+  },
+  "interrupt": {
+    "afterResponses": 3,
+    "constraint": "New requirement: the weekly CSV uses `;` as its delimiter, not a comma. Do not change the public `export_rows`: the nightly daily export relies on it as it is."
+  }
+}

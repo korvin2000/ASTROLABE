@@ -81,7 +81,8 @@ internal class Bench(
             results += result
             Summary.write(plan.out, results)
             log("[${run.order}/${runs.size}] ${run.task.id} / ${run.model} / r${run.repeat}: ${result.outcome ?: "no outcome"}, " +
-                "acceptance ${if (result.acceptance?.passed == true) "passed" else "failed"}" + (result.failure?.let { " ($it)" } ?: ""))
+                "acceptance ${if (result.acceptance?.passed == true) "passed" else "failed"}" +
+                    (result.interrupt?.let { ", interrupt ${it.mode?.let(Summary::wire) ?: "not continued"}" } ?: "") + (result.failure?.let { " ($it)" } ?: ""))
         }
         Summary.write(plan.out, results)
         return results
@@ -95,11 +96,11 @@ internal class Bench(
         try {
             Trees.copy(run.task.base, workspace)
             val base = GitRepo.initWithBase(workspace)
-            var attempt: AttemptOutcome? = null
+            val interrupt = run.task.interrupt
+            val segments = ArrayList<Segment>()
             var failure: String? = null
             var totals: Totals? = null
             var dropped: Long? = null
-            var wall: Long? = null
             var binding: ModelBinding? = null
             try {
                 val bound = models.bind(run.model)
@@ -107,18 +108,19 @@ internal class Bench(
                 val events = Events(clock)
                 try {
                     Recorder(events, dir.resolve("events.jsonl")).use { recorder ->
-                        val start = nanos.asLong
                         try {
-                            attempt = runBlocking {
-                                StudioAttempt(clock, idGen, osName).run(
-                                    workspace, temp.resolve("state"), run.task.prompt, bound, events, plan.effort, plan.maxCells, plan.deadline,
-                                )
+                            val first = segment(run.task.prompt, bound, events, temp, interrupt?.afterResponses)
+                            segments += first
+                            // WP-B2: the user's constraint arrives as the Studio delivers a message after the run stopped or ended.
+                            if (interrupt != null && first.attempt != null && first.attempt.failure == null) {
+                                val request = StudioPolicy.recap(run.task.prompt, first.attempt, GitRepo.changedFiles(workspace, base)) + interrupt.constraint
+                                segments += segment(request, bound, events, temp, null)
                             }
                         } finally {
-                            wall = (nanos.asLong - start) / 1_000_000
                             recorder.drain()
                             totals = Totals.of(recorder.events(), bound.profile.priceTable)
                             dropped = recorder.dropped
+                            segments.replaceAll { it.copy(totals = Totals.of(recorder.events(it.fromSeq, it.toSeq), bound.profile.priceTable)) }
                         }
                     }
                 } finally {
@@ -129,6 +131,9 @@ internal class Bench(
             } finally {
                 runCatching { binding?.close() }
             }
+            failure = failure ?: segments.firstNotNullOfOrNull { it.failure }
+            val attempt = segments.lastOrNull()?.attempt
+            val attempts = segments.map { it.attempt }
             val diff = GitRepo.diff(workspace, base)
             dir.resolve("workspace.diff").writeText(diff)
             val acceptance = runCatching { Acceptance(interpreters, plan.temp).run(run.task, workspace, dir.resolve("acceptance.log")) }
@@ -154,23 +159,58 @@ internal class Bench(
                 outcome = attempt?.outcome,
                 stopCode = attempt?.stopCode,
                 reason = attempt?.reason,
-                failure = failure ?: attempt?.failure,
-                cells = attempt?.cells,
-                policyDecisions = attempt?.decisions ?: emptyList(),
+                failure = failure ?: attempts.firstNotNullOfOrNull { it?.failure },
+                cells = if (attempts.isEmpty() || attempts.any { it?.cells == null }) null else attempts.sumOf { it!!.cells!! },
+                policyDecisions = attempts.flatMap { it?.decisions ?: emptyList() },
                 acceptance = acceptance,
                 acceptanceDigest = run.task.hidden.digest,
                 startedAt = started.toString(),
                 endedAt = clock.instant().toString(),
-                attemptWallMillis = wall,
+                attemptWallMillis = if (segments.isEmpty()) null else segments.sumOf { it.wallMillis },
                 totals = totals,
                 eventsDropped = dropped,
                 changedFiles = DIFF_FILE.findAll(diff).count(),
+                interrupt = interrupt?.let { spec ->
+                    val first = segments.firstOrNull()?.attempt
+                    InterruptResult(
+                        afterResponses = spec.afterResponses,
+                        constraint = spec.constraint,
+                        mode = if (segments.size < 2) null else if (first?.interruptedAt != null) InterruptMode.CancelResume else InterruptMode.FollowUp,
+                        atResponse = first?.interruptedAt,
+                        segments = segments.map { s ->
+                            SegmentResult(
+                                s.attempt?.workId, s.attempt?.outcome, s.attempt?.stopCode, s.attempt?.reason, s.failure ?: s.attempt?.failure,
+                                s.attempt?.cells, s.wallMillis, s.totals,
+                            )
+                        },
+                    )
+                },
             )
             dir.resolve("result.json").writeText(Summary.encode(result))
             return result
         } finally {
             if (plan.keepWorkspaces) log("kept the run directory $temp") else runCatching { Trees.delete(temp) }.onFailure { log("could not remove $temp: ${it.message}") }
         }
+    }
+
+    /** One attempt of a run: events with a sequence number in ([fromSeq], [toSeq]] are its own. */
+    private data class Segment(val attempt: AttemptOutcome?, val failure: String?, val wallMillis: Long, val fromSeq: Long, val toSeq: Long, val totals: Totals? = null)
+
+    private fun segment(prompt: String, bound: ModelBinding, events: Events, temp: Path, interruptAfterResponses: Int?): Segment {
+        val from = events.lastSeq
+        val start = nanos.asLong
+        var attempt: AttemptOutcome? = null
+        var failure: String? = null
+        try {
+            attempt = runBlocking {
+                StudioAttempt(clock, idGen, osName).run(
+                    temp.resolve("workspace"), temp.resolve("state"), prompt, bound, events, plan.effort, plan.maxCells, plan.deadline, interruptAfterResponses,
+                )
+            }
+        } catch (e: Exception) {
+            failure = describe(e)
+        }
+        return Segment(attempt, failure, (nanos.asLong - start) / 1_000_000, from, events.lastSeq)
     }
 
     private fun describe(e: Throwable): String = "${e::class.java.simpleName}: ${e.message}"

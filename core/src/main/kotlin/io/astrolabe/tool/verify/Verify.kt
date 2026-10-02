@@ -411,7 +411,8 @@ public class Verify(
             return Invocation(Executed(command.argv, command.cwd, false, null, Outcome.Unavailable, null, null, listOf(reason)), "unavailable — $reason")
         }
         val observed = Executions.observeCancellable(os, proc, POLL_SLICE_SECONDS, timeoutSeconds)
-        val safeLog = redaction.applyBytes(observed.output, ContentClass.ReusableEvidence)
+        // D-390: the capture is a live stream, so a key block it opens and never closes stays hidden in the stored log.
+        val safeLog = redaction.applyLive(observed.output, ContentClass.ReusableEvidence, openAtEnd = false)
         val blob = blobs.put(safeLog.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
         val lost = observed.lost || observed.proc.status is ProcStatus.Lost
         val collected = try { reports?.collect().orEmpty() } catch (failure: IOException) {

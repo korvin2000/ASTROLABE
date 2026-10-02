@@ -12,6 +12,7 @@ import io.astrolabe.auth.EffectPolicyConfig
 import io.astrolabe.auth.ExecutionDecision
 import io.astrolabe.auth.Executors
 import io.astrolabe.auth.InstructionShape
+import io.astrolabe.auth.Redacted
 import io.astrolabe.auth.Redaction
 import io.astrolabe.contract.Contract
 import io.astrolabe.contract.Contracts
@@ -269,7 +270,8 @@ public class Run(
                     is Launch.Background -> launch.firstOutput
                     is Launch.Unavailable -> ByteArray(0)
                 }
-                logBlob = blobs.put(redaction.applyBytes(bytes, ContentClass.ReusableEvidence).text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
+                // A capture is (the start of) a live stream: a key block it opens and never closes stays hidden (D-387).
+                logBlob = blobs.put(redaction.applyLive(bytes, ContentClass.ReusableEvidence, openAtEnd = false).text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
                 rendered = when (launch) {
                     is Launch.Unavailable -> {
                         val receipts = pinned?.let { "\n" + verification!!.receiptLines(verification.settleUnavailable(it, launch.reason)) } ?: ""
@@ -282,7 +284,7 @@ public class Run(
                         handles.save(handle)
                         started = handle.handleId
                         pinned?.let { pins[handle.handleId] = it }
-                        val safe = redaction.applyBytes(launch.firstOutput, ContentClass.ModelFacing)
+                        val safe = redaction.applyLive(launch.firstOutput, ContentClass.ModelFacing, openAtEnd = false)
                         val slice = safe.text
                         val pending = pinned?.let { "\nreceipt at its end: " + it.pin.checks.joinToString(", ") { check -> check.id } } ?: ""
                         val view = "background run ${alias.text} handle ${handle.handleId} · ${wire(launch.proc.status)} · wait with run(op=wait, handle=\"${handle.handleId}\")" + pending + (if (slice.isBlank()) "" else "\n$slice")
@@ -346,7 +348,9 @@ public class Run(
         val receipt = recognized.receipts.first()
         val changed = recognized.changed
         val touched = if (changed.isEmpty()) null else "touched (by run $alias ${argv.joinToString(" ").take(60)}: ${changed.size} path${if (changed.size == 1) "" else "s"}) " + changed.take(10).joinToString(", ") + (if (changed.size > 10) " …" else "")
-        val view = (shaped?.view ?: invocation.view) + (touched?.let { "\n$it" } ?: "") + "\n" + verification.receiptLines(recognized.receipts)
+        // D-390: the shaped view is guarded like a plain run's, so a key block cut by the view never shows its lines.
+        val shown = invocation.capture?.let { safeView(shaped?.view ?: invocation.view, it.output) } ?: invocation.view
+        val view = shown + (touched?.let { "\n$it" } ?: "") + "\n" + verification.receiptLines(recognized.receipts)
         val result = RunResult(
             alias, actionId, invocation.executed.exit, receipt.outcome, view, shaped?.viewTruncated ?: false, invocation.executed.raw, observedClass(classification.effectClass, changed),
             receipt.stampBefore, after.candidateId, current = true, changedPaths = changed, handle = null, parsed = shaped?.counts, shaped = shaped, limits = shaped?.limitations.orEmpty(), intentId = intentId,
@@ -430,18 +434,20 @@ public class Run(
             reserve = { true },
             dispatch = { client.call(entry.mount.server, entry.tool.name, arguments) },
             persist = { reply ->
-                logBlob = blobs.put(redaction.applyBytes(reply.content.toByteArray(Charsets.UTF_8), ContentClass.ReusableEvidence).text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
+                val bytes = reply.content.toByteArray(Charsets.UTF_8)
+                val safe = redaction.applyLive(bytes, ContentClass.ReusableEvidence, openAtEnd = false)
+                logBlob = blobs.put(safe.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
                 val after = stamper.report()
                 val changed = announce(before, after, "run ${alias.text}")
                 val effectClass = observedClass(entry.effectClass, changed)
-                val capture = RunCapture(actionId = actionId, argv = argv, exitCode = if (reply.isError) 1 else 0, output = reply.content.toByteArray(Charsets.UTF_8))
+                val capture = shapeable(RunCapture(actionId = actionId, argv = argv, exitCode = if (reply.isError) 1 else 0, output = bytes), safe)
                 val shaped = Shapers.shape(capture, ShapeBudget(args.budgetTokens, estimator, alias.text))
                 val touched = if (changed.isEmpty()) "" else "\ntouched (by run ${alias.text} $program: ${changed.size} path${if (changed.size == 1) "" else "s"}) " + changed.take(10).joinToString(", ")
                 val result = RunResult(
-                    alias.text, actionId, capture.exitCode, shaped.status, shaped.view + touched, shaped.viewTruncated, logBlob, effectClass, before.candidateId, after.candidateId,
+                    alias.text, actionId, capture.exitCode, shaped.status, safeView(shaped.view, capture.output) + touched, shaped.viewTruncated, logBlob, effectClass, before.candidateId, after.candidateId,
                     current = true, changedPaths = changed, handle = null, parsed = shaped.counts, shaped = shaped, limits = shaped.limitations, intentId = intent.intentId,
                 )
-                rendered = render(args, result, argv, false, before, after, classification.effectsUnknown)
+                rendered = render(args, result, argv, false, before, after, classification.effectsUnknown, captureMask = safe.mask)
             },
         )
         return when (outcome) {
@@ -488,11 +494,12 @@ public class Run(
         val changed = announce(before, after, "run $alias")
         val effectClass = observedClass(label, changed)
         val status = proc.status
-        val capture = RunCapture(
+        val safe = redaction.applyLive(output, ContentClass.ReusableEvidence, openAtEnd = false)
+        val capture = shapeable(RunCapture(
             actionId = actionId, argv = argv, shell = shell, cwd = args.cwd,
             exitCode = (status as? ProcStatus.Exited)?.exitCode, timedOut = status == ProcStatus.DeadlineExceeded,
             output = output, captureComplete = captureComplete && status !is ProcStatus.Lost,
-        )
+        ), safe)
         val shaped = Shapers.shape(capture, ShapeBudget(args.budgetTokens, estimator, alias))
         val outcome = when (status) {
             is ProcStatus.Lost -> Outcome.UnknownOutcome
@@ -500,13 +507,13 @@ public class Run(
             else -> shaped.status
         }
         val touched = if (changed.isEmpty()) null else "touched (by run $alias ${argv.joinToString(" ").take(60)}: ${changed.size} path${if (changed.size == 1) "" else "s"}) " + changed.take(10).joinToString(", ") + (if (changed.size > 10) " …" else "")
-        val view = shaped.view + (touched?.let { "\n$it" } ?: "")
+        val view = safeView(shaped.view, capture.output) + (touched?.let { "\n$it" } ?: "")
         val result = RunResult(
             alias, actionId, capture.exitCode, outcome, view, shaped.viewTruncated, logBlob, effectClass, before.candidateId, after.candidateId,
             current = true, changedPaths = changed, handle = null, parsed = shaped.counts, shaped = shaped, limits = shaped.limitations, intentId = intentId,
         )
         return render(args, result, argv, shell, before, after, effectsUnknown || status is ProcStatus.Lost,
-            captureMask = redaction.applyBytes(output, ContentClass.ReusableEvidence).mask, completedPlainly = completedPlainly(capture, outcome, shaped))
+            captureMask = safe.mask, completedPlainly = completedPlainly(capture, outcome, shaped))
     }
 
     private fun completedPlainly(capture: RunCapture, outcome: Outcome, shaped: Shaped): Boolean =
@@ -537,14 +544,17 @@ public class Run(
         val proc = os.reattach(handle.proc)
         val since = args.since ?: handle.cursor
         val poll = try {
-            kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { os.poll(proc, since, args.pollWaitSeconds) }
+            kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { wholeLines(proc, os.poll(proc, since, args.pollWaitSeconds)) }
         } catch (failure: IOException) {
             handles.save(handle.copy(status = wire(ProcStatus.Lost)))
             return refused(args, Outcome.UnknownOutcome, "handle ${handle.handleId}: the log cannot be read (${failure.message}); the process state is unknown — reconcile, never relaunch")
         }
         val updated = handle.copy(proc = proc.copy(status = poll.status), status = wire(poll.status), cursor = poll.nextCursorBytes)
         handles.save(updated)
-        val safeSlice = redaction.applyBytes(poll.newBytes, ContentClass.ModelFacing)
+        // D-387: a slice is redacted with the log before it, so a secret begun in an earlier poll stays hidden; one still
+        // open where the slice ends hides its rest, and the next poll resumes from the log. An unreadable prefix hides it.
+        val before = if (poll.newBytes.isEmpty()) "" else logBefore(proc, since)
+        val safeSlice = redaction.applyLive(poll.newBytes, ContentClass.ModelFacing, openAtEnd = before == null, context = before.orEmpty())
         val slice = safeSlice.text
         return when (val status = poll.status) {
             ProcStatus.Running -> {
@@ -557,6 +567,34 @@ public class Run(
     }
 
     /**
+     * A running slice ends at its last line break and the cursor stays there, so a one-line secret split between polls is
+     * redacted whole by the next poll (D-387). A slice with no break waits a moment for one; a quiet process, a line longer
+     * than [WAIT_LINE_BYTES], or the end hands the unfinished line over as it stands, as a wait does.
+     */
+    private fun wholeLines(proc: Proc, first: io.astrolabe.os.Poll): io.astrolabe.os.Poll {
+        if (first.status.isTerminal || first.newBytes.isEmpty()) return first
+        atLineBreak(first.newBytes, first)?.let { return it }
+        // One unfinished line: one more look (at most a second) for its break, never a loop, since a `\r` progress bar
+        // writes without pause and would hold the poll until the line cap.
+        val next = os.poll(proc, first.nextCursorBytes, LINE_COMPLETION_SECONDS)
+        if (next.newBytes.isNotEmpty() && next.nextCursorBytes <= first.nextCursorBytes) throw IOException("the log cursor did not advance")
+        val bytes = first.newBytes + next.newBytes
+        val joined = io.astrolabe.os.Poll(bytes, next.nextCursorBytes, next.status, first.timedOut)
+        return if (next.status.isTerminal) joined else atLineBreak(bytes, joined) ?: joined
+    }
+
+    /**
+     * [bytes] cut after their last line break, the cursor moved back to it; whole when they end at a break or the unfinished
+     * line is longer than [WAIT_LINE_BYTES]; `null` when they are one unfinished line.
+     */
+    private fun atLineBreak(bytes: ByteArray, poll: io.astrolabe.os.Poll): io.astrolabe.os.Poll? {
+        val cut = bytes.lastIndexOf('\n'.code.toByte()) + 1
+        if (cut == bytes.size || bytes.size - cut > WAIT_LINE_BYTES) return poll
+        if (cut == 0) return null
+        return io.astrolabe.os.Poll(bytes.copyOfRange(0, cut), poll.nextCursorBytes - (bytes.size - cut), poll.status, poll.timedOut)
+    }
+
+    /**
      * A background process reached its terminal [status]: the whole log is stored and shaped, the interval diffed. A run
      * pinned as a recognised check gets its receipts here (C1a); a cancelled or lost one gets none.
      */
@@ -564,6 +602,7 @@ public class Run(
         val pinned = pins.remove(handle.handleId)?.takeIf { status is ProcStatus.Exited || status == ProcStatus.DeadlineExceeded }
         val after = stamper.report()
         var complete = true
+        var fromStart = true
         val log = try {
             Files.newInputStream(proc.log).use {
                 val bytes = it.readNBytes(Executions.MAX_CAPTURE_BYTES)
@@ -572,20 +611,23 @@ public class Run(
             }
         } catch (missing: IOException) {
             complete = false
+            fromStart = false
             fallback
         }
-        val safeLog = redaction.applyBytes(log, ContentClass.ReusableEvidence)
+        // D-387: the log is read from byte 0, so it has no context before it; the fallback is the last slice alone, whose
+        // prefix is gone with the log, so a block it may continue is assumed open.
+        val safeLog = redaction.applyLive(log, ContentClass.ReusableEvidence, openAtEnd = !fromStart)
         val logBlob = blobs.put(safeLog.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
         val stampBefore = CandidateId(Digest(handle.stampBefore))
         val changed = announceBackground(handle, after)
-        val plain = RunCapture(handle.actionId, handle.argv, handle.shell, handle.cwd, (status as? ProcStatus.Exited)?.exitCode, status == ProcStatus.DeadlineExceeded, log, complete && status !is ProcStatus.Lost)
+        val plain = shapeable(RunCapture(handle.actionId, handle.argv, handle.shell, handle.cwd, (status as? ProcStatus.Exited)?.exitCode, status == ProcStatus.DeadlineExceeded, log, complete && status !is ProcStatus.Lost), safeLog)
         val budget = ShapeBudget(args.budgetTokens, estimator, handle.alias)
         val settled = pinned?.let { verify?.settleRecognized(it, plain, logBlob, safeLog.limitations, budget) }
         val capture = settled?.capture ?: plain
         val shaped = settled?.shaped ?: Shapers.shape(capture, budget)
         val outcome = settled?.receipts?.firstOrNull()?.outcome ?: if (status is ProcStatus.Lost || status is ProcStatus.Cancelled) Outcome.UnknownOutcome else shaped.status
         val receipts = settled?.let { "\n" + verify!!.receiptLines(it.receipts) } ?: ""
-        val view = "handle ${handle.handleId} ${wire(status)}\n" + (note?.let { "$it\n" } ?: "") + shaped.view + "\nBackground effects cannot be attributed exclusively to this process." + (if (changed.isEmpty()) "" else "\nchanged during background run (${changed.size} paths): " + changed.take(10).joinToString(", ")) + receipts
+        val view = "handle ${handle.handleId} ${wire(status)}\n" + (note?.let { "$it\n" } ?: "") + safeView(shaped.view, capture.output, unknownEnd = !fromStart && !shapedRedacted(safeLog)) +"\nBackground effects cannot be attributed exclusively to this process." + (if (changed.isEmpty()) "" else "\nchanged during background run (${changed.size} paths): " + changed.take(10).joinToString(", ")) + receipts
         val effectClass = observedClass(handle.effectClass, changed)
         val result = RunResult(handle.alias, handle.actionId, capture.exitCode, outcome, view, shaped.viewTruncated, logBlob, effectClass, stampBefore, after.candidateId, true, changed, handle.handleId, shaped.counts, shaped, shaped.limitations)
         return render(args, result, handle.argv, handle.shell, null, after, effectsUnknown = true, captureMask = safeLog.mask, completedPlainly = completedPlainly(capture, outcome, shaped))
@@ -670,7 +712,9 @@ public class Run(
             )
         }
         handles.save(handle.copy(proc = proc.copy(status = ProcStatus.Running), status = wire(ProcStatus.Running), cursor = waited.cursor))
-        val safe = redaction.applyLive(tail, ContentClass.ModelFacing, open)
+        // D-387: the tail is redacted with the log before it, like a poll slice; an unreadable prefix hides it.
+        val before = if (tail.isEmpty()) "" else logBefore(proc, waited.cursor - tail.size)
+        val safe = redaction.applyLive(tail, ContentClass.ModelFacing, open || before == null, before.orEmpty())
         val shown = tailWithin(safe.text, args.budgetTokens)
         val elided = dropped > 0 || shown.length < safe.text.length
         val deadlineView = if (processSeconds == null || (waited is Waited.Expired && stoppedFirst)) "" else " · process deadline ${processSeconds}s from its start"
@@ -689,8 +733,11 @@ public class Run(
         var proc = start
         var cursor = since
         val tail = TailBuffer(WAIT_TAIL_BYTES)
-        var partial = ByteArray(0)
-        val scan = ReadinessScan(redaction, until.line, insideKeyBlock(start, since))
+        // The scan resumes where the log stands at [since]: inside a block or not, and with the unfinished line before it,
+        // so a marker cut by the cursor is read whole (D-387).
+        val before = logBefore(start, since).orEmpty()
+        var partial = before.substring(before.lastIndexOf('\n') + 1).toByteArray(Charsets.UTF_8)
+        val scan = ReadinessScan(redaction, until.line, leavesKeyBlockOpen(before), before.substring(0, before.lastIndexOf('\n') + 1))
         while (true) {
             if (Thread.currentThread().isInterrupted) throw InterruptedException("wait interrupted")
             val remainingMillis = java.time.Duration.between(clock.instant(), deadline).toMillis()
@@ -725,14 +772,39 @@ public class Run(
     }
 
     /**
-     * Whether the log byte [since] lies inside a private-key block, judged from the scan cap's worth of log before it: a
-     * wait that starts there must not read the block's payload lines as ordinary output. An unreadable log answers no; the
-     * poll that follows reports it.
+     * Whether [text] ends inside a private-key block: a wait that starts there must not read the block's payload lines as
+     * ordinary output. An unreadable log reads as empty and answers no; the poll that follows reports it.
      */
-    private fun insideKeyBlock(proc: Proc, since: Long): Boolean {
-        if (since <= 0) return false
+    private fun leavesKeyBlockOpen(text: String): Boolean {
+        val begin = Redaction.PRIVATE_KEY_BEGIN.findAll(text).lastOrNull() ?: return false
+        return Redaction.PRIVATE_KEY_END.find(text, begin.range.last + 1) == null
+    }
+
+    /**
+     * What the shaper reads (D-387): the capture redacted as a live stream when the scan covered all of it, so a cut through
+     * a secret never leaves half a block in the view; a capture beyond the scan cap (or binary) is shaped raw, and
+     * [safeView] guards that view.
+     */
+    private fun shapeable(capture: RunCapture, safe: Redacted): RunCapture =
+        if (shapedRedacted(safe)) capture.copy(output = safe.text.toByteArray(Charsets.UTF_8)) else capture
+
+    private fun shapedRedacted(safe: Redacted): Boolean = safe.limitations.isEmpty()
+
+    /**
+     * The shaped view of a capture, redacted as the end of a live stream (D-387): a private-key block the shaped capture
+     * leaves open (judged from its last scan cap's worth, or [unknownEnd]) hides the view's part of it, and a view that
+     * begins inside a block hides it up to its end.
+     */
+    private fun safeView(view: String, capture: ByteArray, unknownEnd: Boolean = false): String {
+        val last = String(capture, maxOf(0, capture.size - redaction.config.maxBytes), minOf(capture.size, redaction.config.maxBytes), Charsets.UTF_8)
+        return redaction.applyLive(view.toByteArray(Charsets.UTF_8), ContentClass.ModelFacing, openAtEnd = unknownEnd || leavesKeyBlockOpen(last)).text
+    }
+
+    /** The scan cap's worth of log before byte [since]: the scanner state a handle's reader resumes from; `null` when unreadable. */
+    private fun logBefore(proc: Proc, since: Long): String? {
+        if (since <= 0) return ""
         val from = maxOf(0L, since - redaction.config.maxBytes)
-        val before = try {
+        return try {
             Files.newByteChannel(proc.log).use { channel ->
                 channel.position(from)
                 val buffer = java.nio.ByteBuffer.allocate((since - from).toInt())
@@ -740,10 +812,8 @@ public class Run(
                 String(buffer.array(), 0, buffer.position(), Charsets.UTF_8)
             }
         } catch (unreadable: IOException) {
-            return false
+            null
         }
-        val begin = Redaction.PRIVATE_KEY_BEGIN.findAll(before).lastOrNull() ?: return false
-        return Redaction.PRIVATE_KEY_END.find(before, begin.range.last + 1) == null
     }
 
     /** The last whole lines of [text] that fit [budgetTokens]. */
@@ -870,6 +940,9 @@ private const val WAIT_TAIL_BYTES: Int = 256 * 1024
 /** A line longer than this without a newline is matched as it stands. */
 private const val WAIT_LINE_BYTES: Int = 64 * 1024
 
+/** How long a poll waits for the line break that completes a slice made of one unfinished line. */
+private const val LINE_COMPLETION_SECONDS: Long = 1
+
 /** The lines of [text]; a closing line break ends the last line instead of opening an empty one that `^$` would match. */
 private fun linesOf(text: String): Sequence<String> = text.lineSequence().toList().let { if (it.last().isEmpty()) it.dropLast(1) else it }.asSequence()
 
@@ -879,7 +952,13 @@ private fun linesOf(text: String): Sequence<String> = text.lineSequence().toList
  * across polls, then redacted with it. A block that never closes within the scan cap, or that was open where the scan
  * began ([skipping]), is never matched nor shown. So `until_line` is no oracle for a secret and never echoes one.
  */
-private class ReadinessScan(private val redaction: Redaction, private val pattern: Regex?, private var skipping: Boolean) {
+private class ReadinessScan(
+    private val redaction: Redaction,
+    private val pattern: Regex?,
+    private var skipping: Boolean,
+    /** The log right before the first fed text: the first run is redacted with it (D-387), later runs follow their own. */
+    private var context: String = "",
+) {
     /** Characters per redaction run, so a run never exceeds the byte cap and its tail is always scanned. */
     private val runChars = maxOf(1, redaction.config.maxBytes / 4)
     private val held = StringBuilder()
@@ -893,14 +972,20 @@ private class ReadinessScan(private val redaction: Redaction, private val patter
         var matched: String? = null
         fun flush() {
             if (matched == null && pattern != null && run.isNotEmpty()) {
-                matched = linesOf(redaction.apply(run.toString(), ContentClass.ReusableEvidence).text)
-                    .map { it.trimEnd('\r') }.firstOrNull { pattern.containsMatchIn(it) }?.take(200)
+                val safe = if (context.isEmpty()) redaction.apply(run.toString(), ContentClass.ReusableEvidence)
+                else redaction.applyLive(run.toString().toByteArray(Charsets.UTF_8), ContentClass.ReusableEvidence, openAtEnd = false, context = context)
+                matched = linesOf(safe.text).map { it.trimEnd('\r') }.firstOrNull { pattern.containsMatchIn(it) }?.take(200)
             }
+            if (run.isNotEmpty()) context = ""
             run.setLength(0)
         }
         for (line in linesWithBreaks(text)) {
             when {
-                skipping -> if (Redaction.PRIVATE_KEY_END.containsMatchIn(line)) skipping = false
+                // Dropped lines part the context from the first run.
+                skipping -> {
+                    context = ""
+                    if (Redaction.PRIVATE_KEY_END.containsMatchIn(line)) skipping = false
+                }
                 held.isNotEmpty() -> {
                     held.append(line)
                     if (Redaction.PRIVATE_KEY_END.containsMatchIn(line)) {
