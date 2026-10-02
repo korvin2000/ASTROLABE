@@ -20,7 +20,10 @@ import io.astrolabe.verify.CampaignReview
 import io.astrolabe.verify.CampaignReviewRecord
 import io.astrolabe.verify.Currency
 import io.astrolabe.verify.EquivalenceReport
+import io.astrolabe.verify.Obligations
 import io.astrolabe.verify.ProvenanceClass
+import io.astrolabe.verify.ProvenanceKind
+import io.astrolabe.verify.ResultStatus
 import io.astrolabe.verify.RiskAcceptor
 import io.astrolabe.workspace.DirtyState
 import kotlinx.serialization.Serializable
@@ -49,8 +52,8 @@ public data class RequirementLine @JvmOverloads constructor(
  * [acceptedBy], [decider] and [acceptedReason] say who and why. `log` ids are raw-output blobs.
  *
  * Its provenance axis (§4.4 C2): who created the check ([origin], [checkBy]), what ran ([command], [receiptId]), on
- * which tree ([stamp], [currency]), the result ([status]), who took the residual risk ([riskAcceptedBy], `null` while
- * nobody did) and the class this gives the item.
+ * which tree ([stamp], [currency]), the [result] at the final tree before any decision, who took the residual risk
+ * ([riskAcceptedBy], `null` while nobody did) and the class this gives the item.
  */
 @Serializable
 public data class AcceptanceLine @JvmOverloads constructor(
@@ -70,6 +73,7 @@ public data class AcceptanceLine @JvmOverloads constructor(
     val command: String? = null,
     val receiptId: String? = null,
     val riskAcceptedBy: RiskAcceptor? = null,
+    val result: ResultStatus = ResultStatus.Unverified,
     val provenanceClass: ProvenanceClass = ProvenanceClass.Unverified,
 )
 
@@ -101,7 +105,8 @@ public data class BudgetLine(
  * decisions and memory candidates (P4). ADR candidates are the registers' boundary-crossing decisions (P2.1.3). [highestAuthorizedStage] is `patch` as built;
  * `Publisher.report` raises it to the highest stage the attempt's publisher was authorized to reach — never
  * "delivered" for a patch (§14.2). [provenanceClass] says who verified the result (§4.4 C2): `independent`, `agent_test`
- * or `unverified`, beside a status that stays `completed`.
+ * or `unverified`, beside a status that stays `completed`; [acceptanceSurfaceUnreviewed] names the test changes accepted
+ * without an approving review, which leave every declared check the agent's evidence.
  */
 @Serializable
 public data class FinishReceipt @JvmOverloads constructor(
@@ -136,6 +141,7 @@ public data class FinishReceipt @JvmOverloads constructor(
     /** Items accepted on a decider's word without verification (I7, D-342): never shown as verified. */
     val acceptedWithoutVerification: List<io.astrolabe.verify.ItemProvenance> = emptyList(),
     val provenanceClass: ProvenanceClass = ProvenanceClass.Unverified,
+    val acceptanceSurfaceUnreviewed: List<String> = emptyList(),
 )
 
 /** The campaign review as the receipt reports it: the request, the diff it saw, and the signed verdict or why none arrived. */
@@ -189,18 +195,22 @@ public object FinishReceipts {
                 } }
         }
         fun accepted(line: AcceptanceLine): AcceptanceLine = decided[line.id]?.takeIf { line.provenance == null }?.let {
-            line.copy(status = "accepted", provenance = "accepted", acceptedBy = it.by, decider = it.decider?.name?.lowercase(), acceptedReason = it.reason)
+            line.copy(status = "accepted", provenance = "accepted", acceptedBy = it.by, decider = it.decider?.name?.lowercase(), acceptedReason = it.reason,
+                result = it.result ?: line.result)
         } ?: line
+        // §8.6: a change to a required check's tests that no reviewer approved makes every declared check the agent's evidence.
+        val unreviewedSurface = state.graph.increments.filter { it.status == io.astrolabe.contract.IncrementStatus.Verified }
+            .mapNotNull { state.graph.evidence[it.id] }.flatMap { it.provenance }
+            .filter { it.how == ProvenanceKind.Accepted && it.item.startsWith(Obligations.INTEGRITY) }
+            .map { it.item.removePrefix(Obligations.INTEGRITY) }.distinct()
+        fun evidenceBy(item: Acceptance): Author = if (unreviewedSurface.isEmpty()) Author.of(item.origin) else Author.Model
         // §4.4 C2: who created the check, who took the residual risk, and the class this gives the item at the final tree.
-        fun axis(line: AcceptanceLine, item: Acceptance): AcceptanceLine {
-            val verified = line.provenance == "tested" || line.provenance == "reviewed"
-            return line.copy(
-                origin = item.origin,
-                checkBy = Author.of(item.origin),
-                riskAcceptedBy = if (verified) RiskAcceptor.Runtime else decided[line.id]?.takeIf { line.provenance == "accepted" }?.riskAcceptedBy,
-                provenanceClass = ProvenanceClass.item(item.origin, verified),
-            )
-        }
+        fun axis(line: AcceptanceLine, item: Acceptance): AcceptanceLine = line.copy(
+            origin = item.origin,
+            checkBy = Author.of(item.origin),
+            riskAcceptedBy = if (line.result == ResultStatus.Passed) RiskAcceptor.Runtime else decided[line.id]?.takeIf { line.provenance == "accepted" }?.riskAcceptedBy,
+            provenanceClass = ProvenanceClass.item(evidenceBy(item), line.result),
+        )
         val acceptance = contract.acceptance.map { item ->
             when (item) {
                 is Acceptance.Run -> {
@@ -214,13 +224,14 @@ public object FinishReceipts {
                         else -> "missing_evidence"
                     }
                     AcceptanceLine(item.id, "run", status, receipt?.stampAfter?.hash8, currency?.applicability?.name?.lowercase(), listOfNotNull(receipt?.raw?.hex),
-                        provenance = "tested".takeIf { status == "green" }, command = item.command.text, receiptId = currency?.receiptId)
+                        provenance = "tested".takeIf { status == "green" }, command = item.command.text, receiptId = currency?.receiptId,
+                        result = Obligations.run(item.id, item.criterion, currency).status)
                 }
                 is Acceptance.Check -> assessments.firstOrNull { item.id in it.criteria }?.let {
-                    AcceptanceLine(item.id, "check", "assessed", it.candidate.hash8, "current", listOf(it.packetId), provenance = "reviewed", acceptedBy = it.verdict?.signedBy)
+                    AcceptanceLine(item.id, "check", "assessed", it.candidate.hash8, "current", listOf(it.packetId), provenance = "reviewed", acceptedBy = it.verdict?.signedBy, result = ResultStatus.Passed)
                 } ?: AcceptanceLine(item.id, "check", "not_assessed", null, null, emptyList())
                 is Acceptance.Review -> assessments.firstOrNull { item.id in it.criteria }?.let {
-                    AcceptanceLine(item.id, "review", "approved", it.candidate.hash8, "current", listOf(it.packetId), provenance = "reviewed", acceptedBy = it.verdict?.signedBy)
+                    AcceptanceLine(item.id, "review", "approved", it.candidate.hash8, "current", listOf(it.packetId), provenance = "reviewed", acceptedBy = it.verdict?.signedBy, result = ResultStatus.Passed)
                 } ?: AcceptanceLine(item.id, "review", "not_reviewed", null, null, emptyList())
             }.let(::accepted).let { axis(it, item) }
         }
@@ -230,15 +241,11 @@ public object FinishReceipts {
                 listOfNotNull(state.reason.takeIf { entry?.status != RequirementStatus.Verified })
             // §4.4 C2: a requirement is checked by its own items and by the model's that strengthen it.
             val items = (r.acceptance + contract.acceptance.filter { (it.origin as? Origin.Model)?.strengthens == r.id }.map { it.id }).distinct()
-            val verified = entry?.status == RequirementStatus.Verified
-            RequirementLine(r.id, entry?.status?.wire ?: RequirementStatus.Pending.wire, blockers, Author.of(r, contract.requests), r.authorityRef, items,
-                if (verified) ProvenanceClass.requirement(acceptance.filter { it.id in items }.map { it.provenanceClass }) else ProvenanceClass.Unverified)
+            val (agent, declared) = acceptance.filter { it.id in items }.partition { line -> evidenceBy(checkNotNull(contract.acceptance(line.id))) == Author.Model }
+            val provenanceClass = if (entry?.status != RequirementStatus.Verified) ProvenanceClass.Unverified
+                else ProvenanceClass.requirement(declared.map { it.result }, agent.map { it.result })
+            RequirementLine(r.id, entry?.status?.wire ?: RequirementStatus.Pending.wire, blockers, Author.of(r, contract.requests), r.authorityRef, items, provenanceClass)
         }
-        // I7: accepted is never verified — each such item says who accepted it and why, campaign-level obligations included.
-        val notVerified = requirements.filter { it.status != RequirementStatus.Verified.wire }.map { it.id } +
-            acceptance.filter { it.provenance == null }.map { it.id } +
-            acceptance.filter { it.provenance == "accepted" }.map { "${it.id}: accepted without verification by ${it.acceptedBy} (${it.decider}): ${it.acceptedReason}" } +
-            decided.values.filter { p -> acceptance.none { it.id == p.item } }.map { "${it.item}: accepted without verification by ${it.by} (${it.decider?.name?.lowercase()}): ${it.reason}" }
         val changes = packets.flatMap { it.changes }
         // A cell that never handed back a packet (lost or interrupted) still named what it touched in its checkpoint.
         val reported = packets.mapNotNull { it.ids.context }.toSet()
@@ -276,7 +283,11 @@ public object FinishReceipts {
             changes = ChangeSplit(separated.agent.toList(), separated.byRun.toList(), separated.preExistingUserChanges.toList(), separated.unattributed.toList()),
             acceptanceSurfaceModified = null,
             checksRun = checksRun,
-            notVerified = notVerified,
+            // I7: accepted is never verified — each such item says who accepted it and why, campaign-level obligations included.
+            notVerified = requirements.filter { it.status != RequirementStatus.Verified.wire }.map { it.id } +
+                acceptance.filter { it.provenance == null }.map { it.id } +
+                acceptance.filter { it.provenance == "accepted" }.map { "${it.id}: accepted without verification by ${it.acceptedBy} (${it.decider}): ${it.acceptedReason}" } +
+                decided.values.filter { p -> acceptance.none { it.id == p.item } }.map { "${it.item}: accepted without verification by ${it.by} (${it.decider?.name?.lowercase()}): ${it.reason}" },
             deadEnds = registers.flatMap { r -> r.deadEnds.map { it.text } },
             decisions = registers.flatMap { r -> r.decisions.map { "${it.text} because ${it.because}" } },
             // §4.2: a boundary-crossing decision is promoted to an ADR candidate; the curator admits it (P4.1).
@@ -300,7 +311,8 @@ public object FinishReceipts {
             qa = QaRuns.forAttempt(c.store, state.work, state.attempt),
             acceptedWithoutVerification = acceptance.mapNotNull { line -> decided[line.id]?.takeIf { line.provenance == "accepted" } } +
                 decided.values.filter { p -> acceptance.none { it.id == p.item } },
-            provenanceClass = ProvenanceClass.campaign(requirements.map { it.provenanceClass }, notVerified),
+            provenanceClass = ProvenanceClass.campaign(requirements.map { it.provenanceClass }),
+            acceptanceSurfaceUnreviewed = unreviewedSurface,
         )
     }
 

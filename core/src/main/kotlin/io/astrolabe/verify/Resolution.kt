@@ -210,9 +210,9 @@ public enum class RiskAcceptor(public val wire: String) {
 }
 
 /**
- * The summary class of the provenance axis (§4.4 C2), worst first. [Independent]: a check the host or the user declared
- * passed at the final tree; [AgentTest]: only the model's own checks did; [Unverified]: something was accepted without
- * verification or did not hold at the final tree. A `completed` outcome stays `completed` whatever its class.
+ * The summary class of the provenance axis (§4.4 C2), worst first. [Independent]: the checks the host or the user
+ * declared passed at the final tree; [AgentTest]: only the model's own checks did; [Unverified]: neither — a decider's
+ * acceptance is never a verification (I7). A `completed` outcome stays `completed` whatever its class.
  */
 @Serializable
 public enum class ProvenanceClass(public val wire: String) {
@@ -222,29 +222,30 @@ public enum class ProvenanceClass(public val wire: String) {
     ;
 
     public companion object {
-        /** One acceptance item: [verified] at the final tree on the model's criterion ⇒ agent test, on any other ⇒ independent. */
+        /** One check whose evidence is [by]'s: passed at the final tree on the host's or the user's ⇒ independent, the model's ⇒ agent test. */
         @JvmStatic
-        public fun item(origin: Origin, verified: Boolean): ProvenanceClass = when {
-            !verified -> Unverified
-            Author.of(origin) == Author.Model -> AgentTest
+        public fun item(by: Author, result: ResultStatus): ProvenanceClass = when {
+            result != ResultStatus.Passed -> Unverified
+            by == Author.Model -> AgentTest
             else -> Independent
         }
 
         /**
-         * One requirement from the classes of the items that check it: none, or any unverified ⇒ unverified (I7); else
-         * any independent ⇒ independent — the model's extra checks never lower a declared one that passed; else agent test.
+         * One requirement from the results at the final tree of its [declared] checks — the host's and the user's — and
+         * of the [agent]'s own: independent when it has a declared check and every one passed; otherwise agent test when
+         * none failed and one of the agent's passed; otherwise unverified. The agent's checks never lower a declared
+         * verification: a red one of its own stands as an `Open` item.
          */
         @JvmStatic
-        public fun requirement(items: Collection<ProvenanceClass>): ProvenanceClass = when {
-            items.isEmpty() || Unverified in items -> Unverified
-            Independent in items -> Independent
-            else -> AgentTest
+        public fun requirement(declared: Collection<ResultStatus>, agent: Collection<ResultStatus>): ProvenanceClass = when {
+            declared.isNotEmpty() && declared.all { it == ResultStatus.Passed } -> Independent
+            ResultStatus.Failed !in declared && ResultStatus.Failed !in agent && ResultStatus.Passed in agent -> AgentTest
+            else -> Unverified
         }
 
-        /** The campaign: unverified while anything at the final tree is [notVerified] (I7); else the worst of its [requirements], none ⇒ unverified. */
+        /** The campaign: the worst of its [requirements]; none ⇒ unverified. */
         @JvmStatic
-        public fun campaign(requirements: Collection<ProvenanceClass>, notVerified: Collection<String>): ProvenanceClass =
-            if (notVerified.isNotEmpty()) Unverified else requirements.minOrNull() ?: Unverified
+        public fun campaign(requirements: Collection<ProvenanceClass>): ProvenanceClass = requirements.minOrNull() ?: Unverified
     }
 }
 
@@ -360,11 +361,14 @@ public object Obligations {
         }
     }
 
+    /** The obligation id prefix of a test-integrity flag; the path follows it. */
+    public const val INTEGRITY: String = "integrity:"
+
     /** A test-integrity flag on a required check (§8.6): its reviewer's word, bound like any verdict; `null` when it needs none. */
     @JvmStatic
     public fun flag(flag: TestIntegrityFlag, contractVersion: Int, candidate: CandidateId?): ObligationResult? {
         if (flag.requiredChecks.isEmpty() || flag.kind == TestIntegrity.ADDITIONS_ONLY) return null
-        return verdict("integrity:${flag.path}", ObligationKind.Integrity, "acceptance surface ${flag.path} touches ${flag.requiredChecks.joinToString(", ")}",
+        return verdict("$INTEGRITY${flag.path}", ObligationKind.Integrity, "acceptance surface ${flag.path} touches ${flag.requiredChecks.joinToString(", ")}",
             flag.verdict, contractVersion, candidate, "no approving review of the change to a required check")
     }
 
