@@ -43,9 +43,9 @@ Schema **v5** (phase 0: `pending_completions`, `acceptance_decisions`); `packets
 `integration` rows; skills and behaviour maps are `BlobKind.MODULE` blobs linked as a note's `procedure` module.
 
 ## Last verification
-Local Windows (JDK 26), 2026-10-01, `main` tip after D-375: `./gradlew build` green — core 1831, eval 52, provider-api 20,
-provider-ai-gate 40, index-treesitter 17 tests, 0 failed (`checkKotlinAbi` included). Linux and CI not run for this change.
-Earlier CI (Ubuntu + Windows): P4–P6 gates 36159227747, 36162949349, 36167689819, 36172349269; `c407c24` 36468171641.
+CI (Ubuntu + Windows, JDK 26, full `check`): run 37049344584 green at `4bb181b` (ASTROLABE 2.0 wave A + review fixes,
+2026-10-02); run 37044497216 green at `488db92`. Local L2 at every wave-A merge. `provider-ai-gate`, SDK and eval-live
+run only locally (CI has no SDK checkout). Earlier CI: P4–P6 gates; `f68032f` 36905875813.
 
 ## Recorded deviations
 Local choices D-112–D-113, D-120–D-126, D-135–D-137, D-145–D-155, D-160–D-165, D-170–D-174, D-180–D-183, D-190–D-195,
