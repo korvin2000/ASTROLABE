@@ -9,17 +9,35 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 
-/** Where a call's prices come from: fitted from billed calls of its route, or the catalog's list prices (an estimate). */
-public enum class PriceSource { Billed, Catalog }
+/**
+ * Where a call's prices come from (§10.4 keeps billed, documented and inferred apart). The billed amount itself is
+ * never a price: it is [ModelCall.billed].
+ */
+public enum class PriceSource {
+    /** Inferred from the billed calls of the call's own route. */
+    Fitted,
 
-/** The prices a call is priced with; [from] names the fitted route or the catalog entry. */
+    /** Inferred from the billed calls of all of the model's upstreams together, for a route whose own calls identify no price: an estimate. */
+    Pooled,
+
+    /** Documented: the catalog's list prices, an estimate. */
+    Catalog,
+}
+
+/**
+ * The prices a call is priced with; [from] names the fit or the catalog entry and [agreement] the fit's agreement.
+ * [estimate] is true unless the call's own route reproduced its bills (exact or determined).
+ */
 @Serializable
 public data class CallPrices(
     val source: PriceSource,
     val from: String,
     val currency: String,
     val perMillion: Map<PriceClass, SerializableBigDecimal?>,
-)
+    val agreement: Agreement? = null,
+) {
+    val estimate: Boolean get() = source != PriceSource.Fitted || agreement == Agreement.Approximate
+}
 
 /** List prices per million tokens from an ai-gate catalog snapshot (`catalog-snapshot.json`), by `provider` and model id. */
 public class Catalog(entries: Map<Pair<String, String>, CallPrices>) {
@@ -56,25 +74,29 @@ public class Catalog(entries: Map<Pair<String, String>, CallPrices>) {
 }
 
 /**
- * The prices of every call of an audit: a route's own billed fit when it identifies prices, else the fit of all the
- * model's routes on that provider (an upstream with too few calls), else the catalog's list prices, else none.
+ * The prices of every call of an audit: its route's own fit when that identifies prices; else, labelled as an
+ * estimate, the fit of all the model's upstreams together; else the catalog's list prices; else none. A route whose
+ * own calls identify nothing stays unidentified in [fits].
  */
 public class PriceBook(fits: List<PriceFit>, private val catalog: Catalog, private val currencies: Map<Binding, String>) {
     public val fits: List<PriceFit> = fits.toList()
-    private val byBinding = fits.filter { it.agreement != Agreement.Unidentified }.associateBy { it.binding }
+    private val byBinding = fits.filter { it.agreement in IDENTIFIED }.associateBy { it.binding }
 
     public fun prices(call: ModelCall): CallPrices? {
         val binding = call.binding ?: return null
-        val pooled = binding.copy(upstream = ANY)
-        (byBinding[binding] ?: byBinding[pooled])?.let { fit ->
-            return CallPrices(PriceSource.Billed, "billed fit ${fit.binding} (${fit.agreement}, ${fit.calls} calls)", currencies[fit.binding] ?: "USD", fit.perMillion)
-        }
+        byBinding[binding]?.let { return of(PriceSource.Fitted, "fitted ${it.binding}", it) }
+        byBinding[binding.copy(upstream = ANY)]?.let { return of(PriceSource.Pooled, "pooled estimate ${it.binding} for $binding", it) }
         return catalog.prices(binding.provider, binding.model)
     }
+
+    private fun of(source: PriceSource, from: String, fit: PriceFit) =
+        CallPrices(source, "$from (${fit.agreement}, ${fit.calls} calls)", currencies[fit.binding] ?: "USD", fit.perMillion, fit.agreement)
 
     public companion object {
         /** The upstream label of a fit pooled over all of a model's upstreams. */
         public const val ANY: String = "*"
+
+        private val IDENTIFIED = setOf(Agreement.Exact, Agreement.Determined, Agreement.Approximate)
 
         /** Fits every route of [calls] and, where several upstreams served a model, the model pooled over them. */
         @JvmStatic
@@ -93,28 +115,24 @@ public class PriceBook(fits: List<PriceFit>, private val catalog: Catalog, priva
             return PriceBook(fits, catalog, currencies)
         }
 
+        /** A billed call whose every class is known; one with an unknown class cannot say what its bill paid for. */
         private fun row(call: ModelCall): FitRow? {
             val u = call.usage ?: return null
-            val tokens = mapOf(
-                PriceClass.UncachedInput to (u.uncachedInput ?: return null),
-                PriceClass.CacheRead to (u.cacheRead ?: return null),
-                PriceClass.CacheWrite to (u.cacheWrite ?: 0),
-                PriceClass.Output to (u.output ?: return null),
-            )
+            val tokens = PriceClass.entries.associateWith { tokensOf(u, it) ?: return null }
             return FitRow(tokens, call.billed ?: return null)
         }
     }
 }
 
-/** The tokens of [usage] in [c], `null` when unknown. */
+/** The tokens of [usage] in [c]; `null` when unknown, 0 when the provider has no such class. */
 internal fun tokensOf(usage: CallUsage, c: PriceClass): Long? = when (c) {
     PriceClass.UncachedInput -> usage.uncachedInput
     PriceClass.CacheRead -> usage.cacheRead
-    PriceClass.CacheWrite -> usage.cacheWrite ?: 0
+    PriceClass.CacheWrite -> usage.cacheWrite
     PriceClass.Output -> usage.output
 }
 
-/** The priced cost of one call: each class's tokens at its price; `null` when a class with tokens is unknown or unpriced. */
+/** The priced cost of one call: each class's tokens at its price; `null` when a class is unknown, or has tokens and no price. */
 internal fun pricedCost(usage: CallUsage, prices: CallPrices?): BigDecimal? {
     if (prices == null) return null
     var total = BigDecimal.ZERO

@@ -10,55 +10,77 @@ import kotlin.test.assertTrue
 class AuditResidencyTest {
     private fun bill(u: Long, c: Long, o: Long): String = (BigDecimal(u).movePointLeft(6) + BigDecimal(c).movePointLeft(7) + BigDecimal(2 * o).movePointLeft(6)).toPlainString()
 
+    private fun read(n: Int) = "⟦result #$n tool=look class=R v={a.js: 1593} truncated=no effects=none status=ok⟧"
+
+    private val state = "⟦result #- tool=state class=R truncated=no effects=none status=ok⟧"
+
     /**
-     * Ten turns of a k = 2 cadence: each turn adds a 100-token message and a 1000-token read; from turn 4 every even
-     * turn stubs the results two turns old (a stub is about 20 tokens), and the next request misses from the first one.
+     * Ten turns of a k = 2 cadence: each turn adds a 100-token message, a 1000-token read and, [withState], a 40-token
+     * state line no alias names; from turn 4 every even turn stubs the results two turns old (a stub is about 20 tokens,
+     * a state line a loss), and the next request misses from the first one.
      */
-    private fun cadence(): Pair<AuditLog, Long> {
+    private fun cadence(withState: Boolean): Pair<AuditLog, Long> {
         val base = 5_000L
         val message = 100L
         val stubbed = BooleanArray(11)
-        fun size(s: Int) = message + if (stubbed[s]) 20 else 1_000
+        fun size(s: Int) = message + (if (stubbed[s]) 20 else 1_000) + (if (!withState) 0 else if (stubbed[s]) 20 else 40)
         val log = AuditLog(JournalFormat.Studio)
+        fun results(t: Int) { log.tool("look", "read", read(t)); if (withState) log.tool("state", "patch", state) }
         var input = base + 100
         log.turn(1).call(input, 0, message, reasoning = 0, billed = bill(input, 0, message))
-            .tool("look", "read", "⟦result #1 tool=look class=R v={a.js: 1593} truncated=no effects=none status=ok⟧")
+        results(1)
         var previous = base
         var inputs = input
         for (t in 1..9) {
             var first = -1
             if (t % 2 == 0 && t >= 4) {
                 for (s in 1..t - 2) if (!stubbed[s]) { if (first < 0) first = s; stubbed[s] = true }
-                log.entry("boundary", "eviction age at turn $t: 2 stubbed · 0 trimmed · 0 losses", at = t)
+                val each = if (withState) 2 else 1
+                log.entry("boundary", "eviction age at turn $t: ${2 * each} stubbed · 0 trimmed · ${2 * (each - 1)} losses", at = t)
             }
             val content = base + (1..t).sumOf(::size)
             val cached = if (first > 0) base + (1 until first).sumOf(::size) + message else previous
             input = content + 100
             log.turn(t + 1).call(input - cached, cached, message, reasoning = 0, billed = bill(input - cached, cached, message))
-                .tool("look", "read", "⟦result #${t + 1} tool=look class=R v={a.js: 1593} truncated=no effects=none status=ok⟧")
+            results(t + 1)
             previous = content
             inputs += input
         }
         return log to inputs
     }
 
+    private fun whatIf(log: AuditLog, defaults: Defaults): ResidencyWhatIf =
+        Audit.run(listOf(AuditInput("run", "arm", log.journal(), null)), Catalog.EMPTY, defaults).runs.single().residency
+
     @Test fun `the observed cadence replays the observed requests and other cadences are priced on them`() {
-        val (log, inputs) = cadence()
-        val what = Audit.run(listOf(AuditInput("run", "arm", log.journal(), null)), Catalog.EMPTY, Defaults().copy(k = 2)).runs.single().residency
+        val (log, inputs) = cadence(withState = false)
+        val what = whatIf(log, Defaults().copy(k = 2))
         assertEquals(null, what.unmeasured)
-        assertEquals(listOf(4, 6, 8), what.loggedBatches)
+        assertEquals(listOf(4, 6, 8), what.loggedBatches!!.map { it.turn })
         val (observed, slow, off) = what.scenarios
         assertEquals(listOf("k=2", "k=17", "off"), what.scenarios.map { it.label })
-        assertEquals(listOf(4, 6, 8), observed.batches)
+        assertEquals(what.loggedBatches!!.map { Triple(it.turn, it.stubbed, it.losses) }, observed.batches.map { Triple(it.turn, it.stubbed, it.losses) })
         assertEquals(inputs, observed.inputTokens)
-        assertTrue(abs(what.modelError!!.toDouble()) < 0.01 * what.observedCost!!.toDouble(), "error ${what.modelError} of ${what.observedCost}")
+        assertTrue(abs(what.calibrationError!!.toDouble()) < 0.01 * what.observedCost!!.toDouble(), "error ${what.calibrationError} of ${what.observedCost}")
         // Without a cadence nothing reaches R_max here: no batch, no re-paid prefix, and every result is carried.
         for (s in listOf(slow, off)) {
             assertEquals(emptyList(), s.batches)
             assertEquals(0L, s.repaidTokens)
             assertTrue(s.inputTokens > observed.inputTokens)
-            assertEquals(0, s.low!!.add(s.high!!).subtract(s.cost!!.multiply(BigDecimal.TWO)).signum())
         }
+    }
+
+    @Test fun `at the capacity bound only recoverable results are evicted and unrecoverable ones are losses of age`() {
+        val (log, _) = cadence(withState = true)
+        // k = 2 keeps at most three turns of results (3120 tokens) live; without the cadence R_max = 3500 is reached from turn 4.
+        val what = whatIf(log, Defaults().copy(k = 2, rMaxTokens = 3_500))
+        val (observed, _, off) = what.scenarios
+        assertEquals(what.loggedBatches!!.map { Triple(it.turn, it.stubbed, it.losses) }, observed.batches.map { Triple(it.turn, it.stubbed, it.losses) })
+        assertTrue(observed.batches.all { it.trigger == "age" && it.losses == 2 })
+        assertTrue(off.batches.isNotEmpty())
+        assertTrue(off.batches.all { it.trigger == "budget" && it.losses == 0 && it.stubbed == 1 }, "${off.batches}")
+        assertTrue(off.repaidTokens > 0)
+        assertTrue(abs(what.calibrationError!!.toDouble()) < 0.02 * what.observedCost!!.toDouble(), "error ${what.calibrationError} of ${what.observedCost}")
     }
 
     @Test fun `a run without two consecutive priced calls is not replayed`() {

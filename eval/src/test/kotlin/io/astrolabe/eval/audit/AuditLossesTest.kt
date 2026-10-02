@@ -49,7 +49,10 @@ class AuditLossesTest {
         assertEquals(MoneyBasis.Billed, a.basis)
         assertEquals(31_500L, a.uncachedInput.tokens)
         assertEquals(32_800L, a.cacheRead.tokens)
-        assertNull(a.cacheWrite.tokens)
+        // OpenRouter has no cache-write class: none, not unknown — it reconciles as zero and reads `n/a`.
+        assertEquals(0L, a.cacheWrite.tokens)
+        assertEquals(false, a.cacheWrite.reported)
+        assertTrue(a.complete)
         assertEquals(1_360L, a.output.tokens)
         assertEquals(680L, a.reasoning.tokens)
         money("0.0375", a.total)
@@ -59,7 +62,24 @@ class AuditLossesTest {
         money("0.00136", a.reasoning.money)
         money("0", a.unexplained)
         assertEquals(1.0, a.uncachedInput.share!! + a.cacheRead.share!! + a.output.share!!, 1e-12)
-        assertTrue(a.prices.single().startsWith("billed fit"))
+        assertTrue(a.prices.single().startsWith("fitted"))
+        assertEquals(false, a.pricesEstimated)
+    }
+
+    @Test fun `an unknown class stays unknown through every total`() {
+        val log = run(JournalFormat.Bus).turn(9)
+        log.event("cell.model_requested", mapOf("invocationId" to "w", "estimatedTokens" to 1, "profileId" to "p", "anchorTokens" to 100))
+        log.event("cell.model_responded", mapOf("invocationId" to "w", "stop" to "ToolUse", "usage" to mapOf(
+            "quantities" to mapOf("uncached_input" to 100, "cache_read" to 6_000, "output" to 10),
+            "provenance" to mapOf("provider" to "openrouter", "model" to "m/one", "protocol" to "x"),
+            "unknown" to listOf("cache_write_5m"), "billed" to mapOf("currency" to "USD", "amount" to "0.001", "unknown" to false))))
+        val a = audit(log).anatomy
+        assertNotNull(a.output.money)
+        assertNull(a.cacheWrite.tokens)
+        assertNull(a.cacheWrite.money)
+        assertNull(a.unexplained)
+        assertEquals(false, a.complete)
+        assertEquals(MoneyBasis.Billed, a.basis)
     }
 
     @Test fun `without a bill the catalog's list prices give an estimate`() {
@@ -69,6 +89,7 @@ class AuditLossesTest {
         assertNull(a.billed)
         money("0.0375", a.estimate)
         assertTrue(a.prices.single().startsWith("catalog"))
+        assertTrue(a.pricesEstimated)
         assertEquals(MoneyBasis.None, audit(run(JournalFormat.Bus, billed = false)).anatomy.basis)
     }
 

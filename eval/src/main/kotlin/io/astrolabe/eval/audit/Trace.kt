@@ -12,11 +12,23 @@ public data class Binding(val provider: String, val model: String, val upstream:
     override fun toString(): String = "$provider/$model" + (upstream?.let { " @ $it" } ?: "")
 }
 
-/** A call's tokens by billing class; a class the response did not report is `null`, never 0. [reasoning] is part of [output]. */
+/**
+ * A call's tokens by billing class. `null` is unknown — the provider should have reported the class and did not
+ * (`BillableUsage.unknown`, AX-09) — and makes every sum it enters unknown. A class the provider does not have, absent
+ * from both its quantities and its unknowns (OpenRouter reports no cache writes), is 0 and listed in [absent]: none,
+ * not unknown. [reasoning] is part of [output].
+ */
 @Serializable
-public data class CallUsage(val uncachedInput: Long?, val cacheRead: Long?, val cacheWrite: Long?, val output: Long?, val reasoning: Long?) {
-    /** Uncached + cache read + cache write; `null` when uncached or cache read is unknown (an unreported write class is none). */
-    val input: Long? get() = if (uncachedInput == null || cacheRead == null) null else uncachedInput + cacheRead + (cacheWrite ?: 0)
+public data class CallUsage(
+    val uncachedInput: Long?,
+    val cacheRead: Long?,
+    val cacheWrite: Long?,
+    val output: Long?,
+    val reasoning: Long?,
+    val absent: Set<PriceClass> = emptySet(),
+) {
+    /** Uncached + cache read + cache write: every token sent; `null` when any of them is unknown. */
+    val input: Long? get() = if (uncachedInput == null || cacheRead == null || cacheWrite == null) null else uncachedInput + cacheRead + cacheWrite
 }
 
 /**
@@ -45,7 +57,9 @@ public data class ModelCall(
 
 /**
  * A tool result as its envelope header states it; [command] is the `run` command line where the journal kept the call's
- * arguments. [changed] is true for an applied edit (`ok`/`partial`) or an observed effect on the workspace.
+ * arguments. [alias] is the result's campaign alias, `null` for `#-` and for the journal's error results (a schema
+ * error, a call not executed), which no alias names. [changed] is true for an applied edit (`ok`/`partial`) or an
+ * observed effect on the workspace.
  */
 @Serializable
 public data class ToolOutcome(
@@ -55,24 +69,28 @@ public data class ToolOutcome(
     val command: String? = null,
     val op: String? = null,
     val changed: Boolean = false,
+    val alias: String? = null,
 )
 
+/** An eviction batch as the journal logs it (Studio only): `eviction <trigger> at turn N: S stubbed · T trimmed · L losses`. */
+@Serializable
+public data class EvictionRecord(val trigger: String, val stubbed: Int, val trimmed: Int, val losses: Int)
+
 /**
- * What one turn of a cell did around its model call. [results] counts the results the bus reported; [outcomes] are the
- * results with their commands where the journal links them (Studio), else the bus headers. [eviction] is the trigger of
- * a batch the journal logged at the end of the turn; [editArgsChars], [visibleChars] and [created] (characters of each
- * `create` body by path) exist only where the journal kept the model's output (`journal.call`).
+ * What one turn of a cell did around its model call. [outcomes] are its tool results: the journal's (Studio), which
+ * link commands and also keep the error results the bus does not emit, else the bus headers. [eviction] is a batch the
+ * journal logged at the end of the turn; [editArgsChars], [visibleChars] and [created] (characters of each `create`
+ * body by path) exist only where the journal kept the model's output (`journal.call`).
  */
 @Serializable
 public data class TurnActivity(
     val cell: String,
     val turn: Int,
     val ops: List<String>,
-    val results: Int,
     val outcomes: List<ToolOutcome>,
     val gates: List<String>,
     val worksetDropped: List<String>,
-    val eviction: String?,
+    val eviction: EvictionRecord?,
     val rebuilt: Boolean,
     val editArgsChars: Long?,
     val visibleChars: Long?,
@@ -106,12 +124,13 @@ public class RunTrace(calls: List<ModelCall>, activity: List<TurnActivity>, publ
 
     public companion object {
         private val HEADER = Regex("""⟦result (\S+) tool=(\w+)([^⟧]*)⟧""")
-        private val EVICTION = Regex("""^eviction (\w+) at turn (\d+):""")
-        private val CALL_RESULT = Regex("""^call (\S+): (⟦.*)""", RegexOption.DOT_MATCHES_ALL)
+        private val EVICTION = Regex("""^eviction (\w+) at turn (\d+): (\d+) stubbed\D+(\d+) trimmed\D+(\d+) losses""")
+        private val CALL_RESULT = Regex("""^call (\S+?): (.*)""", RegexOption.DOT_MATCHES_ALL)
         private val lenient = Json { ignoreUnknownKeys = true }
         private val VERDICTS = setOf("passed", "failed")
         private val RUN_VERDICTS = setOf("passed", "failed", "completed")
         private val APPLIED = setOf("ok", "partial")
+        private val WRITE_CLASSES = Regex("cache_write.*")
 
         @JvmStatic
         public fun of(journal: Journal): RunTrace {
@@ -128,10 +147,7 @@ public class RunTrace(calls: List<ModelCall>, activity: List<TurnActivity>, publ
                     "cell.model_requested" -> e.data.str("invocationId")?.let { requests[it] = e to (cell?.let(turnOf::get) ?: 0) }
                     "cell.model_responded" -> e.data.str("invocationId")?.let { responses[it] = e }
                     "cell.tool_called" -> if (cell != null) act(cell, turnOf[cell] ?: 0).ops += "${e.data.str("family")}.${e.data.str("op")}"
-                    "cell.tool_resulted" -> if (cell != null) act(cell, turnOf[cell] ?: 0).also { a ->
-                        a.results++
-                        header(e.data.str("header"))?.let { a.busOutcomes += it }
-                    }
+                    "cell.tool_resulted" -> if (cell != null) header(e.data.str("header"))?.let { act(cell, turnOf[cell] ?: 0).busOutcomes += it }
                     "cell.gate_fired" -> if (cell != null) {
                         val gate = e.data.str("gate") ?: "?"
                         act(cell, turnOf[cell] ?: 0).gates += gate
@@ -141,13 +157,11 @@ public class RunTrace(calls: List<ModelCall>, activity: List<TurnActivity>, publ
                         e.data.array("dropped").orEmpty().mapNotNull { (it as? JsonPrimitive)?.content }
                     "cell.rebuilt" -> if (cell != null) act(cell, turnOf[cell] ?: 0).rebuilt = true
                     "journal.boundary" -> if (cell != null) EVICTION.find(e.data.str("text") ?: "")?.let { m ->
-                        act(cell, m.groupValues[2].toInt()).eviction = m.groupValues[1]
+                        val (trigger, at, stubbed, trimmed, losses) = m.destructured
+                        act(cell, at.toInt()).eviction = EvictionRecord(trigger, stubbed.toInt(), trimmed.toInt(), losses.toInt())
                     }
                     "journal.call" -> if (cell != null) act(cell, e.turn ?: turnOf[cell] ?: 0).call(e.data)
-                    "journal.result" -> if (cell != null) CALL_RESULT.find(e.data.str("text") ?: "")?.let { m ->
-                        val a = act(cell, e.turn ?: turnOf[cell] ?: 0)
-                        header(m.groupValues[2])?.let { a.journalOutcomes += a.withCommand(m.groupValues[1], it) }
-                    }
+                    "journal.result" -> if (cell != null) e.data.str("text")?.let { act(cell, e.turn ?: turnOf[cell] ?: 0).result(it) }
                 }
             }
             val calls = requests.entries.mapIndexed { index, (id, request) -> call(index, request.first, request.second, responses[id]) }
@@ -189,16 +203,24 @@ public class RunTrace(calls: List<ModelCall>, activity: List<TurnActivity>, publ
         private fun usageOf(usage: JsonObject): CallUsage {
             val quantities = usage.obj("quantities") ?: JsonObject(emptyMap())
             val unknown = usage.array("unknown").orEmpty().mapNotNull { (it as? JsonPrimitive)?.content }.toSet()
-            fun dimension(id: String): Long? = if (id in unknown) null else quantities.long(id)
-            val writes = quantities.keys.filter { it.startsWith("cache_write") }
+            val absent = HashSet<PriceClass>()
+            fun dimension(id: String, c: PriceClass): Long? = when {
+                id in unknown -> null
+                id in quantities -> quantities.long(id)
+                else -> { absent += c; 0 }
+            }
+            val writes = quantities.keys.filter(WRITE_CLASSES::matches)
             val write = when {
-                unknown.any { it.startsWith("cache_write") } -> null
-                writes.isEmpty() -> null
-                else -> writes.sumOf { quantities.long(it) ?: 0 }
+                unknown.any(WRITE_CLASSES::matches) -> null
+                writes.isEmpty() -> { absent += PriceClass.CacheWrite; 0 }
+                else -> writes.fold(0L as Long?) { s, id -> quantities.long(id)?.let { s?.plus(it) } }
             }
             val reasoning = usage.long("reasoningTokens")
                 ?: (usage.obj("native").path("completion_tokens_details", "reasoning_tokens") as? JsonPrimitive)?.content?.toLongOrNull()
-            return CallUsage(dimension("uncached_input"), dimension("cache_read"), write, dimension("output"), reasoning)
+            return CallUsage(
+                dimension("uncached_input", PriceClass.UncachedInput), dimension("cache_read", PriceClass.CacheRead), write,
+                dimension("output", PriceClass.Output), reasoning, absent,
+            )
         }
 
         private fun header(text: String?): ToolOutcome? {
@@ -209,7 +231,7 @@ public class RunTrace(calls: List<ModelCall>, activity: List<TurnActivity>, publ
             val paths = versions?.split(", ")?.mapNotNull { it.substringBeforeLast(": ", "").takeIf(String::isNotEmpty) }.orEmpty()
             val tool = m.groupValues[2]
             val changed = (tool == "edit" && status in APPLIED) || Regex("""effects=observed""").containsMatchIn(rest)
-            return ToolOutcome(tool, status, paths, changed = changed)
+            return ToolOutcome(tool, status, paths, changed = changed, alias = m.groupValues[1].takeIf { it != "#-" })
         }
 
         /** The command line of a `run` call: `argv` joined, else `cmd`, prefixed by its `cwd`; a `poll`/`wait` names its op instead. */
@@ -223,12 +245,11 @@ public class RunTrace(calls: List<ModelCall>, activity: List<TurnActivity>, publ
 
         private class Builder(val cell: String, val turn: Int) {
             val ops = ArrayList<String>()
-            var results = 0
             val busOutcomes = ArrayList<ToolOutcome>()
             val journalOutcomes = ArrayList<ToolOutcome>()
             val gates = ArrayList<String>()
             val dropped = ArrayList<String>()
-            var eviction: String? = null
+            var eviction: EvictionRecord? = null
             var rebuilt = false
             var editArgs: Long? = null
             var visible: Long? = null
@@ -262,7 +283,19 @@ public class RunTrace(calls: List<ModelCall>, activity: List<TurnActivity>, publ
                 visible = shown
             }
 
-            fun withCommand(callId: String, outcome: ToolOutcome): ToolOutcome {
+            /** A `journal.result` line: `call <id>: ⟦result …⟧`, or an error result the bus never emits (`call <id>: schema error…`, `⟦not executed: …⟧`). */
+            fun result(text: String) {
+                val m = CALL_RESULT.find(text)
+                val outcome = when {
+                    m != null -> header(m.groupValues[2])?.let { withCommand(m.groupValues[1], it) }
+                        ?: ToolOutcome(args[m.groupValues[1]]?.first ?: "?", "error", emptyList())
+                    text.startsWith("⟦not executed") -> ToolOutcome("?", "not-executed", emptyList())
+                    else -> header(text) ?: return
+                }
+                journalOutcomes += outcome
+            }
+
+            private fun withCommand(callId: String, outcome: ToolOutcome): ToolOutcome {
                 val (name, parsed) = args[callId] ?: return outcome
                 if (name != "run" || parsed == null) return outcome
                 val (line, op) = command(parsed)
@@ -270,7 +303,7 @@ public class RunTrace(calls: List<ModelCall>, activity: List<TurnActivity>, publ
             }
 
             fun build() = TurnActivity(
-                cell, turn, ops.toList(), results, (journalOutcomes.ifEmpty { busOutcomes }).toList(), gates.toList(), dropped.toList(),
+                cell, turn, ops.toList(), (journalOutcomes.ifEmpty { busOutcomes }).toList(), gates.toList(), dropped.toList(),
                 eviction, rebuilt, editArgs, visible, created.toMap(),
             )
         }

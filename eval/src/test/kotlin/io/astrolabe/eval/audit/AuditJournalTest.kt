@@ -18,7 +18,7 @@ class AuditJournalTest {
         assertEquals(JournalFormat.Studio, log(JournalFormat.Studio).journal().format)
         assertEquals(bus.calls, studio.calls)
         val first = bus.calls.first()
-        assertEquals(CallUsage(6_131, 0, null, 749, 469), first.usage)
+        assertEquals(CallUsage(6_131, 0, 0, 749, 469, setOf(PriceClass.CacheWrite)), first.usage)
         assertEquals(1, first.turn)
         assertEquals(100L, first.anchorTokens)
         assertEquals(Binding("openrouter", "m/one", "Relace"), first.binding)
@@ -32,6 +32,7 @@ class AuditJournalTest {
         val (partial, unanswered) = trace.calls
         assertNull(partial.usage!!.cacheRead)
         assertNull(partial.usage!!.input)
+        assertEquals(setOf(PriceClass.CacheWrite), partial.usage!!.absent)
         assertNull(partial.usage!!.reasoning)
         assertNull(partial.billed)
         assertNull(unanswered.usage)
@@ -57,12 +58,17 @@ class AuditJournalTest {
             .entry("call", "turn 3 model output", AuditLog.calls(Triple("c1", "run", args), Triple("c2", "run", pollArgs)))
             .entry("result", "call c1: ⟦result #9 tool=run class=W stamp=cc3a truncated=no effects=unknown status=failed⟧")
             .entry("result", "call c2: ⟦result #8 tool=run class=W truncated=no effects=unknown status=running⟧")
+            .entry("result", "call c3: schema error in call c3: unexpected token")
+            .entry("result", "⟦not executed: the edit batch did not apply fully⟧")
             .entry("boundary", "eviction age at turn 16: 19 stubbed · 0 trimmed · 4 losses", at = 16).journal())
-        val (run, poll) = trace.at("cell-1", 3)!!.outcomes
-        assertEquals(ToolOutcome("run", "failed", emptyList(), "node scripts/smoke.js", "run"), run)
+        val (run, poll, schema, skipped) = trace.at("cell-1", 3)!!.outcomes
+        assertEquals(ToolOutcome("run", "failed", emptyList(), "node scripts/smoke.js", "run", alias = "#9"), run)
         assertEquals("poll", poll.op)
         assertNull(poll.command)
-        assertEquals("age", trace.at("cell-1", 16)!!.eviction)
+        // The journal's error results enter [T] too, with no alias to recall them by; the bus never emits them.
+        assertEquals(ToolOutcome("?", "error", emptyList()), schema)
+        assertEquals(ToolOutcome("?", "not-executed", emptyList()), skipped)
+        assertEquals(EvictionRecord("age", 19, 0, 4), trace.at("cell-1", 16)!!.eviction)
         assertEquals((args.length + pollArgs.length).toLong(), trace.at("cell-1", 3)!!.visibleChars)
     }
 }

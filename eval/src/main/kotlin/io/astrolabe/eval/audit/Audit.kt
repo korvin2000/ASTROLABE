@@ -42,7 +42,10 @@ public data class RunAudit(
     val provenance: Provenance,
 )
 
-/** A group's sums (model × arm): categories and losses as shares of the summed totals; a loss unmeasured in any run is unmeasured. */
+/**
+ * A group's sums (model × arm): categories and losses as shares of the summed totals; a loss unmeasured in any run is
+ * unmeasured, and [complete] is false when any run's totals are partial.
+ */
 @Serializable
 public data class GroupAudit(
     val group: String,
@@ -53,6 +56,7 @@ public data class GroupAudit(
     val billed: SerializableBigDecimal?,
     val estimate: SerializableBigDecimal?,
     val total: SerializableBigDecimal?,
+    val complete: Boolean,
     val uncachedInput: Category,
     val cacheRead: Category,
     val cacheWrite: Category,
@@ -110,7 +114,7 @@ public object Audit {
             val categories = runs.map { pick(it.anatomy) }
             val tokens = if (categories.any { it.tokens == null }) null else categories.sumOf { it.tokens!! }
             val money = sum(categories.map { it.money })
-            return Category(tokens, money?.stripTrailingZeros(), AuditMath.share(money, total))
+            return Category(tokens, money?.stripTrailingZeros(), AuditMath.share(money, total), categories.any { it.reported })
         }
         val read = runs.sumOf { it.cache.cacheReadTokens }
         val input = runs.sumOf { it.cache.inputTokens }
@@ -134,6 +138,7 @@ public object Audit {
             billed = sum(runs.map { it.anatomy.billed })?.stripTrailingZeros(),
             estimate = sum(runs.map { it.anatomy.estimate })?.stripTrailingZeros(),
             total = total?.stripTrailingZeros(),
+            complete = runs.all { it.anatomy.complete },
             uncachedInput = category { it.uncachedInput },
             cacheRead = category { it.cacheRead },
             cacheWrite = category { it.cacheWrite },

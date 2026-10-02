@@ -5,6 +5,8 @@ import kotlinx.serialization.Serializable
 import java.math.BigDecimal
 import java.math.BigInteger
 import java.math.MathContext
+import kotlin.math.abs
+import kotlin.math.sqrt
 
 /** Billing classes a price is fitted for, in column order. */
 public enum class PriceClass(public val id: String) { UncachedInput("uncached_input"), CacheRead("cache_read"), CacheWrite("cache_write"), Output("output") }
@@ -22,6 +24,9 @@ public enum class Agreement {
 
     /** Fewer independent calls than prices with tokens: no price is claimed. */
     Unidentified,
+
+    /** A fitted price came out negative: the bills are not linear in these classes, and no price is claimed. */
+    Negative,
 }
 
 /** One billed call of a price fit: its tokens by class and its billed amount. */
@@ -29,7 +34,10 @@ public data class FitRow(val tokens: Map<PriceClass, Long>, val billed: BigDecim
 
 /**
  * Prices per million tokens of one [binding], fitted from billed calls. A class no call used has no price (`null`);
- * the other prices do not depend on it. [maxResidual] is the largest `|C_i − x_i·p|` over the calls.
+ * the other prices do not depend on it. [maxResidual] is the largest `|C_i − x_i·p|` over the calls. [condition] is the
+ * condition number of the design matrix with unit-norm columns (how collinear the classes are); [sensitivityPerMillion]
+ * the largest move of each price if every charge moved by one unit of its last reported decimal; and
+ * [standardErrorPerMillion] each price's standard error from the residuals, with `n > d` calls.
  */
 @Serializable
 public data class PriceFit(
@@ -39,6 +47,9 @@ public data class PriceFit(
     val agreement: Agreement,
     val maxResidual: SerializableBigDecimal?,
     val maxRelativeResidual: Double?,
+    val condition: Double? = null,
+    val sensitivityPerMillion: Map<PriceClass, Double?> = emptyMap(),
+    val standardErrorPerMillion: Map<PriceClass, Double?> = emptyMap(),
 )
 
 /**
@@ -63,8 +74,10 @@ public object AuditMath {
      * Least squares `C_i = x_i · p` (§10.4) over the billed calls of one route, solved exactly: the normal equations
      * `XᵀX p = Xᵀy` have integer coefficients once each charge is scaled by `10^s`, so Cramer's rule with Bareiss
      * determinants gives `p_j = det_j / (det · 10^s)` without rounding; only the final quotient is rounded (DECIMAL128).
-     * Classes no call used are left out (no price); a singular system leaves every price unidentified. With
-     * `n > d` calls the remaining `n − d` degrees of freedom check the prices ([Agreement]).
+     * Classes no call used are left out (no price); a singular system leaves every price unidentified, and a negative
+     * price rejects the fit. With `n > d` calls the remaining `n − d` degrees of freedom check the prices ([Agreement]).
+     * Diagnostics use `(XᵀX)⁻¹ = adj(XᵀX) / det` (exact, then as doubles): the sensitivity of `p_j` is
+     * `Σ_i |((XᵀX)⁻¹Xᵀ)_ji| · 10^(−s_i)` and its standard error `σ̂ · √((XᵀX)⁻¹_jj)`, `σ̂² = Σ r_i² / (n − d)`.
      */
     @JvmStatic
     public fun fitPrices(binding: Binding, rows: List<FitRow>): PriceFit {
@@ -98,11 +111,53 @@ public object AuditMath {
             if (residual > charge.multiply(AGREEMENT)) agrees = false
         }
         val agreement = when {
+            perMillion.values.any { it != null && it.signum() < 0 } -> Agreement.Negative
             rows.size == d -> Agreement.Determined
             agrees -> Agreement.Exact
             else -> Agreement.Approximate
         }
-        return PriceFit(binding, rows.size, perMillion, agreement, maxResidual.stripTrailingZeros(), maxRelative)
+        // (XᵀX)⁻¹ = adj / det: cofactors of the transpose, exact before the division.
+        val inverse = List(d) { i -> List(d) { j ->
+            val minor = List(d - 1) { r -> List(d - 1) { c -> a[if (r < j) r else r + 1][if (c < i) c else c + 1] } }
+            val cofactor = if (d == 1) BigInteger.ONE else determinant(minor)
+            (if ((i + j) % 2 == 0) cofactor else cofactor.negate()).toDouble() / det.toDouble()
+        } }
+        val residuals = rows.indices.map { n -> (y[n] * det - (0 until d).fold(BigInteger.ZERO) { s, j -> s + x[n][j] * dets[j] }).toDouble() / denominator.toDouble() }
+        val sigma = if (rows.size > d) sqrt(residuals.sumOf { it * it } / (rows.size - d)) else null
+        val unit = rows.map { BigDecimal.ONE.movePointLeft(it.billed.stripTrailingZeros().scale().coerceAtLeast(0)).toDouble() }
+        fun byClass(f: (Int) -> Double?): Map<PriceClass, Double?> = PriceClass.entries.associateWith { c -> classes.indexOf(c).takeIf { it >= 0 }?.let(f) }
+        val sensitivity = byClass { j -> 1e6 * rows.indices.sumOf { n -> abs((0 until d).sumOf { k -> inverse[j][k] * x[n][k].toDouble() }) * unit[n] } }
+        val error = byClass { j -> sigma?.let { 1e6 * it * sqrt(maxOf(0.0, inverse[j][j])) } }
+        return PriceFit(
+            binding, rows.size, if (agreement == Agreement.Negative) PriceClass.entries.associateWith { null } else perMillion, agreement,
+            maxResidual.stripTrailingZeros(), maxRelative, condition(a), sensitivity, error,
+        )
+    }
+
+    /**
+     * The condition number of `X` with unit-norm columns, `√(λ_max / λ_min)` of `D⁻¹ XᵀX D⁻¹`, `D = diag(‖x_j‖)`, by
+     * Jacobi rotations; `null` when not finite.
+     */
+    internal fun condition(normal: List<List<BigInteger>>): Double? {
+        val d = normal.size
+        val norms = DoubleArray(d) { sqrt(normal[it][it].toDouble()) }
+        val m = Array(d) { i -> DoubleArray(d) { j -> normal[i][j].toDouble() / (norms[i] * norms[j]) } }
+        repeat(100) {
+            var p = 0
+            var q = 0
+            var largest = 0.0
+            for (i in 0 until d) for (j in i + 1 until d) if (abs(m[i][j]) > largest) { largest = abs(m[i][j]); p = i; q = j }
+            if (largest < 1e-15) return@repeat
+            val theta = (m[q][q] - m[p][p]) / (2 * m[p][q])
+            val t = (if (theta >= 0) 1.0 else -1.0) / (abs(theta) + sqrt(theta * theta + 1))
+            val c = 1 / sqrt(t * t + 1)
+            val s = t * c
+            for (k in 0 until d) { val kp = m[k][p]; val kq = m[k][q]; m[k][p] = c * kp - s * kq; m[k][q] = s * kp + c * kq }
+            for (k in 0 until d) { val pk = m[p][k]; val qk = m[q][k]; m[p][k] = c * pk - s * qk; m[q][k] = s * pk + c * qk }
+        }
+        val eigen = DoubleArray(d) { m[it][it] }
+        val ratio = sqrt(eigen.max() / eigen.min())
+        return ratio.takeIf { it.isFinite() && eigen.min() > 0 }
     }
 
     /** Fraction-free Gaussian elimination (Bareiss): every division is exact, so the determinant of an integer matrix stays an integer. */
@@ -147,7 +202,10 @@ public object AuditMath {
         return CacheStep(cacheable, cached, shortfall, broken, broken && cached <= FULL_MISS_SHARE * cacheable)
     }
 
-    /** `q̂ = Σ min(c_i, b_i) / Σ b_i` over unchanged-prefix steps (§10.4); a `c_i` above `b_i` is anchor-estimate noise and is capped. */
+    /**
+     * `q̂ = Σ min(c_i, b_i) / Σ b_i` over unchanged-prefix steps (§10.4); a `c_i` above `b_i` is anchor-estimate noise and
+     * is capped. The Beta posterior of `q` (§10.4) is E1's, not the auditor's.
+     */
     @JvmStatic
     public fun qHat(steps: List<CacheStep>): Double? {
         val b = steps.sumOf { it.cacheable }

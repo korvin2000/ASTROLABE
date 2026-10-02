@@ -41,6 +41,40 @@ class AuditMathTest {
         assertEquals(Agreement.Unidentified, AuditMath.fitPrices(route, listOf(row(1, 2, 3))).agreement)
     }
 
+    @Test fun `a negative price rejects the fit and diagnostics come with every identified fit`() {
+        // Output costs less the more output there is: no linear price explains it.
+        val rows = listOf(
+            FitRow(mapOf(PriceClass.UncachedInput to 1_000L, PriceClass.CacheRead to 0L, PriceClass.Output to 100L), BigDecimal("0.0010")),
+            FitRow(mapOf(PriceClass.UncachedInput to 1_000L, PriceClass.CacheRead to 0L, PriceClass.Output to 1_000L), BigDecimal("0.0005")),
+            FitRow(mapOf(PriceClass.UncachedInput to 2_000L, PriceClass.CacheRead to 0L, PriceClass.Output to 100L), BigDecimal("0.0020")),
+        )
+        val rejected = AuditMath.fitPrices(route, rows)
+        assertEquals(Agreement.Negative, rejected.agreement)
+        assertTrue(rejected.perMillion.values.all { it == null })
+        val exact = AuditMath.fitPrices(route, listOf(row(6131, 0, 749), row(13302, 4096, 1161), row(4456, 16384, 3383), row(1287, 22784, 219)))
+        assertTrue(exact.condition!! >= 1.0)
+        assertTrue(exact.sensitivityPerMillion.getValue(PriceClass.Output)!! > 0)
+        assertEquals(0.0, exact.standardErrorPerMillion.getValue(PriceClass.Output)!!, 1e-12)
+        assertNull(exact.sensitivityPerMillion[PriceClass.CacheWrite])
+        assertEquals(1.0, AuditMath.condition(listOf(listOf(BigInteger.TWO, BigInteger.ZERO), listOf(BigInteger.ZERO, BigInteger.valueOf(8))))!!, 1e-12)
+    }
+
+    @Test fun `a route its own calls cannot price takes the pooled fit as an estimate and stays unidentified`() {
+        fun call(i: Int, upstream: String, u: Long, c: Long, o: Long) = ModelCall(
+            index = i, cell = "c", turn = i, profileId = null, estimatedTokens = null, anchorTokens = 0, binding = Binding("openrouter", "m/one", upstream),
+            stop = null, failure = null, usage = CallUsage(u, c, 0, o, 0, setOf(PriceClass.CacheWrite)), billed = row(u, c, o).billed, billedCurrency = "USD",
+            billedUpstream = null, latencyMillis = null, firstOutputMillis = null,
+        )
+        val calls = listOf(call(0, "A", 6131, 0, 749), call(1, "A", 13302, 4096, 1161), call(2, "A", 4456, 16384, 3383), call(3, "A", 1287, 22784, 219), call(4, "B", 1000, 1000, 100))
+        val book = PriceBook.of(calls, Catalog.EMPTY)
+        assertEquals(Agreement.Unidentified, book.fits.single { it.binding.upstream == "B" }.agreement)
+        val pooled = book.prices(calls[4])!!
+        assertEquals(PriceSource.Pooled, pooled.source)
+        assertTrue(pooled.estimate)
+        assertEquals(PriceSource.Fitted, book.prices(calls[0])!!.source)
+        assertFalse(book.prices(calls[0])!!.estimate)
+    }
+
     @Test fun `a determinant stays exact on integers`() {
         fun m(vararg rows: List<Int>) = rows.map { r -> r.map { BigInteger.valueOf(it.toLong()) } }
         assertEquals(BigInteger.valueOf(6), AuditMath.determinant(m(listOf(2, 0, 1), listOf(1, 3, 2), listOf(1, 1, 2))))
