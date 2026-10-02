@@ -1785,6 +1785,7 @@ public final class io/astrolabe/eval/audit/FitRow {
 
 public final class io/astrolabe/eval/audit/GroupAudit {
 	public static final field Companion Lio/astrolabe/eval/audit/GroupAudit$Companion;
+	public fun <init> (Ljava/lang/String;IILjava/lang/Integer;ILjava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;ZLio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/List;)V
 	public fun <init> (Ljava/lang/String;IILjava/lang/Integer;ILjava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;ZLio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/List;Lio/astrolabe/eval/audit/ProvenanceShares;)V
 	public synthetic fun <init> (Ljava/lang/String;IILjava/lang/Integer;ILjava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;ZLio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Lio/astrolabe/eval/audit/Category;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/List;Lio/astrolabe/eval/audit/ProvenanceShares;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Ljava/lang/String;
@@ -2074,6 +2075,7 @@ public final class io/astrolabe/eval/audit/PriceSource : java/lang/Enum {
 
 public final class io/astrolabe/eval/audit/Provenance {
 	public static final field Companion Lio/astrolabe/eval/audit/Provenance$Companion;
+	public fun <init> (Ljava/util/List;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Boolean;Ljava/util/List;Ljava/util/List;Ljava/lang/String;Ljava/util/Map;)V
 	public fun <init> (Ljava/util/List;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Boolean;Ljava/util/List;Ljava/util/List;Ljava/lang/String;Ljava/util/Map;Ljava/lang/String;)V
 	public synthetic fun <init> (Ljava/util/List;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Boolean;Ljava/util/List;Ljava/util/List;Ljava/lang/String;Ljava/util/Map;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Ljava/util/List;
