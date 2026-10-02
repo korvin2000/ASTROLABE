@@ -44,24 +44,30 @@ internal class Acceptance(private val interpreters: Interpreters, private val te
     }
 
     /**
-     * The task's acceptance is sound when it fails on the unchanged base and passes on the base with `reference/` laid
-     * over it (plan §9.2); also returns whether the reference keeps the visible tests green when [visibleTests] is given.
+     * The task's acceptance is sound when it fails on the unchanged base, fails on the base with `wrong/` laid over it
+     * and passes on the base with `reference/` laid over it (plan §9.2, WP-B2); also returns whether the reference
+     * keeps the visible tests green when [visibleTests] is given.
      */
     fun validate(task: BenchTask, visibleTests: List<String>?): TaskValidity {
         val base = Files.createTempDirectory(temp, "base-")
+        val wrong = Files.createTempDirectory(temp, "wrong-")
         val reference = Files.createTempDirectory(temp, "reference-")
         try {
             Trees.copy(task.base, base)
+            Trees.copy(task.base, wrong)
+            task.wrong.write(wrong)
             Trees.copy(task.base, reference)
-            Trees.copy(task.reference, reference)
+            task.reference.write(reference)
             val onBase = run(task, base)
+            val onWrong = run(task, wrong)
             val onReference = run(task, reference)
             val visible = visibleTests?.let { argv ->
                 Proc.run(argv.map { interpreters.expand(it) }, reference, Duration.ofSeconds(task.acceptance.timeoutSeconds), ENV)
             }
-            return TaskValidity(task.id, onBase, onReference, visible?.let { it.exitCode == 0 })
+            return TaskValidity(task.id, onBase, onWrong, onReference, visible?.let { it.exitCode == 0 })
         } finally {
             Trees.delete(base)
+            Trees.delete(wrong)
             Trees.delete(reference)
         }
     }
@@ -77,8 +83,14 @@ internal class Acceptance(private val interpreters: Interpreters, private val te
     }
 }
 
-internal data class TaskValidity(val task: String, val onBase: AcceptanceResult, val onReference: AcceptanceResult, val visibleGreenOnReference: Boolean?) {
-    val sound: Boolean get() = !onBase.passed && onReference.passed && visibleGreenOnReference != false
+internal data class TaskValidity(
+    val task: String,
+    val onBase: AcceptanceResult,
+    val onWrong: AcceptanceResult,
+    val onReference: AcceptanceResult,
+    val visibleGreenOnReference: Boolean?,
+) {
+    val sound: Boolean get() = !onBase.passed && !onWrong.passed && onReference.passed && visibleGreenOnReference != false
 }
 
 /** Interpreters a task command names by placeholder; resolved once per process from the PATH unless given. */
