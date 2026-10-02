@@ -2167,10 +2167,10 @@ Goal: the model decides; the runtime executes, waits, records and finishes. Plan
 - [x] **Gate P8.A:** L2 at every merge → push `main` → CI green on Ubuntu + Windows; Codex adversarial review of the wave diff; tag `v2-wave-A`. — [CI run 37044497216](https://github.com/korvin2000/ASTROLABE/actions/runs/37044497216) green at `488db92` (wave A) and [CI run 37049344584](https://github.com/korvin2000/ASTROLABE/actions/runs/37049344584) green at `4bb181b` (with the review fixes, D-387), Ubuntu + Windows (2026-10-02); tag `v2-wave-A` at `4bb181b`.
 
 ### P8.B Wave B — measure
-#### P8.B.1 [M] B1 Offline auditor · TODO
+#### P8.B.1 [M] B1 Offline auditor · IN_PROGRESS
 - Deps: P8.A.2 (fields; also works on old journals). Pkg: `eval/`. Spec: plan §4.7, §6 B1, §9.
 - Done: on `diags/live-2026-10-01` reproduces the measured hit share 86.7 % ± 5 % and the anatomy of F §2.1.
-#### P8.B.2 [V] B2 Screening set of up to 8 tasks · TODO
+#### P8.B.2 [V] B2 Screening set of up to 8 tasks · IN_PROGRESS
 - Deps: P8.A.1. Pkg: `eval-live/tasks/`. Spec: plan §6 B2, §9.2.
 - Done: every task passes its validity self-check (unchanged base, known-wrong patch, reference patch).
 #### P8.B.3 [V] B4 Baseline vs wave A on the screening set · TODO
@@ -2179,11 +2179,11 @@ Goal: the model decides; the runtime executes, waits, records and finishes. Plan
 - [ ] **Gate P8.B:** L2 → push `main` → CI green on Ubuntu + Windows.
 
 ### P8.C Wave C — completion (C1 before D; C2 parallel to D)
-#### P8.C.1 [M] C1a Declared acceptance recognised in `run` · TODO
+#### P8.C.1 [M] C1a Declared acceptance recognised in `run` · IN_PROGRESS
 - Deps: P8.A.8. Pkg: `tool/run`, `verify/Scheduler.kt`, `contract/`, `tool/verify/Verify.kt`. Spec: plan §4.4, §6 C1a.
 #### P8.C.2 [M] C1b Red optional check recorded by the runtime; sufficiency hint; Studio card · TODO
 - Deps: P8.C.1. Repo: ASTROLABE + root (Studio). Pkg: `verify/Resolution.kt`, `cell/Gates.kt`, Studio. Spec: plan §4.4, §6 C1b.
-#### P8.C.3 [M] C2 Provenance axis · TODO
+#### P8.C.3 [M] C2 Provenance axis · IN_PROGRESS
 - Repo: ASTROLABE + root (Studio). Pkg: `verify/Resolution.kt`, `campaign/CampaignFinish.kt`, Studio. Spec: plan §1 row 16, §4.4, §6 C2.
 #### P8.C.4 [M] C3 Hard per-task limits and static profiles · TODO
 - Deps: P8.C.1. Pkg: `budget/`, `campaign/`, `AttemptConfig.kt`, `Defaults.kt`. Spec: plan §4.6, §6 C3, §11 №8.
@@ -2193,11 +2193,11 @@ Goal: the model decides; the runtime executes, waits, records and finishes. Plan
 - Pkg: `context/CarryForward.kt`, `context/Rebuild.kt`, `register/`. Spec: plan §1 row 18, §6 Dp1.
 #### P8.C.7 [C] Dp2 Direct protocol specification (`kernel-direct/1`) · TODO
 - Deps: owner decisions plan §11 №2–4, 6, 7. Pkg: `docs/`. Spec: plan §4.3, §4.6, §6 Dp2, appendix A.8.
-#### P8.C.8 [V] Pending-save crash idempotency (tail of A6, D-383) · TODO
+#### P8.C.8 [V] Pending-save crash idempotency (tail of A6, D-383) · IN_PROGRESS
 - Deps: P8.A.4 (`campaign/Controller.kt` owner in wave A). Pkg: `campaign/Controller.kt` (~1362–1477), store. Spec: plan §5 (CT Next 6), D-339, D-383.
 - Build: persist `CellExit.Completed` (packet, register, text, test-integrity flags) before `Transition.Returned`; on reopen re-verify it without a model call instead of running a continuation cell.
 - Done: a crash between `Returned` and the pending save resumes without model calls (fault-injection test).
-#### P8.C.9 [V] `run(op=poll)` slices redacted across polls (tail of D-387) · TODO
+#### P8.C.9 [V] `run(op=poll)` slices redacted across polls (tail of D-387) · IN_PROGRESS
 - Pkg: `tool/run/Run.kt` (`poll`), `auth/Redaction.kt` (`applyLive`). Spec: D-49, D-387.
 - Build: a poll slice that starts or ends inside a multi-line secret (PEM block, host multi-line patterns) never shows its lines; reuse the `wait` readiness scan state per handle.
 - Done: RunTest cases — a key split across two polls and a poll starting mid-block show no key lines.
