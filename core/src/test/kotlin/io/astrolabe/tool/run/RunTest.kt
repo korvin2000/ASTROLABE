@@ -864,17 +864,34 @@ class RunTest {
     }
 
     @Test
-    fun `a port that is open when a wait starts is probed once and left to the line or the end`() = runTest {
-        val scripted = ScriptedOs(listOf("" to ProcStatus.Running, "" to ProcStatus.Running, "listening on 8080\n" to ProcStatus.Running))
+    fun `a wait on a running handle is ready at once when its port is already open on arrival`() = runTest {
+        val scripted = ScriptedOs(listOf("" to ProcStatus.Running))
+        scripted.portOpen = { true }
+        val tool = runner(os = scripted)
+        run("""{"argv":["git","status"],"bg":true}""", tool)
+        val pollsBefore = scripted.polls
+        val arrived = clock.instant()
+
+        val out = run("""{"op":"wait","handle":"handle-1","until_port":8080,"timeout":60}""", tool)
+
+        assertEquals("running", status(out), out.body)
+        assertTrue(out.body.contains("ready: port 8080 already accepted connections when the wait began (it may belong to another process)"), out.body)
+        assertFalse(out.body.contains("was already open before the wait"), "that wording is the launch case: ${out.body}")
+        assertEquals(1, scripted.polls - pollsBefore, "one look, no waiting for the port")
+        assertEquals(arrived, clock.instant(), "nothing waited on the clock")
+    }
+
+    @Test
+    fun `an end that is already there wins over a port that is open on arrival`() = runTest {
+        val scripted = ScriptedOs(listOf("" to ProcStatus.Running, "bye\n" to ProcStatus.Exited(0)))
         scripted.portOpen = { true }
         val tool = runner(os = scripted)
         run("""{"argv":["git","status"],"bg":true}""", tool)
 
-        val out = run("""{"op":"wait","handle":"handle-1","until_line":"listening","until_port":8080}""", tool)
+        val out = run("""{"op":"wait","handle":"handle-1","until_port":8080}""", tool)
 
-        assertTrue(out.body.contains("ready: line matched: listening on 8080"), out.body)
-        assertTrue(out.body.contains("port 8080 was already open before the wait"), out.body)
-        assertFalse(out.body.contains("accepts connections"), out.body)
+        assertTrue(status(out) != "running", out.body)
+        assertTrue(out.body.contains("wait ended: the process ended before port 8080 accepting connections"), out.body)
     }
 
     @Test

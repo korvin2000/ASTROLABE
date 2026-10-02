@@ -525,6 +525,9 @@ public class Run(
         return Until(pattern, regex, untilPort)
     }
 
+    /** Whether the awaited port already accepted connections when the wait began, and what that proves. */
+    private enum class PortAtStart { Closed, OpenBeforeLaunch, OpenOnArrival }
+
     private sealed interface Waited {
         val cursor: Long
 
@@ -543,9 +546,14 @@ public class Run(
     private suspend fun wait(args: RunArgs, portOpenBefore: Boolean? = null): ToolOutcome {
         val handle = ownedHandle(args.handle!!) ?: return refused(args, Outcome.Denied, "no handle '${args.handle}' in this campaign workspace")
         val until = args.until()
-        // Any loopback listener makes a port "ready", so a port that is open before the wait proves nothing about this process.
-        val portAlreadyOpen = until.port != null && (portOpenBefore ?: listeningOffThread(until.port))
-        val portNote = if (portAlreadyOpen) "port ${until.port} was already open before the wait, so an open port alone is not readiness" else null
+        // Any loopback listener makes a port "ready". Open before a launch, it cannot be this process's; open when a wait
+        // on a running handle begins, it is the usual case (`run(bg)` then `wait`), so the wait answers ready at once.
+        val portAtStart = when {
+            until.port == null || !(portOpenBefore ?: listeningOffThread(until.port)) -> PortAtStart.Closed
+            portOpenBefore != null -> PortAtStart.OpenBeforeLaunch
+            else -> PortAtStart.OpenOnArrival
+        }
+        val portNote = if (portAtStart == PortAtStart.OpenBeforeLaunch) "port ${until.port} was already open before the wait, so an open port alone is not readiness" else null
         val proc = os.reattach(handle.proc)
         val limitSeconds = args.timeoutSeconds.toLong()
         val waitDeadline = clock.instant().plusSeconds(limitSeconds)
@@ -553,7 +561,7 @@ public class Run(
         // The supervisor stops the process at its own deadline: a wait that is not shorter never outlives it.
         val stoppedFirst = processSeconds != null && !waitDeadline.isBefore(java.time.Instant.ofEpochMilli(proc.startedAtEpochMillis).plusSeconds(processSeconds))
         val waited = try {
-            kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { await(proc, args.since ?: handle.cursor, until, waitDeadline, portAlreadyOpen) }
+            kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { await(proc, args.since ?: handle.cursor, until, waitDeadline, portAtStart) }
         } catch (failure: IOException) {
             handles.save(handle.copy(status = wire(ProcStatus.Lost)))
             return refused(args, Outcome.UnknownOutcome, "handle ${handle.handleId}: the log cannot be read (${failure.message}); the process state is unknown — reconcile, never relaunch")
@@ -591,8 +599,8 @@ public class Run(
         kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { os.listening(port) }
 
     /** The blocking wait loop; an interrupted (cancelled) caller propagates and leaves the process alone. */
-    private fun await(start: Proc, since: Long, until: Until, deadline: java.time.Instant, portAlreadyOpen: Boolean): Waited {
-        val watchedPort = until.port?.takeUnless { portAlreadyOpen }
+    private fun await(start: Proc, since: Long, until: Until, deadline: java.time.Instant, portAtStart: PortAtStart): Waited {
+        val watchedPort = until.port?.takeUnless { portAtStart == PortAtStart.OpenBeforeLaunch }
         var proc = start
         var cursor = since
         val tail = TailBuffer(WAIT_TAIL_BYTES)
@@ -602,7 +610,12 @@ public class Run(
             val remainingMillis = java.time.Duration.between(clock.instant(), deadline).toMillis()
             if (remainingMillis <= 0) return Waited.Expired(cursor, tail.bytes(), tail.dropped)
             // A port opens silently, so a port wait looks again every second; otherwise output or the end wakes the poll.
-            val slice = if (watchedPort != null) 1L else minOf(pollSliceSeconds, (remainingMillis + 999) / 1_000)
+            // On arrival at an open port the one look only collects what has already happened: output, a line, or the end.
+            val slice = when {
+                portAtStart == PortAtStart.OpenOnArrival -> 0L
+                watchedPort != null -> 1L
+                else -> minOf(pollSliceSeconds, (remainingMillis + 999) / 1_000)
+            }
             val poll = os.poll(proc, cursor, slice)
             if (poll.newBytes.isNotEmpty() && poll.nextCursorBytes <= cursor) throw IOException("the log cursor did not advance")
             tail.add(poll.newBytes)
@@ -623,6 +636,9 @@ public class Run(
             }
             if (terminal) return Waited.Ended(proc.status, cursor, tail.bytes(), matched)
             if (matched != null) return Waited.Ready("line matched: $matched", cursor, tail.bytes(), tail.dropped)
+            if (watchedPort != null && portAtStart == PortAtStart.OpenOnArrival) {
+                return Waited.Ready("port $watchedPort already accepted connections when the wait began (it may belong to another process)", cursor, tail.bytes(), tail.dropped)
+            }
             if (watchedPort != null && os.listening(watchedPort)) return Waited.Ready("port $watchedPort accepts connections", cursor, tail.bytes(), tail.dropped)
         }
     }
