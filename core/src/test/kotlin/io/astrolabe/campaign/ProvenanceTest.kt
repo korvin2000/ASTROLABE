@@ -36,11 +36,14 @@ import io.astrolabe.id.AttemptId
 import io.astrolabe.id.CandidateId
 import io.astrolabe.id.Digest
 import io.astrolabe.id.WorkId
+import io.astrolabe.evidence.SqliteReceipts
 import io.astrolabe.store.Store
 import io.astrolabe.verify.AcceptanceDecision
 import io.astrolabe.verify.AcceptanceDecisionRequest
+import io.astrolabe.verify.Applicability
 import io.astrolabe.verify.Author
 import io.astrolabe.verify.Checks
+import io.astrolabe.verify.Currency
 import io.astrolabe.verify.Decider
 import io.astrolabe.verify.DecisionKind
 import io.astrolabe.verify.DecisionRecord
@@ -51,7 +54,10 @@ import io.astrolabe.verify.ProvenanceKind
 import io.astrolabe.verify.Resolution
 import io.astrolabe.verify.Resolver
 import io.astrolabe.verify.ResultStatus
+import io.astrolabe.verify.ReviewRequest
 import io.astrolabe.verify.RiskAcceptor
+import io.astrolabe.verify.Verdict
+import io.astrolabe.verify.VerdictOutcome
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -188,8 +194,8 @@ class ProvenanceTest {
         val finish = assertNotNull(run.finish)
         assertEquals("completed" to ProvenanceClass.Independent, finish.status to finish.provenanceClass)
         val line = finish.acceptance.single()
-        assertEquals(listOf<Any?>("green", "tested", Origin.User, Author.User, printing.text, passed, RiskAcceptor.Runtime, ProvenanceClass.Independent),
-            listOf(line.status, line.provenance, line.origin, line.checkBy, line.command, line.result, line.riskAcceptedBy, line.provenanceClass))
+        assertEquals(listOf<Any?>("green", "tested", Origin.User, Author.User, printing.text, passed, "runtime", RiskAcceptor.Runtime, ProvenanceClass.Independent),
+            listOf(line.status, line.provenance, line.origin, line.checkBy, line.command, line.result, line.verifiedBy, line.riskAcceptedBy, line.provenanceClass))
         assertTrue(finish.checksRun.any { it.receiptId == line.receiptId }, "the line names the receipt the check ran under")
         assertEquals(finish.stamp.hash8, line.stamp, "the receipt is the final tree's")
         val requirement = finish.requirements.single()
@@ -254,6 +260,39 @@ class ProvenanceTest {
     }
 
     @Test
+    fun `a declared check green only for an earlier candidate is not independent at the final tree`() = runBlocking<Unit> {
+        seed(listOf(Acceptance.Run("AC-1", printing, Origin.User)), r1 = listOf("AC-1"))
+        val controller = Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all), clock, idGen)
+        controller.open(repo.root, request, policy).use { c ->
+            val model = CellModel(FakeAdapter(ScriptedModel.of(Scripted.Reply(listOf(say("done"))))), FakeProfiles.main, HeuristicEstimator(), maxOutputTokens = 4_000)
+            val finish = assertNotNull(controller.run(c, model).finish)
+            assertEquals(ProvenanceClass.Independent, finish.provenanceClass)
+            // The same green receipt, read as stale for the tree at hand: it speaks for another candidate (D-337).
+            val stale = Currency(finish.acceptance.single().receiptId, Applicability.Stale, eligible = true, green = true, reasons = listOf("src/a.py changed"))
+            val again = FinishReceipts.build(c, emptyList(), mapOf(Checks.acceptId("AC-1") to stale), SqliteReceipts(c.store, clock)::get)
+            assertEquals(unverified to ProvenanceClass.Unverified, again.acceptance.single().let { it.result to it.provenanceClass })
+            assertEquals(ProvenanceClass.Unverified, again.requirements.single().provenanceClass)
+            assertEquals(ProvenanceClass.Unverified, again.provenanceClass)
+        }
+    }
+
+    @Test
+    fun `the model's own check item approved by a reviewer is agent_test, and the line names who verified it`() {
+        seed(listOf(Acceptance.Check("AC-2", "a returns the documented value", Origin.Model("R1"))), r1 = listOf("AC-2"))
+        val reviewer = object : Authority by AutonomousAuthority() {
+            override suspend fun review(request: ReviewRequest): Verdict =
+                Verdict(request.id, request.contractRevision, request.candidate, VerdictOutcome.Approve, confidence = 0.9, signedBy = "host:alice")
+        }
+        val (run, finished) = run(reviewer)
+        assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+        val finish = assertNotNull(run.finish)
+        val line = finish.acceptance.single()
+        assertEquals(listOf<Any?>("reviewed", Author.Model, "human", ProvenanceClass.AgentTest), listOf(line.provenance, line.checkBy, line.verifiedBy, line.provenanceClass))
+        assertEquals(ProvenanceClass.AgentTest, finish.requirements.single().provenanceClass)
+        assertEquals("agent_test", finished.provenanceClass)
+    }
+
+    @Test
     fun `accept-unverified with no check passing completes unverified, with the risk taken by the policy`() {
         seed(listOf(Acceptance.Run("AC-1", missing, Origin.User)), r1 = listOf("AC-1"))
         val (run, finished) = run(accepting(Decider.Policy, "studio:policy(auto)"))
@@ -273,6 +312,32 @@ class ProvenanceTest {
         val finish = assertNotNull(run(accepting(Decider.User, "user:test")).first.finish)
         assertEquals(RiskAcceptor.User to ProvenanceClass.Unverified, finish.acceptance.single().let { it.riskAcceptedBy to it.provenanceClass })
         assertEquals(ProvenanceClass.Unverified, finish.provenanceClass)
+    }
+
+    @Test
+    fun `a test edit an earlier cell left in the tree is the agent's evidence even when the last cell raised no flag`() {
+        seed(listOf(Acceptance.Run("AC-1", printing, Origin.User)), r1 = listOf("AC-1"))
+        val path = "tests/test_a.py"
+        var asked = 0
+        // The first completion is sent back for rework; the continuation changes nothing and raises no flag of its own.
+        val host = object : Authority by AutonomousAuthority() {
+            override suspend fun decide(request: AcceptanceDecisionRequest): AcceptanceDecision? = if (++asked > 1) null else
+                AcceptanceDecision(request.id, request.contractRevision, request.candidate, DecisionKind.Rework, Decider.User, "user:test", "keep the test as it was")
+        }
+        val (run, finished) = run(host, IntegrityApproval.Human) { c ->
+            listOf(
+                Scripted.Reply(listOf(read("read-test", path))),
+                Scripted.Reply(listOf(anchored("edit-test", path, c.registry.version(path)!!, "    assert 1 == 1", "    assert (1 == 1)"))),
+                Scripted.Reply(listOf(say("done"))),
+                Scripted.Reply(listOf(say("done"))),
+            )
+        }
+        val finish = assertNotNull(run.finish)
+        assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+        assertEquals(listOf(path), finish.acceptanceSurfaceUnreviewed)
+        assertEquals("tested" to ProvenanceClass.AgentTest, finish.acceptance.single().let { it.provenance to it.provenanceClass })
+        assertEquals(ProvenanceClass.AgentTest, finish.provenanceClass)
+        assertEquals("agent_test", finished.provenanceClass)
     }
 
     @Test

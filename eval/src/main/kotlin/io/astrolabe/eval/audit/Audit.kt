@@ -47,7 +47,7 @@ public data class RunAudit(
  * unmeasured, and [complete] is false when any run's totals are partial.
  */
 @Serializable
-public data class GroupAudit(
+public data class GroupAudit @JvmOverloads constructor(
     val group: String,
     val runs: Int,
     val calls: Int,

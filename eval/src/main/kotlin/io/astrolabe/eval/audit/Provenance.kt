@@ -14,7 +14,7 @@ import kotlinx.serialization.json.JsonPrimitive
  * `result.json` read nowhere here lands in [extra], so a new field is reported from the run it first appears in.
  */
 @Serializable
-public data class Provenance(
+public data class Provenance @JvmOverloads constructor(
     val requirements: List<String>,
     val verification: String?,
     val checks: List<String>,
