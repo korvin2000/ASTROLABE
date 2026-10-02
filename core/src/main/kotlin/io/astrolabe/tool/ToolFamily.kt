@@ -46,7 +46,7 @@ public enum class EffectClass { R, W, D }
 public object ToolOps {
     public val look: List<String> = listOf("tree", "outline", "read", "find", "def", "refs", "importers", "impact", "recall", "bmap", "catalog")
     public val edit: List<String> = listOf("anchored", "create", "delete", "rename", "revert", "transform")
-    public val run: List<String> = listOf("run", "poll", "cancel")
+    public val run: List<String> = listOf("run", "poll", "wait", "cancel")
     public val verify: List<String> = listOf("check", "tests", "acceptance", "baseline", "review")
     public val state: List<String> = listOf("patch", "blocked", "retrieval_miss")
     public val task: List<String> = listOf("ask", "delegate", "collect", "propose", "answer")

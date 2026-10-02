@@ -46,10 +46,12 @@ import io.astrolabe.os.Poll
 import io.astrolabe.os.Proc
 import io.astrolabe.os.ProcStatus
 import io.astrolabe.provider.ToolCall as ProviderCall
+import io.astrolabe.provider.ToolMask
 import io.astrolabe.store.Store
 import io.astrolabe.tool.EffectClass
 import io.astrolabe.tool.ParsedCalls
 import io.astrolabe.tool.ToolCalls
+import io.astrolabe.tool.ToolOps
 import io.astrolabe.tool.ToolOutcome
 import io.astrolabe.tool.TurnContext
 import io.astrolabe.verify.ReviewRequest
@@ -132,9 +134,9 @@ class RunTest {
         repo.close()
     }
 
-    private fun runner(os: Os = this.os, authority: Authority = AutonomousAuthority(), config: Config = Config(), hostSets: Map<String, CapabilitySet> = emptyMap(), ids: Identities = this.ids, workspace: Workspace = this.workspace, handles: Handles = SqliteHandles(store, clock), observations: Observations = SqliteObservations(store, clock), intents: IntentJournal = this.intents) = Run(
+    private fun runner(os: Os = this.os, authority: Authority = AutonomousAuthority(), config: Config = Config(), hostSets: Map<String, CapabilitySet> = emptyMap(), ids: Identities = this.ids, workspace: Workspace = this.workspace, handles: Handles = SqliteHandles(store, clock), observations: Observations = SqliteObservations(store, clock), intents: IntentJournal = this.intents, mask: ToolMask = ToolOps.implementingS0) = Run(
         workspace, registry, stamper, TrustedLocalRunner(os), os, intents, handles, observations, SqliteAliases(store, clock),
-        store.blobs, Redaction(config.redaction), HeuristicEstimator(), idGen, ids, contracts, authority, config, clock, stateRoot.resolve("logs"), hostSets = hostSets,
+        store.blobs, Redaction(config.redaction), HeuristicEstimator(), idGen, ids, contracts, authority, config, clock, stateRoot.resolve("logs"), mask = mask, hostSets = hostSets,
     )
 
     private fun call(json: String) = (ToolCalls.parse(listOf(ProviderCall("c1", "run", json))) as ParsedCalls.Valid).calls.single()
@@ -183,15 +185,8 @@ class RunTest {
         assertFalse(SqliteObservations(store, clock).get("obs-1")!!.captureComplete)
     }
 
-    /** Polls [handle] until it stops reporting `running`; each poll is itself bounded. */
-    private suspend fun awaitSettled(handle: String, polls: Int = 5): ToolOutcome {
-        var last = run("""{"op":"poll","handle":"$handle","timeout":30}""")
-        repeat(polls) {
-            if (status(last) != "running") return last
-            last = run("""{"op":"poll","handle":"$handle","timeout":30}""")
-        }
-        return last
-    }
+    /** One wait settles [handle]: it returns only when the process ends (the fake clock never expires it). */
+    private suspend fun awaitSettled(handle: String): ToolOutcome = run("""{"op":"wait","handle":"$handle","timeout":60}""")
 
     @Test
     fun `a foreground run captures output and exit code, stamps the tree and stays class R when nothing moved`() = runTest {
@@ -747,10 +742,13 @@ class RunTest {
 
         // The same harness polls the same handle: whatever has arrived comes back and the process is
         // never relaunched. How far the child has got by then is the host's business — asserting a
-        // status here is what made this test flaky on both CI platforms.
-        val early = run("""{"op":"poll","handle":"handle-1","timeout":20}""")
+        // status here is what made this test flaky on both CI platforms. The poll reads from the log's
+        // start: the launch may already have consumed `bg-start`, and a poll from the handle's cursor
+        // then waited for `bg-end` instead (the remaining FX-22 intermittency).
+        val early = run("""{"op":"poll","handle":"handle-1","since":0,"timeout":20}""")
         assertTrue(early.body.contains("bg-start"), "output that has arrived returns at once: ${early.body}")
         assertEquals(handle.proc.pid, SqliteHandles(store, clock).get("handle-1")!!.proc.pid, "same process, same handle")
+        // One wait settles the run, whatever arrives in between: no poll loop, no race with the terminal status.
         val settled = awaitSettled("handle-1")
         assertTrue(status(settled) != "running", settled.body)
         assertTrue(settled.body.contains("bg-end"), settled.body)
@@ -786,5 +784,114 @@ class RunTest {
         assertTrue(status(cancelled) != "running", status(cancelled))
         assertNull(SqliteHandles(store, clock).get("handle-9"))
         assertEquals("denied", status(run("""{"op":"poll","handle":"handle-9"}""")))
+    }
+
+    @Test
+    fun `a background build is awaited in one call until it exits`() = runTest {
+        val started = run("""{"cmd":"${shell("echo compiling&ping -n 3 127.0.0.1 >NUL&echo BUILD-OK", "echo compiling; sleep 2; echo BUILD-OK")}","bg":true}""")
+        assertTrue(started.body.contains("wait with run(op=wait, handle=\"handle-1\")"), started.body)
+
+        val done = run("""{"op":"wait","handle":"handle-1","timeout":60}""")
+
+        assertTrue(status(done) != "running", done.body)
+        assertTrue(done.body.contains("compiling") && done.body.contains("BUILD-OK"), done.body)
+        assertFalse(done.body.contains("wait ended"), "an end is what a plain wait waits for: ${done.body}")
+        assertEquals("exited", SqliteHandles(store, clock).get("handle-1")!!.status)
+    }
+
+    @Test
+    fun `a server launch waits for its readiness line and keeps running`() = runTest {
+        val out = run("""{"cmd":"${shell("echo booting&echo listening on port 8080&ping -n 30 127.0.0.1 >NUL", "echo booting; echo listening on port 8080; sleep 30")}","until_line":"listening on port \\d+"}""")
+
+        assertEquals("running", status(out), out.body)
+        assertTrue(out.body.contains("ready: line matched: listening on port 8080"), out.body)
+        assertTrue(out.body.contains("booting"), "the launch's own first output is part of the wait: ${out.body}")
+        assertEquals("running", SqliteHandles(store, clock).get("handle-1")!!.status)
+        assertTrue(run("""{"op":"cancel","handle":"handle-1"}""").body.contains("cancel requested"))
+    }
+
+    @Test
+    fun `a process that ends before readiness stops the wait with its diagnostics`() = runTest {
+        val out = run("""{"cmd":"${shell("echo starting&echo error port in use&exit 3", "echo starting; echo error port in use; exit 3")}","until_line":"ready"}""")
+
+        assertTrue(status(out) != "running", out.body)
+        assertTrue(out.body.contains("wait ended: the process ended before a line matching /ready/"), out.body)
+        assertTrue(out.body.contains("error port in use"), out.body)
+        assertTrue(out.body.contains("exit 3"), out.body)
+        assertEquals("exited", SqliteHandles(store, clock).get("handle-1")!!.status)
+    }
+
+    @Test
+    fun `a server launch waits until its loopback port accepts connections`() = runTest {
+        val closed = java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress()).use { it.localPort }
+        assertFalse(os.listening(closed), "nothing listens on a closed port")
+        java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress()).use { listener ->
+            val out = run("""{"cmd":"${shell("ping -n 30 127.0.0.1 >NUL", "sleep 30")}","until_port":${listener.localPort}}""")
+
+            assertEquals("running", status(out), out.body)
+            assertTrue(out.body.contains("ready: port ${listener.localPort} accepts connections"), out.body)
+        }
+        run("""{"op":"cancel","handle":"handle-1"}""")
+    }
+
+    @Test
+    fun `a wait deadline on the injected clock ends the observation and never the process`() = runTest {
+        val controlled = ControlledOs()
+        var polls = 0
+        val ticking = object : Os by controlled {
+            override fun poll(proc: Proc, sinceCursorBytes: Long, observationTimeoutSeconds: Long): Poll {
+                polls++
+                clock.advance(java.time.Duration.ofSeconds(observationTimeoutSeconds))
+                return Poll(ByteArray(0), sinceCursorBytes, ProcStatus.Running, observationTimeoutSeconds > 0)
+            }
+
+            override fun listening(port: Int): Boolean = false
+        }
+        // A role that may poll may wait: the plan and probe masks name run.poll only.
+        val tool = runner(os = ticking, mask = ToolMask(setOf("run.run", "run.poll")))
+        run("""{"argv":["git","status"],"bg":true}""", tool)
+        polls = 0
+
+        val waited = run("""{"op":"wait","handle":"handle-1","until_port":8080,"timeout":5}""", tool)
+
+        assertEquals("running", status(waited), waited.body)
+        assertTrue(waited.body.contains("wait timed out after 5s before port 8080 accepting connections, the process keeps running (no relaunch)"), waited.body)
+        assertEquals(5, polls, "a port wait looks every second of the five")
+        assertEquals("running", SqliteHandles(store, clock).get("handle-1")!!.status)
+        // D-365 tolerance: a poll that names a condition is a wait under the same deadline rule.
+        val tolerated = run("""{"op":"poll","handle":"handle-1","until_line":"ready","timeout":30}""", tool)
+        assertTrue(tolerated.body.contains("wait timed out after 30s before a line matching /ready/"), tolerated.body)
+        assertEquals(1, controlled.spawns, "waits never launch")
+    }
+
+    @Test
+    fun `cancelling the caller interrupts a wait and leaves the background process running`() = runBlocking {
+        val controlled = ControlledOs()
+        val polling = CompletableDeferred<Unit>()
+        var terminations = 0
+        val blocking = object : Os by controlled {
+            override fun poll(proc: Proc, sinceCursorBytes: Long, observationTimeoutSeconds: Long): Poll {
+                if (observationTimeoutSeconds > 0) {
+                    polling.complete(Unit)
+                    Thread.sleep(60_000)
+                }
+                return Poll(ByteArray(0), sinceCursorBytes, ProcStatus.Running, observationTimeoutSeconds > 0)
+            }
+
+            override fun terminate(proc: Proc): Proc {
+                terminations++
+                return controlled.terminate(proc)
+            }
+        }
+        val tool = runner(os = blocking)
+        tool.execute(call("""{"argv":["git","status"],"bg":true}"""), context())
+        val waiting = launch(Dispatchers.Default) { tool.execute(call("""{"op":"wait","handle":"handle-1"}"""), context()) }
+        withTimeout(5_000) { polling.await() }
+        withTimeout(5_000) { waiting.cancelAndJoin() }
+
+        assertTrue(waiting.isCancelled)
+        assertEquals(0, terminations, "a cancelled wait is no cancel of the process")
+        assertEquals("running", SqliteHandles(store, clock).get("handle-1")!!.status)
+        assertEquals(1, controlled.spawns)
     }
 }
