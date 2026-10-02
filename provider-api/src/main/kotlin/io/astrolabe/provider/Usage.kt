@@ -1,5 +1,7 @@
 package io.astrolabe.provider
 
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import java.math.BigDecimal
@@ -34,22 +36,52 @@ public data class BillingDimension(val id: String) {
     }
 }
 
-/** Dated price per million tokens (or per unit for hosted tools) per billable dimension. */
+/**
+ * Dated price per million tokens (or per unit for hosted tools) per billable dimension. [tiers] are the provider's
+ * request-size prices (a long-context tier): the highest tier whose [PriceTier.inputTokensAbove] a request's total
+ * input exceeds replaces, for that whole request, the base prices of the dimensions it states ([at]). An empty
+ * [tiers] is not serialized, so a table without tiers keeps its bytes and its attempt fingerprint.
+ */
 @Serializable
-public data class PriceTable(
+public data class PriceTable @JvmOverloads constructor(
     val date: SerializableLocalDate,
     val currency: String,
     val perMillion: Map<BillingDimension, SerializableBigDecimal>,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val tiers: List<PriceTier> = emptyList(),
 ) {
     init {
         require(currency.length == 3 && currency.all { it in 'A'..'Z' }) { "currency must be an ISO code, got '$currency'" }
         require(perMillion.values.all { it.signum() >= 0 }) { "prices must be ≥ 0" }
+        require(tiers.map { it.inputTokensAbove }.toSet().size == tiers.size) { "price tier thresholds must be distinct" }
     }
 
-    /** Price of [quantity] units of [dimension], or `null` when the dimension is not in this table. */
+    /** Price of [quantity] units of [dimension] at base prices, or `null` when the dimension is not in this table. */
     public fun price(dimension: BillingDimension, quantity: Long): Money? {
         val rate = perMillion[dimension] ?: return null
         return Money(currency, rate.multiply(BigDecimal.valueOf(quantity)).divide(MILLION))
+    }
+
+    /** The tier a request of [inputTokens] total input is priced at: the highest threshold it exceeds; `null` at base prices. */
+    public fun tier(inputTokens: Long): PriceTier? = tiers.filter { inputTokens > it.inputTokensAbove }.maxByOrNull { it.inputTokensAbove }
+
+    /** The flat table (no tiers) a request of [inputTokens] total input is priced with: base prices overridden by its [tier]. */
+    public fun at(inputTokens: Long): PriceTable {
+        if (tiers.isEmpty()) return this
+        return PriceTable(date, currency, tier(inputTokens)?.let { perMillion + it.perMillion } ?: perMillion)
+    }
+}
+
+/** Prices for a whole request whose total input exceeds [inputTokensAbove]; a dimension it does not state keeps the base price. */
+@Serializable
+public data class PriceTier(
+    val inputTokensAbove: Long,
+    val perMillion: Map<BillingDimension, SerializableBigDecimal>,
+) {
+    init {
+        require(inputTokensAbove >= 0) { "a price tier threshold must be ≥ 0" }
+        require(perMillion.values.all { it.signum() >= 0 }) { "prices must be ≥ 0" }
     }
 }
 
@@ -99,12 +131,15 @@ public data class BillableUsage @JvmOverloads constructor(
     /**
      * Prices each known dimension once with [table]. The result is [Money.unknown] when any dimension is
      * unknown or unpriced; the amount then covers only the priced part and cannot support an exact economic claim.
+     * The call is priced at the tier of its [totalInput] ([PriceTable.at]): with an input dimension unknown the tier
+     * is chosen from the known part, and the amount is unknown anyway.
      */
     public fun price(table: PriceTable): Money {
-        var total = Money.zero(table.currency)
+        val flat = table.at(totalInput)
+        var total = Money.zero(flat.currency)
         var unknownCost = unknown.isNotEmpty()
         for ((dimension, quantity) in quantities) {
-            val priced = table.price(dimension, quantity)
+            val priced = flat.price(dimension, quantity)
             if (priced == null) unknownCost = true else total += priced
         }
         return if (unknownCost) total.copy(unknown = true) else total

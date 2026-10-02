@@ -176,7 +176,8 @@ public class Accounting(private val store: Store, private val clock: Clock) {
         internal fun add(a: Long, b: Long): Long = if (b > Long.MAX_VALUE - a) Long.MAX_VALUE else a + b
 
         internal fun estimateCost(profile: Profile, input: Long, output: Long): Money {
-            val table = profile.priceTable
+            // A request of [input] tokens is priced at its tier (a long-context tier raises every rate it states).
+            val table = profile.priceTable.at(input)
             val rate = table.perMillion.filterKeys { it.isInput }.values.maxOrNull() ?: return Money.unknown(table.currency)
             val out = table.price(BillingDimension.OUTPUT, output) ?: return Money.unknown(table.currency)
             return Money(table.currency, rate.multiply(BigDecimal.valueOf(input)).divide(BigDecimal.valueOf(1_000_000))) + out

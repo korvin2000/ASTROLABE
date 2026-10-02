@@ -24,6 +24,13 @@ public data class WorkId(val value: String) {
         requireCanonicalId("WorkId", value)
     }
 
+    /**
+     * The provider session key of every request of this campaign (§4.5: OpenRouter `x-session-id`, Responses
+     * `prompt_cache_key`): a pure function of the work id — the same for all its cells and attempts, never a clock —
+     * of fixed length, so it fits any provider's key limit and does not carry the id itself.
+     */
+    public val sessionKey: String get() = "astrolabe-" + Digest.ofUtf8("astrolabe/session/v1\n$value").hex.take(32)
+
     override fun toString(): String = value
 
     public object Serializer : StringWrapperSerializer<WorkId>("WorkId", ::WorkId, WorkId::value)

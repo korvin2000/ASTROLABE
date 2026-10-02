@@ -89,6 +89,15 @@ class CellTest {
     }
 
     @Test
+    fun `every request of a cell carries its campaign's session key`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            f.run(ScriptedModel.of(Scripted.Reply(listOf(tree("c1"))), Scripted.Reply(listOf(say("done")))))
+            assertTrue(f.adapter.calls.size >= 2)
+            assertEquals(setOf(f.ids.work.sessionKey), f.adapter.calls.map { it.request.sessionKey }.toSet())
+        }
+    }
+
+    @Test
     fun `partial usage retains the generation reservation including known overruns`() = runTest {
         val input = io.astrolabe.provider.BillingDimension.UNCACHED_INPUT
         val output = io.astrolabe.provider.BillingDimension.OUTPUT

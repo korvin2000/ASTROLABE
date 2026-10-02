@@ -4,6 +4,7 @@ import io.astrolabe.provider.BillingDimension
 import io.astrolabe.provider.CacheCapability
 import io.astrolabe.provider.Capabilities
 import io.astrolabe.provider.PriceTable
+import io.astrolabe.provider.PriceTier
 import io.astrolabe.provider.Profile
 import io.astrolabe.provider.SchemaDialect
 import kotlinx.serialization.json.JsonObject
@@ -16,11 +17,13 @@ import net.ai.gate.chat.options.ChatOptions
 import net.ai.gate.diagnostics.ConnectionReport
 import net.ai.gate.metadata.Usage
 import net.ai.gate.model.Capability
+import net.ai.gate.model.Prices
 import net.ai.gate.model.SupportLevel
 import net.ai.gate.spi.protocol.ApiFeatures
 import java.math.BigDecimal
 import java.time.Duration
 import java.time.LocalDate
+import java.util.Optional
 
 /**
  * Drafts ASTROLABE profiles from what the SDK knows (§9 of the integration design): limits and prices from the
@@ -72,21 +75,36 @@ public object AiGateProfiles {
             usageFields = usage,
             schemaDialects = setOf(SchemaDialect.JSON_SCHEMA_2020_12),
         )
-        val perMillion = LinkedHashMap<BillingDimension, BigDecimal>()
-        prices?.inputPerMillion()?.ifPresent { perMillion[BillingDimension.UNCACHED_INPUT] = it }
-        prices?.cacheReadPerMillion()?.ifPresent { perMillion[BillingDimension.CACHE_READ] = it }
-        prices?.cacheWritePerMillion()?.ifPresent { perMillion[BillingDimension.CACHE_WRITE_5M] = it }
-        prices?.cacheWriteLongPerMillion()?.or { prices.cacheWritePerMillion() }?.ifPresent { perMillion[BillingDimension.CACHE_WRITE_1H] = it }
-        prices?.outputPerMillion()?.ifPresent { perMillion[BillingDimension.OUTPUT] = it }
         val gate = buildMap {
             put("v", JsonPrimitive(1))
             put("api", JsonPrimitive(features.api()))
             if (features.outputCap() == ApiFeatures.OutputCap.UNSUPPORTED) put("outputCap", JsonPrimitive("unsupported"))
         }
-        return Profile(
-            id, providerId, modelId, capabilities, PriceTable(priceDate, prices?.currency()?.currencyCode ?: "USD", perMillion),
-            config = JsonObject(mapOf("gate" to JsonObject(gate))),
-        )
+        return Profile(id, providerId, modelId, capabilities, priceTable(prices, priceDate), config = JsonObject(mapOf("gate" to JsonObject(gate))))
+    }
+
+    /**
+     * The SDK's [prices] as a dated table, tiers kept (§4.5). Each tier states every dimension at the price the SDK
+     * charges in it — the tier's own component, else the base one — so [PriceTable.at] reproduces `Prices.cost`.
+     * One-hour writes take the long-write price, else the write price, as the SDK does.
+     */
+    internal fun priceTable(prices: Prices?, date: LocalDate): PriceTable {
+        if (prices == null) return PriceTable(date, "USD", emptyMap())
+        val tiers = prices.tiers().map { PriceTier(it.inputTokensAbove(), perMillion(prices, it.prices())) }
+        return PriceTable(date, prices.currency().currencyCode, perMillion(prices, null), tiers)
+    }
+
+    private fun perMillion(base: Prices, tier: Prices?): Map<BillingDimension, BigDecimal> {
+        fun price(component: (Prices) -> Optional<BigDecimal>): BigDecimal? =
+            tier?.let(component)?.orElse(null) ?: component(base).orElse(null)
+        val write = price(Prices::cacheWritePerMillion)
+        return buildMap {
+            price(Prices::inputPerMillion)?.let { put(BillingDimension.UNCACHED_INPUT, it) }
+            price(Prices::cacheReadPerMillion)?.let { put(BillingDimension.CACHE_READ, it) }
+            write?.let { put(BillingDimension.CACHE_WRITE_5M, it) }
+            (price(Prices::cacheWriteLongPerMillion) ?: write)?.let { put(BillingDimension.CACHE_WRITE_1H, it) }
+            price(Prices::outputPerMillion)?.let { put(BillingDimension.OUTPUT, it) }
+        }
     }
 
     /**

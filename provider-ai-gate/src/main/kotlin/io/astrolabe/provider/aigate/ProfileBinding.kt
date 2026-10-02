@@ -172,6 +172,8 @@ internal class ProfileBinding private constructor(
         if (outputCapEnforced) b.maxTokens(request.maxOutputTokens)
         // With `effort = off` the template's own reasoning level (if any) stands.
         if (settings.mapEffort) b.reasoning(reasoning(request.effort))
+        // §4.5: the campaign's key routes every cell to one provider session; a template's own sessionId is the operator's choice.
+        if (settings.options.sessionId().isEmpty) request.sessionKey?.let(b::sessionId)
         b.responseCache(CacheMode.BYPASS)
         b.historyPolicy(if (settings.dropForeignReasoning) HistoryPolicy.ALLOW_ADAPTATION else HistoryPolicy.REJECT_LOSSY)
         b.reasoningHandoff(if (settings.dropForeignReasoning) ReasoningHandoff.DROP else ReasoningHandoff.KEEP)

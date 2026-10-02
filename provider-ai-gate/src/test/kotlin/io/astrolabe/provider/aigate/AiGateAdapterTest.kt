@@ -16,6 +16,7 @@ import io.astrolabe.provider.StopReason
 import io.astrolabe.provider.ToolCall
 import io.astrolabe.provider.ToolResult
 import io.astrolabe.provider.Validation
+import io.astrolabe.provider.estimate
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonObject
@@ -143,6 +144,94 @@ class AiGateAdapterTest {
                 }
             }
         }
+    }
+
+    private val chatReply = arrayOf(
+        """{"id":"gen-1","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}""",
+        """{"id":"gen-1","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":1}}""",
+        "[DONE]",
+    )
+    private val responsesReply = arrayOf(
+        """{"type":"response.created","response":{"id":"resp_1","model":"gpt-5.1"}}""",
+        """{"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.1","status":"completed","output":[],"usage":{"input_tokens":10,"output_tokens":1}}}""",
+    )
+
+    /** The one call [request] of a profile drafted for [providerId]/[model] sends, with [options] as the template's `gate.options`. */
+    private fun sent(provider: net.ai.gate.Provider, keyVariable: String, providerId: String, model: String, reply: Array<String>, sessionKey: String?, options: JsonObject? = null): net.ai.gate.spi.http.HttpCall {
+        val wire = WireScript().sse(*reply)
+        wire.runtime(provider, keyVariable).use { llm ->
+            val drafted = AiGateProfiles.draft(llm, providerId, model, "main", LocalDate.of(2026, 9, 1))
+            val profile = options?.let { drafted.copy(config = JsonObject(mapOf("gate" to JsonObject((drafted.config["gate"] as JsonObject) + ("options" to it))))) } ?: drafted
+            AiGateAdapter(llm, listOf(profile)).use { adapter ->
+                runBlocking { withTimeout(20_000) { adapter.start(GateTestKit.request(profile, sessionKey = sessionKey), InvocationId("inv-1")).await() } }
+            }
+        }
+        return wire.calls.single()
+    }
+
+    @Test
+    fun `the campaign's session key reaches both wire APIs and a template's own session id wins`() {
+        val key = "astrolabe-0123456789abcdef0123456789abcdef"
+        val openRouter = { sessionKey: String?, options: JsonObject? ->
+            sent(GateTestKit.openRouter(), "OPENROUTER_API_KEY", "openrouter", GateTestKit.SONNET_ON_OPENROUTER, chatReply, sessionKey, options)
+        }
+        val responses = { sessionKey: String?, options: JsonObject? ->
+            sent(net.ai.gate.vendors.openai.OpenAi.provider(), "OPENAI_API_KEY", "openai", "gpt-5.1", responsesReply, sessionKey, options)
+        }
+        val chat = openRouter(key, null)
+        assertEquals(key, chat.headers()["x-session-id"])
+        assertFalse(String(chat.bytes(), Charsets.UTF_8).contains(key), "chat completions carry the key as a header only")
+        assertEquals(null, openRouter(null, null).headers()["x-session-id"])
+        val operator = JsonObject(mapOf("sessionId" to JsonPrimitive("operator-session")))
+        assertEquals("operator-session", openRouter(key, operator).headers()["x-session-id"])
+
+        assertEquals(key, (responses(key, null).body().orElseThrow() as net.ai.gate.json.JsonObject).optString("prompt_cache_key").orElse(null))
+        assertEquals(null, (responses(null, null).body().orElseThrow() as net.ai.gate.json.JsonObject).optString("prompt_cache_key").orElse(null))
+        assertEquals("operator-session", (responses(key, operator).body().orElseThrow() as net.ai.gate.json.JsonObject).optString("prompt_cache_key").orElse(null))
+    }
+
+    @Test
+    fun `a call is priced at the SDK's long-context tier when its input exceeds the threshold`() {
+        val usage = { prompt: Long -> """{"id":"gen-1","choices":[],"usage":{"prompt_tokens":$prompt,"completion_tokens":1000,"prompt_tokens_details":{"cached_tokens":0}}}""" }
+        val wire = WireScript()
+            .sse("""{"id":"gen-1","choices":[{"index":0,"delta":{"content":"a"},"finish_reason":"stop"}]}""", usage(250_000), "[DONE]")
+            .sse("""{"id":"gen-2","choices":[{"index":0,"delta":{"content":"b"},"finish_reason":"stop"}]}""", usage(200_000), "[DONE]")
+        wire.runtime(GateTestKit.openRouter(), "OPENROUTER_API_KEY").use { llm ->
+            val profile = AiGateProfiles.draft(llm, "openrouter", GateTestKit.SONNET_ON_OPENROUTER, "main", LocalDate.of(2026, 9, 1))
+            assertEquals(listOf(200_000L), profile.priceTable.tiers.map { it.inputTokensAbove })
+            AiGateAdapter(llm, listOf(profile)).use { adapter ->
+                runBlocking {
+                    withTimeout(20_000) {
+                        val long = adapter.start(GateTestKit.request(profile), InvocationId("inv-1")).await()
+                        val short = adapter.start(GateTestKit.request(profile), InvocationId("inv-2")).await()
+                        // 250 000 × 6 + 1 000 × 22.5 per million; 200 000 does not exceed the threshold: 200 000 × 3 + 1 000 × 15
+                        assertEquals(0, BigDecimal("1.5225").compareTo(long.usage!!.price(profile.priceTable).amount))
+                        assertEquals(0, BigDecimal("0.615").compareTo(short.usage!!.price(profile.priceTable).amount))
+                        assertEquals(200_000L, long.facts!!.priceTierInputTokensAbove)
+                        assertEquals(null, short.facts!!.priceTierInputTokensAbove)
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `reasoning fills the transcript only where the route's codec replays it`() {
+        val reasoning = { origin: String -> ReasoningRef(origin, JsonObject(mapOf("text" to JsonPrimitive("a long chain of hidden thought ".repeat(50))))) }
+        fun counted(provider: net.ai.gate.Provider, keyVariable: String, providerId: String, model: String, api: String): Long =
+            WireScript().runtime(provider, keyVariable).use { llm ->
+                val profile = AiGateProfiles.draft(llm, providerId, model, "main", LocalDate.of(2026, 9, 1))
+                AiGateAdapter(llm, listOf(profile)).use { adapter ->
+                    val estimator = adapter.estimators(HeuristicEstimator()).estimatorFor(profile)
+                    val item = reasoning("$providerId/$model@$api")
+                    assertEquals(estimator.estimate(item), item.estimate(estimator), "the cell's item count goes through the estimator")
+                    estimator.estimate(item).tokens
+                }
+            }
+        assertEquals(0L, counted(GateTestKit.openRouter(), "OPENROUTER_API_KEY", "openrouter", GateTestKit.SONNET_ON_OPENROUTER, "openai-completions"),
+            "OpenRouter chat completions do not replay reasoning")
+        assertTrue(counted(net.ai.gate.vendors.openai.OpenAi.provider(), "OPENAI_API_KEY", "openai", "gpt-5.1", "openai-responses") > 300,
+            "Responses replay reasoning: it is counted as before")
     }
 
     @Test

@@ -23,6 +23,16 @@ class IdsTest {
     }
 
     @Test
+    fun `a session key is a fixed-length pure function of the work id`() {
+        val key = WorkId("W-0042").sessionKey
+        assertEquals(key, WorkId("W-0042").sessionKey)
+        assertNotEquals(key, WorkId("W-0043").sessionKey)
+        assertEquals(42, key.length)
+        assertEquals(42, WorkId("W-" + "x".repeat(100)).sessionKey.length)
+        assertEquals("astrolabe-" + Digest.ofUtf8("astrolabe/session/v1\nW-0042").hex.take(32), key)
+    }
+
+    @Test
     fun `identities serialize as bare strings and round trip`() {
         val ids = Identities(
             work = WorkId("W-0042"),

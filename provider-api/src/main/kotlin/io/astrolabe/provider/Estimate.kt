@@ -60,6 +60,13 @@ public interface TokenEstimator {
 
     /** Generic planning estimate; dispatch adapters must override for their effective wire format. */
     public fun estimate(request: Request): Estimate = request.estimate(this)
+
+    /**
+     * What one replayed [item] adds to the next request — the fill a transcript is accounted with. The planning
+     * estimate of normalized content by default; an adapter whose wire form leaves an item out (reasoning its codec
+     * does not replay) counts it as it is sent.
+     */
+    public fun estimate(item: Item): Estimate = item.planningEstimate(this)
 }
 
 /**
@@ -85,7 +92,11 @@ public fun Request.estimate(estimator: TokenEstimator): Estimate {
     return total
 }
 
-public fun Item.estimate(estimator: TokenEstimator): Estimate {
+/** [estimator]'s count of this item ([TokenEstimator.estimate]). */
+public fun Item.estimate(estimator: TokenEstimator): Estimate = estimator.estimate(this)
+
+/** The planning estimate of this item's normalized content, plus the per-item framing allowance (see [Request.estimate]). */
+public fun Item.planningEstimate(estimator: TokenEstimator): Estimate {
     if (this is UsageItem) return Estimate.zero(estimator.id, estimator.version)
     if (this is OpaqueContinuation) return effectiveHistoryTokens?.let { Estimate.reported(it, estimator.id, estimator.version) }
         ?: Estimate.unknownHistory(estimator.id, estimator.version)

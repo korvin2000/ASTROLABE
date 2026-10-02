@@ -1,6 +1,8 @@
 package io.astrolabe.provider.aigate
 
 import io.astrolabe.provider.Estimate
+import io.astrolabe.provider.Item
+import io.astrolabe.provider.ReasoningRef
 import io.astrolabe.provider.Request
 import io.astrolabe.provider.TokenEstimator
 import io.astrolabe.provider.estimate
@@ -32,6 +34,14 @@ internal class AiGateEstimator(
     override val version: String = "1/${text.version}"
 
     override fun estimate(text: String): Estimate = this.text.estimate(text).copy(estimatorId = id, version = version)
+
+    /**
+     * Reasoning fills the transcript only where the route's codec replays it (`ApiFeatures.nativeReasoningReplay`);
+     * a codec that leaves it out of the next request (OpenRouter chat completions without `reasoning_content`
+     * replay) sends nothing for it, so it counts zero. Every other item is the planning estimate.
+     */
+    override fun estimate(item: Item): Estimate =
+        if (item is ReasoningRef && !binding.features.nativeReasoningReplay()) Estimate.zero(id, version) else super.estimate(item)
 
     override fun estimate(request: Request): Estimate {
         val prepared = when (val p = adapter.prepared(request, binding)) {
