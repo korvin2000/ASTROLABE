@@ -122,15 +122,7 @@ class LayoutTest {
         assertEquals(base, Layout.system(role, ExecutionMode.TrustedLocal), "same inputs, same bytes")
         assertTrue(base != Layout.system(role, ExecutionMode.Confined), "the mode is visible")
         assertTrue(base != Layout.system(Roles.probe, ExecutionMode.TrustedLocal), "the role is visible")
-        @Suppress("DEPRECATION")
-        assertEquals(base, Layout.system(role, ToolMask.of("look.read"), ExecutionMode.TrustedLocal), "a turn's mask changes no byte of [S]")
-        val reserve = ToolMask(mask.allowed.filterNot { it.startsWith("edit.") }.toSet())
-        @Suppress("DEPRECATION")
-        assertEquals(
-            Layout.render(role, mask, ExecutionMode.TrustedLocal, prime, k(), transcript()),
-            Layout.render(role, reserve, ExecutionMode.TrustedLocal, prime, k(), transcript()),
-            "a reserve turn rewrites no cached region",
-        )
+        // The turn's mask is no parameter of system or render: a reserve turn cannot rewrite a cached region.
     }
 
     @Test
@@ -167,7 +159,7 @@ class LayoutTest {
         assertEquals(first, second, "no clock, counter or host path may enter a cached region (§5.1)")
         // Appending to [T] leaves the [S][R][K] prefix byte-identical, which is what makes it cacheable.
         val grown = Layout.render(
-            role, mask, ExecutionMode.TrustedLocal, prime, k(),
+            role, ExecutionMode.TrustedLocal, prime, k(),
             transcript().let { it.copy(items = it.items + Message.text(ItemRole.Assistant, "next")) },
         )
         assertEquals(first.take(3), grown.take(3))
