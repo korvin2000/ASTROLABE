@@ -82,6 +82,15 @@ class AuditLossesTest {
         assertEquals(MoneyBasis.Billed, a.basis)
     }
 
+    @Test fun `known usage without a charge or a price is partial`() {
+        val report = Audit.run(listOf(AuditInput("run", "arm", run(JournalFormat.Bus, billed = false).journal(), null)))
+        val a = report.runs.single().anatomy
+        assertEquals(MoneyBasis.None, a.basis)
+        assertNull(a.total)
+        assertEquals(false, a.complete)
+        assertEquals(false, report.groups.single().complete)
+    }
+
     @Test fun `without a bill the catalog's list prices give an estimate`() {
         val catalog = Catalog.parse("""{"models": [{"provider": "openrouter", "id": "m/one", "prices": {"currency": "USD", "input": 1, "output": 2, "cacheRead": 0.1}}]}""")
         val a = audit(run(JournalFormat.Bus, billed = false), catalog).anatomy

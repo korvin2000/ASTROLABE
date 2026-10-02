@@ -262,6 +262,9 @@ public class Cell @JvmOverloads constructor(
             tools.edit?.increment = increment
             tools.verify?.inputs = atlas.rows.map { it.path }
             tools.verify?.atlas = atlas
+            // C1a (plan §4.4): `run` recognises this cell's registered checks; the model's own checks strengthen its increment.
+            tools.verify?.requirementIds = increment.requirementIds
+            (tools.run as? io.astrolabe.tool.run.Run)?.verify = tools.verify
             try {
                 lastReport = ws.stamper.report()
                 base = lastReport
@@ -281,6 +284,7 @@ public class Cell @JvmOverloads constructor(
             } finally {
                 tools.edit?.beforeDispatch = {}
                 (tools.run as? io.astrolabe.tool.run.Run)?.beforeDispatch = {}
+                (tools.run as? io.astrolabe.tool.run.Run)?.verify = null
                 tools.verify?.beforeDispatch = {}
                 tools.task?.beforeDispatch = {}
                 ws.checker?.beforeDispatch = {}
@@ -1353,6 +1357,7 @@ public class Cell @JvmOverloads constructor(
         }
 
         private fun labelOf(check: Check): String = when {
+            check.id.startsWith(io.astrolabe.verify.Checks.MODEL_PREFIX) -> "agent ${check.evidenceKind?.wire ?: "check"}"
             check.selector == Selector.Blast -> "tests"
             check.kind == CheckKind.Acceptance -> "accept ${check.acceptanceIds.joinToString("+")}"
             check.kind == CheckKind.Type -> "types"
@@ -1421,8 +1426,9 @@ public class Cell @JvmOverloads constructor(
                 return ws.checks.forAcceptance(accept).any { currencies[it.id]?.certifies == true } || currencies[accept]?.certifies == true
             }
 
+            // Plan §4.4 (C1a): the model's own checks are not acceptance; a red one does not hold the cursor back (C1b records it).
             override val redChecks: Set<String>
-                get() = if (redOkUntilIncrementEnd) emptySet() else ws.checks.all().filter { it.last?.outcome == Outcome.Failed }.map { it.id }.toSet()
+                get() = if (redOkUntilIncrementEnd) emptySet() else ws.checks.all().filter { it.last?.outcome == Outcome.Failed && !it.id.startsWith(io.astrolabe.verify.Checks.MODEL_PREFIX) }.map { it.id }.toSet()
 
             override val greenOps: Set<Int> get() = outcomes.filterValues { it.green }.keys
 

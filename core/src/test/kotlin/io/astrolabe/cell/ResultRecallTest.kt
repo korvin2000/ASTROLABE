@@ -84,7 +84,10 @@ class ResultRecallTest {
             object : Os by local {
                 override fun reattach(proc: Proc): Proc = proc
                 override fun poll(proc: Proc, sinceCursorBytes: Long, observationTimeoutSeconds: Long): Poll {
-                    val bytes = "poll-result-${++polls}".toByteArray()
+                    // Whole lines in a readable log: a running poll hands over complete lines and redacts a slice with the
+                    // log before it; an unreadable log hides the slice (D-390).
+                    val bytes = "poll-result-${++polls}\n".toByteArray()
+                    Files.write(proc.log, bytes, java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND)
                     return Poll(bytes, sinceCursorBytes + bytes.size, ProcStatus.Running, false)
                 }
             }

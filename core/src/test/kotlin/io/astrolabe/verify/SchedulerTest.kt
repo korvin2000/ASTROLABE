@@ -1,10 +1,12 @@
 package io.astrolabe.verify
 
 import io.astrolabe.contract.Command
+import io.astrolabe.contract.Origin
 import io.astrolabe.evidence.Closure
 import io.astrolabe.evidence.ClosureCompleteness
 import io.astrolabe.evidence.Coherence
 import io.astrolabe.evidence.Counts
+import io.astrolabe.evidence.EvidenceKind
 import io.astrolabe.evidence.InMemoryAliases
 import io.astrolabe.evidence.InputStability
 import io.astrolabe.evidence.Outcome
@@ -34,6 +36,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -343,5 +346,80 @@ class SchedulerTest {
         assertEquals(listOf("src/a.py", "tests/test_a.py"), scheduler.testedInputsFor(accept(), listOf("ignored/for/known")))
         assertTrue(ScratchPolicy().isScratch("src/__pycache__/a.cpython-314.pyc"))
         assertFalse(ScratchPolicy().isScratch("src/builder.py"))
+    }
+
+    @Test
+    fun `a receipt records what its check proves and who created it, and only a host or user build passes on its exit`() = runTest {
+        val npmBuild = Command(listOf("npm", "run", "build"))
+        val build = checks.register(Check("CHK-accept-AC-B", CheckKind.Acceptance, Selector.Named(npmBuild), Closure.Known(setOf("src/a.py")), CostClass.Slow, Trigger.IncrementEnd, acceptanceIds = listOf("AC-B"), command = npmBuild, origin = Origin.User, evidence = EvidenceKind.Build))
+        val exitOnly = Executed(npmBuild.argv, null, false, 0, Outcome.Passed, null, store.blobs.put("built\n".toByteArray(), BlobKind.LOG, ids))
+
+        val receipt = scheduler.runCheck(build, 1) { exitOnly }
+        assertEquals(EvidenceKind.Build, receipt.evidenceKind)
+        assertTrue(receipt.evidenceDeclared)
+        assertEquals(Origin.User, receipt.checkOrigin)
+        assertEquals(Outcome.Passed, receipt.outcome, receipt.limits.toString())
+        assertEquals(null, receipt.parsed)
+        assertTrue(receipt.passesOnExit && receipt.independent && receipt.greenForFinalTree)
+        assertEquals(receipt, receipts.get(receipt.receiptId), "kind and origin round-trip through the store")
+
+        // The same exit with the kind only recognised (npm run build), from the model's own build, or from a test check
+        // stays inconclusive (D-50).
+        val labelled = checks.register(build.copy(id = "CHK-accept-AC-L", acceptanceIds = listOf("AC-L"), evidence = null))
+        val labelledReceipt = scheduler.runCheck(labelled, 1) { exitOnly }
+        assertEquals(EvidenceKind.Build, labelledReceipt.evidenceKind, "recognised from npm run build: a label")
+        assertFalse(labelledReceipt.evidenceDeclared)
+        assertEquals(Outcome.Inconclusive, labelledReceipt.outcome)
+        val own = checks.register(Checks.modelCheck(npmBuild, EvidenceKind.Build, "R1").copy(inputClosure = Closure.Known(setOf("src/a.py"))))
+        val ownReceipt = scheduler.runCheck(own, 1) { exitOnly }
+        assertEquals(Outcome.Inconclusive, ownReceipt.outcome)
+        assertTrue(ownReceipt.limits.any { it.kind == "evidence" && it.detail.contains("D-50") }, ownReceipt.limits.toString())
+        assertEquals(Origin.Model("R1"), ownReceipt.checkOrigin)
+        assertFalse(ownReceipt.independent)
+        val tests = scheduler.runCheck(accept(), 1) { exitOnly.copy(command = listOf("pytest", "-q")) }
+        assertEquals(EvidenceKind.Tests, tests.evidenceKind)
+        assertEquals(Outcome.Inconclusive, tests.outcome, "exit 0 is never 'tests passed'")
+        assertFailsWith<IllegalArgumentException> { tests.copy(outcome = Outcome.Passed) }
+        assertFailsWith<IllegalArgumentException> { receipt.copy(checkOrigin = Origin.Model("R1")) }
+        assertFailsWith<IllegalArgumentException> { receipt.copy(evidenceDeclared = false) }
+    }
+
+    @Test
+    fun `one recognised run records a receipt for every check it realizes from a single execution`() = runTest {
+        val full = checks["CHK-full"]!!
+        val twin = checks.register(Check("CHK-accept-AC-9", CheckKind.Acceptance, Selector.Named(Command(listOf("pytest"))), Closure.Unknown, CostClass.Slow, Trigger.IncrementEnd, acceptanceIds = listOf("AC-9"), command = Command(listOf("pytest"))))
+        val inputs = listOf("src/a.py", "src/pkg/b.py", "src/pkg/c.py", "tests/test_a.py")
+        var executions = 0
+
+        val scheduled = scheduler.runInWorkspace(listOf(twin, full), 1, inputs) { executions++; passed() }
+
+        assertEquals(1, executions)
+        assertEquals(listOf("CHK-accept-AC-9", "CHK-full"), scheduled.receipts.map { it.checkId })
+        assertEquals(1, scheduled.receipts.map { it.raw }.distinct().size)
+        assertTrue(scheduled.receipts.all { it.greenForFinalTree && it.testedInputs.stability == InputStability.Exclusive })
+        assertTrue(scheduler.currency(full, stamper.stamp().id).certifies)
+        // A check whose tested inputs differ gets none: the execution did not pin its closure.
+        val narrow = scheduler.runInWorkspace(listOf(full, accept()), 1, inputs) { passed() }
+        assertEquals(listOf("CHK-full"), narrow.receipts.map { it.checkId })
+    }
+
+    @Test
+    fun `a pinned background run records its outcome but never certifies a tree, and names what moved meanwhile`() = runTest {
+        val full = checks["CHK-full"]!!
+        val inputs = listOf("src/a.py", "src/pkg/b.py", "src/pkg/c.py", "tests/test_a.py")
+
+        val quiet = scheduler.settle(scheduler.pin(listOf(full), inputs), 1, passed()).single()
+        assertEquals(Outcome.Passed, quiet.outcome)
+        assertEquals(InputStability.Unknown, quiet.testedInputs.stability, "no writer was kept out between launch and end (D-45)")
+        assertFalse(quiet.greenForFinalTree)
+        assertFalse(scheduler.currency(full, stamper.stamp().id).certifies)
+        assertTrue(quiet.limits.any { it.kind == "input_stability" && it.detail.startsWith("background run") })
+
+        val pin = scheduler.pin(listOf(full), inputs)
+        repo.write("src/a.py", "def a():\n    return 5\n")
+        val busy = scheduler.settle(pin, 1, passed()).single()
+        assertEquals(setOf("src/a.py"), busy.testedInputs.mutatedDuringCheck, "an edit during the run is a mutation")
+        assertFalse(busy.greenForFinalTree)
+        assertEquals(Outcome.Passed, busy.outcome, "the factual outcome is kept")
     }
 }

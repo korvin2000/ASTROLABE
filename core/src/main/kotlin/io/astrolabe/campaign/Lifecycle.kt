@@ -346,18 +346,7 @@ public object Lifecycle {
             require(completion.incrementId == exit.packet.increment) { "the completion is for another increment" }
         }
         return when (exit) {
-            is CellExit.Completed -> when (completion) {
-                is CompletionResult.Accepted -> Disposition.Close(completion)
-                is CompletionResult.Refused ->
-                    if (completion.recoveryDirected) {
-                        Disposition.Stop(CampaignOutcome.Failed, "completion unsupported after ${completion.attempts} finalizations: ${completion.missing.joinToString("; ")}")
-                    } else {
-                        Disposition.Continue("completion refused: ${completion.missing.joinToString("; ")}", CampaignOutcome.Failed)
-                    }
-                // D-339: done, awaiting an authority's decision — neither blocked nor failed (I1).
-                is CompletionResult.Pending -> Disposition.Stop(CampaignOutcome.WaitingForInput, pendingReason(completion), completion.code)
-                is CompletionResult.NotCompleted, null -> throw IllegalArgumentException("a completed cell's done proposal must be verified first")
-            }
+            is CellExit.Completed -> completed(completion)
             is CellExit.Blocked ->
                 if (exit.request.question != null) Disposition.Stop(CampaignOutcome.WaitingForInput, exit.request.reason)
                 else Disposition.Stop(CampaignOutcome.BlockedExternal, exit.request.reason)
@@ -371,6 +360,20 @@ public object Lifecycle {
             is CellExit.Failed -> Disposition.Stop(CampaignOutcome.Failed, exit.error)
             is CellExit.Cancelled -> Disposition.Stop(CampaignOutcome.Cancelled, exit.reason)
         }
+    }
+
+    /** A completed cell's disposition by its verified proposal; also a kept return verified again on open (P8.C.8). */
+    internal fun completed(completion: CompletionResult?): Disposition = when (completion) {
+        is CompletionResult.Accepted -> Disposition.Close(completion)
+        is CompletionResult.Refused ->
+            if (completion.recoveryDirected) {
+                Disposition.Stop(CampaignOutcome.Failed, "completion unsupported after ${completion.attempts} finalizations: ${completion.missing.joinToString("; ")}")
+            } else {
+                Disposition.Continue("completion refused: ${completion.missing.joinToString("; ")}", CampaignOutcome.Failed)
+            }
+        // D-339: done, awaiting an authority's decision — neither blocked nor failed (I1).
+        is CompletionResult.Pending -> Disposition.Stop(CampaignOutcome.WaitingForInput, pendingReason(completion), completion.code)
+        is CompletionResult.NotCompleted, null -> throw IllegalArgumentException("a completed cell's done proposal must be verified first")
     }
 
     /** The stop reason of a pending completion: what the authority is asked, one line per gap. */

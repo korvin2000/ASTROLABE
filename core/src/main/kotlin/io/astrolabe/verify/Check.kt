@@ -4,15 +4,18 @@ import io.astrolabe.atlas.PackageCommands
 import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Command
 import io.astrolabe.contract.Contract
+import io.astrolabe.contract.Origin
 import io.astrolabe.evidence.Closure
 import io.astrolabe.evidence.ClosureCompleteness
 import io.astrolabe.evidence.ClosureManifest
 import io.astrolabe.evidence.Counts
+import io.astrolabe.evidence.EvidenceKind
 import io.astrolabe.evidence.Outcome
 import io.astrolabe.evidence.Receipt
 import io.astrolabe.id.CandidateId
 import io.astrolabe.id.CanonicalEncoding
 import io.astrolabe.id.Digest
+import io.astrolabe.tool.run.EvidenceKinds
 import io.astrolabe.workspace.ChangeListener
 import io.astrolabe.workspace.EnvFingerprint
 import io.astrolabe.workspace.VersionChange
@@ -172,6 +175,8 @@ public data class LastResult(
 /**
  * A registered check (§8.1). [definitionVersion] hashes the definition, argv/cwd/selector and parser policy so
  * a changed command or parser invalidates every earlier receipt (FX-16). Closures join the coherence protocol.
+ * [origin] is who created the check (plan §4.4): an acceptance item's origin, `harness` for what the harness sniffed
+ * or the host configured, `model(…)` for an agent's own test ([Checks.modelCheck]); null when unknown.
  */
 @Serializable
 public data class Check(
@@ -185,7 +190,24 @@ public data class Check(
     val command: Command? = null,
     val parserPolicy: String = "shaper/2",
     val last: LastResult? = null,
+    val origin: Origin? = null,
+    /** The evidence kind its definition declares; null: [evidenceKind] recognises it from the command's tool. */
+    val evidence: EvidenceKind? = null,
 ) {
+    /** The v1.0 full constructor: the origin and the declared evidence kind take their defaults. Kept for Java callers. */
+    public constructor(
+        id: String,
+        kind: CheckKind,
+        selector: Selector,
+        inputClosure: Closure,
+        costClass: CostClass,
+        trigger: Trigger,
+        acceptanceIds: List<String>,
+        command: Command?,
+        parserPolicy: String,
+        last: LastResult?,
+    ) : this(id, kind, selector, inputClosure, costClass, trigger, acceptanceIds, command, parserPolicy, last, null, null)
+
     init {
         require(id.isNotBlank()) { "check needs an id" }
     }
@@ -198,11 +220,15 @@ public data class Check(
                     "id" to id, "kind" to kind.name, "selector" to selector.toString(),
                     "argv" to (command?.argv?.joinToString("") ?: ""), "cwd" to (command?.cwd ?: ""),
                     "parser" to parserPolicy, "acceptance" to acceptanceIds.joinToString(","),
-                ),
+                    // A declared kind decides how a pass is read, like the parser; a recognised one follows from the argv.
+                ) + listOfNotNull(evidence?.let { "evidence" to it.wire }),
             ),
         )
 
     val required: Boolean get() = kind == CheckKind.Acceptance || acceptanceIds.isNotEmpty()
+
+    /** What a pass of this check proves (plan §4.4): the declared kind, else a label from its command's tool (never a pass rule). */
+    val evidenceKind: EvidenceKind? get() = evidence ?: command?.let { EvidenceKinds.recognize(it.argv) }
 }
 
 /** Runner commands as sniffed from the repository manifests (the atlas package produces them; the registry consumes argv only). */
@@ -353,6 +379,22 @@ public class Checks private constructor(
 
         public fun acceptId(acceptanceId: String): String = "CHK-accept-$acceptanceId"
 
+        /** The id prefix of an agent's own checks ([modelCheck]). */
+        public const val MODEL_PREFIX: String = "CHK-model-"
+
+        /**
+         * C1a (plan §4.4): the check a test, build or typecheck [command] the model runs becomes — origin
+         * `model(strengthens …)`, run on demand and only through `run` (the effect policy applies to every launch), never
+         * required and never an acceptance item, so it neither replaces independent acceptance nor weakens a required
+         * check. Its id digests the command and directory: the same command is the same check for the whole campaign.
+         * [kind] is the recognised label only: nothing is declared, so no exit ever passes it.
+         */
+        internal fun modelCheck(command: Command, kind: EvidenceKind, strengthens: String): Check {
+            val digest = Digest.ofUtf8(CanonicalEncoding.encode("model-check", 1, listOf("argv" to command.argv.joinToString("\u0001"), "cwd" to (command.cwd ?: ""))))
+            val checkKind = if (kind == EvidenceKind.Tests) CheckKind.Unit else CheckKind.Type
+            return Check(MODEL_PREFIX + digest.hash8, checkKind, Selector.Named(command), Closure.Unknown, CostClass.Slow, Trigger.OnDemand, command = command, origin = Origin.Model(strengthens))
+        }
+
         @JvmStatic
         public fun empty(): Checks = Checks(LinkedHashMap())
 
@@ -372,25 +414,25 @@ public class Checks private constructor(
         ): Checks {
             val registry = Checks(LinkedHashMap(), packageManifest)
             commands.typecheck?.let {
-                registry.register(Check(TYPES_TOUCHED, CheckKind.Type, Selector.Touched, Closure.Known(touched), CostClass.Fast, Trigger.EndOfTurn, command = it))
+                registry.register(Check(TYPES_TOUCHED, CheckKind.Type, Selector.Touched, Closure.Known(touched), CostClass.Fast, Trigger.EndOfTurn, command = it, origin = Origin.Harness))
             }
             commands.lint?.let {
-                registry.register(Check(LINT, CheckKind.Lint, Selector.Touched, Closure.Known(touched), CostClass.Fast, Trigger.EndOfTurn, command = it))
+                registry.register(Check(LINT, CheckKind.Lint, Selector.Touched, Closure.Known(touched), CostClass.Fast, Trigger.EndOfTurn, command = it, origin = Origin.Harness))
             }
             contract.acceptance.filterIsInstance<Acceptance.Run>().forEach { a ->
                 registry.register(
                     Check(
                         acceptId(a.id), CheckKind.Acceptance, Selector.Named(a.command), Closure.Unknown, CostClass.Slow, Trigger.IncrementEnd,
-                        acceptanceIds = listOf(a.id), command = a.command,
+                        acceptanceIds = listOf(a.id), command = a.command, origin = a.origin, evidence = a.evidence,
                     ),
                 )
             }
             commands.test?.let {
-                registry.register(Check(FULL, CheckKind.Full, Selector.All, Closure.Unknown, CostClass.Expensive, Trigger.CampaignEnd, command = it))
+                registry.register(Check(FULL, CheckKind.Full, Selector.All, Closure.Unknown, CostClass.Expensive, Trigger.CampaignEnd, command = it, origin = Origin.Harness, evidence = EvidenceKind.Tests))
             }
             qualityGates.forEachIndexed { i, command ->
                 val id = if (i == 0) QUALITY_GATE else "$QUALITY_GATE-${i + 1}"
-                registry.register(Check(id, CheckKind.Quality, Selector.Named(command), Closure.Unknown, CostClass.Expensive, Trigger.CampaignEnd, command = command))
+                registry.register(Check(id, CheckKind.Quality, Selector.Named(command), Closure.Unknown, CostClass.Expensive, Trigger.CampaignEnd, command = command, origin = Origin.Harness))
             }
             return registry
         }

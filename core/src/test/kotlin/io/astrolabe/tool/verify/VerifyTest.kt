@@ -13,6 +13,7 @@ import io.astrolabe.contract.InMemoryContractRepository
 import io.astrolabe.contract.Origin
 import io.astrolabe.evidence.Closure
 import io.astrolabe.evidence.Coherence
+import io.astrolabe.evidence.EvidenceKind
 import io.astrolabe.evidence.InMemoryAliases
 import io.astrolabe.evidence.InputStability
 import io.astrolabe.evidence.Outcome
@@ -402,5 +403,39 @@ class VerifyTest {
         assertEquals("unavailable", status(run("""{"what":"review","scope":"increment"}""")))
         assertEquals("unavailable", status(run("""{"what":"baseline"}""")))
         assertTrue(SqliteReceipts(store, clock).forCheck("CHK-full").isEmpty(), "refusals record no receipt")
+    }
+
+    @Test
+    fun `verify never launches the model's own check, and a declared build acceptance passes on its exit`() = runTest {
+        val own = checks.register(Checks.modelCheck(Command(listOf("pytest", "-q")), EvidenceKind.Tests, "R1"))
+        val refused = run("""{"what":"tests","selection":"ids","ids":["${own.id}"]}""")
+        assertEquals("denied", status(refused))
+        assertTrue(refused.body.contains("is the model's own check"), refused.body)
+        val denied = SqliteReceipts(store, clock).forCheck(own.id).single()
+        assertEquals(Outcome.Denied, denied.outcome)
+        assertFalse(denied.independent)
+
+        repo.write("build.txt", "compiled 3 files\n")
+        val plainBuild = Command(if (windows) listOf("cmd.exe", "/d", "/s", "/c", "type build.txt") else listOf("/bin/sh", "-c", "cat build.txt"))
+        val amended = contracts.amendByHost(ids.work, "build acceptance") { c ->
+            c.copy(
+                acceptance = c.acceptance + Acceptance.Run("AC-B", plainBuild, Origin.User, evidence = EvidenceKind.Build) +
+                    Acceptance.Run("AC-H", printing("build.txt", 0), Origin.User, evidence = EvidenceKind.Build),
+                requirements = c.requirements.map { it.copy(acceptance = it.acceptance + "AC-B" + "AC-H") },
+            )
+        }
+        checks.synchronizeAcceptance(amended)
+        val out = run("""{"what":"acceptance","ids":["AC-B"]}""")
+        assertEquals("passed", status(out), out.body)
+        val receipt = SqliteReceipts(store, clock).forCheck("CHK-accept-AC-B").single()
+        assertEquals(EvidenceKind.Build, receipt.evidenceKind)
+        assertEquals(null, receipt.parsed)
+        assertTrue(receipt.passesOnExit && receipt.greenForFinalTree, receipt.limits.toString())
+        assertTrue(receipt.limits.any { it.detail.contains("D-50 relaxed") }, receipt.limits.toString())
+
+        // A line that may set its own exit (`…; exit 0`) proves nothing by it, even for a declared build.
+        run("""{"what":"acceptance","ids":["AC-H"]}""")
+        val hidden = SqliteReceipts(store, clock).forCheck("CHK-accept-AC-H").single()
+        assertEquals(Outcome.Inconclusive, hidden.outcome, hidden.limits.toString())
     }
 }
