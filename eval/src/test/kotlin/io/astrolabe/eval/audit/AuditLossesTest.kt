@@ -29,7 +29,8 @@ class AuditLossesTest {
      */
     private fun run(format: JournalFormat, billed: Boolean = true): AuditLog = AuditLog(format)
         .turn(1).request(5_000, 0, 100, billed).tool("run", "run", tests("failed"))
-        .turn(2).request(1_100, 4_900, 120, billed).tool("run", "run", tests("passed")).entry("call", "turn 2", edit("e1"))
+        .turn(2).request(1_100, 4_900, 120, billed).entry("call", "turn 2", edit("e1"))
+        .tool("edit", "create", "⟦result #3 tool=edit class=W v={a.html: 1a2b} truncated=no effects=observed status=ok⟧").tool("run", "run", tests("passed"))
         .turn(3).request(1_100, 5_900, 140, billed).tool("run", "run", tests("failed"))
         .entry("boundary", "eviction age at turn 3: 4 stubbed · 0 trimmed · 0 losses")
         .turn(4).request(4_500, 3_000, 160, billed).gate("reserve").entry("call", "turn 4", edit("e2"))
@@ -99,6 +100,18 @@ class AuditLossesTest {
         assertTrue(bodies.money!!.signum() > 0)
         assertTrue(bodies.detail!!.contains("a.html ×2"))
         assertEquals(bodies.money!!.toDouble() / 0.0375, bodies.share!!, 1e-9)
+    }
+
+    @Test fun `a check green on the untouched base is no working result`() {
+        fun verify(status: String) = "⟦result #4 tool=verify class=R stamp=a912 truncated=no effects=none status=$status⟧"
+        val log = AuditLog(JournalFormat.Bus)
+            .turn(1).call(5_000, 0, 10, billed = "0.0001").tool("verify", "tests", verify("passed"))
+            .turn(2).call(1_000, 4_900, 10, billed = "0.0001").tool("edit", "anchored", "⟦result #5 tool=edit class=W v={a.py: 8123} truncated=no effects=observed status=ok⟧")
+            .turn(3).call(1_000, 5_900, 10, billed = "0.0001").tool("verify", "tests", verify("passed"))
+            .turn(4).call(1_000, 6_900, 10, billed = "0.0001")
+        val tail = audit(log).wastes.first { it.waste == Waste.TailAfterResult }
+        assertEquals(1, tail.calls)
+        assertEquals("after call 2 (verify green at turn 3)", tail.detail)
     }
 
     @Test fun `what the bus cannot show is unmeasured with a reason`() {

@@ -43,9 +43,19 @@ public data class ModelCall(
     val firstOutputMillis: Long?,
 )
 
-/** A tool result as its envelope header states it; [command] is the `run` command line where the journal kept the call's arguments. */
+/**
+ * A tool result as its envelope header states it; [command] is the `run` command line where the journal kept the call's
+ * arguments. [changed] is true for an applied edit (`ok`/`partial`) or an observed effect on the workspace.
+ */
 @Serializable
-public data class ToolOutcome(val tool: String, val status: String?, val paths: List<String>, val command: String? = null, val op: String? = null)
+public data class ToolOutcome(
+    val tool: String,
+    val status: String?,
+    val paths: List<String>,
+    val command: String? = null,
+    val op: String? = null,
+    val changed: Boolean = false,
+)
 
 /**
  * What one turn of a cell did around its model call. [results] counts the results the bus reported; [outcomes] are the
@@ -101,6 +111,7 @@ public class RunTrace(calls: List<ModelCall>, activity: List<TurnActivity>, publ
         private val lenient = Json { ignoreUnknownKeys = true }
         private val VERDICTS = setOf("passed", "failed")
         private val RUN_VERDICTS = setOf("passed", "failed", "completed")
+        private val APPLIED = setOf("ok", "partial")
 
         @JvmStatic
         public fun of(journal: Journal): RunTrace {
@@ -196,7 +207,9 @@ public class RunTrace(calls: List<ModelCall>, activity: List<TurnActivity>, publ
             val status = Regex("""status=(\w+)""").find(rest)?.groupValues?.get(1)
             val versions = Regex("""v=\{([^}]*)}""").find(rest)?.groupValues?.get(1)
             val paths = versions?.split(", ")?.mapNotNull { it.substringBeforeLast(": ", "").takeIf(String::isNotEmpty) }.orEmpty()
-            return ToolOutcome(m.groupValues[2], status, paths)
+            val tool = m.groupValues[2]
+            val changed = (tool == "edit" && status in APPLIED) || Regex("""effects=observed""").containsMatchIn(rest)
+            return ToolOutcome(tool, status, paths, changed = changed)
         }
 
         /** The command line of a `run` call: `argv` joined, else `cmd`, prefixed by its `cwd`; a `poll`/`wait` names its op instead. */

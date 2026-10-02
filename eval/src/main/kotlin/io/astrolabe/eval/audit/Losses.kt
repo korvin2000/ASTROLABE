@@ -42,7 +42,7 @@ public data class CacheReport(
 
 /** The losses of F §2.2, each a share of the run's money. They overlap; they are not a partition. */
 public enum class Waste(public val code: String) {
-    /** Calls after the first working result: the first green check that stays green. */
+    /** Calls after the first working result: the first green check, after the workspace first changed, that stays green. */
     TailAfterResult("W1"),
 
     /** Calls that polled a background command (`run(op=poll)`). */
@@ -155,7 +155,7 @@ public class Losses(private val trace: RunTrace, private val format: JournalForm
         val result = ArrayList<WasteShare>()
         val working = firstWorkingResult()
         result += if (working == null) {
-            none(Waste.TailAfterResult, "no green check that stays green: no verify verdict, test verdict or repeated check command in the log")
+            none(Waste.TailAfterResult, "no check green after the workspace changed and green to the end (verify verdict, test verdict or repeated check command)")
         } else {
             spent(Waste.TailAfterResult, trace.calls.filter { it.index > working.first }, "after call ${working.first} (${working.second})")
         }
@@ -232,16 +232,19 @@ public class Losses(private val trace: RunTrace, private val format: JournalForm
         return WasteShare(Waste.AnchorTail, money?.stripTrailingZeros(), AuditMath.share(money, anatomy.total), known.size, known.sumOf { it.anchorTokens!! }, detail, null)
     }
 
-    /** The first working result (W1): the earliest call whose check came out green and stayed green — no later red of the same check ([RunTrace.verdict]). */
+    /**
+     * The first working result (W1): the earliest call whose check came out green and stayed green — no later red of the
+     * same check ([RunTrace.verdict]) — once the run had changed the workspace; a check green on the untouched base
+     * (existing tests) is no result of the work. `null` when no check qualifies.
+     */
     internal fun firstWorkingResult(): Pair<Int, String>? {
         val callAt = trace.calls.associateBy { it.cell to it.turn }
-        val verdicts = trace.activity.flatMap { a ->
-            val call = callAt[a.cell to a.turn]?.index ?: return@flatMap emptyList()
-            a.outcomes.mapNotNull { o -> trace.verdict(o)?.let { (check, green) -> Triple(call, check, green) } }
-        }
+        val outcomes = trace.activity.flatMap { a -> callAt[a.cell to a.turn]?.index?.let { call -> a.outcomes.map { call to it } }.orEmpty() }
+        val changed = outcomes.filter { it.second.changed }.minOfOrNull { it.first } ?: return null
+        val verdicts = outcomes.mapNotNull { (call, o) -> trace.verdict(o)?.let { (check, green) -> Triple(call, check, green) } }
         return verdicts.groupBy { it.second }.mapNotNull { (check, seen) ->
             val lastRed = seen.filter { !it.third }.maxOfOrNull { it.first } ?: -1
-            seen.filter { it.third && it.first > lastRed }.minOfOrNull { it.first }?.let { it to check }
+            seen.filter { it.third && it.first > lastRed && it.first >= changed }.minOfOrNull { it.first }?.let { it to check }
         }.minByOrNull { it.first }?.let { (call, check) -> call to "$check green at turn ${trace.calls[call].turn}" }
     }
 
