@@ -169,7 +169,10 @@ public object Layout {
      * into the compile fingerprint (`Fingerprint.system`) and asserted by stability tests. The turn's mask is not an input: it is `[A]`'s.
      */
     @JvmStatic
-    public fun system(role: Role, mode: ExecutionMode): String {
+    public fun system(role: Role, mode: ExecutionMode): String = system(role, null, mode)
+
+    // Bench arm waveA-noA3 (P8.B.4): pre-A3 wire. `[S]` lists every family and carries the turn's [mask] line.
+    internal fun system(role: Role, mask: ToolMask?, mode: ExecutionMode): String {
         val out = StringBuilder()
         out.append("astrolabe · role ").append(role.name)
             .append(" · ").append(Kernel.VERSION)
@@ -183,8 +186,9 @@ public object Layout {
         if (role.duties.isNotEmpty()) out.append("duties: ").append(role.duties.joinToString(" · ")).append('\n')
         out.append("ask-back: ").append(if (role.askBack) "ask the parent" else "no parent to ask").append('\n')
         out.append("packet: ").append(role.packetKind.name).append('\n')
-        out.append("tools: ").append(grouped(role.ops.allowed))
-            .append(" (the role's tools, masked, never removed; [A] names those enabled this turn)\n")
+        out.append("tools: ").append(ToolFamily.entries.joinToString(", ") { it.wire })
+            .append(" (masked, never removed)\n")
+        if (mask != null) out.append("enabled this turn: ").append(mask.allowed.sorted().joinToString(", ")).append('\n')
         // §4.3 requires these three verbatim in [S]; kernel line 3 states the same rule, and the
         // restatement is deliberate — they are the assertions cells get wrong most often.
         out.append("evidence:\n")
@@ -247,10 +251,20 @@ public object Layout {
         k: CompiledK,
         transcript: Transcript,
         explicitBreakpoints: Boolean = true,
+    ): List<Segment> = render(role, null, mode, prime, k, transcript, explicitBreakpoints)
+
+    internal fun render(
+        role: Role,
+        mask: ToolMask?,
+        mode: ExecutionMode,
+        prime: String,
+        k: CompiledK,
+        transcript: Transcript,
+        explicitBreakpoints: Boolean,
     ): List<Segment> {
         val segments = ArrayList<Segment>(4)
         if (ContextPart.Kernel in role.contextView) {
-            segments += segment(SegmentKind.S, ItemRole.System, system(role, mode), explicitBreakpoints)
+            segments += segment(SegmentKind.S, ItemRole.System, system(role, mask, mode), explicitBreakpoints)
         }
         if (ContextPart.Prime in role.contextView && prime.isNotBlank()) {
             segments += segment(SegmentKind.R, ItemRole.User, prime, explicitBreakpoints)

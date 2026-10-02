@@ -73,6 +73,7 @@ import io.astrolabe.tool.ToolCall
 import io.astrolabe.tool.ToolCalls
 import io.astrolabe.tool.ToolExecutor
 import io.astrolabe.tool.ToolFamily
+import io.astrolabe.tool.ToolOps
 import io.astrolabe.tool.ToolOutcome
 import io.astrolabe.tool.ToolSchemas
 import io.astrolabe.tool.TurnResult
@@ -177,8 +178,8 @@ public class Cell @JvmOverloads constructor(
         private val estimator = ctx.model.estimator
         private val contextAdmission = ctx.admission ?: ContextAdmission()
         private val capabilities = ctx.model.adapter.capabilities(ctx.model.profile)
-        // Invariant 12: the schema set is the role's, chosen once for the line; a turn's mask lives in [A].
-        private val schemaSelection = ToolSchemas.forLineage(ctx.model.adapter, ctx.model.profile, ctx.role.toolMask)
+        // Bench arm waveA-noA3 (P8.B.4): pre-A3 wire, every family's schema whatever the role.
+        private val schemaSelection = ToolSchemas.forLineage(ctx.model.adapter, ctx.model.profile, ToolMask(ToolOps.all))
         private val residency = Residency.of(defaults, estimator)
         private val record = TurnRecord()
         private val dispatcher = Dispatcher(executors(), ws.workset, ids, events, ctx.turnCheckpoint)
@@ -337,7 +338,7 @@ public class Cell @JvmOverloads constructor(
             } catch (capacity: DigestCapacity) {
                 return partial(PartialReason.Pressure, "replan: ${capacity.message}")
             }
-            val layout = Layout.render(ctx.role, ctx.config.executionMode, ctx.prime, CompiledK(ContractSlice.forIncrement(contract, increment), ctx.preexisting, sections), transcript(contract), capabilities.caching.breakpoints)
+            val layout = Layout.render(ctx.role, mask, ctx.config.executionMode, ctx.prime, CompiledK(ContractSlice.forIncrement(contract, increment), ctx.preexisting, sections), transcript(contract), capabilities.caching.breakpoints)
             val request = Request(layout + anchor.segment(), schemas.schemas, ctx.model.profile, ctx.model.effort, ctx.model.maxOutputTokens, mask, sessionKey = ids.work.sessionKey)
             val estimate = estimator.estimate(request)
             when (val validation = ctx.model.adapter.validate(request, estimate)) {
@@ -731,7 +732,7 @@ public class Cell @JvmOverloads constructor(
                 estimator, digest, RegisterRender.markdown(register), worksetLine, touchedLedger.toList(),
                 ChecksRender.render(stampNow, checkLines(currencies)), null, focusNotes, gauge(currencies).line(),
                 if (repair) nudges.map { if (it == CellBudget.GATE) REPAIR_GATE else it } else nudges,
-                RegisterRender.firedTrips(register) + ctx.diagnoses?.lines().orEmpty(), defaults, Layout.enabled(ctx.role, mask, repair),
+                RegisterRender.firedTrips(register) + ctx.diagnoses?.lines().orEmpty(), defaults, null,
             )
         }
 
