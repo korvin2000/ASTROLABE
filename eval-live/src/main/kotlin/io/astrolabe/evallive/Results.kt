@@ -1,0 +1,97 @@
+package io.astrolabe.evallive
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.Json
+import java.nio.file.Path
+import kotlin.io.path.readText
+import kotlin.io.path.writeText
+
+/**
+ * The result of one run (`runs/<task>/<model>/r<n>/result.json`). Every quantity the run could not observe is `null`,
+ * never 0; the events behind [totals] are in `events.jsonl` next to it.
+ */
+@Serializable
+internal data class RunResult(
+    val schema: Int = SCHEMA,
+    val task: String,
+    val taskClass: String,
+    val provider: String,
+    val model: String,
+    val repeat: Int,
+    /** Position in the seeded run order of the bench (1-based). */
+    val order: Int,
+    val seed: Long,
+    val harnessVersion: String,
+    val effort: String,
+    val maxCells: Int,
+    val profileId: String?,
+    val contextLimitTokens: Int?,
+    val outputHeadroomTokens: Int?,
+    val workId: String?,
+    val attemptFingerprint: String?,
+    val shape: String?,
+    val verification: VerificationSetup?,
+    /** The campaign outcome (`completed`, `waiting_for_input`, …), or `null` when the attempt did not end with one. */
+    val outcome: String?,
+    val stopCode: String?,
+    val reason: String?,
+    /** Why the run could not produce an outcome (a harness or transport failure), or `null`. */
+    val failure: String?,
+    val cells: Int?,
+    val policyDecisions: List<PolicyDecision>,
+    val acceptance: AcceptanceResult?,
+    /** SHA-256 of the hidden acceptance files the run was judged by. */
+    val acceptanceDigest: String,
+    val startedAt: String,
+    val endedAt: String,
+    val attemptWallMillis: Long?,
+    val totals: Totals?,
+    val eventsDropped: Long?,
+    val changedFiles: Int?,
+) {
+    companion object {
+        const val SCHEMA: Int = 1
+    }
+}
+
+/** `summary.json` (every result) and `summary.csv` (one flat row per run), rewritten after each run. */
+internal object Summary {
+    private val json = Json { prettyPrint = true; encodeDefaults = true }
+    private val compact = Json { ignoreUnknownKeys = true }
+
+    val COLUMNS: List<String> = listOf(
+        "order", "task", "class", "provider", "model", "repeat", "outcome", "stop_code", "accepted", "acceptance_exit",
+        "attempt_wall_s", "model_requests", "uncached_input", "cache_read", "cache_write", "output", "cost", "cost_priced_part",
+        "currency", "cells", "turns", "tool_calls", "changed_files", "failure",
+    )
+
+    fun write(out: Path, results: List<RunResult>) {
+        val sorted = results.sortedBy { it.order }
+        out.resolve("summary.json").writeText(json.encodeToString(ListSerializer(RunResult.serializer()), sorted))
+        out.resolve("summary.csv").writeText(buildString {
+            appendLine(COLUMNS.joinToString(","))
+            for (r in sorted) appendLine(row(r).joinToString(",") { csv(it) })
+        })
+    }
+
+    fun row(r: RunResult): List<String?> = listOf(
+        r.order.toString(), r.task, r.taskClass, r.provider, r.model, r.repeat.toString(), r.outcome, r.stopCode,
+        r.acceptance?.passed?.toString(), r.acceptance?.exitCode?.toString(),
+        r.attemptWallMillis?.let { "%.1f".format(java.util.Locale.ROOT, it / 1000.0) }, r.totals?.modelRequests?.toString(),
+        r.totals?.uncachedInputTokens?.toString(), r.totals?.cacheReadTokens?.toString(), r.totals?.cacheWriteTokens?.toString(),
+        r.totals?.outputTokens?.toString(), r.totals?.cost, r.totals?.costPricedPart, r.totals?.currency, r.cells?.toString(),
+        r.totals?.turns?.toString(), r.totals?.toolCalls?.toString(), r.changedFiles?.toString(), r.failure,
+    )
+
+    /** An unknown value is an empty cell, never 0. */
+    private fun csv(value: String?): String {
+        if (value == null) return ""
+        val flat = value.replace('\n', ' ').replace('\r', ' ')
+        return if (flat.any { it == ',' || it == '"' }) "\"" + flat.replace("\"", "\"\"") + "\"" else flat
+    }
+
+    fun encode(result: RunResult): String = json.encodeToString(RunResult.serializer(), result)
+
+    fun read(file: Path): RunResult = compact.decodeFromString(RunResult.serializer(), file.readText())
+}

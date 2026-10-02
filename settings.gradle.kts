@@ -28,6 +28,8 @@ val aiGateBuild = file(providers.gradleProperty("astrolabe.aiGateBuild").getOrEl
 if (aiGateBuild.resolve("settings.gradle.kts").isFile) {
     includeBuild(aiGateBuild)
     include(":provider-ai-gate")
+    // ASTROLABE 2.0 A0: the headless live runner drives the real adapter, so it exists only where the gate does.
+    include(":eval-live")
 } else {
-    logger.lifecycle("provider-ai-gate skipped: no AI Gate build at $aiGateBuild")
+    logger.lifecycle("provider-ai-gate and eval-live skipped: no AI Gate build at $aiGateBuild")
 }
