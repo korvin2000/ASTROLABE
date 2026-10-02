@@ -7100,7 +7100,7 @@ public final class io/astrolabe/context/FactCoherence {
 
 public final class io/astrolabe/context/Fingerprint {
 	public static final field Companion Lio/astrolabe/context/Fingerprint$Companion;
-	public fun <init> (Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Integer;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;)V
+	public fun <init> (Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Integer;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;)V
 	public final fun component1 ()Ljava/lang/String;
 	public final fun component10 ()Ljava/util/List;
 	public final fun component11 ()Ljava/lang/String;
@@ -7111,9 +7111,11 @@ public final class io/astrolabe/context/Fingerprint {
 	public final fun component16 ()Ljava/lang/String;
 	public final fun component17 ()Ljava/lang/String;
 	public final fun component18 ()Ljava/lang/String;
-	public final fun component19 ()I
+	public final fun component19 ()Ljava/lang/String;
 	public final fun component2 ()I
 	public final fun component20 ()Ljava/lang/String;
+	public final fun component21 ()I
+	public final fun component22 ()Ljava/lang/String;
 	public final fun component3 ()Ljava/lang/String;
 	public final fun component4 ()Ljava/lang/String;
 	public final fun component5 ()Ljava/lang/String;
@@ -7121,8 +7123,8 @@ public final class io/astrolabe/context/Fingerprint {
 	public final fun component7 ()Ljava/lang/String;
 	public final fun component8 ()Ljava/util/List;
 	public final fun component9 ()Ljava/lang/String;
-	public final fun copy (Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Integer;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;)Lio/astrolabe/context/Fingerprint;
-	public static synthetic fun copy$default (Lio/astrolabe/context/Fingerprint;Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Integer;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;ILjava/lang/Object;)Lio/astrolabe/context/Fingerprint;
+	public final fun copy (Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Integer;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;)Lio/astrolabe/context/Fingerprint;
+	public static synthetic fun copy$default (Lio/astrolabe/context/Fingerprint;Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Integer;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;ILjava/lang/Object;)Lio/astrolabe/context/Fingerprint;
 	public final fun differences (Lio/astrolabe/context/Fingerprint;)Ljava/util/List;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getAuthorization ()Ljava/lang/String;
@@ -7144,8 +7146,10 @@ public final class io/astrolabe/context/Fingerprint {
 	public final fun getRole ()Ljava/lang/String;
 	public final fun getRoleTextVersion ()Ljava/lang/String;
 	public final fun getRules ()Ljava/lang/String;
+	public final fun getSchemas ()Ljava/lang/String;
 	public final fun getSkills ()Ljava/util/List;
 	public final fun getStamp ()Ljava/lang/String;
+	public final fun getSystem ()Ljava/lang/String;
 	public fun hashCode ()I
 	public static final fun of (Lio/astrolabe/id/CandidateId;Lio/astrolabe/contract/Contract;Lio/astrolabe/contract/Increment;Lio/astrolabe/cell/Role;Lio/astrolabe/provider/Profile;Lio/astrolabe/AttemptConfig;Ljava/lang/String;Lio/astrolabe/provider/TokenEstimator;I)Lio/astrolabe/context/Fingerprint;
 	public static final fun of (Lio/astrolabe/id/CandidateId;Lio/astrolabe/contract/Contract;Lio/astrolabe/contract/Increment;Lio/astrolabe/cell/Role;Lio/astrolabe/provider/Profile;Lio/astrolabe/AttemptConfig;Ljava/lang/String;Lio/astrolabe/provider/TokenEstimator;ILio/astrolabe/context/CompileInputs;)Lio/astrolabe/context/Fingerprint;
