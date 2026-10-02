@@ -45,6 +45,20 @@ class ContextCoverTest {
         assertFailsWith<IllegalArgumentException> { ContextCover.select(units, input.copy(repository = cost(7))) }
     }
 
+    @Test fun `wire input growth reserve and output headroom are reported apart and each charged once`() {
+        val input = budget(30).copy(system = cost(4), pinnedHistory = cost(2), reserves = cost(5), outputHeadroomTokens = Tokens(6))
+        val result = ContextCover.select(listOf(unit("required", 3, mandatory = true), unit("extra", 10)), input)
+        val a = result.arithmetic
+        assertEquals(BigInteger.valueOf(17), a.knownFixedTokens)
+        assertEquals(BigInteger.valueOf(13), a.availableTokens)
+        assertEquals(setOf(ContextUnitId("extra"), ContextUnitId("required")), result.selectedIds)
+        assertEquals(BigInteger.valueOf(19), a.wireTokens, "what is sent: S + T + the selection")
+        assertEquals(BigInteger.valueOf(5), a.reserveTokens)
+        assertEquals(BigInteger.valueOf(6), a.outputTokens)
+        assertEquals(a.wireTokens!! + a.reserveTokens + a.outputTokens, a.totalTokens)
+        assertEquals(ContextSelectionStatus.Capacity, ContextCover.select(listOf(unit("required", 14, mandatory = true)), input).status)
+    }
+
     @Test fun `unknown history is never fit and decimal profile allowance rounds down`() {
         val unknown = ContextCover.select(listOf(unit("required", 1, mandatory = true)),
             budget(100).copy(effectiveHistory = null, pinnedHistory = cost(20)))

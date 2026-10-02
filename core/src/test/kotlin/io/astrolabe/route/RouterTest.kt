@@ -151,6 +151,21 @@ class RouterTest {
         assertTrue(router.calibration.entries().isEmpty())
     }
 
+    @Test fun `the window fit counts wire input growth reserve and output once each and the reserve is never priced`() {
+        val router = Router()
+        val main = TierTable("t3", null, mapOf(Tier.High to setOf("main")))
+        val exact = RoutingPacket(null, 180_000, 4_000, reserveTokens = 16_000)
+        assertEquals("main", assertIs<Routed.Selected>(router.selectProfile(RoutingFunction.Implementing, exact, null, policy(tiers = main))).profile.id)
+        val over = assertIs<Routed.Refused>(router.selectProfile(RoutingFunction.Implementing, exact.copy(reserveTokens = 16_001), null, policy(tiers = main)))
+        assertEquals("context 180000+16001+4000 does not fit 200000", over.excluded["main"])
+        // One turn at main's prices: 10,000 input at 3/M and 4,000 output at 15/M; the 9,000 reserve is room, not input.
+        val reserved = RoutingPacket(null, 10_000, 4_000, reserveTokens = 9_000)
+        assertEquals(0, BigDecimal("0.09").compareTo(Router.conservativeCost(FakeProfiles.main, reserved)!!.amount))
+        assertEquals(Router.conservativeCost(FakeProfiles.main, reserved.copy(reserveTokens = 0)), Router.conservativeCost(FakeProfiles.main, reserved))
+        val selected = assertIs<Routed.Selected>(router.selectProfile(RoutingFunction.Implementing, reserved, null, policy(tiers = main)))
+        assertEquals(Tokens(14_000), selected.conservativeTokens)
+    }
+
     @Test fun `tier tables serve a tier from it upwards and the configuration rejects untiered profile ids`() {
         assertEquals(setOf("main", "escalation"), table.serving(Tier.Medium))
         assertEquals(setOf("helper", "main", "escalation"), table.serving(Tier.Low))

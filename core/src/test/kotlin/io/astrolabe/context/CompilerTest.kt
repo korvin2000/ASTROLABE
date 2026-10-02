@@ -50,4 +50,23 @@ class CompilerTest {
         assertTrue("split the increment or use a larger profile" in rescoping.reason, rescoping.reason)
         assertEquals(setOf(Compiler.MANDATORY), rescoping.selection.mandatoryIds)
     }
+
+    @Test
+    fun `small windows compile with a growth reserve scaled to the window and the output charged once`() {
+        val contract = contract()
+        val increment = ShapeSelector.single(contract).increments.single()
+        // The Studio narrowing: a quarter of the window as output headroom.
+        for ((window, growth) in listOf(16_384 to 2_250L, 32_768 to 4_500L, 65_536 to 9_000L, 131_072 to 9_000L)) {
+            val profile = FakeProfiles.main.copy(capabilities = FakeProfiles.main.capabilities.copy(contextLimitTokens = window))
+            val compiled = Compiler(HeuristicEstimator()).compile(increment, contract, profile, Roles.implementing, "repo: 1 files\n", maxOutputTokens = window / 4)
+            val a = assertIs<Compiled.Ready>(compiled, "window $window").selection.arithmetic
+            assertEquals(growth, a.reserveTokens.toLong(), "window $window")
+            assertEquals(window / 4L, a.outputTokens.toLong(), "window $window")
+            val b = compiled.selection.budget
+            val wire = b.system.tokens.value + b.repository.tokens.value + b.pinnedHistory.tokens.value + a.selectedTokens.toLong()
+            assertEquals(wire, a.wireTokens!!.toLong(), "the wire input is what is sent: no reserve, no output")
+            assertEquals(a.wireTokens!! + a.reserveTokens + a.outputTokens, a.totalTokens, "output and reserve are each charged once")
+            assertEquals((window * 0.65).toLong(), a.limitTokens.toLong())
+        }
+    }
 }
