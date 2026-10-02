@@ -23,7 +23,7 @@ internal object Refusals {
      */
     fun masked(op: String, role: Role, shape: Shape, available: ToolMask, ceiling: String?): String {
         val why = when {
-            !role.toolMask.allows(op) -> "$op is not available to the ${role.name} role in this cell (any turn)"
+            !role.ops.allows(op) -> "$op is not available to the ${role.name} role in this cell (any turn)"
             !Roles.shapeMask(shape).allows(op) -> "$op is not enabled in shape ${shape.name}"
             else -> "$op is outside this cell's capability ceiling (any turn)" + (ceiling?.let { ": $it" } ?: "")
         }

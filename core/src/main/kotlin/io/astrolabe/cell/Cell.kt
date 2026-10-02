@@ -423,6 +423,19 @@ public class Cell @JvmOverloads constructor(
                 admission.reconcile(Tokens(funded))
                 cost += usage
                 accounting?.record(ids, invocationId.value, ctx.model.profile, request, usage, funded)
+                // Every dispatched call reaches the bus once with its reconciled usage; an answered one is emitted below.
+                if (failure != null || received == null || settled?.cancelled == true) {
+                    val stop = when {
+                        failure is CancellationException || settled?.cancelled == true -> StopReason.Cancelled
+                        else -> settled?.response?.stop ?: when (failure) {
+                            is ProviderError.OutputLimit -> StopReason.OutputLimit
+                            is ProviderError.Refusal -> StopReason.Refusal
+                            else -> StopReason.Truncated
+                        }
+                    }
+                    val failed = failure?.takeUnless { it is CancellationException }?.let { it::class.simpleName ?: "error" }
+                    events?.emit(AgentEvent.Cell.ModelResponded(ids, invocationId.value, stop, usage, facts = (settled?.response ?: received)?.facts, failure = failed))
+                }
                 if (settled != null && (settled.lateItems.isNotEmpty() || failure != null)) {
                     val late = settled.lateItems + if (failure != null) settled.response?.items.orEmpty() else emptyList()
                     ev.journal.append(JournalEvent(idGen.next("ev"), ids, turn, JournalKind.Call,
@@ -826,7 +839,7 @@ public class Cell @JvmOverloads constructor(
                     repairable.take(REPAIR_PATHS_SHOWN).joinToString(", ") + (if (repairable.size > REPAIR_PATHS_SHOWN) ", … +${repairable.size - REPAIR_PATHS_SHOWN}" else "") + "); verify and report"
             }
             val op = call.operationNames.firstOrNull { !mask.allows(it) } ?: return null
-            val ceiling = Ceiling.of(contract.authorization, ctx.config.executionMode, ctx.hostSets).allows(op, ctx.role.toolMask)?.detail
+            val ceiling = Ceiling.of(contract.authorization, ctx.config.executionMode, ctx.hostSets).allows(op, ctx.role.ops)?.detail
             return Refusals.masked(op, ctx.role, contract.shape, mask, ceiling)
         }
 

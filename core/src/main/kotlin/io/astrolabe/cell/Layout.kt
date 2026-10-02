@@ -183,7 +183,7 @@ public object Layout {
         if (role.duties.isNotEmpty()) out.append("duties: ").append(role.duties.joinToString(" · ")).append('\n')
         out.append("ask-back: ").append(if (role.askBack) "ask the parent" else "no parent to ask").append('\n')
         out.append("packet: ").append(role.packetKind.name).append('\n')
-        out.append("tools: ").append(grouped(role.toolMask.allowed))
+        out.append("tools: ").append(grouped(role.ops.allowed))
             .append(" (the role's tools, masked, never removed; [A] names those enabled this turn)\n")
         // §4.3 requires these three verbatim in [S]; kernel line 3 states the same rule, and the
         // restatement is deliberate — they are the assertions cells get wrong most often.
@@ -202,7 +202,7 @@ public object Layout {
      * to the cell's own files, and the line says so.
      */
     internal fun enabled(role: Role, mask: ToolMask, ownFilesOnly: Boolean = false): String {
-        val roleOps = role.toolMask.allowed
+        val roleOps = role.ops.allowed
         val excluded = roleOps - mask.allowed
         val text = when {
             mask.allowed.isEmpty() -> "none"

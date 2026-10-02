@@ -1,6 +1,7 @@
 package io.astrolabe.cell
 
 import io.astrolabe.Defaults
+import io.astrolabe.event.AgentEvent
 import io.astrolabe.evidence.JournalScope
 import io.astrolabe.fixtures.Scripted
 import io.astrolabe.fixtures.ScriptedModel
@@ -13,6 +14,7 @@ import io.astrolabe.provider.ProviderAdapter
 import io.astrolabe.provider.ProviderError
 import io.astrolabe.provider.Request
 import io.astrolabe.provider.Response
+import io.astrolabe.provider.StopReason
 import io.astrolabe.provider.Terminal
 import io.astrolabe.provider.UsageProvenance
 import io.astrolabe.telemetry.Accounting
@@ -27,6 +29,7 @@ import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -80,6 +83,60 @@ class TerminalAccountingTest {
                 assertEquals(0L, budget.working.heldTokens.value)
                 assertFalse(Files.exists(f.repo.resolve("src/late.py")))
                 assertTrue(f.journal.events(JournalScope(f.ids.work)).any { "late terminal evidence" in it.text })
+            }
+        }
+    }
+
+    @Test
+    fun `a failed or cancelled call after an answered one still reaches the bus once with its usage`() = runTest {
+        for (cancelled in listOf(true, false)) {
+            CellFixture(stateRoot.resolve("bus-$cancelled")).use { f ->
+                val base = f.context(ScriptedModel.of(Scripted.Reply(listOf(CellFixture.say("look first"),
+                    CellFixture.call("c1", "look", """{"what":"read","target":"README.md","budget":0}""")))))
+                val started = CompletableDeferred<Unit>()
+                val usage = BillableUsage(mapOf(BillingDimension.UNCACHED_INPUT to 321L, BillingDimension.OUTPUT to 79L),
+                    UsageProvenance("fake", "main", "terminal"))
+                val error = ProviderError.Transport("connection lost after billing")
+                var calls = 0
+                val adapter = object : ProviderAdapter by base.model.adapter {
+                    override fun start(request: Request, id: InvocationId): Invocation {
+                        if (++calls == 1) return base.model.adapter.start(request, id)
+                        return object : Invocation {
+                            override val id = id
+                            override val state = InvocationState.Requested
+                            override suspend fun await(): Response {
+                                started.complete(Unit)
+                                if (cancelled) awaitCancellation() else throw error
+                            }
+                            override fun cancel() = Unit
+                            override suspend fun terminal(): Terminal = Terminal(id, null, error, emptyList(), usage, cancelled)
+                        }
+                    }
+                }
+                val context = CellContext(base.ids, base.role, base.contracts,
+                    CellModel(adapter, base.model.profile, base.model.estimator), base.tools, base.workspace,
+                    base.evidence, base.prime)
+                if (cancelled) {
+                    val job = launch { f.cell().run(context, f.increment, f.budget()) }
+                    started.await()
+                    job.cancelAndJoin()
+                } else {
+                    f.cell().run(context, f.increment, f.budget())
+                }
+                assertTrue(f.recorder.awaitCount(f.events.lastSeq.toInt()))
+                val requested = f.recorder.events.filterIsInstance<AgentEvent.Cell.ModelRequested>()
+                val responded = f.recorder.events.filterIsInstance<AgentEvent.Cell.ModelResponded>()
+                assertEquals(2, requested.size)
+                assertEquals(requested.map { it.invocationId }, responded.map { it.invocationId }, "exactly one accounting record per dispatched call")
+                assertNotNull(responded.first().usage)
+                assertNull(responded.first().failure)
+                assertEquals(usage, responded.last().usage)
+                if (cancelled) {
+                    assertEquals(StopReason.Cancelled, responded.last().stop)
+                    assertNull(responded.last().failure)
+                } else {
+                    assertEquals("Transport", responded.last().failure)
+                }
             }
         }
     }

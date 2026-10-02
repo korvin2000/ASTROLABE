@@ -1,22 +1,29 @@
 package io.astrolabe.java;
 
 import io.astrolabe.Config;
+import io.astrolabe.Defaults;
 import io.astrolabe.Project;
 import io.astrolabe.campaign.CampaignOutcome;
+import io.astrolabe.context.ContextArithmetic;
 import io.astrolabe.event.AgentEvent;
 import io.astrolabe.event.AmendmentProposal;
 import io.astrolabe.event.Answer;
 import io.astrolabe.event.DClassRequest;
 import io.astrolabe.event.Decision;
 import io.astrolabe.event.EventRecord;
+import io.astrolabe.event.Phase;
 import io.astrolabe.event.Question;
 import io.astrolabe.event.Resolution;
 import io.astrolabe.event.ResolutionOutcome;
 import io.astrolabe.event.Subscription;
 import io.astrolabe.fixtures.FakeProfiles;
 import io.astrolabe.fixtures.TempRepo;
+import io.astrolabe.id.AttemptId;
+import io.astrolabe.id.Identities;
+import io.astrolabe.id.WorkId;
 import io.astrolabe.provider.BillableUsage;
 import io.astrolabe.provider.Capabilities;
+import io.astrolabe.provider.Effort;
 import io.astrolabe.provider.Estimate;
 import io.astrolabe.provider.InvocationId;
 import io.astrolabe.provider.InvocationState;
@@ -24,6 +31,7 @@ import io.astrolabe.provider.Item;
 import io.astrolabe.provider.JavaInvocation;
 import io.astrolabe.provider.JavaProviderAdapter;
 import io.astrolabe.provider.Message;
+import io.astrolabe.provider.PriceTable;
 import io.astrolabe.provider.Profile;
 import io.astrolabe.provider.Request;
 import io.astrolabe.provider.Response;
@@ -35,12 +43,16 @@ import io.astrolabe.provider.UsageNormalizer;
 import io.astrolabe.provider.UsageProvenance;
 import io.astrolabe.provider.Validation;
 import io.astrolabe.provider.Validations;
+import io.astrolabe.route.RoutingPacket;
+import io.astrolabe.tool.RunArgs;
+import io.astrolabe.tool.edit.EditResult;
 import io.astrolabe.verify.ReviewRequest;
 import io.astrolabe.verify.Verdict;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.lang.reflect.Method;
+import java.math.BigInteger;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.Collections;
@@ -204,6 +216,59 @@ class JavaConsumptionSmokeTest {
             }
             assertTrue(seen.stream().anyMatch(r -> r.getEvent() instanceof AgentEvent.Ask.Answered));
         }
+    }
+
+    /** Wave A widened these records; the v1.0 full constructors still compile from Java and build the same value. */
+    @Test
+    void theVersionOneConstructorsStillCompileFromJava() {
+        RunArgs run = new RunArgs("run", List.of("git", "status"), null, null, "auto", null, null, false, null, null, null, null, null);
+        assertEquals(null, run.getUntilLine());
+
+        EditResult edit = new EditResult(true, "edit-1", Collections.emptyList(), Collections.emptyList(), Collections.emptyMap(),
+                Collections.emptyMap(), Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), null, null,
+                Collections.emptyList(), Collections.emptyMap(), Collections.emptyMap());
+        assertTrue(edit.getAuthored().isEmpty());
+
+        ContextArithmetic arithmetic = new ContextArithmetic(BigInteger.valueOf(100), BigInteger.TEN, BigInteger.valueOf(90), BigInteger.ONE, BigInteger.valueOf(11));
+        assertEquals(BigInteger.valueOf(11), arithmetic.getWireTokens());
+        assertEquals(BigInteger.ZERO, arithmetic.getReserveTokens());
+
+        Defaults d = new Defaults();
+        Defaults restored = new Defaults(
+                d.getShapePolicy(), d.getTurnsPerCell(), d.getTurnNudgeFraction(),
+                d.getProviderTerminalWaitSeconds(), d.getAlpha(), d.getK(), d.getM(), d.getRMaxTokens(),
+                d.getAnchorMaxTokens(), d.getImmediateStubTokens(), d.getLookBudgetTokens(),
+                d.getRunBudgetTokens(), d.getRegisterCapTokens(), d.getDigestCapTokens(),
+                d.getDigestTokensPerRequirement(), d.getDigestCapCeilingTokens(), d.getPatchCapTokens(),
+                d.getFactLineMaxChars(), d.getNoteBodyMaxTokens(), d.getNoteSummaryMaxChars(),
+                d.getSeedsMaxTokens(), d.getInjectionMaxNotes(), d.getInjectionMaxTokens(),
+                d.getFocusNotesMaxTokens(), d.getFocusZoomMaxTokens(), d.getTouchedInAnchor(),
+                d.getCheckerTimeBoxSeconds(), d.getCheckerFallbackTimeBoxSeconds(), d.getTheta(),
+                d.getFullSuiteCadence(), d.getReserveVerification(), d.getReserveRecoveryAndPersist(),
+                d.getCampaignRecoveryReserve(), d.getStallTurns(), d.getLoopIdentical(),
+                d.getRepeatedSignatureRepairs(), d.getDoomLoopSameCalls(), d.getProbeTurns(), d.getProbeTokens(),
+                d.getProbeTier(), d.getReviewLookMax(), d.getReviewIncrementTokens(), d.getReviewCampaignTokens(),
+                d.getReviewTier(), d.getReviewRoutineTier(), d.getRepairCalls(), d.getAttemptsPerIncrement(),
+                d.getWriterDepth(), d.getProbeDepth(), d.getParallelCells(), d.getCampaignCells(),
+                d.getFlakyIsolatedReruns(), d.getAdmissionConfidenceMax(), d.getProfileRoles(), d.getMode(),
+                d.getExecutionMode(), d.getDClass(), d.getIntegrityApproval(), d.getUnknownOutcomeReconciliation(),
+                d.getCeiling(), d.getRunTimeoutSeconds(), d.getGitDeadlineSeconds());
+        assertEquals(d, restored);
+
+        Identities ids = new Identities(new WorkId("W-1"), new AttemptId("a1"), null, null);
+        AgentEvent.Cell.ModelResponded responded = new AgentEvent.Cell.ModelResponded(ids, "inv-1", StopReason.EndTurn, null, Phase.Understand, null, null);
+        assertEquals(null, responded.getFacts());
+        Response response = new Response(Collections.emptyList(), StopReason.EndTurn, null, null);
+        assertEquals(null, response.getFacts());
+        BillableUsage usage = new BillableUsage(Collections.emptyMap(), new UsageProvenance("java", "m", "java/1"), Collections.emptySet(), null, null, BillableUsage.SCHEMA_VERSION);
+        assertEquals(null, usage.getBilled());
+        Profile profile = FakeProfiles.INSTANCE.getMain();
+        PriceTable prices = profile.getPriceTable();
+        assertEquals(prices, new PriceTable(prices.getDate(), prices.getCurrency(), prices.getPerMillion()));
+        Request request = new Request(Collections.emptyList(), Collections.emptyList(), profile, Effort.Medium, 1_000, null, null);
+        assertEquals(null, request.getSessionKey());
+        RoutingPacket packet = new RoutingPacket(null, 1_000L, 100, null, null, null);
+        assertEquals(0L, packet.getReserveTokens());
     }
 
     @Test

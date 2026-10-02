@@ -52,10 +52,14 @@ public data class Role(
         require(toolMask.allowed.all { it in ToolOps.all }) { "unknown ops in the mask of '$name': ${toolMask.allowed - ToolOps.all}" }
     }
 
+    /** [toolMask] with the ops it implies ([ToolOps.implied]): what the role may call, refusals and `[S]`/`[A]` lines read this. */
+    internal val ops: ToolMask get() = ToolOps.implied(toolMask)
+
     /** Role mask ∩ shape/stage mask ∩ what the authorization's capability set allows (§3.4). */
     public fun effectiveOps(shape: Shape, ceiling: Ceiling): ToolMask {
         val shapeMask = Roles.shapeMask(shape)
-        return ToolMask(toolMask.allowed.filter { op -> shapeMask.allows(op) && ceiling.allows(op, toolMask) == null }.toSet())
+        val ops = ops
+        return ToolMask(ops.allowed.filter { op -> shapeMask.allows(op) && ceiling.allows(op, ops) == null }.toSet())
     }
 
     public companion object {

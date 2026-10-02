@@ -70,6 +70,16 @@ public object ToolOps {
      * Everything an S0 implementing cell may call in Stage A (refs/importers/impact since P3.2.3, transform since P3.3.1;
      * kb.propose since P4.1.3; look.bmap since P4.3.2; propose is S1+, delegate/collect S2+ through the shape mask, P4.4.1). `verify.review` is the campaign-scope human review path (P3.5.2, D-23); the review cell is P4.4.3.
      */
+    /**
+     * [mask] with the ops it implies: a wait observes a handle exactly as a poll does, so `run.poll` grants `run.wait`.
+     * The one place the rule lives; the role's ops, the turn mask, refusals and the `[A]` line all derive from it.
+     */
+    internal fun implied(mask: ToolMask): ToolMask =
+        if (RUN_POLL in mask.allowed && RUN_WAIT !in mask.allowed) ToolMask(mask.allowed + RUN_WAIT) else mask
+
+    private const val RUN_POLL: String = "run.poll"
+    private const val RUN_WAIT: String = "run.wait"
+
     public val implementingS0: ToolMask = ToolMask(
         all - setOf("task.delegate", "task.collect", "task.propose"),
     )

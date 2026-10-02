@@ -168,8 +168,7 @@ public class Run(
         require(call.family == ToolFamily.Run) { "not a run call: ${call.name}" }
         // D-352: a cwd naming the root is no cwd, so intents, handles and the unknown-outcome guard see one command.
         val args = (call.args as Args.Run).args.let { if (it.cwd != null && namesWorkspaceRoot(it.cwd)) it.copy(cwd = null) else it }
-        // A wait observes a handle exactly as a poll does, so a role allowed to poll may wait.
-        if (!mask.allows(call.name) && !(args.op == "wait" && mask.allows(ToolOps.name(ToolFamily.Run, "poll")))) {
+        if (!ToolOps.implied(mask).allows(call.name)) {
             return refused(args, Outcome.Denied, "${call.name} is masked in this role")
         }
         return when (args.op) {
@@ -533,8 +532,9 @@ public class Run(
 
         /** [matched] is the readiness line that arrived with the end, if one did. */
         class Ended(val status: ProcStatus, override val cursor: Long, val tail: ByteArray, val matched: String?) : Waited
-        class Ready(val reason: String, override val cursor: Long, val tail: ByteArray, val dropped: Long) : Waited
-        class Expired(override val cursor: Long, val tail: ByteArray, val dropped: Long) : Waited
+        /** [open]: a private-key block is still open where the observation stops, so the tail's end is hidden. */
+        class Ready(val reason: String, override val cursor: Long, val tail: ByteArray, val dropped: Long, val open: Boolean) : Waited
+        class Expired(override val cursor: Long, val tail: ByteArray, val dropped: Long, val open: Boolean) : Waited
     }
 
     /**
@@ -566,6 +566,7 @@ public class Run(
             handles.save(handle.copy(status = wire(ProcStatus.Lost)))
             return refused(args, Outcome.UnknownOutcome, "handle ${handle.handleId}: the log cannot be read (${failure.message}); the process state is unknown — reconcile, never relaunch")
         }
+        val open = (waited as? Waited.Ready)?.open ?: (waited as? Waited.Expired)?.open ?: false
         val (line, tail, dropped) = when (waited) {
             is Waited.Ended -> {
                 handles.save(handle.copy(proc = proc.copy(status = waited.status), status = wire(waited.status), cursor = waited.cursor))
@@ -585,7 +586,7 @@ public class Run(
             )
         }
         handles.save(handle.copy(proc = proc.copy(status = ProcStatus.Running), status = wire(ProcStatus.Running), cursor = waited.cursor))
-        val safe = redaction.applyBytes(tail, ContentClass.ModelFacing)
+        val safe = redaction.applyLive(tail, ContentClass.ModelFacing, open)
         val shown = tailWithin(safe.text, args.budgetTokens)
         val elided = dropped > 0 || shown.length < safe.text.length
         val deadlineView = if (processSeconds == null || (waited is Waited.Expired && stoppedFirst)) "" else " · process deadline ${processSeconds}s from its start"
@@ -605,10 +606,11 @@ public class Run(
         var cursor = since
         val tail = TailBuffer(WAIT_TAIL_BYTES)
         var partial = ByteArray(0)
+        val scan = ReadinessScan(redaction, until.line, insideKeyBlock(start, since))
         while (true) {
             if (Thread.currentThread().isInterrupted) throw InterruptedException("wait interrupted")
             val remainingMillis = java.time.Duration.between(clock.instant(), deadline).toMillis()
-            if (remainingMillis <= 0) return Waited.Expired(cursor, tail.bytes(), tail.dropped)
+            if (remainingMillis <= 0) return Waited.Expired(cursor, tail.bytes(), tail.dropped, scan.open)
             // A port opens silently, so a port wait looks again every second; otherwise output or the end wakes the poll.
             // On arrival at an open port the one look only collects what has already happened: output, a line, or the end.
             val slice = when {
@@ -622,25 +624,42 @@ public class Run(
             cursor = poll.nextCursorBytes
             proc = proc.copy(status = poll.status)
             val terminal = proc.status.isTerminal
-            var matched: String? = null
             // The last bytes arrive together with the terminal status, so the line is matched before the end is reported.
-            if (until.line != null) {
-                val pending = partial + poll.newBytes
-                val end = pending.lastIndexOf('\n'.code.toByte())
-                // Nothing completes a line once the process has ended, so the unfinished one counts as it stands.
-                val cut = if (terminal) pending.size else if (end >= 0) end + 1 else if (pending.size > WAIT_LINE_BYTES) pending.size else 0
-                partial = pending.copyOfRange(cut, pending.size)
-                // Matched on the redacted line: a pattern is no oracle for a secret the model is never shown.
-                matched = linesOf(pending.copyOfRange(0, cut).toString(Charsets.UTF_8))
-                    .map { redaction.apply(it.trimEnd('\r')).text }.firstOrNull { until.line.containsMatchIn(it) }?.take(200)
-            }
+            val pending = partial + poll.newBytes
+            val end = pending.lastIndexOf('\n'.code.toByte())
+            // Nothing completes a line once the process has ended, so the unfinished one counts as it stands.
+            val cut = if (terminal) pending.size else if (end >= 0) end + 1 else if (pending.size > WAIT_LINE_BYTES) pending.size else 0
+            partial = pending.copyOfRange(cut, pending.size)
+            val matched = scan.feed(pending.copyOfRange(0, cut).toString(Charsets.UTF_8))
             if (terminal) return Waited.Ended(proc.status, cursor, tail.bytes(), matched)
-            if (matched != null) return Waited.Ready("line matched: $matched", cursor, tail.bytes(), tail.dropped)
+            if (matched != null) return Waited.Ready("line matched: $matched", cursor, tail.bytes(), tail.dropped, scan.open)
             if (watchedPort != null && portAtStart == PortAtStart.OpenOnArrival) {
-                return Waited.Ready("port $watchedPort already accepted connections when the wait began (it may belong to another process)", cursor, tail.bytes(), tail.dropped)
+                return Waited.Ready("port $watchedPort already accepted connections when the wait began (it may belong to another process)", cursor, tail.bytes(), tail.dropped, scan.open)
             }
-            if (watchedPort != null && os.listening(watchedPort)) return Waited.Ready("port $watchedPort accepts connections", cursor, tail.bytes(), tail.dropped)
+            if (watchedPort != null && os.listening(watchedPort)) return Waited.Ready("port $watchedPort accepts connections", cursor, tail.bytes(), tail.dropped, scan.open)
         }
+    }
+
+    /**
+     * Whether the log byte [since] lies inside a private-key block, judged from the scan cap's worth of log before it: a
+     * wait that starts there must not read the block's payload lines as ordinary output. An unreadable log answers no; the
+     * poll that follows reports it.
+     */
+    private fun insideKeyBlock(proc: Proc, since: Long): Boolean {
+        if (since <= 0) return false
+        val from = maxOf(0L, since - redaction.config.maxBytes)
+        val before = try {
+            Files.newByteChannel(proc.log).use { channel ->
+                channel.position(from)
+                val buffer = java.nio.ByteBuffer.allocate((since - from).toInt())
+                while (buffer.hasRemaining() && channel.read(buffer) > 0) Unit
+                String(buffer.array(), 0, buffer.position(), Charsets.UTF_8)
+            }
+        } catch (unreadable: IOException) {
+            return false
+        }
+        val begin = Redaction.PRIVATE_KEY_BEGIN.findAll(before).lastOrNull() ?: return false
+        return Redaction.PRIVATE_KEY_END.find(before, begin.range.last + 1) == null
     }
 
     /** The last whole lines of [text] that fit [budgetTokens]. */
@@ -767,6 +786,73 @@ private const val WAIT_LINE_BYTES: Int = 64 * 1024
 
 /** The lines of [text]; a closing line break ends the last line instead of opening an empty one that `^$` would match. */
 private fun linesOf(text: String): Sequence<String> = text.lineSequence().toList().let { if (it.last().isEmpty()) it.dropLast(1) else it }.asSequence()
+
+/**
+ * Readiness matching on capture-level redacted text. Lines are redacted in runs, the way a capture is, so a multi-line
+ * secret is recognised as a whole: from an opening private-key marker the lines are held back until the block closes
+ * across polls, then redacted with it. A block that never closes within the scan cap, or that was open where the scan
+ * began ([skipping]), is never matched nor shown. So `until_line` is no oracle for a secret and never echoes one.
+ */
+private class ReadinessScan(private val redaction: Redaction, private val pattern: Regex?, private var skipping: Boolean) {
+    /** Characters per redaction run, so a run never exceeds the byte cap and its tail is always scanned. */
+    private val runChars = maxOf(1, redaction.config.maxBytes / 4)
+    private val held = StringBuilder()
+
+    /** A private-key block is open where the text fed so far ends. */
+    val open: Boolean get() = skipping || held.isNotEmpty()
+
+    /** Feeds whole lines (the last may be unfinished once the process ended); the first redacted line that matches. */
+    fun feed(text: String): String? {
+        val run = StringBuilder()
+        var matched: String? = null
+        fun flush() {
+            if (matched == null && pattern != null && run.isNotEmpty()) {
+                matched = linesOf(redaction.apply(run.toString(), ContentClass.ReusableEvidence).text)
+                    .map { it.trimEnd('\r') }.firstOrNull { pattern.containsMatchIn(it) }?.take(200)
+            }
+            run.setLength(0)
+        }
+        for (line in linesWithBreaks(text)) {
+            when {
+                skipping -> if (Redaction.PRIVATE_KEY_END.containsMatchIn(line)) skipping = false
+                held.isNotEmpty() -> {
+                    held.append(line)
+                    if (Redaction.PRIVATE_KEY_END.containsMatchIn(line)) {
+                        if (run.length + held.length > runChars) flush()
+                        run.append(held)
+                        held.setLength(0)
+                    } else if (held.length > runChars) {
+                        held.setLength(0)
+                        skipping = true
+                    }
+                }
+                opens(line) -> held.append(line)
+                else -> {
+                    if (run.length + line.length > runChars) flush()
+                    run.append(line)
+                }
+            }
+        }
+        flush()
+        return matched
+    }
+
+    private fun opens(line: String): Boolean {
+        val begin = Redaction.PRIVATE_KEY_BEGIN.findAll(line).lastOrNull() ?: return false
+        return Redaction.PRIVATE_KEY_END.find(line, begin.range.last + 1) == null
+    }
+
+    private fun linesWithBreaks(text: String): List<String> {
+        val lines = ArrayList<String>()
+        var from = 0
+        while (from < text.length) {
+            val end = text.indexOf('\n', from).let { if (it < 0) text.length else it + 1 }
+            lines += text.substring(from, end)
+            from = end
+        }
+        return lines
+    }
+}
 
 /** The last [capacity] bytes added, and how many earlier ones were [dropped]. */
 private class TailBuffer(private val capacity: Int) {

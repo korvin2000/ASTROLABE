@@ -63,16 +63,24 @@ internal class Recorder(private val events: Events, file: Path) : AutoCloseable 
     }
 }
 
+/** A numeric response field: [sum] covers the [known] of [calls] responses that reported it; partial when they differ. */
+@Serializable
+internal data class Quantity(val sum: String, val known: Int, val calls: Int)
+
 /**
- * What one run's events add up to. A quantity no response reported is `null`, never 0: a dimension counts only when
- * every response reported it. [cost] prices the usage with the profile's table and is `null` when any part is
- * unknown or unpriced; [costPricedPart] is what could be priced. [responded] sums every other numeric field of
- * `ModelResponded`, so fields the events gain later (A2a: billed cost, reasoning, timings) are summed without a change.
+ * What one run's events add up to. Every dispatched model call ends in one `ModelResponded` — answered, failed or
+ * cancelled — so its usage counts here; [modelFailures] counts the failed ones. A quantity no response reported is
+ * `null`, never 0: a dimension counts only when every response reported it. [cost] prices the usage with the
+ * profile's table and is `null` when any part is unknown or unpriced; [costPricedPart] is what could be priced.
+ * [responded] aggregates every other numeric field of `ModelResponded` as a [Quantity], so fields the events gain later
+ * are aggregated without a change and a partial sum is never mistaken for a whole one. A price tier is a threshold, not
+ * a quantity: [priceTiers] counts the responses per tier threshold (`none` when a response named none).
  */
 @Serializable
 internal data class Totals(
     val modelRequests: Int,
     val modelResponses: Int,
+    val modelFailures: Int,
     val cellsStarted: Int,
     val turns: Int,
     val toolCalls: Int,
@@ -86,15 +94,17 @@ internal data class Totals(
     val spanCost: String?,
     val providerModels: List<String>,
     val stops: Map<String, Int>,
-    val responded: Map<String, String>,
+    val responded: Map<String, Quantity>,
+    val priceTiers: Map<String, Int>,
 ) {
     companion object {
         /** Fields of `ModelResponded` read above or that are identities, not quantities. */
-        private val KNOWN = setOf("type", "ids", "invocationId", "stop", "usage", "phase", "span", "parent")
+        private val KNOWN = setOf("type", "ids", "invocationId", "stop", "usage", "phase", "span", "parent", "failure")
 
         fun of(events: List<AgentEvent>, prices: PriceTable): Totals {
             val responded = events.filterIsInstance<AgentEvent.Cell.ModelResponded>()
             val usages = responded.map { it.usage }
+            val facts = facts(responded)
             fun dimension(match: (BillingDimension) -> Boolean): Long? {
                 if (usages.isEmpty() || usages.any { u -> u == null || u.quantities.keys.none(match) || u.unknown.any(match) }) return null
                 return usages.sumOf { u -> u!!.quantities.filterKeys(match).values.sum() }
@@ -109,6 +119,7 @@ internal data class Totals(
             return Totals(
                 modelRequests = events.count { it is AgentEvent.Cell.ModelRequested },
                 modelResponses = responded.size,
+                modelFailures = responded.count { it.failure != null },
                 cellsStarted = events.count { it is AgentEvent.Cell.Started },
                 turns = events.count { it is AgentEvent.Cell.TurnStarted },
                 toolCalls = events.count { it is AgentEvent.Cell.ToolCalled },
@@ -122,30 +133,44 @@ internal data class Totals(
                 spanCost = spanTotal?.toPlainString(),
                 providerModels = usages.mapNotNull { it?.provenance?.model }.distinct(),
                 stops = responded.groupingBy { it.stop.name }.eachCount(),
-                responded = extra(responded),
+                responded = extra(facts),
+                priceTiers = tiers(facts),
             )
         }
 
-        private fun extra(responded: List<AgentEvent.Cell.ModelResponded>): Map<String, String> {
-            val sums = sortedMapOf<String, BigDecimal>()
-            for (event in responded) {
-                val tree = Recorder.json.encodeToJsonElement(AgentEvent.serializer(), event) as JsonObject
-                for ((key, value) in tree) if (key !in KNOWN) collect(key, value, sums)
-            }
-            return sums.mapValues { it.value.toPlainString() }
+        /** The numeric fields of every response, by path; a response that did not report a path has no entry for it. */
+        private fun facts(responded: List<AgentEvent.Cell.ModelResponded>): List<Map<String, BigDecimal>> = responded.map { event ->
+            val tree = Recorder.json.encodeToJsonElement(AgentEvent.serializer(), event) as JsonObject
+            sortedMapOf<String, BigDecimal>().also { found -> for ((key, value) in tree) if (key !in KNOWN) collect(key, value, found) }
         }
 
-        private fun collect(path: String, value: JsonElement, sums: MutableMap<String, BigDecimal>) {
+        private fun extra(facts: List<Map<String, BigDecimal>>): Map<String, Quantity> {
+            val paths = facts.flatMap { it.keys }.filterNot(::isTier).toSortedSet()
+            return paths.associateWith { path ->
+                val known = facts.mapNotNull { it[path] }
+                Quantity(known.reduce(BigDecimal::add).toPlainString(), known.size, facts.size)
+            }
+        }
+
+        private fun tiers(facts: List<Map<String, BigDecimal>>): Map<String, Int> =
+            facts.groupingBy { found -> found.entries.firstOrNull { isTier(it.key) }?.value?.toPlainString() ?: NO_TIER }.eachCount().toSortedMap()
+
+        private fun isTier(path: String): Boolean = path.substringAfterLast('.').startsWith("priceTier")
+
+        private fun collect(path: String, value: JsonElement, found: MutableMap<String, BigDecimal>) {
             when (value) {
-                is JsonObject -> for ((key, child) in value) collect("$path.$key", child, sums)
+                is JsonObject -> for ((key, child) in value) collect("$path.$key", child, found)
                 is JsonPrimitive -> {
                     val number = if (value.isString) value.content.takeIf { DECIMAL.matches(it) }?.let(::BigDecimal)
                     else value.longOrNull?.let(BigDecimal::valueOf) ?: value.content.toBigDecimalOrNull()
-                    if (number != null) sums.merge(path, number, BigDecimal::add)
+                    if (number != null) found[path] = number
                 }
                 else -> Unit
             }
         }
+
+        /** The [Totals.priceTiers] bucket of a response that named no price tier: base prices, no prices, or no facts. */
+        const val NO_TIER: String = "none"
 
         private val DECIMAL = Regex("""-?\d+(\.\d+)?""")
     }

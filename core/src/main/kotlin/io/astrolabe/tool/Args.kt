@@ -264,7 +264,7 @@ public data class EditArgs(val ops: List<EditOpArgs>, val why: String) {
  * and [untilPort] (a loopback port that accepts connections) are readiness conditions: on a launch they imply `bg`.
  */
 @Serializable
-public data class RunArgs(
+public data class RunArgs @JvmOverloads constructor(
     val op: String = "run",
     val argv: List<String>? = null,
     val cmd: String? = null,
