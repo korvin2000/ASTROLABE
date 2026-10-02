@@ -258,8 +258,10 @@ public data class EditArgs(val ops: List<EditOpArgs>, val why: String) {
 }
 
 /**
- * `run(argv|cmd, …)`, `run(op=poll, handle, since?)`, `run(op=cancel, handle)` (§5.4). An omitted [budget] or
- * [timeout] (seconds) is the configured `Defaults.runBudgetTokens` / `runTimeoutSeconds`, resolved by the executor.
+ * `run(argv|cmd, …)`, `run(op=poll, handle, since?)`, `run(op=wait, handle, until_line?, until_port?)`,
+ * `run(op=cancel, handle)` (§5.4). An omitted [budget] or [timeout] (seconds) is the configured
+ * `Defaults.runBudgetTokens` / `runTimeoutSeconds`, resolved by the executor. [untilLine] (a regex over output lines)
+ * and [untilPort] (a loopback port that accepts connections) are readiness conditions: on a launch they imply `bg`.
  */
 @Serializable
 public data class RunArgs(
@@ -276,9 +278,12 @@ public data class RunArgs(
     @SerialName("if") val condition: String? = null,
     val handle: String? = null,
     val since: Long? = null,
+    @SerialName("until_line") val untilLine: String? = null,
+    @SerialName("until_port") val untilPort: Int? = null,
 ) {
     init {
         require(op in ToolOps.run) { "unknown run op '$op'" }
+        require(untilPort == null || untilPort in 1..65_535) { "until_port must be a TCP port (1-65535)" }
         when (op) {
             "run" -> require((argv != null && argv.isNotEmpty()) xor (!cmd.isNullOrBlank())) { "run needs exactly one of argv or cmd" }
             else -> require(!handle.isNullOrBlank()) { "$op needs a handle" }

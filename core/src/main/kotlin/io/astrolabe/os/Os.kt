@@ -103,6 +103,23 @@ public interface Os : AutoCloseable {
     @Throws(IOException::class)
     public fun realPath(path: Path): Path?
 
+    /**
+     * Whether a listener accepts TCP connections on [port] at the IPv4 or IPv6 loopback address: the
+     * readiness probe of a wait for a port. The connection is closed at once and nothing is sent; a
+     * refused or slow connect answers `false`. Never a network address beyond this machine.
+     */
+    public fun listening(port: Int): Boolean {
+        require(port in 1..65_535) { "port out of range: $port" }
+        return listOf(byteArrayOf(127, 0, 0, 1), ByteArray(15) + byteArrayOf(1)).any { address ->
+            try {
+                java.net.Socket().use { it.connect(java.net.InetSocketAddress(java.net.InetAddress.getByAddress(address), port), LISTEN_PROBE_MILLIS) }
+                true
+            } catch (_: IOException) {
+                false
+            }
+        }
+    }
+
     /** Terminates every process still owned by this instance and releases its native handles. */
     override fun close()
 }
@@ -323,3 +340,6 @@ public class OsFailure(
     public val errorCode: Int,
     message: String,
 ) : IOException(message)
+
+/** How long a loopback readiness probe waits for a connect ([Os.listening]). */
+private const val LISTEN_PROBE_MILLIS: Int = 250

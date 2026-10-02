@@ -99,7 +99,7 @@ public data class RunResult(
 )
 
 /**
- * The `run` family (§5.4, §4.6, §9.4, §13.1, TODO P1.6.5): `run(argv|cmd)`, `run(op=poll)`, `run(op=cancel)`.
+ * The `run` family (§5.4, §4.6, §9.4, §13.1, TODO P1.6.5): `run(argv|cmd)`, `run(op=poll)`, `run(op=wait)`, `run(op=cancel)`.
  *
  * Before dispatch: the effect policy classifies the command, the contract's capability ceiling and the
  * configured execution mode decide (a host that requires confinement is refused, D-11), and a D-class command
@@ -111,7 +111,10 @@ public data class RunResult(
  * writes, and the `touched (by run …)` line names them. Output is captured to a store-owned log, redacted,
  * shaped by the parsers of P1.6.6, and kept as a blob the model can recall. `bg=true` returns a persisted
  * [Handle]; `poll` reattaches to the same process after a restart and an observation timeout leaves it
- * running (FX-22); `cancel` is a request and a status, never proof that every effect stopped.
+ * running (FX-22); `cancel` is a request and a status, never proof that every effect stopped. `wait` observes a
+ * handle in one call until the process ends, or until a readiness condition holds (`until_line`, `until_port`), or
+ * its deadline on the injected clock passes; an end before readiness stops the wait with the terminal diagnostics,
+ * and a cancelled wait leaves the process running. `until_*` on a launch starts it in the background and waits.
  */
 public class Run(
     private val workspace: Workspace,
@@ -165,10 +168,15 @@ public class Run(
         require(call.family == ToolFamily.Run) { "not a run call: ${call.name}" }
         // D-352: a cwd naming the root is no cwd, so intents, handles and the unknown-outcome guard see one command.
         val args = (call.args as Args.Run).args.let { if (it.cwd != null && namesWorkspaceRoot(it.cwd)) it.copy(cwd = null) else it }
-        if (!mask.allows(call.name)) return refused(args, Outcome.Denied, "${call.name} is masked in this role")
+        // A wait observes a handle exactly as a poll does, so a role allowed to poll may wait.
+        if (!mask.allows(call.name) && !(args.op == "wait" && mask.allows(ToolOps.name(ToolFamily.Run, "poll")))) {
+            return refused(args, Outcome.Denied, "${call.name} is masked in this role")
+        }
         return when (args.op) {
-            "run" -> run(args, context)
-            "poll" -> poll(args, context)
+            "run" -> run(if (!args.bg && !args.until().none) args.copy(bg = true) else args, context)
+            // D-365 tolerance: a poll that names a readiness condition is a wait.
+            "poll" -> if (args.until().none) poll(args, context) else wait(args)
+            "wait" -> wait(args)
             "cancel" -> cancel(args)
             else -> refused(args, Outcome.Denied, "unknown run op '${args.op}'")
         }
@@ -226,6 +234,7 @@ public class Run(
         )
         var logBlob: Digest? = null
         var rendered: ToolOutcome? = null
+        var started: String? = null
         // The fence throws before any intent is recorded, so a lapsed lease never leaves an open intent (§13.1).
         beforeDispatch()
         val outcome = Consequential.run(
@@ -249,9 +258,10 @@ public class Run(
                         val handle = Handle(idGen.next("handle"), ids, actionId, alias.text, argv, shell, args.cwd, launch.proc, wire(launch.proc.status), launch.cursor, before.candidateId.digest.hex,
                             classification.effectClass, classification.effectsUnknown, before.members, before.baseCommit)
                         handles.save(handle)
+                        started = handle.handleId
                         val safe = redaction.applyBytes(launch.firstOutput, ContentClass.ModelFacing)
                         val slice = safe.text
-                        val view = "background run ${alias.text} handle ${handle.handleId} · ${wire(launch.proc.status)} · poll with run(op=poll, handle=\"${handle.handleId}\")" + (if (slice.isBlank()) "" else "\n$slice")
+                        val view = "background run ${alias.text} handle ${handle.handleId} · ${wire(launch.proc.status)} · wait with run(op=wait, handle=\"${handle.handleId}\")" + (if (slice.isBlank()) "" else "\n$slice")
                         val result = RunResult(alias.text, actionId, null, Outcome.NotRun, view, false, logBlob, classification.effectClass, before.candidateId, null, false, emptyList(), handle.handleId, null, null, emptyList(), intent.intentId)
                         render(args, result, argv, shell, before, null, classification.effectsUnknown, statusWire = wire(launch.proc.status), captureMask = safe.mask)
                     }
@@ -260,7 +270,8 @@ public class Run(
             },
         )
         return when (outcome) {
-            is ActionOutcome.Completed -> checkNotNull(rendered)
+            // The launch is committed and its handle persisted before the wait, so a cancelled wait leaves no open intent.
+            is ActionOutcome.Completed -> started?.takeUnless { args.until().none }?.let { wait(args.copy(op = "wait", handle = it, since = 0)) } ?: checkNotNull(rendered)
             is ActionOutcome.Unknown -> unknown(args, alias.text, actionId, before, intent.intentId, outcome.cause)
             is ActionOutcome.NotDispatched -> refused(args, Outcome.Denied, outcome.reason)
         }
@@ -464,32 +475,142 @@ public class Run(
                 val result = RunResult(handle.alias, handle.actionId, null, Outcome.NotRun, view, false, null, handle.effectClass, CandidateId(Digest(handle.stampBefore)), null, false, emptyList(), handle.handleId, null, null, emptyList())
                 render(args, result, handle.argv, handle.shell, null, null, effectsUnknown = handle.effectsUnknown, statusWire = "running", captureMask = safeSlice.mask)
             }
-            else -> {
-                val after = stamper.report()
-                var complete = true
-                val log = try {
-                    Files.newInputStream(proc.log).use {
-                        val bytes = it.readNBytes(Executions.MAX_CAPTURE_BYTES)
-                        complete = it.read() == -1
-                        bytes
-                    }
-                } catch (missing: IOException) {
-                    complete = false
-                    poll.newBytes
-                }
-                val safeLog = redaction.applyBytes(log, ContentClass.ReusableEvidence)
-                val logBlob = blobs.put(safeLog.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
-                val stampBefore = CandidateId(Digest(handle.stampBefore))
-                val changed = announceBackground(handle, after)
-                val capture = RunCapture(handle.actionId, handle.argv, handle.shell, handle.cwd, (status as? ProcStatus.Exited)?.exitCode, status == ProcStatus.DeadlineExceeded, log, complete && status !is ProcStatus.Lost)
-                val shaped = Shapers.shape(capture, ShapeBudget(args.budgetTokens, estimator, handle.alias))
-                val outcome = if (status is ProcStatus.Lost || status is ProcStatus.Cancelled) Outcome.UnknownOutcome else shaped.status
-                val view = "handle ${handle.handleId} ${wire(status)}\n" + shaped.view + "\nBackground effects cannot be attributed exclusively to this process." + (if (changed.isEmpty()) "" else "\nchanged during background run (${changed.size} paths): " + changed.take(10).joinToString(", "))
-                val effectClass = observedClass(handle.effectClass, changed)
-                val result = RunResult(handle.alias, handle.actionId, capture.exitCode, outcome, view, shaped.viewTruncated, logBlob, effectClass, stampBefore, after.candidateId, true, changed, handle.handleId, shaped.counts, shaped, shaped.limitations)
-                render(args, result, handle.argv, handle.shell, null, after, effectsUnknown = true, captureMask = safeLog.mask, completedPlainly = completedPlainly(capture, outcome, shaped))
-            }
+            else -> ended(args, handle, proc, status, poll.newBytes, note = null)
         }
+    }
+
+    /** A background process reached its terminal [status]: the whole log is stored and shaped, the interval diffed. */
+    private fun ended(args: RunArgs, handle: Handle, proc: Proc, status: ProcStatus, fallback: ByteArray, note: String?): ToolOutcome {
+        val after = stamper.report()
+        var complete = true
+        val log = try {
+            Files.newInputStream(proc.log).use {
+                val bytes = it.readNBytes(Executions.MAX_CAPTURE_BYTES)
+                complete = it.read() == -1
+                bytes
+            }
+        } catch (missing: IOException) {
+            complete = false
+            fallback
+        }
+        val safeLog = redaction.applyBytes(log, ContentClass.ReusableEvidence)
+        val logBlob = blobs.put(safeLog.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
+        val stampBefore = CandidateId(Digest(handle.stampBefore))
+        val changed = announceBackground(handle, after)
+        val capture = RunCapture(handle.actionId, handle.argv, handle.shell, handle.cwd, (status as? ProcStatus.Exited)?.exitCode, status == ProcStatus.DeadlineExceeded, log, complete && status !is ProcStatus.Lost)
+        val shaped = Shapers.shape(capture, ShapeBudget(args.budgetTokens, estimator, handle.alias))
+        val outcome = if (status is ProcStatus.Lost || status is ProcStatus.Cancelled) Outcome.UnknownOutcome else shaped.status
+        val view = "handle ${handle.handleId} ${wire(status)}\n" + (note?.let { "$it\n" } ?: "") + shaped.view + "\nBackground effects cannot be attributed exclusively to this process." + (if (changed.isEmpty()) "" else "\nchanged during background run (${changed.size} paths): " + changed.take(10).joinToString(", "))
+        val effectClass = observedClass(handle.effectClass, changed)
+        val result = RunResult(handle.alias, handle.actionId, capture.exitCode, outcome, view, shaped.viewTruncated, logBlob, effectClass, stampBefore, after.candidateId, true, changed, handle.handleId, shaped.counts, shaped, shaped.limitations)
+        return render(args, result, handle.argv, handle.shell, null, after, effectsUnknown = true, captureMask = safeLog.mask, completedPlainly = completedPlainly(capture, outcome, shaped))
+    }
+
+    // ------------------------------------------------------------------ wait
+
+    /** What a wait stops on before the process ends; with neither condition it waits for the end itself. */
+    private class Until(val pattern: String?, val line: Regex?, val port: Int?) {
+        val none: Boolean get() = line == null && port == null
+
+        override fun toString(): String =
+            listOfNotNull(pattern?.let { "a line matching /$it/" }, port?.let { "port $it accepting connections" }).joinToString(" or ").ifEmpty { "the process to end" }
+    }
+
+    private fun RunArgs.until(): Until {
+        val pattern = untilLine?.takeIf { it.isNotBlank() }
+        // D-365 tolerance: a pattern that does not compile is matched literally.
+        val regex = pattern?.let { runCatching { Regex(it) }.getOrElse { _ -> Regex(Regex.escape(pattern)) } }
+        return Until(pattern, regex, untilPort)
+    }
+
+    private sealed interface Waited {
+        val cursor: Long
+
+        class Ended(val status: ProcStatus, override val cursor: Long, val tail: ByteArray) : Waited
+        class Ready(val reason: String, override val cursor: Long, val tail: ByteArray, val dropped: Long) : Waited
+        class Expired(override val cursor: Long, val tail: ByteArray, val dropped: Long) : Waited
+    }
+
+    /**
+     * `run(op=wait)`: one call observes the handle until its process ends, a readiness condition holds, or the wait
+     * deadline passes (`timeout`, clamped like a run's, measured on the injected clock). The deadline ends only the
+     * observation, never the process (§13.1), and a cancelled wait leaves the handle as it was.
+     */
+    private suspend fun wait(args: RunArgs): ToolOutcome {
+        val handle = ownedHandle(args.handle!!) ?: return refused(args, Outcome.Denied, "no handle '${args.handle}' in this campaign workspace")
+        val until = args.until()
+        val proc = os.reattach(handle.proc)
+        val limitSeconds = args.timeoutSeconds.toLong()
+        val waited = try {
+            kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { await(proc, args.since ?: handle.cursor, until, clock.instant().plusSeconds(limitSeconds)) }
+        } catch (failure: IOException) {
+            handles.save(handle.copy(status = wire(ProcStatus.Lost)))
+            return refused(args, Outcome.UnknownOutcome, "handle ${handle.handleId}: the log cannot be read (${failure.message}); the process state is unknown — reconcile, never relaunch")
+        }
+        val (line, tail, dropped) = when (waited) {
+            is Waited.Ended -> {
+                handles.save(handle.copy(proc = proc.copy(status = waited.status), status = wire(waited.status), cursor = waited.cursor))
+                // §14 risk: an end before readiness interrupts the wait, and the terminal diagnostics are its result.
+                return ended(args, handle, proc, waited.status, waited.tail, if (until.none) null else "wait ended: the process ended before $until")
+            }
+            is Waited.Ready -> Triple("ready: ${waited.reason}", waited.tail, waited.dropped)
+            is Waited.Expired -> Triple("wait timed out after ${limitSeconds}s before $until, the process keeps running (no relaunch)", waited.tail, waited.dropped)
+        }
+        handles.save(handle.copy(proc = proc.copy(status = ProcStatus.Running), status = wire(ProcStatus.Running), cursor = waited.cursor))
+        val safe = redaction.applyBytes(tail, ContentClass.ModelFacing)
+        val shown = tailWithin(safe.text, args.budgetTokens)
+        val elided = dropped > 0 || shown.length < safe.text.length
+        val view = "handle ${handle.handleId} running · $line · cursor ${waited.cursor}" +
+            (if (elided) "\n… earlier output elided; the log holds it" else "") + (if (shown.isBlank()) "" else "\n$shown")
+        val result = RunResult(handle.alias, handle.actionId, null, Outcome.NotRun, view, elided, null, handle.effectClass, CandidateId(Digest(handle.stampBefore)), null, false, emptyList(), handle.handleId, null, null, emptyList())
+        return render(args, result, handle.argv, handle.shell, null, null, effectsUnknown = handle.effectsUnknown, statusWire = "running", captureMask = safe.mask)
+    }
+
+    /** The blocking wait loop; an interrupted (cancelled) caller propagates and leaves the process alone. */
+    private fun await(start: Proc, since: Long, until: Until, deadline: java.time.Instant): Waited {
+        var proc = start
+        var cursor = since
+        val tail = TailBuffer(WAIT_TAIL_BYTES)
+        var partial = ByteArray(0)
+        while (true) {
+            if (Thread.currentThread().isInterrupted) throw InterruptedException("wait interrupted")
+            val remainingMillis = java.time.Duration.between(clock.instant(), deadline).toMillis()
+            if (remainingMillis <= 0) return Waited.Expired(cursor, tail.bytes(), tail.dropped)
+            // A port opens silently, so a port wait looks again every second; otherwise output or the end wakes the poll.
+            val slice = if (until.port != null) 1L else minOf(pollSliceSeconds, (remainingMillis + 999) / 1_000)
+            val poll = os.poll(proc, cursor, slice)
+            if (poll.newBytes.isNotEmpty() && poll.nextCursorBytes <= cursor) throw IOException("the log cursor did not advance")
+            tail.add(poll.newBytes)
+            cursor = poll.nextCursorBytes
+            proc = proc.copy(status = poll.status)
+            if (proc.status.isTerminal) return Waited.Ended(proc.status, cursor, tail.bytes())
+            if (until.line != null) {
+                val lines = partial + poll.newBytes
+                val end = lines.lastIndexOf('\n'.code.toByte())
+                val cut = if (end >= 0) end + 1 else if (lines.size > WAIT_LINE_BYTES) lines.size else 0
+                partial = lines.copyOfRange(cut, lines.size)
+                // Matched on the redacted line: a pattern is no oracle for a secret the model is never shown.
+                val matched = lines.copyOfRange(0, cut).toString(Charsets.UTF_8).lineSequence()
+                    .map { redaction.apply(it.trimEnd('\r')).text }.firstOrNull { until.line.containsMatchIn(it) }
+                if (matched != null) return Waited.Ready("line matched: ${matched.take(200)}", cursor, tail.bytes(), tail.dropped)
+            }
+            if (until.port != null && os.listening(until.port)) return Waited.Ready("port ${until.port} accepts connections", cursor, tail.bytes(), tail.dropped)
+        }
+    }
+
+    /** The last whole lines of [text] that fit [budgetTokens]. */
+    private fun tailWithin(text: String, budgetTokens: Int): String {
+        if (estimator.estimate(text).tokens <= budgetTokens) return text
+        val lines = text.lines()
+        var used = 0L
+        var first = lines.size
+        while (first > 0) {
+            val cost = estimator.estimate(lines[first - 1]).tokens + 1
+            if (used + cost > budgetTokens) break
+            used += cost
+            first--
+        }
+        return lines.subList(first, lines.size).joinToString("\n")
     }
 
     /** The interval diff invalidates evidence but cannot attribute concurrent edits to a background process. */
@@ -592,6 +713,29 @@ public class Run(
 
 /** The longest `run` a model may ask for in one call (D-370); a larger value is clamped to it. */
 private const val MAX_TIMEOUT_SECONDS: Int = 3_600
+
+/** How much of a wait's output stays in memory for its view; the log holds all of it. */
+private const val WAIT_TAIL_BYTES: Int = 256 * 1024
+
+/** A line longer than this without a newline is matched as it stands. */
+private const val WAIT_LINE_BYTES: Int = 64 * 1024
+
+/** The last [capacity] bytes added, and how many earlier ones were [dropped]. */
+private class TailBuffer(private val capacity: Int) {
+    private var held = ByteArray(0)
+    var dropped: Long = 0
+        private set
+
+    fun add(bytes: ByteArray) {
+        if (bytes.isEmpty()) return
+        val joined = held + bytes
+        val excess = joined.size - capacity
+        if (excess > 0) dropped += excess
+        held = if (excess > 0) joined.copyOfRange(excess, joined.size) else joined
+    }
+
+    fun bytes(): ByteArray = held.copyOf()
+}
 
 /**
  * D-375: [ContainmentProbe] over the real workspace. Every existing segment of the path is a plain directory (the last
