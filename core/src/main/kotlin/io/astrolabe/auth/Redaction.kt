@@ -137,19 +137,21 @@ public class Redaction @JvmOverloads constructor(public val config: RedactionCon
     public fun apply(text: String): Redacted = apply(text, ContentClass.ModelFacing)
 
     /** Redacts [text] for [content]; refuses a content class that must stay byte-exact. */
-    public fun apply(text: String, content: ContentClass): Redacted = redact(text, content, live = false, openAtEnd = false)
+    public fun apply(text: String, content: ContentClass): Redacted = redact(text, content, live = false, openAtEnd = false, context = "")
 
     /**
      * Redacts a window of a live stream, which may begin or end inside a private-key block: an end marker with no
      * opening before it hides everything up to it, an opening with no end hides the rest, and [openAtEnd] (the reader
      * knows a block is still open where the window ends) hides the window when no opening in it explains that.
+     * [context] is the stream just before the window: it is scanned with the window but never rendered, so a secret
+     * that began there (a block opened in an earlier poll, a host multi-line pattern) hides the window's part of it.
      */
-    internal fun applyLive(bytes: ByteArray, content: ContentClass, openAtEnd: Boolean): Redacted {
+    internal fun applyLive(bytes: ByteArray, content: ContentClass, openAtEnd: Boolean, context: String = ""): Redacted {
         if (bytes.isEmpty() || looksBinary(bytes)) return applyBytes(bytes, content)
-        return redact(String(bytes, Charsets.UTF_8), content, live = true, openAtEnd = openAtEnd)
+        return redact(String(bytes, Charsets.UTF_8), content, live = true, openAtEnd = openAtEnd, context = context)
     }
 
-    private fun redact(text: String, content: ContentClass, live: Boolean, openAtEnd: Boolean): Redacted {
+    private fun redact(text: String, content: ContentClass, live: Boolean, openAtEnd: Boolean, context: String): Redacted {
         val refusal = refuse(content)
         require(refusal == null) { refusal.toString() }
         if (text.isEmpty()) return Redacted(text, RedactionMask.NONE)
@@ -167,17 +169,23 @@ public class Redaction @JvmOverloads constructor(public val config: RedactionCon
             }
         }
 
-        val found = ArrayList<Found>()
+        // The context is scanned together with the window; each finding is then clipped to the window's offsets.
+        val whole = context + scanned
+        val all = ArrayList<Found>()
         compiled.forEachIndexed { index, (pattern, regex) ->
-            regex.findAll(scanned).forEach { match ->
-                if (!match.range.isEmpty()) found += Found(match.range.first, match.range.last + 1, pattern.kind, index)
+            regex.findAll(whole).forEach { match ->
+                if (!match.range.isEmpty()) all += Found(match.range.first, match.range.last + 1, pattern.kind, index)
             }
         }
         if (live) {
-            found += liveBlocks(scanned, openAtEnd)
+            all += liveBlocks(whole, openAtEnd)
         } else if (wasCapped) unterminatedBlock(scanned)?.let {
-            found += it
+            all += it
             limitations += "the byte cap cut a private-key block; the rest of the capture is hidden"
+        }
+        val found = ArrayList<Found>(all.size)
+        for (match in all) {
+            if (match.end > context.length) found += match.copy(start = maxOf(0, match.start - context.length), end = match.end - context.length)
         }
 
         found.sortWith(compareBy({ it.start }, { it.priority }, { -it.end }))
