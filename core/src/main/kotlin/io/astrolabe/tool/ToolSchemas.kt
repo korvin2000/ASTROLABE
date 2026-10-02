@@ -63,7 +63,7 @@ public object ToolSchemas {
     private fun description(family: ToolFamily): String = when (family) {
         ToolFamily.Look -> "Observe: tree, outline, read (path | path:a-b | path::Symbol), find (in workspace|store|kb), def, refs, importers, impact, recall(id), bmap, catalog. Budgeted; results carry scope, complete and versions."
         ToolFamily.Edit -> "Mutate, one form per op: {path, expect?, hunks} anchored hunks inside displayed ranges; {create, content}; {delete, expect?}; {rename, to, expect?}; {revert: #id|turn:N}; {transform: {script|argv, scope_glob, why}}. expect is the content hash the file was shown with (4+ hex, e.g. c02e); omitted, it is the version you last read. Preflighted; partial failures are reported, never rolled back."
-        ToolFamily.Run -> "Execute argv (preferred) or one shell cmd; cwd defaults to the workspace root; op=poll/cancel for background handles. Non-zero exit is information; timeouts kill the process tree."
+        ToolFamily.Run -> "Execute argv (preferred) or one shell cmd; cwd defaults to the workspace root; op=wait(handle) blocks until the process ends or until_line (regex) / until_port (loopback) is ready — one call, no polling; until_* on a launch implies bg; op=poll/cancel for background handles. Non-zero exit is information; timeouts kill the process tree."
         ToolFamily.Verify -> "check(paths?) now; tests(selection=blast|accept|full|ids); acceptance(ids?); baseline(); review(scope?)."
         ToolFamily.State -> "STATE ops: patch = a JSON array of typed ops — ${PatchParser.VOCABULARY}. blocked(reason, evidence, question?); retrieval_miss(need, why)."
         ToolFamily.Task -> "ask(question, options?) ends the turn blocked-with-question; delegate/collect (probe|review|writer|qa); propose(kind, proposal) with kind plan|increment_split|amendment — see proposal."
@@ -100,7 +100,7 @@ public object ToolSchemas {
             required = emptyList(),
             "op" to enum(ToolOps.run), "argv" to arr(str()), "cmd" to str(), "cwd" to str(), "shape" to str(), "budget" to int(),
             "timeout" to int(), "bg" to bool(), "intent" to str(), "class_hint" to enum(listOf("R", "W", "D")), "if" to str(),
-            "handle" to str(), "since" to int(),
+            "handle" to str(), "since" to int(), "until_line" to str(), "until_port" to int(),
         )
         ToolFamily.Verify -> obj(
             required = listOf("what"),
