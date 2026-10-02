@@ -423,8 +423,12 @@ internal fun collapsedAncestor(path: String, toolchains: Set<String> = emptySet(
     return null
 }
 
-/** A file every root of one toolchain layout holds, in one of its [places]: a directory below the root and a lower-cased name pattern. */
-private class Marker(vararg places: String) {
+/**
+ * A file every root of one toolchain layout holds, in one of its [places]: a directory below the root and a lower-cased
+ * name pattern. On disk it must be a regular file of at least [minBytes], or with [links] also a link (a venv's
+ * `bin/python`), so an empty planted name proves nothing.
+ */
+private class Marker(vararg places: String, val minBytes: Long = 0, val links: Boolean = false) {
     private val places: List<Pair<String, Regex>> = places.map { it.substringBeforeLast('/', "") to Regex(it.substringAfterLast('/')) }
 
     /** The length of the toolchain root this lower-cased relative [path] names as this marker; null when it is none or the root is the workspace's. */
@@ -442,7 +446,10 @@ private class Marker(vararg places: String) {
     fun onDisk(at: Path): Boolean = places.any { (directory, pattern) ->
         try {
             Files.newDirectoryStream(if (directory.isEmpty()) at else at.resolve(directory)).use { entries ->
-                entries.any { Files.isRegularFile(it, LinkOption.NOFOLLOW_LINKS) && pattern.matches(it.fileName.toString().lowercase(Locale.ROOT)) }
+                entries.any { entry ->
+                    pattern.matches(entry.fileName.toString().lowercase(Locale.ROOT)) &&
+                        ((links && Files.isSymbolicLink(entry)) || (Files.isRegularFile(entry, LinkOption.NOFOLLOW_LINKS) && Files.size(entry) >= minBytes))
+                }
             }
         } catch (_: IOException) {
             false
@@ -450,40 +457,58 @@ private class Marker(vararg places: String) {
     }
 }
 
+private const val MIB: Long = 1L shl 20
+
 /**
- * Toolchain layouts, each a list of markers one root must hold: a JDK or JRE image, a Gradle or Maven distribution,
- * Node.js (Windows zip or POSIX tarball), a Python venv or a Windows Python installation.
+ * Toolchain layouts, each a list of markers one root must hold: a JDK or JRE image (its `lib/modules` holds the class
+ * library), a Gradle or Maven distribution, Node.js (Windows zip or POSIX tarball; the runtime binary itself), a Python
+ * venv (with its interpreter) or a Windows Python installation.
  */
 private val TOOLCHAINS: List<List<Marker>> = listOf(
-    listOf(Marker("bin/java(\\.exe)?"), Marker("lib/modules")),
-    listOf(Marker("bin/gradle(\\.bat)?"), Marker("lib/gradle-.+\\.jar")),
-    listOf(Marker("bin/mvn(\\.cmd)?"), Marker("lib/maven-core-.+\\.jar")),
-    listOf(Marker("node\\.exe", "bin/node"), Marker("node_modules/npm/package\\.json", "lib/node_modules/npm/package\\.json")),
-    listOf(Marker("pyvenv\\.cfg")),
-    listOf(Marker("python\\.exe"), Marker("lib/os\\.py")),
+    listOf(Marker("bin/java(\\.exe)?"), Marker("lib/modules", minBytes = MIB)),
+    listOf(Marker("bin/gradle(\\.bat)?"), Marker("lib/gradle-.+\\.jar", minBytes = 1)),
+    listOf(Marker("bin/mvn(\\.cmd)?"), Marker("lib/maven-core-.+\\.jar", minBytes = 1)),
+    listOf(Marker("node\\.exe", "bin/node", minBytes = MIB), Marker("node_modules/npm/package\\.json", "lib/node_modules/npm/package\\.json")),
+    listOf(Marker("pyvenv\\.cfg"), Marker("scripts/python\\.exe", "bin/python", "bin/python3", links = true)),
+    listOf(Marker("python\\.exe", minBytes = 1), Marker("lib/os\\.py", minBytes = 1)),
 )
+
+/** Real toolchains weigh tens of megabytes even without the binaries a global ignore hides; a planted marker does not. */
+internal const val TOOLCHAIN_MIN_BYTES: Long = 5 * MIB
 
 /**
  * The roots of installed toolchains under [root] among its workspace-relative [paths], never the workspace root
  * itself: a JDK in an untracked `devtools/` would otherwise enter the atlas as a thousand source rows and the shape
- * choice with them. A listed marker names a candidate; the rest are found in the listing or on disk (a global ignore
- * of `*.exe` hides `bin/java.exe`). Their files stay listed as one [CollapseReason.Toolchain] entry each, so the atlas
- * still states that they exist.
+ * choice with them. A listed marker names a candidate; every marker of its layout must then be on disk (a global ignore
+ * of `*.exe` keeps `bin/java.exe` out of the listing), its listed files must weigh [TOOLCHAIN_MIN_BYTES], and none may
+ * be tracked: a root holding a file of the project's history is the project's, never collapsed, so a planted marker
+ * cannot hide source from the atlas's consumers. Without the [tracked] list (no git) nothing is collapsed. A collapsed
+ * root's files stay listed as one [CollapseReason.Toolchain] entry, so the atlas still states that they exist.
  */
-internal fun toolchainRoots(root: Path, paths: Collection<String>): Set<String> {
-    val listed = HashMap<Pair<Int, String>, Int>()
+internal fun toolchainRoots(root: Path, paths: Collection<String>, tracked: () -> Collection<String>?): Set<String> {
+    val candidates = HashMap<String, MutableSet<Int>>()
     for (path in paths) {
         val lowered = path.lowercase(Locale.ROOT)
         if (lowered.length != path.length) continue
-        for ((layout, markers) in TOOLCHAINS.withIndex()) for ((bit, marker) in markers.withIndex()) {
+        for ((layout, markers) in TOOLCHAINS.withIndex()) for (marker in markers) {
             val length = marker.rootLength(lowered) ?: continue
-            val key = layout to path.substring(0, length)
-            listed[key] = (listed[key] ?: 0) or (1 shl bit)
+            candidates.getOrPut(path.substring(0, length)) { HashSet() } += layout
         }
     }
-    return listed.filter { (key, bits) ->
-        TOOLCHAINS[key.first].withIndex().all { (bit, marker) -> bits and (1 shl bit) != 0 || marker.onDisk(root.resolve(key.second)) }
-    }.keys.mapTo(HashSet()) { it.second }
+    val confirmed = candidates.filter { (at, layouts) -> layouts.any { layout -> TOOLCHAINS[layout].all { it.onDisk(root.resolve(at)) } } }.keys
+    if (confirmed.isEmpty()) return emptySet()
+    val history = tracked() ?: return emptySet()
+    return confirmed.filterTo(HashSet()) { at ->
+        val prefix = "$at/"
+        history.none { it.startsWith(prefix) } && paths.filter { it.startsWith(prefix) }.sumOf { sizeOf(root, it) } >= TOOLCHAIN_MIN_BYTES
+    }
+}
+
+/** The size of a listed entry itself (a link counts as the link), or 0 when it cannot be read. */
+private fun sizeOf(root: Path, relative: String): Long = try {
+    Files.readAttributes(root.resolve(relative), BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS).size()
+} catch (_: IOException) {
+    0L
 }
 
 /**
@@ -509,8 +534,10 @@ internal fun normalizeRelative(path: String): String {
  * D-32 rules candidate `.astrolabe/rules.md` is one, and §7.1 forbids the atlas denying existence.
  */
 internal fun scanRepository(root: Path): RepositoryScan {
-    val relative = gitListFiles(root) ?: walkFiles(root)
-    val toolchains = toolchainRoots(root, relative)
+    val listed = gitListFiles(root, "--cached", "--others", "--exclude-standard")
+    val relative = listed ?: walkFiles(root)
+    // Outside a repository nothing tells a toolchain from the project's own files, so nothing is collapsed as one.
+    val toolchains = if (listed == null) emptySet() else toolchainRoots(root, relative) { gitListFiles(root, "--cached") }
     val files = ArrayList<ScannedFile>()
     val collapsedFiles = ArrayList<Collapsed>()
     val collapsedDirectories = LinkedHashMap<String, Triple<Int, Long, CollapseReason>>()
@@ -549,9 +576,9 @@ internal fun scanRepository(root: Path): RepositoryScan {
 /** `git ls-files -z` separates entries with a NUL byte. */
 private const val NUL: Char = '\u0000'
 
-private fun gitListFiles(root: Path): List<String>? {
+private fun gitListFiles(root: Path, vararg selection: String): List<String>? {
     val output = try {
-        val process = ProcessBuilder("git", "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+        val process = ProcessBuilder(listOf("git", "ls-files", "-z") + selection)
             .directory(root.toFile())
             .start()
         val stderr = Thread { process.errorStream.use { it.readBytes() } }.apply {

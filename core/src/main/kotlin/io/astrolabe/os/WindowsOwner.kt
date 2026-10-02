@@ -207,7 +207,7 @@ internal class WindowsOwner(private val beforeAssignment: (Long) -> Unit = {}) :
      * `PATHEXT` gets the system default (D-375).
      */
     private fun plan(command: Command, workingDirectory: Path, environment: Map<String, String>): Launch = when (command) {
-        is Command.Shell -> Launch(null, shellLine(command.commandLine, ""), null)
+        is Command.Shell -> Launch(null, shellLine(command.commandLine, " /v:off"), null)
         is Command.Argv -> {
             val program = command.argv.first()
             val extensions = pathExtensions(environment)

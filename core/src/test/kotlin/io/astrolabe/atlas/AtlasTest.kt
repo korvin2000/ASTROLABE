@@ -221,12 +221,15 @@ class AtlasTest {
             // As on a machine whose global ignore hides `*.exe`: the JDK's launcher is on disk only, never listed.
             repo.write(".gitignore", "*.exe\n")
             val jdk = "devtools/jdk-26.0.2.1+1"
-            for (file in listOf("bin/java.exe", "bin/javac.exe", "lib/modules", "release", "include/jni.h", "conf/security/java.policy", "legal/java.base/LICENSE")) {
+            for (file in listOf("bin/java.exe", "bin/javac.exe", "release", "include/jni.h", "conf/security/java.policy", "legal/java.base/LICENSE")) {
                 repo.write("$jdk/$file", "x\n")
             }
-            for (file in listOf("bin/gradle", "bin/gradle.bat", "lib/gradle-ant-9.7.1.jar", "init.d/readme.txt", "README")) {
+            // A real class library and distribution weigh megabytes; a planted name does not.
+            repo.write("$jdk/lib/modules", HEAVY)
+            for (file in listOf("bin/gradle", "bin/gradle.bat", "init.d/readme.txt", "README")) {
                 repo.write("devtools/gradle-9.7.1/$file", "x\n")
             }
+            repo.write("devtools/gradle-9.7.1/lib/gradle-ant-9.7.1.jar", HEAVY)
             repo.write("devtools/capture-screenshot.mjs", "export {};\n")
             // One marker alone is no toolchain; neither is the workspace root itself.
             repo.write("scripts/bin/java", "#!/bin/sh\n")
@@ -246,6 +249,35 @@ class AtlasTest {
             assertEquals(Atlas.build(repo.root).collapsed, refreshed.collapsed)
             assertEquals(6, refreshed.collapsed.single { it.path == jdk }.files)
         }
+    }
+
+    @Test
+    fun `a planted toolchain marker hides no project file`() {
+        TempRepo.create().use { repo ->
+            // A tracked directory is the project's: its venv marker, interpreter and weight do not make it a toolchain.
+            repo.write("src/app.py", "print(1)\n")
+            repo.write("src/pyvenv.cfg", "home = x\n")
+            repo.write("src/bin/python", "x\n")
+            repo.commit("source")
+            repo.write("src/data.bin", HEAVY)
+            // Empty markers, and a real-sized marker in a directory too light to be a toolchain.
+            repo.write("gen/bin/java", "x\n")
+            repo.write("gen/lib/modules", "x\n")
+            repo.write("gen/blob.dat", HEAVY)
+            repo.write("light/bin/java", "x\n")
+            repo.write("light/lib/modules", "x".repeat(1 shl 20))
+            val atlas = Atlas.build(repo.root)
+
+            assertEquals(emptyList(), atlas.collapsed.filter { it.reason == CollapseReason.Toolchain })
+            for (path in listOf("src/app.py", "src/pyvenv.cfg", "src/bin/python", "gen/bin/java", "gen/lib/modules", "light/bin/java")) {
+                assertNotNull(atlas.row(path), path)
+            }
+        }
+    }
+
+    private companion object {
+        /** Above [TOOLCHAIN_MIN_BYTES] and the 1 MiB `lib/modules` floor. */
+        val HEAVY: String = "x".repeat((TOOLCHAIN_MIN_BYTES + 1).toInt())
     }
 
     @Test

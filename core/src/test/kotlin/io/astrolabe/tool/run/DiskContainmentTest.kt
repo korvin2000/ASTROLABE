@@ -123,6 +123,11 @@ class DiskContainmentTest {
             // A redirect through a link writes outside; beside it, a plain file stays W.
             assertEquals(EffectClass.D, classify(if (onWindows) "echo x > web\\linked\\new.txt" else "echo x > web/linked/new.txt").effectClass)
             assertEquals(EffectClass.W, classify(if (onWindows) "echo x > web\\new.txt" else "echo x > web/new.txt").effectClass)
+            // `web/linked/..` is `web` only lexically: the shell follows the link first, and the probe sees `web/evil.txt` missing.
+            assertEquals(EffectClass.D, classify(if (onWindows) "echo x > web\\linked\\..\\evil.txt" else "echo x > web/linked/../evil.txt").effectClass)
+            // A link created earlier in the same line is not on the disk the probe saw.
+            // (A variable target: lexically inside, so only the missing proof makes it D.)
+            assertEquals(EffectClass.D, classify(if (onWindows) "mklink /j fresh %USERPROFILE% & rd /s /q fresh\\Documents" else "ln -s \"\$HOME\" fresh && rm -rf fresh/Documents").effectClass)
         } finally {
             links.forEach(Files::delete)
         }
