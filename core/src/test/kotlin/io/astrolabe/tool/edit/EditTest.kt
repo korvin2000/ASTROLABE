@@ -498,7 +498,7 @@ class EditTest {
         val again = run("""{"ops":[{"create":"src/own.py","content":"o = 2\np = 3\n"}],"why":"w"}""", cell, turn = 2)
         assertEquals("ok", status(again), again.body)
         assertTrue(again.body.contains("✓ 1 replace src/own.py @${first.hash8}→@"), again.body)
-        assertTrue(again.body.contains("(create over a file this cell wrote: replaced in place)"), again.body)
+        assertTrue(again.body.contains("(create over a file this cell wrote: replaced in place; 2 lines, 12 bytes)"), again.body)
         assertEquals("o = 2\np = 3\n", Files.readString(repo.resolve("src/own.py")))
         assertEquals(first, preimages.of("edit-2").single().versionBefore)
         assertEquals("ok", status(run("""{"ops":[{"revert":"#2"}],"why":"undo"}""", cell, turn = 3)))
@@ -514,7 +514,7 @@ class EditTest {
         seen("src/a.py", 1, 9)
         val known = run("""{"ops":[{"create":"src/a.py","content":"z = 1\n"}],"why":"w"}""", cell)
         assertEquals("ok", status(known), known.body)
-        assertTrue(known.body.contains("(create over a file KNOWN in full: replaced in place)"), known.body)
+        assertTrue(known.body.contains("(create over a file KNOWN in full: replaced in place; 1 line, 6 bytes)"), known.body)
         assertEquals("z = 1\n", Files.readString(repo.resolve("src/a.py")))
         // A file the cell wrote but someone else changed since is no longer the cell's own.
         repo.write("src/a.py", "z = 2\n")
@@ -841,8 +841,8 @@ class EditTest {
         val created = run("""{"ops":[{"create":"src/c.py","content":"def c():\n    return 3\n"}],"why":"add"}""")
         assertEquals("ok", status(created))
         val vc = registry.version("src/c.py")!!
-        assertTrue(workset.covers("src/c.py", vc, LineRange(1, 2)), "a created file is displayed in full at its version")
-        assertTrue(created.body.contains("✓ 1 create src/c.py @new→@${vc.hash8} +2 −0 · syntax ok"), created.body)
+        assertTrue(workset.covers("src/c.py", vc, LineRange(1, 2)), "a created file is KNOWN in full at its version")
+        assertTrue(created.body.contains("✓ 1 create src/c.py @new→@${vc.hash8} +2 −0 · syntax ok (2 lines, 22 bytes)"), created.body)
         // D-371: a create over a file this cell created replaces it in place.
         assertEquals("ok", status(run("""{"ops":[{"create":"src/c.py","content":"def c():\n    return 4\n"}],"why":"dup"}""")))
         val vc2 = registry.version("src/c.py")!!
@@ -867,6 +867,57 @@ class EditTest {
         assertTrue(binary.body.contains("unsupported: 'src/blob.bin' is not valid UTF-8 text"), binary.body)
         val transform = run("""{"ops":[{"transform":{"argv":["sed"],"scope_glob":"src/**","why":"w"}}],"why":"w"}""")
         assertTrue(transform.body.contains("unsupported: transform unsupported: this cell has no transform runner (D-41)"), transform.body)
+    }
+
+    @Test
+    fun `a create answers with a receipt and the next edit of the file needs no read`() = runTest {
+        val content = "def c():\n    return 3\n\n\ndef d():\n    return 4\n"
+        val created = run("""{"ops":[{"create":"src/c.py","content":${quote(content)}}],"why":"add"}""")
+        assertEquals("ok", status(created), created.body)
+        val v1 = registry.version("src/c.py")!!
+        assertTrue(created.body.contains("✓ 1 create src/c.py @new→@${v1.hash8} +6 −0 · syntax ok (6 lines, ${content.length} bytes)"), created.body)
+        assertFalse(created.body.contains("return 3") || created.body.contains("post-edit"), "the body is not echoed back: ${created.body}")
+        assertTrue(workset.covers("src/c.py", v1, LineRange(1, 6)), "the created lines are KNOWN through the call that sent them")
+        // The receipt carries no bytes: stubbing it leaves the coverage the call grants.
+        workset.stub("#1")
+        assertTrue(workset.covers("src/c.py", v1, LineRange(1, 6)))
+
+        val second = run(anchoredBy("src/c.py", null, hunk("    return 4", "    return 40")), turn = 2)
+        assertEquals("ok", status(second), second.body)
+        val v2 = registry.version("src/c.py")!!
+        assertEquals(content.replace("return 4", "return 40"), Files.readString(repo.resolve("src/c.py")))
+        assertTrue(workset.covers("src/c.py", v2, LineRange(1, 6)), "the created lines carry through the cell's own edit")
+        val third = run(anchoredBy("src/c.py", v2.digest.hex.take(8), hunk("    return 3", "    return 30")), turn = 3)
+        assertEquals("ok", status(third), third.body)
+    }
+
+    @Test
+    fun `a file changed outside after its create makes the created coverage stale (FX-01)`() = runTest {
+        val content = "a = 1\nb = 2\n"
+        assertEquals("ok", status(run("""{"ops":[{"create":"src/c.py","content":${quote(content)}}],"why":"add"}""")))
+        val created = registry.version("src/c.py")!!
+        repo.write("src/c.py", "a = 1\nb = 3\n")
+        val stale = run(anchored("src/c.py", created, hunk("b = 2", "b = 20")), turn = 2)
+        assertEquals("refused", status(stale), stale.body)
+        assertTrue(stale.body.contains("stale_expect: 'src/c.py' is @"), stale.body)
+        assertTrue(stale.body.contains("-b = 2\n+b = 3"), "diff since expect: ${stale.body}")
+        assertEquals("a = 1\nb = 3\n", Files.readString(repo.resolve("src/c.py")), "no write on a stale expect")
+        assertFalse(workset.covers("src/c.py", registry.version("src/c.py")!!, LineRange(1, 1)), "the outside version is NOT SEEN")
+    }
+
+    @Test
+    fun `a created line the redactor hides grants no coverage and the receipt names it`() = runTest {
+        val secret = "AKIA" + "IOSFODNN7EXAMPLE"
+        val created = run("""{"ops":[{"create":"src/k.py","content":"a = 1\nkey = '$secret'\nb = 2\n"}],"why":"add"}""")
+        assertEquals("ok", status(created), created.body)
+        val version = registry.version("src/k.py")!!
+        assertFalse(created.body.contains(secret), created.body)
+        assertTrue(created.body.contains("src/k.py:2 redacted, NOT SEEN"), created.body)
+        assertTrue(workset.covers("src/k.py", version, LineRange(1, 1)) && workset.covers("src/k.py", version, LineRange(3, 3)))
+        assertFalse(workset.covers("src/k.py", version, LineRange(2, 2)), "redacted bytes never grant coverage (D-49)")
+        val hidden = run(anchored("src/k.py", version, hunk("key = ", "token = ")), turn = 2)
+        assertEquals("refused", status(hidden), hidden.body)
+        assertEquals("ok", status(run(anchored("src/k.py", version, hunk("b = 2", "b = 20")), turn = 2)))
     }
 
     @Test
