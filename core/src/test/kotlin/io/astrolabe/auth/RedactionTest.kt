@@ -247,4 +247,44 @@ class RedactionTest {
         )
         assertNull(config.rulesFile)
     }
+
+    private fun live(window: String, context: String, openAtEnd: Boolean = false) =
+        redaction.applyLive(window.toByteArray(), ContentClass.ModelFacing, openAtEnd, context)
+
+    @Test
+    fun `a live window that resumes inside a key block begun in its context hides the block up to its end`() {
+        val (head, tail) = privateKey.lines().let { it.take(2).joinToString("\n", postfix = "\n") to it.drop(2).joinToString("\n", postfix = "\n") }
+        val result = live("${tail}after\n", context = "booting\n$head")
+
+        assertFalse(result.text.contains("kQq3Q0m1vQ2n5aB7cD8eF9gH0iJ1kL2mN3oP4qR5sT6uV7w"), result.text)
+        assertTrue(result.text.endsWith("after\n"), result.text)
+        assertEquals(Ranges.single(1, 2), result.mask.hiddenLines, "the window's own line numbers, context excluded")
+        assertEquals(listOf(RedactionHit("private-key-block", 1)), result.hits)
+    }
+
+    @Test
+    fun `a live window with no marker inside an open block in its context is hidden whole`() {
+        val result = live("MIIpayloadOnlyLine\nMIIpayloadAnother\n", context = "booting\n-----BEGIN PRIVATE KEY-----\nMIIEvQ\n")
+
+        assertFalse(result.text.contains("MIIpayload"), result.text)
+        assertEquals(Ranges.single(1, 2), result.mask.hiddenLines)
+    }
+
+    @Test
+    fun `a host multi-line pattern begun in the context hides the window part only`() {
+        val host = Redaction(RedactionConfig(patterns = listOf(RedactionPattern("vault-blob", "VAULT\\{[\\s\\S]*?\\}"))))
+        val result = host.applyLive("secret-line-two\n}\nvisible\n".toByteArray(), ContentClass.ModelFacing, false, "start\nVAULT{\nsecret-line-one\n")
+
+        assertFalse(result.text.contains("secret-line"), result.text)
+        assertTrue(result.text.endsWith("visible\n"), result.text)
+        assertEquals(Ranges.single(1, 2), result.mask.hiddenLines)
+    }
+
+    @Test
+    fun `secrets that end inside the context leave the window and its numbering untouched`() {
+        val result = live("plain one\nplain two\n", context = "$privateKey\nAKIAIOSFODNN7EXAMPLE\n")
+
+        assertEquals("plain one\nplain two\n", result.text)
+        assertFalse(result.applied)
+    }
 }
