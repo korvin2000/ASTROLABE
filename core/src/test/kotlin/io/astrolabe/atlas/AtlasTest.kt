@@ -215,6 +215,40 @@ class AtlasTest {
     }
 
     @Test
+    fun `an untracked toolchain is listed as one collapsed entry, not as source rows`() {
+        TempRepo.create().use { repo ->
+            repo.write("src/app.js", "export const x = 1;\n")
+            // As on a machine whose global ignore hides `*.exe`: the JDK's launcher is on disk only, never listed.
+            repo.write(".gitignore", "*.exe\n")
+            val jdk = "devtools/jdk-26.0.2.1+1"
+            for (file in listOf("bin/java.exe", "bin/javac.exe", "lib/modules", "release", "include/jni.h", "conf/security/java.policy", "legal/java.base/LICENSE")) {
+                repo.write("$jdk/$file", "x\n")
+            }
+            for (file in listOf("bin/gradle", "bin/gradle.bat", "lib/gradle-ant-9.7.1.jar", "init.d/readme.txt", "README")) {
+                repo.write("devtools/gradle-9.7.1/$file", "x\n")
+            }
+            repo.write("devtools/capture-screenshot.mjs", "export {};\n")
+            // One marker alone is no toolchain; neither is the workspace root itself.
+            repo.write("scripts/bin/java", "#!/bin/sh\n")
+            repo.write("bin/java", "#!/bin/sh\n")
+            repo.write("lib/modules", "x\n")
+            val atlas = Atlas.build(repo.root)
+
+            assertEquals(listOf(".gitignore", "bin/java", "devtools/capture-screenshot.mjs", "lib/modules", "scripts/bin/java", "src/app.js"), atlas.rows.map { it.path })
+            assertEquals(
+                listOf("devtools/gradle-9.7.1" to 5, "devtools/jdk-26.0.2.1+1" to 5),
+                atlas.collapsed.filter { it.reason == CollapseReason.Toolchain }.map { it.path to it.files },
+            )
+            // A touched file under a toolchain is no row, and the totals match a fresh build.
+            repo.write("$jdk/conf/extra.properties", "a=1\n")
+            val refreshed = atlas.refresh(listOf("$jdk/conf/extra.properties"))
+            assertNull(refreshed.row("$jdk/conf/extra.properties"))
+            assertEquals(Atlas.build(repo.root).collapsed, refreshed.collapsed)
+            assertEquals(6, refreshed.collapsed.single { it.path == jdk }.files)
+        }
+    }
+
+    @Test
     fun `refresh keeps collapsed descendant counts and sizes current`() {
         FixtureRepos.materialize(Fixture.PythonSmall).use { repo ->
             repo.write(".gitignore", "")

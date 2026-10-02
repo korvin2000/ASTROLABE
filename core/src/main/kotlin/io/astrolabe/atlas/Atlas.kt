@@ -6,6 +6,7 @@ import kotlinx.serialization.json.Json
 import java.io.IOException
 import java.nio.file.FileVisitResult
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 import java.nio.file.SimpleFileVisitor
@@ -70,6 +71,12 @@ public enum class CollapseReason {
 
     /** Larger than [Atlas.MAX_PARSED_BYTES]. */
     TooLarge,
+
+    /**
+     * An installed toolchain recognised by its layout wherever it lies (`devtools/jdk-26/`): a JDK, a Gradle or Maven
+     * distribution, Node.js or Python. Tools the project runs, not its source.
+     */
+    Toolchain,
 }
 
 /**
@@ -217,8 +224,10 @@ public data class Atlas(
         var fresh: Map<String, Outline> = emptyMap()
 
         val scanned = ArrayList<ScannedFile>()
+        // Toolchain roots found by the last full scan; a toolchain unpacked since is collapsed by the next build.
+        val toolchains = collapsed.filter { it.reason == CollapseReason.Toolchain }.mapTo(HashSet()) { it.path }
         for (path in wanted.sorted()) {
-            if (collapsedAncestor(path) != null) continue
+            if (collapsedAncestor(path, toolchains) != null) continue
             val attributes = try {
                 Files.readAttributes(resolveRelative(root, path), BasicFileAttributes::class.java)
             } catch (_: IOException) {
@@ -246,7 +255,7 @@ public data class Atlas(
             for (file in scanned) buildRow(file, parsed, resolver, known)?.let { added += it }
             fresh = parsed.outlines
         }
-        val totals = if (wanted.any { collapsedAncestor("$it/") != null }) {
+        val totals = if (wanted.any { collapsedAncestor("$it/", toolchains) != null }) {
             scanRepository(root).collapsed
         } else {
             keptCollapsed + addedCollapsed
@@ -399,14 +408,82 @@ internal fun collapseReasonFor(path: String, size: Long): CollapseReason? {
     return null
 }
 
-/** The shortest ancestor directory of [path] a collapse rule covers, or null. */
-internal fun collapsedAncestor(path: String): Pair<String, CollapseReason>? {
+/** The shortest ancestor directory of [path] a collapse rule covers — by name, or one of the [toolchains] roots — or null. */
+internal fun collapsedAncestor(path: String, toolchains: Set<String> = emptySet()): Pair<String, CollapseReason>? {
     val segments = path.split('/')
+    val ancestor = StringBuilder()
     for (index in 0 until segments.size - 1) {
-        val reason = COLLAPSED_DIRECTORIES[segments[index].lowercase(Locale.ROOT)] ?: continue
-        return segments.subList(0, index + 1).joinToString("/") to reason
+        if (index > 0) ancestor.append('/')
+        ancestor.append(segments[index])
+        val reason = COLLAPSED_DIRECTORIES[segments[index].lowercase(Locale.ROOT)]
+            ?: CollapseReason.Toolchain.takeIf { ancestor.toString() in toolchains }
+            ?: continue
+        return ancestor.toString() to reason
     }
     return null
+}
+
+/** A file every root of one toolchain layout holds, in one of its [places]: a directory below the root and a lower-cased name pattern. */
+private class Marker(vararg places: String) {
+    private val places: List<Pair<String, Regex>> = places.map { it.substringBeforeLast('/', "") to Regex(it.substringAfterLast('/')) }
+
+    /** The length of the toolchain root this lower-cased relative [path] names as this marker; null when it is none or the root is the workspace's. */
+    fun rootLength(path: String): Int? {
+        val name = path.substringAfterLast('/')
+        for ((directory, pattern) in places) {
+            if (!pattern.matches(name)) continue
+            val suffix = if (directory.isEmpty()) "/$name" else "/$directory/$name"
+            if (path.length > suffix.length && path.endsWith(suffix)) return path.length - suffix.length
+        }
+        return null
+    }
+
+    /** True when the toolchain root [at] holds this marker on disk — also a file the ignore rules keep out of the listing. */
+    fun onDisk(at: Path): Boolean = places.any { (directory, pattern) ->
+        try {
+            Files.newDirectoryStream(if (directory.isEmpty()) at else at.resolve(directory)).use { entries ->
+                entries.any { Files.isRegularFile(it, LinkOption.NOFOLLOW_LINKS) && pattern.matches(it.fileName.toString().lowercase(Locale.ROOT)) }
+            }
+        } catch (_: IOException) {
+            false
+        }
+    }
+}
+
+/**
+ * Toolchain layouts, each a list of markers one root must hold: a JDK or JRE image, a Gradle or Maven distribution,
+ * Node.js (Windows zip or POSIX tarball), a Python venv or a Windows Python installation.
+ */
+private val TOOLCHAINS: List<List<Marker>> = listOf(
+    listOf(Marker("bin/java(\\.exe)?"), Marker("lib/modules")),
+    listOf(Marker("bin/gradle(\\.bat)?"), Marker("lib/gradle-.+\\.jar")),
+    listOf(Marker("bin/mvn(\\.cmd)?"), Marker("lib/maven-core-.+\\.jar")),
+    listOf(Marker("node\\.exe", "bin/node"), Marker("node_modules/npm/package\\.json", "lib/node_modules/npm/package\\.json")),
+    listOf(Marker("pyvenv\\.cfg")),
+    listOf(Marker("python\\.exe"), Marker("lib/os\\.py")),
+)
+
+/**
+ * The roots of installed toolchains under [root] among its workspace-relative [paths], never the workspace root
+ * itself: a JDK in an untracked `devtools/` would otherwise enter the atlas as a thousand source rows and the shape
+ * choice with them. A listed marker names a candidate; the rest are found in the listing or on disk (a global ignore
+ * of `*.exe` hides `bin/java.exe`). Their files stay listed as one [CollapseReason.Toolchain] entry each, so the atlas
+ * still states that they exist.
+ */
+internal fun toolchainRoots(root: Path, paths: Collection<String>): Set<String> {
+    val listed = HashMap<Pair<Int, String>, Int>()
+    for (path in paths) {
+        val lowered = path.lowercase(Locale.ROOT)
+        if (lowered.length != path.length) continue
+        for ((layout, markers) in TOOLCHAINS.withIndex()) for ((bit, marker) in markers.withIndex()) {
+            val length = marker.rootLength(lowered) ?: continue
+            val key = layout to path.substring(0, length)
+            listed[key] = (listed[key] ?: 0) or (1 shl bit)
+        }
+    }
+    return listed.filter { (key, bits) ->
+        TOOLCHAINS[key.first].withIndex().all { (bit, marker) -> bits and (1 shl bit) != 0 || marker.onDisk(root.resolve(key.second)) }
+    }.keys.mapTo(HashSet()) { it.second }
 }
 
 /**
@@ -433,6 +510,7 @@ internal fun normalizeRelative(path: String): String {
  */
 internal fun scanRepository(root: Path): RepositoryScan {
     val relative = gitListFiles(root) ?: walkFiles(root)
+    val toolchains = toolchainRoots(root, relative)
     val files = ArrayList<ScannedFile>()
     val collapsedFiles = ArrayList<Collapsed>()
     val collapsedDirectories = LinkedHashMap<String, Triple<Int, Long, CollapseReason>>()
@@ -444,7 +522,7 @@ internal fun scanRepository(root: Path): RepositoryScan {
         }
         if (!attributes.isRegularFile) continue
         val size = attributes.size()
-        val ancestor = collapsedAncestor(path)
+        val ancestor = collapsedAncestor(path, toolchains)
         if (ancestor != null) {
             val (directory, reason) = ancestor
             val current = collapsedDirectories[directory]
