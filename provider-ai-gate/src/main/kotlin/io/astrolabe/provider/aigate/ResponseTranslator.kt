@@ -40,18 +40,19 @@ internal object ResponseTranslator {
 
     /**
      * The SDK's call facts of [reply]: timings from its `ResponseInfo` (none for a reply not obtained by a call), the
-     * gateway's route, the answering model and the price tier the SDK's prices apply to its usage — the tiers stay out
-     * of the profile's `PriceTable`.
+     * gateway's route, the answering model and the tier of the profile's `PriceTable` its usage is priced at — the same
+     * total input `BillableUsage.price` selects the tier by.
      */
     fun facts(reply: AssistantMessage, binding: ProfileBinding): CallFacts {
         val info = reply.info()
         val called = info.requestId().isNotEmpty()
+        val totalInput = UsageMapper.billable(reply.usage(), null, binding).totalInput
         return CallFacts(
             latencyMillis = if (called) info.latency().toMillis() else null,
             firstOutputMillis = if (called) info.timeToFirstOutput().orElse(null)?.toMillis() else null,
             upstream = info.route().orElse(null),
             responseModel = reply.responseModel().orElse(null),
-            priceTierInputTokensAbove = binding.model.prices().flatMap { it.tier(reply.usage()) }.map { it.inputTokensAbove() }.orElse(null),
+            priceTierInputTokensAbove = binding.profile.priceTable.tier(totalInput)?.inputTokensAbove,
         )
     }
 

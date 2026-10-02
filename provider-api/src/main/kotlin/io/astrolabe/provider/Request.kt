@@ -74,10 +74,12 @@ public data class InvocationId(val value: String) {
 /**
  * One model request. Segments appear in layout order (each kind at most once, in `S R K T A` order); tools
  * carry their schemas; [continuation] replays provider-held history and is admitted by its effective size,
- * not its payload size (§6.1, I-17).
+ * not its payload size (§6.1, I-17). [sessionKey] is the provider session (prompt-cache routing) key of the
+ * campaign the request belongs to — the same for every request of the campaign, never derived from a clock (§4.5);
+ * `null` sends none.
  */
 @Serializable
-public data class Request(
+public data class Request @JvmOverloads constructor(
     val segments: List<Segment>,
     val tools: List<ToolSchema>,
     val profile: Profile,
@@ -85,8 +87,10 @@ public data class Request(
     val maxOutputTokens: Int,
     val mask: ToolMask? = null,
     val continuation: OpaqueContinuation? = null,
+    val sessionKey: String? = null,
 ) {
     init {
+        sessionKey?.let { requireToken("Request.sessionKey", it, maxLength = SESSION_KEY_MAX_LENGTH) }
         require(maxOutputTokens > 0) { "maxOutputTokens must be positive" }
         require(segments.zipWithNext().all { (a, b) -> a.kind.ordinal < b.kind.ordinal }) {
             "segments must follow the S R K T A order, each kind at most once: ${segments.map { it.kind }}"
@@ -97,6 +101,11 @@ public data class Request(
     val items: List<Item> get() = segments.flatMap { it.items }
 
     public fun segment(kind: SegmentKind): Segment? = segments.firstOrNull { it.kind == kind }
+
+    public companion object {
+        /** The longest session key: a conservative bound for the providers' session and prompt-cache keys. */
+        public const val SESSION_KEY_MAX_LENGTH: Int = 64
+    }
 }
 
 @Serializable

@@ -15,7 +15,10 @@ internal fun configSnapshot(config: Config): Config = config.copy(
                     usageFields = frozenSet(it.usageFields), schemaDialects = frozenSet(it.schemaDialects),
                 )
             },
-            priceTable = profile.priceTable.copy(perMillion = frozenMap(profile.priceTable.perMillion)),
+            priceTable = profile.priceTable.copy(
+                perMillion = frozenMap(profile.priceTable.perMillion),
+                tiers = frozenList(profile.priceTable.tiers.map { it.copy(perMillion = frozenMap(it.perMillion)) }),
+            ),
             config = frozenJson(profile.config) as JsonObject,
             stratumOutcomes = frozenList(profile.stratumOutcomes),
         )

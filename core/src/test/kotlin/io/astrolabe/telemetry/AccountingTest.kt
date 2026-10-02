@@ -41,6 +41,55 @@ class AccountingTest {
         Store.open(stateRoot, repo.git, clock).use(block)
     }
 
+    private fun table(perMillion: Map<BillingDimension, String>, vararg tiers: Pair<Long, Map<BillingDimension, String>>) = FakeProfiles.main.priceTable.copy(
+        perMillion = perMillion.mapValues { BigDecimal(it.value) },
+        tiers = tiers.map { (above, prices) -> io.astrolabe.provider.PriceTier(above, prices.mapValues { BigDecimal(it.value) }) },
+    )
+
+    /** A profile billing only uncached input and output, priced by [prices]. */
+    private fun plain(prices: io.astrolabe.provider.PriceTable) = FakeProfiles.main.copy(
+        capabilities = FakeProfiles.main.capabilities.copy(
+            usageFields = setOf(BillingDimension.UNCACHED_INPUT, BillingDimension.OUTPUT),
+            caching = FakeProfiles.main.capabilities.caching.copy(writeClasses = emptySet()),
+        ),
+        priceTable = prices,
+    )
+
+    @Test
+    fun `the reservation is the dearest table a call up to its input bound can be billed at, also when tiers fall`() {
+        val input = BillingDimension.UNCACHED_INPUT
+        val output = BillingDimension.OUTPUT
+        // Tiers do not accumulate: above 200 input falls back to $1 — a call of 200 still pays $10.
+        val falling = plain(table(mapOf(input to "1", output to "0"), 100L to mapOf(input to "10"), 200L to mapOf(input to "1")))
+        assertEquals(0, BigDecimal("0.00201").compareTo(Accounting.estimateCost(falling, 201, 0).amount))
+        // A higher tier that leaves output unstated is billed at the base output, below the lower tier's.
+        val unstated = plain(table(mapOf(input to "1", output to "5"), 100L to mapOf(output to "50"), 200L to mapOf(input to "2")))
+        assertEquals(0, BigDecimal("0.0503").compareTo(Accounting.estimateCost(unstated, 300, 1_000).amount)) // 300 × 1 + 1000 × 50 beats 300 × 2 + 1000 × 5
+        // Tiers above the bound are unreachable.
+        assertEquals(0, BigDecimal("0.0051").compareTo(Accounting.estimateCost(unstated, 100, 1_000).amount))
+        assertFalse(Accounting.estimateCost(falling, 201, 0).unknown)
+    }
+
+    @Test
+    fun `the reservation is unknown, never zero, without a price for every input dimension the route can bill`() {
+        val readAndOutput = table(mapOf(BillingDimension.CACHE_READ to "0.3", BillingDimension.OUTPUT to "2"))
+        assertTrue(Accounting.estimateCost(plain(readAndOutput), 1_000, 1_000).unknown)
+        // The fake profile declares both cache-write classes: a table without the one-hour write is unknown too.
+        val no1h = FakeProfiles.main.copy(priceTable = FakeProfiles.main.priceTable.copy(perMillion = FakeProfiles.main.priceTable.perMillion - BillingDimension.CACHE_WRITE_1H))
+        assertTrue(Accounting.estimateCost(no1h, 1_000, 1_000).unknown)
+        // A higher tier missing a dimension falls back to the base price, so it stays known.
+        val tiered = plain(table(mapOf(BillingDimension.UNCACHED_INPUT to "1", BillingDimension.OUTPUT to "2"), 10L to mapOf(BillingDimension.OUTPUT to "3")))
+        assertFalse(Accounting.estimateCost(tiered, 1_000, 1_000).unknown)
+        assertFalse(Accounting.estimateCost(FakeProfiles.main, 1_000, 1_000).unknown)
+    }
+
+    @Test
+    fun `a reservation of unknown cost is refused under a cost cap`() = withStore { store ->
+        val accounting = Accounting(store, clock)
+        val unknown = Accounting.estimateCost(plain(table(mapOf(BillingDimension.CACHE_READ to "0.3", BillingDimension.OUTPUT to "2"))), 1_000, 1_000)
+        assertFalse(accounting.reserve(ids, "first", FakeProfiles.main, 10, unknown, 100, io.astrolabe.provider.Money("USD", BigDecimal("10"))))
+    }
+
     @Test
     fun `unsettled calls and failed extraction retain campaign funding`() = withStore { store ->
         val accounting = Accounting(store, clock)

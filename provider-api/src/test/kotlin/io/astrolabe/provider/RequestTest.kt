@@ -16,6 +16,29 @@ class RequestTest {
     }
 
     @Test
+    fun `an estimator's own item count is what items and the planning request estimate use`() {
+        val reasoning = ReasoningRef("fake/fake-main@fake", JsonPrimitive("long hidden reasoning"))
+        val dropping = object : TokenEstimator by exactTextEstimator {
+            override fun estimate(item: Item): Estimate = if (item is ReasoningRef) Estimate.zero(id, version) else super.estimate(item)
+        }
+        assertTrue(reasoning.estimate(exactTextEstimator).tokens > 0)
+        assertEquals(0L, reasoning.estimate(dropping).tokens)
+        val text = Message.text(Role.User, "x")
+        assertEquals(text.planningEstimate(dropping), text.estimate(dropping))
+        val with = Fixtures.request(Segment(SegmentKind.T, listOf(text, reasoning)))
+        val without = Fixtures.request(Segment(SegmentKind.T, listOf(text)))
+        assertEquals(without.estimate(dropping).tokens, with.estimate(dropping).tokens)
+        assertTrue(with.estimate(exactTextEstimator).tokens > without.estimate(exactTextEstimator).tokens)
+    }
+
+    @Test
+    fun `a session key is a provider token of bounded length`() {
+        assertEquals("astrolabe-1", Fixtures.request().copy(sessionKey = "astrolabe-1").sessionKey)
+        assertFailsWith<IllegalArgumentException> { Fixtures.request().copy(sessionKey = "a b") }
+        assertFailsWith<IllegalArgumentException> { Fixtures.request().copy(sessionKey = "k".repeat(Request.SESSION_KEY_MAX_LENGTH + 1)) }
+    }
+
+    @Test
     fun `exact text counts do not establish exact request counts`() {
         val request = Fixtures.request(Segment(SegmentKind.T, List(100) { Message.text(Role.User, "x") }))
         val estimate = request.estimate(exactTextEstimator)

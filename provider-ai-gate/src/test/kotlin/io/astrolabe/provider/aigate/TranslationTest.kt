@@ -5,6 +5,7 @@ import io.astrolabe.provider.CallFacts
 import io.astrolabe.provider.Message
 import io.astrolabe.provider.Money
 import io.astrolabe.provider.Opaque
+import io.astrolabe.provider.PriceTable
 import io.astrolabe.provider.Profile
 import io.astrolabe.provider.ReasoningRef
 import io.astrolabe.provider.Role
@@ -19,14 +20,17 @@ import net.ai.gate.metadata.Charge
 import net.ai.gate.metadata.ResponseInfo
 import net.ai.gate.metadata.Usage
 import net.ai.gate.model.ModelRef
+import net.ai.gate.model.Prices
 import net.ai.gate.testing.FakeProvider
 import java.math.BigDecimal
 import java.time.Duration
+import java.time.LocalDate
 import java.util.Currency
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -42,6 +46,31 @@ class TranslationTest {
     private val expectingWrites = GateTestKit.fakeProfile().copy(
         capabilities = GateTestKit.capabilities(128_000, 4_000, breakpoints = false, usage = GateTestKit.sonnetUsage.minus(BillingDimension.CACHE_READ)),
     )
+
+    @Test
+    fun `a drafted price table prices a call as the SDK's tiered prices do`() {
+        val prices = Prices.usd().input("3").output("15").cacheRead("0.3").cacheWrite("3.75").cacheWriteLong("6")
+            .tier(1_000_000, Prices.usd().input("12").build())
+            .tier(200_000, Prices.usd().input("6").output("22.5").cacheWrite("7.5").build())
+            .build()
+        val table = AiGateProfiles.priceTable(prices, LocalDate.of(2026, 9, 1))
+        assertEquals(listOf(200_000L, 1_000_000L), table.tiers.map { it.inputTokensAbove })
+        val binding = bind(GateTestKit.fakeProfile())
+        val cases = listOf(
+            longArrayOf(1_000, 0, 0, 0), longArrayOf(150_000, 50_000, 0, 0), longArrayOf(150_000, 50_001, 0, 0),
+            longArrayOf(100_000, 50_000, 30_000, 40_000), longArrayOf(990_000, 5_000, 5_000, 1), longArrayOf(2_000_000, 0, 7, 9),
+        )
+        for ((input, read, short, long) in cases.map { it.toList() }) {
+            val usage = Usage.builder().input(input).cacheRead(read).cacheWrite(CacheRetention.SHORT, short).cacheWrite(CacheRetention.LONG, long)
+                .output(2_000).finalForCall(true).build()
+            val ours = UsageMapper.billable(usage, null, binding).price(table)
+            val sdk = prices.cost(usage).orElseThrow()
+            assertFalse(ours.unknown)
+            assertEquals(0, sdk.total().compareTo(ours.amount), "input $input, read $read, writes $short/$long: SDK ${sdk.total()} vs ${ours.amount}")
+            assertEquals(prices.tier(usage).map { it.inputTokensAbove() }.orElse(null), table.tier(input + read + short + long)?.inputTokensAbove)
+        }
+        assertEquals(PriceTable(LocalDate.of(2026, 9, 1), "USD", emptyMap()), AiGateProfiles.priceTable(null, LocalDate.of(2026, 9, 1)))
+    }
 
     @Test
     fun `assistant turns split where the reasoning origin changes and fall back to the neutral origin`() {

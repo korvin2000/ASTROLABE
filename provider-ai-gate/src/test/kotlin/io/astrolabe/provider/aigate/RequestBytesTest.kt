@@ -1,5 +1,6 @@
 package io.astrolabe.provider.aigate
 
+import io.astrolabe.id.WorkId
 import io.astrolabe.provider.InvocationId
 import io.astrolabe.provider.ToolResult
 import kotlinx.coroutines.runBlocking
@@ -16,12 +17,15 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 /**
- * Telemetry never changes what is sent: two calls per wire API — the second replays the first reply (reasoning, a
- * tool call and its result) — are compared byte for byte with goldens recorded from `main` before the call facts
- * existed. The scripted replies carry a gateway's charge and route, so decoding them is exercised too. On a mismatch
- * the actual bytes are written to `build/request-bytes/` for review.
+ * What is sent, byte for byte: two calls per wire API — the second replays the first reply (reasoning, a tool call and
+ * its result) — against goldens recorded from `main` before the call facts existed and changed since only by the
+ * campaign's session key (OpenRouter `x-session-id` header, Responses `prompt_cache_key`), the same on both calls.
+ * The scripted replies carry a gateway's charge and route, so decoding them is exercised too. On a mismatch the actual
+ * bytes are written to `build/request-bytes/` for review.
  */
 class RequestBytesTest {
+    private val sessionKey = WorkId("W-requestbytes0000000").sessionKey
+
     @Test
     fun `chat completions requests keep their bytes`() {
         val wire = WireScript().sse(
@@ -63,10 +67,10 @@ class RequestBytesTest {
             AiGateAdapter(llm, listOf(profile)).use { adapter ->
                 runBlocking {
                     withTimeout(20_000) {
-                        val first = adapter.start(GateTestKit.request(profile, maxOutput = 2_000), InvocationId("inv-1")).await()
+                        val first = adapter.start(GateTestKit.request(profile, maxOutput = 2_000, sessionKey = sessionKey), InvocationId("inv-1")).await()
                         val call = first.toolCalls.single()
                         val transcript = first.items + ToolResult.text(call.id, "a.py b.py")
-                        adapter.start(GateTestKit.request(profile, transcript, maxOutput = 2_000), InvocationId("inv-2")).await()
+                        adapter.start(GateTestKit.request(profile, transcript, maxOutput = 2_000, sessionKey = sessionKey), InvocationId("inv-2")).await()
                     }
                 }
             }

@@ -119,7 +119,10 @@ object GateTestKit {
     )
 
     /** `[S][R][K]` fixed text, `[T]` items and an `[A]` anchor, each cached region closed by a breakpoint when [breakpoints]. */
-    fun request(profile: Profile, transcript: List<Item> = emptyList(), breakpoints: Boolean = profile.capabilities.caching.breakpoints, maxOutput: Int = 1_000, effort: Effort = Effort.Medium): Request =
+    fun request(
+        profile: Profile, transcript: List<Item> = emptyList(), breakpoints: Boolean = profile.capabilities.caching.breakpoints, maxOutput: Int = 1_000,
+        effort: Effort = Effort.Medium, sessionKey: String? = null,
+    ): Request =
         Request(
             segments = buildList {
                 add(Segment(SegmentKind.S, listOf(Message.text(Role.System, "You operate a coding harness.")), breakpoints))
@@ -128,7 +131,7 @@ object GateTestKit {
                 if (transcript.isNotEmpty()) add(Segment(SegmentKind.T, transcript, breakpoints))
                 add(Segment(SegmentKind.A, listOf(Message.text(Role.User, "anchor: turn 1"))))
             },
-            tools = listOf(lookSchema), profile = profile, effort = effort, maxOutputTokens = maxOutput,
+            tools = listOf(lookSchema), profile = profile, effort = effort, maxOutputTokens = maxOutput, sessionKey = sessionKey,
         )
 }
 
