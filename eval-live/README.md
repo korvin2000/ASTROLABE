@@ -62,7 +62,8 @@ base, passes on the reference, visible tests green on the reference).
 
 - `result.json` — task, model, repetition, seeded order, attempt outcome, stop code and reason, failure, cells,
   policy decisions, acceptance (passed, exit code, timeout, output tail) and its digest, attempt wall time, totals
-  (model requests and responses, cells, turns, tool calls, tokens uncached/cache read/cache write/output, cost from
+  (model requests and responses — every dispatched call ends in one `ModelResponded`, answered, failed or cancelled,
+  with its reconciled usage — failed calls, cells, turns, tool calls, tokens uncached/cache read/cache write/output, cost from
   the profile's price table, span costs, provider models, stop reasons, sums of any other numeric `ModelResponded`
   field), dropped events, changed files. Anything not observed is `null`, never 0.
 - `events.jsonl` — every `EventRecord` of the run's bus, whole: fields the events gain later are kept without a change.

@@ -423,6 +423,19 @@ public class Cell @JvmOverloads constructor(
                 admission.reconcile(Tokens(funded))
                 cost += usage
                 accounting?.record(ids, invocationId.value, ctx.model.profile, request, usage, funded)
+                // Every dispatched call reaches the bus once with its reconciled usage; an answered one is emitted below.
+                if (failure != null || received == null || settled?.cancelled == true) {
+                    val stop = when {
+                        failure is CancellationException || settled?.cancelled == true -> StopReason.Cancelled
+                        else -> settled?.response?.stop ?: when (failure) {
+                            is ProviderError.OutputLimit -> StopReason.OutputLimit
+                            is ProviderError.Refusal -> StopReason.Refusal
+                            else -> StopReason.Truncated
+                        }
+                    }
+                    val failed = failure?.takeUnless { it is CancellationException }?.let { it::class.simpleName ?: "error" }
+                    events?.emit(AgentEvent.Cell.ModelResponded(ids, invocationId.value, stop, usage, facts = (settled?.response ?: received)?.facts, failure = failed))
+                }
                 if (settled != null && (settled.lateItems.isNotEmpty() || failure != null)) {
                     val late = settled.lateItems + if (failure != null) settled.response?.items.orEmpty() else emptyList()
                     ev.journal.append(JournalEvent(idGen.next("ev"), ids, turn, JournalKind.Call,

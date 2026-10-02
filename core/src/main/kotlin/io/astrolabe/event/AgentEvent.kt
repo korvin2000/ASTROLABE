@@ -102,10 +102,14 @@ public sealed interface AgentEvent {
         /**
          * A model call answered: its [usage] (billed amount and reasoning tokens included, when reported) and its [facts]
          * — timings, upstream, answering model and price tier — which are telemetry, never identity (I-05).
+         *
+         * Every dispatched call ends in exactly one of these, answered or not: a cancelled call has [stop] `Cancelled`, a
+         * failed one names its error class in [failure] (no message), and either carries the reconciled terminal usage,
+         * `null` when unknown.
          */
         @Serializable
         @SerialName("cell.model_responded")
-        public data class ModelResponded @JvmOverloads constructor(override val ids: Identities, val invocationId: String, val stop: StopReason, val usage: BillableUsage?, override val phase: Phase = Phase.Understand, override val span: SpanId? = null, override val parent: SpanId? = null, val facts: CallFacts? = null) : Cell
+        public data class ModelResponded @JvmOverloads constructor(override val ids: Identities, val invocationId: String, val stop: StopReason, val usage: BillableUsage?, override val phase: Phase = Phase.Understand, override val span: SpanId? = null, override val parent: SpanId? = null, val facts: CallFacts? = null, val failure: String? = null) : Cell
 
         /**
          * Content-free progress of an in-flight model call (D-330), from an `ObservableAdapter`: [stage] is `started`,

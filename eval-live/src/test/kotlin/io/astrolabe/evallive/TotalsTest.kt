@@ -44,6 +44,29 @@ class TotalsTest {
     }
 
     @Test
+    fun `failed and cancelled calls after an answered one count in the totals and keep unknown usage unknown`() {
+        val usage = BillableUsage(mapOf(BillingDimension.UNCACHED_INPUT to 1_000L, BillingDimension.OUTPUT to 100L), provenance)
+        val events = listOf(
+            AgentEvent.Cell.ModelRequested(ids, "i-1", 2_000, "main"), responded("i-1", usage),
+            AgentEvent.Cell.ModelRequested(ids, "i-2", 2_000, "main"),
+            AgentEvent.Cell.ModelResponded(ids, "i-2", StopReason.Cancelled, usage),
+            AgentEvent.Cell.ModelRequested(ids, "i-3", 2_000, "main"),
+            AgentEvent.Cell.ModelResponded(ids, "i-3", StopReason.Truncated, null, failure = "Transport"),
+        )
+
+        val totals = Totals.of(events, prices)
+
+        assertEquals(3, totals.modelRequests)
+        assertEquals(3, totals.modelResponses)
+        assertEquals(1, totals.modelFailures)
+        assertEquals(mapOf("EndTurn" to 1, "Cancelled" to 1, "Truncated" to 1), totals.stops)
+        assertNull(totals.uncachedInputTokens, "the failed call's usage is unknown, so the total is, never a partial 2 000")
+        assertNull(totals.cost)
+        // 2 000 × 3 + 200 × 15 per million: the cancelled call's known usage is priced.
+        assertEquals("0.0090", totals.costPricedPart)
+    }
+
+    @Test
     fun `a run without responses has no quantities and an empty summary cell for each`() {
         val totals = Totals.of(listOf(responded("i-1", null)), prices)
 

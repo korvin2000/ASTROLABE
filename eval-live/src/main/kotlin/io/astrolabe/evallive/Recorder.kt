@@ -64,7 +64,9 @@ internal class Recorder(private val events: Events, file: Path) : AutoCloseable 
 }
 
 /**
- * What one run's events add up to. A quantity no response reported is `null`, never 0: a dimension counts only when
+ * What one run's events add up to. Every dispatched model call ends in one `ModelResponded` — answered, failed or
+ * cancelled — so its usage counts here; [modelFailures] counts the failed ones. A quantity no response reported is
+ * `null`, never 0: a dimension counts only when
  * every response reported it. [cost] prices the usage with the profile's table and is `null` when any part is
  * unknown or unpriced; [costPricedPart] is what could be priced. [responded] sums every other numeric field of
  * `ModelResponded`, so fields the events gain later (A2a: billed cost, reasoning, timings) are summed without a change.
@@ -73,6 +75,7 @@ internal class Recorder(private val events: Events, file: Path) : AutoCloseable 
 internal data class Totals(
     val modelRequests: Int,
     val modelResponses: Int,
+    val modelFailures: Int,
     val cellsStarted: Int,
     val turns: Int,
     val toolCalls: Int,
@@ -90,7 +93,7 @@ internal data class Totals(
 ) {
     companion object {
         /** Fields of `ModelResponded` read above or that are identities, not quantities. */
-        private val KNOWN = setOf("type", "ids", "invocationId", "stop", "usage", "phase", "span", "parent")
+        private val KNOWN = setOf("type", "ids", "invocationId", "stop", "usage", "phase", "span", "parent", "failure")
 
         fun of(events: List<AgentEvent>, prices: PriceTable): Totals {
             val responded = events.filterIsInstance<AgentEvent.Cell.ModelResponded>()
@@ -109,6 +112,7 @@ internal data class Totals(
             return Totals(
                 modelRequests = events.count { it is AgentEvent.Cell.ModelRequested },
                 modelResponses = responded.size,
+                modelFailures = responded.count { it.failure != null },
                 cellsStarted = events.count { it is AgentEvent.Cell.Started },
                 turns = events.count { it is AgentEvent.Cell.TurnStarted },
                 toolCalls = events.count { it is AgentEvent.Cell.ToolCalled },
