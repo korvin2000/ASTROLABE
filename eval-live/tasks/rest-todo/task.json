@@ -1,0 +1,9 @@
+{
+  "id": "rest-todo",
+  "class": "greenfield",
+  "title": "In-memory todo REST API on the Python standard library",
+  "acceptance": {
+    "argv": ["{python}", "_acceptance/smoke.py"],
+    "timeoutSeconds": 120
+  }
+}
