@@ -221,6 +221,6 @@ class LayoutTest {
 
     private companion object {
         const val GOLDEN_S_IMPLEMENTING: String = "311827f81e8390431317be6be1732eef68fc76872729623f6dcc12b1c7dce024"
-        const val GOLDEN_SCHEMAS_IMPLEMENTING: String = "ab8f9799ecedcf0a524e77247b152b73bcf2bac363f3bd18eadbb9997a438e9a"
+        const val GOLDEN_SCHEMAS_IMPLEMENTING: String = "2baecef747376403c00599b1d72f21d28104df940985f8963dbc3ef5b9c17c15"
     }
 }

@@ -558,6 +558,24 @@ class CellTest {
     }
 
     @Test
+    fun `plan and probe cells may wait on a run handle, the cell gate does not mask run wait`() = runTest {
+        for (role in listOf(Roles.plan, Roles.probe)) {
+            CellFixture(stateRoot.resolve(role.name)).use { f ->
+                val model = ScriptedModel.of(
+                    Scripted.Reply(listOf(say("wait"), call("c1", "run", """{"op":"wait","handle":"handle-x","timeout":5}"""))),
+                    Scripted.Reply(listOf(say("packet"))),
+                )
+
+                f.run(model, role = role, completion = RoleCompletion { _, _ -> CompletionDecision.Accepted(emptyList()) })
+
+                val waited = resultText(f.transcript(2).filterIsInstance<ToolResult>().single { it.callId == "c1" })
+                assertFalse(waited.contains("not available to the ${role.name} role"), "${role.name}: $waited")
+                assertTrue(waited.contains("no handle 'handle-x'"), "${role.name}: the call reached the run executor: $waited")
+            }
+        }
+    }
+
+    @Test
     fun `a masked op is refused alone while the other calls of the turn run`() = runTest {
         CellFixture(stateRoot).use { f ->
             val before = f.version("src/a.py")
