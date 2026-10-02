@@ -17,6 +17,8 @@ import io.astrolabe.contract.Origin
 import io.astrolabe.contract.RequirementStatus
 import io.astrolabe.contract.Shape
 import io.astrolabe.contract.SqliteContractRepository
+import io.astrolabe.evidence.Outcome
+import io.astrolabe.evidence.SqliteReceipts
 import io.astrolabe.event.Authority
 import io.astrolabe.event.AutonomousAuthority
 import io.astrolabe.fixtures.FakeAdapter
@@ -29,6 +31,7 @@ import io.astrolabe.fixtures.TempRepo
 import io.astrolabe.id.AttemptId
 import io.astrolabe.id.WorkId
 import io.astrolabe.store.Store
+import io.astrolabe.verify.Checks
 import io.astrolabe.verify.ReviewRequest
 import io.astrolabe.verify.Verdict
 import io.astrolabe.verify.VerdictOutcome
@@ -226,6 +229,35 @@ class AcceptanceEvidenceTest {
             ), Reviewer(), maxCells = 1)
             assertEquals(CampaignOutcome.Completed, result.outcome, result.state?.reason)
             assertEquals(RequirementStatus.Verified, c.state!!.ledger.entries.getValue("R1").status)
+        }
+    }
+
+    @Test
+    fun `a declared acceptance command the model runs is the acceptance receipt, with no second run at the stop`() = runBlocking<Unit> {
+        val printing = if (WINDOWS) Command(listOf("cmd.exe", "/d", "/s", "/c", "type pytest_pass.txt")) else Command(listOf("/bin/sh", "-c", "cat pytest_pass.txt"))
+        Store.open(stateRoot, repo.git, clock).use { store ->
+            val contracts = Contracts(SqliteContractRepository(store, clock), idGen, clock)
+            val derived = contracts.deriveS0(request.work, request.attempt, request.text, Atlas.build(repo.root), Config(), policy.tokens).contract
+            contracts.open(derived.copy(
+                scope = derived.scope.copy(writePaths = listOf("src/", "tests/")),
+                requirements = derived.requirements.map { it.copy(acceptance = listOf("AC-1")) },
+                acceptance = listOf(Acceptance.Run("AC-1", printing, Origin.User)),
+            ))
+        }
+        controller().open(repo.root, request, policy).use { c ->
+            val line = if (WINDOWS) "type pytest_pass.txt" else "cat pytest_pass.txt"
+            val adapter = FakeAdapter(ScriptedModel.of(
+                Scripted.Reply(listOf(call("t1", "run", """{"cmd":"$line"}"""))),
+                Scripted.Reply(listOf(say("done"))),
+            ))
+            val result = controller().run(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator(), maxOutputTokens = 4_000))
+            assertEquals(CampaignOutcome.Completed, result.outcome, result.state?.reason)
+            assertEquals(RequirementStatus.Verified, c.state!!.ledger.entries.getValue("R1").status)
+            assertTrue(adapter.calls.any { it.request.toString().contains("receipt CHK-accept-AC-1: accept AC-1: ✓") }, "the run result itself carries the receipt")
+            val receipts = SqliteReceipts(c.store, clock).forCheck(Checks.acceptId("AC-1"))
+            assertEquals(1, receipts.size, "verify-on-stop reused the run's receipt instead of running the command again")
+            assertEquals(Outcome.Passed, receipts.single().outcome)
+            assertTrue(receipts.single().independent)
         }
     }
 }
