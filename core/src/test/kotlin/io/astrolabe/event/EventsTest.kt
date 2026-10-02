@@ -6,9 +6,15 @@ import io.astrolabe.id.AttemptId
 import io.astrolabe.id.Generation
 import io.astrolabe.id.Identities
 import io.astrolabe.id.WorkId
+import io.astrolabe.provider.BillableUsage
+import io.astrolabe.provider.BillingDimension
+import io.astrolabe.provider.CallFacts
+import io.astrolabe.provider.Money
 import io.astrolabe.provider.StopReason
+import io.astrolabe.provider.UsageProvenance
 import kotlinx.serialization.json.Json
 import kotlinx.coroutines.launch
+import java.math.BigDecimal
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.test.Test
@@ -22,6 +28,14 @@ class EventsTest {
     private val samples: List<AgentEvent> = listOf(
         AgentEvent.Campaign.Opened(ids, "U1"),
         AgentEvent.Cell.ModelResponded(ids, "inv-1", StopReason.ToolUse, null),
+        AgentEvent.Cell.ModelResponded(
+            ids, "inv-2", StopReason.EndTurn,
+            BillableUsage(
+                mapOf(BillingDimension.UNCACHED_INPUT to 250_000L, BillingDimension.OUTPUT to 9L), UsageProvenance("openrouter", "anthropic/claude-4.5-sonnet-20250929", "openai-completions"),
+                reasoningIncludedInOutput = true, billed = Money("USD", BigDecimal("0.75")), billedUpstream = Money("USD", BigDecimal("0.7")), reasoningTokens = 4,
+            ),
+            facts = CallFacts(1_500, 400, "Anthropic", "anthropic/claude-4.5-sonnet-20250929", 200_000),
+        ),
         AgentEvent.Cell.ModelProgress(ids, "inv-1", "output", textChars = 120, outputTokens = 30),
         AgentEvent.Cell.ToolCalled(ids, 1, "look", "read", Phase.Locate, SpanId("s1"), SpanId("s0")),
         AgentEvent.Edit.Applied(ids, "e1", listOf("src/a.kt")),
@@ -69,6 +83,17 @@ class EventsTest {
             release.complete(Unit)
             try { kotlinx.coroutines.withTimeout(5000) { final.await() } } finally { collector.cancel() }
         }
+    }
+
+    @Test
+    fun `a model response recorded before the call facts decodes with them unknown`() {
+        val old = Json.encodeToString(AgentEvent.serializer(), samples[2])
+            .replace(Regex(""","(billed|billedUpstream|reasoningTokens|facts)":(\{[^{}]*\}|[^,{}]+)"""), "")
+        val decoded = Json.decodeFromString(AgentEvent.serializer(), old) as AgentEvent.Cell.ModelResponded
+        assertEquals(null, decoded.facts)
+        assertEquals(null, decoded.usage!!.billed)
+        assertEquals(null, decoded.usage!!.reasoningTokens)
+        assertEquals(mapOf(BillingDimension.UNCACHED_INPUT to 250_000L, BillingDimension.OUTPUT to 9L), decoded.usage!!.quantities)
     }
 
     @Test

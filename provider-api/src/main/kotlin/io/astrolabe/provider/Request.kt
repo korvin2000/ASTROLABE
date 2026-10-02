@@ -108,11 +108,12 @@ public enum class StopReason { EndTurn, ToolUse, OutputLimit, Refusal, Cancelled
  * reply was writing when it hit the output limit may look complete and still be cut.
  */
 @Serializable
-public data class Response(
+public data class Response @JvmOverloads constructor(
     val items: List<Item>,
     val stop: StopReason,
     val usage: BillableUsage? = null,
     val continuation: OpaqueContinuation? = null,
+    val facts: CallFacts? = null,
 ) {
     init {
         if (stop == StopReason.Truncated || stop == StopReason.Cancelled || stop == StopReason.OutputLimit) {
@@ -123,4 +124,30 @@ public data class Response(
     val toolCalls: List<ToolCall> get() = Items.toolCalls(items)
 
     val text: String get() = items.filterIsInstance<Message>().joinToString("") { it.text }
+}
+
+/**
+ * How one provider call went, as the transport observed it: telemetry for comparing runs, never priced, compared or
+ * part of an identity or a cached prompt region (I-05). Every member is `null` when unknown.
+ * - [latencyMillis]: from the call's start to its reply — credentials, retries, backoff and the whole stream included;
+ * - [firstOutputMillis]: from the call's start to the model's first output (text, reasoning or a tool call), not the
+ *   first byte — a time to first output, not a time to first token;
+ * - [upstream]: the provider a gateway routed the call to (OpenRouter `provider`);
+ * - [responseModel]: the model that answered, as the reply names it (it may be dated or differ from the profile's);
+ * - [priceTierInputTokensAbove]: the input threshold of the provider price tier that applies to this call; `null` at
+ *   base prices or when the profile has no prices.
+ */
+@Serializable
+public data class CallFacts(
+    val latencyMillis: Long? = null,
+    val firstOutputMillis: Long? = null,
+    val upstream: String? = null,
+    val responseModel: String? = null,
+    val priceTierInputTokensAbove: Long? = null,
+) {
+    init {
+        require(latencyMillis == null || latencyMillis >= 0) { "latency must be ≥ 0" }
+        require(firstOutputMillis == null || firstOutputMillis >= 0) { "first output must be ≥ 0" }
+        require(priceTierInputTokensAbove == null || priceTierInputTokensAbove >= 0) { "a price tier threshold must be ≥ 0" }
+    }
 }

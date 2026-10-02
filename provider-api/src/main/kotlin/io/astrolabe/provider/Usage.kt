@@ -63,19 +63,29 @@ public data class UsageProvenance(val provider: String, val model: String, val p
  * Normalized billable usage of one provider call (§15.2). [quantities] holds each billable dimension once;
  * [unknown] names dimensions the provider should have reported but did not — missing usage is recorded as
  * missing, never as zero (AX-09, FX-59). [native] retains the raw usage object.
+ *
+ * [billed] is what the provider reports it charged for the call (OpenRouter `usage.cost`), as reported and never
+ * computed — [price] gives the estimate; [billedUpstream] is the upstream provider's own charge where a gateway states
+ * it. [reasoningTokens] are part of output when [reasoningIncludedInOutput] and are never priced again. Each is `null`
+ * when not reported: unknown, never zero (AX-09).
  */
 @Serializable
-public data class BillableUsage(
+public data class BillableUsage @JvmOverloads constructor(
     val quantities: Map<BillingDimension, Long>,
     val provenance: UsageProvenance,
     val unknown: Set<BillingDimension> = emptySet(),
     val native: JsonElement? = null,
     val reasoningIncludedInOutput: Boolean? = null,
     val schemaVersion: Int = SCHEMA_VERSION,
+    val billed: Money? = null,
+    val billedUpstream: Money? = null,
+    val reasoningTokens: Long? = null,
 ) {
     init {
         require(quantities.values.all { it >= 0 }) { "usage quantities must be ≥ 0" }
         require(unknown.none { it in quantities }) { "a dimension cannot be both known and unknown" }
+        require(reasoningTokens == null || reasoningTokens >= 0) { "reasoning tokens must be ≥ 0" }
+        require(billed?.unknown != true && billedUpstream?.unknown != true) { "a billed amount is reported, never inexact" }
     }
 
     /** Diagnostic: uncached + cache read + every cache-write class. Never priced. */
