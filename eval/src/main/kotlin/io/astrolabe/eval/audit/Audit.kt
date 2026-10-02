@@ -65,7 +65,35 @@ public data class GroupAudit(
     val hitShare: Double?,
     val qHat: Double?,
     val wastes: List<WasteShare>,
+    val provenanceClasses: ProvenanceShares = ProvenanceShares.of(emptyList()),
 )
+
+/**
+ * A group's runs by the provenance class their finish carried (§4.4 C2) and each class's share of the runs; the shares
+ * are `null` while any run's class is [unknown] — a log written before the class, or a run that never finished.
+ */
+@Serializable
+public data class ProvenanceShares(
+    val independent: Int,
+    val agentTest: Int,
+    val unverified: Int,
+    val unknown: Int,
+    val independentShare: Double?,
+    val agentTestShare: Double?,
+    val unverifiedShare: Double?,
+) {
+    public companion object {
+        /** The shares of [classes], one wire class per run (`independent`, `agent_test`, `unverified`) or `null`. */
+        @JvmStatic
+        public fun of(classes: List<String?>): ProvenanceShares {
+            val counts = classes.groupingBy { it }.eachCount()
+            val (independent, agentTest, unverified) = listOf("independent", "agent_test", "unverified").map { counts[it] ?: 0 }
+            val unknown = classes.size - independent - agentTest - unverified
+            fun share(count: Int): Double? = if (unknown > 0 || classes.isEmpty()) null else count.toDouble() / classes.size
+            return ProvenanceShares(independent, agentTest, unverified, unknown, share(independent), share(agentTest), share(unverified))
+        }
+    }
+}
 
 @Serializable
 public data class AuditReport(val schema: Int, val prices: List<PriceFit>, val runs: List<RunAudit>, val groups: List<GroupAudit>) {
@@ -147,6 +175,7 @@ public object Audit {
             hitShare = AuditMath.hitShare(read, input),
             qHat = runs.sumOf { it.cache.cacheableTokens }.takeIf { it > 0 }?.let { b -> runs.sumOf { it.cache.cachedTokens }.toDouble() / b },
             wastes = wastes,
+            provenanceClasses = ProvenanceShares.of(runs.map { it.provenance.provenanceClass }),
         )
     }
 

@@ -65,12 +65,13 @@ public object AuditMarkdown {
         appendLine()
         appendLine("## Runs: provenance")
         appendLine()
-        row("run", "requirements", "verification", "checks", "outcome", "acceptance", "accept-unverified", "acceptance surface", "test edits", "external")
-        rule(10)
+        row("run", "requirements", "verification", "checks", "outcome", "class", "acceptance", "accept-unverified", "acceptance surface", "test edits", "external")
+        rule(11)
         for (r in report.runs) {
             val p = r.provenance
             row(r.run.source, p.requirements.joinToString("<br>"), p.verification ?: "—", p.checks.joinToString("<br>").ifEmpty { "—" }, p.outcome ?: "—",
-                p.acceptance ?: "—", p.acceptUnverified?.toString() ?: "—", "${p.acceptanceSurface.size}", p.testEdits.joinToString(", ").ifEmpty { "—" }, p.external ?: "—")
+                p.provenanceClass ?: "—", p.acceptance ?: "—", p.acceptUnverified?.toString() ?: "—", "${p.acceptanceSurface.size}", p.testEdits.joinToString(", ").ifEmpty { "—" },
+                p.external ?: "—")
         }
         appendLine()
         appendLine("## Groups (model × arm)")
@@ -81,6 +82,17 @@ public object AuditMarkdown {
             row(g.group + if (g.complete) "" else " · partial", "${g.runs}", "${g.calls}", g.externallyAccepted?.toString() ?: "—", "${g.acceptUnverified}", money(g.billed), money(g.estimate),
                 share(g.uncachedInput), share(g.cacheRead), share(g.output), share(g.reasoning), pct(g.hitShare), pct(g.qHat),
                 *g.wastes.map { w -> if (w.unmeasured != null) "—" else pct(w.share) }.toTypedArray())
+        }
+        appendLine()
+        appendLine("## Groups: provenance class")
+        appendLine()
+        appendLine("Runs by the class their finish carried (C2): who verified the result. Shares are of the group's runs, `—` while a run's class is unknown.")
+        appendLine()
+        row("group", "runs", "independent", "agent_test", "unverified", "unknown")
+        rule(6)
+        for (g in report.groups) {
+            val c = g.provenanceClasses
+            row(g.group, "${g.runs}", count(c.independent, c.independentShare), count(c.agentTest, c.agentTestShare), count(c.unverified, c.unverifiedShare), "${c.unknown}")
         }
         appendLine()
         appendLine("## Details")
@@ -110,6 +122,8 @@ public object AuditMarkdown {
     }
 
     private fun share(c: Category): String = if (!c.reported) "n/a" else pct(c.share)
+
+    private fun count(n: Int, share: Double?): String = "$n (${pct(share)})"
 
     private fun tokens(c: Category): String = if (!c.reported) "n/a" else c.tokens?.toString() ?: "—"
 

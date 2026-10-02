@@ -9,8 +9,9 @@ import kotlinx.serialization.json.JsonPrimitive
 /**
  * Who set the requirements, which checks ran and whose they were, and how acceptance ended (§9.1). An acceptance
  * decision is asked only when obligations stay unverified (D-339), so an accepting decision is [acceptUnverified].
- * C2 adds a provenance axis to the finish: every field of `campaign.finished` and of eval-live's `result.json` read
- * nowhere here lands in [extra], so a new field is reported from the run it first appears in.
+ * [provenanceClass] is the class the last `campaign.finished` carried (§4.4 C2): `independent`, `agent_test` or
+ * `unverified`; `null` for a log written before it. Every other field of `campaign.finished` and of eval-live's
+ * `result.json` read nowhere here lands in [extra], so a new field is reported from the run it first appears in.
  */
 @Serializable
 public data class Provenance(
@@ -24,9 +25,10 @@ public data class Provenance(
     val testEdits: List<String>,
     val external: String?,
     val extra: Map<String, JsonElement>,
+    val provenanceClass: String? = null,
 ) {
     public companion object {
-        private val FINISH_READ = setOf("type", "ids", "phase", "span", "parent", "outcome", "finishReceiptRef", "stopCode")
+        private val FINISH_READ = setOf("type", "ids", "phase", "span", "parent", "outcome", "finishReceiptRef", "stopCode", "provenanceClass")
         private val RESULT_READ = setOf(
             "schema", "task", "taskClass", "provider", "model", "repeat", "order", "seed", "harnessVersion", "effort", "maxCells", "profileId",
             "contextLimitTokens", "outputHeadroomTokens", "workId", "attemptFingerprint", "shape", "verification", "outcome", "stopCode",
@@ -47,6 +49,7 @@ public data class Provenance(
             var outcome: String? = null
             var acceptance: String? = null
             var accepted: Boolean? = null
+            var provenanceClass: String? = null
             val extra = LinkedHashMap<String, JsonElement>()
             val checks = LinkedHashMap<String, MutableMap<String, Int>>()
             for (e in journal.events) {
@@ -59,6 +62,7 @@ public data class Provenance(
                     "campaign.finished" -> {
                         outcome = (e.data.str("outcome") ?: "?") + (e.data.str("stopCode")?.let { " · $it" } ?: "")
                         if (outcome?.startsWith("completed") == true && accepted == null) accepted = false
+                        provenanceClass = e.data.str("provenanceClass")
                         e.data.filterKeys { it !in FINISH_READ }.forEach { (k, v) -> extra["campaign.finished.$k"] = v }
                     }
                     "studio.run_ended" -> e.data.str("reason")?.takeIf { it != e.data.str("outcome") }?.let { outcome = "$outcome · $it" }
@@ -106,6 +110,7 @@ public data class Provenance(
                 testEdits = edited.filter { TEST_PATH.containsMatchIn(it) }.distinct(),
                 external = external,
                 extra = extra,
+                provenanceClass = provenanceClass,
             )
         }
     }
