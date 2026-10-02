@@ -92,4 +92,39 @@ class DiskContainmentTest {
         }
         assertTrue(Files.exists(outside.resolve("victim/keep.txt")))
     }
+
+    @Test
+    fun `rm and rd may remove a directory whose links stay inside, a link leaving it or reaching a protected path keeps it D`() {
+        write("node_modules/pkg/cli.js")
+        write("web/x.txt")
+        write(".github/workflows/ci.yml")
+        val links = listOf(
+            link("node_modules/.bin/pkg", root.resolve("node_modules/pkg")),
+            link("build/out", outside.resolve("victim")),
+            link("gen/gh", root.resolve(".github")),
+            link("tmp/escape", outside.resolve("victim")),
+            link("web/linked", outside.resolve("victim")),
+        )
+        try {
+            val probe = probe()
+            assertFalse(probe.contained("node_modules"), "the strict answer still refuses any link")
+            assertTrue(probe.containedWithInnerLinks("node_modules"))
+            assertFalse(probe.containedWithInnerLinks("build"), "a link below leads outside")
+            assertFalse(probe.containedWithInnerLinks("gen"), "a link below reaches a protected path")
+            assertFalse(probe.containedWithInnerLinks("node_modules/.bin/pkg"), "the operand itself is a link")
+
+            fun classify(line: String) = EffectPolicy.classify(RunArgs(cmd = line), root.toString(), scope.protectedPaths, EffectPolicyConfig(), probe)
+            assertEquals(EffectClass.W, classify(if (onWindows) "rd /s /q node_modules" else "rm -rf node_modules").effectClass)
+            assertEquals(EffectClass.D, classify(if (onWindows) "move node_modules gone" else "mv node_modules gone").effectClass)
+            assertEquals(EffectClass.D, classify(if (onWindows) "rd /s /q build" else "rm -rf build").effectClass)
+            // tmp is no exemption: a link under it leaves the workspace.
+            assertEquals(EffectClass.D, classify(if (onWindows) "rd /s /q tmp\\escape" else "rm -rf tmp/escape").effectClass)
+            assertEquals(EffectClass.D, classify(if (onWindows) "rd /s /q tmp" else "rm -rf tmp").effectClass)
+            // A redirect through a link writes outside; beside it, a plain file stays W.
+            assertEquals(EffectClass.D, classify(if (onWindows) "echo x > web\\linked\\new.txt" else "echo x > web/linked/new.txt").effectClass)
+            assertEquals(EffectClass.W, classify(if (onWindows) "echo x > web\\new.txt" else "echo x > web/new.txt").effectClass)
+        } finally {
+            links.forEach(Files::delete)
+        }
+    }
 }

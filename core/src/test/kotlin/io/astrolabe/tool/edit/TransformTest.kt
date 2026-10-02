@@ -52,6 +52,8 @@ import io.astrolabe.workspace.Ranges
 import io.astrolabe.workspace.Stamper
 import io.astrolabe.workspace.VersionRegistry
 import io.astrolabe.workspace.Workspace
+import io.astrolabe.workspace.createJunction
+import io.astrolabe.workspace.requireSupported
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
@@ -342,6 +344,28 @@ class TransformTest {
         assertFalse(refused.applied)
         assertTrue(refused.body.contains("a transform is a batch of its own"), refused.body)
         assertNull(registry.read("src/new.py"))
+    }
+
+    @Test
+    fun `a transform script's delete is classified with the disk probe of run`() = runTest {
+        val editor = edit()
+        fun script(line: String) = """{"ops":[{"transform":{"script":"$line","scope_glob":"src/**/*.py","why":"w"}}],"why":"w"}"""
+        val plain = run(script(if (windows) "del src\\\\m40.py" else "rm src/m40.py"), editor)
+        assertFalse(plain.body.contains("D-class"), "a probed delete inside the workspace is W: ${plain.body}")
+        assertNull(registry.read("src/m40.py"))
+
+        val victim = Files.createDirectories(stateRoot.resolve("victim"))
+        Files.writeString(victim.resolve("keep.txt"), "keep\n")
+        val link = repo.root.resolve("src/linked")
+        if (windows) requireSupported(createJunction(link, victim)) else Files.createSymbolicLink(link, victim)
+        try {
+            val linked = run(script(if (windows) "rd /s /q src\\\\linked" else "rm -rf src/linked"), editor, turn = 2)
+            assertFalse(linked.applied)
+            assertTrue(linked.body.contains("transform script is D-class"), linked.body)
+        } finally {
+            Files.delete(link)
+        }
+        assertTrue(Files.exists(victim.resolve("keep.txt")))
     }
 
     @Test

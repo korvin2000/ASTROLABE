@@ -39,6 +39,13 @@ public data class Classification(
  */
 public fun interface ContainmentProbe {
     public fun contained(relative: String): Boolean
+
+    /**
+     * [contained], except that a link strictly below [relative] passes when its real target lies strictly inside the
+     * workspace clear of protected paths: `rm -r` and `rd /s` remove such a link without following it. A probe that
+     * cannot tell answers [contained].
+     */
+    public fun containedWithInnerLinks(relative: String): Boolean = contained(relative)
 }
 
 /**
@@ -55,7 +62,7 @@ public data class EffectPolicyConfig(
     val destructiveFileCommands: Set<String> = DEFAULT_DESTRUCTIVE_FILE,
     val writingCommands: Set<String> = DEFAULT_WRITING,
     val scriptInterpreters: Set<String> = DEFAULT_SCRIPT_INTERPRETERS,
-    /** Workspace-relative prefixes a destructive delete may target without becoming D-class. */
+    /** Workspace-relative prefixes a destructive delete may target without becoming D-class, when a probe proves it contained. */
     val tmpPrefixes: Set<String> = setOf("tmp", ".astrolabe/tmp", "build/tmp", "target/tmp"),
     /** D-class package installation (§4.6 "package installation (configurable)"). */
     val packageInstallIsDClass: Boolean = true,
@@ -119,8 +126,8 @@ public data class EffectPolicyConfig(
  * network egress, mutation of the user's git refs, package installation (configurable), privilege escalation
  * and destructive git commands or deletes and moves not proven to stay inside the workspace clear of protected paths.
  * `W` covers known builders, formatters, test runners, scripts, deletes and moves of literal paths a [ContainmentProbe]
- * inspected inside the workspace (D-373, D-375) and
- * redirects inside the workspace. Only known read-only command forms are labelled `R` (existence probes even outside
+ * inspected inside the workspace (D-373, D-375; tmp prefixes included) and
+ * redirects to literal paths inside the workspace. Only known read-only command forms are labelled `R` (existence probes even outside
  * the workspace, D-373); unknown executables are `W` with unknown effects — a label, not proof of read-only execution
  * in trusted-local mode (§4.6): post-hoc verification is the stamp diff (P1.6.5).
  */
@@ -128,7 +135,7 @@ public object EffectPolicy {
 
     /**
      * Classifies argv. [cwd] is workspace-relative; [workspaceRoot] is the absolute workspace path. Without a [probe]
-     * no delete or move outside the tmp prefixes is proven contained (D-375).
+     * no delete or move is proven contained (D-375), under the tmp prefixes neither: a link there may lead outside.
      */
     @JvmStatic
     @JvmOverloads
@@ -145,9 +152,9 @@ public object EffectPolicy {
     }
 
     /**
-     * Classifies a `run` call. The `cmd` (single shell invocation) form is split on shell operators and each
-     * segment is classified; the result is marked [Classification.approximate] because a shell line can hide
-     * effects that argv cannot.
+     * Classifies a `run` call. The `cmd` (single shell invocation) form is split on shell operators and line breaks
+     * and each segment is classified, after a `cd` in every directory it may run in; the result is marked
+     * [Classification.approximate] because a shell line can hide effects that argv cannot.
      */
     @JvmStatic
     @JvmOverloads
@@ -161,7 +168,7 @@ public object EffectPolicy {
         val argv = args.argv
         if (argv != null && argv.isNotEmpty()) return classify(argv, args.cwd, workspaceRoot, protectedPaths, config, probe)
         val cmd = args.cmd.orEmpty()
-        val segments = shellSegments(cmd)
+        val segments = shellSegments(cmd, config.os == OsFamily.Windows)
         return classifySegments(segments, args.cwd, workspaceRoot, protectedPaths, config, probe, approximate = true, rendered = cmd)
     }
 
@@ -184,15 +191,52 @@ public object EffectPolicy {
             reasons += "no command could be parsed"
             return Classification(EffectClass.D, reasons.toList(), capabilities + Capability.OutsideWorkspace, rendered, true, approximate)
         }
+        // A `cd` moves the directory later segments run in, unless it failed (`||`) or ran in a subshell (`|`): each later
+        // segment is classified in every directory it may run in, and a directory the text cannot name resolves nothing.
+        var directories = listOf(cwd)
         for (tokens in segments) {
-            val one = classifyOne(tokens, cwd, workspaceRoot, protectedPaths, config, probe, shell = approximate)
-            effect = maxOf(effect, one.effectClass)
-            reasons += one.reasons
-            capabilities += one.requiredCapabilities
-            effectsUnknown = effectsUnknown || one.effectsUnknown
+            for (directory in directories) {
+                val one = classifyOne(tokens, directory, workspaceRoot, protectedPaths, config, probe, shell = approximate)
+                effect = maxOf(effect, one.effectClass)
+                reasons += one.reasons
+                capabilities += one.requiredCapabilities
+                effectsUnknown = effectsUnknown || one.effectsUnknown
+            }
+            if (!approximate) continue
+            val moved = changedDirectories(tokens, directories, workspaceRoot, config)
+            if (UNKNOWN_DIRECTORY in moved) reasons += "'${render(tokens)}' moves to a directory the text cannot name: later paths resolve nowhere"
+            directories = (directories + moved).distinct()
         }
         return Classification(effect, reasons.toList(), capabilities, rendered, effectsUnknown, approximate)
     }
+
+    /** A cwd under which every relative path resolves outside the workspace: the directory after an unreadable `cd`. */
+    private const val UNKNOWN_DIRECTORY = ".."
+
+    private val CHANGE_DIRECTORY = setOf("cd", "chdir", "pushd")
+
+    /**
+     * The directories a `cd`, `chdir` or `pushd` segment moves to from each of [from]; empty for any other segment (`popd`
+     * returns to a directory already listed). `cmd.exe` takes the rest of the line as one path and prints the directory
+     * when it has none; `sh` goes home.
+     */
+    private fun changedDirectories(tokens: List<String>, from: List<String?>, workspaceRoot: String, config: EffectPolicyConfig): List<String?> {
+        val words = ArrayList<String>()
+        var index = 0
+        while (index < tokens.size) {
+            if (redirect(tokens[index]) != null) index += 2 else words += tokens[index++]
+        }
+        val executable = words.firstOrNull() ?: return emptyList()
+        if ('/' in executable || '\\' in executable || programName(executable) !in CHANGE_DIRECTORY) return emptyList()
+        val windows = config.os == OsFamily.Windows
+        val operands = words.drop(1).filterNot { if (windows) it.equals("/d", ignoreCase = true) else it in POSIX_CD_FLAGS }
+        if (windows && operands.isEmpty()) return emptyList()
+        val target = (if (windows) operands.joinToString(" ") else operands.singleOrNull())
+            ?.takeIf { it != "-" && literal(it, windows) } ?: return listOf(UNKNOWN_DIRECTORY)
+        return from.map { directory -> resolve(target, directory, workspaceRoot, config) ?: UNKNOWN_DIRECTORY }
+    }
+
+    private val POSIX_CD_FLAGS = setOf("-L", "-P", "-e", "-@")
 
     private fun classifyOne(
         tokens: List<String>,
@@ -209,26 +253,54 @@ public object EffectPolicy {
         var effectsUnknown = false
 
         val redirects = ArrayList<String>()
+        val writes = ArrayList<String>()
         val argv = ArrayList<String>()
         var index = 0
         while (index < tokens.size) {
             val token = tokens[index]
             // D-375: argv reaches the program without a shell, so `>` there is an argument, never a redirect.
-            if (shell && token in REDIRECTS) {
-                val target = tokens.getOrNull(index + 1)?.takeUnless { nullDevice(it, config) }
-                if (token != "<" && target != null) {
-                    effect = maxOf(effect, EffectClass.W)
-                    capabilities += Capability.WorkspaceWrite
-                    reasons += "output redirect '$token'"
+            val operator = if (shell) redirect(token) else null
+            if (operator != null) {
+                val target = tokens.getOrNull(index + 1)
+                when {
+                    target == null || operator.heredoc || nullDevice(target, config) -> Unit
+                    // `2>&1`, `>&2`, `<&-` name a descriptor, not a file.
+                    operator.duplicates && (target == "-" || target.all(Char::isDigit)) -> Unit
+                    operator.writes -> {
+                        effect = maxOf(effect, EffectClass.W)
+                        capabilities += Capability.WorkspaceWrite
+                        reasons += "output redirect '$token'"
+                        redirects += target
+                        writes += target
+                    }
+                    else -> redirects += target
                 }
-                target?.let { redirects += it }
                 index += 2
                 continue
             }
             argv += token
             index++
         }
-        if (argv.isEmpty()) return Classification(effect, reasons, capabilities, render(tokens), effectsUnknown = true)
+        // A redirect target is a write path as written: the shell expands anything but a literal path to a place the text
+        // cannot see, and a link on the way (checked when a probe is given) leads it out of the workspace.
+        val windows = config.os == OsFamily.Windows
+        for (target in writes) {
+            if (!literal(target, windows)) {
+                effect = EffectClass.D
+                capabilities += Capability.OutsideWorkspace
+                reasons += "redirect target '$target' is not a literal path"
+                continue
+            }
+            val resolved = resolve(target, cwd, workspaceRoot, config)
+            if (resolved != null && containment != null && !containment.contained(resolved)) {
+                effect = EffectClass.D
+                reasons += "redirect target '$target' is reached through a link, is one or is protected"
+            }
+        }
+        if (argv.isEmpty()) {
+            checkPaths(redirects, probe = false, cwd, workspaceRoot, protectedPaths, config, reasons, capabilities)?.let { effect = it }
+            return Classification(effect, reasons, capabilities, render(tokens), effectsUnknown = true)
+        }
 
         val program = programName(argv.first())
         val args = argv.drop(1)
@@ -276,7 +348,6 @@ public object EffectPolicy {
             // D-375: W only for operands proven to be literal paths that stay inside the workspace; the shell expands
             // anything else (`%VAR%`, `$HOME`, `~`, globs) to paths the text cannot see.
             val parsed = if (removing) removal(program, args, config) else Removal(args.filter { !isFlag(it) }, null, byName = false)
-            val windows = config.os == OsFamily.Windows
             val doubt = when {
                 removing && ('/' in argv.first() || '\\' in argv.first()) -> "'${argv.first()}' is not a bare program name"
                 parsed.unknown != null -> "'${parsed.unknown}' is not a recognised flag of '$program'"
@@ -285,20 +356,22 @@ public object EffectPolicy {
                     // `link/../x` normalises lexically to `x`, but the shell follows `link` first.
                     ?: parsed.operands.firstOrNull { removing && ".." in it.split('/', '\\') }?.let { "'$it' has a '..' segment a link can redirect" }
             }
+            // A tmp prefix is no proof either: a link or junction there leads outside, so it needs the probe as well.
+            val unlinking = removing && program in UNLINKING
+            val why = doubt ?: parsed.operands.firstNotNullOfOrNull { uncontained(it, cwd, workspaceRoot, protectedPaths, config, containment, parsed.byName, unlinking) }
             when {
-                doubt == null && parsed.operands.all { underTmp(if (parsed.byName) "$it/.." else it, cwd, workspaceRoot, config) } -> {
+                why == null && parsed.operands.all { underTmp(if (parsed.byName) "$it/.." else it, cwd, workspaceRoot, config) } -> {
                     effect = maxOf(effect, EffectClass.W)
                     capabilities += Capability.WorkspaceWrite
                     reasons += "destructive delete under tmp: '$label'"
                 }
-                doubt == null && removing && parsed.operands.all { uncontained(it, cwd, workspaceRoot, protectedPaths, config, containment, parsed.byName) == null } -> {
+                why == null && removing -> {
                     effect = maxOf(effect, EffectClass.W)
                     capabilities += Capability.WorkspaceWrite
                     reasons += "delete or move inside the workspace: '$label'"
                 }
                 else -> {
                     effect = EffectClass.D
-                    val why = doubt ?: parsed.operands.firstNotNullOfOrNull { uncontained(it, cwd, workspaceRoot, protectedPaths, config, containment, parsed.byName) }
                     reasons += "destructive delete outside tmp: '$label'" + (why?.let { " ($it)" } ?: "")
                 }
             }
@@ -317,24 +390,7 @@ public object EffectPolicy {
             reasons += "script interpreter '$program': effects are unknown until the stamp diff"
         }
 
-        for (token in targetTokens(argv) + redirects) {
-            val resolved = resolve(token, cwd, workspaceRoot, config)
-            if (resolved == null && probe) {
-                reasons += "read-only probe '$program' names '$token' outside the workspace"
-                continue
-            }
-            if (resolved == null) {
-                effect = EffectClass.D
-                capabilities += Capability.OutsideWorkspace
-                reasons += "path '$token' resolves outside the workspace"
-                continue
-            }
-            val protectedBy = protectedPaths.firstOrNull { matchesPath(resolved, it, config.caseInsensitivePaths) }
-            if (protectedBy != null) {
-                effect = EffectClass.D
-                reasons += "path '$token' is under the protected path '$protectedBy'"
-            }
-        }
+        checkPaths(targetTokens(argv) + redirects, probe, cwd, workspaceRoot, protectedPaths, config, reasons, capabilities, program)?.let { effect = it }
         if (!recognized) {
             effect = maxOf(effect, EffectClass.W)
             capabilities += Capability.WorkspaceWrite
@@ -498,10 +554,18 @@ public object EffectPolicy {
     private val NOT_LITERAL = "%\$`!~[]{}()^,\"'<>|&;@".toSet()
 
     /**
+     * Deletes that remove a link below their operand without following it: `rm -r` (GNU, BSD, busybox, MSYS) and the
+     * `cmd.exe` builtin `rd /s`, also spelled `rmdir /s` (a POSIX `rmdir` removes empty directories only). `del /s`,
+     * `Remove-Item -Recurse` and moves are not among them.
+     */
+    private val UNLINKING = setOf("rm", "rd", "rmdir")
+
+    /**
      * Why the literal operand [token] is not proven to stay strictly inside the workspace clear of protected paths, or
      * `null`: it resolves below the root, a wildcard sits in its last segment only and cannot match a dot-entry, no
-     * protected path is it, holds it or lies under it, and the [probe] inspected it on disk. A wildcard — and with
-     * [byName] any operand — is checked as its parent directory, which must not be the root.
+     * protected path is it, holds it or lies under it, and the [probe] inspected it on disk — with [innerLinks], links
+     * below it pass when they stay inside. A wildcard — and with [byName] any operand — is checked as its parent
+     * directory, which must not be the root.
      */
     private fun uncontained(
         token: String,
@@ -511,6 +575,7 @@ public object EffectPolicy {
         config: EffectPolicyConfig,
         probe: ContainmentProbe?,
         byName: Boolean,
+        innerLinks: Boolean,
     ): String? {
         val resolved = resolve(token, cwd, workspaceRoot, config) ?: return "'$token' resolves outside the workspace"
         val segments = resolved.split('/')
@@ -522,7 +587,45 @@ public object EffectPolicy {
             return "'$token' is, holds or lies under a protected path"
         }
         if (probe == null) return "'$checked' was not inspected on disk"
+        if (innerLinks) return if (probe.containedWithInnerLinks(checked)) null else "'$checked' holds a protected path or a link leaving the workspace, or is reached through a link"
         return if (probe.contained(checked)) null else "'$checked' holds a protected path or a link, or is reached through a link"
+    }
+
+    /**
+     * Checks argument and redirect paths: one outside the workspace or under a protected path makes the command D (the
+     * returned class); a read-only [probe] may name paths outside.
+     */
+    private fun checkPaths(
+        tokens: List<String>,
+        probe: Boolean,
+        cwd: String?,
+        workspaceRoot: String,
+        protectedPaths: List<String>,
+        config: EffectPolicyConfig,
+        reasons: MutableList<String>,
+        capabilities: MutableSet<Capability>,
+        program: String = "",
+    ): EffectClass? {
+        var effect: EffectClass? = null
+        for (token in tokens) {
+            val resolved = resolve(token, cwd, workspaceRoot, config)
+            if (resolved == null && probe) {
+                reasons += "read-only probe '$program' names '$token' outside the workspace"
+                continue
+            }
+            if (resolved == null) {
+                effect = EffectClass.D
+                capabilities += Capability.OutsideWorkspace
+                reasons += "path '$token' resolves outside the workspace"
+                continue
+            }
+            val protectedBy = protectedPaths.firstOrNull { matchesPath(resolved, it, config.caseInsensitivePaths) }
+            if (protectedBy != null) {
+                effect = EffectClass.D
+                reasons += "path '$token' is under the protected path '$protectedBy'"
+            }
+        }
+        return effect
     }
 
     /** A protected [pattern] that could name something under the directory [path]: its literal prefix lies below it, or it starts with a double star. */
@@ -548,7 +651,16 @@ public object EffectPolicy {
 
     // ---- command patterns -------------------------------------------------------------------------------
 
-    private val REDIRECTS = setOf(">", ">>", "<", "2>", "2>>", "&>")
+    /** A redirect operator: it [writes] its target (`>`, `>>`, `>|`, `<>`, `>&file`), [duplicates] a descriptor (`>&2`, `<&0`) or opens a [heredoc]. */
+    private class Redirect(val writes: Boolean, val duplicates: Boolean, val heredoc: Boolean)
+
+    /** An optional descriptor (`2`) or `&` (both streams), then the operator, as [tokenizeShell] emits it. */
+    private val REDIRECT = Regex("^(\\d*|&)(>>|>\\||>&|>|<<<|<<-|<<|<>|<&|<)$")
+
+    private fun redirect(token: String): Redirect? {
+        val operator = REDIRECT.matchEntire(token)?.groupValues?.get(2) ?: return null
+        return Redirect(writes = '>' in operator, duplicates = operator.endsWith('&'), heredoc = operator.startsWith("<<"))
+    }
 
     /** `-rf`, `--hard` and Windows switches (`/s`); a POSIX absolute path such as `/etc/passwd` is not a flag. */
     private fun isFlag(token: String): Boolean = when {
@@ -708,11 +820,11 @@ public object EffectPolicy {
 
     private val OPERATORS = setOf("|", "||", "&&", ";", "&")
 
-    /** Splits one shell command line into command segments; quotes are honoured, operators separate segments. */
-    private fun shellSegments(line: String): List<List<String>> {
+    /** Splits one shell command line into command segments; quotes are honoured, operators and line breaks separate segments. */
+    private fun shellSegments(line: String, windows: Boolean): List<List<String>> {
         val segments = ArrayList<List<String>>()
         var current = ArrayList<String>()
-        for (token in tokenizeShell(line)) {
+        for (token in tokenizeShell(line, windows)) {
             if (token in OPERATORS) {
                 if (current.isNotEmpty()) segments += current
                 current = ArrayList()
@@ -724,7 +836,11 @@ public object EffectPolicy {
         return segments
     }
 
-    private fun tokenizeShell(line: String): List<String> {
+    /**
+     * Shell tokens; a line break ends a command like `;` — in `cmd.exe` also inside quotes, which never span lines there.
+     * A redirect operator is one token with its descriptor (`2>&`, `&>>`, `>|`, `<<-`), so `&` and `|` inside it separate nothing.
+     */
+    private fun tokenizeShell(line: String, windows: Boolean): List<String> {
         val tokens = ArrayList<String>()
         val token = StringBuilder()
         var quote = ' '
@@ -735,15 +851,26 @@ public object EffectPolicy {
                 token.clear()
             }
         }
+        fun at(index: Int, c: Char) = index < line.length && line[index] == c
         while (i < line.length) {
             val c = line[i]
             when {
+                (c == '\n' || c == '\r') && (quote == ' ' || windows) -> {
+                    quote = ' '
+                    flush()
+                    tokens += ";"
+                }
                 quote != ' ' -> if (c == quote) quote = ' ' else token.append(c)
                 c == '"' || c == '\'' -> quote = c
                 c.isWhitespace() -> flush()
+                // `&>` / `&>>`: both streams to a file; the `&` is the redirect's descriptor.
+                c == '&' && at(i + 1, '>') -> {
+                    flush()
+                    token.append(c)
+                }
                 c == '|' || c == '&' -> {
                     flush()
-                    val double = i + 1 < line.length && line[i + 1] == c
+                    val double = at(i + 1, c)
                     tokens += if (double) "$c$c" else c.toString()
                     if (double) i++
                 }
@@ -752,11 +879,21 @@ public object EffectPolicy {
                     tokens += ";"
                 }
                 c == '>' || c == '<' -> {
-                    val prefix = if (token.toString() == "2" || token.toString() == "&") token.toString() else ""
-                    if (prefix.isNotEmpty()) token.clear() else flush()
-                    val double = i + 1 < line.length && line[i + 1] == c
-                    tokens += prefix + (if (double) "$c$c" else c.toString())
-                    if (double) i++
+                    val pending = token.toString()
+                    val descriptor = pending.isNotEmpty() && (pending == "&" || pending.all(Char::isDigit))
+                    if (descriptor) token.clear() else flush()
+                    val operator = StringBuilder(if (descriptor) pending else "").append(c)
+                    var next = i + 1
+                    if (c == '>') {
+                        if (at(next, '>') || at(next, '|') || at(next, '&')) operator.append(line[next++])
+                    } else if (at(next, '<')) {
+                        operator.append(line[next++])
+                        if (at(next, '<') || at(next, '-')) operator.append(line[next++])
+                    } else if (at(next, '>') || at(next, '&')) {
+                        operator.append(line[next++])
+                    }
+                    tokens += operator.toString()
+                    i = next - 1
                 }
                 else -> token.append(c)
             }
