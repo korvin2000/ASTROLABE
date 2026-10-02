@@ -351,18 +351,25 @@ class SchedulerTest {
     @Test
     fun `a receipt records what its check proves and who created it, and only a host or user build passes on its exit`() = runTest {
         val npmBuild = Command(listOf("npm", "run", "build"))
-        val build = checks.register(Check("CHK-accept-AC-B", CheckKind.Acceptance, Selector.Named(npmBuild), Closure.Known(setOf("src/a.py")), CostClass.Slow, Trigger.IncrementEnd, acceptanceIds = listOf("AC-B"), command = npmBuild, origin = Origin.User))
+        val build = checks.register(Check("CHK-accept-AC-B", CheckKind.Acceptance, Selector.Named(npmBuild), Closure.Known(setOf("src/a.py")), CostClass.Slow, Trigger.IncrementEnd, acceptanceIds = listOf("AC-B"), command = npmBuild, origin = Origin.User, evidence = EvidenceKind.Build))
         val exitOnly = Executed(npmBuild.argv, null, false, 0, Outcome.Passed, null, store.blobs.put("built\n".toByteArray(), BlobKind.LOG, ids))
 
         val receipt = scheduler.runCheck(build, 1) { exitOnly }
-        assertEquals(EvidenceKind.Build, receipt.evidenceKind, "recognised from npm run build")
+        assertEquals(EvidenceKind.Build, receipt.evidenceKind)
+        assertTrue(receipt.evidenceDeclared)
         assertEquals(Origin.User, receipt.checkOrigin)
         assertEquals(Outcome.Passed, receipt.outcome, receipt.limits.toString())
         assertEquals(null, receipt.parsed)
         assertTrue(receipt.passesOnExit && receipt.independent && receipt.greenForFinalTree)
         assertEquals(receipt, receipts.get(receipt.receiptId), "kind and origin round-trip through the store")
 
-        // The same exit from the model's own build, or from a test check, stays inconclusive (D-50).
+        // The same exit with the kind only recognised (npm run build), from the model's own build, or from a test check
+        // stays inconclusive (D-50).
+        val labelled = checks.register(build.copy(id = "CHK-accept-AC-L", acceptanceIds = listOf("AC-L"), evidence = null))
+        val labelledReceipt = scheduler.runCheck(labelled, 1) { exitOnly }
+        assertEquals(EvidenceKind.Build, labelledReceipt.evidenceKind, "recognised from npm run build: a label")
+        assertFalse(labelledReceipt.evidenceDeclared)
+        assertEquals(Outcome.Inconclusive, labelledReceipt.outcome)
         val own = checks.register(Checks.modelCheck(npmBuild, EvidenceKind.Build, "R1").copy(inputClosure = Closure.Known(setOf("src/a.py"))))
         val ownReceipt = scheduler.runCheck(own, 1) { exitOnly }
         assertEquals(Outcome.Inconclusive, ownReceipt.outcome)
@@ -374,6 +381,7 @@ class SchedulerTest {
         assertEquals(Outcome.Inconclusive, tests.outcome, "exit 0 is never 'tests passed'")
         assertFailsWith<IllegalArgumentException> { tests.copy(outcome = Outcome.Passed) }
         assertFailsWith<IllegalArgumentException> { receipt.copy(checkOrigin = Origin.Model("R1")) }
+        assertFailsWith<IllegalArgumentException> { receipt.copy(evidenceDeclared = false) }
     }
 
     @Test

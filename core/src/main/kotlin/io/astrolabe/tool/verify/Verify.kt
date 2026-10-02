@@ -438,17 +438,18 @@ public class Verify(
             passes -> Outcome.Passed
             else -> shaped.status
         }
-        val note = if (passes) listOf("${check.evidenceKind?.wire} evidence of a host or user command: exit ${capture.exitCode}, no test counts (plan §4.4, D-50 relaxed)") else emptyList()
+        val note = if (passes) listOf("declared ${check.evidence?.wire} evidence of a host or user command: exit ${capture.exitCode}, no test counts (plan §4.4, D-50 relaxed)") else emptyList()
         return Executed(command.argv, command.cwd, false, capture.exitCode, outcome, shaped.counts, blob, shaped.limitations + limits + note)
     }
 
     /**
      * Plan §4.4 (D-50 relaxed by the owner): a build or a typecheck the host or the user declared passes on its exit 0 alone
      * — no exit-hiding wrapper, nothing lost or cut from the capture, and no error diagnostic from a typecheck tool the
-     * harness can parse. Tests still need parsed counts, and the model's own check never passes this way.
+     * harness can parse. A recognised kind is a label only (`gradle build` and `mvn install` run tests too); tests still
+     * need parsed counts, and the model's own check never passes this way.
      */
     private fun passesOnExit(check: Check, capture: RunCapture, shaped: Shaped): Boolean {
-        val kind = check.evidenceKind ?: return false
+        val kind = check.evidence ?: return false
         if (!kind.exitSuffices || check.origin is Origin.Model) return false
         if (shaped.status != Outcome.Inconclusive || shaped.counts != null || shaped.wrapper != null) return false
         // A command line whose exit is not its one command's (`false; exit 0`) proves nothing by its exit.
@@ -465,8 +466,9 @@ public class Verify(
      * scheduler runs the command once. A declared check — a `run:` item of the host or the user, the sniffed suite, its
      * blast narrowing, a quality gate — matches on the normalized command and the directory ([CommandMatch]). Otherwise,
      * with [modelChecks], a test, build or typecheck command becomes the model's own check ([Checks.modelCheck]): an agent
-     * test, never an acceptance item nor a required check. Recognition reads records only and grants no authority; every
-     * status stays the runner's and the scheduler's (L9). Empty: a plain run.
+     * test, never an acceptance item nor a required check — returned unregistered, and [adopt]ed only once the run passed
+     * its gates. Recognition reads records only and grants no authority; every status stays the runner's and the
+     * scheduler's (L9). Empty: a plain run.
      */
     internal fun recognize(requested: List<String>, shell: Boolean, cwd: String?, contract: Contract, modelChecks: Boolean): List<Check> {
         val tokens = CommandMatch.tokens(requested, shell) ?: return emptyList()
@@ -482,8 +484,13 @@ public class Verify(
         val strengthens = requirementIds.ifEmpty { contract.requirements.map { it.id } }.joinToString("+").ifEmpty { return emptyList() }
         val check = Checks.modelCheck(io.astrolabe.contract.Command(tokens, dir.ifEmpty { null }), kind, strengthens)
         // An id taken by another command (a digest collision) is never reused: that run stays plain.
-        val known = checks[check.id] ?: return listOf(checks.register(check))
+        val known = checks[check.id] ?: return listOf(check)
         return if (known.command == check.command) listOf(known) else emptyList()
+    }
+
+    /** Registers the model's own check of a recognised run that passed its gates (C1a): a refused run leaves no check behind. */
+    internal fun adopt(recognized: List<Check>) {
+        recognized.filter { checks[it.id] == null }.forEach { checks.register(it) }
     }
 
     /** Declared by the host or the user (plan §4.4): `run:` items of another origin than the model's, the sniffed suite and its blast narrowing, quality gates. */

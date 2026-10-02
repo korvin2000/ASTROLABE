@@ -281,8 +281,8 @@ public class Scheduler(
         }
         executed.limits.forEach { limits += Limit("runner", it) }
         val kind = check.evidenceKind
-        // Plan §4.4 (D-50 relaxed by the owner): a host or user build or typecheck passes on its expected exit, uncounted.
-        val passesOnExit = kind?.exitSuffices == true && check.origin !is Origin.Model && executed.counts == null && executed.exit == executed.expectedExitCode
+        // Plan §4.4 (D-50 relaxed by the owner): a declared host or user build or typecheck passes on its expected exit, uncounted.
+        val passesOnExit = check.evidence?.exitSuffices == true && check.origin !is Origin.Model && executed.counts == null && executed.exit == executed.expectedExitCode
         val outcome = if (executed.outcome == Outcome.Passed && !passesOnExit && (executed.counts == null || (executed.counts.executed == 0 && executed.counts.discovered == 0))) {
             limits += Limit("evidence", "a pass without parsed counts is inconclusive, never green (D-50)")
             Outcome.Inconclusive
@@ -296,7 +296,7 @@ public class Scheduler(
             verifierVersion = verifierVersion, checkDefinitionVersion = check.definitionVersion, contractVersion = contractVersion,
             outcome = outcome, parsed = executed.counts, inputClosure = check.inputClosure, testedInputs = testedInputs,
             raw = executed.raw, limits = limits, exitCode = executed.exit, at = clock.instant(), closureManifest = manifest, expectedExitCode = executed.expectedExitCode,
-            evidenceKind = kind, checkOrigin = check.origin,
+            evidenceKind = kind, checkOrigin = check.origin, evidenceDeclared = check.evidence != null,
         )
         receipts.record(receipt)
         aliasByReceipt[receipt.receiptId] = aliases.allocate(ids.work, receipt.receiptId, "receipt", ids.context, workspace.id).text
@@ -387,7 +387,7 @@ public class Scheduler(
             verifierVersion = verifierVersion, checkDefinitionVersion = check.definitionVersion, contractVersion = contractVersion,
             outcome = result.outcome, parsed = result.counts, inputClosure = check.inputClosure,
             testedInputs = TestedInputs(result.touched.mapNotNull { path -> registry.version(path)?.let { path to it } }.toMap(), InputStability.Unknown),
-            raw = result.log, limits = limits, exitCode = result.exit, at = clock.instant(), evidenceKind = check.evidenceKind, checkOrigin = check.origin,
+            raw = result.log, limits = limits, exitCode = result.exit, at = clock.instant(), evidenceKind = check.evidenceKind, checkOrigin = check.origin, evidenceDeclared = check.evidence != null,
         )
         receipts.record(receipt)
         aliasByReceipt[receipt.receiptId] = aliases.allocate(ids.work, receipt.receiptId, "receipt", ids.context, workspace.id).text

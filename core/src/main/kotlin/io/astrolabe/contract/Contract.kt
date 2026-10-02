@@ -128,9 +128,13 @@ public sealed interface Acceptance {
         val scope: String? = null,
         val last: LastRun? = null,
         override val obligationVersion: Int = 1,
-        /** What a pass proves when the host or the user declares it (plan §4.4); null: recognised from the command's tool. */
+        /** What a pass proves when the host or the user declares it (plan §4.4); null: only a label recognised from the tool. */
         val evidence: EvidenceKind? = null,
     ) : Acceptance {
+        /** The v1.0 full constructor: no declared evidence kind. Kept for Java callers. */
+        public constructor(id: String, command: Command, origin: Origin, scope: String?, last: LastRun?, obligationVersion: Int) :
+            this(id, command, origin, scope, last, obligationVersion, null)
+
         override val criterion: String get() = "run: ${command.text}" + (scope?.let { " (scope $it)" } ?: "") + (evidence?.let { " [${it.wire}]" } ?: "")
     }
 

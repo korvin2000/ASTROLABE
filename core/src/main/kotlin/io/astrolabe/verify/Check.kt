@@ -194,6 +194,20 @@ public data class Check(
     /** The evidence kind its definition declares; null: [evidenceKind] recognises it from the command's tool. */
     val evidence: EvidenceKind? = null,
 ) {
+    /** The v1.0 full constructor: the origin and the declared evidence kind take their defaults. Kept for Java callers. */
+    public constructor(
+        id: String,
+        kind: CheckKind,
+        selector: Selector,
+        inputClosure: Closure,
+        costClass: CostClass,
+        trigger: Trigger,
+        acceptanceIds: List<String>,
+        command: Command?,
+        parserPolicy: String,
+        last: LastResult?,
+    ) : this(id, kind, selector, inputClosure, costClass, trigger, acceptanceIds, command, parserPolicy, last, null, null)
+
     init {
         require(id.isNotBlank()) { "check needs an id" }
     }
@@ -213,7 +227,7 @@ public data class Check(
 
     val required: Boolean get() = kind == CheckKind.Acceptance || acceptanceIds.isNotEmpty()
 
-    /** What a pass of this check proves (plan §4.4): the declared kind, else the one its command's tool provides. */
+    /** What a pass of this check proves (plan §4.4): the declared kind, else a label from its command's tool (never a pass rule). */
     val evidenceKind: EvidenceKind? get() = evidence ?: command?.let { EvidenceKinds.recognize(it.argv) }
 }
 
@@ -373,11 +387,12 @@ public class Checks private constructor(
          * `model(strengthens …)`, run on demand and only through `run` (the effect policy applies to every launch), never
          * required and never an acceptance item, so it neither replaces independent acceptance nor weakens a required
          * check. Its id digests the command and directory: the same command is the same check for the whole campaign.
+         * [kind] is the recognised label only: nothing is declared, so no exit ever passes it.
          */
         internal fun modelCheck(command: Command, kind: EvidenceKind, strengthens: String): Check {
             val digest = Digest.ofUtf8(CanonicalEncoding.encode("model-check", 1, listOf("argv" to command.argv.joinToString("\u0001"), "cwd" to (command.cwd ?: ""))))
             val checkKind = if (kind == EvidenceKind.Tests) CheckKind.Unit else CheckKind.Type
-            return Check(MODEL_PREFIX + digest.hash8, checkKind, Selector.Named(command), Closure.Unknown, CostClass.Slow, Trigger.OnDemand, command = command, origin = Origin.Model(strengthens), evidence = kind)
+            return Check(MODEL_PREFIX + digest.hash8, checkKind, Selector.Named(command), Closure.Unknown, CostClass.Slow, Trigger.OnDemand, command = command, origin = Origin.Model(strengthens))
         }
 
         @JvmStatic

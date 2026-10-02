@@ -369,6 +369,8 @@ public object Resolver {
         val requiredIds = increment.accept.map { Checks.acceptId(it) }.toSet() + increment.accept.toSet()
         val openTexts = register.open.filter { !it.closed }.map { it.text }
         for ((checkId, currency) in currencies) {
+            // Plan §4.4 (C1a): the model's own checks are neither required nor independent; recording a red one is C1b's.
+            if (checkId.startsWith(Checks.MODEL_PREFIX)) continue
             // Only a red receipt of this very tree is a red line; a stale red one is history (D-337).
             val redNow = currency.red && currency.applicability == Applicability.Current && currency.eligible
             if (checkId in requiredIds || !redNow || currency.receiptId == null) continue

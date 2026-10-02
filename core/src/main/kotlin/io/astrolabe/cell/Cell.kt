@@ -1426,8 +1426,9 @@ public class Cell @JvmOverloads constructor(
                 return ws.checks.forAcceptance(accept).any { currencies[it.id]?.certifies == true } || currencies[accept]?.certifies == true
             }
 
+            // Plan §4.4 (C1a): the model's own checks are not acceptance; a red one does not hold the cursor back (C1b records it).
             override val redChecks: Set<String>
-                get() = if (redOkUntilIncrementEnd) emptySet() else ws.checks.all().filter { it.last?.outcome == Outcome.Failed }.map { it.id }.toSet()
+                get() = if (redOkUntilIncrementEnd) emptySet() else ws.checks.all().filter { it.last?.outcome == Outcome.Failed && !it.id.startsWith(io.astrolabe.verify.Checks.MODEL_PREFIX) }.map { it.id }.toSet()
 
             override val greenOps: Set<Int> get() = outcomes.filterValues { it.green }.keys
 

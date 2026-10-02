@@ -1,5 +1,6 @@
 package io.astrolabe.tool.run
 
+import io.astrolabe.auth.Classification
 import io.astrolabe.evidence.EvidenceKind
 
 private val WINDOWS: Boolean = System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true)
@@ -18,6 +19,8 @@ internal object CommandMatch {
 
     /** Every interpreter of a command line, whose exit is the line's own only for a plain line. */
     private val COMMAND_LINES = SHELLS + setOf("ksh", "fish", "cmd", "powershell", "pwsh")
+
+    private val MAKES = setOf("make", "gmake", "mingw32-make")
 
     /** Shell syntax a plain line never contains: operators, redirections, expansions, globs, escapes and comments. */
     private const val SYNTAX = "|&;<>()\$`'*?[]{}~!%^#\r\n"
@@ -40,10 +43,28 @@ internal object CommandMatch {
 
     /**
      * Whether [argv]'s exit is its program's own: no command-line interpreter, or one shell around a plain line (one
-     * simple command). Anything else may hide an exit — `false; exit 0` — and is never exit evidence (D-50).
+     * simple command), and no `make` told to go on past a failing recipe (`-i`, `-k` and their long forms). Anything
+     * else may hide an exit — `false; exit 0` — and is never exit evidence (D-50).
      */
-    fun exitPropagates(argv: List<String>, windows: Boolean = WINDOWS): Boolean =
-        argv.isNotEmpty() && (Invocations.basename(argv[0]).lowercase() !in COMMAND_LINES || script(argv, windows) != null)
+    fun exitPropagates(argv: List<String>, windows: Boolean = WINDOWS): Boolean {
+        if (argv.isEmpty()) return false
+        if (Invocations.basename(argv[0]).lowercase() in COMMAND_LINES && script(argv, windows) == null) return false
+        val tokens = canonical(argv, windows)
+        return Invocations.basename(tokens[0]).lowercase() !in MAKES || tokens.drop(1).none(::goesOnPastErrors)
+    }
+
+    /** `make -i`, `-k`, `--ignore-errors`, `--keep-going`, or a short cluster holding `i` or `k` (`-ik`, `-j4k`). */
+    private fun goesOnPastErrors(arg: String): Boolean =
+        arg == "--ignore-errors" || arg == "--keep-going" ||
+            (arg.length > 1 && arg[0] == '-' && arg[1] != '-' && arg.drop(1).let { 'i' in it || 'k' in it })
+
+    /**
+     * Plan §4.4: whether a [declared] command runs under the authorization an [authorized] request already passed — its
+     * policy label is no broader: no higher class, no unknown effects the request did not have, no other capability.
+     */
+    fun covered(declared: Classification, authorized: Classification): Boolean =
+        declared.effectClass <= authorized.effectClass && (!declared.effectsUnknown || authorized.effectsUnknown) &&
+            authorized.requiredCapabilities.containsAll(declared.requiredCapabilities)
 
     /**
      * The words of a shell line with no shell syntax at all ([SYNTAX], and `\` on POSIX): split on spaces and tabs only,

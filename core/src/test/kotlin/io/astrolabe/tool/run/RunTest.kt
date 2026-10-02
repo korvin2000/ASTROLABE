@@ -92,6 +92,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -1354,6 +1355,22 @@ class RunTest {
         assertFalse(CommandMatch.exitPropagates(listOf("sh", "-c", "false; exit 0"), windows = false))
         assertFalse(CommandMatch.exitPropagates(listOf("cmd.exe", "/d", "/s", "/c", "type x&exit /b 0"), windows = true))
         assertFalse(CommandMatch.exitPropagates(listOf("powershell", "-Command", "build"), windows = true))
+        // `make` told to go on past a failing recipe never proves anything by its exit.
+        for (argv in listOf(listOf("make", "-k"), listOf("make", "-i", "build"), listOf("make", "-ik"), listOf("make", "--keep-going"), listOf("gmake", "--ignore-errors"), listOf("/bin/sh", "-c", "make -k all"))) {
+            assertFalse(CommandMatch.exitPropagates(argv, windows = false), argv.toString())
+        }
+        assertTrue(CommandMatch.exitPropagates(listOf("make", "-j4", "build"), windows = false))
+
+        // A declared command runs under the request's authorization only when its label is no broader.
+        fun label(effect: EffectClass, unknown: Boolean = false, vararg extra: Capability) =
+            io.astrolabe.auth.Classification(effect, emptyList(), setOf(Capability.RunLocal, Capability.WorkspaceRead) + extra, "x", effectsUnknown = unknown)
+        val request = label(EffectClass.W, false, Capability.WorkspaceWrite)
+        assertTrue(CommandMatch.covered(label(EffectClass.R), request))
+        assertTrue(CommandMatch.covered(label(EffectClass.W, false, Capability.WorkspaceWrite), request))
+        assertFalse(CommandMatch.covered(label(EffectClass.D, false, Capability.WorkspaceWrite), request), "a higher class")
+        assertFalse(CommandMatch.covered(label(EffectClass.W, true, Capability.WorkspaceWrite), request), "effects the request did not leave unknown")
+        assertFalse(CommandMatch.covered(label(EffectClass.W, false, Capability.WorkspaceWrite, Capability.Network), request), "another capability")
+        assertTrue(CommandMatch.covered(label(EffectClass.W, true, Capability.WorkspaceWrite), label(EffectClass.W, true, Capability.WorkspaceWrite)))
 
         val kinds = mapOf(
             listOf("npm", "test") to EvidenceKind.Tests, listOf("npm", "run", "test:unit") to EvidenceKind.Tests, listOf("pnpm", "build") to EvidenceKind.Build,
@@ -1580,5 +1597,74 @@ class RunTest {
         assertFalse(slices[0].body.contains("more"), "the rest of the output stays hidden while the block is open: ${slices[0].body}")
         assertTrue(slices[0].header!!.runtime.redactionApplied)
         assertFalse(String(store.blobs.get(io.astrolabe.id.Digest(launched.header!!.runtime.artifactRefs.first()))).contains("MIIEvQ"), "the launch's stored slice hides the open block too")
+    }
+
+    @Test
+    fun `a recognised kind is a label only - a declared command without a declared kind never passes on its exit`() = runTest {
+        repo.write("build_ok.txt", "compiled 3 files\n")
+        val tsc = tool("tsc", "build_ok.txt")
+        val r = Recognizing(listOf(Acceptance.Run("AC-T", io.astrolabe.contract.Command(listOf(tsc)), Origin.User)))
+
+        val out = run("""{"argv":["$tsc"]}""", r.run)
+
+        val receipt = r.receiptsOf("CHK-accept-AC-T").single()
+        assertEquals(EvidenceKind.Build, receipt.evidenceKind, "recognised from tsc: a label")
+        assertFalse(receipt.evidenceDeclared)
+        assertEquals(io.astrolabe.evidence.Outcome.Inconclusive, receipt.outcome, "only a declared build passes on its exit (D-50)")
+        assertFalse(receipt.passesOnExit)
+        assertEquals("inconclusive", status(out), out.body)
+    }
+
+    @Test
+    fun `the model's own check joins the registry only after the run passed its gates`() = runTest {
+        repo.write("pytest_pass.txt", recorded("pytest-pass.txt"))
+        val r = Recognizing(listOf(Acceptance.Run("AC-1", printing("pytest_pass.txt"), Origin.User)))
+        val pytest = tool("pytest", "pytest_pass.txt")
+        r.run.beforeDispatch = { throw IllegalStateException("lease lapsed") }
+
+        assertFailsWith<IllegalStateException> { run("""{"argv":["$pytest","-q"]}""", r.run) }
+
+        assertTrue(r.checks.all().none { it.id.startsWith(Checks.MODEL_PREFIX) }, "a refused run leaves no check behind")
+        r.run.beforeDispatch = {}
+        run("""{"argv":["$pytest","-q"]}""", r.run)
+        assertEquals(1, r.checks.all().count { it.id.startsWith(Checks.MODEL_PREFIX) })
+    }
+
+    @Test
+    fun `a secret in the output of a recognised run is not shown, foreground or background`() = runTest {
+        val secret = "AKIA" + "IOSFODNN7EXAMPLE"
+        repo.write("leaky.txt", "booting\n$secret\n$keyHead")
+        val r = Recognizing(listOf(Acceptance.Run("AC-S", printing("leaky.txt"), Origin.User)))
+
+        val out = run("""{"cmd":"${printingCmd("leaky.txt")}"}""", r.run)
+        assertTrue(out.body.contains("receipt CHK-accept-AC-S"), out.body)
+        assertFalse(out.body.contains(secret), out.body)
+        assertNoKey(out.body)
+        val receipt = r.receiptsOf("CHK-accept-AC-S").single()
+        val stored = String(store.blobs.get(assertNotNull(receipt.raw)))
+        assertFalse(stored.contains(secret) || stored.contains("MIIEvQ"), "the receipt's log hides the open block too")
+
+        val started = run("""{"cmd":"${printingCmd("leaky.txt")}","bg":true}""", r.run)
+        val handle = assertNotNull(Regex("handle (handle-\\d+)").find(started.body)).groupValues[1]
+        val ended = run("""{"op":"wait","handle":"$handle","timeout":60}""", r.run)
+        assertTrue(ended.body.contains("receipt CHK-accept-AC-S"), ended.body)
+        assertFalse(ended.body.contains(secret), ended.body)
+        assertNoKey(ended.body)
+    }
+
+    @Test
+    fun `a recognised background run that lost its pin ends without a receipt and says so`() = runTest {
+        repo.write("pytest_pass.txt", recorded("pytest-pass.txt"))
+        val r = Recognizing(listOf(Acceptance.Run("AC-1", printing("pytest_pass.txt"), Origin.User)))
+        val started = run("""{"cmd":"${printingCmd("pytest_pass.txt")}","bg":true}""", r.run)
+        val handle = assertNotNull(Regex("handle (handle-\\d+)").find(started.body)).groupValues[1]
+
+        // A restart: a new executor over the same store, with no pin from the launch.
+        val restarted = runner().also { it.verify = r.verify }
+        val ended = run("""{"op":"wait","handle":"$handle","timeout":60}""", restarted)
+
+        assertTrue(ended.body.contains("no receipt: pin lost on restart"), ended.body)
+        assertTrue(ended.body.contains("CHK-accept-AC-1"), ended.body)
+        assertTrue(r.receiptsOf("CHK-accept-AC-1").isEmpty())
     }
 }

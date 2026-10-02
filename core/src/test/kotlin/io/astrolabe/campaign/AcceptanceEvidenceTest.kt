@@ -260,4 +260,39 @@ class AcceptanceEvidenceTest {
             assertTrue(receipts.single().independent)
         }
     }
+
+    @Test
+    fun `a red check of the model's own on the final tree does not block completion`() = runBlocking<Unit> {
+        val printing = if (WINDOWS) Command(listOf("cmd.exe", "/d", "/s", "/c", "type pytest_pass.txt")) else Command(listOf("/bin/sh", "-c", "cat pytest_pass.txt"))
+        repo.write("pytest_fail.txt", javaClass.getResourceAsStream("/shaper/pytest-fail-param.txt")!!.use { String(it.readAllBytes(), Charsets.UTF_8) })
+        // A legacy test with someone else's failure, run by the model as its own check.
+        val legacy = if (WINDOWS) {
+            repo.write("pytest.cmd", "@type pytest_fail.txt\r\n@exit /b 1\r\n")
+            "pytest.cmd"
+        } else {
+            repo.write("pytest", "#!/bin/sh\ncat pytest_fail.txt\nexit 1\n")
+            java.nio.file.Files.setPosixFilePermissions(repo.root.resolve("pytest"), java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x"))
+            "./pytest"
+        }
+        repo.commit("legacy test runner")
+        Store.open(stateRoot, repo.git, clock).use { store ->
+            val contracts = Contracts(SqliteContractRepository(store, clock), idGen, clock)
+            val derived = contracts.deriveS0(request.work, request.attempt, request.text, Atlas.build(repo.root), Config(), policy.tokens).contract
+            contracts.open(derived.copy(
+                scope = derived.scope.copy(writePaths = listOf("src/", "tests/")),
+                requirements = derived.requirements.map { it.copy(acceptance = listOf("AC-1")) },
+                acceptance = listOf(Acceptance.Run("AC-1", printing, Origin.User)),
+            ))
+        }
+        controller().open(repo.root, request, policy).use { c ->
+            val result = controller().run(c, model(
+                Scripted.Reply(listOf(call("t1", "run", """{"argv":["$legacy","tests/test_legacy.py"]}"""))),
+                Scripted.Reply(listOf(say("done"))),
+            ))
+            val own = c.checks.all().single { it.id.startsWith(Checks.MODEL_PREFIX) }
+            assertEquals(Outcome.Failed, own.last?.outcome, "the scenario has a red check of the model's own")
+            assertEquals(CampaignOutcome.Completed, result.outcome, result.state?.reason)
+            assertEquals(RequirementStatus.Verified, c.state!!.ledger.entries.getValue("R1").status)
+        }
+    }
 }

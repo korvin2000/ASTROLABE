@@ -257,6 +257,7 @@ public class Run(
         var started: String? = null
         // The fence throws before any intent is recorded, so a lapsed lease never leaves an open intent (§13.1).
         beforeDispatch()
+        verification?.adopt(recognized)
         val pinned = if (verification != null && recognized.isNotEmpty()) verification.pinRecognized(recognized, contract, actionId) else null
         // Probed before the spawn: a server that listens at once must not be mistaken for a port that was open already.
         val portOpenBefore = args.until().port?.let { listeningOffThread(it) }
@@ -320,6 +321,8 @@ public class Run(
         var rendered: ToolOutcome? = null
         var lost = false
         beforeDispatch()
+        // Past every gate: only now does the model's own check join the registry (C1a).
+        verification.adopt(checks)
         val outcome = Consequential.run(
             journal = intents,
             intent = intent,
@@ -350,8 +353,7 @@ public class Run(
         // A one-shell wrapper around a plain line is what `run` itself launches for that line: it is labelled as the line.
         val form = CommandMatch.line(command.argv)?.let { RunArgs(cmd = it, cwd = command.cwd) } ?: RunArgs(argv = command.argv, cwd = command.cwd)
         val declared = EffectPolicy.classify(form, workspace.root.toString(), contract.scope.protectedPaths, EffectPolicyConfig(), containment)
-        return declared.effectClass <= authorized.effectClass && (!declared.effectsUnknown || authorized.effectsUnknown) &&
-            authorized.requiredCapabilities.containsAll(declared.requiredCapabilities)
+        return CommandMatch.covered(declared, authorized)
     }
 
     /** The run view of a recognised execution: the shaped output, what it touched, and its receipts; the status is the receipt's. */
@@ -643,11 +645,24 @@ public class Run(
         val capture = settled?.capture ?: plain
         val shaped = settled?.shaped ?: Shapers.shape(capture, budget)
         val outcome = settled?.receipts?.firstOrNull()?.outcome ?: if (status is ProcStatus.Lost || status is ProcStatus.Cancelled) Outcome.UnknownOutcome else shaped.status
-        val receipts = settled?.let { "\n" + verify!!.receiptLines(it.receipts) } ?: ""
+        val receipts = settled?.let { "\n" + verify!!.receiptLines(it.receipts) } ?: lostPin(handle, status)
         val view = "handle ${handle.handleId} ${wire(status)}\n" + (note?.let { "$it\n" } ?: "") + safeView(shaped.view, capture.output, unknownEnd = !fromStart && !shapedRedacted(safeLog)) +"\nBackground effects cannot be attributed exclusively to this process." + (if (changed.isEmpty()) "" else "\nchanged during background run (${changed.size} paths): " + changed.take(10).joinToString(", ")) + receipts
         val effectClass = observedClass(handle.effectClass, changed)
         val result = RunResult(handle.alias, handle.actionId, capture.exitCode, outcome, view, shaped.viewTruncated, logBlob, effectClass, stampBefore, after.candidateId, true, changed, handle.handleId, shaped.counts, shaped, shaped.limitations)
         return render(args, result, handle.argv, handle.shell, null, after, effectsUnknown = true, captureMask = safeLog.mask, completedPlainly = completedPlainly(capture, outcome, shaped))
+    }
+
+    /**
+     * C1a: a background run that ended without a pin though it matches a declared check — the pin was taken by an earlier
+     * process or cell, or never — has no receipt, and its view says so.
+     */
+    private fun lostPin(handle: Handle, status: ProcStatus): String {
+        if (status !is ProcStatus.Exited && status != ProcStatus.DeadlineExceeded) return ""
+        val contract = contracts.current(ids.work) ?: return ""
+        val matching = verify?.recognize(handle.argv, handle.shell, handle.cwd, contract, modelChecks = false).orEmpty()
+        if (matching.isEmpty()) return ""
+        return "\nno receipt: pin lost on restart (or taken in another cell) — this run matches " + matching.joinToString(", ") { it.id } +
+            "; run it in the foreground or let the stop verify it"
     }
 
     // ------------------------------------------------------------------ wait
