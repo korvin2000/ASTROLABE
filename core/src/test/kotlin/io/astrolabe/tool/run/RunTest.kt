@@ -1190,6 +1190,25 @@ class RunTest {
     }
 
     @Test
+    fun `one execution is the receipt of the declared command it ran, never of a different declaration that matched`() = runTest {
+        repo.write("pytest_pass.txt", recorded("pytest-pass.txt"))
+        // The same line declared twice, verbatim and with a doubled blank: equal tokens, different declarations.
+        val twin = io.astrolabe.contract.Command(if (windows) listOf("cmd.exe", "/d", "/s", "/c", "type  pytest_pass.txt") else listOf("/bin/sh", "-c", "cat  pytest_pass.txt"))
+        val r = Recognizing(listOf(
+            Acceptance.Run("AC-1", printing("pytest_pass.txt"), Origin.User),
+            Acceptance.Run("AC-3", twin, Origin.User),
+            Acceptance.Run("AC-4", printing("pytest_pass.txt"), Origin.Harness),
+        ))
+
+        run("""{"cmd":"${printingCmd("pytest_pass.txt")}"}""", r.run)
+
+        assertEquals(1, r.receiptsOf("CHK-accept-AC-1").size)
+        assertEquals(1, r.receiptsOf("CHK-accept-AC-4").size, "a verbatim declaration shares the execution")
+        assertTrue(r.receiptsOf("CHK-accept-AC-3").isEmpty(), "a different declaration is not credited by another's execution")
+        assertEquals(1, r.executions("CHK-accept-AC-1"))
+    }
+
+    @Test
     fun `a command that is not a declared one, or the model's own addition, records no receipt`() = runTest {
         repo.write("pytest_pass.txt", recorded("pytest-pass.txt"))
         val r = Recognizing(listOf(
@@ -1268,7 +1287,7 @@ class RunTest {
     }
 
     @Test
-    fun `a recognised background run records its receipt when a wait sees it end, and a cancelled one records none`() = runTest {
+    fun `a recognised background run records a non-certifying receipt when a wait sees it end, and a cancelled one records none`() = runTest {
         repo.write("pytest_pass.txt", recorded("pytest-pass.txt"))
         val long = io.astrolabe.contract.Command(if (windows) listOf("cmd.exe", "/d", "/s", "/c", "ping -n 30 127.0.0.1") else listOf("/bin/sh", "-c", "sleep 30"))
         val r = Recognizing(listOf(
@@ -1283,10 +1302,16 @@ class RunTest {
 
         assertEquals("passed", status(ended), ended.body)
         val receipt = r.receiptsOf("CHK-accept-AC-1").single()
-        assertEquals(io.astrolabe.evidence.Outcome.Passed, receipt.outcome)
-        assertTrue(receipt.greenForFinalTree, receipt.limits.toString())
+        assertEquals(io.astrolabe.evidence.Outcome.Passed, receipt.outcome, "the outcome is recorded as it happened")
+        // Nothing held the workspace between launch and end (D-45): evidence of the outcome, never of the final tree.
+        assertEquals(io.astrolabe.evidence.InputStability.Unknown, receipt.testedInputs.stability)
+        assertFalse(receipt.greenForFinalTree)
         assertTrue(receipt.limits.any { it.kind == "input_stability" && it.detail.startsWith("background run") })
-        assertTrue(ended.body.contains("receipt CHK-accept-AC-1: accept AC-1: ✓"), ended.body)
+        assertTrue(ended.body.contains("receipt CHK-accept-AC-1: accept AC-1: stale"), ended.body)
+        assertTrue(ended.body.contains("a background run is evidence of its outcome, not of the final tree"), ended.body)
+        // The stop's verification certifies it with one exclusive run.
+        assertEquals(1, r.verify.onStop(listOf("AC-1")).receipts.size)
+        assertTrue(r.scheduler.currency(r.checks["CHK-accept-AC-1"]!!, stamper.stamp().id).certifies)
 
         val slow = run("""{"cmd":"${shell("ping -n 30 127.0.0.1", "sleep 30")}","bg":true}""", r.run)
         val slowHandle = assertNotNull(Regex("handle (handle-\\d+)").find(slow.body)).groupValues[1]
@@ -1314,10 +1339,21 @@ class RunTest {
         assertFalse(CommandMatch.matches(listOf("pytest", "-q", "-x"), listOf("pytest", "-q"), windows = false))
         assertFalse(CommandMatch.matches(listOf("pytest"), listOf("pytest", "-q"), windows = false))
         assertFalse(CommandMatch.matches(listOf("-q", "pytest"), listOf("pytest", "-q"), windows = false))
-        assertTrue(CommandMatch.matches(listOf(".\\gradlew.bat", "test"), listOf("gradlew", "test"), windows = true))
-        assertTrue(CommandMatch.matches(listOf("PYTEST.EXE"), listOf("pytest"), windows = true))
+        assertTrue(CommandMatch.matches(listOf(".\\gradlew.bat", "test"), listOf("gradlew.bat", "test"), windows = true))
+        assertTrue(CommandMatch.matches(listOf("PYTEST.EXE"), listOf("pytest.exe"), windows = true))
+        assertFalse(CommandMatch.matches(listOf("gradlew.bat", "test"), listOf("gradlew", "test"), windows = true), "an extension names a file")
+        assertFalse(CommandMatch.matches(listOf("pytest.exe", "-q"), listOf("pytest.cmd", "-q"), windows = true))
         assertFalse(CommandMatch.matches(listOf("./gradlew", "test"), listOf("gradlew", "test"), windows = false))
         assertFalse(CommandMatch.matches(listOf("pytest", "Tests"), listOf("pytest", "tests"), windows = true), "only the program name folds case")
+        assertFalse(CommandMatch.matches(listOf("./sh", "-c", "pytest -q"), listOf("pytest", "-q"), windows = false), "a relative shell is any file")
+        assertEquals(listOf("pytest", "-q"), CommandMatch.tokens(listOf("pytest\t-q"), shell = true, windows = false))
+        assertNull(CommandMatch.tokens(listOf("pytest -q"), shell = true, windows = false), "a shell does not split on a non-breaking space")
+        assertNull(CommandMatch.tokens(listOf("pytest\u0007"), shell = true, windows = false))
+        assertTrue(CommandMatch.exitPropagates(listOf("make")))
+        assertTrue(CommandMatch.exitPropagates(listOf("/bin/sh", "-c", "make build"), windows = false))
+        assertFalse(CommandMatch.exitPropagates(listOf("sh", "-c", "false; exit 0"), windows = false))
+        assertFalse(CommandMatch.exitPropagates(listOf("cmd.exe", "/d", "/s", "/c", "type x&exit /b 0"), windows = true))
+        assertFalse(CommandMatch.exitPropagates(listOf("powershell", "-Command", "build"), windows = true))
 
         val kinds = mapOf(
             listOf("npm", "test") to EvidenceKind.Tests, listOf("npm", "run", "test:unit") to EvidenceKind.Tests, listOf("pnpm", "build") to EvidenceKind.Build,

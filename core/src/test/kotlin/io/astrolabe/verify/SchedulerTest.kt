@@ -396,12 +396,15 @@ class SchedulerTest {
     }
 
     @Test
-    fun `a pinned background run is eligible only when nothing moved between its launch and its end`() = runTest {
+    fun `a pinned background run records its outcome but never certifies a tree, and names what moved meanwhile`() = runTest {
         val full = checks["CHK-full"]!!
         val inputs = listOf("src/a.py", "src/pkg/b.py", "src/pkg/c.py", "tests/test_a.py")
 
         val quiet = scheduler.settle(scheduler.pin(listOf(full), inputs), 1, passed()).single()
-        assertTrue(quiet.greenForFinalTree, quiet.limits.toString())
+        assertEquals(Outcome.Passed, quiet.outcome)
+        assertEquals(InputStability.Unknown, quiet.testedInputs.stability, "no writer was kept out between launch and end (D-45)")
+        assertFalse(quiet.greenForFinalTree)
+        assertFalse(scheduler.currency(full, stamper.stamp().id).certifies)
         assertTrue(quiet.limits.any { it.kind == "input_stability" && it.detail.startsWith("background run") })
 
         val pin = scheduler.pin(listOf(full), inputs)

@@ -234,6 +234,7 @@ public class Run(
         // C1a (plan §4.4): recognised before dispatch, so a registered check's command runs once, with a fresh stamp.
         val verification = verify?.takeIf { generated == null }
         val recognized = verification?.recognize(requested, shell, args.cwd, contract, config.modelChecks).orEmpty()
+            .takeIf { it.isEmpty() || authorizes(classification, it.first(), contract, containment) }.orEmpty()
         if (verification != null && recognized.isNotEmpty() && !args.bg) return scheduled(args, verification, recognized, argv, shell, classification, contract)
 
         val actionId = idGen.next("act")
@@ -338,6 +339,19 @@ public class Run(
             is ActionOutcome.Unknown -> unknown(args, alias.text, actionId, before, intent.intentId, outcome.cause, announcing = !lost)
             is ActionOutcome.NotDispatched -> refused(args, Outcome.Denied, outcome.reason)
         }
+    }
+
+    /**
+     * C1a: a recognised check runs its declared command under this request's authorization only when that command's own
+     * policy label is no broader — class, unknown effects and capabilities; otherwise the request runs plain, as asked.
+     */
+    private fun authorizes(authorized: Classification, check: Check, contract: Contract, containment: DiskContainment): Boolean {
+        val command = check.command ?: return false
+        // A one-shell wrapper around a plain line is what `run` itself launches for that line: it is labelled as the line.
+        val form = CommandMatch.line(command.argv)?.let { RunArgs(cmd = it, cwd = command.cwd) } ?: RunArgs(argv = command.argv, cwd = command.cwd)
+        val declared = EffectPolicy.classify(form, workspace.root.toString(), contract.scope.protectedPaths, EffectPolicyConfig(), containment)
+        return declared.effectClass <= authorized.effectClass && (!declared.effectsUnknown || authorized.effectsUnknown) &&
+            authorized.requiredCapabilities.containsAll(declared.requiredCapabilities)
     }
 
     /** The run view of a recognised execution: the shaped output, what it touched, and its receipts; the status is the receipt's. */
@@ -600,7 +614,8 @@ public class Run(
      */
     private suspend fun ended(args: RunArgs, handle: Handle, proc: Proc, status: ProcStatus, fallback: ByteArray, note: String?): ToolOutcome {
         val pinned = pins.remove(handle.handleId)?.takeIf { status is ProcStatus.Exited || status == ProcStatus.DeadlineExceeded }
-        val after = stamper.report()
+        // A recognised end announces what a fresh report sees, so no cached digest hides a moved input from coherence.
+        val after = if (pinned != null) stamper.report(fresh = true) else stamper.report()
         var complete = true
         var fromStart = true
         val log = try {
@@ -620,9 +635,11 @@ public class Run(
         val logBlob = blobs.put(safeLog.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
         val stampBefore = CandidateId(Digest(handle.stampBefore))
         val changed = announceBackground(handle, after)
-        val plain = shapeable(RunCapture(handle.actionId, handle.argv, handle.shell, handle.cwd, (status as? ProcStatus.Exited)?.exitCode, status == ProcStatus.DeadlineExceeded, log, complete && status !is ProcStatus.Lost), safeLog)
+        val raw = RunCapture(handle.actionId, handle.argv, handle.shell, handle.cwd, (status as? ProcStatus.Exited)?.exitCode, status == ProcStatus.DeadlineExceeded, log, complete && status !is ProcStatus.Lost)
+        val plain = shapeable(raw, safeLog)
         val budget = ShapeBudget(args.budgetTokens, estimator, handle.alias)
-        val settled = pinned?.let { verify?.settleRecognized(it, plain, logBlob, safeLog.limitations, budget) }
+        // Evidence is read from the raw capture, never from redacted bytes; safeView guards what the model sees of it.
+        val settled = pinned?.let { verify?.settleRecognized(it, raw, logBlob, safeLog.limitations, budget) }
         val capture = settled?.capture ?: plain
         val shaped = settled?.shaped ?: Shapers.shape(capture, budget)
         val outcome = settled?.receipts?.firstOrNull()?.outcome ?: if (status is ProcStatus.Lost || status is ProcStatus.Cancelled) Outcome.UnknownOutcome else shaped.status

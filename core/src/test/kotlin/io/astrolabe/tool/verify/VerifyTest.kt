@@ -416,8 +416,13 @@ class VerifyTest {
         assertFalse(denied.independent)
 
         repo.write("build.txt", "compiled 3 files\n")
+        val plainBuild = Command(if (windows) listOf("cmd.exe", "/d", "/s", "/c", "type build.txt") else listOf("/bin/sh", "-c", "cat build.txt"))
         val amended = contracts.amendByHost(ids.work, "build acceptance") { c ->
-            c.copy(acceptance = c.acceptance + Acceptance.Run("AC-B", printing("build.txt", 0), Origin.User, evidence = EvidenceKind.Build), requirements = c.requirements.map { it.copy(acceptance = it.acceptance + "AC-B") })
+            c.copy(
+                acceptance = c.acceptance + Acceptance.Run("AC-B", plainBuild, Origin.User, evidence = EvidenceKind.Build) +
+                    Acceptance.Run("AC-H", printing("build.txt", 0), Origin.User, evidence = EvidenceKind.Build),
+                requirements = c.requirements.map { it.copy(acceptance = it.acceptance + "AC-B" + "AC-H") },
+            )
         }
         checks.synchronizeAcceptance(amended)
         val out = run("""{"what":"acceptance","ids":["AC-B"]}""")
@@ -427,5 +432,10 @@ class VerifyTest {
         assertEquals(null, receipt.parsed)
         assertTrue(receipt.passesOnExit && receipt.greenForFinalTree, receipt.limits.toString())
         assertTrue(receipt.limits.any { it.detail.contains("D-50 relaxed") }, receipt.limits.toString())
+
+        // A line that may set its own exit (`…; exit 0`) proves nothing by it, even for a declared build.
+        run("""{"what":"acceptance","ids":["AC-H"]}""")
+        val hidden = SqliteReceipts(store, clock).forCheck("CHK-accept-AC-H").single()
+        assertEquals(Outcome.Inconclusive, hidden.outcome, hidden.limits.toString())
     }
 }

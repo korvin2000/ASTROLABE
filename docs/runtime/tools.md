@@ -78,9 +78,12 @@ run(argv|cmd, cwd?, shape="auto", budget=4000 (Defaults.runBudgetTokens), timeou
   · a registered check's command — a `run:` item of the host or the user, the sniffed suite, a quality gate — is
     recognised before dispatch (normalized argv + directory, exact match) and runs once through the scheduler's
     exclusive protocol with a fresh stamp: the receipt `verify` would record, one `receipt …` line per check in the
-    result, no second run for form's sake; a background one gets its receipt when poll/wait sees the end, a cancelled
-    one none. A test, build or typecheck command of the model becomes its own check (origin model, Config.modelChecks,
-    on by default): an agent test, never an acceptance item, never launched by `verify`   [plan §4.4, C1a]
+    result, no second run for form's sake; a background one gets its receipt when poll/wait sees the end — evidence of
+    its outcome that never certifies a tree, since nothing held the workspace meanwhile (D-45) — a cancelled one none.
+    Another declaration shares the execution only when verbatim the same command and directory, and the declared
+    command runs only when its policy label is no broader than the request's. A test, build or typecheck command of the
+    model becomes its own check (origin model, Config.modelChecks, on by default): an agent test, never an acceptance
+    item, never launched by `verify`   [plan §4.4, C1a]
 
 verify(what, ...)
   what ∈ { check(paths?)            → run the end-of-turn checker now (Δ + absolute)

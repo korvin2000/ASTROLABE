@@ -8,12 +8,16 @@ private val WINDOWS: Boolean = System.getProperty("os.name").orEmpty().startsWit
  * C1a (plan §4.4): when a `run` request is the command a registered check declares. Both sides reduce to one canonical
  * token list — an argv as given, a `cmd` line only when it is [plain], and a one-shell wrapper (`sh -c <line>`,
  * `cmd /d /s /c <line>`) to its plain line's tokens — which are then compared exactly: never a prefix, a subset or a
- * reordering, so `pytest -q -x` is not `pytest -q`. On Windows the program token is compared the way `cmd.exe` and the
- * launcher resolve it: case folded, `/` read as `\`, a leading `.\` dropped and a `.exe`/`.cmd`/`.bat`/`.com` suffix
- * ignored; every other token, and every token on POSIX, compares as written. The directory is the caller's to compare.
+ * reordering, so `pytest -q -x` is not `pytest -q`. On Windows the program token is compared the way the file system
+ * resolves it: case folded, `/` read as `\` and a leading `.\` dropped — an extension is kept, since `x.exe` and `x.cmd`
+ * are different files; every other token, and every token on POSIX, compares as written. Only a shell named bare or by
+ * an absolute path is unwrapped. The directory is the caller's to compare.
  */
 internal object CommandMatch {
     private val SHELLS = setOf("sh", "bash", "dash", "zsh", "ash")
+
+    /** Every interpreter of a command line, whose exit is the line's own only for a plain line. */
+    private val COMMAND_LINES = SHELLS + setOf("ksh", "fish", "cmd", "powershell", "pwsh")
 
     /** Shell syntax a plain line never contains: operators, redirections, expansions, globs, escapes and comments. */
     private const val SYNTAX = "|&;<>()\$`'*?[]{}~!%^#\r\n"
@@ -35,8 +39,16 @@ internal object CommandMatch {
     }
 
     /**
-     * The words of a shell line with no shell syntax at all ([SYNTAX], and `\` on POSIX): split on blanks, where a word
-     * may be one whole non-empty double-quoted string. Null for anything else — such a line is never recognised.
+     * Whether [argv]'s exit is its program's own: no command-line interpreter, or one shell around a plain line (one
+     * simple command). Anything else may hide an exit — `false; exit 0` — and is never exit evidence (D-50).
+     */
+    fun exitPropagates(argv: List<String>, windows: Boolean = WINDOWS): Boolean =
+        argv.isNotEmpty() && (Invocations.basename(argv[0]).lowercase() !in COMMAND_LINES || script(argv, windows) != null)
+
+    /**
+     * The words of a shell line with no shell syntax at all ([SYNTAX], and `\` on POSIX): split on spaces and tabs only,
+     * where a word may be one whole non-empty double-quoted string; any other blank or control character refuses the
+     * line, since a shell would not split there. Null for anything else — such a line is never recognised.
      */
     fun plain(line: String, windows: Boolean = WINDOWS): List<String>? {
         val words = ArrayList<String>()
@@ -45,8 +57,10 @@ internal object CommandMatch {
         var closed = false
         var previous = ' '
         for (c in line) {
+            val blank = c == ' ' || c == '\t'
             if (c in SYNTAX || (c == '\\' && !windows) || (c == '"' && previous == '\\')) return null
-            if (closed && !c.isWhitespace()) return null
+            if (!blank && (c.isWhitespace() || c.isISOControl())) return null
+            if (closed && !blank) return null
             closed = false
             previous = c
             when {
@@ -59,7 +73,7 @@ internal object CommandMatch {
                 }
                 c == '"' -> if (word.isEmpty()) quoted = true else return null
                 quoted -> word.append(c)
-                c.isWhitespace() -> if (word.isNotEmpty()) {
+                blank -> if (word.isNotEmpty()) {
                     words += word.toString()
                     word.setLength(0)
                 }
@@ -71,27 +85,29 @@ internal object CommandMatch {
         return words.takeIf { it.isNotEmpty() }
     }
 
-    private fun script(argv: List<String>, windows: Boolean): List<String>? {
-        if (argv.size < 3) return null
+    private fun script(argv: List<String>, windows: Boolean): List<String>? = line(argv, windows)?.let { plain(it, windows) }
+
+    /** The plain line a one-shell wrapper runs (`sh -c <line>`, `cmd /d /s /c <line>`); null for anything else. */
+    fun line(argv: List<String>, windows: Boolean = WINDOWS): String? {
+        if (argv.size < 3 || !bareOrAbsolute(argv[0])) return null
         val head = Invocations.basename(argv[0]).lowercase()
-        if (head in SHELLS) return if (argv.size == 3 && argv[1] == "-c") plain(argv[2], windows) else null
-        if (head != "cmd") return null
-        var i = 1
-        while (i < argv.size && CMD_SWITCH.matches(argv[i])) {
-            when (argv[i].lowercase()) {
-                "/c" -> return if (i + 1 < argv.size) plain(argv.subList(i + 1, argv.size).joinToString(" "), windows) else null
-                "/k" -> return null
+        val line = when {
+            head in SHELLS -> argv[2].takeIf { argv.size == 3 && argv[1] == "-c" }
+            head == "cmd" -> {
+                var i = 1
+                while (i < argv.size && CMD_SWITCH.matches(argv[i]) && argv[i].lowercase() !in setOf("/c", "/k")) i++
+                if (i + 1 < argv.size && argv[i].equals("/c", ignoreCase = true)) argv.subList(i + 1, argv.size).joinToString(" ") else null
             }
-            i++
+            else -> null
         }
-        return null
+        return line?.takeIf { plain(it, windows) != null }
     }
 
-    private fun program(token: String, windows: Boolean): String {
-        if (!windows) return token
-        val name = token.replace('/', '\\').lowercase().removePrefix(".\\")
-        return listOf(".exe", ".cmd", ".bat", ".com").firstOrNull { name.endsWith(it) }?.let { name.removeSuffix(it) } ?: name
-    }
+    private fun program(token: String, windows: Boolean): String = if (windows) token.replace('/', '\\').lowercase().removePrefix(".\\") else token
+
+    /** A shell named bare (found on `PATH`) or by an absolute path; a relative one may be any file of the workspace. */
+    private fun bareOrAbsolute(program: String): Boolean =
+        ('/' !in program && '\\' !in program) || program.startsWith("/") || Regex("""^[A-Za-z]:[\\/]""").containsMatchIn(program)
 }
 
 /**

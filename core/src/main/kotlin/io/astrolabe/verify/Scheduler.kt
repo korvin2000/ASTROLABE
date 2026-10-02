@@ -181,8 +181,9 @@ public class Scheduler(
 
     /**
      * C1a (plan §4.4), a recognised background `run`: [checks]' inputs are pinned at its launch (stamp, hashes and metadata,
-     * under the lock), and [settle] rescans them at its end. The workspace is not locked in between, so every write of the
-     * interval — the model's own edits included — is a mutation that leaves the receipt ineligible, never a silent pass.
+     * under the lock), and [settle] records the outcome at its end. The workspace is not held in between, so no writer —
+     * the model's own tools included — was kept out (D-45): the receipt is evidence of the outcome, never of the final
+     * tree (`input_stability = unknown`); a write the rescan sees is named as a mutation besides.
      */
     internal suspend fun pin(checks: List<Check>, inputs: Collection<String>): Pin = workspace.mutation.withLock {
         val check = checks.first()
@@ -198,11 +199,16 @@ public class Scheduler(
      */
     internal suspend fun settle(pin: Pin, contractVersion: Int, executed: Executed): List<Receipt> = workspace.mutation.withLock {
         val after = stamper.report(fresh = true)
-        val limits = arrayListOf(Limit("input_stability", "background run: inputs pinned at its launch and rescanned at its end, unlocked in between; any write of the interval is a mutation"))
-        val tested = rescanned(pin.checks.first(), pin.inputs, pin.paths, pin.seen, InputStability.Exclusive, limits)
+        val limits = arrayListOf(Limit("input_stability", "$BACKGROUND: the workspace was not held between its launch and its end, so no concurrent writer was kept out (D-45); the receipt cannot certify a tree"))
+        val tested = rescanned(pin.checks.first(), pin.inputs, pin.paths, pin.seen, InputStability.Unknown, limits)
         pin.checks.zip(pin.manifests).filter { (check, _) -> checks[check.id] != null }.map { (check, manifest) ->
             recordRun(check, contractVersion, executed, pin.before, after.candidateId, tested, manifest, ArrayList(limits))
         }
+    }
+
+    internal companion object {
+        /** How the limit of a background run's receipt begins (C1a). */
+        const val BACKGROUND: String = "background run"
     }
 
     /** The receipts of one recognised `run` and the paths it moved (announced by the scheduler). */

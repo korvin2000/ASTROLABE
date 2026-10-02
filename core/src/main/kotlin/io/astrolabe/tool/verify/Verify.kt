@@ -451,6 +451,8 @@ public class Verify(
         val kind = check.evidenceKind ?: return false
         if (!kind.exitSuffices || check.origin is Origin.Model) return false
         if (shaped.status != Outcome.Inconclusive || shaped.counts != null || shaped.wrapper != null) return false
+        // A command line whose exit is not its one command's (`false; exit 0`) proves nothing by its exit.
+        if (!CommandMatch.exitPropagates(capture.argv)) return false
         if (capture.exitCode != 0 || capture.timedOut || !capture.captureComplete || shaped.captureTruncated) return false
         val diagnostics = DiagnosticsParser.parse(capture.argv, capture.text(), capture.exitCode) ?: return true
         return diagnostics.errorCount == 0 && (diagnostics.summaryErrors ?: 0) == 0
@@ -470,7 +472,10 @@ public class Verify(
         val tokens = CommandMatch.tokens(requested, shell) ?: return emptyList()
         val dir = directoryOf(cwd) ?: return emptyList()
         fun realizes(check: Check) = check.command?.let { CommandMatch.matches(tokens, it.argv) && directoryOf(it.cwd) == dir } == true
-        val declared = checks.all().filter { declared(it, contract) && realizes(it) }
+        val matching = checks.all().filter { declared(it, contract) && realizes(it) }
+        // One execution is the receipt of exactly the declared command it ran: another declaration shares it only verbatim.
+        val first = matching.firstOrNull()?.command
+        val declared = matching.filter { it.command!!.argv == first!!.argv && directoryOf(it.command.cwd) == directoryOf(first.cwd) }
         if (declared.isNotEmpty() || !modelChecks) return declared
         checks.all().firstOrNull { it.id.startsWith(Checks.MODEL_PREFIX) && realizes(it) }?.let { return listOf(it) }
         val kind = EvidenceKinds.recognize(tokens) ?: return emptyList()
@@ -530,8 +535,9 @@ public class Verify(
     }
 
     /**
-     * The receipts of a pinned background run that ended (C1a): [capture] (the run's own) is bound to the check — its
-     * declared command, identity and fresh reports — shaped once, and recorded by the scheduler after its rescan.
+     * The receipts of a pinned background run that ended (C1a): [capture] (the run's own, raw: evidence is read before any
+     * redaction) is bound to the check — its declared command, identity and fresh reports — shaped once, and recorded by
+     * the scheduler after its rescan.
      */
     internal suspend fun settleRecognized(pinned: PinnedRun, capture: RunCapture, blob: Digest?, limits: List<String>, budget: ShapeBudget): SettledRun {
         val collected = try { pinned.reports?.collect().orEmpty() } catch (failure: IOException) { null }
@@ -566,7 +572,9 @@ public class Verify(
                     else -> kind.wire
                 }
             }
-            "receipt ${receipt.checkId}: $line" + (proves?.let { " · $it" } ?: "")
+            val background = receipt.limits.any { it.kind == "input_stability" && it.detail.startsWith(Scheduler.BACKGROUND) }
+            "receipt ${receipt.checkId}: $line" + (proves?.let { " · $it" } ?: "") +
+                (if (background) " · a background run is evidence of its outcome, not of the final tree: a foreground run or the stop's verification certifies it" else "")
         }
     }
 
