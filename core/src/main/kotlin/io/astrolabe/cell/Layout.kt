@@ -16,7 +16,7 @@ import io.astrolabe.provider.Role as ItemRole
 
 /**
  * The implementing-cell kernel contract rendered into `[S]` (Appendix A): the lines the structure
- * cannot say. Frozen text — [VERSION] travels in attempt and compile fingerprints, so changing a
+ * cannot say. Frozen text — [VERSION] heads `[S]`, whose digest is in the compile fingerprint, so changing a
  * line is a harness change that takes effect at an attempt boundary (invariant 12).
  */
 public object Kernel {
@@ -166,7 +166,7 @@ public object Layout {
     /**
      * The `[S]` text for [role] under [mode]: the kernel contract for the implementing and writer roles, the role's own
      * text and the shared kernel lines for every other role (§3.4, P4.4.6). Public because the same bytes are hashed
-     * into the attempt fingerprint and asserted by stability tests. The turn's mask is not an input: it is `[A]`'s.
+     * into the compile fingerprint (`Fingerprint.system`) and asserted by stability tests. The turn's mask is not an input: it is `[A]`'s.
      */
     @JvmStatic
     public fun system(role: Role, mode: ExecutionMode): String {
@@ -203,9 +203,10 @@ public object Layout {
     /**
      * The `[A]` line naming what [mask] enables this turn, relative to [role]'s tools listed in `[S]`: `all role tools`,
      * `all role tools except …` while that is the shorter form, else the enabled operations themselves. The executor
-     * refuses a masked call whatever this line says.
+     * refuses a masked call whatever this line says. On a D-366 repair turn ([ownFilesOnly]) the enabled edits are held
+     * to the cell's own files, and the line says so.
      */
-    internal fun enabled(role: Role, mask: ToolMask): String {
+    internal fun enabled(role: Role, mask: ToolMask, ownFilesOnly: Boolean = false): String {
         val roleOps = role.toolMask.allowed
         val excluded = roleOps - mask.allowed
         val text = when {
@@ -214,7 +215,9 @@ public object Layout {
             excluded.isEmpty() -> "all role tools"
             else -> "all role tools except " + ordered(excluded).joinToString(", ")
         }
-        return "enabled this turn: $text"
+        val edit = ToolFamily.Edit.wire + "."
+        val repair = if (ownFilesOnly && mask.allowed.any { it.startsWith(edit) }) " (edits: own files only)" else ""
+        return "enabled this turn: $text$repair"
     }
 
     /** `look(tree, read) · run(run, wait)`: families and operations in declaration order, so the bytes are stable. */

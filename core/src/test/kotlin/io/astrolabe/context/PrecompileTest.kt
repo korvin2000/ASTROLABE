@@ -4,9 +4,11 @@ import io.astrolabe.AttemptConfig
 import io.astrolabe.Config
 import io.astrolabe.Flags
 import io.astrolabe.atlas.Atlas
+import io.astrolabe.auth.ExecutionMode
 import io.astrolabe.budget.HeuristicEstimator
 import io.astrolabe.budget.Tokens
 import io.astrolabe.campaign.ShapeSelector
+import io.astrolabe.cell.Layout
 import io.astrolabe.cell.Roles
 import io.astrolabe.contract.Contract
 import io.astrolabe.contract.Contracts
@@ -15,9 +17,11 @@ import io.astrolabe.contract.Increment
 import io.astrolabe.evidence.Journal
 import io.astrolabe.evidence.JournalKind
 import io.astrolabe.evidence.JournalScope
+import io.astrolabe.fixtures.FakeAdapter
 import io.astrolabe.fixtures.FakeClock
 import io.astrolabe.fixtures.FakeProfiles
 import io.astrolabe.fixtures.FixedIdGen
+import io.astrolabe.fixtures.ScriptedModel
 import io.astrolabe.fixtures.TempRepo
 import io.astrolabe.id.AttemptId
 import io.astrolabe.id.CandidateId
@@ -28,8 +32,11 @@ import io.astrolabe.id.WorkId
 import io.astrolabe.kb.Note
 import io.astrolabe.kb.NoteKind
 import io.astrolabe.kb.NoteStatus
+import io.astrolabe.provider.ToolMask
 import io.astrolabe.store.Store
 import io.astrolabe.telemetry.PrecompileOutcome
+import io.astrolabe.tool.SchemaSelection
+import io.astrolabe.tool.ToolSchemas
 import io.astrolabe.verify.Check
 import io.astrolabe.verify.CheckKind
 import io.astrolabe.evidence.Closure
@@ -43,6 +50,7 @@ import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertSame
@@ -102,6 +110,8 @@ class PrecompileTest {
             "contracts index" to fingerprint(contract, increment, inputs = CompileInputs(contractsIndex = "# contracts\n")),
             "role text version" to fingerprint(contract, increment, role = Roles.implementing.copy(policyTextVersion = "roles/next")),
             "role" to fingerprint(contract, increment, role = Roles.plan),
+            "system" to fingerprint(contract, increment, role = Roles.implementing.copy(duties = listOf("one more duty"))),
+            "schemas" to fingerprint(contract, increment, role = Roles.implementing.copy(toolMask = ToolMask(Roles.implementing.toolMask.allowed.filterNot { it.startsWith("kb.") }.toSet()))),
             "profile" to fingerprint(contract, increment, profile = FakeProfiles.tiny),
             "policy" to fingerprint(contract, increment, policy = AttemptConfig.freeze(Config(profiles = FakeProfiles.all, flags = Flags(precompile = true)))),
             "prime" to fingerprint(contract, increment, prime = "repo: 2 files\n"),
@@ -137,6 +147,8 @@ class PrecompileTest {
             "skills" to { it.copy(skills = listOf("skill-1@1")) },
             "role" to { it.copy(role = "plan") },
             "role text version" to { it.copy(roleTextVersion = "roles/next") },
+            "system" to { it.copy(system = "x") },
+            "schemas" to { it.copy(schemas = "x") },
             "profile" to { it.copy(profile = "tiny") },
             "policy" to { it.copy(policy = "x") },
             "prime" to { it.copy(prime = "x") },
@@ -152,6 +164,22 @@ class PrecompileTest {
             assertEquals(listOf(field), base.differences(other), field)
         }
         assertEquals(emptyList(), base.differences(base))
+    }
+
+    @Test
+    fun `the role's system bytes and schema set enter the fingerprint`() = TempRepo.create().use { repo ->
+        val contract = contract(repo)
+        val increment = ShapeSelector.single(contract).increments.single()
+        val base = fingerprint(contract, increment)
+        assertEquals(Digest.ofUtf8(Layout.system(Roles.implementing, attempt.config.executionMode)).hex, base.system)
+        val set = assertIs<SchemaSelection.Supported>(ToolSchemas.forLineage(FakeAdapter(ScriptedModel.of()), FakeProfiles.main, Roles.implementing.toolMask)).set
+        assertEquals(set.fingerprint.hex, base.schemas, "the schema bytes the line sends, so a changed description moves it")
+        val narrowed = Roles.implementing.copy(toolMask = ToolMask(Roles.implementing.toolMask.allowed - "kb.propose"))
+        assertEquals(listOf("system"), base.differences(fingerprint(contract, increment, role = narrowed)), "a narrower role mask with the same families keeps the schema set but rewrites [S]")
+        val noKb = Roles.implementing.copy(toolMask = ToolMask(Roles.implementing.toolMask.allowed.filterNot { it.startsWith("kb.") }.toSet()))
+        assertEquals(listOf("system", "schemas"), base.differences(fingerprint(contract, increment, role = noKb)))
+        val confined = AttemptConfig.freeze(Config(profiles = FakeProfiles.all, executionMode = ExecutionMode.Confined))
+        assertEquals(listOf("system", "policy"), base.differences(fingerprint(contract, increment, policy = confined)), "the execution mode is visible in [S]")
     }
 
     private fun boundaryLines(store: Store): List<String> = Journal(store, clock).events(JournalScope(work, kinds = setOf(JournalKind.Boundary))).map { it.text }

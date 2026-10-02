@@ -39,6 +39,7 @@ The cell is HELM's loop `[HELM §7]` with judje-1's corrections and six changes 
 [A] anchor  (≤5K tok, typical ~1.2–1.8K, rebuilt every turn, never persisted, never cached)
     contract digest (≤150: exact goal excerpt + ids/status; full authoritative wording remains in [K]/pinned messages) · STATE register (≤1.2K) · Workset KNOWN / NOT SEEN (≤60) ·
     Touched (≤10) · Checks (≤3 lines, Δ + absolute + stamp) · focus atlas zoom (≤300) · focus notes (≤300, each once per cell) ·
+    `enabled this turn` (the turn's mask relative to the role's tools in [S]; never reduced; invariant 12) ·
     gauge · nudges (≤4; stall and budget before impact)
 ```
 

@@ -11,6 +11,7 @@ import io.astrolabe.provider.InvocationId
 import io.astrolabe.provider.Item
 import io.astrolabe.provider.Message
 import io.astrolabe.provider.Profile
+import io.astrolabe.provider.ProviderAdapter
 import io.astrolabe.provider.ReasoningRef
 import io.astrolabe.provider.Request
 import io.astrolabe.provider.Role
@@ -20,7 +21,7 @@ import io.astrolabe.provider.Text
 import io.astrolabe.provider.ToolCall
 import io.astrolabe.provider.ToolMask
 import io.astrolabe.provider.ToolResult
-import io.astrolabe.tool.ToolFamily
+import io.astrolabe.tool.SchemaSelection
 import io.astrolabe.tool.ToolSchemas
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -93,7 +94,7 @@ class GlmToolCallProbeTest {
             AiGateAdapter(llm, listOf(profile)).use { adapter ->
                 Files.newBufferedWriter(out.resolve("probe.jsonl")).use { log ->
                     for (scenario in scenarios) for (i in 1..n) {
-                        val request = Scenarios.request(scenario, profile)
+                        val request = Scenarios.request(scenario, profile, adapter)
                         val id = InvocationId("probe-$scenario-$i")
                         val record = try {
                             runBlocking {
@@ -149,8 +150,7 @@ class GlmToolCallProbeTest {
 /** The three replayed situations, rendered with the real `[S]` text, tool schemas and result delimiters. */
 private object Scenarios {
     private val mask: ToolMask = ToolMask(Roles.plan.toolMask.allowed.filter { Roles.shapeMask(Shape.S1).allows(it) }.toSet())
-    private val system: String = Layout.system(Roles.plan, mask, ExecutionMode.TrustedLocal)
-    private val tools = ToolFamily.entries.map { ToolSchemas.schema(it) }
+    private val system: String = Layout.system(Roles.plan, ExecutionMode.TrustedLocal)
 
     private const val PRIME = "[R] repository · 1131 files · packages: client (npm), server (gradle), play3\n" +
         "tree (depth 2): .gitignore README.md build.gradle.kts gradle.properties gradlew gradlew.bat settings.gradle.kts " +
@@ -209,8 +209,13 @@ private object Scenarios {
         append(extra)
     }
 
-    fun request(scenario: String, profile: Profile): Request {
+    /** The plan line's schema set, selected by the role's mask as production does; the S1 turn mask rides on the request. */
+    fun request(scenario: String, profile: Profile, adapter: ProviderAdapter): Request {
         val bp = profile.capabilities.caching.breakpoints
+        val tools = when (val selection = ToolSchemas.forLineage(adapter, profile, Roles.plan.toolMask)) {
+            is SchemaSelection.Supported -> selection.set.schemas
+            is SchemaSelection.Unsupported -> throw IllegalStateException("schemas unsupported for ${selection.profileId}: ${selection.reason}")
+        }
         val (items, anchor) = when (scenario) {
             "masked-run" -> turnsSoFar to anchor(4, withState = true)
             "blocked-explicit" -> turnsSoFar to anchor(4, withState = true, extra = "Execution is not available to this role. Record the blocker now with the state tool, op \"blocked\": reason, evidence (one entry per refused call) and a question for the parent.\n")
@@ -226,7 +231,7 @@ private object Scenarios {
                 Segment(SegmentKind.T, transcript, bp),
                 Segment(SegmentKind.A, listOf(Message.text(Role.User, anchor))),
             ),
-            tools, profile, Effort.High, 4_096,
+            tools, profile, Effort.High, 4_096, mask,
         )
     }
 }

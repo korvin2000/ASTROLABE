@@ -24,7 +24,7 @@ public data class SchemaSet(
     /** The role's mask the set was selected by — never a turn's mask, which a reserve or a shape narrows. */
     val mask: ToolMask,
     val dialect: SchemaDialect,
-    /** Digest of the serialized schemas; recorded in compile fingerprints. */
+    /** Digest of the serialized schemas; recorded in compile fingerprints (`Fingerprint.schemas`). */
     val fingerprint: Digest,
 )
 
@@ -56,9 +56,14 @@ public object ToolSchemas {
         val unknown = roleMask.allowed - ToolOps.all
         require(unknown.isEmpty()) { "mask names unknown ops $unknown" }
         val schemas = families(roleMask).map { schema(it) }
-        val bytes = stableJson.encodeToString(kotlinx.serialization.builtins.ListSerializer(ToolSchema.serializer()), schemas)
-        return SchemaSelection.Supported(SchemaSet(schemas, roleMask, dialect, Digest.ofUtf8(bytes)))
+        return SchemaSelection.Supported(SchemaSet(schemas, roleMask, dialect, fingerprint(schemas)))
     }
+
+    /** [SchemaSet.fingerprint] of the role with [roleMask], without an adapter: what `Fingerprint.of` records. */
+    internal fun fingerprint(roleMask: ToolMask): Digest = fingerprint(families(roleMask).map { schema(it) })
+
+    private fun fingerprint(schemas: List<ToolSchema>): Digest =
+        Digest.ofUtf8(stableJson.encodeToString(kotlinx.serialization.builtins.ListSerializer(ToolSchema.serializer()), schemas))
 
     /** The families [roleMask] names at least one operation of, in declaration order. */
     internal fun families(roleMask: ToolMask): List<ToolFamily> =
