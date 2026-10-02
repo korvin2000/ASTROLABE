@@ -1114,4 +1114,62 @@ class RunTest {
         assertTrue(out.body.contains("wait ended: the process ended before a line matching /^MII/"), out.body)
         assertNoKey(out.body)
     }
+
+    private fun assertNoKeyLine(body: String) = assertFalse(body.contains("MIIEvQ") || body.contains("MIIpayload"), body)
+
+    @Test
+    fun `a private key split across two polls shows none of its lines in either slice`() = runTest {
+        val scripted = ScriptedOs(listOf("" to ProcStatus.Running, "booting\n$keyHead" to ProcStatus.Running, keyTail + "after\n" to ProcStatus.Running))
+        val tool = runner(os = scripted)
+        run("""{"argv":["git","status"],"bg":true,"timeout":60}""", tool)
+
+        val first = run("""{"op":"poll","handle":"handle-1"}""", tool)
+        val second = run("""{"op":"poll","handle":"handle-1"}""", tool)
+
+        assertTrue(first.body.contains("booting") && first.body.contains("[REDACTED:private-key-block]"), first.body)
+        assertTrue(second.body.contains("after") && second.body.contains("[REDACTED:private-key-block]"), second.body)
+        assertNoKeyLine(first.body)
+        assertNoKeyLine(second.body)
+        assertTrue(second.header!!.runtime.redactionApplied, "the slice's mask records the hidden lines")
+    }
+
+    @Test
+    fun `a poll that starts in the middle of a key block hides it up to its end`() = runTest {
+        val begin = "booting\n-----BEGIN PRIVATE KEY-----\n"
+        val scripted = ScriptedOs(listOf(
+            "" to ProcStatus.Running, begin to ProcStatus.Running, "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n" to ProcStatus.Running, keyTail + "after\n" to ProcStatus.Running,
+        ))
+        val tool = runner(os = scripted)
+        run("""{"argv":["git","status"],"bg":true,"timeout":60}""", tool)
+        run("""{"op":"poll","handle":"handle-1"}""", tool)
+
+        val inside = run("""{"op":"poll","handle":"handle-1"}""", tool)
+        val closing = run("""{"op":"poll","handle":"handle-1"}""", tool)
+        // An explicit cursor in the middle of the block, after the whole block is in the log.
+        val resumed = run("""{"op":"poll","handle":"handle-1","since":${begin.length}}""", tool)
+
+        assertNoKeyLine(inside.body)
+        assertTrue(inside.body.contains("[REDACTED:private-key-block]"), inside.body)
+        assertNoKeyLine(closing.body)
+        assertTrue(closing.body.contains("after"), closing.body)
+        assertNoKeyLine(resumed.body)
+        assertTrue(resumed.body.contains("after"), resumed.body)
+    }
+
+    @Test
+    fun `a key block left open hides every later slice while the output does not close it`() = runTest {
+        // The launch's own first look is the first slice: it opens the block.
+        val scripted = ScriptedOs(listOf("booting\n$keyHead" to ProcStatus.Running, "MIIpayloadSecondLineOfTheKey\nmore\n" to ProcStatus.Running, "" to ProcStatus.Running))
+        val tool = runner(os = scripted)
+        val launched = run("""{"argv":["git","status"],"bg":true,"timeout":60}""", tool)
+
+        val slices = List(2) { run("""{"op":"poll","handle":"handle-1","timeout":1}""", tool) }
+
+        assertNoKeyLine(launched.body)
+        assertTrue(launched.body.contains("booting") && launched.body.contains("[REDACTED:private-key-block]"), launched.body)
+        slices.forEach { assertNoKeyLine(it.body) }
+        assertFalse(slices[0].body.contains("more"), "the rest of the output stays hidden while the block is open: ${slices[0].body}")
+        assertTrue(slices[0].header!!.runtime.redactionApplied)
+        assertFalse(String(store.blobs.get(io.astrolabe.id.Digest(launched.header!!.runtime.artifactRefs.first()))).contains("MIIEvQ"), "the launch's stored slice hides the open block too")
+    }
 }

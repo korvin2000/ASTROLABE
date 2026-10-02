@@ -249,7 +249,9 @@ public class Run(
                     is Launch.Background -> launch.firstOutput
                     is Launch.Unavailable -> ByteArray(0)
                 }
-                logBlob = blobs.put(redaction.applyBytes(bytes, ContentClass.ReusableEvidence).text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
+                // A background launch's first output is the first slice of a live stream: a key block it opens stays hidden.
+                val safeBytes = if (launch is Launch.Background) redaction.applyLive(bytes, ContentClass.ReusableEvidence, openAtEnd = false) else redaction.applyBytes(bytes, ContentClass.ReusableEvidence)
+                logBlob = blobs.put(safeBytes.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
                 rendered = when (launch) {
                     is Launch.Unavailable -> {
                         val result = RunResult(alias.text, actionId, null, Outcome.Unavailable, "cannot start: ${launch.reason}", false, logBlob, classification.effectClass, before.candidateId, before.candidateId, true, emptyList(), null, null, null, listOf(launch.reason), intent.intentId)
@@ -260,7 +262,7 @@ public class Run(
                             classification.effectClass, classification.effectsUnknown, before.members, before.baseCommit)
                         handles.save(handle)
                         started = handle.handleId
-                        val safe = redaction.applyBytes(launch.firstOutput, ContentClass.ModelFacing)
+                        val safe = redaction.applyLive(launch.firstOutput, ContentClass.ModelFacing, openAtEnd = false)
                         val slice = safe.text
                         val view = "background run ${alias.text} handle ${handle.handleId} · ${wire(launch.proc.status)} · wait with run(op=wait, handle=\"${handle.handleId}\")" + (if (slice.isBlank()) "" else "\n$slice")
                         val result = RunResult(alias.text, actionId, null, Outcome.NotRun, view, false, logBlob, classification.effectClass, before.candidateId, null, false, emptyList(), handle.handleId, null, null, emptyList(), intent.intentId)
@@ -468,7 +470,10 @@ public class Run(
         }
         val updated = handle.copy(proc = proc.copy(status = poll.status), status = wire(poll.status), cursor = poll.nextCursorBytes)
         handles.save(updated)
-        val safeSlice = redaction.applyBytes(poll.newBytes, ContentClass.ModelFacing)
+        // D-387: a slice is redacted with the log before it, so a secret begun in an earlier poll stays hidden; one still
+        // open where the slice ends hides its rest, and the next poll resumes from the log. An unreadable prefix hides it.
+        val before = logBefore(proc, since)
+        val safeSlice = redaction.applyLive(poll.newBytes, ContentClass.ModelFacing, openAtEnd = before == null, context = before.orEmpty())
         val slice = safeSlice.text
         return when (val status = poll.status) {
             ProcStatus.Running -> {
@@ -646,9 +651,16 @@ public class Run(
      * poll that follows reports it.
      */
     private fun insideKeyBlock(proc: Proc, since: Long): Boolean {
-        if (since <= 0) return false
+        val before = logBefore(proc, since) ?: return false
+        val begin = Redaction.PRIVATE_KEY_BEGIN.findAll(before).lastOrNull() ?: return false
+        return Redaction.PRIVATE_KEY_END.find(before, begin.range.last + 1) == null
+    }
+
+    /** The scan cap's worth of log before byte [since]: the scanner state a handle's reader resumes from; `null` when unreadable. */
+    private fun logBefore(proc: Proc, since: Long): String? {
+        if (since <= 0) return ""
         val from = maxOf(0L, since - redaction.config.maxBytes)
-        val before = try {
+        return try {
             Files.newByteChannel(proc.log).use { channel ->
                 channel.position(from)
                 val buffer = java.nio.ByteBuffer.allocate((since - from).toInt())
@@ -656,10 +668,8 @@ public class Run(
                 String(buffer.array(), 0, buffer.position(), Charsets.UTF_8)
             }
         } catch (unreadable: IOException) {
-            return false
+            null
         }
-        val begin = Redaction.PRIVATE_KEY_BEGIN.findAll(before).lastOrNull() ?: return false
-        return Redaction.PRIVATE_KEY_END.find(before, begin.range.last + 1) == null
     }
 
     /** The last whole lines of [text] that fit [budgetTokens]. */
