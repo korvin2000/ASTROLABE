@@ -35,6 +35,17 @@ distributions {
     }
 }
 
+// Gradle's default excludes drop `.gitignore` and other dot files from every copy; a task's base keeps its own (the
+// repository as the agent gets it), so installDist lays them in by path afterwards.
+tasks.named<Sync>("installDist") {
+    val source = layout.projectDirectory.dir("tasks").asFile
+    doLast {
+        val target = destinationDir.resolve("tasks")
+        source.walkTopDown().filter { it.isFile && it.name.startsWith(".") }
+            .forEach { it.copyTo(target.resolve(it.relativeTo(source)), overwrite = true) }
+    }
+}
+
 // `-PbenchDir=<dir>` installs the distribution there; results and everything else outside bin/, lib/, tasks/ stay.
 providers.gradleProperty("benchDir").orNull?.let { dir ->
     tasks.named<Sync>("installDist") {
