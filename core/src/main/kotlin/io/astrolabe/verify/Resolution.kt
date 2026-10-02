@@ -232,9 +232,9 @@ public enum class ProvenanceClass(public val wire: String) {
 
         /**
          * One requirement from the results at the final tree of its [declared] checks — the host's and the user's — and
-         * of the [agent]'s own: independent when it has a declared check and every one passed; otherwise agent test when
-         * none failed and one of the agent's passed; otherwise unverified. The agent's checks never lower a declared
-         * verification: a red one of its own stands as an `Open` item.
+         * of the [agent]'s own (its items and the checks it registered, C1a): independent when it has a declared check
+         * and every one passed; otherwise agent test when none failed and one of the agent's passed; otherwise
+         * unverified. The agent's checks never make a requirement independent nor lower a declared verification.
          */
         @JvmStatic
         public fun requirement(declared: Collection<ResultStatus>, agent: Collection<ResultStatus>): ProvenanceClass = when {

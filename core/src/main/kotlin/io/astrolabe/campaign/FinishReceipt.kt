@@ -7,6 +7,7 @@ import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Origin
 import io.astrolabe.contract.RequirementStatus
 import io.astrolabe.delegate.QaRunRecord
+import io.astrolabe.evidence.EvidenceKind
 import io.astrolabe.delegate.QaRuns
 import io.astrolabe.id.AttemptId
 import io.astrolabe.id.CandidateId
@@ -18,6 +19,7 @@ import io.astrolabe.telemetry.Accounting
 import io.astrolabe.verify.Author
 import io.astrolabe.verify.CampaignReview
 import io.astrolabe.verify.CampaignReviewRecord
+import io.astrolabe.verify.Checks
 import io.astrolabe.verify.Currency
 import io.astrolabe.verify.EquivalenceReport
 import io.astrolabe.verify.Obligations
@@ -33,7 +35,8 @@ import java.nio.file.Path
 
 /**
  * One requirement with its provenance axis (§4.4 C2): who set it ([by], from [authorityRef]), the [acceptance] items
- * that check it — its own and the model's that strengthen it — and the class they give it.
+ * that check it — its own and the model's that strengthen it — the model's own checks that name it ([agentChecks],
+ * C1a), and the class they give it.
  */
 @Serializable
 public data class RequirementLine @JvmOverloads constructor(
@@ -44,6 +47,7 @@ public data class RequirementLine @JvmOverloads constructor(
     val authorityRef: String? = null,
     val acceptance: List<String> = emptyList(),
     val provenanceClass: ProvenanceClass = ProvenanceClass.Unverified,
+    val agentChecks: List<String> = emptyList(),
 )
 
 /**
@@ -51,9 +55,9 @@ public data class RequirementLine @JvmOverloads constructor(
  * a reviewer's current approval, `accepted` when a decider accepted it without verification (I7, D-342) — then
  * [acceptedBy], [decider] and [acceptedReason] say who and why. `log` ids are raw-output blobs.
  *
- * Its provenance axis (§4.4 C2): who created the check ([origin], [checkBy]), what ran ([command], [receiptId]), on
- * which tree ([stamp], [currency]), the [result] at the final tree before any decision, who took the residual risk
- * ([riskAcceptedBy], `null` while nobody did) and the class this gives the item.
+ * Its provenance axis (§4.4 C2): who created the check ([origin], [checkBy]), what ran ([command], [receiptId], and what
+ * a pass proves — [evidenceKind]), on which tree ([stamp], [currency]), the [result] at the final tree before any
+ * decision, who took the residual risk ([riskAcceptedBy], `null` while nobody did) and the class this gives the item.
  */
 @Serializable
 public data class AcceptanceLine @JvmOverloads constructor(
@@ -75,6 +79,7 @@ public data class AcceptanceLine @JvmOverloads constructor(
     val riskAcceptedBy: RiskAcceptor? = null,
     val result: ResultStatus = ResultStatus.Unverified,
     val provenanceClass: ProvenanceClass = ProvenanceClass.Unverified,
+    val evidenceKind: EvidenceKind? = null,
 )
 
 @Serializable
@@ -86,8 +91,17 @@ public data class ChangeSplit(
     val unattributed: List<String>,
 )
 
+/** A check's last receipt; [checkOrigin] says whose check it is (`model(…)`: the agent's own, C1a) and [evidenceKind] what a pass proves. */
 @Serializable
-public data class CheckRun(val checkId: String, val receiptId: String, val outcome: String, val verifierVersion: String, val envId: String)
+public data class CheckRun @JvmOverloads constructor(
+    val checkId: String,
+    val receiptId: String,
+    val outcome: String,
+    val verifierVersion: String,
+    val envId: String,
+    val checkOrigin: Origin? = null,
+    val evidenceKind: EvidenceKind? = null,
+)
 
 @Serializable
 public data class BudgetLine(
@@ -203,7 +217,14 @@ public object FinishReceipts {
             .mapNotNull { state.graph.evidence[it.id] }.flatMap { it.provenance }
             .filter { it.how == ProvenanceKind.Accepted && it.item.startsWith(Obligations.INTEGRITY) }
             .map { it.item.removePrefix(Obligations.INTEGRITY) }.distinct()
-        fun evidenceBy(item: Acceptance): Author = if (unreviewedSurface.isEmpty()) Author.of(item.origin) else Author.Model
+        // The certifying (else the latest) receipt of each `run:` item at the final stamp.
+        val runs = contract.acceptance.filterIsInstance<Acceptance.Run>().associate { item ->
+            val checks = c.checks.forAcceptance(item.id)
+            val currency = checks.firstNotNullOfOrNull { currencies[it.id]?.takeIf(Currency::certifies) } ?: checks.firstNotNullOfOrNull { currencies[it.id] }
+            item.id to Triple(currency, currency?.receiptId?.let(receipts), checks.firstNotNullOfOrNull { it.evidenceKind })
+        }
+        fun evidenceBy(item: Acceptance): Author =
+            if (unreviewedSurface.isNotEmpty() || runs[item.id]?.second?.independent == false) Author.Model else Author.of(item.origin)
         // §4.4 C2: who created the check, who took the residual risk, and the class this gives the item at the final tree.
         fun axis(line: AcceptanceLine, item: Acceptance): AcceptanceLine = line.copy(
             origin = item.origin,
@@ -214,9 +235,7 @@ public object FinishReceipts {
         val acceptance = contract.acceptance.map { item ->
             when (item) {
                 is Acceptance.Run -> {
-                    val checks = c.checks.forAcceptance(item.id)
-                    val currency = checks.firstNotNullOfOrNull { currencies[it.id]?.takeIf(Currency::certifies) } ?: checks.firstNotNullOfOrNull { currencies[it.id] }
-                    val receipt = currency?.receiptId?.let(receipts)
+                    val (currency, receipt, kind) = runs.getValue(item.id)
                     val status = when {
                         currency == null -> "not_run"
                         currency.certifies -> "green"
@@ -225,7 +244,7 @@ public object FinishReceipts {
                     }
                     AcceptanceLine(item.id, "run", status, receipt?.stampAfter?.hash8, currency?.applicability?.name?.lowercase(), listOfNotNull(receipt?.raw?.hex),
                         provenance = "tested".takeIf { status == "green" }, command = item.command.text, receiptId = currency?.receiptId,
-                        result = Obligations.run(item.id, item.criterion, currency).status)
+                        result = Obligations.run(item.id, item.criterion, currency).status, evidenceKind = receipt?.evidenceKind ?: kind)
                 }
                 is Acceptance.Check -> assessments.firstOrNull { item.id in it.criteria }?.let {
                     AcceptanceLine(item.id, "check", "assessed", it.candidate.hash8, "current", listOf(it.packetId), provenance = "reviewed", acceptedBy = it.verdict?.signedBy, result = ResultStatus.Passed)
@@ -235,16 +254,21 @@ public object FinishReceipts {
                 } ?: AcceptanceLine(item.id, "review", "not_reviewed", null, null, emptyList())
             }.let(::accepted).let { axis(it, item) }
         }
+        // `model(strengthens R1+R2)`: an item strengthens one requirement, the model's own check (C1a) every one its increment serves.
+        fun strengthens(origin: Origin?, requirement: String): Boolean = (origin as? Origin.Model)?.strengthens?.split('+')?.contains(requirement) == true
+        val modelChecks = c.checks.all().filter { it.id.startsWith(Checks.MODEL_PREFIX) }
         val requirements = contract.requirements.map { r ->
             val entry = state.ledger.entries[r.id]
             val blockers = blocked.filter { r.id in it.requirementIds }.map { "${it.id} blocked" } +
                 listOfNotNull(state.reason.takeIf { entry?.status != RequirementStatus.Verified })
-            // §4.4 C2: a requirement is checked by its own items and by the model's that strengthen it.
-            val items = (r.acceptance + contract.acceptance.filter { (it.origin as? Origin.Model)?.strengthens == r.id }.map { it.id }).distinct()
+            // §4.4 C2: a requirement is checked by its own items, the model's items that strengthen it, and the model's own checks that name it.
+            val items = (r.acceptance + contract.acceptance.filter { strengthens(it.origin, r.id) }.map { it.id }).distinct()
             val (agent, declared) = acceptance.filter { it.id in items }.partition { line -> evidenceBy(checkNotNull(contract.acceptance(line.id))) == Author.Model }
+            val own = modelChecks.filter { strengthens(it.origin, r.id) }
             val provenanceClass = if (entry?.status != RequirementStatus.Verified) ProvenanceClass.Unverified
-                else ProvenanceClass.requirement(declared.map { it.result }, agent.map { it.result })
-            RequirementLine(r.id, entry?.status?.wire ?: RequirementStatus.Pending.wire, blockers, Author.of(r, contract.requests), r.authorityRef, items, provenanceClass)
+                else ProvenanceClass.requirement(declared.map { it.result }, agent.map { it.result } + own.map { Obligations.run(it.id, "model check", currencies[it.id]).status })
+            RequirementLine(r.id, entry?.status?.wire ?: RequirementStatus.Pending.wire, blockers, Author.of(r, contract.requests), r.authorityRef, items, provenanceClass,
+                own.map { it.id })
         }
         val changes = packets.flatMap { it.changes }
         // A cell that never handed back a packet (lost or interrupted) still named what it touched in its checkpoint.
@@ -257,7 +281,7 @@ public object FinishReceipts {
             runTouched = changes.filter { it.origin == ChangeOrigin.Run }.map { it.path }.toSet(),
         )
         val checksRun = c.checks.all().flatMap { check -> check.last?.receiptId?.let(receipts)?.let(::listOf).orEmpty() }
-            .map { CheckRun(it.checkId, it.receiptId, it.outcome.name.lowercase(), it.verifierVersion, it.envId.hex) }
+            .map { CheckRun(it.checkId, it.receiptId, it.outcome.name.lowercase(), it.verifierVersion, it.envId.hex, it.checkOrigin, it.evidenceKind) }
         val registers = packets.map { it.register }
         val totals = Accounting.totals(Accounting(c.store, java.time.Clock.systemUTC()).calls(c.ids.work), state.graph.increments.count { it.status == io.astrolabe.contract.IncrementStatus.Verified }, c.attempt.config.profiles.values.firstOrNull()?.priceTable?.currency ?: "USD")
         val billed = totals.quantities.values.takeIf { values -> values.none { it == null } }?.sumOf { it!! }

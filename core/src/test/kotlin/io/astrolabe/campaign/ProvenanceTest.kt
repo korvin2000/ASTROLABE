@@ -6,6 +6,7 @@ import io.astrolabe.atlas.Atlas
 import io.astrolabe.budget.HeuristicEstimator
 import io.astrolabe.budget.Tokens
 import io.astrolabe.cell.CellFixture.Companion.anchored
+import io.astrolabe.cell.CellFixture.Companion.call
 import io.astrolabe.cell.CellFixture.Companion.read
 import io.astrolabe.cell.CellFixture.Companion.say
 import io.astrolabe.cell.CellModel
@@ -22,6 +23,7 @@ import io.astrolabe.event.AgentEvent
 import io.astrolabe.event.Authority
 import io.astrolabe.event.AutonomousAuthority
 import io.astrolabe.event.Events
+import io.astrolabe.evidence.EvidenceKind
 import io.astrolabe.fixtures.EventRecorder
 import io.astrolabe.fixtures.FakeAdapter
 import io.astrolabe.fixtures.FakeClock
@@ -38,6 +40,7 @@ import io.astrolabe.store.Store
 import io.astrolabe.verify.AcceptanceDecision
 import io.astrolabe.verify.AcceptanceDecisionRequest
 import io.astrolabe.verify.Author
+import io.astrolabe.verify.Checks
 import io.astrolabe.verify.Decider
 import io.astrolabe.verify.DecisionKind
 import io.astrolabe.verify.DecisionRecord
@@ -223,6 +226,30 @@ class ProvenanceTest {
         assertEquals(ProvenanceClass.AgentTest, finish.requirements.single().provenanceClass)
         assertEquals("completed" to ProvenanceClass.AgentTest, finish.status to finish.provenanceClass)
         assertTrue(finish.notVerified.any { it.startsWith("AC-1: accepted without verification") }, "the decider's acceptance stays visible")
+        assertEquals("agent_test", finished.provenanceClass)
+    }
+
+    @Test
+    fun `the model's own test beside a host review nobody answered completes agent_test, never independent`() {
+        // C1a: a test command the model runs becomes its own check (CHK-model-*, origin model); the host's review has no reviewer.
+        val pytest = if (WINDOWS) "pytest.cmd".also { repo.write(it, "@type pytest_pass.txt\r\n") } else "./pytest".also {
+            repo.write("pytest", "#!/bin/sh\ncat pytest_pass.txt\n")
+            java.nio.file.Files.setPosixFilePermissions(repo.root.resolve("pytest"), java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x"))
+        }
+        repo.commit("test runner")
+        seed(listOf(Acceptance.Check("AC-1", "a reviewer approves the change", Origin.Amended(1))), r1 = listOf("AC-1"))
+        val (run, finished) = run(accepting(Decider.Policy, "studio:policy(auto)")) {
+            listOf(Scripted.Reply(listOf(call("t1", "run", """{"argv":["$pytest","-q"]}"""))), Scripted.Reply(listOf(say("done"))))
+        }
+        assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+        val finish = assertNotNull(run.finish)
+        val own = finish.checksRun.single { it.checkId.startsWith(Checks.MODEL_PREFIX) }
+        assertEquals(listOf<Any?>(Origin.Model("R1"), EvidenceKind.Tests, "passed"), listOf(own.checkOrigin, own.evidenceKind, own.outcome))
+        val requirement = finish.requirements.single()
+        assertEquals(listOf(own.checkId), requirement.agentChecks)
+        assertEquals(ProvenanceClass.AgentTest, requirement.provenanceClass)
+        assertEquals(Author.Host to unverified, finish.acceptance.single().let { it.checkBy to it.result })
+        assertEquals("completed" to ProvenanceClass.AgentTest, finish.status to finish.provenanceClass)
         assertEquals("agent_test", finished.provenanceClass)
     }
 
