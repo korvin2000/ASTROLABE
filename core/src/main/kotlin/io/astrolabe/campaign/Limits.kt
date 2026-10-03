@@ -287,9 +287,9 @@ internal class TaskLimitControl(private val idGen: IdGen, private val clock: Clo
             val price = LimitRule.nextCost(now, e)
             val decision = latch(c, LimitRule.decide(c.limits, now, price))
             observe(c, now, decision, price)
-            // A refusal that ends the cell: a spent limit, or generation refused at admission. A turn that merely falls back to
-            // verify-and-report is not one.
-            if (decision is LimitDecision.Exhausted || (decision is LimitDecision.Reserve && estimate.value > 0 && !spend.reportOrVerify)) block(c, decision, price)
+            // A refusal that ends the cell: a spent limit. A turn that falls back to verify-and-report is not one, nor a generation
+            // request refused by the reserve at admission: the cell renders that turn again as verify-and-report (C3r).
+            if (decision is LimitDecision.Exhausted) block(c, decision, price)
             decision
         }
 

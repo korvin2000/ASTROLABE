@@ -10,6 +10,8 @@ import io.astrolabe.budget.HeuristicEstimator
 import io.astrolabe.budget.LimitDecision
 import io.astrolabe.budget.LimitKind
 import io.astrolabe.budget.LimitRule
+import io.astrolabe.budget.LimitSpend
+import io.astrolabe.budget.Spend
 import io.astrolabe.budget.TaskLimits
 import io.astrolabe.budget.Tokens
 import io.astrolabe.cell.CellFixture.Companion.anchored
@@ -43,6 +45,8 @@ import io.astrolabe.fixtures.ScriptedModel
 import io.astrolabe.fixtures.TempRepo
 import io.astrolabe.id.AttemptId
 import io.astrolabe.id.WorkId
+import io.astrolabe.provider.BillableUsage
+import io.astrolabe.provider.BillingDimension
 import io.astrolabe.provider.Effort
 import io.astrolabe.provider.Invocation
 import io.astrolabe.provider.InvocationId
@@ -52,6 +56,7 @@ import io.astrolabe.provider.ProviderAdapter
 import io.astrolabe.provider.Request
 import io.astrolabe.provider.Response
 import io.astrolabe.provider.Terminal
+import io.astrolabe.provider.UsageProvenance
 import io.astrolabe.store.Store
 import io.astrolabe.telemetry.Accounting
 import kotlinx.coroutines.CompletableDeferred
@@ -67,6 +72,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -332,6 +338,28 @@ class TaskLimitsTest {
             assertTrue(adapter.calls.drop(1).none { it.request.mask!!.allows("edit.delete") || it.request.mask!!.allows("edit.anchored") }, "no edit op on a task limit's reserve turn")
             assertTrue(CellBudget.GATE in texts(adapter.calls[1].request), "the gate line")
             assertTrue(adapter.calls.none { "repairs to your own files only" in texts(it.request) }, "never the repair line")
+        }
+    }
+
+    @Test
+    fun `a dearer rendered request reaches the reserve without ending the cell, and three verify calls still fit`() = runBlocking<Unit> {
+        // C3r 3: L = $10, S = $6 over six calls of u = $1, the last estimate E = $1: the turn starts Within; the rendered E = $1.10 is Reserve.
+        controller().open(repo.root, request, policy(TaskLimits(maxCost = usd("10")))).use { c ->
+            val dear = FakeProfiles.main.copy(priceTable = FakeProfiles.prices("10", "10", "10", "10", "62.5"))
+            val billed = BillableUsage(mapOf(BillingDimension.OUTPUT to 1L), UsageProvenance("fake", "fake-main", "test"), billed = usd("1"))
+            repeat(6) { Accounting(c.store, clock).record(c.ids, "inv-$it", dear, null, billed) }
+            c.limitState.lastEstimate = usd("1")
+            val gate = TaskLimitControl(idGen, clock, null).cell(c, CellModel(FakeAdapter(ScriptedModel.of()), dear, HeuristicEstimator())).gate
+            assertEquals(LimitDecision.Within, gate.check(Spend.Generation, Tokens.ZERO), "the turn starts at the last request's price")
+            // $0.10 of input at $10 per million plus the $1.00 output headroom (16k at $62.5 per million).
+            val rendered = Tokens(10_000L + 16_000L)
+            assertIs<LimitDecision.Reserve>(gate.check(Spend.Generation, rendered))
+            assertNull(c.limitState.block, "no refusal that ends the cell: the turn is rendered again as verify and report")
+            assertIs<LimitDecision.Reserve>(gate.check(Spend.Check, rendered), "which the reserve admits")
+            // The $4 left hold three verify-and-report calls at $1.10; a fourth would cross the limit.
+            fun spent(amount: String) = LimitSpend(6, usd(amount), CostBasis.Billed, 0, usd("1.1"))
+            for (amount in listOf("6", "7.1", "8.2")) assertIs<LimitDecision.Reserve>(LimitRule.decide(c.limits, spent(amount), usd("1.1")), amount)
+            assertIs<LimitDecision.Exhausted>(LimitRule.decide(c.limits, spent("9.3"), usd("1.1")))
         }
     }
 

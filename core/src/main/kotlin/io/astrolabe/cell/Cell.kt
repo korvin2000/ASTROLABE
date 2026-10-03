@@ -300,7 +300,7 @@ public class Cell @JvmOverloads constructor(
             // §3.7 enforce_dispatch_authority_and_budget: nothing below runs without the authority and a turn.
             authority.check(turn)?.let { return if (it.cancelled) cancelled(it.reason) else failed(it.reason) }
             (Executors.require(ctx.config.executionMode) as? ExecutionDecision.Refused)?.let { return failed("dispatch refused: ${it.refusal}") }
-            val reserveTurn = when (val generation = budget.startTurn(Spend.Generation)) {
+            var reserveTurn = when (val generation = budget.startTurn(Spend.Generation)) {
                 is Admission.Admitted -> false
                 is Admission.Refused -> {
                     if (budget.turnsLeft <= 0) return partial(PartialReason.TurnBudget, generation.reason)
@@ -325,55 +325,75 @@ public class Cell @JvmOverloads constructor(
                 ev.journal.append(JournalEvent(idGen.next("ev"), ids, turn, JournalKind.Boundary, text = "refactor mode (${refactor.reasons.first()}): red_ok_until ${RefactorMode.RED_OK_UNTIL}", at = clock.instant()))
             }
             redOkUntilIncrementEnd = refactor.active
-            // D-366: a reserve reached by the turn count, with working tokens left, still lets the cell repair what it changed —
-            // never a task limit's reserve (C3r), which pays for verification and the report only.
-            val repairable = if (reserveTurn && budget.working.available.value > 0 && !budget.limitReserve) ownPaths() else emptySet()
-            val mask = maskFor(contract, reserveTurn, repairable.isNotEmpty())
-            val schemas = when (val selection = schemaSelection) {
-                is SchemaSelection.Supported -> selection.set
-                is SchemaSelection.Unsupported -> return failed("tool schemas unsupported for ${selection.profileId}: ${selection.reason}")
-            }
-            // Invariant 12: the turn mask narrows the role's set and never names a family the line does not carry.
-            check(mask.allowed.all { op -> schemas.schemas.any { it.name == op.substringBefore('.') } }) {
-                "turn mask names ops outside the line's schema set: ${mask.allowed.filter { op -> schemas.schemas.none { it.name == op.substringBefore('.') } }}"
-            }
-            val anchor = try {
-                renderAnchor(contract, mask, repairable.isNotEmpty())
-            } catch (capacity: DigestCapacity) {
-                return partial(PartialReason.Pressure, "replan: ${capacity.message}")
-            }
-            val layout = Layout.render(ctx.role, ctx.config.executionMode, ctx.prime, CompiledK(ContractSlice.forIncrement(contract, increment), ctx.preexisting, sections), transcript(contract), capabilities.caching.breakpoints)
-            val request = Request(layout + anchor.segment(), schemas.schemas, ctx.model.profile, ctx.model.effort, ctx.model.maxOutputTokens, mask, sessionKey = ids.work.sessionKey)
-            val estimate = estimator.estimate(request)
-            when (val validation = ctx.model.adapter.validate(request, estimate)) {
-                Validation.Ok -> Unit
-                is Validation.Rejected -> {
-                    val problems = validation.problems.joinToString("; ") { "${it.kind}: ${it.detail}" }
-                    if (validation.problems.any { it.kind == ProblemKind.ContextOverflow }) contextAdmission.rejected(estimate)
-                    // next_request_exceeds_usable_context: a P1 cell checkpoints and stops rather than rebuilds.
-                    if (validation.problems.any { it.kind == ProblemKind.ContextOverflow }) {
-                        if (rebuilds >= 1) return partial(PartialReason.Pressure, "replan: the next request does not fit the window after a rebuild ($problems) — split the increment")
-                        rebuild("the next request does not fit the window ($problems)")
+            lateinit var repairable: Set<String>
+            lateinit var mask: ToolMask
+            lateinit var anchor: AnchorRender
+            lateinit var layout: List<Segment>
+            lateinit var request: Request
+            lateinit var estimate: io.astrolabe.provider.Estimate
+            lateinit var spend: Spend
+            lateinit var admission: Admission.Admitted
+            // C3r: a generation turn whose rendered request first meets a task limit's reserve at admission is rendered
+            // again as a verify-and-report turn; the cell does not end on it.
+            while (true) {
+                // D-366: a reserve reached by the turn count, with working tokens left, still lets the cell repair what it changed —
+                // never a task limit's reserve (C3r), which pays for verification and the report only.
+                repairable = if (reserveTurn && budget.working.available.value > 0 && !budget.limitReserve) ownPaths() else emptySet()
+                mask = maskFor(contract, reserveTurn, repairable.isNotEmpty())
+                val schemas = when (val selection = schemaSelection) {
+                    is SchemaSelection.Supported -> selection.set
+                    is SchemaSelection.Unsupported -> return failed("tool schemas unsupported for ${selection.profileId}: ${selection.reason}")
+                }
+                // Invariant 12: the turn mask narrows the role's set and never names a family the line does not carry.
+                check(mask.allowed.all { op -> schemas.schemas.any { it.name == op.substringBefore('.') } }) {
+                    "turn mask names ops outside the line's schema set: ${mask.allowed.filter { op -> schemas.schemas.none { it.name == op.substringBefore('.') } }}"
+                }
+                anchor = try {
+                    renderAnchor(contract, mask, repairable.isNotEmpty())
+                } catch (capacity: DigestCapacity) {
+                    return partial(PartialReason.Pressure, "replan: ${capacity.message}")
+                }
+                layout = Layout.render(ctx.role, ctx.config.executionMode, ctx.prime, CompiledK(ContractSlice.forIncrement(contract, increment), ctx.preexisting, sections), transcript(contract), capabilities.caching.breakpoints)
+                request = Request(layout + anchor.segment(), schemas.schemas, ctx.model.profile, ctx.model.effort, ctx.model.maxOutputTokens, mask, sessionKey = ids.work.sessionKey)
+                estimate = estimator.estimate(request)
+                when (val validation = ctx.model.adapter.validate(request, estimate)) {
+                    Validation.Ok -> Unit
+                    is Validation.Rejected -> {
+                        val problems = validation.problems.joinToString("; ") { "${it.kind}: ${it.detail}" }
+                        if (validation.problems.any { it.kind == ProblemKind.ContextOverflow }) contextAdmission.rejected(estimate)
+                        // next_request_exceeds_usable_context: a P1 cell checkpoints and stops rather than rebuilds.
+                        if (validation.problems.any { it.kind == ProblemKind.ContextOverflow }) {
+                            if (rebuilds >= 1) return partial(PartialReason.Pressure, "replan: the next request does not fit the window after a rebuild ($problems) — split the increment")
+                            rebuild("the next request does not fit the window ($problems)")
+                            return null
+                        }
+                        return failed("request refused by ${ctx.model.adapter.id}: $problems")
+                    }
+                }
+                // §6.1: the hard admission check — never an oversize request, never a fit claimed on unknown history.
+                when (val decision = contextAdmission.check(request, estimate)) {
+                    is AdmissionDecision.Admitted -> Unit
+                    is AdmissionDecision.Capacity -> {
+                        if (decision.condition != CapacityCondition.OverWindow || rebuilds >= 1) {
+                            return partial(PartialReason.Pressure, "replan: capacity ${decision.condition.name.lowercase()} — ${decision.detail}")
+                        }
+                        rebuild("capacity: ${decision.detail}")
                         return null
                     }
-                    return failed("request refused by ${ctx.model.adapter.id}: $problems")
                 }
-            }
-            // §6.1: the hard admission check — never an oversize request, never a fit claimed on unknown history.
-            when (val decision = contextAdmission.check(request, estimate)) {
-                is AdmissionDecision.Admitted -> Unit
-                is AdmissionDecision.Capacity -> {
-                    if (decision.condition != CapacityCondition.OverWindow || rebuilds >= 1) {
-                        return partial(PartialReason.Pressure, "replan: capacity ${decision.condition.name.lowercase()} — ${decision.detail}")
+                spend = if (reserveTurn) Spend.Check else Spend.Generation
+                admission = when (val admitted = budget.admit(spend, Tokens(estimate.upperBoundTokens + ctx.model.maxOutputTokens))) {
+                    is Admission.Admitted -> admitted
+                    is Admission.Refused -> {
+                        if (!reserveTurn && budget.limitDecision is io.astrolabe.budget.LimitDecision.Reserve) {
+                            reserveTurn = true
+                            if (CellBudget.GATE !in nudges) nudges = (listOf(CellBudget.GATE) + nudges).take(MAX_NUDGES)
+                            continue
+                        }
+                        return partial(if (reserveTurn) PartialReason.Reserve else PartialReason.TokenBudget, admitted.reason)
                     }
-                    rebuild("capacity: ${decision.detail}")
-                    return null
                 }
-            }
-            val spend = if (reserveTurn) Spend.Check else Spend.Generation
-            val admission = when (val admitted = budget.admit(spend, Tokens(estimate.upperBoundTokens + ctx.model.maxOutputTokens))) {
-                is Admission.Admitted -> admitted
-                is Admission.Refused -> return partial(if (reserveTurn) PartialReason.Reserve else PartialReason.TokenBudget, admitted.reason)
+                break
             }
 
             // Complete.
