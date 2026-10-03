@@ -225,8 +225,8 @@ public final class io/astrolabe/Defaults {
 	public static final field Companion Lio/astrolabe/Defaults$Companion;
 	public fun <init> ()V
 	public fun <init> (Lio/astrolabe/ShapePolicy;IDIDIIIIIIIIIIIIIIIIIIIIIIIIIDDDIIIIIILio/astrolabe/route/Tier;IIILio/astrolabe/route/Tier;Lio/astrolabe/route/Tier;IIIIIIIDLio/astrolabe/ProfileRoles;Lio/astrolabe/Mode;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/DClassPolicy;Lio/astrolabe/IntegrityApproval;Lio/astrolabe/UnknownOutcomeReconciliation;Lio/astrolabe/auth/Stage;II)V
-	public fun <init> (Lio/astrolabe/ShapePolicy;IDIDIIIIIIIIIIIIIIIIIIIIIIIIIIDDDIIIIIILio/astrolabe/route/Tier;IIILio/astrolabe/route/Tier;Lio/astrolabe/route/Tier;IIIIIIIDLio/astrolabe/ProfileRoles;Lio/astrolabe/Mode;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/DClassPolicy;Lio/astrolabe/IntegrityApproval;Lio/astrolabe/UnknownOutcomeReconciliation;Lio/astrolabe/auth/Stage;II)V
-	public synthetic fun <init> (Lio/astrolabe/ShapePolicy;IDIDIIIIIIIIIIIIIIIIIIIIIIIIIIDDDIIIIIILio/astrolabe/route/Tier;IIILio/astrolabe/route/Tier;Lio/astrolabe/route/Tier;IIIIIIIDLio/astrolabe/ProfileRoles;Lio/astrolabe/Mode;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/DClassPolicy;Lio/astrolabe/IntegrityApproval;Lio/astrolabe/UnknownOutcomeReconciliation;Lio/astrolabe/auth/Stage;IIIILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Lio/astrolabe/ShapePolicy;IDIDIIIIIIIIIIIIIIIIILio/astrolabe/context/SeedRule;IIIIIIIIIDDDIIIIIILio/astrolabe/route/Tier;IIILio/astrolabe/route/Tier;Lio/astrolabe/route/Tier;IIIIIIIDLio/astrolabe/ProfileRoles;Lio/astrolabe/Mode;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/DClassPolicy;Lio/astrolabe/IntegrityApproval;Lio/astrolabe/UnknownOutcomeReconciliation;Lio/astrolabe/auth/Stage;II)V
+	public synthetic fun <init> (Lio/astrolabe/ShapePolicy;IDIDIIIIIIIIIIIIIIIIILio/astrolabe/context/SeedRule;IIIIIIIIIDDDIIIIIILio/astrolabe/route/Tier;IIILio/astrolabe/route/Tier;Lio/astrolabe/route/Tier;IIIIIIIDLio/astrolabe/ProfileRoles;Lio/astrolabe/Mode;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/DClassPolicy;Lio/astrolabe/IntegrityApproval;Lio/astrolabe/UnknownOutcomeReconciliation;Lio/astrolabe/auth/Stage;IIIILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Lio/astrolabe/ShapePolicy;
 	public final fun component10 ()I
 	public final fun component11 ()I
@@ -242,7 +242,7 @@ public final class io/astrolabe/Defaults {
 	public final fun component20 ()I
 	public final fun component21 ()I
 	public final fun component22 ()I
-	public final fun component23 ()I
+	public final fun component23 ()Lio/astrolabe/context/SeedRule;
 	public final fun component24 ()I
 	public final fun component25 ()I
 	public final fun component26 ()I
@@ -252,23 +252,23 @@ public final class io/astrolabe/Defaults {
 	public final fun component3 ()D
 	public final fun component30 ()I
 	public final fun component31 ()I
-	public final fun component32 ()D
+	public final fun component32 ()I
 	public final fun component33 ()D
 	public final fun component34 ()D
-	public final fun component35 ()I
+	public final fun component35 ()D
 	public final fun component36 ()I
 	public final fun component37 ()I
 	public final fun component38 ()I
 	public final fun component39 ()I
 	public final fun component4 ()I
 	public final fun component40 ()I
-	public final fun component41 ()Lio/astrolabe/route/Tier;
-	public final fun component42 ()I
+	public final fun component41 ()I
+	public final fun component42 ()Lio/astrolabe/route/Tier;
 	public final fun component43 ()I
 	public final fun component44 ()I
-	public final fun component45 ()Lio/astrolabe/route/Tier;
+	public final fun component45 ()I
 	public final fun component46 ()Lio/astrolabe/route/Tier;
-	public final fun component47 ()I
+	public final fun component47 ()Lio/astrolabe/route/Tier;
 	public final fun component48 ()I
 	public final fun component49 ()I
 	public final fun component5 ()D
@@ -276,22 +276,23 @@ public final class io/astrolabe/Defaults {
 	public final fun component51 ()I
 	public final fun component52 ()I
 	public final fun component53 ()I
-	public final fun component54 ()D
-	public final fun component55 ()Lio/astrolabe/ProfileRoles;
-	public final fun component56 ()Lio/astrolabe/Mode;
-	public final fun component57 ()Lio/astrolabe/auth/ExecutionMode;
-	public final fun component58 ()Lio/astrolabe/DClassPolicy;
-	public final fun component59 ()Lio/astrolabe/IntegrityApproval;
+	public final fun component54 ()I
+	public final fun component55 ()D
+	public final fun component56 ()Lio/astrolabe/ProfileRoles;
+	public final fun component57 ()Lio/astrolabe/Mode;
+	public final fun component58 ()Lio/astrolabe/auth/ExecutionMode;
+	public final fun component59 ()Lio/astrolabe/DClassPolicy;
 	public final fun component6 ()I
-	public final fun component60 ()Lio/astrolabe/UnknownOutcomeReconciliation;
-	public final fun component61 ()Lio/astrolabe/auth/Stage;
-	public final fun component62 ()I
+	public final fun component60 ()Lio/astrolabe/IntegrityApproval;
+	public final fun component61 ()Lio/astrolabe/UnknownOutcomeReconciliation;
+	public final fun component62 ()Lio/astrolabe/auth/Stage;
 	public final fun component63 ()I
+	public final fun component64 ()I
 	public final fun component7 ()I
 	public final fun component8 ()I
 	public final fun component9 ()I
-	public final fun copy (Lio/astrolabe/ShapePolicy;IDIDIIIIIIIIIIIIIIIIIIIIIIIIIIDDDIIIIIILio/astrolabe/route/Tier;IIILio/astrolabe/route/Tier;Lio/astrolabe/route/Tier;IIIIIIIDLio/astrolabe/ProfileRoles;Lio/astrolabe/Mode;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/DClassPolicy;Lio/astrolabe/IntegrityApproval;Lio/astrolabe/UnknownOutcomeReconciliation;Lio/astrolabe/auth/Stage;II)Lio/astrolabe/Defaults;
-	public static synthetic fun copy$default (Lio/astrolabe/Defaults;Lio/astrolabe/ShapePolicy;IDIDIIIIIIIIIIIIIIIIIIIIIIIIIIDDDIIIIIILio/astrolabe/route/Tier;IIILio/astrolabe/route/Tier;Lio/astrolabe/route/Tier;IIIIIIIDLio/astrolabe/ProfileRoles;Lio/astrolabe/Mode;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/DClassPolicy;Lio/astrolabe/IntegrityApproval;Lio/astrolabe/UnknownOutcomeReconciliation;Lio/astrolabe/auth/Stage;IIIILjava/lang/Object;)Lio/astrolabe/Defaults;
+	public final fun copy (Lio/astrolabe/ShapePolicy;IDIDIIIIIIIIIIIIIIIIILio/astrolabe/context/SeedRule;IIIIIIIIIDDDIIIIIILio/astrolabe/route/Tier;IIILio/astrolabe/route/Tier;Lio/astrolabe/route/Tier;IIIIIIIDLio/astrolabe/ProfileRoles;Lio/astrolabe/Mode;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/DClassPolicy;Lio/astrolabe/IntegrityApproval;Lio/astrolabe/UnknownOutcomeReconciliation;Lio/astrolabe/auth/Stage;II)Lio/astrolabe/Defaults;
+	public static synthetic fun copy$default (Lio/astrolabe/Defaults;Lio/astrolabe/ShapePolicy;IDIDIIIIIIIIIIIIIIIIILio/astrolabe/context/SeedRule;IIIIIIIIIDDDIIIIIILio/astrolabe/route/Tier;IIILio/astrolabe/route/Tier;Lio/astrolabe/route/Tier;IIIIIIIDLio/astrolabe/ProfileRoles;Lio/astrolabe/Mode;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/DClassPolicy;Lio/astrolabe/IntegrityApproval;Lio/astrolabe/UnknownOutcomeReconciliation;Lio/astrolabe/auth/Stage;IIIILjava/lang/Object;)Lio/astrolabe/Defaults;
 	public final fun effectiveDigestCapTokens (I)I
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getAdmissionConfidenceMax ()D
@@ -348,6 +349,7 @@ public final class io/astrolabe/Defaults {
 	public final fun getReviewTier ()Lio/astrolabe/route/Tier;
 	public final fun getRunBudgetTokens ()I
 	public final fun getRunTimeoutSeconds ()I
+	public final fun getSeedRule ()Lio/astrolabe/context/SeedRule;
 	public final fun getSeedsMaxTokens ()I
 	public final fun getShapePolicy ()Lio/astrolabe/ShapePolicy;
 	public final fun getStallTurns ()I
@@ -6829,7 +6831,10 @@ public final class io/astrolabe/context/CarryForward {
 	public static final field SEED_CAP_TOKENS J
 	public static final fun carry (Lio/astrolabe/register/Register;Ljava/util/List;Lio/astrolabe/cell/ResultPacket;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;Ljava/util/List;Ljava/util/List;)Lio/astrolabe/context/Carry;
 	public static final fun carry (Lio/astrolabe/register/Register;Ljava/util/List;Lio/astrolabe/cell/ResultPacket;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;Ljava/util/List;Ljava/util/List;J)Lio/astrolabe/context/Carry;
-	public static synthetic fun carry$default (Lio/astrolabe/register/Register;Ljava/util/List;Lio/astrolabe/cell/ResultPacket;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;Ljava/util/List;Ljava/util/List;JILjava/lang/Object;)Lio/astrolabe/context/Carry;
+	public static final fun carry (Lio/astrolabe/register/Register;Ljava/util/List;Lio/astrolabe/cell/ResultPacket;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;Ljava/util/List;Ljava/util/List;JLio/astrolabe/context/SeedSelector;)Lio/astrolabe/context/Carry;
+	public static final fun carry (Lio/astrolabe/register/Register;Ljava/util/List;Lio/astrolabe/cell/ResultPacket;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;Ljava/util/List;Ljava/util/List;JLio/astrolabe/context/SeedSelector;Ljava/util/Collection;)Lio/astrolabe/context/Carry;
+	public static final fun carry (Lio/astrolabe/register/Register;Ljava/util/List;Lio/astrolabe/cell/ResultPacket;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;Ljava/util/List;Ljava/util/List;JLio/astrolabe/context/SeedSelector;Ljava/util/Collection;Ljava/util/List;)Lio/astrolabe/context/Carry;
+	public static synthetic fun carry$default (Lio/astrolabe/register/Register;Ljava/util/List;Lio/astrolabe/cell/ResultPacket;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;Ljava/util/List;Ljava/util/List;JLio/astrolabe/context/SeedSelector;Ljava/util/Collection;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/context/Carry;
 }
 
 public final class io/astrolabe/context/CompileInputs {
@@ -7698,6 +7703,52 @@ public final class io/astrolabe/context/Retention$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
 }
 
+public final class io/astrolabe/context/SeedCandidate {
+	public fun <init> (Lio/astrolabe/workset/Entry;Lio/astrolabe/context/SeedReason;)V
+	public final fun component1 ()Lio/astrolabe/workset/Entry;
+	public final fun component2 ()Lio/astrolabe/context/SeedReason;
+	public final fun copy (Lio/astrolabe/workset/Entry;Lio/astrolabe/context/SeedReason;)Lio/astrolabe/context/SeedCandidate;
+	public static synthetic fun copy$default (Lio/astrolabe/context/SeedCandidate;Lio/astrolabe/workset/Entry;Lio/astrolabe/context/SeedReason;ILjava/lang/Object;)Lio/astrolabe/context/SeedCandidate;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEntry ()Lio/astrolabe/workset/Entry;
+	public final fun getReason ()Lio/astrolabe/context/SeedReason;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/context/SeedInputs {
+	public fun <init> (Lio/astrolabe/register/Register;Ljava/util/List;)V
+	public fun <init> (Lio/astrolabe/register/Register;Ljava/util/List;Ljava/util/Set;)V
+	public fun <init> (Lio/astrolabe/register/Register;Ljava/util/List;Ljava/util/Set;Ljava/util/List;)V
+	public synthetic fun <init> (Lio/astrolabe/register/Register;Ljava/util/List;Ljava/util/Set;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lio/astrolabe/register/Register;
+	public final fun component2 ()Ljava/util/List;
+	public final fun component3 ()Ljava/util/Set;
+	public final fun component4 ()Ljava/util/List;
+	public final fun copy (Lio/astrolabe/register/Register;Ljava/util/List;Ljava/util/Set;Ljava/util/List;)Lio/astrolabe/context/SeedInputs;
+	public static synthetic fun copy$default (Lio/astrolabe/context/SeedInputs;Lio/astrolabe/register/Register;Ljava/util/List;Ljava/util/Set;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/context/SeedInputs;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getExport ()Ljava/util/List;
+	public final fun getReceipts ()Ljava/util/List;
+	public final fun getRegister ()Lio/astrolabe/register/Register;
+	public final fun getTouched ()Ljava/util/Set;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/context/SeedReason : java/lang/Enum {
+	public static final field Noted Lio/astrolabe/context/SeedReason;
+	public static final field Recent Lio/astrolabe/context/SeedReason;
+	public static final field Red Lio/astrolabe/context/SeedReason;
+	public static final field Referenced Lio/astrolabe/context/SeedReason;
+	public static final field Touched Lio/astrolabe/context/SeedReason;
+	public final fun getAnnounced ()Z
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getWire ()Ljava/lang/String;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/context/SeedReason;
+	public static fun values ()[Lio/astrolabe/context/SeedReason;
+}
+
 public final class io/astrolabe/context/SeedRender {
 	public fun <init> (Ljava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/util/List;)V
 	public synthetic fun <init> (Ljava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
@@ -7714,6 +7765,31 @@ public final class io/astrolabe/context/SeedRender {
 	public final fun getText ()Ljava/lang/String;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/context/SeedRule : java/lang/Enum {
+	public static final field Companion Lio/astrolabe/context/SeedRule$Companion;
+	public static final field V1 Lio/astrolabe/context/SeedRule;
+	public static final field V2 Lio/astrolabe/context/SeedRule;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getSelector ()Lio/astrolabe/context/SeedSelector;
+	public final fun getWire ()Ljava/lang/String;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/context/SeedRule;
+	public static fun values ()[Lio/astrolabe/context/SeedRule;
+}
+
+public final class io/astrolabe/context/SeedRule$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public abstract interface class io/astrolabe/context/SeedSelector {
+	public static final field Companion Lio/astrolabe/context/SeedSelector$Companion;
+	public static final field V1 Lio/astrolabe/context/SeedSelector;
+	public static final field V2 Lio/astrolabe/context/SeedSelector;
+	public abstract fun candidates (Lio/astrolabe/context/SeedInputs;)Ljava/util/List;
+}
+
+public final class io/astrolabe/context/SeedSelector$Companion {
 }
 
 public final class io/astrolabe/context/Seeds {
