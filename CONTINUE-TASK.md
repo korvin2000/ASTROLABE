@@ -34,7 +34,7 @@ sound core, breaks eligibility of every check and the report shapers — do not 
 `.claude/worktrees/agent-a8bf47cef32456645`. Older unregistered dirs there: `Remove-Item -LiteralPath '\\?\<path>' -Recurse -Force`.
 
 ## Last gate / blockers
-Gate P8.C: its line in `TODO.md` carries the CI run of the final S3 push. S3 CI fix: the ripgrep step verifies `rg` and
+Gate P8.C closed: CI 37154760649 green at `b3eae38` (Ubuntu + Windows), tag `v2-wave-C`; the last push only adds docs — check its run. S3 CI fix: the ripgrep step verifies `rg` and
 falls back to the pinned GitHub release (choco exits 0 on a 503). No blockers. `gh` not installed; CI via
 `curl -s https://api.github.com/repos/korvin2000/ASTROLABE/actions/runs?branch=main`.
 `.llm-memory`: 30 entries stale by content, no missing paths — re-verify a card when its topic is touched.
