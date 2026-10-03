@@ -390,6 +390,18 @@ class VerifyTest {
     }
 
     @Test
+    fun `the stop's regression baseline leaves the model's own verify(baseline) unconfigured, as before (P8C10)`() = runTest {
+        val dirty = io.astrolabe.workspace.DirtyState(workspace, store.blobs, stamper, ids, clock)
+        val shadow = io.astrolabe.workspace.ShadowRef(ids.work, ids.attempt, workspace, store, dirty, os, clock).also { it.open(dirty.capture(0)) }
+        verify.regressionBaseline = io.astrolabe.verify.Baseline(shadow, store.layout, TrustedLocalRunner(os), os, SqliteReceipts(store, clock), io.astrolabe.evidence.InMemoryAliases(),
+            store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, clock, stamper.report().env)
+        val baseline = run("""{"what":"baseline"}""")
+        assertEquals("unavailable", status(baseline))
+        assertTrue(baseline.body.contains("no baseline is configured"), baseline.body)
+        assertTrue(SqliteReceipts(store, clock).forCheck("CHK-full").isEmpty(), "nothing ran")
+    }
+
+    @Test
     fun `unsupported selections, unknown ids, masked ops and a missing baseline are explicit`() = runTest {
         val blast = run("""{"what":"tests","selection":"blast"}""")
         assertEquals("unavailable", status(blast))

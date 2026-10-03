@@ -195,4 +195,31 @@ class JUnitXmlShaperTest {
         val shaped = Shapers.shape(Recorded.capture("gradle-no-tests.txt", gradle, exitCode = 0, reports = listOf(artifact)))
         assertEquals(Outcome.Inconclusive, shaped.status)
     }
+
+    @Test
+    fun `the runner's file keys a regression record apart, identity and display unchanged (P8C10 rounds 4 and 5)`() {
+        val xml = "<testsuite name=\"tests\" tests=\"2\" failures=\"1\">" +
+            "<testcase classname=\"tests\" name=\"t\" file=\"tests/a.py\"><failure message=\"boom\">x</failure></testcase>" +
+            "<testcase classname=\"tests\" name=\"t\" file=\"tests/b.py\"/></testsuite>"
+        val tests = JUnitXml.parse(xml.toByteArray(), null, "CHK-tests-blast").tests
+        assertEquals(listOf("tests" to "tests::t", "tests" to "tests::t"), tests.map { it.identity.file to it.identity.display }, "as before: the file is no part of the identity")
+        assertEquals(listOf("tests/a.py", "tests/b.py"), tests.map { it.runnerFile })
+        val record = io.astrolabe.verify.Regressions.outcomes(tests, { it })
+        assertEquals(emptyList(), record.ambiguous, "two tests, not one ambiguous identity")
+        assertNotEquals(record.failed.single().key, record.passed.single())
+    }
+
+    @Test
+    fun `a report cut inside a failing test is incomplete evidence whatever status its counts give (P8C10)`() {
+        // `t` passes whole, then a second `t` is cut off inside its failure.
+        val cut = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuite name=\"com.acme.T\" tests=\"2\" failures=\"1\" errors=\"0\" skipped=\"0\">\n" +
+            "  <testcase name=\"t\" classname=\"com.acme.T\" time=\"0.01\"/>\n  <testcase name=\"t\" classname=\"com.acme.T\" time=\"0.01\"><failure message=\"boom\">at com.acme"
+        val artifact = ReportArtifact(
+            path = "build/test-results/test/TEST-com.acme.T.xml", kind = ReportKind.JUnitXml, freshForThisInvocation = true,
+            provenance = "written by this invocation", content = cut.toByteArray(),
+        )
+        val shaped = Shapers.shape(Recorded.capture("gradle-no-tests.txt", gradle, exitCode = 1, reports = listOf(artifact)))
+        assertTrue(shaped.evidenceIncomplete, shaped.limitations.toString())
+        assertTrue(io.astrolabe.verify.Regressions.outcomes(shaped.tests, { it }, complete = !shaped.evidenceIncomplete).incomplete, "nothing in it is shown fixed")
+    }
 }

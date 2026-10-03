@@ -36,6 +36,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -354,6 +355,62 @@ class ExitGateTest {
             assertEquals(Resolution.Complete, resolve(register = done.copy(open = listOf(OpenItem(1, "$id red: tests/test_b.py, tracked"))), currencies = mapOf("CHK-accept-AC-1" to green(), id to red("rcpt-9"))).resolution)
         }
     }
+
+    @Test
+    fun `a new failure against the baseline is rework whatever Open says, one that failed before is no gap, an unknown one keeps the Open rule while current`() {
+        val noted = done.copy(open = listOf(OpenItem(1, "CHK-tests-blast CHK-types-touched red: tracked")))
+        for (id in listOf(Checks.TESTS_BLAST, Checks.TYPES_TOUCHED)) {
+            fun held(hold: RegressionHold) = red("rcpt-9").copy(hold = hold)
+            val regression = held(RegressionHold(listOf("#9"), listOf("rcpt-9"), "pytest tests/test_b.py", regressions = listOf("tests/test_b.py::test_b — assert 2 == 1 (did not fail on s0)")))
+            for (register in listOf(done, noted)) {
+                val resolved = resolve(register = register, currencies = mapOf("CHK-accept-AC-1" to green(), id to regression))
+                assertEquals(Resolution.Rework, resolved.resolution, id)
+                // The instruction and the command come first, so a cut line still says what to do.
+                assertTrue(resolved.missing.single().startsWith("$id: fix and rerun `pytest tests/test_b.py` — new failures against the baseline at s0, which no Open item clears: tests/test_b.py::test_b"), resolved.missing.toString())
+                assertEquals(GapKind.Failed, resolved.gaps.single().kind, "an executed red check: no decision covers it")
+            }
+            // Failed before the change too, only: complete without an Open item; the finish receipt discloses it.
+            val inherited = held(RegressionHold(listOf("#9"), listOf("rcpt-9"), "pytest", failedBefore = listOf("failed before the change too: tests/test_c.py::test_c")))
+            assertEquals(Resolution.Complete to emptyList<String>(), resolve(currencies = mapOf("CHK-accept-AC-1" to green(), id to inherited)).let { it.resolution to it.missing })
+            assertEquals(listOf("$id: failed before the change too: tests/test_c.py::test_c"), Obligations.disclosure(id, inherited.hold!!))
+            // Unknown and current: the D-400 rule — an Open item, which the acceptance then acknowledges.
+            val unclassified = held(RegressionHold(listOf("#9"), listOf("rcpt-9"), "pytest", unknown = listOf("x — y (${Regressions.NO_BASELINE})")))
+            assertEquals(listOf("$id is red without an Open item naming it"), resolve(currencies = mapOf("CHK-accept-AC-1" to green(), id to unclassified)).missing)
+            val acknowledged = resolve(register = noted, currencies = mapOf("CHK-accept-AC-1" to green(), id to unclassified))
+            assertEquals(Resolution.Complete to listOf("rcpt-9"), acknowledged.resolution to acknowledged.acknowledged)
+            // An earlier acceptance's acknowledgment of the same receipt stands for every later resolution (D-337), registers aside.
+            assertEquals(Resolution.Complete, Resolver.increment(Register.empty(ContextId("cell-final"), "I1", "fix rounding"), contract, increment,
+                mapOf("CHK-accept-AC-1" to green(), id to unclassified), mapOf("AC-2" to approve, "AC-3" to approve), acknowledged = listOf("rcpt-9")).resolution)
+            // Not current (a green run on this tree did not execute it): no gap, disclosed, the class stays unverified (FinishReceipt).
+            val stale = held(RegressionHold(listOf("#9"), emptyList(), "pytest", unknown = listOf("x: failed in rcpt-9, not executed on this tree (removed, skipped or renamed)")))
+            assertEquals(Resolution.Complete, resolve(currencies = mapOf("CHK-accept-AC-1" to green(), id to stale)).resolution)
+            assertEquals(listOf("$id: failure not classified (x: failed in rcpt-9, not executed on this tree (removed, skipped or renamed))"), Obligations.disclosure(id, stale.hold!!))
+            // Without the scheduler's record, a current eligible red is unknown; a stale or ineligible one holds nothing.
+            assertEquals(RedClass.Unknown, Obligations.hold(id, red("rcpt-9"))?.kind)
+            assertNull(Obligations.hold(id, red("rcpt-9").copy(applicability = Applicability.Stale)))
+            assertNull(Obligations.hold(id, red("rcpt-9").copy(eligible = false)))
+        }
+        // Not a harness regression check: the full suite keeps the D-400 rule, a hold on it changes nothing.
+        val full = red("rcpt-9").copy(hold = RegressionHold(listOf("#9"), listOf("rcpt-9"), "pytest", regressions = listOf("x (new)")))
+        assertEquals(Resolution.Complete, resolve(register = done.copy(open = listOf(OpenItem(1, "CHK-full red: tracked"))), currencies = mapOf("CHK-accept-AC-1" to green(), Checks.FULL to full)).resolution)
+        assertNull(Obligations.hold(Checks.FULL, full))
+    }
+
+    @Test
+    fun `the verifier keeps what an acceptance acknowledged, so the final reacceptance answers as the increment's did`() {
+        val unclassified = red("rcpt-9").copy(hold = RegressionHold(listOf("#9"), listOf("rcpt-9"), "pytest", unknown = listOf("x — y (${Regressions.NO_BASELINE})")))
+        val currencies = mapOf("CHK-accept-AC-1" to green(), Checks.TESTS_BLAST to unclassified)
+        val proposal = CompletionProposal("I1", "done", 2, s8, s9, null, env)
+        val noted = done.copy(open = listOf(OpenItem(1, "CHK-tests-blast red: tracked")))
+        val accepted = assertIs<CompletionResult.Accepted>(Verifier().accept(proposal, contract, increment, noted, Ledger.initial(contract), s9, currencies, mapOf("AC-2" to approve, "AC-3" to approve)))
+        assertEquals(listOf("rcpt-9"), accepted.acknowledged)
+        // The final reacceptance has no register (Controller.reaccept): the acknowledgment is the record it reads.
+        val empty = Register.empty(ContextId("cell-1"), "I1", "fix rounding")
+        assertIs<CompletionResult.Refused>(Verifier().accept(proposal, contract, increment, empty, Ledger.initial(contract), s9, currencies, mapOf("AC-2" to approve, "AC-3" to approve)))
+        assertIs<CompletionResult.Accepted>(Verifier().accept(proposal, contract, increment, empty, Ledger.initial(contract), s9, currencies, mapOf("AC-2" to approve, "AC-3" to approve),
+            acknowledged = accepted.acknowledged))
+    }
+
 
     @Test
     fun `a red optional check is the runtime's known red, never a gap, until the scheduler ends it`() {

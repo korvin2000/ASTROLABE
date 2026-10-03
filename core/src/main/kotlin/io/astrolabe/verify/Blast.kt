@@ -6,6 +6,7 @@ import io.astrolabe.atlas.ImpactScope
 import io.astrolabe.atlas.isTestPath
 import io.astrolabe.contract.Command
 import io.astrolabe.evidence.Closure
+import io.astrolabe.evidence.Receipt
 
 /** What the blast-radius selection produced (§7.3, P3.2.5): the `CHK-tests-blast` check, or why there is none. */
 public sealed interface BlastSelection {
@@ -55,6 +56,15 @@ public object Blast {
             Closure.Unknown -> "workspace"
         }
         else -> null
+    }
+
+    /**
+     * P8.C.10 F: `CHK-tests-blast` as its last run [receipt] defined it, with that run as its last result — so a reopened
+     * campaign, which seeds no blast check, still resolves and reports its hold as the live one did.
+     */
+    @JvmStatic
+    public fun restored(receipt: Receipt): Check = check(Command(receipt.command, receipt.cwd), receipt.inputClosure).let { check ->
+        check.copy(last = LastResult(receipt.receiptId, receipt.stampAfter, receipt.checkDefinitionVersion, receipt.outcome, receipt.parsed, Applicability.Current))
     }
 
     private fun takesPaths(test: Command): Boolean = test.argv.any { it.substringAfterLast('/').substringAfterLast('\\') in PATH_RUNNERS }

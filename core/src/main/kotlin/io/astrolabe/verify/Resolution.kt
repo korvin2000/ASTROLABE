@@ -312,7 +312,29 @@ public data class Resolved(
     val leftOpen: List<String> = emptyList(),
     /** Optional checks red at their latest receipt, as the runtime records them ([Obligations.knownRed], C1b): shown, never a gap. */
     val knownRed: List<String> = emptyList(),
+    /**
+     * P8.C.10: this tree's red receipts of a harness regression check whose unknown failures an `Open` item (or an earlier
+     * acknowledgment) covered; an accepted increment keeps them, so a later resolution of the same receipt asks no `Open` item.
+     */
+    val acknowledged: List<String> = emptyList(),
 ) {
+    /** The constructor before [acknowledged] (P8.C.10). Kept for Java callers. */
+    public constructor(
+        resolution: Resolution,
+        gaps: List<Gap>,
+        results: List<ObligationResult>,
+        provenance: List<ItemProvenance>,
+        code: StopCode?,
+        receiptIds: List<String>,
+        evidenceRefs: List<String>,
+        decision: DecisionRecord?,
+        other: List<String>,
+        considered: DecisionRecord?,
+        binding: List<String>,
+        leftOpen: List<String>,
+        knownRed: List<String>,
+    ) : this(resolution, gaps, results, provenance, code, receiptIds, evidenceRefs, decision, other, considered, binding, leftOpen, knownRed, emptyList())
+
     /** The constructor before [knownRed] (C1b). Kept for Java callers. */
     public constructor(
         resolution: Resolution,
@@ -335,7 +357,7 @@ public data class Resolved(
      * The same inputs once the rework round is spent (I4): a reviewer's standing rejection, and whatever the agent left
      * open, then await a decision.
      */
-    public fun spent(): Resolved = Resolver.resolve(results, other, considered, reworkSpent = true, binding = binding).copy(leftOpen = leftOpen, knownRed = knownRed)
+    public fun spent(): Resolved = Resolver.resolve(results, other, considered, reworkSpent = true, binding = binding).copy(leftOpen = leftOpen, knownRed = knownRed, acknowledged = acknowledged)
 
     /** Results the authority is asked about when this resolution awaits: uncovered unverified ones and reviewer rejections. */
     val undecided: List<ObligationResult>
@@ -419,6 +441,28 @@ public object Obligations {
         return "$checkId known red since receipt $since (recorded by the runtime)"
     }
 
+    /**
+     * P8.C.10: the hold of a harness regression check ([Regressions.CHECKS]) — the scheduler's [Currency.hold], or, from a
+     * caller that did not compute it, a current, eligible red read as unknown (no baseline); `null` otherwise.
+     */
+    @JvmStatic
+    public fun hold(checkId: String, currency: Currency): RegressionHold? {
+        if (checkId !in Regressions.CHECKS || !currency.mandatory) return null
+        currency.hold?.let { return it }
+        val receipt = currency.receiptId?.takeIf { currency.red && currency.applicability == Applicability.Current && currency.eligible } ?: return null
+        return RegressionHold(listOf(receipt), listOf(receipt), checkId, unknown = listOf(Regressions.NO_BASELINE))
+    }
+
+    /**
+     * P8.C.10: what the finish receipt discloses of a [hold]: each failure that failed before the change too, each unknown
+     * one with why, and each new one (a gap while the work is open; listed when the campaign ended otherwise).
+     */
+    @JvmStatic
+    public fun disclosure(checkId: String, hold: RegressionHold): List<String> =
+        hold.regressions.map { "$checkId: new failure against the baseline at s0: $it" } +
+            hold.failedBefore.map { "$checkId: $it" } +
+            hold.unknown.map { "$checkId: failure not classified ($it)" }
+
     /** The obligation id prefix of a test-integrity flag; the path follows it. */
     public const val INTEGRITY: String = "integrity:"
 
@@ -449,7 +493,9 @@ public object Obligations {
 /**
  * The one acceptance rule (§8.7, D-337): the cell's exit gate, the verifier, final acceptance and resume all resolve a
  * proposal here, so the same inputs always give the same answer. Order:
- * 1. an executed red check → rework; no decision covers it (§8.8);
+ * 1. an executed red check → rework; no decision covers it (§8.8) — a failure of the blast radius or the types of touched
+ *    files that is new against the baseline at `s0` is one, whatever `Open` says, until it is shown fixed on the tree at
+ *    hand: reported once, passed, by an eligible run that finished with a complete record (P8.C.10);
  * 2. something the agent must close ([other]: an open plan step while acceptance is not proven, a red mandatory check
  *    without an `Open` item, a contract or stamp mismatch, an unresolved impact nudge, an unjustified acceptance-surface
  *    change) → rework; a red optional check is no gap: the runtime records it as known red ([Resolved.knownRed], C1b);
@@ -540,6 +586,11 @@ public object Resolver {
         binding: List<String> = emptyList(),
         /** Obligations beside the increment's items: an owed increment review without a `review:` item (§8.8). */
         extra: List<ObligationResult> = emptyList(),
+        /**
+         * P8.C.10: red receipts of a harness regression check an earlier accepted increment acknowledged with an `Open` item
+         * ([Resolved.acknowledged], kept with the increment's evidence): the same receipt is not refused again for want of one.
+         */
+        acknowledged: Collection<String> = emptyList(),
     ): Resolved {
         val results = ArrayList<ObligationResult>(extra)
         val open = ArrayList<String>()
@@ -555,12 +606,34 @@ public object Resolver {
         val requiredIds = increment.accept.map { Checks.acceptId(it) }.toSet() + increment.accept.toSet()
         val openTexts = register.open.filter { !it.closed }.map { it.text }
         val knownRed = ArrayList<String>()
+        val acknowledging = ArrayList<String>()
         for ((checkId, currency) in currencies) {
             if (checkId in requiredIds || currency.receiptId == null) continue
             // Plan §4.3 (C1b): an optional check's red is the runtime's record, not the agent's, until a later `passed`
             // receipt of it on the tree now; a mandatory one keeps the rule below.
             if (!currency.mandatory) {
                 Obligations.knownRed(checkId, currency)?.let { knownRed += it }
+                continue
+            }
+            // P8.C.10: the failures the harness found itself (blast radius, types of touched files), held until they pass on
+            // this tree: a new one against the baseline at s0 is never covered by an Open item; one that failed before the
+            // change too the runtime acknowledges (disclosed, no gap); an unknown one keeps the D-400 rule while a red run is
+            // current — an Open item, or an earlier acceptance that acknowledged that same red receipt.
+            if (checkId in Regressions.CHECKS) {
+                val hold = Obligations.hold(checkId, currency) ?: continue
+                when (hold.kind) {
+                    RedClass.FailedBefore -> Unit
+                    RedClass.New -> results += ObligationResult("red:$checkId", ObligationKind.Run, ResultStatus.Failed,
+                        "$checkId: fix and rerun `${hold.command}` — new failures against the baseline at s0, which no Open item clears: " +
+                            hold.regressions.take(MAX_NAMED).joinToString("; ") + (if (hold.regressions.size > MAX_NAMED) "; +${hold.regressions.size - MAX_NAMED} more" else ""),
+                        currency.receiptId)
+                    RedClass.Unknown -> when {
+                        hold.current.isEmpty() -> Unit
+                        hold.current.all { it in acknowledged } -> acknowledging += hold.current
+                        openTexts.any { it.contains(checkId) } -> acknowledging += hold.current
+                        else -> results += ObligationResult("red:$checkId", ObligationKind.Run, ResultStatus.Failed, "$checkId is red without an Open item naming it", currency.receiptId)
+                    }
+                }
                 continue
             }
             // Only a red receipt of this very tree is a red line; a stale red one is history (D-337).
@@ -582,6 +655,9 @@ public object Resolver {
             results += result
         }
         unresolvedImpactNudges.forEach { open += "unresolved impact nudge: $it" }
-        return resolve(results, open, decision, reworkSpent, binding).copy(leftOpen = leftOpen, knownRed = knownRed)
+        return resolve(results, open, decision, reworkSpent, binding).copy(leftOpen = leftOpen, knownRed = knownRed, acknowledged = acknowledging.distinct())
     }
+
+    /** How many failures a regression gap names before it counts the rest. */
+    private const val MAX_NAMED = 5
 }

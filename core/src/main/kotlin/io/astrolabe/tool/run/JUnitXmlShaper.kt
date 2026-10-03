@@ -47,6 +47,7 @@ public class JUnitXmlShaper : Shaper {
         if (totalsDisagree) {
             limitations += "report totals ($declaredTotal declared) disagree with ${tests.size} parsed test cases"
         }
+        val incomplete = totalsDisagree || parses.any { it.second.problems.isNotEmpty() }
         val status = deriveStatus(
             StatusInputs(
                 capture = capture,
@@ -54,7 +55,7 @@ public class JUnitXmlShaper : Shaper {
                 wrapper = wrapper,
                 runnerName = Invocations.runnerName(capture),
                 nothingCollected = false,
-                evidenceIncomplete = totalsDisagree || parses.any { it.second.problems.isNotEmpty() },
+                evidenceIncomplete = incomplete,
             ),
             limitations,
         )
@@ -75,6 +76,7 @@ public class JUnitXmlShaper : Shaper {
             wrapper = wrapper,
             shaper = id,
             limitations = limitations,
+            evidenceIncomplete = incomplete,
         )
     }
 
@@ -106,6 +108,8 @@ internal object JUnitXml {
             var suitePackage: String? = null
             var caseName: String? = null
             var caseClass: String? = null
+            // P8.C.10: the runner's file (pytest, some JUnit writers) — kept beside the identity, for the regression record's key only.
+            var caseFile: String? = null
             var caseTime: Long? = null
             var caseOutcome = TestOutcome.Passed
             var caseMessage: String? = null
@@ -121,6 +125,7 @@ internal object JUnitXml {
                         "testcase" -> {
                             caseName = reader.attr("name")
                             caseClass = reader.attr("classname")
+                            caseFile = reader.attr("file")
                             caseTime = reader.attr("time")?.toDoubleOrNull()?.let { (it * 1000).toLong() }
                             caseOutcome = TestOutcome.Passed
                             caseMessage = null
@@ -165,10 +170,12 @@ internal object JUnitXml {
                                     outcome = caseOutcome,
                                     message = caseMessage,
                                     durationMillis = caseTime,
+                                    runnerFile = caseFile,
                                 )
                             }
                             caseName = null
                             caseClass = null
+                            caseFile = null
                             caseMessage = null
                             caseTime = null
                         }

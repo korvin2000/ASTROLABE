@@ -53,6 +53,7 @@ public class JestShaper : Shaper {
             }
         }
 
+        val incomplete = fromReport?.problems?.isNotEmpty() == true
         val status = deriveStatus(
             StatusInputs(
                 capture = capture,
@@ -60,7 +61,7 @@ public class JestShaper : Shaper {
                 wrapper = wrapper,
                 runnerName = Invocations.runnerName(capture),
                 nothingCollected = terminal.noTestsFound && !useReport,
-                evidenceIncomplete = fromReport?.problems?.isNotEmpty() == true,
+                evidenceIncomplete = incomplete,
             ),
             limitations,
         )
@@ -76,6 +77,7 @@ public class JestShaper : Shaper {
             wrapper = wrapper,
             shaper = id,
             limitations = limitations,
+            evidenceIncomplete = incomplete,
         )
     }
 

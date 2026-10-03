@@ -215,6 +215,7 @@ public class RequirementGraph(
             result.evidenceRefs.distinct().sorted(),
             result.provenance,
             result.leftOpen,
+            result.acknowledged,
         )
         return replace(increment.copy(status = IncrementStatus.Verified)).copy(evidence = evidence + (increment.id to record))
     }

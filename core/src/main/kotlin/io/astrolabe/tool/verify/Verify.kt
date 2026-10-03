@@ -71,6 +71,7 @@ import io.astrolabe.verify.Currency
 import io.astrolabe.verify.Executed
 import io.astrolabe.verify.Layer
 import io.astrolabe.verify.Layers
+import io.astrolabe.verify.Regressions
 import io.astrolabe.verify.Scheduler
 import io.astrolabe.verify.Selector
 import io.astrolabe.workspace.Stamper
@@ -127,10 +128,28 @@ public class Verify(
             field = value
             checker?.beforeDispatch = value
             baseline?.beforeDispatch = value
+            regressionBaseline?.beforeDispatch = value
         }
 
     /** C3r: the whole seconds of active time a task's minutes limit leaves, read at each dispatch; `null` without one. */
     internal var timeLeft: () -> Long? = { null }
+        set(value) {
+            field = value
+            // P8.C.10: every baseline path — the stop's and `verify(baseline)` — reads the same time left.
+            baseline?.timeLeft = value
+            regressionBaseline?.timeLeft = value
+        }
+
+    /**
+     * P8.C.10: the baseline verify-on-stop runs for a held red of the blast radius or the types of touched files — set by
+     * the controller apart from [baseline], so the model's own `verify(baseline)` stays exactly what it was; `null` uses [baseline].
+     */
+    internal var regressionBaseline: Baseline? = null
+        set(value) {
+            field = value
+            value?.timeLeft = timeLeft
+            value?.beforeDispatch = beforeDispatch
+        }
 
     /** [seconds] cut to [left], the active time a minutes limit leaves (C3r). */
     private fun cut(seconds: Long, left: Long?): Long = if (left == null) seconds else minOf(seconds, left)
@@ -334,8 +353,75 @@ public class Verify(
         return last.stamp == stampNow && last.outcome in SETTLED_UNVERIFIED
     }
 
-    /** Verify-on-stop (§8.1, P3.1.3): the increment's acceptance on a completion proposal; never the full suite. */
-    public suspend fun onStop(acceptanceIds: Collection<String>): LayerRun = runLayer(Layer.IncrementAcceptance, acceptanceIds)
+    /**
+     * Verify-on-stop (§8.1, P3.1.3): the increment's acceptance on a completion proposal; never the full suite.
+     * P8.C.12: it runs while the cell's background runs still live (an end-to-end check may need its server); they are then
+     * settled — a grace, a cancellation, its confirmation — and a check the settling made stale or that ran while the tree
+     * was not quiet runs again on the quiet tree; a run still live afterwards leaves every receipt uncertifying until a later
+     * stop finds the tree quiet ([Workspace.unquiet]). P8.C.10: then the blast radius and the types of touched files are
+     * brought to this tree ([refreshRegressions]).
+     */
+    public suspend fun onStop(acceptanceIds: Collection<String>): LayerRun {
+        val wasUnquiet = workspace.unquiet.isNotEmpty()
+        val first = runLayer(Layer.IncrementAcceptance, acceptanceIds)
+        val settled = settleRuns?.invoke()
+        if (settled != null) workspace.unquiet = settled.live
+        val again = if (settled != null && (settled.settled > 0 || wasUnquiet)) runLayer(Layer.IncrementAcceptance, acceptanceIds) else null
+        val regressions = refreshRegressions()
+        return LayerRun(first.layer, first.receipts + again?.receipts.orEmpty() + regressions, again?.notTested ?: first.notTested, settled?.notes.orEmpty())
+    }
+
+    /** P8.C.12: settles the cell's live background runs after its stop's acceptance ran (the `run` tool sets it). */
+    internal var settleRuns: (suspend () -> StopSettle)? = null
+
+    /**
+     * P8.C.10 A, G: the command of every red run behind a regression check's hold that no run of its definition confirms on
+     * this tree reruns here, with that run's closure — once per definition and tree (begun on record, no flaky retry), its
+     * deadline cut to the time left; with none left it does not run and the failure stays unknown. Then, for this
+     * tree's red run, one baseline per check and attempt on `s0`, recorded as begun before it runs, its time left read again
+     * just before the process starts — so a failure, an exception or an interruption is never retried in the attempt.
+     */
+    private suspend fun refreshRegressions(): List<Receipt> {
+        val contract = contracts.current(ids.work) ?: return emptyList()
+        val recorded = ArrayList<Receipt>()
+        for (id in Regressions.CHECKS) {
+            val check = checks[id] ?: continue
+            // One rerun per check and stop: the latest red not shown on this tree (older ones stay held, unknown).
+            scheduler.unconfirmed(check, stamper.stamp().id).firstOrNull()?.let { red ->
+                val left = timeLeft()
+                if (left == null || left > 0) {
+                    // P8.C.10: the red run's own command and closure, so the rescan watches what it tested — the registered check
+                    // itself when it defined the red (an end-of-turn typecheck ran it over the touched files); one run, begun on
+                    // record under the red's own definition.
+                    val rerun = if (red.checkDefinitionVersion == check.definitionVersion) check.copy(inputClosure = red.inputClosure)
+                        else check.copy(command = io.astrolabe.contract.Command(red.command, red.cwd), inputClosure = red.inputClosure)
+                    scheduler.beginRerun(rerun, contract.version, red.checkDefinitionVersion)
+                    runOne(rerun, contract)?.let { recorded += it.first }
+                }
+            }
+            val due = scheduler.baselineDue(check, stamper.stamp().id) ?: continue
+            baselineOf(check.copy(command = io.astrolabe.contract.Command(due.command, due.cwd), inputClosure = due.inputClosure), contract)?.let { recorded += it }
+        }
+        return recorded
+    }
+
+    /** One baseline of [check] on `s0` (P8.C.10 G): begun on record, cut to the time left, a failure to export it unknown. */
+    private suspend fun baselineOf(check: Check, contract: Contract): Receipt? {
+        val runner = regressionBaseline ?: baseline ?: return null
+        val stamp = s0 ?: return null
+        val left = timeLeft()
+        if (left != null && left <= 0) return null
+        runner.begin(check, contract.version, stamp)
+        return try {
+            runner.run(check, contract.version, stamp, cut(timeoutSeconds, left)).receipt
+        } catch (failure: IOException) {
+            null
+        } catch (failure: IllegalStateException) {
+            null
+        } catch (failure: IllegalArgumentException) {
+            null
+        }
+    }
 
     // --------------------------------------------------------------- running
 
@@ -389,7 +475,7 @@ public class Verify(
                 view = "  ${check.id}: denied — $refusal"
                 return@execution Executed(command.argv, command.cwd, false, null, Outcome.Denied, null, null, listOf(refusal))
             }
-            val invocation = invoke(check, command, root, idGen.next("act"), timeoutSeconds, ShapeBudget(estimator = estimator))
+            val invocation = invoke(check, command, root, idGen.next("act"), timeoutSeconds, ShapeBudget(estimator = estimator), listPasses = check.id in Regressions.CHECKS)
             view = "  ${check.id}: " + invocation.view.lines().joinToString("\n  ")
             invocation.executed
         }
@@ -403,7 +489,14 @@ public class Verify(
      * as a redacted log blob and shaped once at the boundary with the check's identity (D-27, D-50). Refusals are the
      * caller's; a runner that cannot start is `unavailable` (FX-13).
      */
-    private suspend fun invoke(check: Check, command: io.astrolabe.contract.Command, root: Path, actionId: String, timeoutSeconds: Long, budget: ShapeBudget): Invocation {
+    private suspend fun invoke(
+        check: Check, command: io.astrolabe.contract.Command, root: Path, actionId: String, timeoutSeconds: Long, budget: ShapeBudget,
+        /** Every check the run realizes (one `run` may realize several, C1a): each regression check gets its own record. */
+        sharing: List<Check> = listOf(check),
+        /** P8.C.10: a harness run of a regression check asks the runner to list its passed tests where that is safe. */
+        listPasses: Boolean = false,
+    ): Invocation {
+        val argv = if (listPasses) Regressions.listingPasses(command.argv) else command.argv
         val cwd = when (val path = command.cwd) {
             null -> root
             else -> if (namesWorkspaceRoot(path)) root else (WorkspacePath.of(root).resolve(path, Intent.Read) as? PathResolution.Resolved)?.real
@@ -417,11 +510,11 @@ public class Verify(
             return Invocation(Executed(command.argv, command.cwd, false, null, Outcome.NotRun, null, null, listOf(io.astrolabe.budget.NO_ACTIVE_TIME)), "not run — ${io.astrolabe.budget.NO_ACTIVE_TIME}")
         }
         val deadline = cut(timeoutSeconds, left)
-        val reports = JUnitReports.forCommand(cwd, command.argv, actionId)
+        val reports = JUnitReports.forCommand(cwd, argv, actionId)
         val proc = try {
             beforeDispatch()
             reports?.prepare(logsDir.resolve("reports-$actionId"))
-            runner.start(SpawnSpec(Command.Argv(command.argv), cwd, logPath(check.id, actionId), EnvPolicy(inheritedNames = envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")), deadline))
+            runner.start(SpawnSpec(Command.Argv(argv), cwd, logPath(check.id, actionId), EnvPolicy(inheritedNames = envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")), deadline))
         } catch (failure: IOException) {
             val reason = "cannot start ${command.argv.first()}: ${failure.message}"
             return Invocation(Executed(command.argv, command.cwd, false, null, Outcome.Unavailable, null, null, listOf(reason)), "unavailable — $reason")
@@ -431,31 +524,61 @@ public class Verify(
         val safeLog = redaction.applyLive(observed.output, ContentClass.ReusableEvidence, openAtEnd = false)
         val blob = blobs.put(safeLog.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
         val lost = observed.lost || observed.proc.status is ProcStatus.Lost
+        var reportFailure: String? = null
         val collected = try { reports?.collect().orEmpty() } catch (failure: IOException) {
-            return Invocation(Executed(command.argv, command.cwd, false, null, Outcome.Inconclusive, null, blob, listOf("report capture failed: ${failure.message}")), "report capture failed: ${failure.message}", lost = lost, mask = safeLog.mask)
+            reportFailure = "report capture failed: ${failure.message}"
+            emptyList()
         }
         val capture = RunCapture(
             reports = collected,
-            actionId = actionId, argv = command.argv, shell = false, cwd = command.cwd,
+            actionId = actionId, argv = argv, shell = false, cwd = command.cwd,
             executionRoot = runCatching { cwd.toRealPath() }.getOrDefault(cwd.toAbsolutePath()).toString(),
             exitCode = (observed.proc.status as? ProcStatus.Exited)?.exitCode, timedOut = observed.proc.status == ProcStatus.DeadlineExceeded,
             output = observed.output, captureComplete = !observed.lost && !observed.truncated && observed.proc.status !is ProcStatus.Lost, checkId = check.id, selector = check.selector.toString(),
         )
         val shaped = Shapers.shape(capture, budget)
-        return Invocation(executedOf(check, command, capture, shaped, lost, blob, safeLog.limitations), shaped.view, shaped, capture, lost, safeLog.mask)
+        if (reportFailure != null) {
+            // Every check keeps the receipt it always had (an inconclusive run, its view the failure); only the two regression
+            // checks get the process's outcome and the log's failures besides, as an incomplete record (P8.C.10).
+            val plain = Executed(command.argv, command.cwd, false, null, Outcome.Inconclusive, null, blob, listOf(reportFailure))
+            return Invocation(withRegressionEvidence(plain, check, command, capture, shaped, lost, blob, sharing), reportFailure, lost = lost, mask = safeLog.mask)
+        }
+        return Invocation(executedOf(check, command, capture, shaped, lost, blob, safeLog.limitations, sharing), shaped.view, shaped, capture, lost, safeLog.mask)
+    }
+
+    /**
+     * P8.C.10: [plain] — the receipt every check gets when its reports could not be collected — with, for each regression
+     * check among [sharing], its own outcome from the process and the failures its log shows, marked incomplete (never a pass).
+     */
+    private fun withRegressionEvidence(plain: Executed, check: Check, command: io.astrolabe.contract.Command, capture: RunCapture, shaped: Shaped, lost: Boolean, blob: Digest?, sharing: List<Check>): Executed {
+        val regressions = sharing.filter { it.id in Regressions.CHECKS }
+        if (regressions.isEmpty()) return plain
+        val evidence = executedOf(check, command, capture, shaped, lost, blob, emptyList(), regressions, incomplete = true)
+        return plain.copy(testsByCheck = evidence.testsByCheck, outcomeByCheck = regressions.associate { it.id to evidence.outcome })
     }
 
     /** The scheduler's record of a shaped invocation: the runner's outcome, or a host or user build or typecheck passing on its exit. */
-    private fun executedOf(check: Check, command: io.astrolabe.contract.Command, capture: RunCapture, shaped: Shaped, lost: Boolean, blob: Digest?, limits: List<String>): Executed {
-        val passes = !lost && passesOnExit(check, capture, shaped)
+    private fun executedOf(
+        check: Check, command: io.astrolabe.contract.Command, capture: RunCapture, shaped: Shaped, lost: Boolean, blob: Digest?, limits: List<String>,
+        sharing: List<Check> = listOf(check), incomplete: Boolean = false,
+    ): Executed {
+        val passes = !lost && !incomplete && passesOnExit(check, capture, shaped)
         val outcome = when {
             lost -> Outcome.UnknownOutcome
             capture.timedOut -> Outcome.Timeout
             passes -> Outcome.Passed
+            incomplete && shaped.status == Outcome.Passed -> Outcome.Inconclusive
             else -> shaped.status
         }
         val note = if (passes) listOf("declared ${check.evidence?.wire} evidence of a host or user command: exit ${capture.exitCode}, no test counts (plan §4.4, D-50 relaxed)") else emptyList()
-        return Executed(command.argv, command.cwd, false, capture.exitCode, outcome, shaped.counts, blob, shaped.limitations + limits + note)
+        // P8.C.10: each regression check the run realizes records its tests one by one (bounded), its identities bound to that
+        // check's id and the run's directory, compared by digest, shown redacted.
+        val complete = !lost && !incomplete && capture.captureComplete && !shaped.captureTruncated && !shaped.evidenceIncomplete
+        val byCheck = sharing.filter { it.id in Regressions.CHECKS }.associate { regression ->
+            regression.id to Regressions.outcomes(shaped.tests.map { it.copy(identity = it.identity.copy(check = regression.id)) },
+                { redaction.apply(it, ContentClass.ReusableEvidence).text }, complete, command.cwd)
+        }
+        return Executed(command.argv, command.cwd, false, capture.exitCode, outcome, shaped.counts, blob, shaped.limitations + limits + note, testsByCheck = byCheck)
     }
 
     /**
@@ -536,7 +659,7 @@ public class Verify(
         val command = checkNotNull(check.command) { "a recognised check declares a command" }
         var invocation: Invocation? = null
         val scheduled = scheduler.runInWorkspace(recognized, contract.version, inputs) { root ->
-            invoke(check, command, root, actionId, timeoutSeconds, budget).also { invocation = it }.executed
+            invoke(check, command, root, actionId, timeoutSeconds, budget, sharing = recognized).also { invocation = it }.executed
         }
         return RecognizedRun(scheduled.receipts, checkNotNull(invocation), scheduled.changed)
     }
@@ -571,9 +694,11 @@ public class Verify(
         )
         val shaped = Shapers.shape(bound, budget)
         val executed = if (collected == null) {
-            Executed(pinned.command.argv, pinned.command.cwd, false, null, Outcome.Inconclusive, null, blob, listOf("report capture failed"))
+            // As ever an inconclusive receipt; the regression checks also keep the process's outcome and the log's failures (P8.C.10).
+            withRegressionEvidence(Executed(pinned.command.argv, pinned.command.cwd, false, null, Outcome.Inconclusive, null, blob, listOf("report capture failed")),
+                pinned.check, pinned.command, bound, shaped, lost = false, blob, pinned.pin.checks)
         } else {
-            executedOf(pinned.check, pinned.command, bound, shaped, lost = false, blob, limits)
+            executedOf(pinned.check, pinned.command, bound, shaped, lost = false, blob, limits, pinned.pin.checks)
         }
         return SettledRun(scheduler.settle(pinned.pin, pinned.contractVersion, executed), shaped, bound)
     }
@@ -674,7 +799,16 @@ public class Verify(
 }
 
 /** What [Verify.runLayer] recorded: the receipts of the checks it ran, and what the layer could not test. */
-public data class LayerRun(val layer: Layer, val receipts: List<Receipt>, val notTested: List<String>)
+public data class LayerRun @JvmOverloads constructor(
+    val layer: Layer,
+    val receipts: List<Receipt>,
+    val notTested: List<String>,
+    /** What the model must hear of the stop's own actions (P8.C.12): background runs it cancelled; the cell pins them. */
+    val notes: List<String> = emptyList(),
+)
+
+/** P8.C.12: what settling a cell's background runs at its stop did — [settled] runs ended or cancelled, [live] still running, [notes] for the model. */
+internal class StopSettle(val settled: Int, val live: List<String>, val notes: List<String>)
 
 /** One invocation of a check's command: the scheduler's record, and what the caller shows of it. */
 internal class Invocation(

@@ -322,4 +322,22 @@ class AcceptanceDecisionTest {
             assertEquals("accepted", assertNotNull(run.finish).acceptance.single { it.id == "AC-2" }.status)
         }
     }
+
+    @Test
+    fun `a pending completion keeps the red receipts its Open items acknowledged, through the store to the commit (P8C10)`() {
+        Store.open(stateRoot, repo.git, clock).use { store ->
+            val acceptances = Acceptances(store, clock)
+            val stamp = io.astrolabe.id.CandidateId(io.astrolabe.id.Digest.ofUtf8("s"))
+            val record = PendingCompletion(
+                "pending-1", request.work, request.attempt, "I1", io.astrolabe.id.ContextId("cell-1"), 1, stamp, stamp, null, io.astrolabe.id.Digest.ofUtf8("env"), null, emptyList(),
+                listOf(io.astrolabe.verify.ObligationResult("AC-2", ObligationKind.Check, ResultStatus.Unverified, "AC-2: no verdict")), emptyList(), emptyList(),
+                StopCode.AcceptanceDecision, emptyList(), null, "decide-1", acknowledged = listOf("rcpt-9"),
+            )
+            acceptances.save(io.astrolabe.id.Identities(request.work, request.attempt, context = io.astrolabe.id.ContextId("cell-1")), record)
+            val stored = assertNotNull(acceptances.open(request.work, request.attempt))
+            assertEquals(listOf("rcpt-9"), stored.acknowledged)
+            // The decider's accept re-resolves the stored results: the acknowledgment reaches the commit, and the increment's evidence.
+            assertEquals(listOf("rcpt-9"), stored.resolve(null).acknowledged)
+        }
+    }
 }

@@ -67,8 +67,16 @@ public data class IncrementEvidence(
     val provenance: List<io.astrolabe.verify.ItemProvenance> = emptyList(),
     /** Plan steps the agent left unticked on a proven acceptance (D-368); the finish receipt lists them (D-372). */
     val leftOpen: List<String> = emptyList(),
+    /** P8.C.10: red receipts of a harness regression check the acceptance acknowledged with an `Open` item; later resolutions honour them. */
+    val acknowledged: List<String> = emptyList(),
 ) {
     init { require(contractVersion >= 1) }
+
+    /** The constructor before [acknowledged] (P8.C.10). Kept for Java callers. */
+    public constructor(
+        workId: WorkId, attemptId: AttemptId, contractVersion: Int, stamp: CandidateId, contextId: ContextId, definition: Digest, evidenceRefs: List<String>,
+        provenance: List<io.astrolabe.verify.ItemProvenance>, leftOpen: List<String>,
+    ) : this(workId, attemptId, contractVersion, stamp, contextId, definition, evidenceRefs, provenance, leftOpen, emptyList())
 }
 
 public enum class GraphIssueCode {

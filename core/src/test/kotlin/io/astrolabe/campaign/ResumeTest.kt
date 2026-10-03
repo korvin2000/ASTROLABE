@@ -122,6 +122,8 @@ class ResumeTest {
                 val note = pinnedResume(adapter)
                 assertTrue("ended failed" in note && "handles handle-1" in note && "KNOWN: seeds only" in note, note)
                 assertEquals(1L, c.store.db.query("SELECT count(*) AS n FROM handles") { it.long("n") }.single(), "the handle was polled, never relaunched")
+                // P8.C.12: still running at the stop, it was settled (a short grace, then a cancel) before the stop's verification.
+                assertTrue(c.store.db.query("SELECT status FROM handles") { it.string("status") }.single() != "running", "the stop never certifies a tree a live background run may change")
             }
         }
     }

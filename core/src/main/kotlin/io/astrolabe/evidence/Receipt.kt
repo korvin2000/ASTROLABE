@@ -77,6 +77,28 @@ public data class TestedInputs(
     val eligible: Boolean get() = stability != InputStability.Unknown && mutatedDuringCheck.isEmpty()
 }
 
+/**
+ * One failing test a run reported (§8.5, P8.C.10): [key], an opaque digest of its namespaced identity, is what decisions
+ * compare; [name] and [signature] (the first failure line) are redacted and only shown — no failure text is ever compared.
+ */
+@Serializable
+public data class FailedTest(val key: String, val name: String, val signature: String)
+
+/**
+ * The per-test outcomes a run of a harness regression check reported (P8.C.10): its failing tests, the keys of the tests
+ * that executed and passed, and the keys reported more than once whatever their outcome (ambiguous, D-27). [truncated]
+ * when a bound cut a list, [incomplete] when the capture or the structured report could not be read whole: either way
+ * the record shows nothing fixed and nothing new.
+ */
+@Serializable
+public data class TestOutcomes(
+    val failed: List<FailedTest> = emptyList(),
+    val passed: List<String> = emptyList(),
+    val ambiguous: List<String> = emptyList(),
+    val truncated: Boolean = false,
+    val incomplete: Boolean = false,
+)
+
 /** Where evidence about a receipt was truncated or could not be captured (§8.4 limitations). */
 @Serializable
 public data class Limit(val kind: String, val detail: String)
@@ -137,7 +159,44 @@ public data class Receipt(
     val checkOrigin: Origin? = null,
     /** True when the host or the user declared [evidenceKind]; a recognised kind is a label and never decides a pass. */
     val evidenceDeclared: Boolean = false,
+    /** What a run of a harness regression check reported test by test (P8.C.10); `null` for any other check or an older receipt. */
+    val tests: TestOutcomes? = null,
 ) {
+    /** The constructor before [tests] (P8.C.10). Kept for Java callers. */
+    public constructor(
+        receiptId: String,
+        ids: Identities,
+        checkId: String,
+        acceptanceIds: List<String>,
+        command: List<String>,
+        cwd: String?,
+        shell: Boolean,
+        stampBefore: CandidateId,
+        stampAfter: CandidateId,
+        envId: Digest,
+        verifierVersion: String,
+        checkDefinitionVersion: Digest,
+        contractVersion: Int,
+        outcome: Outcome,
+        parsed: Counts?,
+        inputClosure: Closure,
+        testedInputs: TestedInputs,
+        raw: Digest?,
+        limits: List<Limit>,
+        reuseOf: String?,
+        exitCode: Int?,
+        at: Instant,
+        closureManifest: ClosureManifest?,
+        expectedExitCode: Int?,
+        evidenceKind: EvidenceKind?,
+        checkOrigin: Origin?,
+        evidenceDeclared: Boolean,
+    ) : this(
+        receiptId, ids, checkId, acceptanceIds, command, cwd, shell, stampBefore, stampAfter, envId, verifierVersion, checkDefinitionVersion,
+        contractVersion, outcome, parsed, inputClosure, testedInputs, raw, limits, reuseOf, exitCode, at, closureManifest, expectedExitCode,
+        evidenceKind, checkOrigin, evidenceDeclared, null,
+    )
+
     /** The v1.0 full constructor: the evidence kind, the check's origin and the declaration take their defaults. Kept for Java callers. */
     public constructor(
         receiptId: String,
@@ -167,7 +226,7 @@ public data class Receipt(
     ) : this(
         receiptId, ids, checkId, acceptanceIds, command, cwd, shell, stampBefore, stampAfter, envId, verifierVersion, checkDefinitionVersion,
         contractVersion, outcome, parsed, inputClosure, testedInputs, raw, limits, reuseOf, exitCode, at, closureManifest, expectedExitCode,
-        null, null, false,
+        null, null, false, null,
     )
 
     init {
