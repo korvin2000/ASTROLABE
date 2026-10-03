@@ -264,9 +264,11 @@ class TaskLimitsTest {
         controller().open(repo.root, request, CampaignPolicy(Tokens(400_000))).use { c ->
             assertEquals(CampaignOutcome.BudgetExhausted, c.state!!.outcome, "the host changed no limit: the reserve stays latched")
             assertTrue(c.journal.events(JournalScope(request.work, kinds = setOf(JournalKind.Reconcile))).any { it.text.startsWith("limits: still reached (minutes)") })
+            assertEquals(BudgetStop.TaskLimitMinutes, c.limitHold?.stop, "the latch holds it, typed")
         }
         controller().open(repo.root, request, policy(TaskLimits(maxMinutes = 10))).use { c ->
             assertEquals(CampaignPhase.Running, c.state!!.phase, "a changed limit releases the latch")
+            assertNull(c.limitHold, "nothing holds a campaign that continues")
         }
     }
 
@@ -276,12 +278,22 @@ class TaskLimitsTest {
         Events(clock).use { events ->
             events.subscribe(recorder)
             controller(events).open(repo.root, request, policy(TaskLimits(maxMinutes = 7, maxRequests = 8))).use { c ->
+                assertNull(c.limitHold, "a first open holds nothing")
                 val run = controller(events).run(c, CellModel(minuteAdapter(planning() + implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"")), FakeProfiles.main, HeuristicEstimator()))
                 assertEquals(BudgetStop.TaskLimitRequests, run.budgetStop, run.state?.reason)
             }
             controller(events).open(repo.root, request, policy(TaskLimits(maxMinutes = 7, maxRequests = 20))).use { c ->
                 assertEquals(CampaignOutcome.BudgetExhausted, c.state!!.outcome, "the minutes are still in the reserve")
                 assertTrue(c.journal.events(JournalScope(request.work, kinds = setOf(JournalKind.Reconcile))).any { it.text.startsWith("limits: still reached (minutes)") })
+                // C14: the host reads the holding limit from the open itself, not from the event log.
+                val hold = assertNotNull(c.limitHold)
+                assertEquals(BudgetStop.TaskLimitMinutes, hold.stop)
+                assertEquals(LimitKind.Minutes, hold.limit)
+                assertEquals(BudgetStop.TaskLimitRequests, c.state!!.budgetStop, "the state keeps the stop it ended on")
+                assertEquals(20, hold.status.maxRequests)
+                assertEquals(7 * 60_000L, hold.status.maxMillis)
+                assertEquals(c.state!!.budgetStop!!.limit, LimitKind.Requests)
+                assertTrue(hold.reason.startsWith("task limit:"), hold.reason)
             }
         }
         awaitEvents(recorder) { recorder.ofType<AgentEvent.Budget.LimitReached>().any { it.limit == "minutes" } }
@@ -304,6 +316,10 @@ class TaskLimitsTest {
             assertEquals(4_000L, c.contract.budget.tokens.value)
             assertTrue(set(c).isEmpty())
             assertTrue(c.journal.events(JournalScope(small.work, kinds = setOf(JournalKind.Reconcile))).any { it.text.startsWith(ContractTokens.STILL) })
+            val hold = assertNotNull(c.limitHold)
+            assertEquals(BudgetStop.ContractBudget, hold.stop)
+            assertNull(hold.limit, "the contract budget is no task limit")
+            assertTrue(hold.reason.endsWith(ContractTokens.RAISE_TO_CONTINUE), hold.reason)
         }
         controller().open(repo.root, small, CampaignPolicy(Tokens(400_000))).use { c ->
             assertEquals(calls, Accounting(c.store, clock).calls(small.work).size, "reopens charge nothing (D-392)")
@@ -311,6 +327,7 @@ class TaskLimitsTest {
             assertEquals(1, c.contract.version, "a budget is not an amendment: the contract keeps its version")
             assertEquals(1, set(c).size)
             assertEquals(CampaignPhase.Running, c.state!!.phase, "the raise continues the contract budget stop, the same attempt")
+            assertNull(c.limitHold)
             // 4 000 tokens stopped the plan cell; the raised budget plans and implements both increments.
             val replies = planning() + implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"") + implement(c, "src/b.py", "    return 2", "    return 20", "\"AC-1\",\"AC-2\"")
             val run = controller().run(c, CellModel(FakeAdapter(ScriptedModel.of(*replies.toTypedArray())), FakeProfiles.main, HeuristicEstimator()))
@@ -348,6 +365,7 @@ class TaskLimitsTest {
             assertEquals(LimitKind.Requests, TaskLimitControl.latched(c.journal, request.work)?.kind, "the old latch reads back")
             assertEquals(LimitKind.Requests, TaskLimitControl.recorded(c.journal, request.work)?.limit, "the old stop reads back")
             assertEquals(CampaignOutcome.BudgetExhausted, c.state!!.outcome, "nothing raised, nothing continues")
+            assertEquals(BudgetStop.TaskLimitRequests, c.limitHold?.stop)
         }
         controller().open(repo.root, request, policy(TaskLimits(maxRequests = 30))).use { c ->
             assertEquals(CampaignPhase.Running, c.state!!.phase, "the host's raise continues the old stop")
@@ -515,6 +533,7 @@ class TaskLimitsTest {
             controller(events).open(repo.root, request, CampaignPolicy(Tokens(400_000), balance = BalanceProfile.Thorough)).use { c ->
                 assertEquals(BalanceProfile.Economy, c.attempt.config.balance, "invariant 12: the attempt keeps its profile")
                 assertEquals(CampaignPhase.Running, c.state!!.phase, "the cell cap counts per run: a reopen continues")
+                assertNull(c.limitHold)
             }
             controller(events).open(repo.root, request, CampaignPolicy(Tokens(400_000))).use { c ->
                 assertEquals(BalanceProfile.Economy, c.attempt.config.balance, "a reopen naming none asks for the frozen one")

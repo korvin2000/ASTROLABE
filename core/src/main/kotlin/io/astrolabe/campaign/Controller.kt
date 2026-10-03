@@ -363,6 +363,11 @@ public class OpenedCampaign internal constructor(
     public val hostNotes: List<String> = emptyList(),
     /** The user's limits on this task in force at this open: the host's, or the ones kept with the campaign (C3). */
     public val limits: TaskLimits = TaskLimits.NONE,
+    /**
+     * What still holds a `budget_exhausted` campaign this open could not continue (C14): the task limit or the contract
+     * budget to raise next; `null` when the campaign was not stopped on a budget or this open continued it.
+     */
+    public val limitHold: LimitHold? = null,
 ) : AutoCloseable {
     /** Cancels this campaign: no further dispatch, no publication; effects already made are archived (D-26). */
     public val cancellation: Cancellation = Cancellation()
@@ -583,6 +588,8 @@ public class Controller @JvmOverloads public constructor(
         // C3r: a reserve latched under these limits holds until the host changes them.
         val latched = TaskLimitControl.latched(journal, request.work)
         val budgetStop = state?.takeIf { it.phase == CampaignPhase.Ended && it.outcome == CampaignOutcome.BudgetExhausted }?.budgetStop
+        // C14: what still holds a budget stop this open cannot continue, typed for the host.
+        var limitHold: LimitHold? = null
         if (budgetStop == BudgetStop.CellCap) {
             state = Lifecycle.apply(checkNotNull(state), contract, Transition.LimitRaised("reopened after the run's cell cap: the cap counts per run")).also(campaigns::save)
         }
@@ -595,6 +602,7 @@ public class Controller @JvmOverloads public constructor(
             } else {
                 val why = "contract budget: ${budget - left} of $budget tokens spent; ${ContractTokens.RAISE_TO_CONTINUE}"
                 journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Reconcile, text = "${ContractTokens.STILL}: $why", at = clock.instant()))
+                limitHold = LimitHold(BudgetStop.ContractBudget, LimitRule.status(limits, limitControl.spend(store, journal, request.work, limits)), why)
             }
         }
         // C3: a task limit's stop continues the same attempt only once the host's limits leave room again — priced at the
@@ -616,6 +624,7 @@ public class Controller @JvmOverloads public constructor(
                 }
                 journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Reconcile, text = "${LimitSessions.STILL} (${kind.wire}) at $limits: $why", at = clock.instant()))
                 events?.emit(AgentEvent.Budget.LimitReached(ids, kind.wire, TaskLimitControl.STOPPED_STAGE, why, LimitRule.status(limits, spend)))
+                limitHold = LimitHold(BudgetStop.of(kind), LimitRule.status(limits, spend), why)
             }
         }
 
@@ -712,7 +721,7 @@ public class Controller @JvmOverloads public constructor(
         return OpenedCampaign(
             request, ids, store, os, workspace, registry, stamper, dirty, shadow, s0, atlas, derived.sniffed, commands,
             contracts, checks, rules, prime, kb, journal, intents, campaigns, reconciliation, prescan, impactPrescan, shape, state, refusal, owned,
-            frozen, lease, leases, frozenNotes = Notes(store).all(), hostNotes = policy.hostNotes.filter { it.isNotBlank() }, limits = limits,
+            frozen, lease, leases, frozenNotes = Notes(store).all(), hostNotes = policy.hostNotes.filter { it.isNotBlank() }, limits = limits, limitHold = limitHold,
         ).also {
             plugged[it] = layered
             it.limitState.reserve = latched

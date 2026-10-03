@@ -70,6 +70,15 @@ public enum class BudgetStop(public val wire: String) {
     /** A task limit stop: a reopen continues it once the host's limits leave room. */
     public val taskLimit: Boolean get() = this == TaskLimitMoney || this == TaskLimitMinutes || this == TaskLimitRequests
 
+    /** The task limit this stop names (the inverse of [of]); `null` for the cell cap and the contract budget (C14). */
+    public val limit: io.astrolabe.budget.LimitKind?
+        get() = when (this) {
+            TaskLimitMoney -> io.astrolabe.budget.LimitKind.Cost
+            TaskLimitMinutes -> io.astrolabe.budget.LimitKind.Minutes
+            TaskLimitRequests -> io.astrolabe.budget.LimitKind.Requests
+            CellCap, ContractBudget -> null
+        }
+
     /**
      * A reopen may continue the attempt: a raised task limit, a fresh per-run cell cap, or contract tokens the host raised
      * (C14) — every budget stop, so none is a dead end; only the host's raise lifts a task limit or the contract budget.

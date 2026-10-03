@@ -79,6 +79,24 @@ public data class LimitStop(
     }
 }
 
+/**
+ * What still holds a `budget_exhausted` campaign after an open that could not continue it (C14): the ceiling — a task
+ * limit, possibly another than the one it stopped on, or the contract budget — the task limits beside their spend at that
+ * open, and why. A host reads it from [OpenedCampaign.limitHold] after a reopen with raised limits to say what to raise
+ * next; the open also journals it (`limits: still reached`, `budget: contract budget still reached`).
+ */
+@Serializable
+public data class LimitHold(
+    /** `task_limit_money` · `task_limit_minutes` · `task_limit_requests` · `contract_budget`. */
+    val stop: BudgetStop,
+    /** The task limits beside their spend at this open, as `budget.spent` reports them. */
+    val status: LimitStatus,
+    val reason: String,
+) {
+    /** The task limit that holds; `null` when the contract budget does. */
+    val limit: LimitKind? get() = stop.limit
+}
+
 /** A refusal that ended a cell on a task limit: the stop the next boundary takes, with the price it was refused at. */
 internal class LimitBlock(val decision: LimitDecision, val price: Money?)
 
