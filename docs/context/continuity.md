@@ -16,7 +16,7 @@
 | Carried | How | Not carried |
 |---|---|---|
 | Register | validated; `v` facts re-checked against the store and file versions (stale ones tagged) | transcript |
-| Workset seeds | entries referenced by the next step's plan text, `Focus` or `Next`; re-served at *current* versions with hashes; ≤4K tokens | entries for files that changed (announced as NOT SEEN) |
+| Workset seeds | entries chosen by the seed selector (below): the same rule at a cell boundary and at a pressure rebuild; re-served at *current* versions with hashes; one budget of ≤4K tokens | entries for files that changed and entries over the budget (announced as NOT SEEN) |
 | Dead ends, open items, decisions | verbatim into `[K]` | model prose |
 | Verification status | last receipt per check with validity (closure-based) | raw logs (recallable by id) |
 | Touched ledger | compressed: paths + versions | diffs (in store) |
@@ -24,6 +24,26 @@
 | Probe findings used | pointers `(path:range@hash | #id)`; the next cell must `look` to make them KNOWN | the probe's transcript |
 
 The store is campaign-scoped, so `recall #17` works across cells; a stub index of ids referenced by facts is rendered on request, not by default.
+
+**Seed selector** `[ASTROLABE 2.0 plan §4.3, §1 row 18]`
+
+> **Status.** The v1 rule and the budget are the code at `main` `6daabfc` (`K = core/src/main/kotlin/io/astrolabe`). The selector seam and v2 are **SPEC — implemented in P8.C.6** (line `v2/Dp1`, commit `47e546f`, not merged when this was written; its [report](../../../plan2/reports/WP-Dp1.md) governs the names below). The binding of v2 to the direct protocol is **SPEC — implemented in P8.D.1**.
+
+One implementation serves both consumers: the cell boundary (`Controller.carryFrom` → `CarryForward.carry`, *code:* `K/campaign/Controller.kt:1251-1263`) and the pressure rebuild inside a cell (*code:* `K/cell/Cell.kt:1098-1101` calls the same function with the live register and Workset export). A selector is a pure function of records and only **orders** candidates; one shared cut decides what becomes KNOWN.
+
+| Part | Rule |
+|---|---|
+| Candidates | The entries of the previous cell's Workset export — what was displayed, at which version, in which turn (*code:* `K/context/Seeds.kt:27-31`). Nothing outside it can be a seed. |
+| Cut (both rules) | Walk the ordered candidates with a remainder of 4 000 tokens (`CarryForward.SEED_CAP_TOKENS`; *code:* `K/context/CarryForward.kt:88, 115-128`). The file moved since it was displayed → not a seed, NOT SEEN `changed`. The entry is larger than the remainder → not a seed, NOT SEEN `over the 4000-token seed budget`, and the walk continues: a later, smaller entry may still fit (first fit). Otherwise it is a seed and the remainder shrinks. The sum never exceeds the cap. P8.C.6 moves this loop to `Seeds.fit`, unchanged. |
+| Render | `Seeds.render` shows each seed at its recorded hash; bytes that moved between selection and render are announced NOT SEEN, never shown as KNOWN (*code:* `K/context/Seeds.kt:33-57`). |
+| **v1** — `SeedRule.V1`, the default | Entries whose path is mentioned by the text or `accept:` of the `[>]` step (else the first `[ ]` step) or by `Next`, or lies under `Focus`; ordered by path and first line (*code:* `K/context/CarryForward.kt:111-114, 139-147`). The bytes of the result are those before P8.C.6. |
+| **v2** — `SeedRule.V2` | Every export entry, once, in this priority by its path: **touched** in the cell (the packet's `changes`, or the cell's own changes at a pressure rebuild) → **red** (an input of a check whose last receipt failed) → **noted** (named in the text or `needs` of an open item that is not closed) → **recent** (everything else). Inside one priority: an entry displayed in this cell before a carried seed, a later turn first, then path, first line and the remaining fields, so the order never depends on the export's order (`SEED_V2_ORDER`). |
+| Red, precisely | A failed outcome only — a timeout or an unavailable runner is missing evidence, not red. The last receipt of **each** check is taken, without choosing "the latest" by time (I-05). Its files are the paths of a known closure, the files under a package closure, and the paths the command names; an unknown closure contributes only the paths the command names. |
+| NOT SEEN in v2 | Announced for touched, red and noted entries that did not become seeds. A recent entry that did not fit is silent: "NOT SEEN: everything else" already covers it. |
+| Choice | `Defaults.seedRule: SeedRule = SeedRule.V1`, frozen with the attempt. A direct cell always uses `V2`, whatever the default says: a direct register has no plan, `Next` or `Focus`, so v1 would select nothing. A structured cell uses `Defaults.seedRule`; moving it to `V2` is decided by the benchmark (D5). |
+| Open wiring | At `v2/Dp1` the pressure rebuild reads the rule; the cell boundary (`Controller.carryFrom`) still passes the default. D1 passes the cell's rule, the packet's changes and the last receipt of each check there. |
+
+A `v` fact whose anchor names no version shown in the cell is kept as `h` (P8.C.6): its staleness could not be tracked ([§6.4](#sec-6-4)).
 <!-- end-source-section: 6.2 -->
 
 <!-- source-section: 6.3 -->

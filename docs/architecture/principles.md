@@ -65,7 +65,32 @@ Medium and large repositories (10⁴–10⁶ LOC, monorepos included), several l
 9. Context reduction never removes the only recoverable copy of required state or evidence without recording the loss.
 10. Every child, retry, rebuild, review, verification and pre-compilation consumes the originating work's budget.
 11. `completed` is a supported state; `waiting`, `blocked`, `budget_exhausted` and `cancelled` are distinct outcomes, never disguised as completion.
-12. Harness changes are versioned and take effect only at attempt boundaries; a candidate harness never edits the evaluator, the acceptance, the accounting or its own promotion verdict.
+12. Harness changes are versioned and take effect only at the boundary their tier names — the attempt, the cell or the turn (three tiers, below); a candidate harness never edits the evaluator, the acceptance, the accounting or its own promotion verdict.
+
+**Invariant 12 in three tiers** `[ASTROLABE 2.0 plan §4.6; owner decision №6]`
+
+Until 2.0 the invariant read "only at attempt boundaries". It now names three boundaries. A value never changes inside its unit: a tier-1 value is the same for every cell of an attempt, a tier-2 value for every turn of a cell, a tier-3 value for the whole of a turn. *code:* is the code at `main` `6daabfc`, `K = core/src/main/kotlin/io/astrolabe`; **SPEC** names the task that implements the rest.
+
+| Tier | Takes effect at | What it holds | Status |
+|---|---|---|---|
+| 1 | the attempt boundary | the harness version; kernel and role texts; tool schema sets; role masks; controls; the profile table; the acceptance rule and the evaluator | *code:* `AttemptConfig` freezes the configuration, the role-text versions and the controls and fingerprints them (`K/AttemptConfig.kt:42-58`); the controller reads the frozen copy, never the live one (`K/campaign/Controller.kt:1331`) |
+| 2 | the cell boundary | role and protocol; profile; effort; context limit | *code:* the router binds profile and effort for each cell (`K/campaign/Controller.kt:836-841`, `K/cell/CellContext.kt:67-71`); a role changes through `RebuildReason.RoleSwitch` (`K/context/Rebuild.kt:34-37`). **SPEC:** the protocol is chosen per attempt in P8.D.1 and may change at a cell boundary from P8.E.2; static profiles are P8.C.4 |
+| 3 | the turn boundary | the dials — `k`, `R_max`, the immediate-stub threshold, the stall threshold, the `look`, `run` and result budgets, the stop-loss threshold — and the user's hard limits | **SPEC — P8.E.2** (the `Dials` record). The user's limits are read at start and at resume in P8.C.4 and at a turn boundary from P8.E.2. Today every dial is a tier-1 value (`K/Defaults.kt:27-36, 71`) |
+
+Rules of tier 3:
+
+- The dials are a numbered journal record `Dials`. A turn reads `dials@seq` when it starts and journals that `seq`; every policy stays a pure function of (records, dials); a replay is the journal.
+- A dial never raises a limit, never switches off a mandatory check and never changes a byte of the cached prefix.
+- Only the user, through the host, raises a hard limit; the regulator and the model never do.
+- 2.0 implements the minimum: the user's limits from the turn boundary; profile, effort and protocol from the cell boundary; the other dials are recorded, and only shadow rules — which do not execute — change them. At most one change of a hot parameter per four model requests.
+
+**Two older rules under the two protocols** `[ASTROLABE 2.0 plan §4.3; owner decisions №2, №7]`
+
+- **D-20, "masked, never removed"**, now reads: *the schema set is fixed for a cell line and chosen by the role*. *code* (D-379): the set is chosen once per cell from the role's mask, families the role cannot use are dropped, and a turn's narrower mask is named in `[A]` and enforced by the executor (`K/tool/ToolSchemas.kt:39-60`, `K/cell/Cell.kt:180-181`, `K/cell/Layout.kt:154-159`). **SPEC — P8.D.1:** the direct role's set also narrows the operations inside a family ([Appendix A-D.3](../reference/kernel-contract.md#sec-appendix-a-direct-3)). What remains of the old wording holds inside a line: a turn's mask never removes or rewrites a schema. Read "masked, never removed" in [§5.1](../runtime/context-layout.md#sec-5-1) and [§5.4](../runtime/tools.md#sec-5-4) this way.
+- **The register invariants of [§5.2](../runtime/register-workset.md#sec-5-2)** — one `[>]`, exactly one `Next`, a red line recorded before `[>]` advances, the stale fact under `Next` — bind the structured protocol only. **SPEC — P8.D.1:** in the direct protocol the register holds notes, and the rules that remain are the caps and the per-note rules ([Appendix A-D.4](../reference/kernel-contract.md#sec-appendix-a-direct-4)).
+- **Seeds "by `Next` and `Focus`"** ([§6.2](../context/continuity.md#sec-6-2)) are one of two rules behind a selector; the direct protocol uses the other.
+
+Invariants 1–11 and laws L1–L11 are unchanged and hold for both protocols.
 <!-- end-source-section: 1.3 -->
 
 <!-- source-section: 1.4 -->
