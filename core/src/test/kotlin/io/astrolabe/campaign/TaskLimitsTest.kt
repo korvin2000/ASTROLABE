@@ -289,6 +289,34 @@ class TaskLimitsTest {
     }
 
     @Test
+    fun `a store written before the wire words still reopens, keeps its latch and continues once raised`() = runBlocking<Unit> {
+        controller().open(repo.root, request, policy(TaskLimits(maxRequests = 8))).use { c ->
+            val adapter = FakeAdapter(ScriptedModel.of(*(planning() + implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"")).toTypedArray()))
+            val run = controller().run(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator()))
+            assertEquals(BudgetStop.TaskLimitRequests, run.budgetStop, run.state?.reason)
+            val body = c.store.db.query("SELECT body FROM campaigns WHERE work_id = ?", request.work) { it.string("body") }.single()
+            assertTrue("\"budgetStop\":\"task_limit_requests\"" in body, "the state carries the wire word")
+            val journal = c.store.db.query("SELECT body FROM journal WHERE work_id = ?", request.work) { it.string("body") }.joinToString("\n")
+            assertTrue("\"limit\":\"requests\"" in journal && "\"costBasis\":\"estimated\"" in journal, "the latch and the stop carry wire words")
+            // A store from before C14 holds the constants' names in the state, the latch and the stop.
+            c.store.db.tx { tx ->
+                tx.execute("UPDATE campaigns SET body = replace(body, ?, ?) WHERE work_id = ?", "\"task_limit_requests\"", "\"TaskLimitRequests\"", request.work)
+                tx.execute("UPDATE journal SET body = replace(replace(body, ?, ?), ?, ?) WHERE work_id = ?",
+                    "\"limit\":\"requests\"", "\"limit\":\"Requests\"", "\"costBasis\":\"estimated\"", "\"costBasis\":\"Estimated\"", request.work)
+            }
+        }
+        controller().open(repo.root, request, policy(TaskLimits(maxRequests = 8))).use { c ->
+            assertEquals(BudgetStop.TaskLimitRequests, c.state!!.budgetStop, "the old state reads back")
+            assertEquals(LimitKind.Requests, TaskLimitControl.latched(c.journal, request.work)?.kind, "the old latch reads back")
+            assertEquals(LimitKind.Requests, TaskLimitControl.recorded(c.journal, request.work)?.limit, "the old stop reads back")
+            assertEquals(CampaignOutcome.BudgetExhausted, c.state!!.outcome, "nothing raised, nothing continues")
+        }
+        controller().open(repo.root, request, policy(TaskLimits(maxRequests = 30))).use { c ->
+            assertEquals(CampaignPhase.Running, c.state!!.phase, "the host's raise continues the old stop")
+        }
+    }
+
+    @Test
     fun `the candidate is the last accepted stamp, not the edited tree, and a raised limit continues the partial cell`() = runBlocking<Unit> {
         controller().open(repo.root, request, policy(TaskLimits(maxRequests = 11))).use { c ->
             val vb = c.registry.version("src/b.py")!!

@@ -14,7 +14,10 @@ import io.astrolabe.id.ContextId
 import io.astrolabe.id.WorkId
 import io.astrolabe.verify.CompletionResult
 import io.astrolabe.verify.StopCode
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonNames
 
 /** Campaign-level outcomes (§5.9, invariant 11): distinct from each other, and only [Completed] is a supported state. */
 @Serializable
@@ -38,18 +41,26 @@ public enum class CampaignOutcome(public val wire: String) {
 /**
  * Why a campaign ended `budget_exhausted`, machine-readable (C3): which ceiling stopped it and whether a reopen may
  * continue the same attempt — a task limit the host raises, or the per-run cell cap; a hidden technical ceiling is never a
- * dead end without saying so.
+ * dead end without saying so. JSON carries [wire] (C14); a state written before reads back by the constant's name.
  */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 public enum class BudgetStop(public val wire: String) {
+    @SerialName("task_limit_money") @JsonNames("TaskLimitMoney")
     TaskLimitMoney("task_limit_money"),
+
+    @SerialName("task_limit_minutes") @JsonNames("TaskLimitMinutes")
     TaskLimitMinutes("task_limit_minutes"),
+
+    @SerialName("task_limit_requests") @JsonNames("TaskLimitRequests")
     TaskLimitRequests("task_limit_requests"),
 
     /** `Controller.run(maxCells)`: counted per run, so a reopen runs with a fresh cap. */
+    @SerialName("cell_cap") @JsonNames("CellCap")
     CellCap("cell_cap"),
 
     /** The contract's own budget — tokens, turns per cell, its money — frozen with the contract (§4.1). */
+    @SerialName("contract_budget") @JsonNames("ContractBudget")
     ContractBudget("contract_budget"),
     ;
 
