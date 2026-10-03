@@ -205,8 +205,16 @@ public class CellBudget @JvmOverloads constructor(
 
     public data class Snapshot(val spentTokens: Tokens, val percentUsed: Int, val reserveOk: Boolean, val turnsTaken: Int)
 
+    /** The task limits' answer to this budget's last turn or admission (C3r); `null` without limits. */
+    @Volatile
+    internal var limitDecision: LimitDecision? = null
+        private set
+
+    /** True once the task limits hold this cell to verification and the report: their reserve or a spent limit (C3r). */
+    internal val limitReserve: Boolean get() = limitDecision.let { it != null && it !is LimitDecision.Within }
+
     /** C3: a spent limit refuses every spend; a spent working part refuses all but verify-and-report spends. */
-    private fun limitRefusal(spend: Spend, estimate: Tokens): Admission.Refused? = when (val decision = limits?.check(spend, estimate)) {
+    private fun limitRefusal(spend: Spend, estimate: Tokens): Admission.Refused? = when (val decision = limits?.check(spend, estimate).also { limitDecision = it }) {
         null, LimitDecision.Within -> null
         is LimitDecision.Reserve -> if (spend.reportOrVerify) null else Admission.Refused(spend, estimate, "reserve reached: ${decision.reason}")
         is LimitDecision.Exhausted -> {

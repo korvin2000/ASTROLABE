@@ -574,6 +574,8 @@ public class Controller @JvmOverloads public constructor(
         }
         // C3 (K): the limits in force — the host's when it names them, else the ones kept with the campaign.
         val limits = TaskLimitControl.atOpen(journal, ids, idGen, clock, policy.limits)
+        // C3r: a reserve latched under these limits holds until the host changes them.
+        val latched = TaskLimitControl.latched(journal, request.work)
         val budgetStop = state?.takeIf { it.phase == CampaignPhase.Ended && it.outcome == CampaignOutcome.BudgetExhausted }?.budgetStop
         if (budgetStop == BudgetStop.CellCap) {
             state = Lifecycle.apply(checkNotNull(state), contract, Transition.LimitRaised("reopened after the run's cell cap: the cap counts per run")).also(campaigns::save)
@@ -583,6 +585,7 @@ public class Controller @JvmOverloads public constructor(
         if (budgetStop?.taskLimit == true) {
             val spend = limitControl.spend(store, journal, request.work, limits)
             val decision = LimitRule.decide(limits, spend, LimitRule.nextCost(spend, TaskLimitControl.recorded(journal, request.work)?.status?.nextCallCost))
+                .let { if (it == LimitDecision.Within) latched ?: it else it }
             if (decision == LimitDecision.Within) {
                 val raised = "${LimitSessions.RAISED}: $limits; spent ${spend.requests} requests, ${spend.elapsedMillis} ms active" +
                     (spend.cost?.let { ", ${it.amount.toPlainString()} ${it.currency} (${spend.costBasis.wire})" } ?: "")
@@ -693,7 +696,11 @@ public class Controller @JvmOverloads public constructor(
             request, ids, store, os, workspace, registry, stamper, dirty, shadow, s0, atlas, derived.sniffed, commands,
             contracts, checks, rules, prime, kb, journal, intents, campaigns, reconciliation, prescan, impactPrescan, shape, state, refusal, owned,
             frozen, lease, leases, frozenNotes = Notes(store).all(), hostNotes = policy.hostNotes.filter { it.isNotBlank() }, limits = limits,
-        ).also { plugged[it] = layered }
+        ).also {
+            plugged[it] = layered
+            it.limitState.reserve = latched
+            it.limitState.reserveAnnounced = latched != null
+        }
     }
 
     /**
@@ -1930,6 +1937,12 @@ public class Controller @JvmOverloads public constructor(
     private fun scheduler(c: OpenedCampaign): Scheduler =
         Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = candidates(c), retryCandidates = c.store.layout.candidates)
 
+    /**
+     * The model the host supplied behind each model [route] bound (C3r), by identity and held weakly: a child is routed
+     * from its parent's routed model, and the balance profile must apply to the supplied one once, never again.
+     */
+    private val boundFrom: MutableMap<CellModel, CellModel> = java.util.Collections.synchronizedMap(java.util.WeakHashMap())
+
     /** One cell's routing: the model to run it with, the selection to record, or the refusal that stops the campaign. */
     private class Routing(val model: CellModel, val compiled: Compiled, val selected: Routed.Selected?, val refused: Routed.Refused?)
 
@@ -1950,11 +1963,14 @@ public class Controller @JvmOverloads public constructor(
         val config = c.attempt.config
         val contract = c.contract
         // C3: the attempt's balance profile bounds every candidate's window and steps the configured effort; Balanced changes neither.
+        // C3r: it applies once, to the model the host supplied — a child routed from its parent's routed model starts from that one.
         val vector = BalanceProfiles.vector(config.balance)
-        val model = supplied.let { m ->
+        val base = boundFrom[supplied] ?: supplied
+        val model = base.let { m ->
             val profile = BalanceProfiles.bounded(m.profile, vector)
             val effort = BalanceProfiles.effort(m.effort, vector, BalanceProfiles.modelClass(m.profile))
-            if (profile === m.profile && effort == m.effort) m else CellModel(m.adapter, profile, m.estimator, effort, m.maxOutputTokens, m.narrowedOutput)
+            // A profile that changes nothing (Balanced) routes the supplied model as it always did.
+            if (profile === m.profile && effort == m.effort) supplied else CellModel(m.adapter, profile, m.estimator, effort, m.maxOutputTokens, m.narrowedOutput).also { boundFrom[it] = base }
         }
         val tiered = config.tierTable.profiles.isNotEmpty() && config.tierTable.profileIds.all { it in config.profiles }
         val table = if (tiered) config.tierTable else TierTable.single(model.profile.id)
@@ -1962,7 +1978,7 @@ public class Controller @JvmOverloads public constructor(
         val factory = estimators ?: io.astrolabe.provider.EstimatorFactory { model.estimator }
         // Always bound from the supplied model, so a narrowing is capped by each routed limit once, never compounded.
         fun bind(profile: Profile, effort: io.astrolabe.provider.Effort) =
-            if (profile.id == model.profile.id && effort == model.effort) model else model.rebind(profile, effort, factory)
+            if (profile.id == model.profile.id && effort == model.effort) model else model.rebind(profile, effort, factory).also { boundFrom[it] = base }
         val first = initial ?: compile(model)
         val misfits = LinkedHashMap<String, String>()
         val fallback = first.windowBound()
@@ -2139,6 +2155,9 @@ public class Controller @JvmOverloads public constructor(
             tiers = layered.tiers,
         )
         verify.inputs = tree.atlas.rows.map { it.path }
+        // C3r: every check and run deadline is cut at its dispatch to the active time the minutes limit leaves then.
+        val timeLeft = limitControl.timeLeft(c)
+        verify.timeLeft = timeLeft
         val ceiling = Ceiling.of(contract.authorization, config.executionMode)
         val generation = c.lease?.generation ?: ExecutionGeneration.INITIAL
         // §10.1 (D-121): an S2+ main-line cell whose role unmasks task.delegate delegates to child cells; a child never does.
@@ -2177,6 +2196,7 @@ public class Controller @JvmOverloads public constructor(
             ),
             kb = KbTool(c.kb, estimator, idGen, queue = Queue(c.store, KbWriter(c.store, estimator, clock), idGen, clock), ids = ids, events = events, deniedKinds = role.deniedNoteKinds, dense = layered.dense, redaction = redaction),
         )
+        (tools.run as Run).timeLeft = timeLeft
         // §6.3: what this cell was given is logged per note; the register-citation hook turns `injected` into `cited`.
         val usage = Usage(c.store, clock)
         val injected = inputs.notes.filter { it.status == NoteStatus.Admitted }.map { it.id }.toSet()
@@ -2284,7 +2304,8 @@ public class Controller @JvmOverloads public constructor(
      * with the runtime brief pinned in `[T]` — the parent's transcript never reaches it (D13).
      */
     private fun childCell(c: OpenedCampaign, increment: Increment, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?): ChildCell =
-        ChildCell { seat, declared, completion, budget, brief ->
+        // C3r: a child is a branch of the run: a host wait elsewhere stops the minutes clock only while it waits too.
+        ChildCell { seat, declared, completion, budget, brief -> limitControl.branch(c) {
             // D-38: the frozen attempt configuration words the child's role; its mask and packet stay the caller's.
             val role = RoleTexts.worded(declared, c.attempt.config.role(declared.name))
             // §11.1: a child is routed by its own function row, never by the parent's tier; an escalated tier is its floor.
@@ -2295,7 +2316,7 @@ public class Controller @JvmOverloads public constructor(
             routing.refused?.let { throw ChildNotStarted("the ${role.name} child of ${increment.id} is unaffordable: ${it.reason}") }
             runCell(c, seat.context, increment, role, routing.model, authority, syntax, compiled, span, null, completion = completion, pinned = listOf(brief), child = ChildForm(seat.cancellation, budget, isolated = role.name == Roles.review.name))
                 .exit.also { exit -> routing.selected?.let { router.record(it, outcomeOf(exit)) } }
-        }
+        } }
 
     /**
      * The controller-side writer cell (§10.4, D-181): the child-context form of [runCell] over the writer's worktree —
@@ -2303,7 +2324,7 @@ public class Controller @JvmOverloads public constructor(
      * the child's cancellation and budget. Its exit is kept in [exits] for the campaign state (D-243).
      */
     private fun writerCell(c: OpenedCampaign, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?, exits: MutableMap<String, CellExit>): WriterCell =
-        WriterCell { seat, dispatch, declared, budget, brief ->
+        WriterCell { seat, dispatch, declared, budget, brief -> limitControl.branch(c) {
             val increment = checkNotNull(c.state).graph.increments.first { it.id == dispatch.task.incrementId }
             val role = RoleTexts.worded(declared, c.attempt.config.role(declared.name))
             val routing = route(c, seat.function, increment, model, seat.tier, null) { bound ->
@@ -2319,7 +2340,7 @@ public class Controller @JvmOverloads public constructor(
                     routing.selected?.let { router.record(it, outcomeOf(exit)) }
                     exit?.let { exits[dispatch.handle.id] = it }
                 }
-        }
+        } }
 
     /** D-242: each pending unit's writer-token estimate from its compiled writer `[K]`; `null` (slack unmeasured) when one cannot compile. */
     private fun writerEstimates(c: OpenedCampaign, model: CellModel): Map<String, Long>? {

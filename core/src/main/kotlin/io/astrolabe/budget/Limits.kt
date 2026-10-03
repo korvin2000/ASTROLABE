@@ -5,6 +5,9 @@ import io.astrolabe.telemetry.CallAccount
 import kotlinx.serialization.Serializable
 import java.math.BigDecimal
 
+/** The refusal of a run or a check a task's minutes limit leaves no active time for (C3r): nothing is dispatched. */
+internal const val NO_ACTIVE_TIME: String = "task limit (minutes): no active time is left for this operation; nothing was dispatched"
+
 /** What a task limit counts (plan §4.6, C3). */
 @Serializable
 public enum class LimitKind(public val wire: String) {
@@ -44,8 +47,8 @@ public enum class CostBasis(public val wire: String) {
  *   exceed the limit by (billed − held); that overrun is recorded, never hidden. [CostBasis] says where a sum came from,
  *   not that it is an upper bound.
  * - [maxMinutes]: an admission threshold on active time — no model call starts once a mean call would cross the
- *   working part; an operation already running (a call, a command, a check) can overrun by its own duration, bounded
- *   where it has a deadline of its own.
+ *   working part; a model call already running can overrun by its own duration; every `run` and check deadline is cut
+ *   at its dispatch to the active time left, and nothing is dispatched once no whole second is left.
  * A limit stop keeps a reserve for verification and the report and names the best verified candidate.
  */
 @Serializable
