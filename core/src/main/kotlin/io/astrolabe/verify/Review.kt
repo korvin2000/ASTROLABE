@@ -15,7 +15,9 @@ public enum class ReviewScope { Increment, Campaign }
  * the complete applicable acceptance definitions with origin and obligation version (D-52); [criteria] repeats
  * the criterion texts so a verdict can name what it assessed. [humanOnly] (C11): the packet carries a test-integrity
  * change only a person's verdict resolves ([io.astrolabe.IntegrityApproval.Human]) — a host answers it with a person and
- * marks the verdict [ReviewerKind.Human]; a model's answer resolves no flag and the campaign waits for a person.
+ * marks the verdict [ReviewerKind.Human]; a model's answer resolves no flag and the campaign waits for a person. Such a
+ * question keeps its [id] across asks while it stays the same — the same packet reference (the s0 → candidate diff),
+ * [candidate] and [contractRevision] — and a person's answer to any earlier ask of it counts, so a host may answer late.
  */
 @Serializable
 public data class ReviewRequest @JvmOverloads constructor(

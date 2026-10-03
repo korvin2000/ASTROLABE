@@ -105,6 +105,12 @@ internal class ReturnedCompletions(private val store: Store, private val clock: 
         )
     }
 
+    /** The attempt's returned completions, oldest first. */
+    fun all(work: WorkId, attempt: AttemptId): List<ReturnedCompletion> = store.db.query(
+        "SELECT body FROM packets WHERE work_id = ? AND attempt_id = ? AND kind = ? ORDER BY rowid",
+        work, attempt, ReturnedCompletion.KIND,
+    ) { JSON.decodeFromString(ReturnedCompletion.serializer(), it.string("body")) }
+
     /** The attempt's latest returned completion, if any. */
     fun latest(work: WorkId, attempt: AttemptId): ReturnedCompletion? = store.db.query(
         "SELECT body FROM packets WHERE work_id = ? AND attempt_id = ? AND kind = ? ORDER BY rowid DESC LIMIT 1",

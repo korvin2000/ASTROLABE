@@ -442,6 +442,7 @@ public object Lifecycle {
     public fun pendingReason(pending: CompletionResult.Pending): String = when (pending.code) {
         StopCode.AcceptanceDecision -> "acceptance needs a decision: "
         StopCode.ReviewRejected -> "review rejected the change after its rework round: "
+        StopCode.IntegrityReview -> "a test-integrity change waits for a person's review: "
     } + pending.missing.joinToString("; ")
 
     private fun expect(state: CampaignState, vararg phases: CampaignPhase) =

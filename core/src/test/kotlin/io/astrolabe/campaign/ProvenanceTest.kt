@@ -428,7 +428,7 @@ class ProvenanceTest {
         val model = Host(null, Decider.Policy)
         val (waiting, stopped) = run(model, IntegrityApproval.Human, replies = ::testEdit)
         assertEquals(CampaignOutcome.WaitingForInput, waiting.outcome, waiting.state?.reason)
-        assertEquals("acceptance_decision", stopped.stopCode)
+        assertEquals("integrity_review", stopped.stopCode)
         assertTrue(waiting.state?.reason.orEmpty().contains("integrity change needs a human review"), waiting.state?.reason)
         assertTrue(model.reviews.single().humanOnly, "the host is told that only a person's verdict resolves the flag")
         val item = model.asked.last().items.single { it.obligation == "integrity:tests/test_a.py" }
@@ -551,30 +551,106 @@ class ProvenanceTest {
         assertEquals(ProvenanceClass.Unverified, finish.provenanceClass)
     }
 
-    @Test
-    fun `a test edit an earlier cell left in the tree is the agent's evidence even when the last cell raised no flag`() {
-        seed(listOf(Acceptance.Run("AC-1", printing, Origin.User)), r1 = listOf("AC-1"))
-        val path = "tests/test_a.py"
+    /**
+     * Under human approval the model edits the declared test and the decider sends it back; the continuation says `done`
+     * without touching it and raises no flag of its own. The change is still on the tree: a person must review it (C11).
+     */
+    private fun reworkedTestEdit(s1: Boolean) {
+        seed(listOf(Acceptance.Run("AC-1", printing, Origin.User)), r1 = listOf("AC-1"), host = if (s1) listOf("AC-1") else null)
         var asked = 0
-        // The first completion is sent back for rework; the continuation changes nothing and raises no flag of its own.
         val host = object : Authority by AutonomousAuthority() {
             override suspend fun decide(request: AcceptanceDecisionRequest): AcceptanceDecision? = if (++asked > 1) null else
                 AcceptanceDecision(request.id, request.contractRevision, request.candidate, DecisionKind.Rework, Decider.User, "user:test", "keep the test as it was")
         }
-        val (run, finished) = run(host, IntegrityApproval.Human) { c ->
-            listOf(
-                Scripted.Reply(listOf(read("read-test", path))),
-                Scripted.Reply(listOf(anchored("edit-test", path, c.registry.version(path)!!, "    assert 1 == 1", "    assert (1 == 1)"))),
-                Scripted.Reply(listOf(say("done"))),
-                Scripted.Reply(listOf(say("done"))),
-            )
-        }
-        val finish = assertNotNull(run.finish)
+        val (waiting, stopped) = run(host, IntegrityApproval.Human) { c -> testEdit(c) + Scripted.Reply(listOf(say("done"))) }
+        assertEquals(CampaignOutcome.WaitingForInput, waiting.outcome, waiting.state?.reason)
+        assertEquals("integrity_review", stopped.stopCode)
+        assertEquals(2, asked, "the continuation's completion waits for the person again")
+        // A person approves the change on the next run.
+        val (run, finished) = run(Host(ReviewerKind.Human), IntegrityApproval.Human)
         assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
-        assertEquals(listOf(path), finish.acceptanceSurfaceUnreviewed)
-        assertEquals("tested" to ProvenanceClass.AgentTest, finish.acceptance.single().let { it.provenance to it.provenanceClass })
+        val finish = assertNotNull(run.finish)
+        assertEquals(emptyList(), finish.acceptanceSurfaceUnreviewed + finish.acceptanceSurfaceModelApproved)
+        assertEquals("independent", finished.provenanceClass)
+    }
+
+    @Test
+    fun `under human approval a test edit an earlier cell left in the tree waits for a person after a rework, S0`() = reworkedTestEdit(s1 = false)
+
+    @Test
+    fun `under human approval a test edit an earlier cell left in the tree waits for a person after a rework, S1`() = reworkedTestEdit(s1 = true)
+
+    @Test
+    fun `under human approval a pending completion voided by a moved tree does not let the next cell's done complete without a person`() {
+        seed(listOf(Acceptance.Run("AC-1", printing, Origin.User)), r1 = listOf("AC-1"))
+        assertEquals(CampaignOutcome.WaitingForInput, run(Host(null, Decider.Policy), IntegrityApproval.Human, replies = ::testEdit).first.outcome)
+        repo.write("src/a.py", "def a(): return 2\n")
+        val model = Host(null, Decider.Policy)
+        val (run, stopped) = run(model, IntegrityApproval.Human)
+        assertEquals(CampaignOutcome.WaitingForInput, run.outcome, run.state?.reason)
+        assertEquals("integrity_review", stopped.stopCode)
+        assertTrue(model.reviews.single().humanOnly, "the next cell's completion asks for a person")
+        assertEquals(PendingStatus.Void, Store.open(stateRoot, repo.git, clock).use { Acceptances(it, clock).pending(request.work, request.attempt).first().status })
+    }
+
+    @Test
+    fun `under human approval a model's rejection of a test edit is reworked, then a person's approval completes it`() {
+        seed(listOf(Acceptance.Run("AC-1", printing, Origin.User)), r1 = listOf("AC-1"))
+        val rejecting = object : Authority by AutonomousAuthority() {
+            override suspend fun review(request: ReviewRequest): Verdict = Verdict(request.id, request.contractRevision, request.candidate, VerdictOutcome.Revise,
+                listOf(io.astrolabe.verify.Finding(io.astrolabe.verify.Severity.Major, "tests/test_a.py:2@x", "the assertion was rewritten", kind = io.astrolabe.verify.FindingKind.TestIntegrity)),
+                confidence = 0.8, signedBy = "host:review")
+        }
+        // The rejection reworks once in the cell; the second `done` on the same tree waits for the user's word.
+        val (waiting, stopped) = run(rejecting, IntegrityApproval.Human) { c -> testEdit(c) + Scripted.Reply(listOf(say("done"))) }
+        assertEquals(CampaignOutcome.WaitingForInput, waiting.outcome, waiting.state?.reason)
+        assertEquals("review_rejected", stopped.stopCode)
+        val person = Host(ReviewerKind.Human)
+        val (run, finished) = run(person, IntegrityApproval.Human)
+        assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+        assertEquals(1, person.reviews.size)
+        assertEquals("independent", finished.provenanceClass)
+    }
+
+    @Test
+    fun `under human approval a user's stored acceptance settles a waiting test edit on resume without asking again`() {
+        seed(listOf(Acceptance.Run("AC-1", printing, Origin.User)), r1 = listOf("AC-1"))
+        assertEquals(CampaignOutcome.WaitingForInput, run(Host(null), IntegrityApproval.Human, replies = ::testEdit).first.outcome)
+        // The user's answer arrived while the campaign was stopped (a host that records it before resuming).
+        Store.open(stateRoot, repo.git, clock).use { store ->
+            val acceptances = Acceptances(store, clock)
+            val pending = assertNotNull(acceptances.open(request.work, request.attempt))
+            acceptances.record(io.astrolabe.id.Identities(request.work, request.attempt, context = pending.cell), DecisionRecord("decision-user", pending.incrementId,
+                AcceptanceDecision(pending.requestId, pending.contractVersion, pending.resultingStamp, DecisionKind.Accept, Decider.User, "user:alice", "the rewrite keeps the assertion"),
+                pending.results.filter { it.status != passed }.map { it.obligation }))
+        }
+        val again = Host(null)
+        val (run, _) = run(again, IntegrityApproval.Human)
+        assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+        assertEquals(emptyList(), again.asked, "the stored decision is the user's: nothing is asked again")
+        val finish = assertNotNull(run.finish)
+        assertEquals(listOf("tests/test_a.py"), finish.acceptanceSurfaceModelApproved, "the model's approval is no person's")
         assertEquals(ProvenanceClass.AgentTest, finish.provenanceClass)
-        assertEquals("agent_test", finished.provenanceClass)
+    }
+
+    @Test
+    fun `under autonomous approval a resumed acceptance reads the green receipts the stopped run held`() {
+        seed(listOf(Acceptance.Run("AC-1", printing, Origin.User), Acceptance.Check("AC-2", "a returns the documented value", Origin.User)), r1 = listOf("AC-1", "AC-2"))
+        // The host has no reviewer and no decision now: AC-2 waits.
+        assertEquals(CampaignOutcome.WaitingForInput, run().first.outcome)
+        val (run, _) = run(accepting(Decider.User, "user:test"))
+        assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+        val line = assertNotNull(run.finish).acceptance.single { it.id == "AC-1" }
+        assertEquals("tested" to passed, line.provenance to line.result, "the green receipt of AC-1 still speaks for the final tree")
+    }
+
+    @Test
+    fun `human integrity approval refuses S3 writers as a configuration error`() {
+        val error = kotlin.test.assertFailsWith<IllegalArgumentException> {
+            Config(integrityApproval = IntegrityApproval.Human, flags = io.astrolabe.Flags(s3Writers = true))
+        }
+        assertTrue(error.message.orEmpty().contains("s3Writers"), error.message)
+        Config(integrityApproval = IntegrityApproval.Autonomous, flags = io.astrolabe.Flags(s3Writers = true))
     }
 
     @Test

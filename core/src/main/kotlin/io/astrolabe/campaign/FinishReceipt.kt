@@ -254,12 +254,7 @@ public object FinishReceipts {
         // §8.6 at the final tree: what changed since s0 — by the agent, a run or no one known — on a required check's
         // acceptance surface, classified from its bytes then and now, unless an approving review covered it. Its
         // run checks are the agent's evidence, whichever cell made the change (§4.4 C2).
-        val surface = TestIntegrity.classify(
-            (separated.agent + separated.byRun + separated.unattributed).distinct()
-                .filter { TestIntegrity.surfaceOf(it, contract, c.checks.packageManifest) != null }
-                .map { SurfaceChange(it, textAtS0(c, it), textNow(c, it)) }.filterNot { sameText(it.before, it.after) },
-            "finish", contract, c.checks,
-        ).filter { flag -> flag.requiredChecks.isNotEmpty() && flag.kind != TestIntegrity.ADDITIONS_ONLY }
+        val surface = surfaceChanges(c, separated.agent + separated.byRun + separated.unattributed, "finish")
         val approvals = surface.associate { it.path to reviewed(c, it.path, reviews, report) }
         val unreviewedSurface = surface.filter { approvals[it.path] == null }.map { it.path }.sorted()
         // Owner 2026-10-03: a model's approval (the judge's, or a host's model's) lets completion proceed, but only a person's
@@ -393,6 +388,18 @@ public object FinishReceipts {
             acceptanceSurfaceModelApproved = surface.filter { approvals[it.path] == ReviewerKind.Model }.map { it.path }.sorted(),
         )
     }
+
+    /**
+     * §8.6 from the tree (D-396): the changes of [paths] since s0 on a required check's acceptance surface, classified
+     * from each path's text at s0 and now — text equal up to line endings, trailing blanks and blank lines is no change —
+     * whichever cell or run made them; only those that need an approving review.
+     */
+    internal fun surfaceChanges(c: OpenedCampaign, paths: Collection<String>, cause: String): List<io.astrolabe.verify.TestIntegrityFlag> =
+        TestIntegrity.classify(
+            paths.distinct().filter { TestIntegrity.surfaceOf(it, c.contract, c.checks.packageManifest) != null }
+                .map { SurfaceChange(it, textAtS0(c, it), textNow(c, it)) }.filterNot { sameText(it.before, it.after) },
+            cause, c.contract, c.checks,
+        ).filter { flag -> flag.requiredChecks.isNotEmpty() && flag.kind != TestIntegrity.ADDITIONS_ONLY }
 
     /** A path's text at s0: its recovery blob when s0 recorded it, else the base commit's; `null` when it did not exist. */
     private fun textAtS0(c: OpenedCampaign, path: String): String? {

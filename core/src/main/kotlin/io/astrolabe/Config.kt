@@ -80,6 +80,13 @@ public data class Config(
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val balance: BalanceProfile = BalanceProfile.Balanced,
 ) {
+    init {
+        // C11: S3 writers resolve no test-integrity flag on the host's path, so they cannot keep IntegrityApproval.Human.
+        require(!(integrityApproval == IntegrityApproval.Human && flags.s3Writers)) {
+            "integrityApproval = Human cannot run with flags.s3Writers: S3 writers do not ask a person about test-integrity changes — choose Autonomous or turn s3Writers off"
+        }
+    }
+
     /** The v2.0 C1a constructor: [balance] takes its default. Kept for Java callers. */
     public constructor(
         defaults: Defaults,

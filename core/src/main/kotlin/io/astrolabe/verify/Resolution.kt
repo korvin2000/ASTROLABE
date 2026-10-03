@@ -72,6 +72,12 @@ public enum class StopCode(public val wire: String) {
 
     /** A reviewer rejected the work and the one rework round is spent; the authority decides: rework or accept as is. */
     ReviewRejected("review_rejected"),
+
+    /**
+     * A test-integrity change waits for a person (C11, [io.astrolabe.IntegrityApproval.Human]): a person's approving
+     * review of it (the host's next review request says `humanOnly`), or the user's decision — never a policy's.
+     */
+    IntegrityReview("integrity_review"),
 }
 
 /**
@@ -450,9 +456,14 @@ public object Obligations {
  * 3. a current `rework` decision → rework;
  * 4. a reviewer rejection not accepted by a decision → rework, or — once the rework round is spent — await
  *    ([StopCode.ReviewRejected]);
- * 5. an unverified obligation not accepted by a decision → await ([StopCode.AcceptanceDecision]);
+ * 5. an unverified obligation not accepted by a decision → await ([StopCode.AcceptanceDecision];
+ *    [StopCode.IntegrityReview] while one only a person settles waits, C11);
  * 6. otherwise complete, with provenance per item: tested, reviewed, or accepted by whom and why (I7).
- * An `accept` decision covers exactly the obligations its request listed; a spent `rework` decision covers nothing.
+ * An `accept` decision covers exactly the obligations its request listed; a spent `rework` decision covers nothing. A
+ * policy's `accept` covers only unverified obligations that are not [ObligationResult.humanOnly]; the user's covers any
+ * it names — a reviewer's rejection (D-338) and, under [io.astrolabe.IntegrityApproval.Human], a test-integrity change
+ * with no person's review (C11: the user is a person; the item is accepted, never verified, and its run checks stay the
+ * agent's evidence).
  */
 public object Resolver {
     @JvmStatic
@@ -486,10 +497,12 @@ public object Resolver {
         if (rework != null) gaps += Gap(GapKind.Other, null, "rework requested by ${rework.decision.by}: ${rework.decision.reason}")
         val passed = all.filter { it.status == ResultStatus.Passed }
         val receipts = passed.filter { it.kind == ObligationKind.Run }.mapNotNull { it.evidenceRef }.distinct()
+        // C11: what waits for a person's review says so, whatever else waits beside it.
+        val person = unverified.any { it.humanOnly }
         val (resolution, code) = when {
             all.any { it.executedFailure } || open.isNotEmpty() || rework != null -> Resolution.Rework to null
-            rejected.isNotEmpty() -> if (reworkSpent) Resolution.Await to StopCode.ReviewRejected else Resolution.Rework to null
-            unverified.isNotEmpty() -> Resolution.Await to StopCode.AcceptanceDecision
+            rejected.isNotEmpty() -> if (reworkSpent) Resolution.Await to (if (person) StopCode.IntegrityReview else StopCode.ReviewRejected) else Resolution.Rework to null
+            unverified.isNotEmpty() -> Resolution.Await to (if (person) StopCode.IntegrityReview else StopCode.AcceptanceDecision)
             else -> Resolution.Complete to null
         }
         val applied = active?.takeIf { resolution == Resolution.Complete && accepted.isNotEmpty() || rework != null }
