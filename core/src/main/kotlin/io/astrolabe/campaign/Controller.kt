@@ -417,7 +417,7 @@ public class OpenedCampaign internal constructor(
 }
 
 /** What [Controller.runS0] did: the campaign state it left, the cell's exit, the verifier's result and the compile. */
-public data class S0Run(
+public data class S0Run @JvmOverloads constructor(
     val state: CampaignState?,
     val exit: CellExit?,
     val completion: CompletionResult?,
