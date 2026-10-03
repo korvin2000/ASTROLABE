@@ -251,6 +251,26 @@ class TaskLimitsTest {
     }
 
     @Test
+    fun `a reopen keeps the latched reserve until the host changes the limits`() = runBlocking<Unit> {
+        // C3r 4: L = 60 s. A 15 s call latches the reserve (15 + 15 + 45 > 60); after a 1 s call the raw rule is Within (16 + 8 + 24 ≤ 60).
+        controller().open(repo.root, request, policy(TaskLimits(maxMinutes = 1))).use { c ->
+            val adapter = FakeAdapter(ScriptedModel(planning().zip(listOf(15L, 1L)).map { (r, s) -> ScriptedModel.Turn({ true }, { clock.advance(Duration.ofSeconds(s)); r }) }))
+            val run = controller().run(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator()))
+            assertEquals(BudgetStop.TaskLimitMinutes, run.budgetStop, run.state?.reason)
+            val spend = TaskLimitControl(idGen, clock, null).spend(c)
+            assertEquals(16_000L, spend.elapsedMillis)
+            assertEquals(LimitDecision.Within, LimitRule.decide(c.limits, spend), "the raw rule alone would reopen the working part")
+        }
+        controller().open(repo.root, request, CampaignPolicy(Tokens(400_000))).use { c ->
+            assertEquals(CampaignOutcome.BudgetExhausted, c.state!!.outcome, "the host changed no limit: the reserve stays latched")
+            assertTrue(c.journal.events(JournalScope(request.work, kinds = setOf(JournalKind.Reconcile))).any { it.text.startsWith("limits: still reached (minutes)") })
+        }
+        controller().open(repo.root, request, policy(TaskLimits(maxMinutes = 10))).use { c ->
+            assertEquals(CampaignPhase.Running, c.state!!.phase, "a changed limit releases the latch")
+        }
+    }
+
+    @Test
     fun `a raised limit with another still spent stays stopped and says which`() = runBlocking<Unit> {
         val recorder = EventRecorder()
         Events(clock).use { events ->

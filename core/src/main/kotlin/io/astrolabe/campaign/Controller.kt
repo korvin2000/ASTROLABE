@@ -574,6 +574,8 @@ public class Controller @JvmOverloads public constructor(
         }
         // C3 (K): the limits in force — the host's when it names them, else the ones kept with the campaign.
         val limits = TaskLimitControl.atOpen(journal, ids, idGen, clock, policy.limits)
+        // C3r: a reserve latched under these limits holds until the host changes them.
+        val latched = TaskLimitControl.latched(journal, request.work)
         val budgetStop = state?.takeIf { it.phase == CampaignPhase.Ended && it.outcome == CampaignOutcome.BudgetExhausted }?.budgetStop
         if (budgetStop == BudgetStop.CellCap) {
             state = Lifecycle.apply(checkNotNull(state), contract, Transition.LimitRaised("reopened after the run's cell cap: the cap counts per run")).also(campaigns::save)
@@ -583,6 +585,7 @@ public class Controller @JvmOverloads public constructor(
         if (budgetStop?.taskLimit == true) {
             val spend = limitControl.spend(store, journal, request.work, limits)
             val decision = LimitRule.decide(limits, spend, LimitRule.nextCost(spend, TaskLimitControl.recorded(journal, request.work)?.status?.nextCallCost))
+                .let { if (it == LimitDecision.Within) latched ?: it else it }
             if (decision == LimitDecision.Within) {
                 val raised = "${LimitSessions.RAISED}: $limits; spent ${spend.requests} requests, ${spend.elapsedMillis} ms active" +
                     (spend.cost?.let { ", ${it.amount.toPlainString()} ${it.currency} (${spend.costBasis.wire})" } ?: "")
@@ -693,7 +696,11 @@ public class Controller @JvmOverloads public constructor(
             request, ids, store, os, workspace, registry, stamper, dirty, shadow, s0, atlas, derived.sniffed, commands,
             contracts, checks, rules, prime, kb, journal, intents, campaigns, reconciliation, prescan, impactPrescan, shape, state, refusal, owned,
             frozen, lease, leases, frozenNotes = Notes(store).all(), hostNotes = policy.hostNotes.filter { it.isNotBlank() }, limits = limits,
-        ).also { plugged[it] = layered }
+        ).also {
+            plugged[it] = layered
+            it.limitState.reserve = latched
+            it.limitState.reserveAnnounced = latched != null
+        }
     }
 
     /**

@@ -79,6 +79,10 @@ public data class LimitStop(
 /** A refusal that ended a cell on a task limit: the stop the next boundary takes, with the price it was refused at. */
 internal class LimitBlock(val decision: LimitDecision, val price: Money?)
 
+/** The journal's record of a latched reserve (C3r): it holds under the limits in force when it was written. */
+@Serializable
+internal data class ReserveLatch(val limit: LimitKind, val reason: String)
+
 /** A run of the controller over a campaign (C3 minutes): its start, the active time before it and its paused waits. */
 internal class LimitSession(val startEventId: String, val start: Instant, val priorMillis: Long) {
     var pausedMillis: Long = 0
@@ -339,7 +343,7 @@ internal class TaskLimitControl(private val idGen: IdGen, private val clock: Clo
         events?.emit(AgentEvent.Budget.Spent(c.ids, LimitRule.status(c.limits, spend, LimitRule.nextCost(spend, c.limitState.lastEstimate))))
     }
 
-    /** The working part stays spent until the host changes the limits: a falling mean call time never reopens it (latch). */
+    /** The working part stays spent until the host changes the limits: a falling mean call time never reopens it (latch; kept across reopens, C3r). */
     private fun latch(c: OpenedCampaign, decision: LimitDecision): LimitDecision = when (decision) {
         is LimitDecision.Reserve -> decision.also { if (c.limitState.reserve == null) c.limitState.reserve = it }
         LimitDecision.Within -> c.limitState.reserve ?: decision
@@ -358,7 +362,8 @@ internal class TaskLimitControl(private val idGen: IdGen, private val clock: Clo
         }
         if (decision is LimitDecision.Reserve && !c.limitState.reserveAnnounced) {
             c.limitState.reserveAnnounced = true
-            c.journal.append(JournalEvent(idGen.next("ev"), c.ids, null, JournalKind.Boundary, text = "${LimitSessions.RESERVE} (${decision.kind.wire}): ${decision.reason} · verify and report only", at = clock.instant()))
+            c.journal.append(JournalEvent(idGen.next("ev"), c.ids, null, JournalKind.Boundary, text = "${LimitSessions.RESERVE} (${decision.kind.wire}): ${decision.reason} · verify and report only",
+                payload = JSON.encodeToJsonElement(ReserveLatch.serializer(), ReserveLatch(decision.kind, decision.reason)), at = clock.instant()))
             events?.emit(AgentEvent.Budget.LimitReached(c.ids, decision.kind.wire, RESERVE_STAGE, decision.reason, LimitRule.status(c.limits, spend, price)))
         }
     }
@@ -382,6 +387,18 @@ internal class TaskLimitControl(private val idGen: IdGen, private val clock: Clo
         fun recorded(journal: Journal, work: WorkId): LimitStop? =
             journal.events(JournalScope(work, kinds = setOf(JournalKind.Boundary))).lastOrNull { it.text.startsWith(LimitSessions.REACHED) && it.payload != null }
                 ?.let { runCatching { JSON.decodeFromJsonElement(LimitStop.serializer(), it.payload!!) }.getOrNull() }
+
+        /**
+         * The reserve latched under the limits in force (C3r): a `limits: reserve reached` record after the last change of
+         * the limits. It holds across reopens — a falling mean call time never reopens the working part — and only the
+         * host's change of the limits releases it.
+         */
+        fun latched(journal: Journal, work: WorkId): LimitDecision.Reserve? {
+            val events = journal.events(JournalScope(work))
+            val changed = events.indexOfLast { it.text.startsWith(LimitSessions.SET) }
+            val record = events.withIndex().lastOrNull { (i, e) -> i > changed && e.text.startsWith(LimitSessions.RESERVE) && e.payload != null }?.value ?: return null
+            return runCatching { JSON.decodeFromJsonElement(ReserveLatch.serializer(), record.payload!!) }.getOrNull()?.let { LimitDecision.Reserve(it.limit, it.reason) }
+        }
 
         /**
          * The limits in force at an open (K): [requested] when the host names them — [TaskLimits.NONE] lifts every limit —
