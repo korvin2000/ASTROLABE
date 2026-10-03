@@ -7,6 +7,7 @@ import io.astrolabe.campaign.CampaignPolicy
 import io.astrolabe.campaign.CampaignRequest
 import io.astrolabe.campaign.Controller
 import io.astrolabe.campaign.Deployer
+import io.astrolabe.campaign.FinishReceipt
 import io.astrolabe.campaign.OpenedCampaign
 import io.astrolabe.campaign.OptionalLayers
 import io.astrolabe.campaign.PublicationRequest
@@ -114,14 +115,16 @@ public class Astrolabe @JvmOverloads public constructor(
             val opened = controller.open(project, CampaignRequest(WorkId(idGen.next("W")), AttemptId(FIRST_ATTEMPT), request), chosen)
             val model = CellModel(adapter, profile, estimators.estimatorFor(profile))
             val published = AtomicReference<PublicationRun?>(null)
+            val finished = AtomicReference<FinishReceipt?>(null)
             val job = scope.async {
                 opened.use { c ->
                     val run = controller.run(c, model, authority)
+                    finished.set(run.finish)
                     if (publication != null && run.finish != null) published.set(controller.publish(c, run, publication, authority, deployer))
                     run.outcome ?: c.stop?.outcome ?: CampaignOutcome.Failed
                 }
             }
-            return CampaignHandle(opened.ids.work, job, opened, events, project.views, published).also { project.active = it }
+            return CampaignHandle(opened.ids.work, job, opened, events, project.views, published, finished).also { project.active = it }
         }
     }
 
@@ -187,11 +190,18 @@ public class CampaignHandle internal constructor(
     private val bus: Events,
     public val views: Views,
     private val published: AtomicReference<PublicationRun?> = AtomicReference(null),
+    private val finished: AtomicReference<FinishReceipt?> = AtomicReference(null),
 ) {
     public val done: Boolean get() = job.isCompleted
 
     /** The stages published after finish when the campaign was started with a publication request; `null` until then or without one. */
     public val publication: PublicationRun? get() = published.get()
+
+    /**
+     * The finish receipt the campaign ended with (§5.9), its provenance class included (§4.4 C2); `null` until [await]
+     * returns, or for a campaign that ended without one.
+     */
+    public val finish: FinishReceipt? get() = finished.get()
 
     public val events: Flow<AgentEvent> get() = bus.records().filter { it.event.ids.work == workId }.map { it.event }
 

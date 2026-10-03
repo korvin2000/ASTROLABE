@@ -3,10 +3,14 @@ package io.astrolabe.verify
 import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Contract
 import io.astrolabe.contract.Increment
+import io.astrolabe.contract.Origin
+import io.astrolabe.contract.Requirement
+import io.astrolabe.contract.UserRequest
 import io.astrolabe.id.CandidateId
 import io.astrolabe.id.Identities
 import io.astrolabe.register.Mark
 import io.astrolabe.register.Register
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
@@ -24,9 +28,12 @@ public enum class ResultStatus { Passed, Failed, Unverified }
 @Serializable
 public enum class ObligationKind { Run, Check, Review, Integrity }
 
-/** The result of one obligation at one candidate; [detail] names the obligation and says why, [findings] a rejection's substance. */
+/**
+ * The result of one obligation at one candidate; [detail] names the obligation and says why, [findings] a rejection's
+ * substance, [origin] the contract origin of its criterion — `null` for an obligation that is no acceptance item.
+ */
 @Serializable
-public data class ObligationResult(
+public data class ObligationResult @JvmOverloads constructor(
     val obligation: String,
     val kind: ObligationKind,
     val status: ResultStatus,
@@ -34,6 +41,7 @@ public data class ObligationResult(
     val evidenceRef: String? = null,
     val by: String? = null,
     val findings: List<Finding> = emptyList(),
+    val origin: Origin? = null,
 ) {
     init {
         require(obligation.isNotBlank() && detail.isNotBlank()) { "a result names its obligation and says why" }
@@ -162,16 +170,111 @@ public data class Gap(val kind: GapKind, val obligation: String?, val text: Stri
 @Serializable
 public enum class ProvenanceKind { Tested, Reviewed, Accepted }
 
-/** How one acceptance item came to be accepted (I7): tested, reviewed, or accepted by a decider without verification. */
+/**
+ * Who stands behind a link of the provenance axis (§4.4 C2): the user, the host — the harness that derives a project's
+ * own suite and the authorized amendments it applies included — or the model. Only `model(strengthens …)` is the
+ * model's: the split D-262 draws for launching commands.
+ */
 @Serializable
-public data class ItemProvenance(
+public enum class Author(public val wire: String) {
+    @SerialName("user") User("user"),
+    @SerialName("host") Host("host"),
+    @SerialName("model") Model("model"),
+    ;
+
+    public companion object {
+        /** Who created an acceptance item, from its contract [origin]. */
+        @JvmStatic
+        public fun of(origin: Origin): Author = when (origin) {
+            is Origin.User -> User
+            is Origin.Harness, is Origin.Amended -> Host
+            is Origin.Model -> Model
+        }
+
+        /** Who set [requirement]: the user when its authority is one of the contract's verbatim [requests], else the host. */
+        @JvmStatic
+        public fun of(requirement: Requirement, requests: List<UserRequest>): Author =
+            if (requests.any { it.id == requirement.authorityRef }) User else Host
+    }
+}
+
+/**
+ * Who took an item's residual risk (§4.4 C2): the runtime, whose verification accepted it, or the decider who accepted
+ * it without one — the user, or a host policy (accept-unverified).
+ */
+@Serializable
+public enum class RiskAcceptor(public val wire: String) {
+    @SerialName("runtime") Runtime("runtime"),
+    @SerialName("user") User("user"),
+    @SerialName("policy") Policy("policy"),
+}
+
+/**
+ * The summary class of the provenance axis (§4.4 C2), worst first. [Independent]: the checks the host or the user
+ * declared passed at the final tree; [AgentTest]: only the model's own checks did; [Unverified]: neither — a decider's
+ * acceptance is never a verification (I7). A `completed` outcome stays `completed` whatever its class.
+ */
+@Serializable
+public enum class ProvenanceClass(public val wire: String) {
+    @SerialName("unverified") Unverified("unverified"),
+    @SerialName("agent_test") AgentTest("agent_test"),
+    @SerialName("independent") Independent("independent"),
+    ;
+
+    public companion object {
+        /** One check whose evidence is [by]'s: passed at the final tree on the host's or the user's ⇒ independent, the model's ⇒ agent test. */
+        @JvmStatic
+        public fun item(by: Author, result: ResultStatus): ProvenanceClass = when {
+            result != ResultStatus.Passed -> Unverified
+            by == Author.Model -> AgentTest
+            else -> Independent
+        }
+
+        /**
+         * One requirement from the results at the final tree of its [declared] checks — the host's and the user's — and
+         * of the [agent]'s own (its items and the checks it registered, C1a): independent when it has a declared check
+         * and every one passed; otherwise agent test when none failed and one of the agent's passed; otherwise
+         * unverified. The agent's checks never make a requirement independent nor lower a declared verification.
+         */
+        @JvmStatic
+        public fun requirement(declared: Collection<ResultStatus>, agent: Collection<ResultStatus>): ProvenanceClass = when {
+            declared.isNotEmpty() && declared.all { it == ResultStatus.Passed } -> Independent
+            ResultStatus.Failed !in declared && ResultStatus.Failed !in agent && ResultStatus.Passed in agent -> AgentTest
+            else -> Unverified
+        }
+
+        /** The campaign: the worst of its [requirements]; none ⇒ unverified. */
+        @JvmStatic
+        public fun campaign(requirements: Collection<ProvenanceClass>): ProvenanceClass = requirements.minOrNull() ?: Unverified
+    }
+}
+
+/**
+ * How one acceptance item came to be accepted (I7): tested, reviewed, or accepted by a decider without verification.
+ * [origin] and [result] are its criterion's provenance (§4.4 C2) — who created the check and what checking it gave
+ * before any decision — `null` on records made without them.
+ */
+@Serializable
+public data class ItemProvenance @JvmOverloads constructor(
     val item: String,
     val how: ProvenanceKind,
     val by: String? = null,
     val decider: Decider? = null,
     val reason: String? = null,
     val evidenceRef: String? = null,
-)
+    val origin: Origin? = null,
+    val result: ResultStatus? = null,
+) {
+    /** Who created the check; `null` while [origin] is unknown. */
+    val checkBy: Author? get() = origin?.let(Author::of)
+
+    val riskAcceptedBy: RiskAcceptor
+        get() = when {
+            how != ProvenanceKind.Accepted -> RiskAcceptor.Runtime
+            decider == Decider.User -> RiskAcceptor.User
+            else -> RiskAcceptor.Policy
+        }
+}
 
 /** What the resolver concluded, with everything it was concluded from. */
 public data class Resolved(
@@ -258,11 +361,14 @@ public object Obligations {
         }
     }
 
+    /** The obligation id prefix of a test-integrity flag; the path follows it. */
+    public const val INTEGRITY: String = "integrity:"
+
     /** A test-integrity flag on a required check (§8.6): its reviewer's word, bound like any verdict; `null` when it needs none. */
     @JvmStatic
     public fun flag(flag: TestIntegrityFlag, contractVersion: Int, candidate: CandidateId?): ObligationResult? {
         if (flag.requiredChecks.isEmpty() || flag.kind == TestIntegrity.ADDITIONS_ONLY) return null
-        return verdict("integrity:${flag.path}", ObligationKind.Integrity, "acceptance surface ${flag.path} touches ${flag.requiredChecks.joinToString(", ")}",
+        return verdict("$INTEGRITY${flag.path}", ObligationKind.Integrity, "acceptance surface ${flag.path} touches ${flag.requiredChecks.joinToString(", ")}",
             flag.verdict, contractVersion, candidate, "no approving review of the change to a required check")
     }
 
@@ -322,9 +428,9 @@ public object Resolver {
         val applied = active?.takeIf { resolution == Resolution.Complete && accepted.isNotEmpty() || rework != null }
         val provenance = if (resolution != Resolution.Complete) emptyList() else all.map { r ->
             when {
-                r.status == ResultStatus.Passed && r.kind == ObligationKind.Run -> ItemProvenance(r.obligation, ProvenanceKind.Tested, evidenceRef = r.evidenceRef)
-                r.status == ResultStatus.Passed -> ItemProvenance(r.obligation, ProvenanceKind.Reviewed, r.by, evidenceRef = r.evidenceRef)
-                else -> ItemProvenance(r.obligation, ProvenanceKind.Accepted, active!!.decision.by, active.decision.decider, active.decision.reason, active.decision.requestId)
+                r.status == ResultStatus.Passed && r.kind == ObligationKind.Run -> ItemProvenance(r.obligation, ProvenanceKind.Tested, evidenceRef = r.evidenceRef, origin = r.origin, result = r.status)
+                r.status == ResultStatus.Passed -> ItemProvenance(r.obligation, ProvenanceKind.Reviewed, r.by, evidenceRef = r.evidenceRef, origin = r.origin, result = r.status)
+                else -> ItemProvenance(r.obligation, ProvenanceKind.Accepted, active!!.decision.by, active.decision.decider, active.decision.reason, active.decision.requestId, r.origin, r.status)
             }
         }
         val evidence = (passed.mapNotNull { it.evidenceRef } + listOfNotNull(applied?.decision?.requestId?.takeIf { resolution == Resolution.Complete })).distinct()
@@ -360,9 +466,9 @@ public object Resolver {
         for (id in increment.accept) {
             when (val item = contract.acceptance(id)) {
                 null -> open += "$id: not an acceptance item of contract v${contract.version}"
-                is Acceptance.Run -> results += Obligations.run(id, item.criterion, currencies[id] ?: currencies[Checks.acceptId(id)])
-                is Acceptance.Check -> results += Obligations.verdict(id, ObligationKind.Check, item.criterion, verdicts[id], contract.version, candidate, unavailable[id])
-                is Acceptance.Review -> results += Obligations.verdict(id, ObligationKind.Review, item.criterion, verdicts[id], contract.version, candidate, unavailable[id])
+                is Acceptance.Run -> results += Obligations.run(id, item.criterion, currencies[id] ?: currencies[Checks.acceptId(id)]).copy(origin = item.origin)
+                is Acceptance.Check -> results += Obligations.verdict(id, ObligationKind.Check, item.criterion, verdicts[id], contract.version, candidate, unavailable[id]).copy(origin = item.origin)
+                is Acceptance.Review -> results += Obligations.verdict(id, ObligationKind.Review, item.criterion, verdicts[id], contract.version, candidate, unavailable[id]).copy(origin = item.origin)
             }
         }
         // A red check outside the increment's required set needs an Open item that names it; a required red is a result above.
