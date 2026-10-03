@@ -30,6 +30,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -254,6 +255,47 @@ class TestIntegrityTest {
         assertFalse(approved.single().blocksCompletion)
         assertTrue(TestIntegrity.unresolved(approved).isEmpty())
         assertTrue(approved.single().line.endsWith("review: approved by human:alice"), approved.single().line)
+    }
+
+    @Test
+    fun `under human integrity approval only a person's approval passes a flag, a model's stays attached and only a user's decision accepts it`() {
+        val flag = TestIntegrityFlag("tests/test_total.py", AcceptanceSurface.TestFile, "edit #3", listOf("CHK-accept-AC-1"), humanOnly = true)
+        val model = Verdict("rev-1", 1, candidate, VerdictOutcome.Approve, confidence = 0.9, signedBy = "host:review")
+        val person = model.copy(signedBy = "user:alice", reviewer = ReviewerKind.Human)
+
+        // No verdict, or a model's approval: the obligation waits for a person, the model's word attached as information.
+        val none = assertNotNull(Obligations.flag(flag, 1, candidate))
+        assertEquals(ResultStatus.Unverified to true, none.status to none.humanOnly)
+        assertTrue(none.detail.contains("integrity change needs a human review"), none.detail)
+        assertTrue(flag.copy(verdict = model).blocksCompletion, "a model's approval does not resolve the flag")
+        assertTrue(flag.copy(verdict = model).line.endsWith("review: approved by host:review (model; a person must review)"), flag.copy(verdict = model).line)
+        val attached = assertNotNull(Obligations.flag(flag.copy(verdict = model), 1, candidate))
+        assertEquals(listOf<Any?>(ResultStatus.Unverified, true, "host:review"), listOf(attached.status, attached.humanOnly, attached.by))
+        assertTrue(attached.detail.contains("integrity change needs a human review; approve by host:review (model) attached"), attached.detail)
+
+        // A policy's acceptance covers no such obligation; the user's does — the risk is the user's, never a verification.
+        fun decided(decider: Decider) = DecisionRecord("rec-1", "inc-1", AcceptanceDecision("d-1", 1, candidate, DecisionKind.Accept, decider, "who", "not verified"), listOf(attached.obligation))
+        assertEquals(io.astrolabe.verify.Resolution.Await, Resolver.resolve(listOf(attached), decision = decided(Decider.Policy)).resolution)
+        assertEquals(io.astrolabe.verify.Resolution.Await, Resolver.resolve(listOf(none), decision = decided(Decider.Policy).copy(obligations = listOf(none.obligation))).resolution)
+        val user = Resolver.resolve(listOf(attached), decision = decided(Decider.User))
+        assertEquals(io.astrolabe.verify.Resolution.Complete, user.resolution)
+        assertEquals(ProvenanceKind.Accepted to RiskAcceptor.User, user.provenance.single().let { it.how to it.riskAcceptedBy })
+
+        // A person's approval passes it.
+        assertFalse(flag.copy(verdict = person).blocksCompletion)
+        assertEquals(ResultStatus.Passed, assertNotNull(Obligations.flag(flag.copy(verdict = person), 1, candidate)).status)
+
+        // A model's rejection with substance is a rejection as before: rework, then the user's word (D-338).
+        val major = Finding(Severity.Major, "tests/test_total.py:3@ab", "the assertion no longer checks rounding", kind = FindingKind.TestIntegrity)
+        val rejected = assertNotNull(Obligations.flag(flag.copy(verdict = model.copy(outcome = VerdictOutcome.Revise, findings = listOf(major))), 1, candidate))
+        assertEquals(ResultStatus.Failed, rejected.status)
+        assertEquals(io.astrolabe.verify.Resolution.Rework, Resolver.resolve(listOf(rejected)).resolution)
+
+        // Autonomous approval is unchanged: a model's approval passes the flag and a policy covers what has no verdict.
+        assertEquals(ResultStatus.Passed, assertNotNull(Obligations.flag(flag.copy(humanOnly = false, verdict = model), 1, candidate)).status)
+        val plain = assertNotNull(Obligations.flag(flag.copy(humanOnly = false), 1, candidate))
+        assertFalse(plain.humanOnly)
+        assertEquals(io.astrolabe.verify.Resolution.Complete, Resolver.resolve(listOf(plain), decision = decided(Decider.Policy).copy(obligations = listOf(plain.obligation))).resolution)
     }
 
     @Test

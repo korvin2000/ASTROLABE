@@ -389,13 +389,80 @@ class ProvenanceTest {
         return assertNotNull(run.finish)
     }
 
+    /**
+     * A host whose reviews are answered by [kind] (`null`: a verdict that does not say who reviewed) and whose acceptance
+     * decisions come from [decider] (`null`: none now); it keeps what it was asked.
+     */
+    private class Host(private val kind: ReviewerKind?, private val decider: Decider? = null) : Authority by AutonomousAuthority() {
+        val reviews = ArrayList<ReviewRequest>()
+        val asked = ArrayList<AcceptanceDecisionRequest>()
+
+        override suspend fun review(request: ReviewRequest): Verdict {
+            reviews += request
+            val verdict = Verdict(request.id, request.contractRevision, request.candidate, VerdictOutcome.Approve, confidence = 0.9,
+                signedBy = if (kind == ReviewerKind.Human) "user:alice" else "host:review")
+            return kind?.let { verdict.copy(reviewer = it) } ?: verdict
+        }
+
+        override suspend fun decide(request: AcceptanceDecisionRequest): AcceptanceDecision? {
+            asked += request
+            return decider?.let { AcceptanceDecision(request.id, request.contractRevision, request.candidate, DecisionKind.Accept, it,
+                if (it == Decider.User) "user:alice" else "studio:policy(auto)", "not verified") }
+        }
+    }
+
+    /** The model edits the declared test and proposes completion. */
+    private fun testEdit(c: OpenedCampaign): List<Scripted> {
+        val path = "tests/test_a.py"
+        return listOf(
+            Scripted.Reply(listOf(read("read-test", path))),
+            Scripted.Reply(listOf(anchored("edit-test", path, c.registry.version(path)!!, "    assert 1 == 1", "    assert (1 == 1)"))),
+            Scripted.Reply(listOf(say("done"))),
+        )
+    }
+
     @Test
-    fun `a test edit a host's model approved completes as before, but the declared check stays the agent's evidence`() {
-        val finish = testEditReviewedBy(null)
-        assertEquals(emptyList(), finish.acceptanceSurfaceUnreviewed, "the approval lets completion proceed")
-        assertEquals(listOf("tests/test_a.py"), finish.acceptanceSurfaceModelApproved)
-        assertEquals(listOf<Any?>("tested", passed, ProvenanceClass.AgentTest), finish.acceptance.single().let { listOf(it.provenance, it.result, it.provenanceClass) })
-        assertEquals("completed" to ProvenanceClass.AgentTest, finish.status to finish.provenanceClass)
+    fun `under human integrity approval a host's model approving a test edit leaves the campaign waiting for a person, whose verdict completes it independent`() {
+        seed(listOf(Acceptance.Run("AC-1", printing, Origin.User)), r1 = listOf("AC-1"))
+        // A review pass of the host's model answers the review; its policy accepts what was not verified (Studio's auto mode).
+        val model = Host(null, Decider.Policy)
+        val (waiting, stopped) = run(model, IntegrityApproval.Human, replies = ::testEdit)
+        assertEquals(CampaignOutcome.WaitingForInput, waiting.outcome, waiting.state?.reason)
+        assertEquals("acceptance_decision", stopped.stopCode)
+        assertTrue(waiting.state?.reason.orEmpty().contains("integrity change needs a human review"), waiting.state?.reason)
+        assertTrue(model.reviews.single().humanOnly, "the host is told that only a person's verdict resolves the flag")
+        val item = model.asked.last().items.single { it.obligation == "integrity:tests/test_a.py" }
+        assertEquals(listOf<Any?>(ObligationKind.Integrity, unverified, true, "host:review"), listOf(item.kind, item.status, item.humanOnly, item.by))
+        assertTrue(item.reason.contains("(model)"), item.reason)
+
+        // The person answers on the next run: the model's stored review is not reused as theirs.
+        val person = Host(ReviewerKind.Human)
+        val (run, finished) = run(person, IntegrityApproval.Human)
+        assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+        assertEquals(1, person.reviews.size, "the host is asked again, for a person")
+        val finish = assertNotNull(run.finish)
+        assertEquals(emptyList(), finish.acceptanceSurfaceUnreviewed + finish.acceptanceSurfaceModelApproved)
+        assertEquals("completed" to ProvenanceClass.Independent, finish.status to finish.provenanceClass)
+        assertEquals("independent", finished.provenanceClass)
+    }
+
+    @Test
+    fun `a pending completion whose integrity result a model's approval passed does not complete on resume under human approval`() {
+        seed(listOf(Acceptance.Run("AC-1", printing, Origin.User)), r1 = listOf("AC-1"))
+        assertEquals(CampaignOutcome.WaitingForInput, run(Host(null, Decider.Policy), IntegrityApproval.Human, replies = ::testEdit).first.outcome)
+        // As a version before C11 stored it: the host's model approval passed the integrity obligation.
+        Store.open(stateRoot, repo.git, clock).use { store ->
+            val acceptances = Acceptances(store, clock)
+            val pending = assertNotNull(acceptances.open(request.work, request.attempt))
+            acceptances.save(io.astrolabe.id.Identities(request.work, request.attempt, context = pending.cell), pending.copy(results = pending.results.map { r ->
+                if (r.kind != ObligationKind.Integrity) r else r.copy(status = passed, detail = "${r.obligation}: approved by host:review", humanOnly = false)
+            }))
+        }
+        val again = Host(null, Decider.Policy)
+        val (run, _) = run(again, IntegrityApproval.Human)
+        assertEquals(CampaignOutcome.WaitingForInput, run.outcome, run.state?.reason)
+        assertEquals(1, again.reviews.size, "the host is asked again for a person")
+        assertEquals(true, again.asked.single().items.single().humanOnly)
     }
 
     @Test
@@ -514,8 +581,9 @@ class ProvenanceTest {
     fun `a test file back at its s0 text, line endings aside, is no surface change at the final tree`() {
         seed(listOf(Acceptance.Run("AC-1", printing, Origin.User)), r1 = listOf("AC-1"))
         val path = "tests/test_a.py"
-        // A checkout with other line endings rewrites the test between turns: its bytes moved, its lines did not.
-        val (run, finished) = run(accepting(Decider.Policy, "studio:policy(auto)"), IntegrityApproval.Human,
+        // A checkout with other line endings rewrites the test between turns: its bytes moved, its lines did not. The cell's
+        // flag on the moved bytes is a person's to settle under human approval (C11): the user accepts it.
+        val (run, finished) = run(accepting(Decider.User, "user:test"), IntegrityApproval.Human,
             replies = { listOf(Scripted.Reply(listOf(read("read-src", "src/a.py"))), Scripted.Reply(listOf(say("done")))) },
             before = { i -> if (i == 1) repo.write(path, "def test_a():\r\n    assert 1 == 1   \r\n\r\n") })
         assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
@@ -550,14 +618,12 @@ class ProvenanceTest {
     fun `a test edit accepted without an approving review leaves the green declared check the agent's evidence`() {
         seed(listOf(Acceptance.Run("AC-1", printing, Origin.User)), r1 = listOf("AC-1"))
         val path = "tests/test_a.py"
-        // Under human integrity approval the host reviews the flag; this host has no reviewer, so its policy accepts it.
-        val (run, finished) = run(accepting(Decider.Policy, "studio:policy(auto)"), IntegrityApproval.Human) { c ->
-            listOf(
-                Scripted.Reply(listOf(read("read-test", path))),
-                Scripted.Reply(listOf(anchored("edit-test", path, c.registry.version(path)!!, "    assert 1 == 1", "    assert (1 == 1)"))),
-                Scripted.Reply(listOf(say("done"))),
-            )
-        }
+        // Under human integrity approval the host reviews the flag; this host has no reviewer, and its policy's acceptance
+        // never covers a change only a person settles (C11): the campaign waits.
+        val (policy, _) = run(accepting(Decider.Policy, "studio:policy(auto)"), IntegrityApproval.Human, replies = ::testEdit)
+        assertEquals(CampaignOutcome.WaitingForInput, policy.outcome, policy.state?.reason)
+        // The user accepts it as is on the next run.
+        val (run, finished) = run(accepting(Decider.User, "user:test"), IntegrityApproval.Human)
         assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
         val finish = assertNotNull(run.finish)
         assertEquals(listOf(path), finish.acceptanceSurfaceUnreviewed)

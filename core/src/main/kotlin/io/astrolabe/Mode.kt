@@ -17,8 +17,13 @@ public enum class DClassPolicy { Ask, Deny }
 /**
  * Who may approve a blocking test-integrity flag (§8.6, D-23, D-320). [Autonomous]: in S2+, and for a flag-only
  * review (no Check/Review item) in any shape, the review cell's approval suffices, with the human path as
- * fallback, so long autonomous campaigns can proceed. [Human]: only a verdict from
- * [io.astrolabe.event.Authority.review] resolves the flag; the review cell is not asked.
+ * fallback, so long autonomous campaigns can proceed; a host that wants a model — its judge or its own — to approve
+ * such changes chooses it. [Human] (C11): the flag goes to [io.astrolabe.event.Authority.review], the review cell is not
+ * asked, and only a person's approving verdict ([io.astrolabe.verify.ReviewerKind.Human]) resolves it — the request says
+ * so ([io.astrolabe.verify.ReviewRequest.humanOnly]). A model's answer is kept as the person's information: its approval
+ * resolves nothing and its rejection is a rejection as before; a policy's acceptance does not cover the flag, a user's
+ * does (the class stays the agent's evidence). Until a person answers, the campaign waits, and the host is asked again on
+ * resume.
  */
 @Serializable
 public enum class IntegrityApproval { Autonomous, Human }

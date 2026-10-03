@@ -19,6 +19,7 @@ import io.astrolabe.store.Migrations
 import io.astrolabe.store.Store
 import io.astrolabe.verify.ReviewRequest
 import io.astrolabe.verify.ReviewScope
+import io.astrolabe.verify.ReviewerKind
 import io.astrolabe.verify.Severity
 import io.astrolabe.verify.Verdict
 import io.astrolabe.verify.VerdictOutcome
@@ -95,6 +96,9 @@ public data class ReviewRecord(
 ) {
     val approved: Boolean get() = verdict?.approved == true && unavailable == null && failedRequiredChecks.isEmpty()
 
+    /** C11: a person's verdict ([ReviewerKind.Human]) that came on the host's review path. */
+    val byPerson: Boolean get() = verdict?.reviewer == ReviewerKind.Human && path.lastOrNull() == HUMAN
+
     /**
      * Whether this assessment still speaks for [contractVersion] at [candidate] with the evidence as it is now. The
      * candidate stamp covers the whole tree, so an equal candidate with no changed paths (an empty diff) is current
@@ -104,6 +108,11 @@ public data class ReviewRecord(
         this.contractVersion != contractVersion || this.candidate != candidate -> Freshness.Stale
         evidenceVersions.any { (path, version) -> current(path) != version } -> Freshness.Stale
         else -> Freshness.Current
+    }
+
+    public companion object {
+        /** The last [path] step of a review the host's authority answered (D-23). */
+        public const val HUMAN: String = "human"
     }
 }
 
@@ -153,11 +162,13 @@ public class ReviewCell @JvmOverloads constructor(
     public suspend fun obtain(packet: EvidencePacket, tier: Tier, current: (String) -> FileVersion?): ReviewOutcome {
         val criteria = packet.criteria.map { it.id }
         val integrity = packet.testIntegrity.map { it.copy(verdict = null).line + it.originalObligation.orEmpty() }
+        val person = packet.testIntegrity.any { it.needsPerson }
         // I3 (D-341): a review of this candidate, contract, criteria and integrity evidence is a stored result — an
-        // approval, a rejection or no verdict alike — reused, never asked for again.
+        // approval, a rejection or no verdict alike — reused, never asked for again. C11: a flag only a person resolves
+        // reuses only a person's verdict on the host's path; any other stored review is no answer and the host is asked.
         records(packet.ids).lastOrNull { r ->
             r.scope == packet.scope && r.incrementId == packet.incrementId && r.criteria.containsAll(criteria) && r.integrity == integrity &&
-                r.freshness(packet.contractVersion, packet.candidate, current) == Freshness.Current
+                r.freshness(packet.contractVersion, packet.candidate, current) == Freshness.Current && (!person || r.byPerson)
         }?.let { earlier ->
             val reused = earlier.copy(reused = true, failedRequiredChecks = packet.failedRequired.map { it.checkId })
             record(packet.ids, reused)
@@ -169,8 +180,8 @@ public class ReviewCell @JvmOverloads constructor(
         val why = ladder.reason
         var verdict = ladder.verdict
         if (verdict == null) {
-            path += "human"
-            verdict = authority.review(packet.request())
+            path += ReviewRecord.HUMAN
+            verdict = authority.review(packet.request().copy(humanOnly = person))
         }
         val base = ReviewRecord(packet.id, packet.scope, packet.incrementId, packet.contractVersion, packet.candidate, criteria, packet.evidenceVersions, verdict, path = path, failedRequiredChecks = packet.failedRequired.map { it.checkId }, integrity = integrity)
         val record = when {

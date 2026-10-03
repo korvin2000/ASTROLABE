@@ -85,12 +85,13 @@ internal data class KeptFlag(
     val reason: String?,
     val verdict: Verdict?,
     val originalObligation: String?,
+    val humanOnly: Boolean = false,
 ) {
-    fun flag(): TestIntegrityFlag = TestIntegrityFlag(path, surface, cause, requiredChecks, kind, reason, verdict, originalObligation)
+    fun flag(): TestIntegrityFlag = TestIntegrityFlag(path, surface, cause, requiredChecks, kind, reason, verdict, originalObligation, humanOnly)
 
     companion object {
         fun of(flag: TestIntegrityFlag): KeptFlag =
-            KeptFlag(flag.path, flag.surface, flag.cause, flag.requiredChecks, flag.kind, flag.reason, flag.verdict, flag.originalObligation)
+            KeptFlag(flag.path, flag.surface, flag.cause, flag.requiredChecks, flag.kind, flag.reason, flag.verdict, flag.originalObligation, flag.humanOnly)
     }
 }
 

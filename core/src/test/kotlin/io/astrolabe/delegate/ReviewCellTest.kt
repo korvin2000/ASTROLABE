@@ -149,6 +149,38 @@ class ReviewCellTest {
     }
 
     @Test
+    fun `under human integrity approval a stored model review is asked again for a person, and only a person's is reused`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val flag = TestIntegrityFlag("tests/test_a.py", AcceptanceSurface.TestFile, "edit #1", listOf("CHK-accept"), humanOnly = true)
+            val p = packet(f).copy(testIntegrity = listOf(flag))
+            var kind = io.astrolabe.verify.ReviewerKind.Model
+            val asked = ArrayList<ReviewRequest>()
+            val host = object : Authority by AutonomousAuthority() {
+                override suspend fun review(request: ReviewRequest): Verdict { asked += request; return verdict(p, VerdictOutcome.Approve).copy(requestId = request.id, signedBy = "host", reviewer = kind) }
+            }
+            // The host path: the judge always defers to the host's authority.
+            val cells = ReviewCell(ReviewJudge { _, _ -> JudgeRun(null, Tokens.ZERO, "host assessment required") }, host, f.store, f.idGen, f.clock, f.journal)
+            assertIs<ReviewOutcome.Approved>(cells.obtain(p, Tier.Medium, f.registry::version))
+            assertTrue(asked.single().humanOnly, "the request says only a person's verdict resolves its flag")
+            kind = io.astrolabe.verify.ReviewerKind.Human
+            val second = assertIs<ReviewOutcome.Approved>(cells.obtain(p.copy(id = "evidence-2"), Tier.Medium, f.registry::version))
+            assertEquals(2, asked.size, "a model's stored review is no person's: the host is asked again")
+            assertFalse(second.record.reused)
+            val third = assertIs<ReviewOutcome.Approved>(cells.obtain(p.copy(id = "evidence-3"), Tier.Medium, f.registry::version))
+            assertEquals(2, asked.size, "a person's review of this candidate is reused")
+            assertTrue(third.record.reused && third.record.verdict?.reviewer == io.astrolabe.verify.ReviewerKind.Human)
+            // Without human integrity approval a stored model review is reused as before (I3).
+            val plain = p.copy(id = "evidence-4", testIntegrity = listOf(flag.copy(path = "tests/test_b.py", humanOnly = false)))
+            kind = io.astrolabe.verify.ReviewerKind.Model
+            assertIs<ReviewOutcome.Approved>(cells.obtain(plain, Tier.Medium, f.registry::version))
+            assertFalse(asked.last().humanOnly)
+            val before = asked.size
+            assertTrue(assertIs<ReviewOutcome.Approved>(cells.obtain(plain.copy(id = "evidence-5"), Tier.Medium, f.registry::version)).record.reused)
+            assertEquals(before, asked.size)
+        }
+    }
+
+    @Test
     fun `campaign scope asks the review cell first and the human path only without a verdict`() = runTest {
         CellFixture(stateRoot).use { f ->
             val p = packet(f).copy(scope = ReviewScope.Campaign, incrementId = null, triggers = listOf(ReviewTriggers.CAMPAIGN))
