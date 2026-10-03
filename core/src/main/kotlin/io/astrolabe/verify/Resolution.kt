@@ -31,6 +31,8 @@ public enum class ObligationKind { Run, Check, Review, Integrity }
 /**
  * The result of one obligation at one candidate; [detail] names the obligation and says why, [findings] a rejection's
  * substance, [origin] the contract origin of its criterion — `null` for an obligation that is no acceptance item.
+ * [humanOnly]: only a person settles it — a test-integrity change under [io.astrolabe.IntegrityApproval.Human] (C11):
+ * a person's approving verdict passes it, and an acceptance decision covers it only when the user made it.
  */
 @Serializable
 public data class ObligationResult @JvmOverloads constructor(
@@ -42,6 +44,7 @@ public data class ObligationResult @JvmOverloads constructor(
     val by: String? = null,
     val findings: List<Finding> = emptyList(),
     val origin: Origin? = null,
+    val humanOnly: Boolean = false,
 ) {
     init {
         require(obligation.isNotBlank() && detail.isNotBlank()) { "a result names its obligation and says why" }
@@ -69,17 +72,29 @@ public enum class StopCode(public val wire: String) {
 
     /** A reviewer rejected the work and the one rework round is spent; the authority decides: rework or accept as is. */
     ReviewRejected("review_rejected"),
+
+    /**
+     * A test-integrity change waits for a person (C11, [io.astrolabe.IntegrityApproval.Human]): a person's approving
+     * review of it (the host's next review request says `humanOnly`), or the user's decision — never a policy's.
+     */
+    IntegrityReview("integrity_review"),
 }
 
-/** One obligation an acceptance decision is asked about: unverified with its reason, or rejected by review with its findings. */
+/**
+ * One obligation an acceptance decision is asked about: unverified with its reason, or rejected by review with its findings.
+ * [by] signed the verdict the item carries, if any. [humanOnly] (C11): only a person settles it — a test-integrity change
+ * under [io.astrolabe.IntegrityApproval.Human]; a policy's `accept` does not cover it, a user's does, and a person's
+ * approving verdict on the next review request ([ReviewRequest.humanOnly]) passes it.
+ */
 @Serializable
-public data class DecisionItem(
+public data class DecisionItem @JvmOverloads constructor(
     val obligation: String,
     val kind: ObligationKind,
     val status: ResultStatus,
     val reason: String,
     val findings: List<Finding> = emptyList(),
     val by: String? = null,
+    val humanOnly: Boolean = false,
 )
 
 /**
@@ -407,12 +422,25 @@ public object Obligations {
     /** The obligation id prefix of a test-integrity flag; the path follows it. */
     public const val INTEGRITY: String = "integrity:"
 
-    /** A test-integrity flag on a required check (§8.6): its reviewer's word, bound like any verdict; `null` when it needs none. */
+    /** Why a test-integrity obligation under [io.astrolabe.IntegrityApproval.Human] waits (C11). */
+    public const val HUMAN_REVIEW: String = "integrity change needs a human review"
+
+    /**
+     * A test-integrity flag on a required check (§8.6): its reviewer's word, bound like any verdict; `null` when it needs
+     * none. A [TestIntegrityFlag.humanOnly] flag (C11) gives a [ObligationResult.humanOnly] result that only a person's
+     * approval passes: a model's approval, or none, leaves it unverified with the model's word attached for the person; a
+     * model's rejection with substance stays a rejection (rework, then the user's word, D-338).
+     */
     @JvmStatic
     public fun flag(flag: TestIntegrityFlag, contractVersion: Int, candidate: CandidateId?): ObligationResult? {
-        if (flag.requiredChecks.isEmpty() || flag.kind == TestIntegrity.ADDITIONS_ONLY) return null
-        return verdict("$INTEGRITY${flag.path}", ObligationKind.Integrity, "acceptance surface ${flag.path} touches ${flag.requiredChecks.joinToString(", ")}",
-            flag.verdict, contractVersion, candidate, "no approving review of the change to a required check")
+        if (!flag.requiresReview) return null
+        val id = "$INTEGRITY${flag.path}"
+        val criterion = "acceptance surface ${flag.path} touches ${flag.requiredChecks.joinToString(", ")}"
+        if (!flag.humanOnly) return verdict(id, ObligationKind.Integrity, criterion, flag.verdict, contractVersion, candidate, "no approving review of the change to a required check")
+        val result = verdict(id, ObligationKind.Integrity, criterion, flag.verdict, contractVersion, candidate, HUMAN_REVIEW).copy(humanOnly = true)
+        val model = flag.verdict?.takeIf { it.reviewer != ReviewerKind.Human }
+        if (model == null || result.status == ResultStatus.Failed) return result
+        return result.copy(status = ResultStatus.Unverified, detail = "$id: $criterion — $HUMAN_REVIEW; ${wire(model.outcome)} by ${model.signedBy} (model) attached")
     }
 
     private fun wire(outcome: VerdictOutcome): String = if (outcome == VerdictOutcome.InsufficientEvidence) "insufficient_evidence" else outcome.name.lowercase()
@@ -428,9 +456,14 @@ public object Obligations {
  * 3. a current `rework` decision → rework;
  * 4. a reviewer rejection not accepted by a decision → rework, or — once the rework round is spent — await
  *    ([StopCode.ReviewRejected]);
- * 5. an unverified obligation not accepted by a decision → await ([StopCode.AcceptanceDecision]);
+ * 5. an unverified obligation not accepted by a decision → await ([StopCode.AcceptanceDecision];
+ *    [StopCode.IntegrityReview] while one only a person settles waits, C11);
  * 6. otherwise complete, with provenance per item: tested, reviewed, or accepted by whom and why (I7).
- * An `accept` decision covers exactly the obligations its request listed; a spent `rework` decision covers nothing.
+ * An `accept` decision covers exactly the obligations its request listed; a spent `rework` decision covers nothing. A
+ * policy's `accept` covers only unverified obligations that are not [ObligationResult.humanOnly]; the user's covers any
+ * it names — a reviewer's rejection (D-338) and, under [io.astrolabe.IntegrityApproval.Human], a test-integrity change
+ * with no person's review (C11: the user is a person; the item is accepted, never verified, and its run checks stay the
+ * agent's evidence).
  */
 public object Resolver {
     @JvmStatic
@@ -449,8 +482,9 @@ public object Resolver {
         // I2: once the rework round is spent, what the agent left open goes to the decider — never a failure by itself.
         val all = results + if (reworkSpent) other.mapIndexed { i, text -> ObligationResult("open:${i + 1}", ObligationKind.Check, ResultStatus.Unverified, text) } else emptyList()
         val open = binding + if (reworkSpent) emptyList() else other
-        // D-338: a policy covers only what could not be verified; accepting over a reviewer's rejection is the user's word.
-        fun covered(r: ObligationResult): Boolean = r.obligation in named && (r.status == ResultStatus.Unverified || accept?.decision?.decider == Decider.User)
+        // D-338: a policy covers only what could not be verified; accepting over a reviewer's rejection — or what only a
+        // person settles (C11) — is the user's word.
+        fun covered(r: ObligationResult): Boolean = r.obligation in named && (r.status == ResultStatus.Unverified && !r.humanOnly || accept?.decision?.decider == Decider.User)
         val accepted = all.filter(::covered).map { it.obligation }.toSet()
         val gaps = ArrayList<Gap>()
         all.filter { it.executedFailure }.forEach { gaps += Gap(GapKind.Failed, it.obligation, it.detail) }
@@ -463,10 +497,12 @@ public object Resolver {
         if (rework != null) gaps += Gap(GapKind.Other, null, "rework requested by ${rework.decision.by}: ${rework.decision.reason}")
         val passed = all.filter { it.status == ResultStatus.Passed }
         val receipts = passed.filter { it.kind == ObligationKind.Run }.mapNotNull { it.evidenceRef }.distinct()
+        // C11: what waits for a person's review says so, whatever else waits beside it.
+        val person = unverified.any { it.humanOnly }
         val (resolution, code) = when {
             all.any { it.executedFailure } || open.isNotEmpty() || rework != null -> Resolution.Rework to null
-            rejected.isNotEmpty() -> if (reworkSpent) Resolution.Await to StopCode.ReviewRejected else Resolution.Rework to null
-            unverified.isNotEmpty() -> Resolution.Await to StopCode.AcceptanceDecision
+            rejected.isNotEmpty() -> if (reworkSpent) Resolution.Await to (if (person) StopCode.IntegrityReview else StopCode.ReviewRejected) else Resolution.Rework to null
+            unverified.isNotEmpty() -> Resolution.Await to (if (person) StopCode.IntegrityReview else StopCode.AcceptanceDecision)
             else -> Resolution.Complete to null
         }
         val applied = active?.takeIf { resolution == Resolution.Complete && accepted.isNotEmpty() || rework != null }

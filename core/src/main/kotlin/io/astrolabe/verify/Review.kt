@@ -13,10 +13,14 @@ public enum class ReviewScope { Increment, Campaign }
  * A request for an independent assessment (§8.8), declared here as the protocol contract consumed by
  * [io.astrolabe.event.Authority.review] (human path) and by the review cell (P4.4.3). The packet it names carries
  * the complete applicable acceptance definitions with origin and obligation version (D-52); [criteria] repeats
- * the criterion texts so a verdict can name what it assessed.
+ * the criterion texts so a verdict can name what it assessed. [humanOnly] (C11): the packet carries a test-integrity
+ * change only a person's verdict resolves ([io.astrolabe.IntegrityApproval.Human]) — a host answers it with a person and
+ * marks the verdict [ReviewerKind.Human]; a model's answer resolves no flag and the campaign waits for a person. Such a
+ * question keeps its [id] across asks while it stays the same — the same packet reference (the s0 → candidate diff),
+ * [candidate] and [contractRevision] — and a person's answer to any earlier ask of it counts, so a host may answer late.
  */
 @Serializable
-public data class ReviewRequest(
+public data class ReviewRequest @JvmOverloads constructor(
     val id: String,
     val contractRevision: Int,
     val ids: Identities,
@@ -33,6 +37,7 @@ public data class ReviewRequest(
     val receipts: List<String> = emptyList(),
     /** The rubric the reviewer assesses against, one line per item (§8.8). */
     val rubric: List<String> = emptyList(),
+    val humanOnly: Boolean = false,
 ) {
     init {
         require(id.isNotBlank() && packetRef.isNotBlank()) { "review request needs an id and a packet reference" }

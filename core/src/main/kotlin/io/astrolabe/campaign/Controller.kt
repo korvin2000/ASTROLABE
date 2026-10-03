@@ -370,6 +370,9 @@ public class OpenedCampaign internal constructor(
     /** The task limits' running state for this open: session, latched reserve, a cell's limit stop, counters (C3). */
     internal val limitState: LimitState = LimitState()
 
+    /** C11: the increment reviews asked of the host for a person in this open (increment, candidate, revision): asked once. */
+    internal val personAsked: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
     /** Why dispatch or publication is refused now: cancellation first, then the lease; `null` when authorized. */
     public fun refusal(): String? = cancellation.reason?.let { "cancelled: $it" } ?: lease?.let { leases.authority(it).refusal() }
 
@@ -1611,7 +1614,7 @@ public class Controller @JvmOverloads public constructor(
      * the cell's own pending marker says so for a rejection that stood after its round (D-341).
      */
     private fun verify(c: OpenedCampaign, kept: ReturnedCompletion, increment: Increment, stampNow: CandidateId, currencies: Map<String, Currency>, review: ReviewOutcome? = null): CompletionResult {
-        val evidence = completionEvidence(c, increment, kept.testIntegrity())
+        val evidence = completionEvidence(c, increment, acceptanceFlags(c, kept.testIntegrity()))
         val reviewed = withIncrementReview(c.contract, increment, review, evidence, stampNow)
         return Verifier().accept(
             kept.proposal(), c.contract, increment, kept.register, checkNotNull(c.state).ledger, stampNow, currencies,
@@ -1671,7 +1674,7 @@ public class Controller @JvmOverloads public constructor(
         val record = PendingCompletion(
             idGen.next("pending"), c.ids.work, c.ids.attempt, increment.id, kept.cell, proposal.contractVersion,
             proposal.baseStamp, proposal.resultingStamp, proposal.patchHash, proposal.envId, kept.register.version,
-            kept.testIntegrity().map { it.line }, pending.resolved.results, pending.resolved.other, pending.resolved.gaps, pending.code,
+            acceptanceFlags(c, kept.testIntegrity()).map { it.line }, pending.resolved.results, pending.resolved.other, pending.resolved.gaps, pending.code,
             pending.resolved.results.mapNotNull { it.evidenceRef }.distinct(), kept.text.take(MAX_SUMMARY_CHARS), idGen.next("decide"),
         )
         Acceptances(c.store, clock).save(ids, record)
@@ -1687,7 +1690,9 @@ public class Controller @JvmOverloads public constructor(
     private suspend fun decide(c: OpenedCampaign, ids: Identities, pending: PendingCompletion, authority: Authority): Settled {
         val acceptances = Acceptances(c.store, clock)
         val waiting = pending.resolve(null)
+        // C11: a policy's word settles nothing only a person settles — such a request is asked again, so a person can answer.
         val decision = acceptances.current(c.ids.work, c.ids.attempt, pending.incrementId, pending.resultingStamp, pending.contractVersion)
+            ?.takeUnless { it.decision.decider == io.astrolabe.verify.Decider.Policy && waiting.undecided.any { r -> r.humanOnly } }
             ?: ask(c, ids, pending, waiting, authority)
         val resolved = pending.resolve(decision)
         // The authority may take its time: a decision applies only to the tree and contract it was asked about.
@@ -1704,7 +1709,7 @@ public class Controller @JvmOverloads public constructor(
 
     /** One acceptance-decision request for [pending] (D-338); an answer for another request, revision or candidate is no answer. */
     private suspend fun ask(c: OpenedCampaign, ids: Identities, pending: PendingCompletion, waiting: io.astrolabe.verify.Resolved, authority: Authority): DecisionRecord? {
-        val items = waiting.undecided.map { DecisionItem(it.obligation, it.kind, it.status, it.detail, it.findings, it.by) }
+        val items = waiting.undecided.map { DecisionItem(it.obligation, it.kind, it.status, it.detail, it.findings, it.by, it.humanOnly) }
         if (items.isEmpty()) return null
         val diff = runCatching { campaignReview(c, authority).diffBlob(c.s0.stampId, pending.resultingStamp).first.hex }.getOrNull()
         val request = AcceptanceDecisionRequest(
@@ -1780,7 +1785,58 @@ public class Controller @JvmOverloads public constructor(
         }
         // The campaign gate's own pending completion is settled where final acceptance runs.
         if (increment == null) return Resumed.Continue
-        return resumed(c, ids, increment, decide(c, ids, pending, authority))
+        // A commit goes on to final acceptance, which reads the green receipts this tree already has (C11 resume).
+        heldReceipts(c)
+        return resumed(c, ids, increment, decide(c, ids, personReviewed(c, increment, pending, authority), authority))
+    }
+
+    /** A fresh registry knows no result: each check's last receipt is the one the stopped controller held, re-assessed now. */
+    private fun heldReceipts(c: OpenedCampaign) {
+        val receipts = SqliteReceipts(c.store, clock)
+        for (check in c.checks.all().filter { it.last == null }) {
+            val receipt = receipts.forCheck(check.id).lastOrNull { it.ids.work == c.ids.work && it.ids.attempt == c.ids.attempt } ?: continue
+            c.checks.record(check.id, io.astrolabe.verify.LastResult(receipt.receiptId, receipt.stampAfter, receipt.checkDefinitionVersion, receipt.outcome, receipt.parsed, io.astrolabe.verify.Applicability.Current))
+        }
+    }
+
+    /**
+     * C11 resume: under [IntegrityApproval.Human] the reviewer's results of [pending] again from the review records now —
+     * its flags ([acceptanceFlags]: the kept cell's and the tree's) asked of the host once more, for a person, while no
+     * person's usable verdict is stored — so neither a model's approval nor a result stored before C11 settles a flag on
+     * resume, and one fresh record settles the packet's integrity, `check:` and `review:` results alike. An integrity
+     * result whose flag is no longer on the tree waits for a person.
+     */
+    private suspend fun personReviewed(c: OpenedCampaign, increment: Increment, pending: PendingCompletion, authority: Authority): PendingCompletion {
+        if (c.attempt.config.integrityApproval != io.astrolabe.IntegrityApproval.Human) return pending
+        val kept = ReturnedCompletions(c.store, clock).latest(c.ids.work, c.ids.attempt)?.takeIf { it.cell == pending.cell }
+        val flags = acceptanceFlags(c, kept?.testIntegrity().orEmpty().map { it.copy(verdict = null) })
+        if (pending.results.none { it.kind == ObligationKind.Integrity } && flags.none { it.needsPerson }) return pending
+        if (flags.any { it.needsPerson }) {
+            personReview(c, authority, increment, flags, { evidence(c, increment, listOf("completion acceptance"), flags, kept?.preexisting.orEmpty(), authority) }, Tier.Medium)
+        }
+        val record = latestReview(c, increment, flags)
+        val assessed = completionEvidence(c, increment, flags)
+        val integrity = assessed.flags.mapNotNull { Obligations.flag(it, pending.contractVersion, pending.resultingStamp) }.associateBy { it.obligation }
+        fun reviewed(r: ObligationResult): ObligationResult {
+            if (record == null) return r
+            val item = c.contract.acceptance(r.obligation)
+            return when {
+                item is Acceptance.Check || item is Acceptance.Review -> Obligations.verdict(r.obligation, if (item is Acceptance.Review) ObligationKind.Review else ObligationKind.Check, item.criterion,
+                    assessed.verdicts[r.obligation], pending.contractVersion, pending.resultingStamp, assessed.unavailable[r.obligation]).copy(origin = item.origin)
+                r.obligation == "review:${increment.id}" -> Obligations.verdict(r.obligation, ObligationKind.Review, "increment review (${record.path.joinToString(" → ")})",
+                    record.verdict?.takeIf { record.unavailable == null }, pending.contractVersion, pending.resultingStamp, record.unavailable)
+                else -> r
+            }
+        }
+        val results = pending.results.map { r ->
+            when {
+                r.kind != ObligationKind.Integrity -> reviewed(r)
+                r.obligation in integrity -> integrity.getValue(r.obligation)
+                r.status == ResultStatus.Passed -> r.copy(status = ResultStatus.Unverified, detail = "${r.obligation}: ${Obligations.HUMAN_REVIEW}", humanOnly = true)
+                else -> r.copy(humanOnly = true)
+            }
+        }
+        return pending.copy(results = results + integrity.values.filter { flag -> results.none { it.obligation == flag.obligation } })
     }
 
     /** What a pending completion of [increment] settled outside a live return comes to on resume (D-340). */
@@ -1857,12 +1913,7 @@ public class Controller @JvmOverloads public constructor(
             text = "open: cell ${kept.cell.value} returned but its outcome was never applied · " +
                 (void?.let { "$it; the work continues in a cell" } ?: "verified again at @${kept.resultingStamp.hash8} with no model call"), at = clock.instant()))
         if (void != null) return null
-        // A fresh registry knows no result: each check's last receipt is the one the stopped controller held, re-assessed now.
-        val receipts = SqliteReceipts(c.store, clock)
-        for (check in c.checks.all().filter { it.last == null }) {
-            val receipt = receipts.forCheck(check.id).lastOrNull { it.ids.work == c.ids.work && it.ids.attempt == c.ids.attempt } ?: continue
-            c.checks.record(check.id, io.astrolabe.verify.LastResult(receipt.receiptId, receipt.stampAfter, receipt.checkDefinitionVersion, receipt.outcome, receipt.parsed, io.astrolabe.verify.Applicability.Current))
-        }
+        heldReceipts(c)
         refreshPrescan(c, ids, kept.touched, kept.turns, once = true)?.let { return Resumed.Stopped(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, it))) }
         kept.answer?.let { return Resumed.Stopped(c.advance(Transition.Answered(report.candidateId, it))) }
         val completion = verify(c, kept, increment, report.candidateId, currencies(c, scheduler(c), report.candidateId), review(increment, kept))
@@ -2207,15 +2258,17 @@ public class Controller @JvmOverloads public constructor(
             precompile = precompile,
             rework = rework,
             knowledge = knowledge,
-            completionEvidence = if (child == null && role.packetKind == io.astrolabe.cell.PacketKind.Result) { flags ->
+            completionEvidence = if (child == null && role.packetKind == io.astrolabe.cell.PacketKind.Result) { raised ->
+                val flags = acceptanceFlags(c, raised)
                 val required = increment.accept.any { c.contract.acceptance(it) is Acceptance.Check || c.contract.acceptance(it) is Acceptance.Review } || flags.any { it.blocksCompletion }
                 if (required) {
                     // D-261/D-320: a flag-only review (no Check/Review item) goes to the review cell in every shape unless Human.
                     val flagOnly = increment.accept.none { c.contract.acceptance(it) is Acceptance.Check || c.contract.acceptance(it) is Acceptance.Review }
-                    val reviewer = if ((c.contract.shape >= Shape.S2 && increment.accept.none { c.contract.acceptance(it) is Acceptance.Check } || flagOnly) && !humanIntegrity(c, flags))
-                        reviewCell(c, increment, model, authority, syntax, span)
-                    else hostReviewer(c, authority)
-                    reviewer.obtain(evidence(c, increment, listOf("completion acceptance"), flags, preexistingLines(compiled.k.ledger), authority), Tier.Medium, c.registry::version)
+                    val packet = { evidence(c, increment, listOf("completion acceptance"), flags, preexistingLines(compiled.k.ledger), authority) }
+                    if (humanIntegrity(c, flags)) personReview(c, authority, increment, flags, packet, Tier.Medium)
+                    else if (c.contract.shape >= Shape.S2 && increment.accept.none { c.contract.acceptance(it) is Acceptance.Check } || flagOnly)
+                        reviewCell(c, increment, model, authority, syntax, span).obtain(packet(), Tier.Medium, c.registry::version)
+                    else hostReviewer(c, authority).obtain(packet(), Tier.Medium, c.registry::version)
                 }
                 completionEvidence(c, increment, flags)
             } else null,
@@ -2331,12 +2384,14 @@ public class Controller @JvmOverloads public constructor(
     private suspend fun incrementReview(c: OpenedCampaign, increment: Increment, kept: ReturnedCompletion, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?): ReviewOutcome? {
         val prescan = c.impactPrescan
         val impact = RiskFloorInput(prescan.contractsTouched.size, prescan.complete, prescan.prescan.fanIn, prescan.complete)
-        val flags = kept.testIntegrity()
+        val flags = acceptanceFlags(c, kept.testIntegrity())
         val triggers = ReviewTriggers.increment(IncrementReviewInput(c.contract, increment, Roles.implementing, kept.tier, flags, kept.changed, c.kb.contractAnchors(), impact))
         if (triggers.isEmpty()) return null
         val row = FunctionTable.DEFAULT.row(ReviewTriggers.function(triggers))
-        val reviewer = if (humanIntegrity(c, flags)) hostReviewer(c, authority) else reviewCell(c, increment, model, authority, syntax, span)
-        val outcome = reviewer.obtain(evidence(c, increment, triggers, flags, kept.preexisting, authority), row.defaultTier, c.registry::version)
+        val packet = { evidence(c, increment, triggers, flags, kept.preexisting, authority) }
+        // C11: a review that waits for a person is the host's, never cut short by a task limit — it costs no model call here.
+        if (humanIntegrity(c, flags)) return personReview(c, authority, increment, flags, packet, row.defaultTier)
+        val outcome = reviewCell(c, increment, model, authority, syntax, span).obtain(packet(), row.defaultTier, c.registry::version)
         // C3: a review a task limit cut short says so — an unverified result, never a block and never another cause.
         val block = c.limitState.block?.decision
         if (outcome !is ReviewOutcome.Unavailable || block == null) return outcome
@@ -2353,6 +2408,37 @@ public class Controller @JvmOverloads public constructor(
     /** D-320: under [IntegrityApproval.Human] a blocking test-integrity flag is resolved only through `Authority.review`. */
     private fun humanIntegrity(c: OpenedCampaign, flags: List<io.astrolabe.verify.TestIntegrityFlag>): Boolean =
         c.attempt.config.integrityApproval == io.astrolabe.IntegrityApproval.Human && flags.any { it.blocksCompletion }
+
+    /**
+     * C11: the test-integrity flags acceptance resolves. Under [IntegrityApproval.Human] they are those [raised] by the cell
+     * and every acceptance-surface change since s0 on the tree now ([FinishReceipts.surfaceChanges], D-396) — so a later
+     * cell of the increment that says `done` without touching the test leaves no change unreviewed — each one only a
+     * person's approving verdict resolves; a change from the tree keeps the justification an earlier cell recorded for
+     * its path. Otherwise [raised] as they are.
+     */
+    private fun acceptanceFlags(c: OpenedCampaign, raised: List<io.astrolabe.verify.TestIntegrityFlag>): List<io.astrolabe.verify.TestIntegrityFlag> {
+        if (c.attempt.config.integrityApproval != io.astrolabe.IntegrityApproval.Human) return raised
+        val known = raised.map { it.path }.toSet()
+        val tree = FinishReceipts.surfaceChanges(c, c.stamper.report().members.keys + c.s0.paths, SINCE_S0).filter { it.path !in known }
+        if (tree.isEmpty()) return raised.map { it.copy(humanOnly = true) }
+        val reasons = ReturnedCompletions(c.store, clock).all(c.ids.work, c.ids.attempt).flatMap { it.flags }.mapNotNull { f -> f.reason?.let { f.path to it } }.toMap()
+        return (raised + tree.map { it.copy(reason = reasons[it.path]) }).map { it.copy(humanOnly = true) }
+    }
+
+    /**
+     * C11: the host's review of [increment] for a person — asked once per open for this candidate and contract revision; a
+     * later ask in the same open reads the stored answer, so a host without a person is not asked on every proposal (a
+     * reopen asks again, under the question's first request id: [ReviewCell.obtain]).
+     */
+    private suspend fun personReview(c: OpenedCampaign, authority: Authority, increment: Increment, flags: List<io.astrolabe.verify.TestIntegrityFlag>, packet: () -> EvidencePacket, tier: Tier): ReviewOutcome {
+        val stored = latestReview(c, increment, flags)
+        if (!c.personAsked.add("${increment.id}@${c.stamper.report().candidateId.hash8}@v${c.contract.version}") && stored != null) return when {
+            stored.unavailable != null -> ReviewOutcome.Unavailable(stored, stored.unavailable)
+            stored.approved -> ReviewOutcome.Approved(stored)
+            else -> ReviewOutcome.Declined(stored, "review ${stored.verdict?.outcome?.name?.lowercase()} by ${stored.verdict?.signedBy}", emptyList())
+        }
+        return hostReviewer(c, authority).obtain(packet(), tier, c.registry::version)
+    }
 
     private fun hostReviewer(c: OpenedCampaign, authority: Authority): ReviewCell =
         ReviewCell(io.astrolabe.delegate.ReviewJudge { _, _ -> io.astrolabe.delegate.JudgeRun(null, Tokens(0), "host assessment required") }, authority, c.store, idGen, clock, c.journal)
@@ -2396,25 +2482,33 @@ public class Controller @JvmOverloads public constructor(
     private fun completionEvidence(c: OpenedCampaign, increment: Increment, flags: List<io.astrolabe.verify.TestIntegrityFlag> = emptyList()): io.astrolabe.cell.CompletionEvidence {
         val stamp = c.stamper.report().candidateId
         val contract = c.contract
-        val integrity = flags.map { it.copy(verdict = null).line + it.originalObligation.orEmpty() }
-        val record = c.store.db.query("SELECT body FROM packets WHERE work_id = ? AND attempt_id = ? AND kind = ? ORDER BY rowid DESC",
-            c.ids.work, c.ids.attempt, ReviewCell.KIND) { Json.decodeFromString(io.astrolabe.delegate.ReviewRecord.serializer(), it.string("body")) }
-            .firstOrNull { it.incrementId == increment.id && it.criteria.containsAll(increment.accept) && (flags.isEmpty() || it.integrity == integrity) &&
-                it.freshness(contract.version, stamp, c.registry::version) == io.astrolabe.delegate.Freshness.Current }
+        val record = latestReview(c, increment, flags)
         val acceptances = Acceptances(c.store, clock)
         val decision = acceptances.current(c.ids.work, c.ids.attempt, increment.id, stamp, contract.version)
         val reworkSpent = acceptances.reworkSpent(c.ids.work, c.ids.attempt, increment.id, stamp, contract.version)
         val independent = increment.accept.filter { contract.acceptance(it) is Acceptance.Check || contract.acceptance(it) is Acceptance.Review }
         val verdict = record?.verdict?.takeIf { record.unavailable == null }
-        // D-320: a review-cell verdict still speaks for Check/Review items, but under Human it never resolves a flag.
-        val flagVerdict = verdict?.takeUnless { humanIntegrity(c, flags) && record.path.lastOrNull() != "human" }
+        val human = c.attempt.config.integrityApproval == io.astrolabe.IntegrityApproval.Human
+        // D-320: a review-cell verdict still speaks for Check/Review items, but under Human only the host's path speaks for
+        // a flag — C11: and only a person's verdict resolves it; a model's stays attached as the person's information.
+        val flagVerdict = verdict?.takeUnless { human && record.path.lastOrNull() != io.astrolabe.delegate.ReviewRecord.HUMAN }
         return io.astrolabe.cell.CompletionEvidence(
             verdicts = if (verdict != null) independent.associateWith { verdict } else emptyMap(),
             unavailable = if (record != null && verdict == null) independent.associateWith { record.unavailable ?: "no usable verdict" } else emptyMap(),
-            flags = flags.map { it.copy(verdict = flagVerdict) },
+            flags = flags.map { it.copy(verdict = flagVerdict, humanOnly = human) },
             decision = decision,
             reworkSpent = reworkSpent,
         )
+    }
+
+    /** The latest review of [increment] recorded for the tree now, its criteria and its [flags]' integrity evidence. */
+    private fun latestReview(c: OpenedCampaign, increment: Increment, flags: List<io.astrolabe.verify.TestIntegrityFlag>): io.astrolabe.delegate.ReviewRecord? {
+        val stamp = c.stamper.report().candidateId
+        val integrity = flags.map { it.copy(verdict = null).line + it.originalObligation.orEmpty() }
+        return c.store.db.query("SELECT body FROM packets WHERE work_id = ? AND attempt_id = ? AND kind = ? ORDER BY rowid DESC",
+            c.ids.work, c.ids.attempt, ReviewCell.KIND) { Json.decodeFromString(io.astrolabe.delegate.ReviewRecord.serializer(), it.string("body")) }
+            .firstOrNull { it.incrementId == increment.id && it.criteria.containsAll(increment.accept) && (flags.isEmpty() || it.integrity == integrity) &&
+                it.freshness(c.contract.version, stamp, c.registry::version) == io.astrolabe.delegate.Freshness.Current }
     }
 
     /**
@@ -2702,6 +2796,9 @@ public class Controller @JvmOverloads public constructor(
 
         /** How many `rework` continuations one S0 run applies before it waits for the next resume (D-340). */
         private const val MAX_REWORKS_PER_RUN: Int = 2
+
+        /** The cause of a test-integrity flag derived from the tree rather than from a cell's edit (C11). */
+        private const val SINCE_S0: String = "a change since s0"
 
         /** The agent's final text kept with a pending completion, for the decider. */
         private const val MAX_SUMMARY_CHARS: Int = 4_000

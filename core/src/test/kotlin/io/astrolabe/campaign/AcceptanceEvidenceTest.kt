@@ -174,7 +174,8 @@ class AcceptanceEvidenceTest {
             ), reviewer, maxCells = 1)
             assertTrue(reviewer.requests.isNotEmpty(), result.state?.reason)
             val flag = assertNotNull(result.exit, result.state?.reason).packet.flags.testIntegrity.single { it.path == path }
-            assertEquals("host:alice", assertNotNull(flag.verdict, "the flag must be resolved").signedBy)
+            assertEquals("host:alice", assertNotNull(flag.verdict, "the host's answer is attached to the flag").signedBy)
+            assertTrue(flag.blocksCompletion, "a verdict that does not say a person reviewed resolves no flag under Human (C11)")
         }
     }
 
@@ -209,10 +210,11 @@ class AcceptanceEvidenceTest {
     }
 
     @Test
-    fun `S0 under human integrity approval still resolves a required test edit through the host`() {
+    fun `S0 under human integrity approval asks the host about a required test edit, and a model's answer leaves it waiting for a person`() {
         val (reviewer, flag) = s0TestEdit(io.astrolabe.IntegrityApproval.Human)
-        assertTrue(reviewer.requests.isNotEmpty())
-        assertEquals("host:alice", assertNotNull(flag.verdict, "the flag must be resolved").signedBy)
+        assertTrue(reviewer.requests.isNotEmpty() && reviewer.requests.all { it.humanOnly })
+        assertEquals("host:alice", assertNotNull(flag.verdict, "the host's answer is attached to the flag").signedBy)
+        assertTrue(flag.blocksCompletion, "a verdict that does not say a person reviewed resolves no flag under Human (C11)")
     }
 
     @Test

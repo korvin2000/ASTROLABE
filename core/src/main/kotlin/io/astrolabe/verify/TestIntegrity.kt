@@ -30,8 +30,10 @@ public enum class AcceptanceSurface(public val wire: String) {
  * and no approving [verdict] is attached, the increment cannot complete. [originalObligation] is the pre-change
  * text the change removed (the deleted test, the original assertion) for the reviewer. [reason] is the worker's
  * recorded justification, rendered with the line and in the finish receipt (`acceptance_surface_modified`).
+ * [humanOnly] (C11, set under [io.astrolabe.IntegrityApproval.Human]): only a person's approving [verdict]
+ * ([ReviewerKind.Human]) resolves the flag; a model's stays attached as the person's information and resolves nothing.
  */
-public data class TestIntegrityFlag(
+public data class TestIntegrityFlag @JvmOverloads constructor(
     val path: String,
     val surface: AcceptanceSurface,
     val cause: String,
@@ -40,12 +42,19 @@ public data class TestIntegrityFlag(
     val reason: String? = null,
     val verdict: Verdict? = null,
     val originalObligation: String? = null,
+    val humanOnly: Boolean = false,
 ) {
     /**
      * Unknown classification is never proof of no weakening: a touched required check needs an approving review.
      * Only a new test file without skip markers is exempt; additions to existing tests can bypass assertions.
      */
-    val blocksCompletion: Boolean get() = requiredChecks.isNotEmpty() && kind != TestIntegrity.ADDITIONS_ONLY && verdict?.approved != true
+    val blocksCompletion: Boolean get() = requiresReview && !(verdict?.approved == true && (!humanOnly || verdict.reviewer == ReviewerKind.Human))
+
+    /** A touched required check that is not a pure addition: its change needs an approving review. */
+    internal val requiresReview: Boolean get() = requiredChecks.isNotEmpty() && kind != TestIntegrity.ADDITIONS_ONLY
+
+    /** C11: a flag whose resolution waits for a person whatever a model said. */
+    internal val needsPerson: Boolean get() = humanOnly && requiresReview
 
     /** The acceptance-surface line of the edit result and the anchor (§8.6). */
     val line: String
@@ -61,6 +70,7 @@ public data class TestIntegrityFlag(
                     else -> "${verdict.outcome.name.lowercase()} by ${verdict.signedBy}"
                 },
             )
+            if (verdict != null && humanOnly && verdict.reviewer != ReviewerKind.Human) append(" (model; a person must review)")
         }
 }
 
@@ -246,6 +256,7 @@ public object TestIntegrity {
             packetRef = packetRef,
             criteria = acceptance.map { it.criterion } + flags.map { it.line },
             originalObligations = obligations,
+            humanOnly = flags.any { it.needsPerson },
         )
     }
 

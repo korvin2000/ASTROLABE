@@ -19,6 +19,7 @@ import io.astrolabe.store.Migrations
 import io.astrolabe.store.Store
 import io.astrolabe.verify.ReviewRequest
 import io.astrolabe.verify.ReviewScope
+import io.astrolabe.verify.ReviewerKind
 import io.astrolabe.verify.Severity
 import io.astrolabe.verify.Verdict
 import io.astrolabe.verify.VerdictOutcome
@@ -95,6 +96,9 @@ public data class ReviewRecord(
 ) {
     val approved: Boolean get() = verdict?.approved == true && unavailable == null && failedRequiredChecks.isEmpty()
 
+    /** C11: a person's usable verdict ([ReviewerKind.Human]) that came on the host's review path. */
+    val byPerson: Boolean get() = unavailable == null && verdict?.reviewer == ReviewerKind.Human && path.lastOrNull() == HUMAN
+
     /**
      * Whether this assessment still speaks for [contractVersion] at [candidate] with the evidence as it is now. The
      * candidate stamp covers the whole tree, so an equal candidate with no changed paths (an empty diff) is current
@@ -104,6 +108,11 @@ public data class ReviewRecord(
         this.contractVersion != contractVersion || this.candidate != candidate -> Freshness.Stale
         evidenceVersions.any { (path, version) -> current(path) != version } -> Freshness.Stale
         else -> Freshness.Current
+    }
+
+    public companion object {
+        /** The last [path] step of a review the host's authority answered (D-23). */
+        public const val HUMAN: String = "human"
     }
 }
 
@@ -153,12 +162,18 @@ public class ReviewCell @JvmOverloads constructor(
     public suspend fun obtain(packet: EvidencePacket, tier: Tier, current: (String) -> FileVersion?): ReviewOutcome {
         val criteria = packet.criteria.map { it.id }
         val integrity = packet.testIntegrity.map { it.copy(verdict = null).line + it.originalObligation.orEmpty() }
+        val person = packet.testIntegrity.any { it.needsPerson }
         // I3 (D-341): a review of this candidate, contract, criteria and integrity evidence is a stored result — an
-        // approval, a rejection or no verdict alike — reused, never asked for again.
-        records(packet.ids).lastOrNull { r ->
+        // approval, a rejection or no verdict alike — reused, never asked for again. C11: a flag only a person resolves
+        // reuses only a person's usable verdict on the host's path; any other stored review is no answer and the host is asked.
+        val same = records(packet.ids).filter { r ->
             r.scope == packet.scope && r.incrementId == packet.incrementId && r.criteria.containsAll(criteria) && r.integrity == integrity &&
                 r.freshness(packet.contractVersion, packet.candidate, current) == Freshness.Current
-        }?.let { earlier ->
+        }
+        // C11: the same question for a person — this packet reference (the s0 → candidate diff), candidate and revision —
+        // keeps the id it was first asked under, and a person's late answer to any earlier ask of it counts.
+        val asked = if (person) same.map { it.packetId }.distinct() else emptyList()
+        same.lastOrNull { r -> !person || r.byPerson }?.let { earlier ->
             val reused = earlier.copy(reused = true, failedRequiredChecks = packet.failedRequired.map { it.checkId })
             record(packet.ids, reused)
             journal(packet, "reused: " + (earlier.verdict?.let { "${it.signedBy} ${wire(it.outcome)}" } ?: "no verdict (${earlier.unavailable})") + " @${packet.candidate.hash8} at contract v${packet.contractVersion}")
@@ -169,13 +184,13 @@ public class ReviewCell @JvmOverloads constructor(
         val why = ladder.reason
         var verdict = ladder.verdict
         if (verdict == null) {
-            path += "human"
-            verdict = authority.review(packet.request())
+            path += ReviewRecord.HUMAN
+            verdict = authority.review(packet.request().copy(id = asked.firstOrNull() ?: packet.id, humanOnly = person))
         }
         val base = ReviewRecord(packet.id, packet.scope, packet.incrementId, packet.contractVersion, packet.candidate, criteria, packet.evidenceVersions, verdict, path = path, failedRequiredChecks = packet.failedRequired.map { it.checkId }, integrity = integrity)
         val record = when {
             verdict == null -> base.copy(unavailable = "the reviewer gave no verdict (${why ?: "the judge published none"}); the result is unverified")
-            verdict.requestId != packet.id -> base.copy(unavailable = "verdict answers ${verdict.requestId}, not ${packet.id}")
+            verdict.requestId != packet.id && verdict.requestId !in asked -> base.copy(unavailable = "verdict answers ${verdict.requestId}, not ${packet.id}")
             Replies.check(verdict, packet.contractVersion) != ReplyValidity.Current -> base.copy(unavailable = "verdict signed for contract v${verdict.contractRevision}, not v${packet.contractVersion}")
             verdict.reviewedCandidate != packet.candidate -> base.copy(unavailable = "verdict reviewed @${verdict.reviewedCandidate.hash8}, not @${packet.candidate.hash8}")
             else -> base
