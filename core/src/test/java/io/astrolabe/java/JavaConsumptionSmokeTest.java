@@ -1,9 +1,16 @@
 package io.astrolabe.java;
 
+import io.astrolabe.BalanceProfile;
+import io.astrolabe.BalanceProfiles;
 import io.astrolabe.Config;
 import io.astrolabe.Defaults;
 import io.astrolabe.Project;
+import io.astrolabe.budget.LimitRule;
+import io.astrolabe.budget.Reserves;
+import io.astrolabe.budget.TaskLimits;
+import io.astrolabe.budget.Tokens;
 import io.astrolabe.campaign.CampaignOutcome;
+import io.astrolabe.campaign.CampaignPolicy;
 import io.astrolabe.context.ContextArithmetic;
 import io.astrolabe.event.AgentEvent;
 import io.astrolabe.event.AmendmentProposal;
@@ -31,6 +38,7 @@ import io.astrolabe.provider.Item;
 import io.astrolabe.provider.JavaInvocation;
 import io.astrolabe.provider.JavaProviderAdapter;
 import io.astrolabe.provider.Message;
+import io.astrolabe.provider.Money;
 import io.astrolabe.provider.PriceTable;
 import io.astrolabe.provider.Profile;
 import io.astrolabe.provider.Request;
@@ -52,6 +60,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.lang.reflect.Method;
+import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
@@ -269,6 +278,27 @@ class JavaConsumptionSmokeTest {
         assertEquals(null, request.getSessionKey());
         RoutingPacket packet = new RoutingPacket(null, 1_000L, 100, null, null, null);
         assertEquals(0L, packet.getReserveTokens());
+        // C3: the policy's v1 constructors stay; limits and the balance profile are plain Java values.
+        CampaignPolicy v1 = new CampaignPolicy(Tokens.of(1_000), null, false, Collections.emptyList());
+        assertEquals(TaskLimits.NONE, v1.getLimits());
+        assertEquals(null, v1.getBalance());
+        Config config = new Config(d, Collections.emptyMap(), d.getProfileRoles(), d.getMode(), d.getExecutionMode(), d.getDClass(),
+                d.getIntegrityApproval(), d.getUnknownOutcomeReconciliation(), d.getCeiling(), null, new io.astrolabe.auth.RedactionConfig(),
+                null, new io.astrolabe.Flags(), Collections.emptyMap(), Collections.emptyList(), io.astrolabe.route.TierTable.UNTIERED, true);
+        assertEquals(BalanceProfile.Balanced, config.getBalance());
+    }
+
+    @Test
+    void aJavaHostSetsTaskLimitsAndAProfileAtStart() {
+        TaskLimits limits = new TaskLimits(new Money("USD", new BigDecimal("50"), false), 480, 3_000);
+        CampaignPolicy policy = new CampaignPolicy(Tokens.of(1_000_000), null, false, Collections.emptyList(), limits, BalanceProfile.Economy);
+        assertEquals(480, policy.getLimits().getMaxMinutes());
+        assertEquals(BalanceProfile.Economy, policy.getBalance());
+        assertEquals(3, LimitRule.reserveRequests(3_000, new Reserves()));
+        TaskLimits requestsOnly = new TaskLimits(null, null, 100);
+        assertTrue(requestsOnly.getAny());
+        assertEquals(BalanceProfile.Thorough, new Config().withBalance(BalanceProfile.Thorough).getBalance());
+        assertTrue(BalanceProfiles.slowdown(BalanceProfiles.vector(BalanceProfile.Economy)).getWorst() <= BalanceProfiles.SOFT_SLOWDOWN);
     }
 
     @Test
