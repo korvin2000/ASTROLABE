@@ -2114,6 +2114,9 @@ public class Controller @JvmOverloads public constructor(
             tiers = layered.tiers,
         )
         verify.inputs = tree.atlas.rows.map { it.path }
+        // C3r: every check and run deadline is cut at its dispatch to the active time the minutes limit leaves then.
+        val timeLeft = limitControl.timeLeft(c)
+        verify.timeLeft = timeLeft
         val ceiling = Ceiling.of(contract.authorization, config.executionMode)
         val generation = c.lease?.generation ?: ExecutionGeneration.INITIAL
         // §10.1 (D-121): an S2+ main-line cell whose role unmasks task.delegate delegates to child cells; a child never does.
@@ -2152,6 +2155,7 @@ public class Controller @JvmOverloads public constructor(
             ),
             kb = KbTool(c.kb, estimator, idGen, queue = Queue(c.store, KbWriter(c.store, estimator, clock), idGen, clock), ids = ids, events = events, deniedKinds = role.deniedNoteKinds, dense = layered.dense, redaction = redaction),
         )
+        (tools.run as Run).timeLeft = timeLeft
         // §6.3: what this cell was given is logged per note; the register-citation hook turns `injected` into `cited`.
         val usage = Usage(c.store, clock)
         val injected = inputs.notes.filter { it.status == NoteStatus.Admitted }.map { it.id }.toSet()

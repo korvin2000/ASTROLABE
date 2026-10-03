@@ -325,8 +325,15 @@ internal class TaskLimitControl(private val idGen: IdGen, private val clock: Clo
     }
 
     /**
+     * The whole seconds of active time [c]'s minutes limit leaves now, `null` without one (C3r): `run` and `verify` read it
+     * at each dispatch, cut every launch, wait and check deadline to it, and dispatch nothing when none is left.
+     */
+    fun timeLeft(c: OpenedCampaign): () -> Long? = { c.limits.maxMillis?.let { (it - elapsed(c)) / 1_000 } }
+
+    /**
      * [config] for a cell of [c]: under a minutes limit, the default `run` deadline and the check time boxes are cut to the
-     * active time left (at least a second); an explicit `run` timeout and a model call are not (a recorded bound).
+     * active time left at the cell's start (at least a second) — the end-of-turn checker's boxes; `run` and `verify` cut
+     * again at each dispatch ([timeLeft]). A model call is not cut (a recorded bound).
      */
     fun bounded(c: OpenedCampaign, config: io.astrolabe.Config): io.astrolabe.Config {
         val max = c.limits.maxMillis ?: return config

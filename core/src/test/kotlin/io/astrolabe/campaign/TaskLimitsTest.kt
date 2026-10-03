@@ -384,6 +384,33 @@ class TaskLimitsTest {
     }
 
     @Test
+    fun `run and check deadlines are cut at dispatch to the time left, and nothing starts without any`() = runBlocking<Unit> {
+        // C3r 5: the cell is created with 60 s left; its model call takes 59 s, so a run launched after it gets 1 s, not 60.
+        fun timed(seconds: Long, vararg items: Item) =
+            FakeAdapter(ScriptedModel(listOf(ScriptedModel.Turn({ true }, { clock.advance(Duration.ofSeconds(seconds)); Scripted.Reply(items.toList()) }))))
+        fun handles(c: OpenedCampaign) = c.store.db.query("SELECT handle_id FROM handles WHERE work_id = ?", c.ids.work) { it.string("handle_id") }
+            .map { io.astrolabe.tool.run.SqliteHandles(c.store, clock).get(it)!! }
+        val early = CampaignRequest(WorkId("W-c3-deadline"), AttemptId("a1"), "make a return 10")
+        seed(early, shape = Shape.S0)
+        controller().open(repo.root, early, policy(TaskLimits(maxMinutes = 1))).use { c ->
+            val run = controller().runS0(c, CellModel(timed(59, say("starting"), call("r-bg", "run", """{"op":"run","cmd":"echo hi","bg":true}""")), FakeProfiles.main, HeuristicEstimator()))
+            assertEquals(BudgetStop.TaskLimitMinutes, run.budgetStop, run.state?.reason)
+            assertEquals(listOf(1L), handles(c).map { it.proc.deadlineSeconds }, "the deadline is the time left at launch")
+        }
+        // A 61 s call leaves no active time: its run is refused and its check is not run (never a minimal second).
+        val late = CampaignRequest(WorkId("W-c3-deadline-late"), AttemptId("a1"), "make a return 10")
+        seed(late, shape = Shape.S0)
+        controller().open(repo.root, late, policy(TaskLimits(maxMinutes = 1))).use { c ->
+            val adapter = timed(61, say("starting"), call("r-bg", "run", """{"op":"run","cmd":"echo hi","bg":true}"""), call("v-a", "verify", """{"what":"acceptance","ids":["AC-1"]}"""))
+            val run = controller().runS0(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator()))
+            assertEquals(BudgetStop.TaskLimitMinutes, run.budgetStop, run.state?.reason)
+            assertTrue(handles(c).isEmpty(), "no process is launched")
+            val outcomes = c.store.db.query("SELECT outcome FROM receipts WHERE work_id = ?", c.ids.work) { it.string("outcome") }
+            assertTrue(outcomes.isNotEmpty() && outcomes.all { it == "NotRun" }, outcomes.toString())
+        }
+    }
+
+    @Test
     fun `the balance profile is chosen at start and frozen for the attempt`() = runBlocking<Unit> {
         val recorder = EventRecorder()
         Events(clock).use { events ->

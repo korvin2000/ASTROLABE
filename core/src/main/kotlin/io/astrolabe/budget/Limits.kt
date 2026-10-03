@@ -5,6 +5,9 @@ import io.astrolabe.telemetry.CallAccount
 import kotlinx.serialization.Serializable
 import java.math.BigDecimal
 
+/** The refusal of a run or a check a task's minutes limit leaves no active time for (C3r): nothing is dispatched. */
+internal const val NO_ACTIVE_TIME: String = "task limit (minutes): no active time is left for this operation; nothing was dispatched"
+
 /** What a task limit counts (plan §4.6, C3). */
 @Serializable
 public enum class LimitKind(public val wire: String) {
