@@ -128,6 +128,7 @@ public class Verify(
             field = value
             checker?.beforeDispatch = value
             baseline?.beforeDispatch = value
+            regressionBaseline?.beforeDispatch = value
         }
 
     /** C3r: the whole seconds of active time a task's minutes limit leaves, read at each dispatch; `null` without one. */
@@ -136,6 +137,18 @@ public class Verify(
             field = value
             // P8.C.10: every baseline path — the stop's and `verify(baseline)` — reads the same time left.
             baseline?.timeLeft = value
+            regressionBaseline?.timeLeft = value
+        }
+
+    /**
+     * P8.C.10: the baseline verify-on-stop runs for a held red of the blast radius or the types of touched files — set by
+     * the controller apart from [baseline], so the model's own `verify(baseline)` stays exactly what it was; `null` uses [baseline].
+     */
+    internal var regressionBaseline: Baseline? = null
+        set(value) {
+            field = value
+            value?.timeLeft = timeLeft
+            value?.beforeDispatch = beforeDispatch
         }
 
     /** [seconds] cut to [left], the active time a minutes limit leaves (C3r). */
@@ -394,7 +407,7 @@ public class Verify(
 
     /** One baseline of [check] on `s0` (P8.C.10 G): begun on record, cut to the time left, a failure to export it unknown. */
     private suspend fun baselineOf(check: Check, contract: Contract): Receipt? {
-        val runner = baseline ?: return null
+        val runner = regressionBaseline ?: baseline ?: return null
         val stamp = s0 ?: return null
         val left = timeLeft()
         if (left != null && left <= 0) return null
@@ -511,8 +524,6 @@ public class Verify(
         val safeLog = redaction.applyLive(observed.output, ContentClass.ReusableEvidence, openAtEnd = false)
         val blob = blobs.put(safeLog.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
         val lost = observed.lost || observed.proc.status is ProcStatus.Lost
-        // P8.C.10: reports that cannot be collected leave the process's own outcome, its log and the failures it shows — as an
-        // incomplete record (never a pass) — rather than an outcome-less receipt that would hold nothing.
         var reportFailure: String? = null
         val collected = try { reports?.collect().orEmpty() } catch (failure: IOException) {
             reportFailure = "report capture failed: ${failure.message}"
@@ -526,8 +537,24 @@ public class Verify(
             output = observed.output, captureComplete = !observed.lost && !observed.truncated && observed.proc.status !is ProcStatus.Lost, checkId = check.id, selector = check.selector.toString(),
         )
         val shaped = Shapers.shape(capture, budget)
-        val executed = executedOf(check, command, capture, shaped, lost, blob, safeLog.limitations + listOfNotNull(reportFailure), sharing, incomplete = reportFailure != null)
-        return Invocation(executed, reportFailure?.let { "${shaped.view}\n$it" } ?: shaped.view, shaped, capture, lost, safeLog.mask)
+        if (reportFailure != null) {
+            // Every check keeps the receipt it always had (an inconclusive run, its view the failure); only the two regression
+            // checks get the process's outcome and the log's failures besides, as an incomplete record (P8.C.10).
+            val plain = Executed(command.argv, command.cwd, false, null, Outcome.Inconclusive, null, blob, listOf(reportFailure))
+            return Invocation(withRegressionEvidence(plain, check, command, capture, shaped, lost, blob, sharing), reportFailure, lost = lost, mask = safeLog.mask)
+        }
+        return Invocation(executedOf(check, command, capture, shaped, lost, blob, safeLog.limitations, sharing), shaped.view, shaped, capture, lost, safeLog.mask)
+    }
+
+    /**
+     * P8.C.10: [plain] — the receipt every check gets when its reports could not be collected — with, for each regression
+     * check among [sharing], its own outcome from the process and the failures its log shows, marked incomplete (never a pass).
+     */
+    private fun withRegressionEvidence(plain: Executed, check: Check, command: io.astrolabe.contract.Command, capture: RunCapture, shaped: Shaped, lost: Boolean, blob: Digest?, sharing: List<Check>): Executed {
+        val regressions = sharing.filter { it.id in Regressions.CHECKS }
+        if (regressions.isEmpty()) return plain
+        val evidence = executedOf(check, command, capture, shaped, lost, blob, emptyList(), regressions, incomplete = true)
+        return plain.copy(testsByCheck = evidence.testsByCheck, outcomeByCheck = regressions.associate { it.id to evidence.outcome })
     }
 
     /** The scheduler's record of a shaped invocation: the runner's outcome, or a host or user build or typecheck passing on its exit. */
@@ -666,9 +693,13 @@ public class Verify(
             checkId = pinned.check.id, selector = pinned.check.selector.toString(), executionRoot = pinned.executionRoot,
         )
         val shaped = Shapers.shape(bound, budget)
-        // P8.C.10: an uncollected report keeps the process's outcome and the failures its log shows, as an incomplete record.
-        val executed = executedOf(pinned.check, pinned.command, bound, shaped, lost = false, blob, limits + listOfNotNull("report capture failed".takeIf { collected == null }),
-            pinned.pin.checks, incomplete = collected == null)
+        val executed = if (collected == null) {
+            // As ever an inconclusive receipt; the regression checks also keep the process's outcome and the log's failures (P8.C.10).
+            withRegressionEvidence(Executed(pinned.command.argv, pinned.command.cwd, false, null, Outcome.Inconclusive, null, blob, listOf("report capture failed")),
+                pinned.check, pinned.command, bound, shaped, lost = false, blob, pinned.pin.checks)
+        } else {
+            executedOf(pinned.check, pinned.command, bound, shaped, lost = false, blob, limits, pinned.pin.checks)
+        }
         return SettledRun(scheduler.settle(pinned.pin, pinned.contractVersion, executed), shaped, bound)
     }
 

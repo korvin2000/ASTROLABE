@@ -58,6 +58,8 @@ public data class Executed(
      * on that check's receipt (one `run` realizing the full suite and the blast radius gives each its own).
      */
     val testsByCheck: Map<String, TestOutcomes> = emptyMap(),
+    /** P8.C.10: per regression check, the outcome its receipt records instead of [outcome] (reports that could not be collected). */
+    val outcomeByCheck: Map<String, Outcome> = emptyMap(),
 ) {
     /** The constructor before [tests] (P8.C.10). Kept for Java callers. */
     public constructor(command: List<String>, cwd: String?, shell: Boolean, exit: Int?, outcome: Outcome, counts: Counts?, raw: Digest?, limits: List<String>, expectedExitCode: Int?) :
@@ -325,7 +327,7 @@ public class Scheduler(
             limits += Limit("evidence", "a pass without parsed counts is inconclusive, never green (D-50)")
             Outcome.Inconclusive
         } else {
-            executed.outcome
+            executed.outcomeByCheck[check.id]?.takeIf { it != Outcome.Passed } ?: executed.outcome
         }
         val receipt = Receipt(
             receiptId = idGen.next("rcpt"), ids = ids, checkId = check.id, acceptanceIds = check.acceptanceIds,

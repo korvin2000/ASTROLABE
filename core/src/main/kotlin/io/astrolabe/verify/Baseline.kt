@@ -193,6 +193,16 @@ public object Regressions {
     @JvmStatic
     public fun isBaseline(receipt: Receipt): Boolean = receipt.limits.any { it.kind == BASELINE }
 
+    /**
+     * P8.C.10 F: a regression check as its last run [receipt] defined it, with that run as its last result — for a reopened
+     * attempt whose runner discovery no longer registers it (a removed `mypy.ini`): its hold, and the cap, come from history.
+     */
+    @JvmStatic
+    public fun restored(receipt: Receipt): Check = if (receipt.checkId == Checks.TESTS_BLAST) Blast.restored(receipt) else
+        Check(receipt.checkId, CheckKind.Type, Selector.Touched, receipt.inputClosure, CostClass.Fast, Trigger.OnDemand,
+            command = io.astrolabe.contract.Command(receipt.command, receipt.cwd), origin = io.astrolabe.contract.Origin.Harness)
+            .copy(last = LastResult(receipt.receiptId, receipt.stampAfter, receipt.checkDefinitionVersion, receipt.outcome, receipt.parsed, Applicability.Current))
+
     /** A marker receipt (a baseline begun, a rerun begun): it reports nothing of a run. */
     @JvmStatic
     public fun isMarker(receipt: Receipt): Boolean = receipt.limits.any { it.kind == RERUN || it.kind == BASELINE_STARTED }
@@ -206,21 +216,27 @@ public object Regressions {
     @JvmStatic
     @JvmOverloads
     public fun outcomes(tests: List<TestResult>, redact: (String) -> String, complete: Boolean = true, cwd: String? = null): TestOutcomes {
-        val repeated = tests.groupBy { it.identity.canonical }.filterValues { it.size > 1 }.keys
-        val failing = tests.filter { it.failing }
-        val passing = tests.filter { it.outcome == TestOutcome.Passed }
-        val failed = failing.take(MAX_FAILED).map { t ->
+        val keys = tests.map { key(it.identity, cwd, it.runnerFile) }
+        val repeated = keys.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
+        val failing = tests.indices.filter { tests[it].failing }
+        val passing = tests.indices.filter { tests[it].outcome == TestOutcome.Passed }
+        val failed = failing.take(MAX_FAILED).map { i ->
+            val t = tests[i]
             val first = t.message?.lineSequence()?.map { it.trim() }?.firstOrNull { it.isNotEmpty() } ?: t.outcome.name.lowercase()
-            FailedTest(key(t.identity, cwd), redact(t.identity.display).take(MAX_TEXT), redact(first).take(MAX_TEXT))
+            FailedTest(keys[i], redact(t.identity.display).take(MAX_TEXT), redact(first).take(MAX_TEXT))
         }
-        return TestOutcomes(failed, passing.take(MAX_PASSED).map { key(it.identity, cwd) }, repeated.take(MAX_FAILED).map { keyOf(it, cwd) },
+        return TestOutcomes(failed, passing.take(MAX_PASSED).map { keys[it] }, repeated.take(MAX_FAILED),
             truncated = failing.size > MAX_FAILED || passing.size > MAX_PASSED || repeated.size > MAX_FAILED, incomplete = !complete)
     }
 
-    /** The comparison key of an identity run in [cwd]: a digest of its canonical form and of the normalized directory, never shown. */
+    /**
+     * The comparison key of an identity run in [cwd] — and, when the runner named it beside the identity, in [runnerFile]:
+     * a digest of its canonical form, the file and the normalized directory, never shown.
+     */
     @JvmStatic
     @JvmOverloads
-    public fun key(identity: TestIdentity, cwd: String? = null): String = keyOf(identity.canonical, cwd)
+    public fun key(identity: TestIdentity, cwd: String? = null, runnerFile: String? = null): String =
+        keyOf(identity.canonical + (runnerFile?.let { "|file=" + it.replace('\\', '/') } ?: ""), cwd)
 
     private fun keyOf(canonical: String, cwd: String?): String {
         val dir = cwd?.replace('\\', '/')?.trim()?.trimEnd('/')?.removePrefix("./")?.takeUnless { it.isEmpty() || it == "." }.orEmpty()

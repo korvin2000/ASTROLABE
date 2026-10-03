@@ -1460,7 +1460,7 @@ class RunTest {
     }
 
     @Test
-    fun `reports that cannot be collected keep the process's outcome and an opaque hold (round 4, 7)`() = runTest {
+    fun `reports that cannot be collected keep the regression checks' failure, every other check its receipt as before (round 4, 7, round 5, 2)`() = runTest {
         repo.write("gradle_out.txt", "> Task :test FAILED\n")
         Files.write(repo.root.resolve("big.bin"), ByteArray(17 * 1024 * 1024) { 'x'.code.toByte() })
         val gradle = if (windows) "gradlew.bat".also {
@@ -1472,9 +1472,13 @@ class RunTest {
         val r = Regression(io.astrolabe.contract.Command(listOf(gradle, "test")), blastClosure = io.astrolabe.evidence.Closure.Known(setOf("src/a.py")))
         r.verify.runLayer(io.astrolabe.verify.Layer.BlastAndStepAccept)
         val red = r.receipts.forCheck(io.astrolabe.verify.Checks.TESTS_BLAST).first()
-        assertEquals(io.astrolabe.evidence.Outcome.Failed to 1, red.outcome to red.exitCode, red.limits.toString())
+        assertEquals(io.astrolabe.evidence.Outcome.Failed, red.outcome, red.limits.toString())
         assertTrue(red.limits.any { it.detail.startsWith("report capture failed") } && red.tests?.incomplete == true, red.toString())
         assertTrue(r.hold()!!.unknown.single().contains("did not identify"), r.hold().toString())
+        // Any other check — the full suite, an acceptance item — keeps the receipt it always had: inconclusive, no exit, no record.
+        r.verify.runLayer(io.astrolabe.verify.Layer.FullSuiteAndQuality)
+        val full = r.receipts.forCheck(io.astrolabe.verify.Checks.FULL).first()
+        assertEquals(Triple(io.astrolabe.evidence.Outcome.Inconclusive, null, null), Triple(full.outcome, full.exitCode, full.tests), full.toString())
     }
 
     @Test

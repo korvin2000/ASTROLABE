@@ -197,13 +197,13 @@ class JUnitXmlShaperTest {
     }
 
     @Test
-    fun `the runner's file is part of a test's identity, so one-named tests of two files never meet (P8C10 round 4)`() {
+    fun `the runner's file keys a regression record apart, identity and display unchanged (P8C10 rounds 4 and 5)`() {
         val xml = "<testsuite name=\"tests\" tests=\"2\" failures=\"1\">" +
             "<testcase classname=\"tests\" name=\"t\" file=\"tests/a.py\"><failure message=\"boom\">x</failure></testcase>" +
             "<testcase classname=\"tests\" name=\"t\" file=\"tests/b.py\"/></testsuite>"
         val tests = JUnitXml.parse(xml.toByteArray(), null, "CHK-tests-blast").tests
-        assertEquals(listOf("tests/a.py", "tests/b.py"), tests.map { it.identity.file })
-        assertNotEquals(tests[0].identity.canonical, tests[1].identity.canonical)
+        assertEquals(listOf("tests" to "tests::t", "tests" to "tests::t"), tests.map { it.identity.file to it.identity.display }, "as before: the file is no part of the identity")
+        assertEquals(listOf("tests/a.py", "tests/b.py"), tests.map { it.runnerFile })
         val record = io.astrolabe.verify.Regressions.outcomes(tests, { it })
         assertEquals(emptyList(), record.ambiguous, "two tests, not one ambiguous identity")
         assertNotEquals(record.failed.single().key, record.passed.single())

@@ -572,7 +572,7 @@ public class Controller @JvmOverloads public constructor(
             } ?: continue
             val known = checks[id]
             when {
-                known == null -> if (id == Checks.TESTS_BLAST) checks.register(io.astrolabe.verify.Blast.restored(last))
+                known == null -> checks.register(io.astrolabe.verify.Regressions.restored(last))
                 known.last == null -> checks.record(id, io.astrolabe.verify.LastResult(last.receiptId, last.stampAfter, last.checkDefinitionVersion, last.outcome, last.parsed, io.astrolabe.verify.Applicability.Current))
             }
         }
@@ -2227,14 +2227,16 @@ public class Controller @JvmOverloads public constructor(
         val scheduler = Scheduler(tree.checks, tree.workspace, tree.registry, tree.stamper, receipts, aliases, idGen, ids, clock, candidates = if (isolated) c.store.layout.candidates else candidates(c), isolateAll = isolated, retryCandidates = c.store.layout.candidates)
         val checker = Checker(tree.checks, runner, c.os, tree.stamper, tree.registry, tree.workspace, c.store.blobs, redaction, idGen, ids, logs)
         val layered = plugged(c)
-        // P8.C.10: verify-on-stop classifies a held red of the blast radius or the types of touched files against s0 (main line only).
+        // P8.C.10: verify-on-stop classifies a held red of the blast radius or the types of touched files against s0 (main line
+        // only); the model's own verify(baseline) stays unconfigured, as before.
         val baseline = if (child == null) Baseline(c.shadow, c.store.layout, runner, c.os, receipts, aliases, c.store.blobs, redaction, estimator, idGen, ids, clock, EnvFingerprint.compute(env)) else null
-        val verify = Verify(checks = tree.checks, scheduler = scheduler, checker = checker, baseline = baseline, s0 = tree.s0, workspace = tree.workspace, runner = runner, os = c.os, stamper = tree.stamper, blobs = c.store.blobs, redaction = redaction, estimator = estimator, idGen = idGen, ids = ids, contracts = c.contracts, logsDir = logs, checkerTimeBoxSeconds = config.defaults.checkerTimeBoxSeconds.toLong(), checkerFallbackTimeBoxSeconds = config.defaults.checkerFallbackTimeBoxSeconds.toLong(), campaignReview = campaignReview(c, authority),
+        val verify = Verify(checks = tree.checks, scheduler = scheduler, checker = checker, baseline = null, s0 = tree.s0, workspace = tree.workspace, runner = runner, os = c.os, stamper = tree.stamper, blobs = c.store.blobs, redaction = redaction, estimator = estimator, idGen = idGen, ids = ids, contracts = c.contracts, logsDir = logs, checkerTimeBoxSeconds = config.defaults.checkerTimeBoxSeconds.toLong(), checkerFallbackTimeBoxSeconds = config.defaults.checkerFallbackTimeBoxSeconds.toLong(), campaignReview = campaignReview(c, authority),
             // §8.8: review(scope=increment) is the review cell for S2+ main-line cells; a review cell never reaches it (no verify.review in its mask).
             incrementReview = if (child == null && contract.shape >= Shape.S2) IncrementReview { why -> reviewCell(c, increment, model, authority, syntax, span).obtain(evidence(c, increment, listOf(why), emptyList(), preexistingLines(compiled.k.ledger), authority), Tier.Medium, c.registry::version) } else null,
             tiers = layered.tiers,
         )
         verify.inputs = tree.atlas.rows.map { it.path }
+        verify.regressionBaseline = baseline
         // C3r: every check and run deadline is cut at its dispatch to the active time the minutes limit leaves then.
         val timeLeft = limitControl.timeLeft(c)
         verify.timeLeft = timeLeft

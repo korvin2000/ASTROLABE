@@ -364,6 +364,30 @@ class ProvenanceTest {
     }
 
     @Test
+    fun `a reopened campaign whose runner discovery lost the typecheck still holds its red from history (round 5, 1)`() = runBlocking<Unit> {
+        repo.write("pyproject.toml", "[project]\nname = \"shop\"\n")
+        repo.write("mypy.ini", "[mypy]\nstrict = True\n")
+        repo.commit("typecheck")
+        seed(listOf(Acceptance.Run("AC-1", printing, Origin.User)), r1 = listOf("AC-1"))
+        val controller = Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all), clock, idGen)
+        controller.open(repo.root, request, policy).use { c ->
+            val types = assertNotNull(c.checks[Checks.TYPES_TOUCHED], "mypy.ini seeds the types of touched files")
+            val scheduler = io.astrolabe.verify.Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), io.astrolabe.evidence.SqliteAliases(c.store, clock), idGen, c.ids, clock)
+            scheduler.runCheck(types, 1) { io.astrolabe.verify.Executed(types.command!!.argv, null, false, 1, io.astrolabe.evidence.Outcome.Failed, null, null) }
+        }
+        // `x: int = "bad"` is still there; only mypy.ini went away.
+        java.nio.file.Files.delete(repo.root.resolve("mypy.ini"))
+        controller.open(repo.root, request, policy).use { c ->
+            val restored = assertNotNull(c.checks[Checks.TYPES_TOUCHED], "restored from the attempt's receipts though discovery no longer gives it")
+            assertNotNull(restored.last)
+            val scheduler = io.astrolabe.verify.Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), io.astrolabe.evidence.SqliteAliases(c.store, clock), idGen, c.ids, clock)
+            val currencies = c.checks.all().filter { it.last != null }.associate { it.id to scheduler.currency(it, c.stamper.report(fresh = true).candidateId) }
+            val hold = assertNotNull(currencies[Checks.TYPES_TOUCHED]?.let { io.astrolabe.verify.Obligations.hold(Checks.TYPES_TOUCHED, it) }, "held: the cap stands")
+            assertEquals(io.astrolabe.verify.RedClass.Unknown, hold.kind)
+        }
+    }
+
+    @Test
     fun `an S1 increment never completes past a new failure the blast radius finds, whatever Open says`() {
         val (run, _) = blastCampaign(atS0 = false, outputs = listOf(true, true), verifying = setOf(0))
         assertTrue(run.outcome != CampaignOutcome.Completed, "${run.outcome}: ${run.state?.reason}")

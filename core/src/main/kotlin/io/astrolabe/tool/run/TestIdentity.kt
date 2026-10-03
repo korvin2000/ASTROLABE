@@ -76,7 +76,15 @@ public data class TestResult(
     /** First assertion/error line, already trimmed; null when the runner printed none. */
     val message: String? = null,
     val durationMillis: Long? = null,
+    /**
+     * The file the runner reported the test in (a JUnit `file` attribute) when it is not part of [identity]: only the
+     * regression record's key uses it (P8.C.10), so one-named tests of two files never meet; display and identity ignore it.
+     */
+    @kotlinx.serialization.Transient val runnerFile: String? = null,
 ) {
+    /** The constructor before [runnerFile] (P8.C.10). Kept for Java callers. */
+    public constructor(identity: TestIdentity, outcome: TestOutcome, message: String?, durationMillis: Long?) : this(identity, outcome, message, durationMillis, null)
+
     val failing: Boolean get() = outcome == TestOutcome.Failed || outcome == TestOutcome.Error
 }
 

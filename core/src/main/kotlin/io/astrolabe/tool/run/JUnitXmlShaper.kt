@@ -108,7 +108,7 @@ internal object JUnitXml {
             var suitePackage: String? = null
             var caseName: String? = null
             var caseClass: String? = null
-            // P8.C.10: the runner's file (pytest, some JUnit writers) tells one-named tests of two files apart.
+            // P8.C.10: the runner's file (pytest, some JUnit writers) — kept beside the identity, for the regression record's key only.
             var caseFile: String? = null
             var caseTime: Long? = null
             var caseOutcome = TestOutcome.Passed
@@ -162,14 +162,15 @@ internal object JUnitXml {
                                     identity = TestIdentity(
                                         check = checkId,
                                         module = module ?: suitePackage,
-                                        file = caseFile ?: caseClass ?: suite,
-                                        suite = if (caseFile != null) caseClass ?: suite else suite?.takeIf { it != caseClass },
+                                        file = caseClass ?: suite,
+                                        suite = suite?.takeIf { it != caseClass },
                                         name = name,
                                         parameterization = param,
                                     ),
                                     outcome = caseOutcome,
                                     message = caseMessage,
                                     durationMillis = caseTime,
+                                    runnerFile = caseFile,
                                 )
                             }
                             caseName = null
