@@ -15,6 +15,11 @@ import kotlin.math.roundToInt
  * The static balance profiles (plan §4.6, C3; F §4.2 starting values): chosen when a task starts and frozen for its
  * attempt with the rest of the configuration (invariant 12, first tier). [Balanced] is the declared `Defaults` as they
  * stand, so a task that chooses no profile behaves exactly as before.
+ *
+ * **Effort** (C14): a profile steps the effort of the host's model — Economy −1, Thorough +1 for an expensive model — only
+ * when the host left the effort to it ("effort by approach"). An effort the host chose itself
+ * (`CellModel.effortExplicit`) is stronger than the step and runs as given; the profile's window, result budgets and
+ * verification depth still apply ([BalanceProfiles.effort]).
  */
 @Serializable
 public enum class BalanceProfile(public val wire: String) {
@@ -145,6 +150,14 @@ public object BalanceProfiles {
         val lowest = minOf(configured.ordinal, Effort.Low.ordinal)
         return Effort.entries[(configured.ordinal + step).coerceIn(lowest, Effort.High.ordinal)]
     }
+
+    /**
+     * The effort [model] runs at under [vector] (C14): the host's explicit effort ([io.astrolabe.cell.CellModel.effortExplicit])
+     * as it is — stronger than any profile's step — else [model]'s effort moved by the step for its price class.
+     */
+    @JvmStatic
+    public fun effort(model: io.astrolabe.cell.CellModel, vector: BalanceVector): Effort =
+        if (model.effortExplicit) model.effort else effort(model.effort, vector, modelClass(model.profile))
 
     /** [profile]'s price class: output at or above [EXPENSIVE_OUTPUT_USD_PER_MILLION] USD per million tokens; an unpriced or non-USD table is cheap. */
     @JvmStatic

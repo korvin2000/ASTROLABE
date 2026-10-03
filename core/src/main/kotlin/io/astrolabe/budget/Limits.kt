@@ -2,38 +2,50 @@ package io.astrolabe.budget
 
 import io.astrolabe.provider.Money
 import io.astrolabe.telemetry.CallAccount
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonNames
 import java.math.BigDecimal
 
 /** The refusal of a run or a check a task's minutes limit leaves no active time for (C3r): nothing is dispatched. */
 internal const val NO_ACTIVE_TIME: String = "task limit (minutes): no active time is left for this operation; nothing was dispatched"
 
-/** What a task limit counts (plan §4.6, C3). */
+/** What a task limit counts (plan §4.6, C3). JSON carries [wire] (C14); a record written before reads back by the constant's name. */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 public enum class LimitKind(public val wire: String) {
     /** Money for model calls: the provider's billed amount, else the price-table estimate (D-378). */
+    @SerialName("money") @JsonNames("Cost")
     Cost("money"),
 
     /** Minutes of active work on the injected clock: the time runs of the campaign held the controller. */
+    @SerialName("minutes") @JsonNames("Minutes")
     Minutes("minutes"),
 
     /** Model requests: every dispatched model call of the task, child, reviewer and extractor calls included. */
+    @SerialName("requests") @JsonNames("Requests")
     Requests("requests"),
 }
 
-/** Which amounts a money spend was summed from (C3, D-378). */
+/** Which amounts a money spend was summed from (C3, D-378). JSON carries [wire] (C14); the constant's name still reads back. */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 public enum class CostBasis(public val wire: String) {
     /** Every call reported the amount the provider billed. */
+    @SerialName("billed") @JsonNames("Billed")
     Billed("billed"),
 
     /** No call reported one: price-table estimates, or the conservative hold of a call not yet settled. */
+    @SerialName("estimated") @JsonNames("Estimated")
     Estimated("estimated"),
 
     /** Some calls billed, the others estimated. */
+    @SerialName("mixed") @JsonNames("Mixed")
     Mixed("mixed"),
 
     /** No call yet. */
+    @SerialName("none") @JsonNames("None")
     None("none"),
 }
 

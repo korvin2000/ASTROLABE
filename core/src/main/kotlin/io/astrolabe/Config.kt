@@ -74,7 +74,8 @@ public data class Config(
     /**
      * The balance profile (plan §4.6, C3) a task runs under when its `CampaignPolicy` names none; [defaults] are the
      * Balanced values and the profile applies when the attempt freezes ([BalanceProfiles.applied]). The default is not
-     * encoded, so a Balanced attempt keeps its fingerprint.
+     * encoded, so a Balanced attempt keeps its fingerprint. The profile's effort step moves only an effort the host left to
+     * it: an explicit one (`CellModel.effortExplicit`, C14) is stronger and runs as given.
      */
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)

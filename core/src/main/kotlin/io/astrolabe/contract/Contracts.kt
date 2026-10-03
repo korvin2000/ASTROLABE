@@ -20,6 +20,7 @@ import io.astrolabe.id.IdGen
 import io.astrolabe.id.Identities
 import io.astrolabe.id.WorkId
 import io.astrolabe.provider.Money
+import io.astrolabe.store.Tx
 import io.astrolabe.workspace.ProtectedPaths
 import java.time.Clock
 import kotlinx.coroutines.currentCoroutineContext
@@ -104,6 +105,17 @@ public class Contracts(
         require(contract.version == 1) { "a new contract starts at version 1" }
         repository.append(contract)
         return contract
+    }
+
+    /**
+     * C14: the host raises [work]'s contract tokens to [tokens] at its current version — a budget is not an amendment, so
+     * nothing bound to the version is invalidated. Under this monitor, the latest version is re-read and replaced in one
+     * transaction with what [record] writes (the journal line); at or below the stored tokens nothing changes (`null`).
+     */
+    internal fun raiseTokens(work: WorkId, tokens: Tokens, record: (Tx, Contract, Contract) -> Unit): Contract? = synchronized(repository) {
+        val rows = repository as? SqliteContractRepository
+            ?: throw IllegalStateException("a contract budget raise commits with its journal line: it needs the store's repository")
+        rows.replaceLatest(work, { c -> c.takeIf { tokens.value > it.budget.tokens.value }?.let { it.copy(budget = it.budget.copy(tokens = tokens)) } }, record)
     }
 
     /** Model-side strengthening: adds an item at the same version (the model may only ADD). */
