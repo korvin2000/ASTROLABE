@@ -183,10 +183,11 @@ class ExitGateTest {
             listOf("step 2 [>] 'update call sites' has no disposition (done, cancelled or an explicit non-completed exit)", "step 3 [ ] 'docs' has no disposition (done, cancelled or an explicit non-completed exit)"),
             steps.missing.take(2),
         )
-        val lintRed = mapOf("CHK-accept-AC-1" to green(), "CHK-lint" to red("rcpt-9"))
-        assertEquals(listOf("CHK-lint is red without an Open item naming it"), resolve(currencies = lintRed).missing)
-        assertEquals(Resolution.Complete, resolve(register = done.copy(open = listOf(OpenItem(1, "CHK-lint: 3 style errors in legacy module, tracked"))), currencies = lintRed).resolution)
-        assertEquals(Resolution.Rework, resolve(register = done.copy(open = listOf(OpenItem(1, "CHK-lint tracked", closed = true))), currencies = lintRed).resolution, "a closed item is no longer open")
+        // C1b: a mandatory check outside the increment's items (here the campaign gate's full suite) keeps the I2 rule.
+        val fullRed = mapOf("CHK-accept-AC-1" to green(), "CHK-full" to red("rcpt-9"))
+        assertEquals(listOf("CHK-full is red without an Open item naming it"), resolve(currencies = fullRed).missing)
+        assertEquals(Resolution.Complete, resolve(register = done.copy(open = listOf(OpenItem(1, "CHK-full: 3 failures in the legacy module, tracked"))), currencies = fullRed).resolution)
+        assertEquals(Resolution.Rework, resolve(register = done.copy(open = listOf(OpenItem(1, "CHK-full tracked", closed = true))), currencies = fullRed).resolution, "a closed item is no longer open")
         val waived = done.copy(open = listOf(OpenItem(1, "AC-1 red: CHK-accept-AC-1 fails on the legacy path, tracked")))
         assertEquals(Resolution.Rework, resolve(register = waived, currencies = mapOf("CHK-accept-AC-1" to red())).resolution, "recording a required failure in Open does not waive it")
         assertEquals(listOf("unresolved impact nudge: public def total() changed; 3 importers unread"), resolve(nudges = listOf("public def total() changed; 3 importers unread")).missing)
@@ -316,6 +317,45 @@ class ExitGateTest {
     fun `a stale red optional check is history, not a red line (D-337)`() {
         val staleRed = mapOf("CHK-accept-AC-1" to green(), "CHK-lint" to red("rcpt-9").copy(applicability = Applicability.Stale))
         assertEquals(Resolution.Complete, resolve(currencies = staleRed).resolution)
+    }
+
+    // ------------------------------------------------------------ C1b: the runtime records a red optional check
+
+    @Test
+    fun `mandatory checks are those an acceptance item or the campaign gate requires, every other check is optional`() {
+        val commands = RunnerCommands(test = Command(listOf("pytest")), lint = Command(listOf("ruff", "check")), typecheck = Command(listOf("mypy")))
+        val checks = Checks.seed(contract, commands, qualityGates = listOf(Command(listOf("make", "audit"))))
+        val mandatory = checks.all().associate { it.id to Obligations.mandatory(it) }
+        assertEquals(
+            mapOf(Checks.TYPES_TOUCHED to false, Checks.LINT to false, "CHK-accept-AC-1" to true, Checks.FULL to true, Checks.QUALITY_GATE to true),
+            mandatory,
+        )
+        assertFalse(Obligations.mandatory(Checks.modelCheck(Command(listOf("pytest", "-q")), io.astrolabe.evidence.EvidenceKind.Tests, "R1")), "the model's own check is optional")
+    }
+
+    @Test
+    fun `a red optional check is the runtime's known red, never a gap, until a later receipt of it is not red`() {
+        val known = "CHK-lint known red since receipt rcpt-9 (recorded by the runtime)"
+        val lintRed = red("rcpt-9").copy(mandatory = false)
+        val red = resolve(currencies = mapOf("CHK-accept-AC-1" to green(), "CHK-lint" to lintRed))
+        assertEquals(Resolution.Complete, red.resolution, red.missing.toString())
+        assertEquals(listOf(known), red.knownRed, "no Open item is asked of the agent")
+        assertEquals(listOf(known), resolve(currencies = mapOf("CHK-accept-AC-1" to green(), "CHK-lint" to lintRed.copy(applicability = Applicability.Stale))).knownRed,
+            "a stale red receipt is still the check's latest word")
+        val model = resolve(currencies = mapOf("CHK-accept-AC-1" to green(), "CHK-model-1a2b3c4d" to red("rcpt-10")))
+        assertEquals(Resolution.Complete to listOf("CHK-model-1a2b3c4d known red since receipt rcpt-10 (recorded by the runtime)"), model.resolution to model.knownRed)
+        // The same check green on the tree now: the record is gone.
+        val green = resolve(currencies = mapOf("CHK-accept-AC-1" to green(), "CHK-lint" to green("rcpt-11").copy(mandatory = false)))
+        assertEquals(Resolution.Complete to emptyList<String>(), green.resolution to green.knownRed)
+        // Inconclusive is not red: nothing to record.
+        assertEquals(emptyList(), resolve(currencies = mapOf("CHK-accept-AC-1" to green(), "CHK-lint" to notGreen("inconclusive").copy(mandatory = false))).knownRed)
+        // A required red check is untouched: still the increment's failed result.
+        val required = resolve(currencies = mapOf("CHK-accept-AC-1" to red().copy(mandatory = false)))
+        assertEquals(Resolution.Rework to emptyList<String>(), required.resolution to required.knownRed)
+        // The exit gate refuses nothing for the optional red check.
+        val gate = Gates.s0().evaluate(GateState(turn = 3, register = done, contract = contract, increment = increment, completionProposed = true,
+            currencies = mapOf("CHK-accept-AC-1" to green(), "CHK-lint" to lintRed), verdicts = mapOf("AC-2" to approve, "AC-3" to approve)))
+        assertTrue(gate.rejections.none { it.key.gate == Gates.EXIT }, gate.lines.toString())
     }
 
     // ------------------------------------------------------------ one rule for gate and verifier (A1)

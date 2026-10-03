@@ -57,6 +57,7 @@ import io.astrolabe.verify.Resolver
 import io.astrolabe.verify.ResultStatus
 import io.astrolabe.verify.ReviewScope
 import io.astrolabe.verify.ReviewRequest
+import io.astrolabe.verify.ReviewerKind
 import io.astrolabe.verify.RiskAcceptor
 import io.astrolabe.verify.Verdict
 import io.astrolabe.verify.VerdictOutcome
@@ -264,6 +265,54 @@ class ProvenanceTest {
         assertEquals("agent_test", finished.provenanceClass)
     }
 
+    /** A `pytest` the model can run that prints [output], committed with [text] in it. */
+    private fun modelPytest(output: String, text: String): String {
+        repo.write(output, text)
+        val pytest = if (WINDOWS) "pytest.cmd".also { repo.write(it, "@type $output\r\n") } else "./pytest".also {
+            repo.write("pytest", "#!/bin/sh\ncat $output\n")
+            java.nio.file.Files.setPosixFilePermissions(repo.root.resolve("pytest"), java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x"))
+        }
+        repo.commit("test runner")
+        return pytest
+    }
+
+    private fun shaper(name: String): String = javaClass.getResourceAsStream("/shaper/$name")!!.use { String(it.readAllBytes(), Charsets.UTF_8) }
+
+    @Test
+    fun `a red test of the model completes without an Open item, recorded by the runtime as known red in the finish receipt`() {
+        val pytest = modelPytest("pytest_out.txt", shaper("pytest-fail-param.txt"))
+        seed(listOf(Acceptance.Run("AC-1", printing, Origin.User)), r1 = listOf("AC-1"))
+        val (run, finished) = run {
+            listOf(Scripted.Reply(listOf(call("t1", "run", """{"argv":["$pytest","-q"]}"""))), Scripted.Reply(listOf(say("done"))))
+        }
+        assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+        val finish = assertNotNull(run.finish)
+        val own = finish.checksRun.single { it.checkId.startsWith(Checks.MODEL_PREFIX) }
+        assertEquals("failed", own.outcome)
+        // C1b: what a host needs to declare the agent's check as the project's own — its command, origin, kind and last result.
+        assertEquals(listOf<Any?>(Command(listOf(pytest, "-q")), Origin.Model("R1"), EvidenceKind.Tests), listOf(own.command, own.checkOrigin, own.evidenceKind))
+        assertEquals(listOf("${own.checkId} known red since receipt ${own.receiptId} (recorded by the runtime)"), finish.openItems)
+        assertEquals(ProvenanceClass.Independent, finish.provenanceClass, "the model's red test never lowers a declared verification")
+        assertEquals("independent", finished.provenanceClass)
+    }
+
+    @Test
+    fun `the runtime's known red goes once the same check of the model is green on the tree`() {
+        val pytest = modelPytest("pytest_out.txt", shaper("pytest-fail-param.txt"))
+        seed(listOf(Acceptance.Run("AC-1", printing, Origin.User)), r1 = listOf("AC-1"))
+        val (run, _) = run(before = { i -> if (i == 1) repo.write("pytest_out.txt", shaper("pytest-pass.txt")) }) {
+            listOf(
+                Scripted.Reply(listOf(call("t1", "run", """{"argv":["$pytest","-q"]}"""))),
+                Scripted.Reply(listOf(call("t2", "run", """{"argv":["$pytest","-q"]}"""))),
+                Scripted.Reply(listOf(say("done"))),
+            )
+        }
+        assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+        val finish = assertNotNull(run.finish)
+        assertEquals("passed", finish.checksRun.single { it.checkId.startsWith(Checks.MODEL_PREFIX) }.outcome)
+        assertEquals(emptyList(), finish.openItems)
+    }
+
     @Test
     fun `a declared check green only for an earlier candidate is not independent at the final tree`() = runBlocking<Unit> {
         seed(listOf(Acceptance.Run("AC-1", printing, Origin.User)), r1 = listOf("AC-1"))
@@ -284,17 +333,86 @@ class ProvenanceTest {
     @Test
     fun `the model's own check item approved by a reviewer is agent_test, and the line names who verified it`() {
         seed(listOf(Acceptance.Check("AC-2", "a returns the documented value", Origin.Model("R1"))), r1 = listOf("AC-2"))
-        val reviewer = object : Authority by AutonomousAuthority() {
-            override suspend fun review(request: ReviewRequest): Verdict =
-                Verdict(request.id, request.contractRevision, request.candidate, VerdictOutcome.Approve, confidence = 0.9, signedBy = "host:alice")
-        }
-        val (run, finished) = run(reviewer)
+        val (run, finished) = run(reviewing(ReviewerKind.Human))
         assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
         val finish = assertNotNull(run.finish)
         val line = finish.acceptance.single()
         assertEquals(listOf<Any?>("reviewed", Author.Model, "human", ProvenanceClass.AgentTest), listOf(line.provenance, line.checkBy, line.verifiedBy, line.provenanceClass))
         assertEquals(ProvenanceClass.AgentTest, finish.requirements.single().provenanceClass)
         assertEquals("agent_test", finished.provenanceClass)
+    }
+
+    /** A host that answers every review with an approval signed by [kind] — `null`: a verdict that does not say who reviewed. */
+    private fun reviewing(kind: ReviewerKind?) = object : Authority by AutonomousAuthority() {
+        override suspend fun review(request: ReviewRequest): Verdict =
+            Verdict(request.id, request.contractRevision, request.candidate, VerdictOutcome.Approve, confidence = 0.9, signedBy = "host:review")
+                .let { verdict -> kind?.let { verdict.copy(reviewer = it) } ?: verdict }
+    }
+
+    @Test
+    fun `a user's check item approved by a host's model is agent_test, never independent`() {
+        seed(listOf(Acceptance.Check("AC-1", "a returns the documented value", Origin.User)), r1 = listOf("AC-1"))
+        val (run, finished) = run(reviewing(null))
+        assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+        val finish = assertNotNull(run.finish)
+        val line = finish.acceptance.single()
+        assertEquals(listOf<Any?>("reviewed", Author.User, passed, "host_model", ProvenanceClass.AgentTest), listOf(line.provenance, line.checkBy, line.result, line.verifiedBy, line.provenanceClass))
+        assertEquals(ProvenanceClass.AgentTest, finish.requirements.single().provenanceClass)
+        assertEquals("completed" to ProvenanceClass.AgentTest, finish.status to finish.provenanceClass)
+        assertEquals("agent_test", finished.provenanceClass)
+    }
+
+    @Test
+    fun `a user's check item approved by a person is independent`() {
+        seed(listOf(Acceptance.Check("AC-1", "a returns the documented value", Origin.User)), r1 = listOf("AC-1"))
+        val (run, finished) = run(reviewing(ReviewerKind.Human))
+        assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+        val finish = assertNotNull(run.finish)
+        assertEquals("human" to ProvenanceClass.Independent, finish.acceptance.single().let { it.verifiedBy to it.provenanceClass })
+        assertEquals("completed" to ProvenanceClass.Independent, finish.status to finish.provenanceClass)
+        assertEquals("independent", finished.provenanceClass)
+    }
+
+    /** Under human integrity approval the model edits the declared test; [kind] approves the change (D-320). */
+    private fun testEditReviewedBy(kind: ReviewerKind?): FinishReceipt {
+        seed(listOf(Acceptance.Run("AC-1", printing, Origin.User)), r1 = listOf("AC-1"))
+        val path = "tests/test_a.py"
+        val (run, _) = run(reviewing(kind), IntegrityApproval.Human) { c ->
+            listOf(
+                Scripted.Reply(listOf(read("read-test", path))),
+                Scripted.Reply(listOf(anchored("edit-test", path, c.registry.version(path)!!, "    assert 1 == 1", "    assert (1 == 1)"))),
+                Scripted.Reply(listOf(say("done"))),
+            )
+        }
+        assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+        return assertNotNull(run.finish)
+    }
+
+    @Test
+    fun `a test edit a host's model approved completes as before, but the declared check stays the agent's evidence`() {
+        val finish = testEditReviewedBy(null)
+        assertEquals(emptyList(), finish.acceptanceSurfaceUnreviewed, "the approval lets completion proceed")
+        assertEquals(listOf("tests/test_a.py"), finish.acceptanceSurfaceModelApproved)
+        assertEquals(listOf<Any?>("tested", passed, ProvenanceClass.AgentTest), finish.acceptance.single().let { listOf(it.provenance, it.result, it.provenanceClass) })
+        assertEquals("completed" to ProvenanceClass.AgentTest, finish.status to finish.provenanceClass)
+    }
+
+    @Test
+    fun `a test edit a person approved keeps the declared check independent`() {
+        val finish = testEditReviewedBy(ReviewerKind.Human)
+        assertEquals(emptyList(), finish.acceptanceSurfaceUnreviewed + finish.acceptanceSurfaceModelApproved)
+        assertEquals("completed" to ProvenanceClass.Independent, finish.status to finish.provenanceClass)
+    }
+
+    @Test
+    fun `a verdict that does not say who reviewed is a model's, also when it arrives as JSON from before the field`() {
+        val candidate = CandidateId(Digest.ofUtf8("final"))
+        val verdict = Verdict("rq-1", 1, candidate, VerdictOutcome.Approve, emptyList(), null, emptyList(), 0.9, "studio:review-pass(m)", null)
+        assertEquals(ReviewerKind.Model, verdict.reviewer)
+        val json = kotlinx.serialization.json.Json.encodeToString(Verdict.serializer(), verdict.copy(reviewer = ReviewerKind.Human))
+        assertTrue(json.contains("\"reviewer\":\"human\""), json)
+        val old = json.replace(",\"reviewer\":\"human\"", "")
+        assertEquals(ReviewerKind.Model, kotlinx.serialization.json.Json.decodeFromString(Verdict.serializer(), old).reviewer)
     }
 
     @Test
