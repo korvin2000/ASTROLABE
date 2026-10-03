@@ -333,7 +333,15 @@ public class Verify(
      * yet (P8.C.10): its command once on `s0`, per definition and attempt; without a baseline runner nothing runs and the
      * red stays unclassified.
      */
-    public suspend fun onStop(acceptanceIds: Collection<String>): LayerRun = runLayer(Layer.IncrementAcceptance, acceptanceIds).also { settleBaselines() }
+    public suspend fun onStop(acceptanceIds: Collection<String>): LayerRun {
+        // P8.C.12: a live background run may still change the tree, so the cell's runs are settled first; one still live
+        // after its cancellation leaves every receipt uncertifying until a later stop finds the tree quiet.
+        scheduler.unquiet = settleRuns?.invoke().orEmpty()
+        return runLayer(Layer.IncrementAcceptance, acceptanceIds).also { settleBaselines() }
+    }
+
+    /** P8.C.12: settles the cell's live background runs before its stop's verification (the `run` tool sets it); returns those still live. */
+    internal var settleRuns: (suspend () -> List<String>)? = null
 
     /** P8.C.10 п. 3: the baseline receipts verify-on-stop records; they are the check's history, never its last result. */
     private suspend fun settleBaselines(): List<Receipt> {

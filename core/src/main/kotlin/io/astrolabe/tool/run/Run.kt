@@ -160,6 +160,15 @@ public class Run(
      * grants no authority: the command passes every gate of a plain run first.
      */
     internal var verify: Verify? = null
+        set(value) {
+            field?.settleRuns = null
+            field = value
+            // P8.C.12: the stop's verification settles this cell's background runs first.
+            value?.settleRuns = { settleForStop() }
+        }
+
+    /** P8.C.12: how long the stop waits for a live background run to end on its own before it cancels it. */
+    internal var stopGraceMillis: Long = STOP_GRACE_MILLIS
 
     /** Recognised background runs by handle, pinned at launch until their end (C1a); in memory, so a restart records none. */
     private val pins = HashMap<String, PinnedRun>()
@@ -899,12 +908,58 @@ public class Run(
         return render(args, result, handle.argv, handle.shell, null, null, effectsUnknown = true, statusWire = wire(proc.status))
     }
 
+    // ------------------------------------------------------------ stop · P8.C.12
+
+    /**
+     * P8.C.12: before the stop's verification certifies the tree, every live background run of this campaign workspace is
+     * settled — [stopGraceMillis] to end on its own (its end recorded as a poll records it: a recognised run's receipts,
+     * the interval announced), then cancelled, as it would end with the cell anyway (§5.4); a cancelled run records no
+     * receipt (C1a). Returns the aliases of the runs still live afterwards: a cancellation not delivered or not confirmed.
+     */
+    internal suspend fun settleForStop(): List<String> {
+        val live = handles.open().filter(::owned)
+        if (live.isEmpty()) return emptyList()
+        val seen = kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { awaitEnds(live, stopGraceMillis) }
+        val still = ArrayList<String>()
+        for ((handle, proc) in live.zip(seen)) {
+            if (proc.status.isTerminal) {
+                handles.save(handle.copy(proc = proc, status = wire(proc.status)))
+                ended(RunArgs(op = "poll", handle = handle.handleId), handle, proc, proc.status, ByteArray(0), note = null)
+                continue
+            }
+            pins.remove(handle.handleId)
+            val cancelled = try {
+                os.terminate(proc)
+            } catch (failure: IOException) {
+                null
+            }
+            cancelled?.let { handles.save(handle.copy(proc = it, status = wire(it.status))) }
+            if (cancelled == null || !cancelled.status.isTerminal) {
+                still += handle.alias
+                continue
+            }
+            announceBackground(handle, stamper.report(fresh = true))
+        }
+        return still
+    }
+
+    /** The grace before a cancellation: real time, since what it waits for is a process, whatever clock the cell keeps. */
+    private fun awaitEnds(live: List<Handle>, graceMillis: Long): List<Proc> {
+        val deadline = System.nanoTime() + graceMillis * 1_000_000L
+        var seen = live.map { os.reattach(it.proc) }
+        while (seen.any { !it.status.isTerminal } && System.nanoTime() < deadline) {
+            Thread.sleep(STOP_POLL_MILLIS)
+            seen = seen.map { if (it.status.isTerminal) it else os.reattach(it) }
+        }
+        return seen
+    }
+
     // ---------------------------------------------------------------- render
 
     /** Attempts may resume their campaign's handles; another work or workspace has no authority over them. */
-    private fun ownedHandle(id: String): Handle? = handles.get(id)?.takeIf {
-        it.ids.work == ids.work && aliases.byCanonical(ids.work, it.actionId)?.workspace == workspace.id
-    }
+    private fun ownedHandle(id: String): Handle? = handles.get(id)?.takeIf(::owned)
+
+    private fun owned(handle: Handle): Boolean = handle.ids.work == ids.work && aliases.byCanonical(ids.work, handle.actionId)?.workspace == workspace.id
 
     private fun refused(args: RunArgs, status: Outcome, detail: String): ToolOutcome {
         val actionId = idGen.next("act")
@@ -965,6 +1020,10 @@ public class Run(
 
 /** The longest `run` a model may ask for in one call (D-370); a larger value is clamped to it. */
 private const val MAX_TIMEOUT_SECONDS: Int = 3_600
+
+/** P8.C.12: the stop's grace for a live background run before it is cancelled, and how often it looks. */
+private const val STOP_GRACE_MILLIS: Long = 2_000
+private const val STOP_POLL_MILLIS: Long = 100
 
 /** How much of a wait's output stays in memory for its view; the log holds all of it. */
 private const val WAIT_TAIL_BYTES: Int = 256 * 1024

@@ -1331,6 +1331,40 @@ class RunTest {
     }
 
     @Test
+    fun `the stop settles live background runs first - a short grace, then a cancel - and certifies only a quiet tree`() = runTest {
+        repo.write("pytest_pass.txt", recorded("pytest-pass.txt"))
+        val r = Recognizing(listOf(Acceptance.Run("AC-1", printing("pytest_pass.txt"), Origin.User, evidence = EvidenceKind.Tests)))
+        r.run.stopGraceMillis = 3_000
+        // A server the model left running, and a recognised check that ends within the grace.
+        val server = run("""{"cmd":"${shell("ping -n 30 127.0.0.1", "sleep 30")}","bg":true}""", r.run)
+        val serverHandle = assertNotNull(Regex("handle (handle-\\d+)").find(server.body)).groupValues[1]
+        run("""{"cmd":"${printingCmd("pytest_pass.txt")}","bg":true}""", r.run)
+
+        val stop = r.verify.onStop(listOf("AC-1"))
+        val receipts = r.receiptsOf("CHK-accept-AC-1")
+        assertEquals(2, receipts.size, "the background run's own receipt at its end, then the stop's exclusive run")
+        assertTrue(receipts.first().limits.any { it.kind == "input_stability" && it.detail.startsWith("background run") })
+        assertEquals(listOf(receipts.last()), stop.receipts)
+        assertTrue(r.scheduler.currency(r.checks["CHK-accept-AC-1"]!!, stamper.stamp().id).certifies, "the quiet tree is certified")
+        val polled = run("""{"op":"poll","handle":"$serverHandle","timeout":1}""", r.run)
+        assertTrue(polled.body.contains("\nhandle $serverHandle cancelled\n"), polled.body)
+
+        // A run the stop could not cancel: nothing certifies the tree while it may still change it.
+        r.verify.settleRuns = { listOf("#9") }
+        r.verify.onStop(listOf("AC-1"))
+        val unquiet = r.receiptsOf("CHK-accept-AC-1").last()
+        assertEquals(io.astrolabe.evidence.InputStability.Unknown, unquiet.testedInputs.stability)
+        assertTrue(unquiet.limits.any { it.kind == Scheduler.CONCURRENT && it.detail.startsWith("#9 live") }, unquiet.limits.toString())
+        val currency = r.scheduler.currency(r.checks["CHK-accept-AC-1"]!!, stamper.stamp().id)
+        assertFalse(currency.certifies)
+        assertTrue(currency.reasons.any { it.contains("background run #9 still live") }, currency.reasons.toString())
+        // A later stop that finds the tree quiet certifies it again.
+        r.verify.settleRuns = { emptyList() }
+        assertEquals(1, r.verify.onStop(listOf("AC-1")).receipts.size)
+        assertTrue(r.scheduler.currency(r.checks["CHK-accept-AC-1"]!!, stamper.stamp().id).certifies)
+    }
+
+    @Test
     fun `recognition compares normalized commands exactly`() {
         assertEquals(listOf("pytest", "-q"), CommandMatch.tokens(listOf("pytest  -q"), shell = true, windows = false))
         assertEquals(listOf("pytest", "tests/test a.py"), CommandMatch.tokens(listOf("pytest \"tests/test a.py\""), shell = true, windows = false))

@@ -146,6 +146,13 @@ public class Scheduler(
 ) {
     private val aliasByReceipt = HashMap<String, String>()
 
+    /**
+     * P8.C.12: background runs still live after the stop settled them (a cancellation not delivered or not confirmed):
+     * while any is, no receipt certifies a tree — those recorded are `input_stability = unknown`, and currency reads every
+     * receipt as ineligible. Set by each stop's verification.
+     */
+    internal var unquiet: List<String> = emptyList()
+
     /** The campaign-global `#n` of [receiptId], when this scheduler recorded it. */
     public fun aliasOf(receiptId: String): String? = aliasByReceipt[receiptId]
 
@@ -234,6 +241,9 @@ public class Scheduler(
     internal companion object {
         /** How the limit of a background run's receipt begins (C1a). */
         const val BACKGROUND: String = "background run"
+
+        /** The limit kind of a receipt recorded while a background run the stop could not cancel was live (P8.C.12). */
+        const val CONCURRENT: String = "concurrent"
     }
 
     /** The receipts of one recognised `run` and the paths it moved (announced by the scheduler). */
@@ -304,6 +314,8 @@ public class Scheduler(
         if (testedInputs.mutatedDuringCheck.isNotEmpty()) {
             limits += Limit("input_mutation", "inputs moved during the check: ${testedInputs.mutatedDuringCheck.sorted().joinToString(", ")}; the receipt is ineligible for the final tree — rerun")
         }
+        val concurrent = unquiet.isNotEmpty()
+        if (concurrent) limits += Limit(CONCURRENT, "${unquiet.joinToString(", ")} live during the check after its cancellation: the tree was not quiet, so the receipt cannot certify it")
         executed.limits.forEach { limits += Limit("runner", it) }
         val kind = check.evidenceKind
         // Plan §4.4 (D-50 relaxed by the owner): a declared host or user build or typecheck passes on its expected exit, uncounted.
@@ -319,7 +331,7 @@ public class Scheduler(
             command = executed.command, cwd = executed.cwd, shell = executed.shell,
             stampBefore = before.candidateId, stampAfter = stampAfter, envId = before.env.envId,
             verifierVersion = verifierVersion, checkDefinitionVersion = check.definitionVersion, contractVersion = contractVersion,
-            outcome = outcome, parsed = executed.counts, inputClosure = check.inputClosure, testedInputs = testedInputs,
+            outcome = outcome, parsed = executed.counts, inputClosure = check.inputClosure, testedInputs = if (concurrent) testedInputs.copy(stability = InputStability.Unknown) else testedInputs,
             raw = executed.raw, limits = limits, exitCode = executed.exit, at = clock.instant(), closureManifest = manifest, expectedExitCode = executed.expectedExitCode,
             evidenceKind = kind, checkOrigin = check.origin, evidenceDeclared = check.evidence != null, failures = executed.failures,
         )
@@ -446,9 +458,13 @@ public class Scheduler(
         val reasons = ArrayList<String>()
         refreshed.staleReason?.let { reasons += it }
         if (receipt == null) reasons += "receipt ${last.receiptId} is not in the store"
-        val eligible = receipt?.testedInputs?.eligible ?: false
+        val eligible = (receipt?.testedInputs?.eligible ?: false) && unquiet.isEmpty()
         if (receipt != null && !eligible) {
-            reasons += if (receipt.testedInputs.mutatedDuringCheck.isNotEmpty()) "inputs moved during the check: ${receipt.testedInputs.mutatedDuringCheck.sorted().joinToString(", ")}" else "input stability ${receipt.testedInputs.stability.name.lowercase()} cannot certify the final tree"
+            reasons += when {
+                unquiet.isNotEmpty() -> "background run ${unquiet.joinToString(", ")} still live after the stop cancelled it: no receipt certifies the tree"
+                receipt.testedInputs.mutatedDuringCheck.isNotEmpty() -> "inputs moved during the check: ${receipt.testedInputs.mutatedDuringCheck.sorted().joinToString(", ")}"
+                else -> "input stability ${receipt.testedInputs.stability.name.lowercase()} cannot certify the final tree"
+            }
         }
         val green = receipt?.outcome?.green ?: false
         // D-338: an unverified result names its cause for the decider — "cannot start python3", not just "unavailable".
