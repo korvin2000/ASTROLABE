@@ -172,6 +172,8 @@ public data class FinishReceipt @JvmOverloads constructor(
     val acceptanceSurfaceUnreviewed: List<String> = emptyList(),
     /** Such changes only a model approved (owner 2026-10-03): completion went ahead, the run checks they touch stay the agent's evidence. */
     val acceptanceSurfaceModelApproved: List<String> = emptyList(),
+    /** How a task limit ended the campaign, with the best verified candidate it names (C3); `null` for every other ending. */
+    val limit: LimitStop? = null,
 )
 
 /** The campaign review as the receipt reports it: the request, the diff it saw, and the signed verdict or why none arrived. */

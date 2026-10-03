@@ -666,7 +666,7 @@ public class Cell @JvmOverloads constructor(
                 contractAnchors = (tools.kb as? KbTool)?.contractAnchors().orEmpty(), repeatedFailures = repeated, acceptance = acceptance,
                 refusals = refused.toList(), implementing = implementingCompletion,
                 // D-340: the controller pins a `rework` decision's text as "rework requested by …" (`Controller.reworkNotes`).
-                reworked = ctx.pinned.any { it.startsWith("rework requested by ") },
+                reworked = ctx.rework || ctx.pinned.any { it.startsWith("rework requested by ") },
             )
             val report = gates.evaluate(state)
             fired = report.fired

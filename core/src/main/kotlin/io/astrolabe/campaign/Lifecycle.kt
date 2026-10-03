@@ -35,6 +35,40 @@ public enum class CampaignOutcome(public val wire: String) {
     public val resumable: Boolean get() = this == WaitingForProcess || this == WaitingForInput || this == BlockedExternal
 }
 
+/**
+ * Why a campaign ended `budget_exhausted`, machine-readable (C3): which ceiling stopped it and whether a reopen may
+ * continue the same attempt — a task limit the host raises, or the per-run cell cap; a hidden technical ceiling is never a
+ * dead end without saying so.
+ */
+@Serializable
+public enum class BudgetStop(public val wire: String) {
+    TaskLimitMoney("task_limit_money"),
+    TaskLimitMinutes("task_limit_minutes"),
+    TaskLimitRequests("task_limit_requests"),
+
+    /** `Controller.run(maxCells)`: counted per run, so a reopen runs with a fresh cap. */
+    CellCap("cell_cap"),
+
+    /** The contract's own budget — tokens, turns per cell, its money — frozen with the contract (§4.1). */
+    ContractBudget("contract_budget"),
+    ;
+
+    /** A task limit stop: a reopen continues it once the host's limits leave room. */
+    public val taskLimit: Boolean get() = this == TaskLimitMoney || this == TaskLimitMinutes || this == TaskLimitRequests
+
+    /** A reopen may continue the attempt: a raised task limit, or a fresh per-run cell cap. */
+    public val resumable: Boolean get() = this != ContractBudget
+
+    public companion object {
+        @JvmStatic
+        public fun of(kind: io.astrolabe.budget.LimitKind): BudgetStop = when (kind) {
+            io.astrolabe.budget.LimitKind.Cost -> TaskLimitMoney
+            io.astrolabe.budget.LimitKind.Minutes -> TaskLimitMinutes
+            io.astrolabe.budget.LimitKind.Requests -> TaskLimitRequests
+        }
+    }
+}
+
 /** Where a campaign stands in `campaign()` (§3.7). */
 @Serializable
 public enum class CampaignPhase {
@@ -79,8 +113,11 @@ public data class CampaignState private constructor(
     val seq: Long,
     /** Why an ended campaign waits for a person, machine-readable (D-339); `null` for every other stop. */
     val stopCode: StopCode? = null,
+    /** Which ceiling ended a `budget_exhausted` campaign and whether a reopen continues it (C3); `null` otherwise. */
+    val budgetStop: BudgetStop? = null,
 ) {
     init {
+        require(budgetStop == null || outcome == CampaignOutcome.BudgetExhausted) { "a budget stop code marks budget_exhausted only" }
         require(seq >= 0 && contractVersion >= 1) { "seq ≥ 0 and a committed contract version" }
         require((phase == CampaignPhase.Ended) == (outcome != null)) { "an outcome exactly when the campaign ended" }
         require(outcome != CampaignOutcome.Completed || ledger.unfinished().isEmpty()) { "completed needs a verified ledger" }
@@ -101,7 +138,8 @@ public data class CampaignState private constructor(
         reason: String? = this.reason,
         contractVersion: Int = this.contractVersion,
         stopCode: StopCode? = this.stopCode,
-    ): CampaignState = CampaignState(work, attempt, contractVersion, phase, graph, ledger, cells, outcome, reason, seq + 1, stopCode)
+        budgetStop: BudgetStop? = this.budgetStop,
+    ): CampaignState = CampaignState(work, attempt, contractVersion, phase, graph, ledger, cells, outcome, reason, seq + 1, stopCode, budgetStop)
 
     internal companion object {
         fun opened(contract: Contract, graph: RequirementGraph): CampaignState = CampaignState(
@@ -186,8 +224,15 @@ public sealed interface Transition {
      * An honest non-completed outcome, never disguised as completion (invariant 11). [code] says, for a host, why a
      * campaign waits for a person (D-339); it marks `waiting_for_input` only.
      */
-    public data class Stopped @JvmOverloads constructor(val outcome: CampaignOutcome, val reason: String, val code: StopCode? = null) : Transition {
+    public data class Stopped @JvmOverloads constructor(
+        val outcome: CampaignOutcome,
+        val reason: String,
+        val code: StopCode? = null,
+        /** C3: the ceiling a `budget_exhausted` stop hit. */
+        val budget: BudgetStop? = null,
+    ) : Transition {
         init {
+            require(budget == null || outcome == CampaignOutcome.BudgetExhausted) { "a budget stop code marks budget_exhausted only" }
             require(outcome != CampaignOutcome.Completed) { "completed is reached only through Finished" }
             require(outcome != CampaignOutcome.Answered) { "answered is reached only through Answered" }
             require(reason.isNotBlank()) { "a stop records why" }
@@ -197,6 +242,17 @@ public sealed interface Transition {
 
     /** A reopened campaign that stopped on something outside it starts over at reconciliation. */
     public data class Resumed(val reason: String) : Transition
+
+    /**
+     * C3 (plan §4.6): a campaign stopped `budget_exhausted` on a resumable [BudgetStop] — a task limit the host has raised
+     * so it leaves room again, or the per-run cell cap — is reopened and continues the same attempt from reconciliation,
+     * its verified ledger kept. Only the host raises a limit: the controller applies this at open, on the host's limits.
+     */
+    public data class LimitRaised(val reason: String) : Transition {
+        init {
+            require(reason.isNotBlank()) { "a raised limit records why" }
+        }
+    }
 }
 
 /** What the controller does with a returned cell (§3.7 `dispatch_outcome`). */
@@ -322,14 +378,19 @@ public object Lifecycle {
             is Transition.Stopped -> {
                 expect(s, CampaignPhase.Opened, CampaignPhase.Running, CampaignPhase.Finishing)
                 check(s.running == null) { "reconcile the running cell ${s.running?.cell} before a terminal outcome" }
-                s.next(phase = CampaignPhase.Ended, outcome = transition.outcome, reason = transition.reason, contractVersion = v, stopCode = transition.code)
+                s.next(phase = CampaignPhase.Ended, outcome = transition.outcome, reason = transition.reason, contractVersion = v, stopCode = transition.code, budgetStop = transition.budget)
             }
             is Transition.Resumed -> {
                 expect(s, CampaignPhase.Ended, CampaignPhase.Finishing)
                 val interrupted = s.phase == CampaignPhase.Finishing
                 check(interrupted || s.outcome?.resumable == true) { "a ${s.outcome?.wire} campaign does not resume" }
-                s.next(phase = CampaignPhase.Opened, outcome = null, reason = null, contractVersion = v, stopCode = null,
+                s.next(phase = CampaignPhase.Opened, outcome = null, reason = null, contractVersion = v, stopCode = null, budgetStop = null,
                     ledger = if (interrupted) Ledger.initial(contract) else s.ledger)
+            }
+            is Transition.LimitRaised -> {
+                expect(s, CampaignPhase.Ended)
+                check(s.outcome == CampaignOutcome.BudgetExhausted && s.budgetStop?.resumable == true) { "only a resumable budget stop reopens; this one is ${s.outcome?.wire} ${s.budgetStop?.wire}" }
+                s.next(phase = CampaignPhase.Opened, outcome = null, reason = null, contractVersion = v, stopCode = null, budgetStop = null)
             }
         }
     }

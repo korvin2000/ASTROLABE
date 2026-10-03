@@ -160,7 +160,8 @@ public class CellContext @JvmOverloads constructor(
     public val diagnoses: Diagnoses? = null,
     public val noteHorizon: io.astrolabe.kb.NoteHorizon? = null,
     public val completionEvidence: (suspend (List<io.astrolabe.verify.TestIntegrityFlag>) -> CompletionEvidence)? = null,
-
+    /** The controller runs this cell to rework the increment on a decider's `rework` answer (D-340); set by the controller, never inferred from text. */
+    public val rework: Boolean = false,
 ) {
     init {
         require(ids.context != null) { "a cell runs under its own context id" }
