@@ -42,9 +42,8 @@ branch; CI green on Ubuntu + Windows at `6daabfc` (ripgrep fix), `13cea02` (Dp1,
 (C3r, C11); the final S3 push (C14, C10) — see the Gate P8.C line in `TODO.md`. Studio tests run only locally.
 
 ## History (details in `audit/SESSION-HISTORY.md`; decisions D-112… in TODO §3, owner D-175 deps)
-Audit remediation 2026-09-28 (D-321–D-325); AI Gate transport (D-326–D-336, `liveTest` not run); phase 0 acceptance rule
-(D-337–D-355); plan-handoff fix (D-357–D-362); efficiency fix (D-363–D-375): Windows program resolution, `ContentCache`
-with fresh stamps at every acceptance boundary, input tolerance + `JsonRepair`, a refused call refuses only itself.
+Audit remediation (D-321–D-325); AI Gate transport (D-326–D-336, `liveTest` not run); phase 0 acceptance rule (D-337–D-355);
+plan-handoff fix (D-357–D-362); efficiency fix (D-363–D-375).
 ## ASTROLABE 2.0 waves A and B (2026-10-02/03, D-376–D-396)
 Wave A: `create` receipt, `run(op=wait)`, billed amount and timings in `ModelResponded`, stable `[S]` with the mask in
 `[A]`, `eval-live` runner, shell-accurate `EffectPolicy`, wire/reserve/output apart, session key and price tiers (D-376–D-387).
@@ -58,5 +57,4 @@ limits (money, minutes, requests) with a one-price reserve, atomic admission, ty
 balance profiles Economy/Balanced/Thorough (D-401, D-403); under `IntegrityApproval.Human` only a person clears a
 test-integrity flag (D-404); contract tokens follow the policy upward on a reopen, `limitHold`, wire names,
 `Astrolabe.resume` (D-405); strict regression gate for blast and types-touched with holds per test identity and a quiet
-stop for background runs (D-406). Studio (root repository): per-run limits and approach, live meter, outcome labels,
-raise-and-continue, human review card (D-402). Reviews: Codex and Fable on every line; all found defects fixed.
+stop for background runs (D-406). Studio (root): per-run limits and approach, live meter, labels, human review card (D-402).

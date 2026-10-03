@@ -24,8 +24,7 @@ reviewed every line before its merge. The owner delegated the 14 spec questions 
   `StopCode`, `CampaignOutcome`, `BalanceProfile` serialise constant names; Studio opens twice on a continuing reopen.
 - C3/C3r: no deadline on a model call; a host wait inside a synchronous child counts as active time; no tests for the
   S2 reviewer in reserve and S3 writers under a limit. Dp1: `Defaults.seedsMaxTokens` not connected.
-- Dp2: neighbouring docs (defaults §17, roles-shapes, context-layout, gates-termination, tools, lifecycle) change with D1–D3.
-- Studio: e2e not run in S3; backend and frontend must ship together (explicit effort). D5: exercise A1, A4, A5 (D-395).
+- Dp2: neighbouring docs change with D1–D3 (list in its report). Studio: e2e not run in S3; backend and frontend ship together. D5: exercise A1, A4, A5 (D-395).
 
 ## Debts, branches, leftovers
 Frozen debts (plan §12): D-254, D-70/D-71/D-241, D-252, D-113/D-120, D-124/D-244, D-200; D-66, D-28, D-92. Transient:
