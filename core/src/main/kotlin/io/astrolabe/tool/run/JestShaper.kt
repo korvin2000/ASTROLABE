@@ -3,6 +3,7 @@ package io.astrolabe.tool.run
 import io.astrolabe.evidence.Counts
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -14,7 +15,7 @@ import kotlinx.serialization.json.jsonPrimitive
  */
 public class JestShaper : Shaper {
     override val id: String = "jest"
-    override val version: String = "2"
+    override val version: String = "3"
 
     override fun applies(capture: RunCapture): Boolean {
         val tokens = Invocations.runnerTokens(capture)
@@ -29,9 +30,14 @@ public class JestShaper : Shaper {
         val wrapper = Invocations.detectWrapper(capture)
         capture.rejectedReports.forEach { limitations += "report '${it.path}' ignored: ${it.rejectionReason} (D-50)" }
 
-        val report = capture.evidenceReports.firstOrNull { it.kind == ReportKind.JestJson }
-        val fromReport = report?.let { JestJson.parse(it.content ?: ByteArray(0), capture.checkId, capture.executionRoot ?: capture.cwd) }
-        fromReport?.problems?.forEach { limitations += "report '${report.path}': $it" }
+        val parses = capture.evidenceReports.filter { it.kind == ReportKind.JestJson }.map { report ->
+            val parsed = JestJson.parse(report.content ?: ByteArray(0), capture.checkId, capture.executionRoot ?: capture.cwd)
+            parsed.problems.forEach { limitations += "report '${report.path}': $it" }
+            parsed
+        }
+        val fromReport = parses.takeIf { it.isNotEmpty() }?.let { all ->
+            XmlParse(all.flatMap { it.tests }, all.mapNotNull { it.declaredTests }.takeIf { it.size == all.size }?.sum(), all.flatMap { it.problems }, all.all { it.complete })
+        }
 
         val terminal = JestTerminal.parse(capture.text(), capture.checkId)
         val useReport = fromReport != null && fromReport.tests.isNotEmpty()
@@ -60,7 +66,7 @@ public class JestShaper : Shaper {
                 wrapper = wrapper,
                 runnerName = Invocations.runnerName(capture),
                 nothingCollected = terminal.noTestsFound && !useReport,
-                evidenceIncomplete = fromReport?.problems?.isNotEmpty() == true,
+                evidenceIncomplete = fromReport?.let { !it.complete } == true,
             ),
             limitations,
         )
@@ -76,6 +82,7 @@ public class JestShaper : Shaper {
             wrapper = wrapper,
             shaper = id,
             limitations = limitations,
+            reportComplete = fromReport?.complete == true && parses.size == capture.reports.size && capture.reports.all { it.collectionComplete },
         )
     }
 
@@ -215,7 +222,7 @@ internal object JestTerminal {
 
 /** `jest --json` subset: `testResults[].assertionResults[]` with ancestor titles and status. */
 internal object JestJson {
-    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    private val json = Json { ignoreUnknownKeys = true }
 
     fun parse(bytes: ByteArray, checkId: String?, cwd: String?): XmlParse = try {
         parseReport(bytes, checkId, cwd)
@@ -227,14 +234,18 @@ internal object JestJson {
 
     private fun parseReport(bytes: ByteArray, checkId: String?, cwd: String?): XmlParse {
         if (bytes.isEmpty()) return XmlParse(emptyList(), null, listOf("empty report"))
-        val root = runCatching { json.parseToJsonElement(bytes.toString(Charsets.UTF_8)).jsonObject }.getOrElse {
-            return XmlParse(emptyList(), null, listOf("could not be parsed (malformed JSON)"))
-        }
+        val text = bytes.toString(Charsets.UTF_8)
+        val root = json.parseToJsonElement(text).jsonObject
+        val uniqueKeys = uniqueJsonKeys(text)
+        val problems = ArrayList<String>()
+        if (!uniqueKeys) problems += "duplicate JSON keys make failure content ambiguous"
+        if ((intField(root, "numRuntimeErrorTestSuites") ?: 0) > 0) problems += "runtime suite errors leave unidentified failures"
         val out = ArrayList<TestResult>()
         val files = requireNotNull(root["testResults"]).jsonArray
         for (fileEntry in files) {
             val fileObj = fileEntry.jsonObject
-            val file = fileObj["name"]?.jsonPrimitive?.content?.replace('\\', '/')?.let { path ->
+            if (fileObj["testExecError"]?.takeUnless { it == JsonNull } != null) problems += "runtime suite errors leave unidentified failures"
+            val file = fileObj["name"]?.jsonPrimitive?.also { require(it.isString) }?.content?.replace('\\', '/')?.let { path ->
                 val root = cwd?.replace('\\', '/')?.trimEnd('/')
                 if (root != null && path.startsWith("$root/", ignoreCase = root.length > 1 && root[1] == ':'))
                     path.substring(root.length + 1) else path
@@ -242,17 +253,24 @@ internal object JestJson {
             val assertions = requireNotNull(fileObj["assertionResults"]).jsonArray
             for (entry in assertions) {
                 val obj = entry.jsonObject
-                val title = requireNotNull(obj["title"]).jsonPrimitive.content
-                val status = when (obj["status"]?.jsonPrimitive?.content) {
+                val title = requireNotNull(obj["title"]).jsonPrimitive.also { require(it.isString) }.content
+                var status = when (obj["status"]?.jsonPrimitive?.content) {
                     "passed" -> TestOutcome.Passed
                     "failed" -> TestOutcome.Failed
                     "pending", "skipped", "todo", "disabled" -> TestOutcome.Skipped
                     else -> error("unknown test status")
                 }
-                val suite = runCatching { obj["ancestorTitles"]?.jsonArray?.map { it.jsonPrimitive.content } }
-                    .getOrNull().orEmpty().takeIf { it.isNotEmpty() }?.joinToString(" > ")
-                val message = runCatching { obj["failureMessages"]?.jsonArray?.firstOrNull()?.jsonPrimitive?.content }
-                    .getOrNull()?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()
+                val suite = obj["ancestorTitles"]?.jsonArray?.map { it.jsonPrimitive.also { value -> require(value.isString) }.content }
+                    .orEmpty().takeIf { it.isNotEmpty() }?.joinToString(" > ")
+                val failures = obj["failureMessages"]?.jsonArray?.map { FailureContent("failure", body = it.jsonPrimitive.also { value -> require(value.isString) }.content) }.orEmpty() +
+                    obj["failureDetails"]?.jsonArray?.map { FailureContent("detail", body = it.toString()) }.orEmpty()
+                val contentComplete = uniqueKeys && (status != TestOutcome.Failed || "failureMessages" in obj)
+                if (!contentComplete) problems += "failure content for a test is incomplete"
+                if (status != TestOutcome.Failed && failures.isNotEmpty()) {
+                    problems += "test outcome disagrees with failure content"
+                    status = TestOutcome.Failed
+                }
+                val message = failures.firstOrNull()?.body?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()
                 val duration = obj["duration"]?.jsonPrimitive?.content?.toDoubleOrNull()?.toLong()
                 val (name, param) = TestIdentity.splitParameterization(title)
                 out += TestResult(
@@ -260,19 +278,23 @@ internal object JestJson {
                     status,
                     message,
                     duration,
+                    failureContent = failures,
+                    failureContentComplete = contentComplete,
                 )
             }
         }
-        val total = requireNotNull(intField(root, "numTotalTests"))
-        require(total == out.size)
+        val total = intField(root, "numTotalTests")
+        if (total == null || total != out.size) problems += "report totals disagree with parsed test cases"
         val counts = TestResults.counts(out)
         for ((field, actual) in listOf("numPassedTests" to counts.passed, "numFailedTests" to counts.failed)) {
-            if (field in root) require(intField(root, field) == actual)
+            if (field in root && intField(root, field) != actual) problems += "report outcome totals disagree with parsed test cases"
         }
         // Jest reports `todo` apart from `pending`; both parse as skipped.
-        if ("numPendingTests" in root) require((intField(root, "numPendingTests") ?: -1) + (intField(root, "numTodoTests") ?: 0) == counts.skipped)
-        require(root["success"]?.jsonPrimitive?.content != "false" || counts.failed > 0)
-        return XmlParse(out, total, emptyList())
+        if ("numPendingTests" in root && (intField(root, "numPendingTests") ?: -1) + (intField(root, "numTodoTests") ?: 0) != counts.skipped) {
+            problems += "report skip totals disagree with parsed test cases"
+        }
+        if (root["success"]?.jsonPrimitive?.content == "false" && counts.failed == 0) problems += "unsuccessful report has unidentified failures"
+        return XmlParse(out, total, problems, complete = problems.isEmpty())
     }
 
     private fun intField(root: JsonObject, key: String): Int? =

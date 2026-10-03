@@ -30,7 +30,7 @@ public enum class PendingStatus { Open, Applied, Void }
  * it, so a host's answer binds this completion and no other.
  */
 @Serializable
-public data class PendingCompletion(
+public data class PendingCompletion @JvmOverloads constructor(
     val id: String,
     val work: WorkId,
     val attempt: AttemptId,
@@ -56,6 +56,8 @@ public data class PendingCompletion(
     val requestId: String,
     val status: PendingStatus = PendingStatus.Open,
     val closedReason: String? = null,
+    /** Current regression receipts acknowledged by Open when the proposal was resolved. */
+    val acknowledged: List<String> = emptyList(),
 ) {
     init {
         require(id.isNotBlank() && requestId.isNotBlank()) { "a pending completion has an id and a request id" }
@@ -72,6 +74,7 @@ public data class PendingCompletion(
      */
     public fun resolve(decision: DecisionRecord?): Resolved =
         Resolver.resolve(results, other, decision?.takeIf { it.appliesTo(resultingStamp, contractVersion) && it.incrementId == incrementId }, reworkSpent = true)
+            .copy(acknowledged = acknowledged)
 }
 
 /**

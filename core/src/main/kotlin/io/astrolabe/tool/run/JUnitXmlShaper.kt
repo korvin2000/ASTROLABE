@@ -13,7 +13,7 @@ import javax.xml.stream.XMLStreamReader
  */
 public class JUnitXmlShaper : Shaper {
     override val id: String = "junit-xml"
-    override val version: String = "2"
+    override val version: String = "3"
 
     override fun applies(capture: RunCapture): Boolean {
         if (capture.evidenceReports.any { it.kind == ReportKind.JUnitXml }) return true
@@ -54,7 +54,7 @@ public class JUnitXmlShaper : Shaper {
                 wrapper = wrapper,
                 runnerName = Invocations.runnerName(capture),
                 nothingCollected = false,
-                evidenceIncomplete = totalsDisagree || parses.any { it.second.problems.isNotEmpty() },
+                evidenceIncomplete = totalsDisagree || parses.any { !it.second.complete },
             ),
             limitations,
         )
@@ -75,6 +75,8 @@ public class JUnitXmlShaper : Shaper {
             wrapper = wrapper,
             shaper = id,
             limitations = limitations,
+            reportComplete = parses.isNotEmpty() && parses.size == capture.reports.size &&
+                parses.all { it.second.complete && it.first.collectionComplete } && !totalsDisagree,
         )
     }
 
@@ -88,6 +90,7 @@ internal data class XmlParse(
     /** Sum of the `tests` attributes across suites; null when no suite declared one. */
     val declaredTests: Int?,
     val problems: List<String>,
+    val complete: Boolean = false,
 )
 
 /**
@@ -100,91 +103,132 @@ internal object JUnitXml {
         val tests = ArrayList<TestResult>()
         val problems = ArrayList<String>()
         var declared: Int? = null
+        var rootSeen = false
         try {
             val reader = factory().createXMLStreamReader(bytes.inputStream())
-            var suite: String? = null
-            var suitePackage: String? = null
-            var caseName: String? = null
-            var caseClass: String? = null
-            var caseTime: Long? = null
-            var caseOutcome = TestOutcome.Passed
-            var caseMessage: String? = null
-            var pendingText: StringBuilder? = null
-            // P8.C.10: the whole failure (attributes and body), unredacted, for its comparison fingerprint only.
-            var caseHead: String? = null
-            var caseDetail: String? = null
+            val suites = ArrayList<PendingSuite>()
+            var current: PendingCase? = null
+            var failure: PendingFailure? = null
+            var depth = 0
             while (reader.hasNext()) {
                 when (reader.next()) {
-                    XMLStreamConstants.START_ELEMENT -> when (reader.localName) {
-                        "testsuite" -> {
-                            suite = reader.attr("name")
-                            suitePackage = reader.attr("package")
-                            reader.attr("tests")?.toIntOrNull()?.let { declared = (declared ?: 0) + it }
+                    XMLStreamConstants.START_ELEMENT -> {
+                        depth++
+                        if (!rootSeen) {
+                            rootSeen = true
+                            if (reader.localName !in setOf("testsuite", "testsuites")) problems += "unsupported report root"
                         }
-                        "testcase" -> {
-                            caseName = reader.attr("name")
-                            caseClass = reader.attr("classname")
-                            caseTime = reader.attr("time")?.toDoubleOrNull()?.let { (it * 1000).toLong() }
-                            caseOutcome = TestOutcome.Passed
-                            caseMessage = null
+                        if (failure != null) {
+                            current?.contentComplete = false
+                            problems += "nested failure markup is unsupported"
+                            continue
                         }
-                        "failure", "error", "skipped" -> if (caseName != null) {
-                            caseOutcome = when (reader.localName) {
-                                "failure" -> TestOutcome.Failed
-                                "error" -> TestOutcome.Error
-                                else -> TestOutcome.Skipped
+                        when (reader.localName) {
+                            "testsuite", "testsuites" -> {
+                                val rawCount = reader.attr("tests")
+                                val total = rawCount?.toIntOrNull()?.takeIf { it >= 0 }
+                                if (rawCount != null && total == null) problems += "invalid suite test count"
+                                if (suites.none { it.declaredTests != null } && total != null) declared = (declared ?: 0) + total
+                                val outcomes = buildMap {
+                                    for (field in listOf("failures", "errors", "skipped", "disabled")) {
+                                        val raw = reader.attr(field) ?: continue
+                                        val count = raw.toIntOrNull()?.takeIf { it >= 0 }
+                                        if (count == null) problems += "invalid suite outcome count" else put(field, count)
+                                    }
+                                }
+                                suites += PendingSuite(reader.attr("name"), reader.attr("package"), total, outcomes, tests.size, depth)
                             }
-                            caseMessage = reader.attr("message") ?: reader.attr("type")
-                            caseHead = listOfNotNull(reader.attr("type"), reader.attr("message")).joinToString(NEWLINE)
-                            pendingText = StringBuilder()
+                            "testcase" -> {
+                                if (current != null || suites.isEmpty()) problems += "testcase outside a supported suite"
+                                current = PendingCase(
+                                    reader.attr("name"), reader.attr("classname"),
+                                    reader.attr("time")?.toDoubleOrNull()?.let { (it * 1000).toLong() },
+                                    suites.lastOrNull()?.name, suites.lastOrNull()?.pkg, depth,
+                                )
+                                for (field in listOf("status", "result")) {
+                                    when (reader.attr(field)) {
+                                        null, "run", "passed", "completed" -> Unit
+                                        "notrun", "disabled", "skipped", "suppressed" -> current.outcome = TestOutcome.Skipped
+                                        else -> problems += "unsupported testcase outcome attribute"
+                                    }
+                                }
+                            }
+                            "failure", "error", "skipped" -> {
+                                val test = current
+                                if (test == null || depth != test.depth + 1) {
+                                    problems += "failure or skip outside a supported testcase"
+                                } else {
+                                    val kind = reader.localName
+                                    if (kind == "skipped" && test.outcome in setOf(TestOutcome.Failed, TestOutcome.Error) ||
+                                        kind != "skipped" && test.outcome == TestOutcome.Skipped) problems += "testcase contains both skipped and failing outcomes"
+                                    test.outcome = when {
+                                        kind == "error" || test.outcome == TestOutcome.Error -> TestOutcome.Error
+                                        kind == "failure" || test.outcome == TestOutcome.Failed -> TestOutcome.Failed
+                                        else -> TestOutcome.Skipped
+                                    }
+                                    val attributes = (0 until reader.attributeCount).associate {
+                                        reader.getAttributeName(it).toString() to reader.getAttributeValue(it)
+                                    }
+                                    failure = PendingFailure(kind, attributes, depth)
+                                }
+                            }
+                            else -> if ((current?.depth == depth - 1 || current == null && suites.lastOrNull()?.depth == depth - 1) &&
+                                reader.localName !in setOf("system-out", "system-err", "properties")) {
+                                problems += "unsupported report child element"
+                            }
                         }
-                        else -> Unit
                     }
 
                     XMLStreamConstants.CHARACTERS, XMLStreamConstants.CDATA ->
-                        pendingText?.append(reader.text)
+                        failure?.body?.append(reader.text)
 
-                    XMLStreamConstants.END_ELEMENT -> when (reader.localName) {
-                        "failure", "error", "skipped" -> {
-                            if (caseMessage == null) {
-                                caseMessage = pendingText?.toString()?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()
-                            }
-                            caseDetail = listOfNotNull(caseHead?.ifBlank { null }, pendingText?.toString()?.trim()?.ifBlank { null }).joinToString(NEWLINE).ifBlank { null }
-                            pendingText = null
+                    XMLStreamConstants.DTD, XMLStreamConstants.ENTITY_REFERENCE -> problems += "unsupported report entity content"
+
+                    XMLStreamConstants.COMMENT, XMLStreamConstants.PROCESSING_INSTRUCTION -> if (failure != null) {
+                        current?.contentComplete = false
+                        problems += "unsupported failure markup"
+                    }
+
+                    XMLStreamConstants.END_ELEMENT -> {
+                        val pending = failure
+                        if (pending != null && pending.depth == depth) {
+                            val content = FailureContent(pending.kind, pending.attributes, pending.body.toString())
+                            if (pending.kind != "skipped") current?.failures?.add(content)
+                            if (current?.message == null) current?.message = pending.attributes["message"] ?: pending.attributes["type"]
+                                ?: content.body.lineSequence().firstOrNull { it.isNotBlank() }?.trim()
+                            failure = null
                         }
-                        "testcase" -> {
-                            val raw = caseName
-                            if (raw == null) {
-                                problems += "a testcase without a name was skipped"
-                            } else {
-                                val (name, param) = TestIdentity.splitParameterization(raw)
+                        val test = current
+                        if (reader.localName == "testcase" && test?.depth == depth) {
+                            if (test.name.isNullOrBlank()) problems += "a testcase without a name was skipped"
+                            else {
+                                val (name, param) = TestIdentity.splitParameterization(test.name)
                                 tests += TestResult(
-                                    identity = TestIdentity(
-                                        check = checkId,
-                                        module = module ?: suitePackage,
-                                        file = caseClass ?: suite,
-                                        suite = suite?.takeIf { it != caseClass },
-                                        name = name,
-                                        parameterization = param,
-                                    ),
-                                    outcome = caseOutcome,
-                                    message = caseMessage,
-                                    durationMillis = caseTime,
-                                    detail = caseDetail,
+                                    TestIdentity(checkId, module ?: test.pkg, test.className ?: test.suite, test.suite?.takeIf { it != test.className }, name, param),
+                                    test.outcome, test.message, test.time,
+                                    detail = test.failures.joinToString("\n") { it.body }.ifEmpty { null },
+                                    failureContent = test.failures.toList(),
+                                    failureContentComplete = test.contentComplete,
                                 )
                             }
-                            caseName = null
-                            caseClass = null
-                            caseMessage = null
-                            caseHead = null
-                            caseDetail = null
-                            caseTime = null
+                            current = null
                         }
-                        "testsuite" -> {
-                            suite = null
-                            suitePackage = null
+                        if (reader.localName in setOf("testsuite", "testsuites") && suites.lastOrNull()?.depth == depth) {
+                            val suite = suites.removeAt(suites.lastIndex)
+                            if (suite.declaredTests != null && suite.declaredTests != tests.size - suite.start) {
+                                problems += "suite totals disagree with parsed test cases"
+                            }
+                            val cases = tests.subList(suite.start, tests.size)
+                            for ((field, expected) in suite.declaredOutcomes) {
+                                val actual = when (field) {
+                                    "failures" -> cases.count { it.failureContent.any { failure -> failure.kind == "failure" } }
+                                    "errors" -> cases.count { it.failureContent.any { failure -> failure.kind == "error" } }
+                                    else -> cases.count { it.outcome == TestOutcome.Skipped }
+                                }
+                                if (actual != expected) problems += "suite outcome totals disagree with parsed test cases"
+                            }
                         }
-                        else -> Unit
+                        depth--
                     }
 
                     else -> Unit
@@ -197,8 +241,20 @@ internal object JUnitXml {
             problems += "could not be parsed (${e.message?.lineSequence()?.firstOrNull()?.trim() ?: "malformed XML"})"
             return XmlParse(tests, declared, problems)
         }
-        return XmlParse(tests, declared, problems)
+        return XmlParse(tests, declared, problems, complete = rootSeen && problems.isEmpty())
     }
+
+    private data class PendingSuite(val name: String?, val pkg: String?, val declaredTests: Int?, val declaredOutcomes: Map<String, Int>, val start: Int, val depth: Int)
+
+    private data class PendingCase(
+        val name: String?, val className: String?, val time: Long?, val suite: String?, val pkg: String?, val depth: Int,
+        var outcome: TestOutcome = TestOutcome.Passed,
+        var message: String? = null,
+        val failures: MutableList<FailureContent> = ArrayList(),
+        var contentComplete: Boolean = true,
+    )
+
+    private data class PendingFailure(val kind: String, val attributes: Map<String, String>, val depth: Int, val body: StringBuilder = StringBuilder())
 
     private fun XMLStreamReader.attr(name: String): String? =
         (0 until attributeCount).firstOrNull { getAttributeLocalName(it) == name }?.let { getAttributeValue(it) }
@@ -209,6 +265,3 @@ internal object JUnitXml {
         runCatching { setProperty(XMLInputFactory.IS_COALESCING, true) }
     }
 }
-
-/** The separator of a failure's attribute and body lines in [TestResult.detail]. */
-private const val NEWLINE: String = "\n"

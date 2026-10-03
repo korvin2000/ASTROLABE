@@ -1297,7 +1297,7 @@ public class Cell @JvmOverloads constructor(
         // ------------------------------------------------------------ checks
 
         private fun currencies(stampNow: CandidateId?): Map<String, Currency> =
-            ws.checks.all().filter { it.last != null }.associate { it.id to ws.scheduler.currency(it, stampNow) }
+            ws.checks.all().filter { it.last != null || it.id in io.astrolabe.verify.Regressions.CHECKS }.associate { it.id to ws.scheduler.currency(it, stampNow) }
 
         /** The acceptance checks verify-on-stop is about to run at [stampNow] — the same selection [Verify.onStop] makes. */
         private fun remainingAcceptance(stampNow: CandidateId): List<Check> =

@@ -3,6 +3,8 @@ package io.astrolabe.tool.run
 import io.astrolabe.evidence.Counts
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -14,7 +16,7 @@ import kotlinx.serialization.json.jsonPrimitive
  */
 public class PytestShaper : Shaper {
     override val id: String = "pytest"
-    override val version: String = "1"
+    override val version: String = "2"
 
     override fun applies(capture: RunCapture): Boolean {
         val tokens = Invocations.runnerTokens(capture)
@@ -31,14 +33,18 @@ public class PytestShaper : Shaper {
             limitations += "report '${it.path}' ignored: ${it.rejectionReason} (D-50)"
         }
 
-        val report = capture.evidenceReports.firstOrNull { it.kind == ReportKind.PytestJson || it.kind == ReportKind.JUnitXml }
-        val fromReport = report?.let { artifact ->
-            when (artifact.kind) {
+        val reports = capture.evidenceReports.filter { it.kind == ReportKind.PytestJson || it.kind == ReportKind.JUnitXml }
+        val parses = reports.map { artifact ->
+            val parsed = when (artifact.kind) {
                 ReportKind.PytestJson -> PytestJson.parse(artifact.content ?: ByteArray(0), capture.checkId)
                 else -> JUnitXml.parse(artifact.content ?: ByteArray(0), artifact.moduleOrDerived, capture.checkId)
             }
+            parsed.problems.forEach { limitations += "report '${artifact.path}': $it" }
+            parsed
         }
-        fromReport?.problems?.forEach { limitations += "report '${report.path}': $it" }
+        val fromReport = parses.takeIf { it.isNotEmpty() }?.let { all ->
+            XmlParse(all.flatMap { it.tests }, all.mapNotNull { it.declaredTests }.takeIf { it.size == all.size }?.sum(), all.flatMap { it.problems }, all.all { it.complete })
+        }
 
         val useReport = fromReport != null && fromReport.tests.isNotEmpty()
         val tests = if (useReport) fromReport.tests else terminal.tests
@@ -62,7 +68,7 @@ public class PytestShaper : Shaper {
                 wrapper = wrapper,
                 runnerName = Invocations.runnerName(capture) ?: "pytest",
                 nothingCollected = terminal.noTestsRan && !useReport,
-                evidenceIncomplete = fromReport?.let { it.problems.isNotEmpty() || (it.declaredTests != null && it.declaredTests != it.tests.size) } == true,
+                evidenceIncomplete = fromReport?.let { !it.complete } == true,
                 infraExitCodes = INFRA_EXITS,
                 inconclusiveExitCodes = INCONCLUSIVE_EXITS,
             ),
@@ -80,6 +86,7 @@ public class PytestShaper : Shaper {
             wrapper = wrapper,
             shaper = id,
             limitations = limitations,
+            reportComplete = fromReport?.complete == true && reports.size == capture.reports.size && reports.all { it.collectionComplete },
         )
     }
 
@@ -130,11 +137,11 @@ internal object PytestTerminal {
             for (t in tokens) {
                 val n = t.groupValues[1].toIntOrNull() ?: continue
                 when (t.groupValues[2]) {
-                    "passed", "xpassed" -> passed += n
+                    "passed" -> passed += n
                     "failed" -> failed += n
                     "error", "errors" -> errors += n
                     // An expected failure verified no new behaviour; it is not a pass and not a red.
-                    "skipped", "xfailed" -> skipped += n
+                    "skipped", "xfailed", "xpassed" -> skipped += n
                     else -> Unit // deselected and warnings were never executed
                 }
             }
@@ -164,7 +171,7 @@ internal object PytestTerminal {
                 outcome = when (verb) {
                     "FAILED" -> TestOutcome.Failed
                     "ERROR" -> TestOutcome.Error
-                    "XFAIL" -> TestOutcome.Skipped
+                    "XFAIL", "XPASS" -> TestOutcome.Skipped
                     else -> TestOutcome.Passed
                 },
                 message = message,
@@ -191,7 +198,7 @@ internal object PytestTerminal {
 
 /** `pytest --json-report` subset: `summary` plus a `tests` array of `nodeid`/`outcome`. */
 internal object PytestJson {
-    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    private val json = Json { ignoreUnknownKeys = true }
 
     fun parse(bytes: ByteArray, checkId: String?): XmlParse = try {
         parseReport(bytes, checkId)
@@ -203,29 +210,84 @@ internal object PytestJson {
 
     private fun parseReport(bytes: ByteArray, checkId: String?): XmlParse {
         if (bytes.isEmpty()) return XmlParse(emptyList(), null, listOf("empty report"))
-        val root = runCatching { json.parseToJsonElement(bytes.toString(Charsets.UTF_8)).jsonObject }.getOrElse {
-            return XmlParse(emptyList(), null, listOf("could not be parsed (malformed JSON)"))
+        val text = bytes.toString(Charsets.UTF_8)
+        val root = json.parseToJsonElement(text).jsonObject
+        val uniqueKeys = uniqueJsonKeys(text)
+        val problems = ArrayList<String>()
+        if (!uniqueKeys) problems += "duplicate JSON keys make failure content ambiguous"
+        root["collectors"]?.jsonArray?.forEach { collector ->
+            if (collector.jsonObject["outcome"]?.jsonPrimitive?.content !in setOf("passed", "skipped")) {
+                problems += "collection errors leave unidentified failures"
+            }
         }
         val results = ArrayList<TestResult>()
         val entries = requireNotNull(root["tests"]).jsonArray
         for (entry in entries) {
             val obj = entry.jsonObject
-            val nodeId = requireNotNull(obj["nodeid"]?.jsonPrimitive?.contentOrNullSafe())
-            val outcome = when (obj["outcome"]?.jsonPrimitive?.contentOrNullSafe()) {
-                "passed", "xpassed" -> TestOutcome.Passed
+            val node = requireNotNull(obj["nodeid"]?.jsonPrimitive)
+            require(node.isString)
+            val nodeId = requireNotNull(node.contentOrNullSafe())
+            val outcomeField = requireNotNull(obj["outcome"]?.jsonPrimitive)
+            require(outcomeField.isString)
+            var outcome = when (outcomeField.contentOrNullSafe()) {
+                "passed" -> TestOutcome.Passed
                 "failed" -> TestOutcome.Failed
                 "error" -> TestOutcome.Error
-                "skipped", "xfailed" -> TestOutcome.Skipped
+                "skipped", "xfailed", "xpassed", "deselected" -> TestOutcome.Skipped
                 else -> error("unknown test outcome")
             }
-            val message = obj["call"]?.let { it as? JsonObject }?.get("longrepr")?.jsonPrimitive?.contentOrNullSafe()
-                ?.lineSequence()?.lastOrNull { it.isNotBlank() }?.trim()
+            if (outcome == TestOutcome.Passed && ("wasxfail" in obj || listOf("setup", "call", "teardown").any {
+                    obj[it]?.jsonObject?.containsKey("wasxfail") == true
+                })) outcome = TestOutcome.Skipped
+            val failures = ArrayList<FailureContent>()
+            var contentComplete = uniqueKeys
+            var failedPhase = false
+            var errorPhase = false
+            for (phase in listOf("setup", "call", "teardown")) {
+                val stage = obj[phase]?.jsonObject ?: continue
+                val longrepr = stage["longrepr"]?.takeUnless { it == JsonNull }
+                val phaseOutcome = stage["outcome"]?.jsonPrimitive?.content
+                if (phaseOutcome !in setOf(null, "passed", "failed", "error", "skipped", "xfailed", "xpassed")) problems += "unsupported phase outcome"
+                failedPhase = failedPhase || phaseOutcome == "failed" || phaseOutcome == "error"
+                errorPhase = errorPhase || phaseOutcome == "error"
+                if (phaseOutcome !in setOf("failed", "error") && longrepr == null) continue
+                if (longrepr == null) contentComplete = false
+                val body = if (longrepr is JsonPrimitive && longrepr.isString) longrepr.content else longrepr?.toString().orEmpty()
+                val attributes = stage.filterKeys { it in setOf("crash", "traceback") }.mapValues { it.value.toString() } +
+                    ("longreprFormat" to if (longrepr is JsonPrimitive && longrepr.isString) "text" else "json")
+                failures += FailureContent(phase, attributes, body)
+            }
+            val failing = outcome == TestOutcome.Failed || outcome == TestOutcome.Error
+            if (failing && failures.isEmpty()) contentComplete = false
+            if (outcome == TestOutcome.Passed && failures.isNotEmpty()) problems += "test outcome disagrees with a failed phase"
+            if (failedPhase && !failing) problems += "test outcome disagrees with a failed phase"
+            val observedOutcome = if (failedPhase && !failing) {
+                if (errorPhase) TestOutcome.Error else TestOutcome.Failed
+            } else outcome
+            if (failing && !contentComplete) problems += "failure content for a test is incomplete"
+            val message = failures.firstOrNull()?.body?.lineSequence()?.lastOrNull { it.isNotBlank() }?.trim()
             val duration = obj["duration"]?.jsonPrimitive?.contentOrNullSafe()?.toDoubleOrNull()?.let { (it * 1000).toLong() }
-            results += TestResult(PytestTerminal.identityOf(nodeId, checkId), outcome, message, duration)
+            results += TestResult(PytestTerminal.identityOf(nodeId, checkId), observedOutcome, message, duration,
+                failureContent = failures, failureContentComplete = contentComplete)
         }
-        val total = runCatching { root["summary"]?.jsonObject?.get("total")?.jsonPrimitive?.contentOrNullSafe()?.toIntOrNull() }.getOrNull()
-        require(total != null && total == results.size)
-        return XmlParse(results, total, emptyList())
+        val summary = root["summary"]?.jsonObject
+        val total = summary?.get("total")?.jsonPrimitive?.contentOrNullSafe()?.toIntOrNull()
+        if (total == null || total != results.size) problems += "report totals disagree with parsed test cases"
+        val counts = TestResults.counts(results)
+        for ((fields, actual) in listOf(
+            listOf("passed") to counts.passed,
+            listOf("failed") to counts.failed,
+            listOf("error", "errors") to counts.errors,
+            listOf("skipped", "xfailed", "xpassed", "deselected") to counts.skipped,
+        )) {
+            if (summary != null && fields.any { it in summary }) {
+                val expected = fields.sumOf { field ->
+                    if (field in summary) summary[field]?.jsonPrimitive?.contentOrNullSafe()?.toIntOrNull() ?: -1 else 0
+                }
+                if (expected != actual) problems += "report outcome totals disagree with parsed test cases"
+            }
+        }
+        return XmlParse(results, total, problems, complete = problems.isEmpty())
     }
 
     private fun kotlinx.serialization.json.JsonPrimitive.contentOrNullSafe(): String? = content.takeIf { it.isNotEmpty() && it != "null" }

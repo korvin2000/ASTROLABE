@@ -4,10 +4,118 @@ import io.astrolabe.evidence.Outcome
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class PytestShaperTest {
+    @Test
+    fun `pytest collection errors prevent report completeness`() {
+        val shaped = pytestJson("""
+            {"summary":{"total":1},"collectors":[{"nodeid":"test_other.py","outcome":"failed","longrepr":"collection failed"}],
+            "tests":[{"nodeid":"test_t.py::t","outcome":"failed","call":{"outcome":"failed","longrepr":"OLD"}}]}
+        """.trimIndent())
+        assertTrue(!shaped.reportComplete)
+        assertTrue(shaped.tests.single().failing)
+    }
+
+    @Test
+    fun `pytest JSON preserves different full bodies with the same summary line`() {
+        fun shaped(body: String) = pytestJson("""
+            {"summary":{"total":1},"tests":[{"nodeid":"test_t.py::t","outcome":"failed",
+            "call":{"outcome":"failed","longrepr":"$body\nAssertionError same summary"}}]}
+        """.trimIndent())
+        val first = shaped("NEW 12 0x123 3ms")
+        val second = shaped("OLD 14 0x456 5ms")
+        assertEquals(first.tests.single().message, second.tests.single().message)
+        assertTrue(first.reportComplete && second.reportComplete)
+        assertTrue(first.tests.single().failureContentComplete)
+        assertNotEquals(first.tests.single().failureContent, second.tests.single().failureContent)
+        assertEquals("NEW 12 0x123 3ms\nAssertionError same summary", first.tests.single().failureContent.single().body)
+    }
+
+    @Test
+    fun `pytest JSON preserves failing setup and teardown as separate failures`() {
+        val shaped = pytestJson("""
+            {"summary":{"total":1},"tests":[{"nodeid":"test_t.py::t","outcome":"error",
+            "setup":{"outcome":"failed","longrepr":"SETUP"},
+            "teardown":{"outcome":"failed","longrepr":"TEARDOWN"}}]}
+        """.trimIndent())
+        val result = shaped.tests.single()
+        assertTrue(result.failureContentComplete)
+        assertEquals(listOf("setup", "teardown"), result.failureContent.map { it.kind })
+        assertEquals(listOf("SETUP", "TEARDOWN"), result.failureContent.map { it.body })
+    }
+
+    @Test
+    fun `pytest terminal short summary alone cannot certify full failure content`() {
+        fun shaped(body: String) = Shapers.shape(Recorded.capture(
+            argv = listOf("pytest"), exitCode = 1,
+            output = "___ t ___\n$body\n=== short test summary info ===\nFAILED test_t.py::t - same\n=== 1 failed in 0.1s ===".toByteArray(),
+        ))
+        listOf(shaped("NEW"), shaped("OLD")).forEach {
+            assertTrue(!it.reportComplete)
+            assertTrue(!it.tests.single().failureContentComplete)
+        }
+    }
+
+    @Test
+    fun `every fresh pytest report contributes identities and multiplicity`() {
+        fun report(body: String) = ReportArtifact("$body.json", ReportKind.PytestJson, true, "fresh",
+            """{"summary":{"total":1},"tests":[{"nodeid":"test_t.py::t","outcome":"failed","call":{"outcome":"failed","longrepr":"$body"}}]}""".toByteArray())
+        val shaped = Shapers.shape(Recorded.capture(
+            argv = listOf("pytest"), exitCode = 1, reports = listOf(report("NEW"), report("OLD")),
+        ))
+        assertEquals(2, shaped.tests.size)
+        assertEquals(1, shaped.ambiguousIdentities.size)
+    }
+
+    @Test
+    fun `duplicate JSON fields cannot silently replace an earlier failure`() {
+        val shaped = pytestJson("""
+            {"summary":{"total":1},"tests":[{"nodeid":"test_t.py::t","outcome":"failed",
+            "call":{"outcome":"failed","longrepr":"NEW","longrepr":"OLD"}}]}
+        """.trimIndent())
+        assertTrue(!shaped.reportComplete)
+        assertTrue(shaped.tests.all { !it.failureContentComplete })
+    }
+
+    @Test
+    fun `a passing pytest outcome with a failed phase is incomplete`() {
+        val shaped = pytestJson("""
+            {"summary":{"total":1},"tests":[{"nodeid":"test_t.py::t","outcome":"passed",
+            "call":{"outcome":"failed","longrepr":"NEW"}}]}
+        """.trimIndent())
+        assertTrue(!shaped.reportComplete)
+        assertTrue(shaped.tests.single().failing)
+    }
+
+    @Test
+    fun `pytest summary failures cannot contradict a parsed pass`() {
+        val shaped = pytestJson("""{"summary":{"total":1,"failed":1},"tests":[{"nodeid":"test_t.py::t","outcome":"passed"}]}""")
+        assertTrue(!shaped.reportComplete)
+    }
+
+    @Test
+    fun `expected and deselected pytest outcomes never become passed evidence`() {
+        val cases = listOf(
+            "\"outcome\":\"xfailed\"",
+            "\"outcome\":\"xpassed\"",
+            "\"outcome\":\"deselected\"",
+            "\"outcome\":\"passed\",\"wasxfail\":\"expected failure\"",
+            "\"outcome\":\"passed\",\"call\":{\"outcome\":\"passed\",\"wasxfail\":\"expected failure\"}",
+        )
+        for (fields in cases) {
+            val shaped = pytestJson("""{"summary":{"total":1},"tests":[{"nodeid":"test_t.py::t",$fields}]}""")
+            assertTrue(shaped.tests.none { it.outcome == TestOutcome.Passed }, fields)
+        }
+    }
+
+    private fun pytestJson(json: String): Shaped = Shapers.shape(Recorded.capture(
+        argv = listOf("pytest"), exitCode = 1,
+        reports = listOf(ReportArtifact("report.json", ReportKind.PytestJson, true, "fresh", json.toByteArray())),
+    ))
+
     @Test
     fun `a green run yields parsed counts and the only green status`() {
         val shaped = Shapers.shape(Recorded.capture("pytest-pass.txt", listOf("pytest", "-q"), exitCode = 0))

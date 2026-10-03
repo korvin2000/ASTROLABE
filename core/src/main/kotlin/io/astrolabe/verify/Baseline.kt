@@ -1,17 +1,35 @@
 package io.astrolabe.verify
 
+/**
+ * Strict regression state machine for CHK-tests-blast and CHK-types-touched.
+ * Absent -> Held on every identified failure; unknown failures create an opaque Held obligation.
+ * Held accumulates observations in durable receipt order, including incomplete and timeout runs.
+ * Held -> Discharged only by a later complete, eligible, untruncated, fully parsed current-tree run
+ * reporting that identity exactly once as passed and covering every held command and input closure.
+ * A later failure reopens Discharged; a partial, missing, skipped or ambiguous result never discharges.
+ * Remaining Held -> Inherited only when every observation is complete, unambiguous and confirmed on this tree,
+ * and every complete-content fingerprint matches the same unambiguous failure on initial candidate s0.
+ * Remaining Held -> New only with an explicit unique pass in a complete comparable s0 baseline.
+ * Remaining Held -> Unclassified otherwise, including opaque obligations and conflicting fingerprints.
+ * Inherited is disclosed without a gap or cap; New requires fix and rerun and cannot be acknowledged.
+ * Unclassified is disclosed and caps provenance; a current red requires a persisted Open acknowledgement.
+ * These are pure projections of persisted evidence, shared by exit, acceptance, finish and reopen.
+ */
+
 import io.astrolabe.Astrolabe
 import io.astrolabe.auth.ContentClass
 import io.astrolabe.auth.Redaction
 import io.astrolabe.auth.RedactionConfig
 import io.astrolabe.evidence.Aliases
 import io.astrolabe.evidence.FailedTest
+import io.astrolabe.evidence.Closure
 import io.astrolabe.evidence.TestOutcomes
 import io.astrolabe.evidence.InputStability
 import io.astrolabe.evidence.Limit
 import io.astrolabe.evidence.Outcome
 import io.astrolabe.evidence.Receipt
 import io.astrolabe.evidence.Receipts
+import io.astrolabe.evidence.ReceiptClaim
 import io.astrolabe.evidence.TestedInputs
 import io.astrolabe.id.CandidateId
 import io.astrolabe.id.Digest
@@ -27,8 +45,7 @@ import io.astrolabe.provider.TokenEstimator
 import io.astrolabe.store.BlobKind
 import io.astrolabe.store.BlobStore
 import io.astrolabe.store.Layout
-import io.astrolabe.tool.run.ReportArtifact
-import io.astrolabe.tool.run.ReportKind
+import io.astrolabe.tool.run.JUnitReports
 import io.astrolabe.tool.run.RunCapture
 import io.astrolabe.tool.run.Runner
 import io.astrolabe.tool.run.ShapeBudget
@@ -36,7 +53,6 @@ import io.astrolabe.tool.run.Shapers
 import io.astrolabe.tool.run.TestIdentity
 import io.astrolabe.tool.run.TestOutcome
 import io.astrolabe.tool.run.TestResult
-import io.astrolabe.tool.run.TestResults
 import io.astrolabe.workspace.EnvFingerprint
 import io.astrolabe.workspace.MaterializeResult
 import io.astrolabe.workspace.ShadowRef
@@ -44,9 +60,8 @@ import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Clock
-import kotlin.io.path.relativeTo
 
-/** One pre-existing failure: namespaced identity, normalized failure signature, multiplicity (D-27, D-50). */
+/** A display-only baseline failure: redacted identity and message, plus multiplicity (D-27, D-50). */
 public data class PreexistingFailure(val identity: TestIdentity, val signature: String, val multiplicity: Int)
 
 /** How a later red relates to the baseline (§8.5). Only [PreExisting] is "unchanged"; everything else steers. */
@@ -70,24 +85,30 @@ public sealed interface BaselineMatch {
  * at `s0`, matched later by identity, comparable environment and failure signature — never by counts or a
  * bare name. A ledger is never permission to waive task acceptance.
  */
-public data class PreexistingLedger(
+public data class PreexistingLedger @JvmOverloads constructor(
     val receiptId: String,
     val alias: String?,
     val stamp: CandidateId,
     val envId: Digest,
     val entries: List<PreexistingFailure>,
-    /** Canonical identities that appeared more than once in the baseline: they can never match. */
+    /** Opaque keys of identities that appeared more than once in the baseline: they can never match. */
     val ambiguous: Set<String>,
     val limitations: List<String> = emptyList(),
+    /** Opaque, complete comparison evidence; legacy display signatures never establish inheritance or a new regression. */
+    val evidence: TestOutcomes? = null,
 ) {
-    private val byIdentity: Map<String, PreexistingFailure> = entries.associateBy { it.identity.canonical }
-
-    public fun classify(result: TestResult, envId: Digest = this.envId): BaselineMatch {
+    @JvmOverloads
+    public fun classify(result: TestResult, envId: Digest = this.envId, roots: List<String> = emptyList()): BaselineMatch {
+        if (!result.failing) return BaselineMatch.Ambiguous("this observation is not a failure")
         if (envId != this.envId) return BaselineMatch.Ambiguous("environment ${envId.hash8} differs from the baseline's ${this.envId.hash8}")
-        val canonical = result.identity.canonical
-        if (canonical in ambiguous) return BaselineMatch.Ambiguous("'${result.identity}' appears more than once in the baseline")
-        val entry = byIdentity[canonical] ?: return BaselineMatch.New
-        return if (signatureOf(result) == entry.signature) BaselineMatch.PreExisting else BaselineMatch.Changed(entry.signature)
+        val baseline = evidence ?: return BaselineMatch.Ambiguous("no complete comparison evidence")
+        val key = Regressions.key(result.identity)
+        if (!baseline.reportComplete || baseline.truncated || baseline.multiplicity[key] != 1 || key in baseline.ambiguous) return BaselineMatch.Ambiguous("identity missing, ambiguous or incompletely reported on s0")
+        val before = baseline.failed.singleOrNull { it.key == key }
+        if (before == null) return if (baseline.passed.count { it == key } == 1) BaselineMatch.New else BaselineMatch.Ambiguous("not reported passed on s0")
+        val now = Regressions.outcomes(listOf(result), { "" }, roots).failed.singleOrNull()
+        if (!before.contentComplete || now?.contentComplete != true) return BaselineMatch.Ambiguous("complete failure content missing")
+        return if (now.fingerprint == before.fingerprint) BaselineMatch.PreExisting else BaselineMatch.Changed(before.signature)
     }
 
     /** Rendered once in `[K]`; bounded. */
@@ -107,8 +128,7 @@ public data class PreexistingLedger(
         private val TEMP_PATH = Regex("""(/tmp/\S+|[A-Za-z]:\\[^\s]*\\Temp\\[^\s]*)""")
 
         /**
-         * The failure signature: the first message line with only identified volatile data normalized
-         * (addresses, long hex ids, timestamps, temp paths — D-19); paths, error codes and literals stay.
+         * Legacy display and recovery summary (D-19), never comparison evidence for the strict regression rule.
          */
         @JvmStatic
         public fun signatureOf(result: TestResult): String {
@@ -128,7 +148,7 @@ public data class PreexistingLedger(
  * positive, unambiguous, complete evidence makes a failure [New] or [Inherited]; anything less is [Unclassified].
  */
 public enum class RedClass {
-    /** It fails on this tree, and on `s0` the same set showed it pass — individually, or by running to its end without it failing: a regression no `Open` item clears. */
+    /** It is held on this tree and an unambiguous, complete baseline explicitly reported it passed: no `Open` item clears it. */
     New,
 
     /** The same identity failed on `s0` with the same fingerprint: inherited, disclosed in the finish receipt, never a gap. */
@@ -203,16 +223,31 @@ public object Regressions {
      * whatever its outcomes, is ambiguous; skipped and expected failures are no pass. Bounded; [roots] are the run's roots.
      */
     @JvmStatic
-    public fun outcomes(tests: List<TestResult>, redact: (String) -> String, roots: List<String>): TestOutcomes {
-        val repeated = tests.groupBy { it.identity.canonical }.filterValues { it.size > 1 }.keys
+    @JvmOverloads
+    public fun outcomes(tests: List<TestResult>, redact: (String) -> String, roots: List<String>, reportComplete: Boolean = false): TestOutcomes {
+        val multiplicity = tests.groupingBy { key(it.identity) }.eachCount()
+        val repeated = multiplicity.filterValues { it > 1 }.keys
         val failing = tests.filter { it.failing }
         val passing = tests.filter { it.outcome == TestOutcome.Passed }
         val failed = failing.take(MAX_FAILED).map { t ->
             val first = t.message?.lineSequence()?.map { it.trim() }?.firstOrNull { it.isNotEmpty() } ?: t.outcome.name.lowercase()
-            FailedTest(key(t.identity), redact(t.identity.display).take(MAX_TEXT), fingerprint(t.detail ?: t.message ?: t.outcome.name.lowercase(), roots), redact(first).take(MAX_TEXT))
+            val content = buildString {
+                fun field(value: String) { val normalized = neutralize(value, roots); append(normalized.length).append(':').append(normalized) }
+                field(t.outcome.name)
+                for (element in t.failureContent) {
+                    field(element.kind)
+                    append(element.attributes.size).append(':')
+                    for ((name, value) in element.attributes.toSortedMap()) { field(name); field(value) }
+                    field(element.body)
+                }
+                if (!t.failureContentComplete) field(t.detail ?: t.message ?: t.outcome.name)
+            }
+            FailedTest(key(t.identity), redact(t.identity.display).take(MAX_TEXT), Digest.ofUtf8(content).hex, redact(first).take(MAX_TEXT),
+                contentComplete = t.failureContentComplete && t.failureContent.isNotEmpty())
         }
-        return TestOutcomes(failed, passing.take(MAX_PASSED).map { key(it.identity) }, repeated.take(MAX_FAILED).map(::keyOf),
-            truncated = failing.size > MAX_FAILED || passing.size > MAX_PASSED || repeated.size > MAX_FAILED)
+        return TestOutcomes(failed, passing.take(MAX_PASSED).map { key(it.identity) }, repeated.take(MAX_FAILED),
+            truncated = failing.size > MAX_FAILED || passing.size > MAX_PASSED || repeated.size > MAX_FAILED || multiplicity.size > MAX_IDENTITIES,
+            reportComplete = reportComplete, multiplicity = multiplicity.entries.take(MAX_IDENTITIES).associate { it.toPair() })
     }
 
     /** The comparison key of an identity: a digest of its canonical form, never shown. */
@@ -222,18 +257,31 @@ public object Regressions {
     private fun keyOf(canonical: String): String = Digest.ofUtf8(canonical).hex.take(KEY_HEX)
 
     /**
-     * The comparison fingerprint of a failure (P8.C.10 D): a digest of its whole unredacted text, line endings aside, with
+     * The comparison fingerprint of a failure (P8.C.10 D): a digest of its whole unredacted text, with
      * only the run's own root paths — and the separators of the paths under them — made neutral; every other value in it,
      * line numbers, durations and addresses included, tells two failures apart (in doubt they differ: unclassified).
      */
     @JvmStatic
-    public fun fingerprint(text: String, roots: List<String>): String {
-        var t = text.replace("\r\n", "\n").trim()
-        for (root in roots.filter { it.isNotBlank() }.flatMap { listOf(it, it.replace('\\', '/')) }.distinct().sortedByDescending { it.length }) {
-            t = t.replace(root, ROOT)
+    public fun fingerprint(text: String, roots: List<String>): String = Digest.ofUtf8(neutralize(text, roots)).hex
+
+    private fun neutralize(text: String, roots: List<String>): String {
+        val t = text
+        val alternatives = roots.filter { it.isNotBlank() }.flatMap { listOf(it.replace('\\', '/'), it.replace('/', '\\')) }
+            .map { if (it.length > 1) it.trimEnd('/', '\\') else it }.distinct().sortedByDescending { it.length }
+        val matches = if (alternatives.isEmpty()) emptyList() else Regex(
+            "(?<![\\w./\\\\-])(?:" + alternatives.joinToString("|") { Regex.escape(it) } + ")(?=$|[\\\\/\\s'\"`:;,()\\[\\]])([\\\\/][^\\s'\"`:;,()\\[\\]]*)?",
+        ).findAll(t).toList()
+        return buildString {
+            fun literal(value: String) { append('L').append(value.length).append(':').append(value) }
+            var at = 0
+            for (match in matches) {
+                literal(t.substring(at, match.range.first))
+                val path = match.groupValues[1].replace('\\', '/')
+                append('R').append(path.length).append(':').append(path)
+                at = match.range.last + 1
+            }
+            literal(t.substring(at))
         }
-        t = UNDER_ROOT.replace(t) { ROOT + it.groupValues[1].replace('\\', '/') }
-        return Digest.ofUtf8(t).hex.take(KEY_HEX)
     }
 
     /**
@@ -263,49 +311,111 @@ public object Regressions {
 
     private class Held(val from: List<Receipt>, val current: List<Receipt>, val command: String, val regressions: List<String>, val inherited: List<String>, val unclassified: List<String>)
 
+    private data class Observation(val failure: FailedTest, val receipt: Receipt)
+
+    private sealed interface IdentityState {
+        data object Discharged : IdentityState
+        data class Held(val observations: List<Observation>) : IdentityState
+    }
+
+    private sealed interface Evidence {
+        data class Failure(val observation: Observation) : Evidence
+        data class Pass(val receipt: Receipt) : Evidence
+    }
+
+    private fun transition(state: IdentityState, evidence: Evidence): IdentityState = when (evidence) {
+        is Evidence.Failure -> IdentityState.Held((state as? IdentityState.Held)?.observations.orEmpty() + evidence.observation)
+        is Evidence.Pass -> when (state) {
+            IdentityState.Discharged -> state
+            is IdentityState.Held -> state.observations.filterNot { covers(evidence.receipt, it.receipt) }
+                .takeIf { it.isNotEmpty() }?.let { IdentityState.Held(it) } ?: IdentityState.Discharged
+        }
+    }
+
     /** A run that reported a failure: a red outcome, or a failing test of a run that did not finish. */
-    private fun reported(r: Receipt): Boolean = !isMarker(r) && (r.outcome == Outcome.Failed || r.tests?.failed?.isNotEmpty() == true)
+    private fun reported(r: Receipt): Boolean = !isMarker(r) &&
+        (r.outcome == Outcome.Failed || r.tests?.failed?.isNotEmpty() == true || r.limits.any { it.kind == "workspace_attribution" })
 
     /** A run whose test list is complete evidence: eligible, finished, untruncated. */
     private fun finished(r: Receipt): Boolean =
-        r.testedInputs.eligible && !isMarker(r) && (r.outcome == Outcome.Passed || r.outcome == Outcome.Failed) && r.tests?.truncated == false
+        r.testedInputs.eligible && !isMarker(r) && (r.outcome == Outcome.Passed || r.outcome == Outcome.Failed) &&
+            r.tests?.let { it.reportComplete && !it.truncated } == true
+
+    private fun unique(tests: TestOutcomes, key: String): Boolean =
+        tests.multiplicity[key] == 1 && key !in tests.ambiguous && tests.passed.count { it == key } + tests.failed.count { it.key == key } == 1
+
+    /** Exact commands are comparable; a wider declared closure must also have tested every earlier observed input path. */
+    private fun covers(fresh: Receipt, held: Receipt): Boolean {
+        if (fresh.command != held.command || fresh.cwd != held.cwd || fresh.shell != held.shell || fresh.envId != held.envId) return false
+        if (!fresh.testedInputs.versions.keys.containsAll(held.testedInputs.versions.keys)) return false
+        if (fresh.testedInputs.workspaceComplete) return true
+        return when (val previous = held.inputClosure) {
+            is Closure.Known -> when (val current = fresh.inputClosure) {
+                is Closure.Known -> current.paths.containsAll(previous.paths) && fresh.testedInputs.versions.keys.containsAll(previous.paths)
+                is Closure.Package -> fresh.closureManifest?.completeness == io.astrolabe.evidence.ClosureCompleteness.Complete &&
+                    fresh.testedInputs.versions.keys.containsAll(previous.paths) && previous.paths.all { it == current.path || it.startsWith(current.path.trimEnd('/') + "/") }
+                Closure.Unknown -> false
+            }
+            is Closure.Package -> when (val current = fresh.inputClosure) {
+                is Closure.Package -> fresh.closureManifest?.completeness == io.astrolabe.evidence.ClosureCompleteness.Complete &&
+                    (previous.path == current.path || previous.path.startsWith(current.path.trimEnd('/') + "/"))
+                else -> false
+            }
+            Closure.Unknown -> fresh.testedInputs.workspaceComplete
+        }
+    }
 
     private fun held(history: List<Receipt>, baselines: List<Receipt>, stamp: CandidateId?): Held? {
         val runs = history.filter { !isBaseline(it) && !isMarker(it) }
         val reds = runs.filter(::reported)
         if (reds.isEmpty()) return null
         val fresh = if (stamp == null) emptyList() else runs.filter { it.stampAfter == stamp }
-        val failures = LinkedHashMap<String, Pair<FailedTest, Receipt>>()
-        for (red in reds) for (failure in red.tests?.failed.orEmpty()) failures[failure.key] = failure to red
-        // On this tree: a failure any run reported, and a pass only a finished, eligible run reported alone and unambiguously.
-        val failingNow = LinkedHashMap<String, Pair<FailedTest, Receipt>>()
-        for (run in fresh) for (failure in run.tests?.failed.orEmpty()) failingNow[failure.key] = failure to run
-        val passedNow = fresh.filter(::finished).flatMap { r -> r.tests!!.passed.filter { it !in r.tests.ambiguous } }.toSet()
-        val reportedNow = fresh.filter(::finished).flatMap { r -> r.tests!!.passed + r.tests.failed.map { it.key } }.toSet()
+        val identities = LinkedHashMap<String, IdentityState>()
+        for (run in runs) {
+            val tests = run.tests ?: continue
+            if (run.stampAfter == stamp && finished(run) && !unidentified(run)) {
+                for (key in tests.passed.filter { unique(tests, it) }) {
+                    identities[key] = transition(identities[key] ?: IdentityState.Discharged, Evidence.Pass(run))
+                }
+            }
+            for (failure in tests.failed) {
+                identities[failure.key] = transition(identities[failure.key] ?: IdentityState.Discharged, Evidence.Failure(Observation(failure, run)))
+            }
+        }
         val from = LinkedHashSet<Receipt>()
         val regressions = ArrayList<String>()
         val inherited = ArrayList<String>()
         val unclassified = ArrayList<String>()
-        for ((key, earlier) in failures) {
-            val (failure, red) = earlier
-            val now = failingNow[key]
-            when {
-                now == null && key in passedNow -> Unit
-                now != null && key in passedNow -> { unclassified += "${failure.name}: failed and passed on this tree (flaky)"; from += now.second }
-                now != null && !now.second.testedInputs.eligible -> { unclassified += "${failure.name}: failed on this tree in a run that cannot certify it"; from += now.second }
-                now != null -> {
-                    from += now.second
-                    val (kind, line) = classify(now.first, now.second, baselines.lastOrNull { it.checkDefinitionVersion == now.second.checkDefinitionVersion })
-                    when (kind) {
-                        RedClass.New -> regressions += line
-                        RedClass.Inherited -> inherited += line
-                        RedClass.Unclassified -> unclassified += line
-                    }
+        for ((key, state) in identities) {
+            if (state !is IdentityState.Held) continue
+            val observations = state.observations
+            observations.forEach { from += it.receipt }
+            val (failure, red) = observations.first()
+            val now = observations.filter { it.receipt.stampAfter == stamp }
+            if (now.isEmpty()) {
+                val reason = when {
+                    fresh.isEmpty() -> ", not rerun on this tree"
+                    fresh.none(::finished) -> "; the run on this tree did not finish"
+                    fresh.any { key in it.tests?.ambiguous.orEmpty() || (it.tests?.multiplicity?.get(key) ?: 0) > 1 } -> "; reported more than once on this tree: ambiguous"
+                    fresh.any { key in it.tests?.passed.orEmpty() } -> "; the passing run did not cover the held command and inputs"
+                    else -> ", not executed on this tree (removed, skipped or renamed)"
                 }
-                fresh.none(::finished) && fresh.any { !isMarker(it) } -> { unclassified += "${failure.name}: failed in ${red.receiptId}; the run on this tree did not finish"; from += red }
-                fresh.none(::finished) -> { unclassified += "${failure.name}: failed in ${red.receiptId}, not rerun on this tree"; from += red }
-                key in reportedNow -> { unclassified += "${failure.name}: failed in ${red.receiptId}; reported more than once on this tree: ambiguous"; from += red }
-                else -> { unclassified += "${failure.name}: failed in ${red.receiptId}, not executed on this tree (removed, skipped or renamed)"; from += red }
+                unclassified += "${failure.name}: failed in ${red.receiptId}$reason"
+                continue
+            }
+            val classified = observations.map { observation ->
+                classify(observation.failure, observation.receipt,
+                    baselines.lastOrNull { it.checkDefinitionVersion == observation.receipt.checkDefinitionVersion })
+            }
+            val provenNew = observations.zip(classified).firstOrNull { (observation, classification) ->
+                observation.receipt.stampAfter == stamp && classification.first == RedClass.New
+            }?.second
+            when {
+                provenNew != null -> regressions += provenNew.second
+                observations.map { it.failure.fingerprint }.distinct().size > 1 -> unclassified += "${failure.name}: conflicting failures remain held"
+                classified.all { it.first == RedClass.Inherited } && observations.all { old -> old.receipt.stampAfter == stamp || now.any { covers(it.receipt, old.receipt) } } -> inherited += classified.first().second
+                else -> unclassified += classified.firstOrNull { it.first == RedClass.Unclassified }?.second
+                    ?: "${failure.name}: the current run does not classify every held failure"
             }
         }
         // P8.C.10 B: failures a run counted but did not identify (or cut from its record) stay: nothing shows them fixed one by one.
@@ -314,7 +424,7 @@ public object Regressions {
             from += red
         }
         if (from.isEmpty()) return null
-        val current = fresh.filter { it.testedInputs.eligible && reported(it) }
+        val current = fresh.filter { it in from && it.testedInputs.eligible && reported(it) }
         val last = current.lastOrNull() ?: from.last()
         return Held(from.toList(), current, (last.command + listOfNotNull(last.cwd?.let { "(in $it)" })).joinToString(" "), regressions, inherited, unclassified)
     }
@@ -322,17 +432,20 @@ public object Regressions {
     /** P8.C.10 C, one failing identity of [red] (eligible, on this tree) against [baseline]: New and Inherited on positive evidence only. */
     private fun classify(failure: FailedTest, red: Receipt, baseline: Receipt?): Pair<RedClass, String> {
         fun unclassified(why: String) = RedClass.Unclassified to "${failure.name} — ${failure.signature} ($why)"
+        if (!red.testedInputs.eligible) return unclassified("failed on this tree in a run that cannot certify it")
+        if (!finished(red)) return unclassified("the run did not finish with a complete parsed report and lists")
+        if (!unique(red.tests!!, failure.key)) return unclassified("reported more than once or without multiplicity: ambiguous")
         if (baseline == null) return unclassified(NO_BASELINE)
         unusable(baseline)?.let { return unclassified("baseline ${baseline.receiptId} $it: $NO_BASELINE") }
         if (red.envId != baseline.envId) return unclassified("environment ${red.envId.hash8} differs from the baseline's ${baseline.envId.hash8}")
         val s0 = baseline.tests!!
-        if (failure.key in red.tests?.ambiguous.orEmpty() || failure.key in s0.ambiguous) return unclassified("reported more than once: ambiguous")
+        if (!unique(s0, failure.key)) return unclassified(if (failure.key in s0.ambiguous || (s0.multiplicity[failure.key] ?: 0) > 1) "reported more than once: ambiguous" else "baseline ${baseline.receiptId} stopped before showing it on s0")
         val before = s0.failed.firstOrNull { it.key == failure.key }
         return when {
+            before != null && (!before.contentComplete || !failure.contentComplete) -> unclassified("complete failure content was not captured")
             before != null && before.fingerprint == failure.fingerprint -> RedClass.Inherited to "${failure.name} — ${failure.signature} (unchanged since baseline ${baseline.receiptId} on s0)"
             before != null -> unclassified("failed on s0 another way: ${before.signature}")
             failure.key in s0.passed -> RedClass.New to "${failure.name} — ${failure.signature} (passed on s0 in baseline ${baseline.receiptId})"
-            ranToEnd(baseline) -> RedClass.New to "${failure.name} — ${failure.signature} (not failing on s0: baseline ${baseline.receiptId} ran the set to its end)"
             else -> unclassified("baseline ${baseline.receiptId} stopped before showing it on s0")
         }
     }
@@ -343,16 +456,10 @@ public object Regressions {
         return when {
             !baseline.testedInputs.eligible -> "is not eligible"
             baseline.outcome != Outcome.Passed && baseline.outcome != Outcome.Failed -> "is ${baseline.outcome.name.lowercase()}"
-            tests == null || tests.truncated -> "recorded no complete test list"
+            tests == null || tests.truncated || !tests.reportComplete -> "recorded no complete test list"
             unidentified(baseline) -> "has failures the runner did not identify"
             else -> null
         }
-    }
-
-    /** The baseline executed every test it discovered (no fail-fast stop): its absence of a failure is evidence. */
-    private fun ranToEnd(baseline: Receipt): Boolean {
-        val counts = baseline.parsed ?: return false
-        return counts.discovered > 0 && counts.passed + counts.failed + counts.errors + counts.skipped >= counts.discovered
     }
 
     /** A red run with more failures counted than identified, a cut failure list, or a red outcome with none identified. */
@@ -360,6 +467,9 @@ public object Regressions {
         val identified = red.tests?.failed?.size ?: 0
         val counted = red.parsed?.let { it.failed + it.errors }
         return when {
+            red.limits.any { it.kind == "workspace_attribution" } -> true
+            identified == 0 && red.outcome == Outcome.Failed -> true
+            reported(red) && red.tests?.reportComplete == false -> true
             red.tests?.truncated == true && identified >= MAX_FAILED -> true
             counted != null -> identified < counted
             else -> identified == 0 && red.outcome == Outcome.Failed
@@ -368,10 +478,9 @@ public object Regressions {
 
     /** The limit kind of a baseline's start marker ([Baseline.begin]). */
     internal const val BASELINE_STARTED: String = "baseline_started"
-    private const val KEY_HEX = 16
+    private const val KEY_HEX = 64
+    private const val MAX_IDENTITIES = MAX_FAILED + MAX_PASSED
     private const val MAX_TEXT = 200
-    private const val ROOT = "<root>"
-    private val UNDER_ROOT = Regex("""<root>([\\/][^\s'"`:;,()\[\]]*)""")
 }
 
 
@@ -415,16 +524,15 @@ public class Baseline(
     public suspend fun run(check: Check, contractVersion: Int, s0: CandidateId, timeoutSeconds: Long = 600): BaselineResult {
         require(timeoutSeconds > 0) { "timeoutSeconds must be positive" }
         val command = requireNotNull(check.command) { "check ${check.id} declares no command" }
-        val dir = layout.candidates.resolve("${ids.work.value}-${ids.attempt.value}-s0")
-        if (Files.exists(dir)) deleteTree(dir)
+        val actionId = idGen.next("act")
+        val receiptId = idGen.next("rcpt")
+        val dir = layout.candidates.resolve(actionId)
         val materialized = shadowRef.materialize(0, dir)
         // The candidate is the whole exported tree (HEAD plus the dirty manifest), so every exported file is a tested input.
         val before = snapshot(dir)
         val inputs = before.mapValues { it.value.version }
         val limits = ArrayList<Limit>()
         materialized.limitations.forEach { limits += Limit("materialize", it) }
-        val actionId = idGen.next("act")
-        val receiptId = idGen.next("rcpt")
 
         if (!materialized.ok) {
             limits += Limit("candidate", "exported candidate differs from its manifest: ${materialized.mismatches.joinToString(", ")}; the baseline did not run (D-53)")
@@ -432,11 +540,19 @@ public class Baseline(
             return BaselineResult(receipt, null, dir, materialized)
         }
 
-        val started = System.currentTimeMillis()
         val cwd = command.cwd?.let { dir.resolve(it) } ?: dir
-        val logsDir = layout.campaigns.resolve(ids.work.value).resolve("logs")
+        val logsDir = layout.root.resolve("logs")
         Files.createDirectories(logsDir)
+        val reports = JUnitReports(dir, actionId)
+        try {
+            reports.prepare(logsDir.resolve("baseline-reports-$actionId"))
+        } catch (failure: IOException) {
+            limits += Limit("reports", "cannot prepare baseline reports: ${failure.message}")
+            val receipt = receipt(receiptId, check, contractVersion, s0, command.argv, command.cwd, null, Outcome.Unavailable, null, TestedInputs(inputs, InputStability.Isolated), null, limits)
+            return BaselineResult(receipt, null, dir, materialized)
+        }
         // P8.C.10 (C3r): the time a minutes limit leaves is read again here, after the export, just before the process starts.
+        beforeDispatch()
         val left = timeLeft()
         if (left != null && left <= 0) {
             limits += Limit("runner", io.astrolabe.budget.NO_ACTIVE_TIME)
@@ -446,7 +562,6 @@ public class Baseline(
         val deadline = if (left == null) timeoutSeconds else minOf(timeoutSeconds, left)
         val spec = SpawnSpec(Command.Argv(command.argv), cwd, logsDir.resolve("baseline-${check.id}-$actionId.log"), EnvPolicy(inheritedNames = envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")), deadline)
         var proc = try {
-            beforeDispatch()
             runner.start(spec)
         } catch (failure: IOException) {
             limits += Limit("runner", "cannot start ${command.argv.first()}: ${failure.message}")
@@ -466,11 +581,15 @@ public class Baseline(
         val redacted = redaction.applyBytes(observed.output, ContentClass.ReusableEvidence)
         val blob = blobs.put(redacted.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
         val alias = aliases.allocate(ids.work, receiptId, "receipt", ids.context, null).text
+        val collected = try { reports.collect() } catch (failure: IOException) {
+            limits += Limit("reports", "cannot capture baseline reports: ${failure.message}")
+            null
+        }
         val capture = RunCapture(
             actionId = actionId, argv = command.argv, shell = false, cwd = command.cwd,
             exitCode = (proc.status as? ProcStatus.Exited)?.exitCode, timedOut = proc.status == ProcStatus.DeadlineExceeded,
-            output = observed.output, captureComplete = !lost && !observed.truncated && proc.status !is ProcStatus.Lost,
-            reports = reports(dir, started, actionId), checkId = check.id, selector = check.selector.toString(),
+            output = observed.output, captureComplete = collected != null && !lost && !observed.truncated && proc.status !is ProcStatus.Lost,
+            reports = collected.orEmpty(), checkId = check.id, selector = check.selector.toString(),
             executionRoot = runCatching { cwd.toRealPath() }.getOrDefault(cwd.toAbsolutePath()).toString(),
         )
         val shaped = Shapers.shape(capture, ShapeBudget(estimator = estimator, recallAlias = alias))
@@ -481,17 +600,23 @@ public class Baseline(
             shaped.status == Outcome.Passed && (shaped.counts == null || (shaped.counts.executed == 0 && shaped.counts.discovered == 0)) -> Outcome.Inconclusive
             else -> shaped.status
         }
-        val tests = Regressions.outcomes(shaped.tests, { redaction.apply(it, ContentClass.ReusableEvidence).text }, listOf(capture.executionRoot.orEmpty(), dir.toString()))
-        val receipt = receipt(receiptId, check, contractVersion, s0, command.argv, command.cwd, capture.exitCode, outcome, shaped.counts, TestedInputs(inputs, InputStability.Isolated, mutated), blob, limits, tests)
+        val tests = Regressions.outcomes(shaped.tests, { redaction.apply(it, ContentClass.ReusableEvidence).text }, listOf(capture.executionRoot.orEmpty(), dir.toString()),
+            reportComplete = shaped.reportComplete && capture.captureComplete && !shaped.captureTruncated)
+        val receipt = receipt(receiptId, check, contractVersion, s0, command.argv, command.cwd, capture.exitCode, outcome, shaped.counts, TestedInputs(inputs, InputStability.Isolated, mutated, workspaceComplete = mutated.isEmpty()), blob, limits, tests)
         val ledger = if (receipt.testedInputs.eligible && (outcome == Outcome.Passed || outcome == Outcome.Failed || outcome == Outcome.Inconclusive)) {
             val ledgerLimits = ArrayList<String>()
             if (shaped.tests.isEmpty() && outcome != Outcome.Passed) ledgerLimits += "no test identities parsed by ${shaped.shaper}: nothing can be called pre-existing"
-            val ambiguous = TestResults.ambiguous(shaped.tests)
+            val ambiguous = tests.ambiguous.toSet()
             if (ambiguous.isNotEmpty()) ledgerLimits += "${ambiguous.size} identities appear more than once and never match"
             val entries = shaped.tests.filter { it.failing }.groupBy { it.identity.canonical }.values
-                .map { group -> PreexistingFailure(group.first().identity, PreexistingLedger.signatureOf(group.first()), group.size) }
+                .map { group ->
+                    val test = group.first()
+                    val display = redaction.apply(test.identity.display, ContentClass.ReusableEvidence).text
+                    val summary = redaction.apply(test.message?.lineSequence()?.firstOrNull() ?: test.outcome.name.lowercase(), ContentClass.ReusableEvidence).text
+                    PreexistingFailure(TestIdentity(name = display), summary, group.size)
+                }
                 .sortedBy { it.identity.canonical }
-            PreexistingLedger(receiptId, alias, s0, env.envId, entries, ambiguous, ledgerLimits)
+            PreexistingLedger(receiptId, alias, s0, env.envId, entries, ambiguous, ledgerLimits, tests)
         } else {
             null
         }
@@ -520,6 +645,7 @@ public class Baseline(
     private fun receipt(
         receiptId: String, check: Check, contractVersion: Int, s0: CandidateId, argv: List<String>, cwd: String?, exit: Int?,
         outcome: Outcome, counts: io.astrolabe.evidence.Counts?, tested: TestedInputs, raw: Digest?, limits: List<Limit>, tests: TestOutcomes? = null,
+        persist: Boolean = true,
     ): Receipt {
         val receipt = Receipt(
             receiptId = receiptId, ids = ids, checkId = check.id, acceptanceIds = check.acceptanceIds, command = argv, cwd = cwd, shell = false,
@@ -529,48 +655,31 @@ public class Baseline(
             raw = raw, limits = limits + Limit(Regressions.BASELINE, "${check.id} on the captured initial candidate @${s0.hash8}"), exitCode = exit, at = clock.instant(),
             evidenceKind = check.evidenceKind, checkOrigin = check.origin, tests = tests,
         )
-        receipts.record(receipt)
+        if (persist) receipts.record(receipt)
         return receipt
     }
 
     /**
      * P8.C.10 G: records, before [run], that [check]'s baseline began — an `unavailable` baseline receipt of its definition —
-     * so a run that fails, throws or is interrupted is never retried in the attempt; a run that ends records its own after it.
+     * so a run that fails, throws or is interrupted is never retried in the attempt; returns existing evidence if claimed.
+     * Automatic dispatch must use [tryBegin] to distinguish a new claim from a previous one.
      */
     public fun begin(check: Check, contractVersion: Int, s0: CandidateId): Receipt {
-        val command = requireNotNull(check.command) { "check ${check.id} declares no command" }
-        return receipt(idGen.next("rcpt"), check, contractVersion, s0, command.argv, command.cwd, null, Outcome.Unavailable, null, TestedInputs(emptyMap(), InputStability.Isolated), null,
-            listOf(Limit(Regressions.BASELINE_STARTED, "the baseline began; a receipt of its end follows it unless it failed, threw or was interrupted")))
-    }
-
-    /** JUnit XML written by this invocation (mtime after the start): fresh, invocation-bound evidence (D-50). */
-    private fun reports(dir: Path, startedMillis: Long, actionId: String): List<ReportArtifact> {
-        val found = ArrayList<ReportArtifact>()
-        val candidates = listOf("build/test-results", "target/surefire-reports", "target/failsafe-reports")
-        try {
-            Files.walk(dir, REPORT_WALK_DEPTH).use { stream ->
-                stream.filter { Files.isRegularFile(it) && it.fileName.toString().endsWith(".xml") }
-                    .forEach { file ->
-                        val relative = file.relativeTo(dir).joinToString("/") { it.toString() }
-                        if (candidates.any { relative.contains(it) }) {
-                            val fresh = Files.getLastModifiedTime(file).toMillis() >= startedMillis
-                            found += ReportArtifact(relative, ReportKind.JUnitXml, fresh, "candidate:s0:$actionId", if (fresh) Files.readAllBytes(file) else null)
-                        }
-                    }
-            }
-        } catch (ignored: IOException) {
-            // No reports directory: the shapers work from the capture alone.
+        return tryBegin(check, contractVersion, s0) ?: receipts.forCheck(check.id).first {
+            it.ids.work == ids.work && it.ids.attempt == ids.attempt && Regressions.isBaseline(it)
         }
-        return found
     }
 
-    private fun deleteTree(dir: Path) {
-        Files.walk(dir).use { stream -> stream.sorted(Comparator.reverseOrder()).forEach { Files.deleteIfExists(it) } }
+    /** Atomically consumes this attempt's automatic baseline allowance; null means another dispatch already claimed it. */
+    public fun tryBegin(check: Check, contractVersion: Int, s0: CandidateId): Receipt? {
+        val command = requireNotNull(check.command) { "check ${check.id} declares no command" }
+        val marker = receipt(idGen.next("rcpt"), check, contractVersion, s0, command.argv, command.cwd, null, Outcome.Unavailable, null, TestedInputs(emptyMap(), InputStability.Isolated), null,
+            listOf(Limit(Regressions.BASELINE_STARTED, "the baseline began; a receipt of its end follows it unless it failed, threw or was interrupted")), persist = false)
+        return marker.takeIf { receipts.claim(it, ReceiptClaim.Baseline) }
     }
 
     private companion object {
         const val POLL_SLICE_SECONDS = 5L
-        const val REPORT_WALK_DEPTH = 8
         val ARTIFACT_DIRS = setOf("htmlcov", ".pytest_cache", ".nyc_output", "coverage")
     }
 }

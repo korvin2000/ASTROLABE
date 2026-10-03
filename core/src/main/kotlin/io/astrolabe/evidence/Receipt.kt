@@ -5,6 +5,7 @@ import io.astrolabe.id.CandidateId
 import io.astrolabe.id.Digest
 import io.astrolabe.id.FileVersion
 import io.astrolabe.id.Identities
+import io.astrolabe.id.WorkspaceId
 import io.astrolabe.id.InstantSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -68,22 +69,31 @@ public enum class InputStability { Exclusive, Isolated, Unknown }
 
 /** Paths@versions the check actually depended on (declared closure ∪ observed access), D-45. */
 @Serializable
-public data class TestedInputs(
+public data class TestedInputs @JvmOverloads constructor(
     val versions: Map<String, FileVersion>,
     val stability: InputStability,
     /** Relevant inputs that changed during the check (rescan after the run); non-empty ⇒ ineligible. */
     val mutatedDuringCheck: Set<String> = emptySet(),
+    /** Every non-scratch workspace input was enumerated, read and rescanned, or verified in an isolated export. */
+    val workspaceComplete: Boolean = false,
 ) {
     val eligible: Boolean get() = stability != InputStability.Unknown && mutatedDuringCheck.isEmpty()
 }
 
 /**
  * One failing test a run reported (§8.5, P8.C.10): [key] and [fingerprint] compare — opaque digests of its namespaced
- * identity and of its unredacted failure, the runner's volatile fields normalized — while [name] and [signature] (the
+ * identity and of its unredacted failure, only explicit run roots normalized — while [name] and [signature] (the
  * first failure line) are redacted and only shown.
  */
 @Serializable
-public data class FailedTest(val key: String, val name: String, val fingerprint: String, val signature: String)
+public data class FailedTest @JvmOverloads constructor(
+    val key: String,
+    val name: String,
+    val fingerprint: String,
+    val signature: String,
+    /** The digest includes every unredacted failure element, message and body; false for legacy or partial evidence. */
+    val contentComplete: Boolean = false,
+)
 
 /**
  * The per-test outcomes a run of a harness regression check reported (P8.C.10): its failing tests, the keys of the tests
@@ -91,11 +101,15 @@ public data class FailedTest(val key: String, val name: String, val fingerprint:
  * when a bound cut a list: nothing missing from it is proven either way.
  */
 @Serializable
-public data class TestOutcomes(
+public data class TestOutcomes @JvmOverloads constructor(
     val failed: List<FailedTest> = emptyList(),
     val passed: List<String> = emptyList(),
     val ambiguous: List<String> = emptyList(),
     val truncated: Boolean = false,
+    /** Every captured report was parsed completely; independent of the run's outcome and presentation budget. */
+    val reportComplete: Boolean = false,
+    /** Occurrences across all outcomes, including skipped cases; omitted or truncated keys prove nothing. */
+    val multiplicity: Map<String, Int> = emptyMap(),
 )
 
 /** Where evidence about a receipt was truncated or could not be captured (§8.4 limitations). */
@@ -160,8 +174,11 @@ public data class Receipt(
     val evidenceDeclared: Boolean = false,
     /** What a run of a harness regression check reported test by test (P8.C.10); `null` for any other check or an older receipt. */
     val tests: TestOutcomes? = null,
+    /** Recorded atomically with the receipt, before an alias or a check's last-result pointer can be allocated. */
+    val workspaceId: WorkspaceId? = null,
 ) {
-    /** The constructor before [tests] (P8.C.10). Kept for Java callers. */
+    /** The constructors before [workspaceId] and [tests]. Kept for Java callers. */
+    @JvmOverloads
     public constructor(
         receiptId: String,
         ids: Identities,
@@ -190,10 +207,11 @@ public data class Receipt(
         evidenceKind: EvidenceKind?,
         checkOrigin: Origin?,
         evidenceDeclared: Boolean,
+        tests: TestOutcomes? = null,
     ) : this(
         receiptId, ids, checkId, acceptanceIds, command, cwd, shell, stampBefore, stampAfter, envId, verifierVersion, checkDefinitionVersion,
         contractVersion, outcome, parsed, inputClosure, testedInputs, raw, limits, reuseOf, exitCode, at, closureManifest, expectedExitCode,
-        evidenceKind, checkOrigin, evidenceDeclared, null,
+        evidenceKind, checkOrigin, evidenceDeclared, tests, null,
     )
 
     /** The v1.0 full constructor: the evidence kind, the check's origin and the declaration take their defaults. Kept for Java callers. */

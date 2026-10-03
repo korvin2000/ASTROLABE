@@ -554,9 +554,22 @@ public class Controller @JvmOverloads public constructor(
         val commands = derived.primary?.let(RunnerCommands::of) ?: RunnerCommands()
         workspace.paths.bindWriteProtection { path, ignoreCase -> contracts.current(request.work)?.scope?.protects(path, ignoreCase) != false }
         val checks = Checks.seed(contract, commands, qualityGates = effective.qualityGates, packageManifest = TestIntegrity.packageManifests(workspace))
-        // P8.C.10 F: a reopened attempt gets its blast radius back from its last run, so resume and finish see its hold as live did.
-        SqliteReceipts(store, clock).forCheck(Checks.TESTS_BLAST).lastOrNull { it.ids.work == request.work && it.ids.attempt == request.attempt && !io.astrolabe.verify.Regressions.isBaseline(it) }
-            ?.let { if (checks[Checks.TESTS_BLAST] == null) checks.register(io.astrolabe.verify.Blast.restored(it)) }
+        val receiptStore = SqliteReceipts(store, clock)
+        val receiptAliases = SqliteAliases(store, clock)
+        for (checkId in io.astrolabe.verify.Regressions.CHECKS) {
+            val receipt = receiptStore.forCheck(checkId).lastOrNull {
+                it.ids.work == request.work && it.ids.attempt == request.attempt && !io.astrolabe.verify.Regressions.isBaseline(it) &&
+                    !io.astrolabe.verify.Regressions.isMarker(it) && receiptBelongs(it, receiptAliases, workspace.id)
+            } ?: continue
+            if (checks[checkId] == null) {
+                val restored = if (checkId == Checks.TESTS_BLAST) io.astrolabe.verify.Blast.restored(receipt) else
+                    io.astrolabe.verify.Check(checkId, CheckKind.Type, io.astrolabe.verify.Selector.Touched, receipt.inputClosure,
+                        io.astrolabe.verify.CostClass.Fast, io.astrolabe.verify.Trigger.EndOfTurn,
+                        command = io.astrolabe.contract.Command(receipt.command, receipt.cwd), origin = receipt.checkOrigin,
+                        evidence = receipt.evidenceKind.takeIf { receipt.evidenceDeclared })
+                checks.register(restored)
+            }
+        }
         val rules =RulesTrust(workspace.root).approved(effective.rulesFile)?.let { RulesSnapshot(it.binding.path, it.digest, it.text) }
         val prime = Prime.render(atlas, derived.sniffed, rules, host = HostFacts.of(host, atlas))
 
@@ -703,6 +716,7 @@ public class Controller @JvmOverloads public constructor(
             contracts, checks, rules, prime, kb, journal, intents, campaigns, reconciliation, prescan, impactPrescan, shape, state, refusal, owned,
             frozen, lease, leases, frozenNotes = Notes(store).all(), hostNotes = policy.hostNotes.filter { it.isNotBlank() }, limits = limits,
         ).also {
+            heldReceipts(it)
             plugged[it] = layered
             it.limitState.reserve = latched
             it.limitState.reserveAnnounced = latched != null
@@ -1268,6 +1282,7 @@ public class Controller @JvmOverloads public constructor(
                         idGen.next("pending"), c.ids.work, c.ids.attempt, increment.id, cell, proposal.contractVersion, proposal.baseStamp, proposal.resultingStamp,
                         null, proposal.envId, null, emptyList(), result.resolved.results, result.resolved.other, result.resolved.gaps, result.code,
                         result.resolved.results.mapNotNull { it.evidenceRef }.distinct(), null, idGen.next("decide"),
+                        acknowledged = result.resolved.acknowledged,
                     )
                     Acceptances(c.store, clock).save(ids, record)
                     when (val settled = decide(c, ids, record, authority)) {
@@ -1630,6 +1645,14 @@ public class Controller @JvmOverloads public constructor(
     /** P8.C.10: the red receipts accepted increments acknowledged with an `Open` item — one answer on every path (D-337). */
     private fun acknowledged(c: OpenedCampaign): List<String> = checkNotNull(c.state).graph.evidence.values.flatMap { it.acknowledged }.distinct()
 
+    /** Reuses the increment rule for current regression evidence at every acceptance boundary. */
+    private fun regressionEvidence(c: OpenedCampaign, scheduler: Scheduler, stamp: CandidateId, carried: Collection<String> = emptyList()): io.astrolabe.verify.Resolved {
+        val increment = checkNotNull(c.state).graph.increments.firstOrNull()?.copy(accept = emptyList()) ?: return Resolver.resolve(emptyList())
+        return Resolver.increment(Register.empty(c.ids.context ?: ContextId("regression-gate"), increment.id, increment.title), c.contract, increment,
+            currencies(c, scheduler, stamp).filterKeys { it in io.astrolabe.verify.Regressions.CHECKS }, candidate = stamp,
+            acknowledged = acknowledged(c) + carried)
+    }
+
     /** The increment review an S2+ campaign obtained (§8.8): the verdict of its `review:` items, or its own obligation when it has none. */
     private class Reviewed(val verdicts: Map<String, io.astrolabe.verify.Verdict>, val unavailable: Map<String, String>, val extra: List<ObligationResult>)
 
@@ -1682,6 +1705,7 @@ public class Controller @JvmOverloads public constructor(
             proposal.baseStamp, proposal.resultingStamp, proposal.patchHash, proposal.envId, kept.register.version,
             acceptanceFlags(c, kept.testIntegrity()).map { it.line }, pending.resolved.results, pending.resolved.other, pending.resolved.gaps, pending.code,
             pending.resolved.results.mapNotNull { it.evidenceRef }.distinct(), kept.text.take(MAX_SUMMARY_CHARS), idGen.next("decide"),
+            acknowledged = pending.resolved.acknowledged,
         )
         Acceptances(c.store, clock).save(ids, record)
         c.journal.append(JournalEvent(idGen.next("ev"), ids, kept.turns, JournalKind.Boundary, refs = record.evidence,
@@ -1695,6 +1719,9 @@ public class Controller @JvmOverloads public constructor(
      */
     private suspend fun decide(c: OpenedCampaign, ids: Identities, pending: PendingCompletion, authority: Authority): Settled {
         val acceptances = Acceptances(c.store, clock)
+        val scheduler = scheduler(c)
+        val before = regressionEvidence(c, scheduler, pending.resultingStamp, pending.acknowledged)
+        if (before.resolution == Resolution.Rework) return Settled.Void(pending, before.missing.joinToString("; "))
         val waiting = pending.resolve(null)
         // C11: a policy's word settles nothing only a person settles — such a request is asked again, so a person can answer.
         val decision = acceptances.current(c.ids.work, c.ids.attempt, pending.incrementId, pending.resultingStamp, pending.contractVersion)
@@ -1706,6 +1733,8 @@ public class Controller @JvmOverloads public constructor(
         if (now != pending.resultingStamp || c.contract.version != pending.contractVersion) {
             return Settled.Void(pending, "the tree or contract moved while the decision was asked (@${now.hash8}, v${c.contract.version})")
         }
+        val after = regressionEvidence(c, scheduler, now, pending.acknowledged)
+        if (after.resolution == Resolution.Rework) return Settled.Void(pending, after.missing.joinToString("; "))
         return when (resolved.resolution) {
             Resolution.Complete -> Settled.Commit(pending, resolved, decision?.let { "${it.decision.kind.name.lowercase()} by ${it.decision.by}: ${it.decision.reason}" } ?: "all obligations settled")
             Resolution.Rework -> Settled.Rework(pending, checkNotNull(decision?.takeIf { it.decision.kind == DecisionKind.Rework }) { "a pending completion reworks only on a rework decision" })
@@ -1801,10 +1830,17 @@ public class Controller @JvmOverloads public constructor(
         val receipts = SqliteReceipts(c.store, clock)
         for (check in c.checks.all().filter { it.last == null }) {
             // P8.C.10 F: a baseline (a run on s0) is never a check's last result.
-            val receipt = receipts.forCheck(check.id).lastOrNull { it.ids.work == c.ids.work && it.ids.attempt == c.ids.attempt && !io.astrolabe.verify.Regressions.isBaseline(it) } ?: continue
+            val receipt = receipts.forCheck(check.id).lastOrNull {
+                it.ids.work == c.ids.work && it.ids.attempt == c.ids.attempt && !io.astrolabe.verify.Regressions.isBaseline(it) &&
+                    !io.astrolabe.verify.Regressions.isMarker(it) && receiptBelongs(it, SqliteAliases(c.store, clock), c.workspace.id)
+            } ?: continue
             c.checks.record(check.id, io.astrolabe.verify.LastResult(receipt.receiptId, receipt.stampAfter, receipt.checkDefinitionVersion, receipt.outcome, receipt.parsed, io.astrolabe.verify.Applicability.Current))
         }
     }
+
+    private fun receiptBelongs(receipt: io.astrolabe.evidence.Receipt, aliases: SqliteAliases, workspace: WorkspaceId): Boolean =
+        (receipt.workspaceId ?: aliases.byCanonical(receipt.ids.work, receipt.receiptId)?.workspace)?.let { it == workspace }
+            ?: (receipt.outcome == Outcome.Failed || receipt.tests?.failed?.isNotEmpty() == true)
 
     /**
      * C11 resume: under [IntegrityApproval.Human] the reviewer's results of [pending] again from the review records now —
@@ -2569,8 +2605,10 @@ public class Controller @JvmOverloads public constructor(
         val stored = acceptances.open(c.ids.work, c.ids.attempt)
             ?.takeIf { it.incrementId == null && it.resultingStamp == stamp && it.contractVersion == contract.version && it.envId == report.env.envId }
         val carried = carriedAcceptances(c, stamp)
-        val results = stored?.results ?: campaignResults(c, scheduler, campaign, authority, stamp)
+        val acceptedResults = stored?.results ?: campaignResults(c, scheduler, campaign, authority, stamp)
             .filterNot { it.status != ResultStatus.Passed && it.obligation in carried }
+        val regression = regressionEvidence(c, scheduler, stamp, stored?.acknowledged.orEmpty())
+        val results = acceptedResults + regression.results
         val spent = acceptances.reworkSpent(c.ids.work, c.ids.attempt, null, stamp, contract.version)
         // There is no cell to rework a campaign-level rejection: it goes to the authority at once.
         var resolved = Resolver.resolve(results, decision = acceptances.current(c.ids.work, c.ids.attempt, null, stamp, contract.version), reworkSpent = true)
@@ -2579,6 +2617,7 @@ public class Controller @JvmOverloads public constructor(
             val record = pending ?: PendingCompletion(
                 idGen.next("pending"), c.ids.work, c.ids.attempt, null, null, contract.version, c.s0.stampId, stamp, null, report.env.envId, null,
                 emptyList(), results, emptyList(), resolved.gaps, checkNotNull(resolved.code), results.mapNotNull { it.evidenceRef }.distinct(), null, idGen.next("decide"),
+                acknowledged = regression.acknowledged,
             ).also {
                 acceptances.save(ids, it)
                 c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, refs = it.evidence, text = "final acceptance awaits ${it.code.wire} (${it.id}): ${resolved.missing.joinToString("; ")}", at = clock.instant()))
@@ -2758,7 +2797,7 @@ public class Controller @JvmOverloads public constructor(
     private fun candidates(c: OpenedCampaign): java.nio.file.Path? = c.store.layout.candidates.takeIf { c.attempt.config.flags.s3Writers }
 
     private fun currencies(c: OpenedCampaign, scheduler: Scheduler, stamp: CandidateId): Map<String, Currency> =
-        c.checks.all().filter { it.last != null }.associate { it.id to scheduler.currency(it, stamp) }
+        c.checks.all().filter { it.last != null || it.id in io.astrolabe.verify.Regressions.CHECKS }.associate { it.id to scheduler.currency(it, stamp) }
 
     /** Records the main line as the next shadow snapshot, when it moved since the last one. */
     private fun snapshot(c: OpenedCampaign) = snapshot(CellTree.main(c))

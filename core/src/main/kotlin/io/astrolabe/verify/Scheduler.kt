@@ -12,6 +12,7 @@ import io.astrolabe.evidence.InputStability
 import io.astrolabe.evidence.Limit
 import io.astrolabe.evidence.Outcome
 import io.astrolabe.evidence.Receipt
+import io.astrolabe.evidence.ReceiptClaim
 import io.astrolabe.evidence.Receipts
 import io.astrolabe.evidence.TestedInputs
 import io.astrolabe.id.CandidateId
@@ -33,8 +34,10 @@ import io.astrolabe.workspace.WorkspacePath
 import kotlinx.coroutines.sync.withLock
 import java.io.IOException
 import java.nio.file.Files
+import java.nio.file.FileVisitResult
 import java.nio.file.LinkOption
 import java.nio.file.Path
+import java.nio.file.SimpleFileVisitor
 import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.attribute.PosixFilePermission
 import java.time.Clock
@@ -177,34 +180,41 @@ public class Scheduler(
         val check = checks.first()
         return workspace.mutation.withLock {
             val before = stamper.report(fresh = true)
-            val paths = testedInputsFor(check, inputs)
-            val sharing = checks.filter { it === check || testedInputsFor(it, inputs) == paths }
-            val seenBefore = paths.associateWith { snapshot(it) }
+            val listing = inputListing(check, inputs)
+            val sharing = checks.filter { it === check || inputListing(it, inputs) == listing }
+            val seenBefore = listing.paths.associateWith { snapshot(it) }
             val manifests = sharing.map { manifestOf(it.inputClosure) }
             val executed = execute(workspace.root)
             val after = stamper.report(fresh = true)
             val changed = announceMoved(registry, before, after, "check ${check.id}")
             val limits = ArrayList<Limit>()
-            val tested = rescanned(check, inputs, paths, seenBefore, InputStability.Exclusive, limits)
+            val tested = rescanned(check, inputs, listing, seenBefore, InputStability.Exclusive, limits)
             Scheduled(sharing.zip(manifests).map { (each, manifest) -> recordRun(each, contractVersion, executed, before, after.candidateId, tested, manifest, ArrayList(limits)) }, changed)
         }
     }
 
     /** The tested inputs after a check: what moved against [seenBefore] (content or metadata, added or removed) is a mutation. */
-    private fun rescanned(check: Check, inputs: Collection<String>, paths: List<String>, seenBefore: Map<String, Seen>, stable: InputStability, limits: MutableList<Limit>): TestedInputs {
-        val afterPaths = testedInputsFor(check, inputs)
-        val pathSet = paths.toHashSet()
-        val afterSet = afterPaths.toHashSet()
-        val mutated = (pathSet + afterSet).filter { it !in pathSet || it !in afterSet || snapshot(it) != seenBefore[it] }.toSet()
+    private fun rescanned(check: Check, inputs: Collection<String>, listing: InputListing, seenBefore: Map<String, Seen>, stable: InputStability, limits: MutableList<Limit>): TestedInputs {
+        val afterListing = inputListing(check, inputs)
+        val seenAfter = afterListing.paths.associateWith { snapshot(it) }
+        val pathSet = listing.paths.toHashSet()
+        val afterSet = afterListing.paths.toHashSet()
+        val mutated = (pathSet + afterSet).filter { it !in pathSet || it !in afterSet || seenAfter[it] != seenBefore[it] }.toSet()
+        val complete = listing.complete && afterListing.complete && seenBefore.values.all { it.version != null } && seenAfter.values.all { it.version != null }
         val stability = when {
-            check.inputClosure == Closure.Unknown && paths.isEmpty() -> {
+            check.inputClosure == Closure.Unknown && listing.paths.isEmpty() -> {
                 limits += Limit("input_stability", "closure unknown and no inputs enumerated: the tested inputs could not be rescanned")
+                InputStability.Unknown
+            }
+            !complete -> {
+                limits += Limit("input_stability", "input enumeration or reads were incomplete; the receipt preserves the outcome without certifying its inputs")
                 InputStability.Unknown
             }
             else -> stable
         }
         val versions = seenBefore.mapNotNull { (path, seen) -> seen.version?.let { path to it } }.toMap()
-        return TestedInputs(versions, stability, mutated)
+        return TestedInputs(versions, stability, mutated,
+            workspaceComplete = listing.wholeWorkspace && afterListing.wholeWorkspace && complete && stability != InputStability.Unknown && mutated.isEmpty())
     }
 
     /**
@@ -216,9 +226,9 @@ public class Scheduler(
     internal suspend fun pin(checks: List<Check>, inputs: Collection<String>): Pin = workspace.mutation.withLock {
         val check = checks.first()
         val before = stamper.report(fresh = true)
-        val paths = testedInputsFor(check, inputs)
-        val sharing = checks.filter { it === check || testedInputsFor(it, inputs) == paths }
-        Pin(sharing, inputs.toList(), before, paths, paths.associateWith { snapshot(it) }, sharing.map { manifestOf(it.inputClosure) })
+        val listing = inputListing(check, inputs)
+        val sharing = checks.filter { it === check || inputListing(it, inputs) == listing }
+        Pin(sharing, inputs.toList(), before, listing, listing.paths.associateWith { snapshot(it) }, sharing.map { manifestOf(it.inputClosure) })
     }
 
     /**
@@ -228,7 +238,7 @@ public class Scheduler(
     internal suspend fun settle(pin: Pin, contractVersion: Int, executed: Executed): List<Receipt> = workspace.mutation.withLock {
         val after = stamper.report(fresh = true)
         val limits = arrayListOf(Limit("input_stability", "$BACKGROUND: the workspace was not held between its launch and its end, so no concurrent writer was kept out (D-45); the receipt cannot certify a tree"))
-        val tested = rescanned(pin.checks.first(), pin.inputs, pin.paths, pin.seen, InputStability.Unknown, limits)
+        val tested = rescanned(pin.checks.first(), pin.inputs, pin.listing, pin.seen, InputStability.Unknown, limits)
         pin.checks.zip(pin.manifests).filter { (check, _) -> checks[check.id] != null }.map { (check, manifest) ->
             recordRun(check, contractVersion, executed, pin.before, after.candidateId, tested, manifest, ArrayList(limits))
         }
@@ -250,7 +260,7 @@ public class Scheduler(
         val checks: List<Check>,
         val inputs: List<String>,
         val before: StampReport,
-        val paths: List<String>,
+        val listing: InputListing,
         val seen: Map<String, Seen>,
         val manifests: List<ClosureManifest>,
     )
@@ -291,7 +301,10 @@ public class Scheduler(
             )
             val paths = testedInputsFor(check, inputs).toSet()
             val tested = exported.filterKeys { check.inputClosure == Closure.Unknown && paths.isEmpty() || it in paths }
-            return recordRun(check, contractVersion, executed, report, report.candidateId, TestedInputs(tested.mapNotNull { (path, seen) -> seen.version?.let { path to it } }.toMap(), InputStability.Isolated, mutated), manifest, limits)
+            return recordRun(check, contractVersion, executed, report, report.candidateId,
+                TestedInputs(tested.mapNotNull { (path, seen) -> seen.version?.let { path to it } }.toMap(), InputStability.Isolated, mutated,
+                    workspaceComplete = check.inputClosure == Closure.Unknown && tested.keys == exported.keys && tested.values.all { it.version != null } && mutated.isEmpty()),
+                manifest, limits)
         } finally {
             deleteTree(dir)
         }
@@ -327,9 +340,9 @@ public class Scheduler(
             command = executed.command, cwd = executed.cwd, shell = executed.shell,
             stampBefore = before.candidateId, stampAfter = stampAfter, envId = before.env.envId,
             verifierVersion = verifierVersion, checkDefinitionVersion = check.definitionVersion, contractVersion = contractVersion,
-            outcome = outcome, parsed = executed.counts, inputClosure = check.inputClosure, testedInputs = if (concurrent) testedInputs.copy(stability = InputStability.Unknown) else testedInputs,
+            outcome = outcome, parsed = executed.counts, inputClosure = check.inputClosure, testedInputs = if (concurrent) testedInputs.copy(stability = InputStability.Unknown, workspaceComplete = false) else testedInputs,
             raw = executed.raw, limits = limits, exitCode = executed.exit, at = clock.instant(), closureManifest = manifest, expectedExitCode = executed.expectedExitCode,
-            evidenceKind = kind, checkOrigin = check.origin, evidenceDeclared = check.evidence != null, tests = executed.tests,
+            evidenceKind = kind, checkOrigin = check.origin, evidenceDeclared = check.evidence != null, tests = executed.tests, workspaceId = workspace.id,
         )
         receipts.record(receipt)
         aliasByReceipt[receipt.receiptId] = aliases.allocate(ids.work, receipt.receiptId, "receipt", ids.context, workspace.id).text
@@ -395,6 +408,7 @@ public class Scheduler(
         val receipt = second.copy(
             receiptId = idGen.next("rcpt"), contractVersion = contractVersion, outcome = Outcome.Inconclusive, at = clock.instant(), reuseOf = null,
             limits = second.limits + Limit("flaky", "${first.receiptId} ${first.outcome.name.lowercase()}, isolated rerun ${second.receiptId} ${second.outcome.name.lowercase()}: two disagreeing outcomes are inconclusive (§8.10)"),
+            workspaceId = workspace.id,
         )
         receipts.record(receipt)
         aliasByReceipt[receipt.receiptId] = aliases.allocate(ids.work, receipt.receiptId, "receipt", ids.context, workspace.id).text
@@ -420,7 +434,7 @@ public class Scheduler(
             verifierVersion = verifierVersion, checkDefinitionVersion = check.definitionVersion, contractVersion = contractVersion,
             outcome = result.outcome, parsed = result.counts, inputClosure = check.inputClosure,
             testedInputs = TestedInputs(result.touched.mapNotNull { path -> registry.version(path)?.let { path to it } }.toMap(), InputStability.Unknown),
-            raw = result.log, limits = limits, exitCode = result.exit, at = clock.instant(), evidenceKind = check.evidenceKind, checkOrigin = check.origin, evidenceDeclared = check.evidence != null,
+            raw = result.log, limits = limits, exitCode = result.exit, at = clock.instant(), evidenceKind = check.evidenceKind, checkOrigin = check.origin, evidenceDeclared = check.evidence != null, workspaceId = workspace.id,
         )
         receipts.record(receipt)
         aliasByReceipt[receipt.receiptId] = aliases.allocate(ids.work, receipt.receiptId, "receipt", ids.context, workspace.id).text
@@ -442,10 +456,15 @@ public class Scheduler(
 
     /** §8.4 applicability plus D-45 eligibility of a check's last receipt against [stampNow]. */
     public fun currency(check: Check, stampNow: CandidateId?): Currency {
-        val mandatory = Obligations.mandatory(checks[check.id] ?: check)
-        val last = checks[check.id]?.last ?: return Currency(null, Applicability.Unknown, false, false, listOf("no receipt for ${check.id}"), mandatory = mandatory)
-        val receipt = receipts.get(last.receiptId)
         val registered = checks[check.id] ?: check
+        val mandatory = Obligations.mandatory(registered)
+        val regression = Regressions.of(registered)
+        // Receipt insertion is durable before aliases and the registry cache; a crash cannot hide its last observation.
+        val last = (if (regression) history(check.id).lastOrNull { !Regressions.isMarker(it) }?.let {
+            LastResult(it.receiptId, it.stampAfter, it.checkDefinitionVersion, it.outcome, it.parsed, Applicability.Unknown)
+        } else registered.last) ?: return Currency(null, Applicability.Unknown, false, false, listOf("no receipt for ${check.id}"),
+            mandatory = mandatory, hold = if (regression) hold(check.id, stampNow) else null)
+        val receipt = receipts.get(last.receiptId)
         val refreshed = if (receipt == null || stampNow == null) {
             checks.refresh(stampNow).firstOrNull { it.id == check.id }?.last ?: last
         } else {
@@ -466,7 +485,7 @@ public class Scheduler(
         // D-338: an unverified result names its cause for the decider — "cannot start python3", not just "unavailable".
         if (receipt != null && !green) reasons += "outcome ${receipt.outcome.name.lowercase()}" + (receipt.limits.firstOrNull()?.detail?.let { ": $it" } ?: "")
         return Currency(last.receiptId, refreshed.applicability, eligible, green, reasons, red = receipt?.outcome == Outcome.Failed, mandatory = mandatory,
-            knownRed = if (mandatory) null else knownRedSince(check.id), hold = if (Regressions.of(registered)) hold(check.id, stampNow) else null)
+            knownRed = if (mandatory) null else knownRedSince(check.id), hold = if (regression) hold(check.id, stampNow) else null)
     }
 
     /** C1b ([Currency.knownRed]): walks this attempt's receipts of [checkId] in order; only a later `passed` one ends a red. */
@@ -491,16 +510,16 @@ public class Scheduler(
      * rerun began — a `not_run` marker of its definition on this stamp, in this workspace — so it runs once per definition
      * and tree, a crash or a reopen included. The marker is no run of the change and never the check's last result.
      */
-    internal fun beginRerun(check: Check, contractVersion: Int): Receipt {
+    internal fun beginRerun(check: Check, contractVersion: Int, definitionVersion: Digest = check.definitionVersion): Receipt? {
         val report = stamper.report(fresh = true)
         val receipt = Receipt(
             receiptId = idGen.next("rcpt"), ids = ids, checkId = check.id, acceptanceIds = check.acceptanceIds, command = check.command?.argv.orEmpty(), cwd = check.command?.cwd,
             shell = false, stampBefore = report.candidateId, stampAfter = report.candidateId, envId = report.env.envId, verifierVersion = verifierVersion,
-            checkDefinitionVersion = check.definitionVersion, contractVersion = contractVersion, outcome = Outcome.NotRun, parsed = null, inputClosure = check.inputClosure,
+            checkDefinitionVersion = definitionVersion, contractVersion = contractVersion, outcome = Outcome.NotRun, parsed = null, inputClosure = check.inputClosure,
             testedInputs = TestedInputs(emptyMap(), InputStability.Unknown), raw = null, limits = listOf(Limit(Regressions.RERUN, "the stop's rerun of ${check.id} on @${report.candidateId.hash8} began")),
-            at = clock.instant(), evidenceKind = check.evidenceKind, checkOrigin = check.origin,
+            at = clock.instant(), evidenceKind = check.evidenceKind, checkOrigin = check.origin, workspaceId = workspace.id,
         )
-        receipts.record(receipt)
+        if (!receipts.claim(receipt, ReceiptClaim.StopRerun)) return null
         aliasByReceipt[receipt.receiptId] = aliases.allocate(ids.work, receipt.receiptId, "receipt", ids.context, workspace.id).text
         return receipt
     }
@@ -513,9 +532,19 @@ public class Scheduler(
      * The receipts of [checkId] this scheduler's workspace recorded in the attempt, in the order they were recorded,
      * baselines aside: a writer's worktree never answers for another's (P8.C.10 F).
      */
-    private fun history(checkId: String): List<Receipt> = receipts.forCheck(checkId).filter {
-        it.ids.work == ids.work && it.ids.attempt == ids.attempt && !Regressions.isBaseline(it) &&
-            (aliasByReceipt.containsKey(it.receiptId) || aliases.byCanonical(ids.work, it.receiptId)?.workspace == workspace.id)
+    private fun history(checkId: String): List<Receipt> = receipts.forCheck(checkId).mapNotNull { receipt ->
+        if (receipt.ids.work != ids.work || receipt.ids.attempt != ids.attempt || Regressions.isBaseline(receipt)) return@mapNotNull null
+        val owner = receipt.workspaceId ?: if (aliasByReceipt.containsKey(receipt.receiptId)) workspace.id else aliases.byCanonical(ids.work, receipt.receiptId)?.workspace
+        when {
+            owner == workspace.id -> receipt
+            owner != null -> null
+            Regressions.isMarker(receipt) -> receipt
+            receipt.outcome == Outcome.Failed || receipt.tests?.failed?.isNotEmpty() == true -> receipt.copy(
+                tests = null,
+                limits = receipt.limits + Limit("workspace_attribution", "legacy failure has no durable workspace attribution; no run can prove its identity discharged or inherited"),
+            )
+            else -> null
+        }
     }
 
     /** The attempt's baseline receipts of [checkId]: runs on the captured `s0`, whichever workspace asked for them. */
@@ -549,31 +578,57 @@ public class Scheduler(
     }
 
     /** The paths whose stability the receipt vouches for: the declared closure minus scratch, or [inputs] for an unknown closure. */
-    public fun testedInputsFor(check: Check, inputs: Collection<String>): List<String> {
-        val declared: Collection<String> = when (val closure = check.inputClosure) {
-            is Closure.Known -> closure.paths
-            is Closure.Package -> filesUnder(closure.path) + inputs
-            Closure.Unknown -> if (inputs.isEmpty()) emptyList() else filesUnder(".") + inputs
+    public fun testedInputsFor(check: Check, inputs: Collection<String>): List<String> = inputListing(check, inputs).paths
+
+    internal data class InputListing(val paths: List<String>, val complete: Boolean, val wholeWorkspace: Boolean = false)
+
+    private fun inputListing(check: Check, inputs: Collection<String>): InputListing {
+        val listing = when (val closure = check.inputClosure) {
+            is Closure.Known -> InputListing(closure.paths.toList(), true)
+            is Closure.Package -> listFilesUnder(closure.path).let { it.copy(paths = it.paths + inputs) }
+            Closure.Unknown -> if (inputs.isEmpty()) InputListing(emptyList(), false) else listFilesUnder(".").let { it.copy(paths = it.paths + inputs, wholeWorkspace = true) }
         }
-        return declared.map { it.replace('\\', '/') }.filterNot { scratch.isScratch(it) }.distinct().sorted()
+        return listing.copy(paths = listing.paths.map { it.replace('\\', '/') }.filterNot { scratch.isScratch(it) }.distinct().sorted())
     }
 
-    private fun filesUnder(prefix: String): List<String> {
+    private fun filesUnder(prefix: String): List<String> = listFilesUnder(prefix).paths
+
+    private fun listFilesUnder(prefix: String): InputListing {
         val root = if (prefix == "." || prefix.isEmpty() || prefix == "/") workspace.root else {
-            val resolved = workspace.resolve(prefix, Intent.Read) as? PathResolution.Resolved ?: return emptyList()
-            if (!Files.isDirectory(resolved.real)) return listOf(resolved.relative)
+            val resolved = workspace.resolve(prefix, Intent.Read) as? PathResolution.Resolved ?: return InputListing(emptyList(), false)
+            if (!Files.isDirectory(resolved.real)) return InputListing(listOf(resolved.relative), true)
             resolved.real
         }
-        return try {
-            Files.walk(root).use { stream ->
-                stream.filter { Files.isRegularFile(it) }
-                    .map { it.relativeTo(workspace.root).joinToString("/") { part -> part.toString() } }
-                    .filter { !it.startsWith(".git/") }
-                    .toList()
-            }
+        val paths = ArrayList<String>()
+        var complete = true
+        fun relative(path: Path): String = path.relativeTo(workspace.root).joinToString("/") { it.toString() }
+        fun excluded(path: Path): Boolean = relative(path).let { it == ".git" || it.startsWith(".git/") || scratch.isScratch(it) }
+        try {
+            Files.walkFileTree(root, object : SimpleFileVisitor<Path>() {
+                override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult =
+                    if (excluded(dir)) FileVisitResult.SKIP_SUBTREE else FileVisitResult.CONTINUE
+
+                override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
+                    if (!excluded(file)) {
+                        if (attrs.isRegularFile || attrs.isSymbolicLink) paths += relative(file) else complete = false
+                    }
+                    return FileVisitResult.CONTINUE
+                }
+
+                override fun visitFileFailed(file: Path, failure: IOException): FileVisitResult {
+                    if (!excluded(file)) complete = false
+                    return FileVisitResult.CONTINUE
+                }
+
+                override fun postVisitDirectory(dir: Path, failure: IOException?): FileVisitResult {
+                    if (failure != null && !excluded(dir)) complete = false
+                    return FileVisitResult.CONTINUE
+                }
+            })
         } catch (failure: IOException) {
-            emptyList()
+            complete = false
         }
+        return InputListing(paths, complete)
     }
 
     /** Content and metadata of one input: a restore-after-write leaves the version equal but moves the metadata. */

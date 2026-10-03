@@ -68,6 +68,14 @@ public data class TestIdentity(
 @Serializable
 public enum class TestOutcome { Passed, Failed, Error, Skipped }
 
+/** Unredacted failure content for comparison only; never copied into a receipt or prompt. */
+@Serializable
+public data class FailureContent(
+    val kind: String,
+    val attributes: Map<String, String> = emptyMap(),
+    val body: String,
+)
+
 /** One executed (or skipped) test as the runner reported it. */
 @Serializable
 public data class TestResult(
@@ -77,13 +85,21 @@ public data class TestResult(
     val message: String? = null,
     val durationMillis: Long? = null,
     /**
-     * The whole failure as the runner reported it — every attribute and the body, unredacted — when the shaper read more
-     * than [message] (P8.C.10: a failure's comparison fingerprint); never shown. `null`: [message] is all there is.
+     * Legacy diagnostic detail, unredacted and never shown. Only [failureContent] with
+     * [failureContentComplete] certifies complete comparison evidence.
      */
     val detail: String? = null,
+    /** Every failure/error element, retaining its attributes and complete body in report order. */
+    val failureContent: List<FailureContent> = emptyList(),
+    /** False when the format or parser cannot certify that [failureContent] is exhaustive. */
+    val failureContentComplete: Boolean = false,
 ) {
     /** The constructor before [detail] (P8.C.10). Kept for Java callers. */
     public constructor(identity: TestIdentity, outcome: TestOutcome, message: String?, durationMillis: Long?) : this(identity, outcome, message, durationMillis, null)
+
+    /** The constructor before complete failure content was recorded. Kept for Java callers. */
+    public constructor(identity: TestIdentity, outcome: TestOutcome, message: String?, durationMillis: Long?, detail: String?) :
+        this(identity, outcome, message, durationMillis, detail, emptyList(), false)
 
     val failing: Boolean get() = outcome == TestOutcome.Failed || outcome == TestOutcome.Error
 }

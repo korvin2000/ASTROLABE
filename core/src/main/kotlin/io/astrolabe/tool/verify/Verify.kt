@@ -199,7 +199,7 @@ public class Verify(
         val reviewer = campaignReview ?: return refused(args, "unavailable", "no campaign review path is wired for this cell")
         val base = s0 ?: return refused(args, "unavailable", "no captured initial candidate: the review has no diff base")
         val stamp = stamper.report().candidateId
-        val currencies = checks.all().filter { it.last != null }.associate { it.id to scheduler.currency(it, stamp) }
+        val currencies = checks.all().filter { it.last != null || it.id in Regressions.CHECKS }.associate { it.id to scheduler.currency(it, stamp) }
         val equivalence = reviewer.equivalence(stamp, currencies)
         val current = currencies.values.filter { it.certifies }.mapNotNull { it.receiptId }.distinct()
         val outcome = reviewer.review(contract, base, current, equivalence, why = "review requested by the cell")
@@ -373,7 +373,7 @@ public class Verify(
                 if (left != null && left <= 0) break
                 // P8.C.10: the red run's own command and closure, so the rescan watches what it tested; one run, begun on record.
                 val rerun = check.copy(command = io.astrolabe.contract.Command(red.command, red.cwd), inputClosure = red.inputClosure)
-                scheduler.beginRerun(rerun, contract.version)
+                scheduler.beginRerun(rerun, contract.version, red.checkDefinitionVersion) ?: continue
                 runOne(rerun, contract)?.let { recorded += it.first }
             }
             val due = scheduler.baselineDue(check, stamper.stamp().id) ?: continue
@@ -388,7 +388,7 @@ public class Verify(
         val stamp = s0 ?: return null
         val left = timeLeft()
         if (left != null && left <= 0) return null
-        runner.begin(check, contract.version, stamp)
+        runner.tryBegin(check, contract.version, stamp) ?: return null
         runner.timeLeft = timeLeft
         return try {
             runner.run(check, contract.version, stamp, cut(timeoutSeconds, left)).receipt
@@ -476,15 +476,16 @@ public class Verify(
             return Invocation(Executed(command.argv, command.cwd, false, null, Outcome.Denied, null, null, listOf("working directory refused")), "denied — working directory must be a directory inside the verification workspace")
         }
         // C3r: the check's deadline is cut at dispatch to the active time a minutes limit leaves; with none left it is not run.
-        val left = timeLeft()
-        if (left != null && left <= 0) {
-            return Invocation(Executed(command.argv, command.cwd, false, null, Outcome.NotRun, null, null, listOf(io.astrolabe.budget.NO_ACTIVE_TIME)), "not run — ${io.astrolabe.budget.NO_ACTIVE_TIME}")
-        }
-        val deadline = cut(timeoutSeconds, left)
-        val reports = JUnitReports.forCommand(cwd, command.argv, actionId)
+        val reports = JUnitReports.forCommand(root, command.argv, actionId)
+        var deadline = timeoutSeconds
         val proc = try {
             beforeDispatch()
             reports?.prepare(logsDir.resolve("reports-$actionId"))
+            val left = timeLeft()
+            if (left != null && left <= 0) {
+                return Invocation(Executed(command.argv, command.cwd, false, null, Outcome.NotRun, null, null, listOf(io.astrolabe.budget.NO_ACTIVE_TIME)), "not run — ${io.astrolabe.budget.NO_ACTIVE_TIME}")
+            }
+            deadline = cut(timeoutSeconds, left)
             runner.start(SpawnSpec(Command.Argv(command.argv), cwd, logPath(check.id, actionId), EnvPolicy(inheritedNames = envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")), deadline))
         } catch (failure: IOException) {
             val reason = "cannot start ${command.argv.first()}: ${failure.message}"
@@ -506,11 +507,11 @@ public class Verify(
             output = observed.output, captureComplete = !observed.lost && !observed.truncated && observed.proc.status !is ProcStatus.Lost, checkId = check.id, selector = check.selector.toString(),
         )
         val shaped = Shapers.shape(capture, budget)
-        return Invocation(executedOf(check, command, capture, shaped, lost, blob, safeLog.limitations), shaped.view, shaped, capture, lost, safeLog.mask)
+        return Invocation(executedOf(check, command, capture, shaped, lost, blob, safeLog.limitations, root), shaped.view, shaped, capture, lost, safeLog.mask)
     }
 
     /** The scheduler's record of a shaped invocation: the runner's outcome, or a host or user build or typecheck passing on its exit. */
-    private fun executedOf(check: Check, command: io.astrolabe.contract.Command, capture: RunCapture, shaped: Shaped, lost: Boolean, blob: Digest?, limits: List<String>): Executed {
+    private fun executedOf(check: Check, command: io.astrolabe.contract.Command, capture: RunCapture, shaped: Shaped, lost: Boolean, blob: Digest?, limits: List<String>, root: Path = workspace.root): Executed {
         val passes = !lost && passesOnExit(check, capture, shaped)
         val outcome = when {
             lost -> Outcome.UnknownOutcome
@@ -520,7 +521,8 @@ public class Verify(
         }
         val note = if (passes) listOf("declared ${check.evidence?.wire} evidence of a host or user command: exit ${capture.exitCode}, no test counts (plan §4.4, D-50 relaxed)") else emptyList()
         // P8.C.10: a harness regression check records its tests one by one (bounded), compared by digest, shown redacted.
-        val tests = if (check.id in Regressions.CHECKS) Regressions.outcomes(shaped.tests, { redaction.apply(it, ContentClass.ReusableEvidence).text }, listOfNotNull(capture.executionRoot, workspace.root.toString())) else null
+        val tests = if (check.id in Regressions.CHECKS) Regressions.outcomes(shaped.tests, { redaction.apply(it, ContentClass.ReusableEvidence).text }, listOfNotNull(capture.executionRoot, root.toString(), workspace.root.toString()),
+            reportComplete = shaped.reportComplete && capture.captureComplete && !shaped.captureTruncated) else null
         return Executed(command.argv, command.cwd, false, capture.exitCode, outcome, shaped.counts, blob, shaped.limitations + limits + note, tests = tests)
     }
 
@@ -615,7 +617,7 @@ public class Verify(
         val check = recognized.first()
         val command = check.command ?: return null
         val cwd = directoryOf(command.cwd)?.let { if (it.isEmpty()) workspace.root else workspace.root.resolve(it) } ?: return null
-        val reports = JUnitReports.forCommand(cwd, command.argv, actionId)
+        val reports = JUnitReports.forCommand(workspace.root, command.argv, actionId)
         try {
             reports?.prepare(logsDir.resolve("reports-$actionId"))
         } catch (failure: IOException) {

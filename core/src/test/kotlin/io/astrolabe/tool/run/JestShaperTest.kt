@@ -9,6 +9,34 @@ import kotlin.test.assertTrue
 
 class JestShaperTest {
     @Test
+    fun `jest runtime suite errors prevent report completeness`() {
+        val json = """
+            {"numTotalTests":1,"numFailedTests":1,"numRuntimeErrorTestSuites":1,
+            "testResults":[{"name":"test_t.js","testExecError":{"message":"suite failed"},"assertionResults":[
+            {"title":"t","status":"failed","failureMessages":["OLD"]}]}]}
+        """.trimIndent()
+        val shaped = Shapers.shape(Recorded.capture(argv = listOf("jest"), exitCode = 1,
+            reports = listOf(ReportArtifact("jest.json", ReportKind.JestJson, true, "fresh", json.toByteArray()))))
+        assertTrue(!shaped.reportComplete)
+        assertTrue(shaped.tests.single().failing)
+    }
+
+    @Test
+    fun `jest JSON keeps every complete failure message`() {
+        val json = """
+            {"numTotalTests":1,"numFailedTests":1,"testResults":[{"name":"test_t.js","assertionResults":[
+            {"title":"t","status":"failed","failureMessages":["NEW\n12 0x123 3ms","OLD"]}]}]}
+        """.trimIndent()
+        val shaped = Shapers.shape(Recorded.capture(
+            argv = listOf("jest"), exitCode = 1,
+            reports = listOf(ReportArtifact("jest.json", ReportKind.JestJson, true, "fresh", json.toByteArray())),
+        ))
+        assertTrue(shaped.reportComplete)
+        assertTrue(shaped.tests.single().failureContentComplete)
+        assertEquals(listOf("NEW\n12 0x123 3ms", "OLD"), shaped.tests.single().failureContent.map { it.body })
+    }
+
+    @Test
     fun `a green jest run parses its summary`() {
         val shaped = Shapers.shape(Recorded.capture("jest-pass.txt", listOf("npx", "jest"), exitCode = 0))
         assertEquals("jest", shaped.shaper)

@@ -74,6 +74,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFails
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -268,28 +269,36 @@ class ProvenanceTest {
         assertEquals("agent_test", finished.provenanceClass)
     }
 
-    /** P8.C.10: `pytest -rA` output of `tests/test_discount.py`: `test_other` passes, `test_tier` passes or fails. */
+    /** Complete JUnit evidence: test_other passes and test_tier passes or fails with its full failure body. */
     private fun blastOutput(tierFails: Boolean, message: String = "AssertionError: assert 4 == 5"): String = """
-        ============================= test session starts ==============================
-        collected 2 items
-
-        tests/test_discount.py ${if (tierFails) ".F" else ".."}                                                [100%]
-
-        =========================== short test summary info ============================
-        PASSED tests/test_discount.py::test_other
-        ${if (tierFails) "FAILED tests/test_discount.py::test_tier - $message" else "PASSED tests/test_discount.py::test_tier"}
-        ========================= ${if (tierFails) "1 passed, 1 failed" else "2 passed"} in 0.10s ==========================
+        <testsuite tests="2">
+          <testcase classname="tests/test_discount.py" name="test_other"/>
+          <testcase classname="tests/test_discount.py" name="test_tier">${if (tierFails) "<failure message=\"$message\">$message</failure>" else ""}</testcase>
+        </testsuite>
     """.trimIndent() + "\n"
 
+    private fun modelBlast(text: String): String {
+        repo.write("blast_out.txt", text)
+        repo.write(".gitignore", "build/\n")
+        val runner = if (WINDOWS) "gradlew.bat".also {
+            repo.write(it, "@echo off\r\nif not exist build\\test-results\\test mkdir build\\test-results\\test\r\ncopy /y blast_out.txt build\\test-results\\test\\TEST-blast.xml >nul\r\n")
+        } else "./gradlew".also {
+            repo.write("gradlew", "#!/bin/sh\nmkdir -p build/test-results/test\ncp blast_out.txt build/test-results/test/TEST-blast.xml\n")
+            java.nio.file.Files.setPosixFilePermissions(repo.root.resolve("gradlew"), java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x"))
+        }
+        repo.commit("regression report runner")
+        return runner
+    }
+
     /**
-     * P8.C.10, an S1 increment: the blast radius (a `pytest` printing `blast_out.txt`: [atS0] at s0, then [outputs] — the
+     * P8.C.10, an S1 increment: the blast radius (a runner reporting `blast_out.txt`: [atS0] at s0, then [outputs] — the
      * tree before each reply) runs through `verify` at the replies [verifying]; the agent notes the red in Open before its
      * first `done`, which comes after them; verify-on-stop brings the blast radius to the tree and runs its baseline on s0.
      */
     private fun blastCampaign(atS0: Boolean, outputs: List<Boolean>, verifying: Set<Int>): Pair<S0Run, AgentEvent.Campaign.Finished> {
-        val pytest = modelPytest("blast_out.txt", blastOutput(atS0))
+        val pytest = modelBlast(blastOutput(atS0))
         seed(listOf(Acceptance.Run("AC-1", printing, Origin.User)), r1 = listOf("AC-1"), host = listOf("AC-1"))
-        return run(before = { i -> outputs.getOrNull(i)?.let { repo.write("blast_out.txt", blastOutput(it)) } }) { c ->
+        val result = run(before = { i -> outputs.getOrNull(i)?.let { repo.write("blast_out.txt", blastOutput(it)) } }) { c ->
             c.checks.replace(io.astrolabe.verify.Check(Checks.TESTS_BLAST, io.astrolabe.verify.CheckKind.Unit, io.astrolabe.verify.Selector.Blast, io.astrolabe.evidence.Closure.Unknown,
                 io.astrolabe.verify.CostClass.Slow, io.astrolabe.verify.Trigger.StepBoundary, command = Command(listOf(pytest, "-q"))))
             outputs.indices.map { i ->
@@ -297,6 +306,12 @@ class ProvenanceTest {
                 else Scripted.Reply(listOf(call("t$i", "state", """{"op":"patch","patch":[{"open.add":{"text":"${Checks.TESTS_BLAST} red: tests/test_discount.py, tracked"}},{"next":"propose completion"}]}"""), say("done")))
             } + Scripted.Reply(listOf(say("done")))
         }
+        Store.open(stateRoot, repo.git, clock).use { store ->
+            for (baseline in SqliteReceipts(store, clock).forCheck(Checks.TESTS_BLAST).filter { Regressions.isBaseline(it) && !Regressions.isMarker(it) }) {
+                assertNotNull(baseline.tests, "the fixture baseline must produce structured evidence: ${baseline.outcome} ${baseline.limits}")
+            }
+        }
+        return result
     }
 
     @Test
@@ -329,7 +344,8 @@ class ProvenanceTest {
     fun `an S1 increment never completes past a new failure the blast radius finds, whatever Open says`() {
         val (run, _) = blastCampaign(atS0 = false, outputs = listOf(true, true), verifying = setOf(0))
         assertTrue(run.outcome != CampaignOutcome.Completed, "${run.outcome}: ${run.state?.reason}")
-        assertTrue(run.state?.reason.orEmpty().contains("${Checks.TESTS_BLAST}: fix and rerun `"), run.state?.reason)
+        assertTrue(run.state?.reason.orEmpty().contains("fix and rerun `"), run.state?.reason)
+        assertTrue(run.state?.reason.orEmpty().contains("${Checks.TESTS_BLAST} has new failures against the baseline"), run.state?.reason)
     }
 
     @Test
@@ -356,7 +372,7 @@ class ProvenanceTest {
      * that [fixedInI2] or not.
      */
     private fun twoIncrements(fixedInI2: Boolean): S0Run = runBlocking {
-        val pytest = modelPytest("blast_out.txt", blastOutput(true, "AssertionError: assert 3 == 5"))
+        val pytest = modelBlast(blastOutput(true, "AssertionError: assert 3 == 5"))
         Store.open(stateRoot, repo.git, clock).use { store ->
             val contracts = Contracts(SqliteContractRepository(store, clock), idGen, clock)
             val derived = contracts.deriveS0(request.work, request.attempt, request.text, Atlas.build(repo.root), Config(), policy.tokens).contract
@@ -399,6 +415,198 @@ class ProvenanceTest {
         val finish = assertNotNull(fixed.finish)
         assertTrue(finish.openItems.none { it.startsWith("${Checks.TESTS_BLAST}: ") } && finish.notVerified.none { it.startsWith(Checks.TESTS_BLAST) }, finish.toString())
         assertEquals(ProvenanceClass.Independent, finish.provenanceClass)
+    }
+
+    private fun regressionController(): Controller = Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all), clock, idGen)
+
+    private fun regressionModel(vararg replies: Scripted): Pair<CellModel, FakeAdapter> {
+        val adapter = FakeAdapter(ScriptedModel.of(*replies))
+        return CellModel(adapter, FakeProfiles.main, HeuristicEstimator(), maxOutputTokens = 4_000) to adapter
+    }
+
+    private fun holdAndAcknowledge(checkId: String): Pair<CellModel, FakeAdapter> = regressionModel(
+        Scripted.Reply(listOf(call("v1", "verify", """{"what":"tests","selection":"ids","ids":["$checkId"]}"""))),
+        Scripted.Reply(listOf(call("s1", "state", """{"op":"patch","patch":[{"open.add":{"text":"$checkId red and tracked"}},{"next":"propose completion"}]}"""), say("done"))),
+        Scripted.Reply(listOf(say("done"))),
+    )
+
+    private fun crashBeforeFinished(c: OpenedCampaign) = c.store.db.tx {
+        it.execute("CREATE TRIGGER die_before_finished BEFORE INSERT ON campaigns WHEN NEW.outcome = 'completed' BEGIN SELECT RAISE(ABORT, 'process death'); END")
+    }
+
+    private fun removeFinishCrash() = Store.open(stateRoot, repo.git, clock).use { store ->
+        assertEquals(CampaignPhase.Finishing, SqliteCampaigns(store, clock).load(request.work, request.attempt)?.phase)
+        store.db.tx { it.execute("DROP TRIGGER die_before_finished") }
+    }
+
+    @Test
+    fun `a types hold acknowledged before a finalization crash is restored and caps the reopened finish`() = runBlocking<Unit> {
+        repo.write("package.json", """{"scripts":{"test":"echo fixture tests","typecheck":"exit 1"},"devDependencies":{"typescript":"fixture"}}""" + "\n")
+        repo.write("tsconfig.json", "{}\n")
+        repo.write("src/a.ts", "export const a: number = 1\n")
+        repo.write("types_out.txt", "src/a.py:1: error: incompatible return type\nFound 1 error in 1 file (checked 1 source file)\n")
+        val command = if (WINDOWS) Command(listOf("cmd.exe", "/d", "/s", "/c", "type types_out.txt & exit /b 1"))
+            else Command(listOf("/bin/sh", "-c", "cat types_out.txt; exit 1"))
+        repo.commit("typecheck output")
+        seed(listOf(Acceptance.Run("AC-1", printing, Origin.User)), r1 = listOf("AC-1"))
+        val controller = regressionController()
+        controller.open(repo.root, request, policy).use { c ->
+            assertNotNull(c.checks[Checks.TYPES_TOUCHED], "the repository seeds the touched types check")
+            c.checks.replace(io.astrolabe.verify.Check(Checks.TYPES_TOUCHED, io.astrolabe.verify.CheckKind.Type,
+                io.astrolabe.verify.Selector.Touched, io.astrolabe.evidence.Closure.Unknown, io.astrolabe.verify.CostClass.Fast,
+                io.astrolabe.verify.Trigger.EndOfTurn, command = command, origin = Origin.Harness, evidence = EvidenceKind.Typecheck))
+            crashBeforeFinished(c)
+            assertFails { controller.run(c, holdAndAcknowledge(Checks.TYPES_TOUCHED).first) }
+            assertTrue(c.state!!.graph.evidence.values.single().acknowledged.isNotEmpty(), "the increment committed its Open acknowledgement")
+        }
+        removeFinishCrash()
+        val reopened = regressionController()
+        reopened.open(repo.root, request, policy).use { c ->
+            assertNotNull(c.checks[Checks.TYPES_TOUCHED]?.last, "the types receipt must be restored before reaccept and finish")
+            val (model, adapter) = regressionModel()
+            val run = reopened.run(c, model)
+            assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+            assertEquals(0, adapter.calls.size)
+            val finish = assertNotNull(run.finish)
+            assertEquals(ProvenanceClass.Unverified, finish.provenanceClass)
+            assertTrue(finish.openItems.any { it.startsWith("${Checks.TYPES_TOUCHED}: failure not classified") }, finish.openItems.toString())
+        }
+    }
+
+    @Test
+    fun `an Open acknowledgement survives pending acceptance and commit then finalization crash and empty register reaccept`() = runBlocking<Unit> {
+        val pytest = modelBlast(blastOutput(true, "AssertionError: assert 3 == 5"))
+        seed(listOf(Acceptance.Run("AC-1", printing, Origin.User), Acceptance.Check("AC-2", "review the documentation", Origin.User)),
+            r1 = listOf("AC-1", "AC-2"))
+        val controller = regressionController()
+        controller.open(repo.root, request, policy).use { c ->
+            c.checks.replace(io.astrolabe.verify.Check(Checks.TESTS_BLAST, io.astrolabe.verify.CheckKind.Unit, io.astrolabe.verify.Selector.Blast,
+                io.astrolabe.evidence.Closure.Unknown, io.astrolabe.verify.CostClass.Slow, io.astrolabe.verify.Trigger.StepBoundary, command = Command(listOf(pytest, "-q"))))
+            repo.write("blast_out.txt", blastOutput(true))
+            val run = controller.run(c, holdAndAcknowledge(Checks.TESTS_BLAST).first)
+            assertEquals(CampaignOutcome.WaitingForInput, run.outcome, run.state?.reason)
+            assertNotNull(Acceptances(c.store, clock).open(request.work, request.attempt))
+        }
+        val acceptingController = regressionController()
+        acceptingController.open(repo.root, request, policy).use { c ->
+            crashBeforeFinished(c)
+            val (model, adapter) = regressionModel()
+            assertFails { acceptingController.run(c, model, accepting(Decider.User, "user:test")) }
+            assertEquals(0, adapter.calls.size)
+            assertTrue(c.state!!.graph.evidence.values.single().acknowledged.isNotEmpty(), "the pending proposal must carry its Open acknowledgement into the committed evidence")
+        }
+        removeFinishCrash()
+        val reopened = regressionController()
+        reopened.open(repo.root, request, policy).use { c ->
+            val (model, adapter) = regressionModel()
+            val run = reopened.run(c, model)
+            assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+            assertEquals(0, adapter.calls.size, "reaccept uses the persisted acknowledgement with Register empty")
+            assertEquals(ProvenanceClass.Unverified, assertNotNull(run.finish).provenanceClass)
+        }
+    }
+
+    private fun newlyFailedPassingIdentity(c: OpenedCampaign): io.astrolabe.evidence.Receipt {
+        val receipts = SqliteReceipts(c.store, clock).forCheck(Checks.TESTS_BLAST)
+        val baseline = receipts.last { Regressions.isBaseline(it) && !Regressions.isMarker(it) }
+        val key = assertNotNull(baseline.tests, "the fixture baseline must produce structured evidence: ${baseline.outcome} ${baseline.limits}").passed.single()
+        return receipts.last { !Regressions.isBaseline(it) && !Regressions.isMarker(it) }.copy(
+            receiptId = "late-regression",
+            parsed = io.astrolabe.evidence.Counts(failed = 1, discovered = 1),
+            tests = io.astrolabe.evidence.TestOutcomes(
+                failed = listOf(io.astrolabe.evidence.FailedTest(key, "tests/test_discount.py::test_other", Digest.ofUtf8("new failure").hex, "new failure", contentComplete = true)),
+                reportComplete = true, multiplicity = mapOf(key to 1),
+            ),
+        )
+    }
+
+    private fun lateRegressionDuringAcceptance(afterCommit: Boolean) = runBlocking<Unit> {
+        val pytest = modelBlast(blastOutput(true, "AssertionError: assert 3 == 5"))
+        seed(listOf(Acceptance.Run("AC-1", printing, Origin.User), Acceptance.Check("AC-2", "review the documentation", Origin.User)),
+            r1 = listOf("AC-1", "AC-2"))
+        val controller = regressionController()
+        controller.open(repo.root, request, policy).use { c ->
+            c.checks.replace(io.astrolabe.verify.Check(Checks.TESTS_BLAST, io.astrolabe.verify.CheckKind.Unit, io.astrolabe.verify.Selector.Blast,
+                io.astrolabe.evidence.Closure.Unknown, io.astrolabe.verify.CostClass.Slow, io.astrolabe.verify.Trigger.StepBoundary, command = Command(listOf(pytest, "-q"))))
+            repo.write("blast_out.txt", blastOutput(true))
+            val host = object : Authority by AutonomousAuthority() {
+                override suspend fun decide(request: AcceptanceDecisionRequest): AcceptanceDecision {
+                    val receipt = newlyFailedPassingIdentity(c)
+                    if (!afterCommit) SqliteReceipts(c.store, clock).record(receipt) else {
+                        val body = kotlinx.serialization.json.Json.encodeToString(io.astrolabe.evidence.Receipt.serializer(), receipt).replace("'", "''")
+                        val source = SqliteReceipts(c.store, clock).forCheck(Checks.TESTS_BLAST).last { !Regressions.isBaseline(it) && !Regressions.isMarker(it) }.receiptId
+                        c.store.db.tx { it.execute("""
+                            CREATE TRIGGER fail_after_commit AFTER INSERT ON increments
+                            WHEN NEW.status = 'Verified' AND NOT EXISTS (SELECT 1 FROM receipts WHERE receipt_id = 'late-regression')
+                            BEGIN INSERT INTO receipts (receipt_id, work_id, attempt_id, candidate_id, context_id, check_id, stamp_before, stamp_after, outcome, raw_blob, schema_version, created_at, body)
+                            SELECT 'late-regression', work_id, attempt_id, candidate_id, context_id, check_id, stamp_before, stamp_after, outcome, raw_blob, schema_version, created_at, '$body'
+                            FROM receipts WHERE receipt_id = '$source'; END
+                        """.trimIndent()) }
+                    }
+                    return AcceptanceDecision(request.id, request.contractRevision, request.candidate, DecisionKind.Accept, Decider.User, "user:test", "review accepted")
+                }
+            }
+            val run = controller.run(c, holdAndAcknowledge(Checks.TESTS_BLAST).first, host)
+            assertTrue(run.outcome != CampaignOutcome.Completed, "a newly recorded regression cannot be accepted by a pending decision or the final gate")
+            val refusals = listOfNotNull(run.state?.reason) + Acceptances(c.store, clock).pending(request.work, request.attempt).mapNotNull { it.closedReason }
+            assertTrue(refusals.any { "fix and rerun" in it }, refusals.toString())
+        }
+    }
+
+    @Test
+    fun `a new regression recorded while an authority decides invalidates the pending proposal`() = lateRegressionDuringAcceptance(afterCommit = false)
+
+    @Test
+    fun `the final gate refuses a new regression recorded after the increment commits`() = lateRegressionDuringAcceptance(afterCommit = true)
+
+    @Test
+    fun `the cell exit refuses a durable new regression before its last result cache is populated`() = runBlocking<Unit> {
+        seed(listOf(Acceptance.Run("AC-1", printing, Origin.User)), r1 = listOf("AC-1"))
+        val controller = regressionController()
+        controller.open(repo.root, request, policy).use { c ->
+            val check = io.astrolabe.verify.Check(Checks.TESTS_BLAST, io.astrolabe.verify.CheckKind.Unit, io.astrolabe.verify.Selector.Blast,
+                io.astrolabe.evidence.Closure.Known(setOf("src/a.py")), io.astrolabe.verify.CostClass.Slow,
+                io.astrolabe.verify.Trigger.StepBoundary, command = Command(listOf("fixture-regression")))
+            c.checks.replace(check)
+            val turns = listOf(
+                ScriptedModel.Turn({ true }, {
+                    val report = c.stamper.report(fresh = true)
+                    val key = Regressions.key(io.astrolabe.tool.run.TestIdentity(check = check.id, file = "tests/test_a.py", name = "test_a"))
+                    val baseline = io.astrolabe.evidence.Receipt(
+                        receiptId = "cell-gate-baseline", ids = c.ids, checkId = check.id, acceptanceIds = emptyList(),
+                        command = checkNotNull(check.command).argv, cwd = null, shell = false,
+                        stampBefore = c.s0.stampId, stampAfter = c.s0.stampId, envId = report.env.envId,
+                        verifierVersion = io.astrolabe.Astrolabe.VERSION, checkDefinitionVersion = check.definitionVersion,
+                        contractVersion = c.contract.version, outcome = io.astrolabe.evidence.Outcome.Passed,
+                        parsed = io.astrolabe.evidence.Counts(passed = 1, discovered = 1), inputClosure = check.inputClosure,
+                        testedInputs = io.astrolabe.evidence.TestedInputs(mapOf("src/a.py" to checkNotNull(c.registry.version("src/a.py"))), io.astrolabe.evidence.InputStability.Exclusive),
+                        raw = null, limits = listOf(io.astrolabe.evidence.Limit("baseline", "completed run at s0")), exitCode = 0, at = clock.instant(),
+                        tests = io.astrolabe.evidence.TestOutcomes(passed = listOf(key), reportComplete = true, multiplicity = mapOf(key to 1)),
+                    )
+                    val receipts = SqliteReceipts(c.store, clock)
+                    receipts.record(baseline)
+                    receipts.record(baseline.copy(
+                        receiptId = "cell-gate-red", stampBefore = report.candidateId, stampAfter = report.candidateId,
+                        outcome = io.astrolabe.evidence.Outcome.Failed, parsed = io.astrolabe.evidence.Counts(failed = 1, discovered = 1),
+                        limits = emptyList(), exitCode = 1, workspaceId = c.workspace.id,
+                        tests = io.astrolabe.evidence.TestOutcomes(
+                            failed = listOf(io.astrolabe.evidence.FailedTest(key, "tests/test_a.py::test_a", Digest.ofUtf8("new failure").hex, "new failure", contentComplete = true)),
+                            reportComplete = true, multiplicity = mapOf(key to 1),
+                        ),
+                    ))
+                    assertEquals(null, c.checks[check.id]?.last, "the durable write has no last result cache entry or alias")
+                    Scripted.Reply(listOf(say("done")))
+                }),
+                ScriptedModel.Turn({ true }, { Scripted.Reply(listOf(say("done"))) }),
+                ScriptedModel.Turn({ true }, { Scripted.Reply(listOf(say("done"))) }),
+            )
+            val adapter = FakeAdapter(ScriptedModel(turns))
+            val run = controller.run(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator(), maxOutputTokens = 4_000))
+            assertTrue(run.outcome != CampaignOutcome.Completed, run.state?.reason)
+            assertTrue(adapter.calls.size >= 2, "the cell must refuse its first completion and tell the model before returning to the controller")
+            val refusal = adapter.calls[1].request.toString()
+            assertTrue("fix and rerun `fixture-regression`" in refusal, refusal)
+        }
     }
 
     /** A `pytest` the model can run that prints [output], committed with [text] in it. */

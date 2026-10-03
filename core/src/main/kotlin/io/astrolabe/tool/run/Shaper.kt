@@ -5,6 +5,7 @@ import io.astrolabe.evidence.Outcome
 import io.astrolabe.id.Digest
 import io.astrolabe.provider.TokenEstimator
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import kotlin.math.ceil
 
 /** Structured report formats a runner can be asked to write (D-50). */
@@ -28,7 +29,13 @@ public data class ReportArtifact(
     val content: ByteArray? = null,
     /** Gradle/Maven project this report belongs to; derived from [path] when absent. */
     val module: String? = null,
+    /** False when report discovery skipped a subtree whose contents could not be inspected. */
+    val collectionComplete: Boolean = true,
 ) {
+    /** The constructor before collection completeness was recorded. Kept for Java callers. */
+    public constructor(path: String, kind: ReportKind, freshForThisInvocation: Boolean, provenance: String, content: ByteArray?, module: String?) :
+        this(path, kind, freshForThisInvocation, provenance, content, module, true)
+
     /** A stale report without recorded build-cache provenance proves nothing about this invocation. */
     val usableAsEvidence: Boolean get() = rejectionReason == null
 
@@ -58,7 +65,7 @@ public data class ReportArtifact(
             other is ReportArtifact &&
                 path == other.path && kind == other.kind &&
                 freshForThisInvocation == other.freshForThisInvocation &&
-                provenance == other.provenance && module == other.module &&
+                provenance == other.provenance && module == other.module && collectionComplete == other.collectionComplete &&
                 (content?.contentEquals(other.content ?: ByteArray(0)) ?: (other.content == null))
             )
 
@@ -68,6 +75,7 @@ public data class ReportArtifact(
         result = 31 * result + freshForThisInvocation.hashCode()
         result = 31 * result + provenance.hashCode()
         result = 31 * result + (module?.hashCode() ?: 0)
+        result = 31 * result + collectionComplete.hashCode()
         result = 31 * result + (content?.contentHashCode() ?: 0)
         return result
     }
@@ -183,7 +191,15 @@ public data class Shaped(
     val wrapper: WrapperDetection? = null,
     val shaper: String,
     val limitations: List<String> = emptyList(),
+    /** Every captured report was fully parsed; independent of process outcome and presentation limits. */
+    val reportComplete: Boolean = false,
 ) {
+    /** The constructor before report completeness was recorded. Kept for Java callers. */
+    public constructor(
+        status: Outcome, counts: Counts?, tests: List<TestResult>, view: String, viewTruncated: Boolean,
+        captureTruncated: Boolean, recallHint: String?, wrapper: WrapperDetection?, shaper: String, limitations: List<String>,
+    ) : this(status, counts, tests, view, viewTruncated, captureTruncated, recallHint, wrapper, shaper, limitations, false)
+
     init {
         require(!(status == Outcome.Passed && counts == null)) {
             "a passed status needs parsed counts; missing structured evidence is inconclusive (D-50)"
@@ -348,6 +364,35 @@ internal data class StatusInputs(
     val infraExitCodes: Set<Int> = emptySet(),
     val inconclusiveExitCodes: Set<Int> = emptySet(),
 )
+
+/** JSON object parsing overwrites duplicate keys; reject that loss before certifying report evidence. */
+internal fun uniqueJsonKeys(text: String): Boolean {
+    val objects = ArrayList<MutableSet<String>>()
+    var at = 0
+    while (at < text.length) {
+        when (text[at]) {
+            '{' -> objects.add(HashSet())
+            '}' -> objects.removeAt(objects.lastIndex)
+            '"' -> {
+                val start = at++
+                while (at < text.length && text[at] != '"') {
+                    if (text[at] == '\\') at++
+                    at++
+                }
+                val end = at + 1
+                var next = end
+                while (next < text.length && text[next].isWhitespace()) next++
+                if (next < text.length && text[next] == ':') {
+                    val key = Json.decodeFromString<String>(text.substring(start, end))
+                    if (!objects.last().add(key)) return false
+                }
+            }
+            else -> Unit
+        }
+        at++
+    }
+    return true
+}
 
 /**
  * The one status rule (§8.3, §8.4, D-50). Applied in order; a parse error, an absent result or a wrapper's

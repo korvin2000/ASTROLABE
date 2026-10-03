@@ -607,7 +607,7 @@ public object Resolver {
         val knownRed = ArrayList<String>()
         val acknowledging = ArrayList<String>()
         for ((checkId, currency) in currencies) {
-            if (checkId in requiredIds || currency.receiptId == null) continue
+            if (checkId in requiredIds || currency.receiptId == null && currency.hold == null) continue
             // Plan §4.3 (C1b): an optional check's red is the runtime's record, not the agent's, until a later `passed`
             // receipt of it on the tree now; a mandatory one keeps the rule below.
             if (!currency.mandatory) {
@@ -623,7 +623,7 @@ public object Resolver {
                 when (hold.kind) {
                     RedClass.Inherited -> Unit
                     RedClass.New -> results += ObligationResult("red:$checkId", ObligationKind.Run, ResultStatus.Failed,
-                        "$checkId: fix and rerun `${hold.command}` — new failures against the baseline at s0, which no Open item clears: " +
+                        "fix and rerun `${hold.command}` — $checkId has new failures against the baseline at s0, which no Open item clears: " +
                             hold.regressions.take(MAX_NAMED).joinToString("; ") + (if (hold.regressions.size > MAX_NAMED) "; +${hold.regressions.size - MAX_NAMED} more" else ""),
                         currency.receiptId)
                     RedClass.Unclassified -> when {

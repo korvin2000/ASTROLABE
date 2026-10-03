@@ -1386,7 +1386,7 @@ class RunTest {
         val failure = io.astrolabe.evidence.FailedTest(io.astrolabe.verify.Regressions.key(TestIdentity(file = "tests/t.py", name = "t")), "tests/t.py::t", "fp", "assert 1 == 2")
         scheduler.runCheck(blast, 1, listOf("src/a.py", "README.md")) {
             io.astrolabe.verify.Executed(printing("README.md").argv, null, false, 1, io.astrolabe.evidence.Outcome.Failed, io.astrolabe.evidence.Counts(failed = 1, discovered = 1), null,
-                tests = io.astrolabe.evidence.TestOutcomes(listOf(failure)))
+                tests = io.astrolabe.evidence.TestOutcomes(listOf(failure.copy(contentComplete = true)), reportComplete = true, multiplicity = mapOf(failure.key to 1)))
         }
         fun baselines() = receipts.forCheck(io.astrolabe.verify.Checks.TESTS_BLAST).filter(io.astrolabe.verify.Regressions::isBaseline)
         // A minutes limit with no time left: no baseline runs, the red stays unclassified.
@@ -1417,7 +1417,7 @@ class RunTest {
         val failure = io.astrolabe.evidence.FailedTest(io.astrolabe.verify.Regressions.key(TestIdentity(file = "tests/t.py", name = "t")), "tests/t.py::t", "fp", "assert 1 == 2")
         scheduler.runCheck(red, 1) {
             io.astrolabe.verify.Executed(rewrites.argv, null, false, 1, io.astrolabe.evidence.Outcome.Failed, io.astrolabe.evidence.Counts(failed = 1, discovered = 1), null,
-                tests = io.astrolabe.evidence.TestOutcomes(listOf(failure)))
+                tests = io.astrolabe.evidence.TestOutcomes(listOf(failure.copy(contentComplete = true)), reportComplete = true, multiplicity = mapOf(failure.key to 1)))
         }
         checks.replace(red.copy(command = printing("pytest_pass.txt"), inputClosure = io.astrolabe.evidence.Closure.Known(setOf("src/b.py"))))
         repo.write("README.md", "# moved\n")

@@ -10,8 +10,12 @@ import io.astrolabe.evidence.EvidenceKind
 import io.astrolabe.evidence.FailedTest
 import io.astrolabe.evidence.TestOutcomes
 import io.astrolabe.evidence.InMemoryAliases
+import io.astrolabe.evidence.InMemoryReceipts
 import io.astrolabe.evidence.InputStability
 import io.astrolabe.evidence.Outcome
+import io.astrolabe.evidence.Receipt
+import io.astrolabe.evidence.ReceiptClaim
+import io.astrolabe.evidence.Receipts
 import io.astrolabe.evidence.SqliteReceipts
 import io.astrolabe.fixtures.FakeClock
 import io.astrolabe.fixtures.FixedIdGen
@@ -34,6 +38,9 @@ import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.FileTime
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -345,6 +352,28 @@ class SchedulerTest {
     }
 
     @Test
+    fun `unknown closure failures discharge only after a complete workspace scan and rescan`() = runTest {
+        val blast = checks.register(Check(Checks.TESTS_BLAST, CheckKind.Unit, Selector.Blast, Closure.Unknown, CostClass.Slow, Trigger.StepBoundary,
+            command = Command(listOf("pytest"))))
+        val key = Regressions.key(io.astrolabe.tool.run.TestIdentity(file = "tests/test_a.py", name = "test_a"))
+        val failure = FailedTest(key, "tests/test_a.py::test_a", Regressions.fingerprint("assert 1 == 2", emptyList()), "assert 1 == 2", contentComplete = true)
+        val red = scheduler.runCheck(blast, 1, inputs = listOf("src/a.py")) {
+            Executed(blast.command!!.argv, null, false, 1, Outcome.Failed, Counts(failed = 1, discovered = 1), null,
+                tests = TestOutcomes(listOf(failure), reportComplete = true, multiplicity = mapOf(key to 1)))
+        }
+        assertTrue(red.testedInputs.workspaceComplete, "the workspace closure is enumerated in full around the run")
+        val green = Executed(blast.command!!.argv, null, false, 0, Outcome.Passed, Counts(passed = 1, discovered = 1), null,
+            tests = TestOutcomes(passed = listOf(key), reportComplete = true, multiplicity = mapOf(key to 1)))
+        val partial = scheduler.runCheck(blast, 1, inputs = listOf("src/a.py", "missing-input.py")) { green }
+        assertFalse(partial.testedInputs.workspaceComplete)
+        assertFalse(partial.testedInputs.eligible, "an input that could not be read withholds coverage")
+        assertNotNull(scheduler.currency(blast, stamper.stamp().id).hold, "a passing identity with partial inputs does not discharge")
+        val complete = scheduler.runCheck(blast, 1, inputs = listOf("src/a.py")) { green }
+        assertTrue(complete.testedInputs.workspaceComplete)
+        assertNull(scheduler.currency(blast, stamper.stamp().id).hold)
+    }
+
+    @Test
     fun `a package closure enumerates its files`() {
         assertEquals(listOf("src/pkg/b.py", "src/pkg/c.py"), scheduler.testedInputsFor(checks["CHK-pkg"]!!, emptyList()))
         assertEquals(listOf("src/a.py", "tests/test_a.py"), scheduler.testedInputsFor(accept(), listOf("ignored/for/known")))
@@ -458,8 +487,9 @@ class SchedulerTest {
         val blast = checks.register(Check(Checks.TESTS_BLAST, CheckKind.Unit, Selector.Blast, Closure.Known(setOf("src/a.py", "tests/test_a.py")), CostClass.Slow, Trigger.StepBoundary,
             command = Command(listOf("pytest", "tests/test_a.py"))))
         val key = Regressions.key(io.astrolabe.tool.run.TestIdentity(file = "tests/test_a.py", name = "test_a"))
-        val failure = FailedTest(key, "tests/test_a.py::test_a", Regressions.fingerprint("assert 1 == 2", emptyList()), "assert 1 == 2")
-        val failed = { Executed(listOf("pytest", "tests/test_a.py"), null, false, 1, Outcome.Failed, Counts(failed = 1, discovered = 1), null, tests = TestOutcomes(listOf(failure))) }
+        val failure = FailedTest(key, "tests/test_a.py::test_a", Regressions.fingerprint("assert 1 == 2", emptyList()), "assert 1 == 2", contentComplete = true)
+        val failed = { Executed(listOf("pytest", "tests/test_a.py"), null, false, 1, Outcome.Failed, Counts(failed = 1, discovered = 1), null,
+            tests = TestOutcomes(listOf(failure), reportComplete = true, multiplicity = mapOf(key to 1))) }
         val red = scheduler.runCheck(blast, 1, execute = { failed() })
         assertEquals(listOf(failure), receipts.get(red.receiptId)!!.tests?.failed, "the failing identities are on the receipt")
         val first = assertNotNull(scheduler.currency(blast, stamper.stamp().id).hold)
@@ -474,7 +504,8 @@ class SchedulerTest {
         assertEquals(emptyList<String>() to listOf(red.receiptId), moved.current to scheduler.unconfirmed(blast, stamper.stamp().id).map { it.receiptId },
             "on a moved tree the red is not current, and the stop owes it a rerun")
         // Passed on this tree with the identity executed: shown fixed; a stale green is never red.
-        scheduler.runCheck(blast, 1, execute = { Executed(listOf("pytest", "tests/test_a.py"), null, false, 0, Outcome.Passed, Counts(passed = 1, discovered = 1), null, tests = TestOutcomes(passed = listOf(key))) })
+        scheduler.runCheck(blast, 1, execute = { Executed(listOf("pytest", "tests/test_a.py"), null, false, 0, Outcome.Passed, Counts(passed = 1, discovered = 1), null,
+            tests = TestOutcomes(passed = listOf(key), reportComplete = true, multiplicity = mapOf(key to 1))) })
         assertNull(scheduler.currency(blast, stamper.stamp().id).hold)
         repo.write("src/a.py", "def a():\n    return 3\n")
         assertTrue(assertNotNull(scheduler.currency(blast, stamper.stamp().id).hold).unclassified.single().endsWith("not rerun on this tree"), "the pass was on another tree")
@@ -482,6 +513,144 @@ class SchedulerTest {
         // Another workspace's runs (a writer's worktree) never answer for this one.
         val other = Scheduler(checks, Workspace(WorkspaceId("ws-2"), repo.root, repo.git), registry, stamper, receipts, InMemoryAliases(), idGen, ids, clock)
         assertNull(other.currency(blast, stamper.stamp().id).hold)
+    }
+
+    @Test
+    fun `a crash after recording a red preserves its workspace hold before and after an unrelated green`() = runTest {
+        val blast = checks.register(Check(Checks.TESTS_BLAST, CheckKind.Unit, Selector.Blast, Closure.Known(setOf("src/a.py", "tests/test_a.py")), CostClass.Slow, Trigger.StepBoundary,
+            command = Command(listOf("pytest", "tests/test_a.py"))))
+        val failedKey = Regressions.key(io.astrolabe.tool.run.TestIdentity(file = "tests/test_a.py", name = "test_a"))
+        val otherKey = Regressions.key(io.astrolabe.tool.run.TestIdentity(file = "tests/test_a.py", name = "test_b"))
+        val failure = FailedTest(failedKey, "tests/test_a.py::test_a", Regressions.fingerprint("assert 1 == 2", emptyList()), "assert 1 == 2", contentComplete = true)
+        val crashAfterRecord = object : Receipts by receipts {
+            override fun record(receipt: Receipt) {
+                receipts.record(receipt)
+                throw IllegalStateException("crash after durable receipt before alias")
+            }
+        }
+        val crashing = Scheduler(checks, workspace, registry, stamper, crashAfterRecord, InMemoryAliases(), idGen, ids, clock)
+        assertFailsWith<IllegalStateException> {
+            crashing.runCheck(blast, 1) {
+                Executed(blast.command!!.argv, null, false, 1, Outcome.Failed, Counts(failed = 1, discovered = 1), null,
+                    tests = TestOutcomes(listOf(failure), reportComplete = true, multiplicity = mapOf(failedKey to 1)))
+            }
+        }
+        val durable = receipts.forCheck(blast.id).single()
+        assertNull(blast.last, "the crash precedes alias allocation and last-result recording")
+
+        val reopenedChecks = Checks.empty()
+        val reopenedBlast = reopenedChecks.register(blast.copy(last = null))
+        val reopened = Scheduler(reopenedChecks, workspace, registry, stamper, SqliteReceipts(store, clock), InMemoryAliases(), idGen, ids, clock)
+        val initialHold = assertNotNull(reopened.currency(reopenedBlast, stamper.stamp().id).hold)
+        assertEquals(listOf(durable.receiptId), initialHold.current)
+        assertTrue(initialHold.unclassified.isNotEmpty(), "an unclassified hold requires disclosure and caps completion")
+
+        reopened.runCheck(reopenedBlast, 1) {
+            Executed(blast.command!!.argv, null, false, 0, Outcome.Passed, Counts(passed = 1, discovered = 1), null,
+                tests = TestOutcomes(passed = listOf(otherKey), reportComplete = true, multiplicity = mapOf(otherKey to 1)))
+        }
+        val afterGreen = assertNotNull(reopened.currency(reopenedBlast, stamper.stamp().id).hold)
+        assertEquals(initialHold, afterGreen, "a different passing identity cannot erase the durable failure")
+        val other = Scheduler(reopenedChecks, Workspace(WorkspaceId("ws-2"), repo.root, repo.git), registry, stamper, receipts, InMemoryAliases(), idGen, ids, clock)
+        assertNull(other.currency(reopenedBlast, stamper.stamp().id).hold, "durable attribution excludes the other workspace")
+    }
+
+    @Test
+    fun `a rerun begin marker survives a crash before its workspace alias`() = runTest {
+        val blast = checks.register(Check(Checks.TESTS_BLAST, CheckKind.Unit, Selector.Blast, Closure.Known(setOf("src/a.py", "tests/test_a.py")), CostClass.Slow, Trigger.StepBoundary,
+            command = Command(listOf("pytest", "tests/test_a.py"))))
+        val aliases = InMemoryAliases()
+        val first = Scheduler(checks, workspace, registry, stamper, receipts, aliases, idGen, ids, clock)
+        first.runCheck(blast, 1) { passed(Counts(failed = 1, discovered = 1), exit = 1, outcome = Outcome.Failed) }
+        repo.write("src/a.py", "def a():\n    return 2\n")
+        assertEquals(1, first.unconfirmed(blast, stamper.stamp().id).size)
+        val crashAfterRecord = object : Receipts by receipts {
+            override fun record(receipt: Receipt) {
+                receipts.record(receipt)
+                throw IllegalStateException("crash after durable marker before alias")
+            }
+
+            override fun claim(marker: Receipt, scope: ReceiptClaim): Boolean {
+                receipts.claim(marker, scope)
+                throw IllegalStateException("crash after durable marker before alias")
+            }
+        }
+        val crashing = Scheduler(checks, workspace, registry, stamper, crashAfterRecord, aliases, idGen, ids, clock)
+        assertFailsWith<IllegalStateException> { crashing.beginRerun(blast, 1) }
+        val reopened = Scheduler(checks, workspace, registry, stamper, SqliteReceipts(store, clock), aliases, idGen, ids, clock)
+        assertTrue(reopened.unconfirmed(blast, stamper.stamp().id).isEmpty(), "a durable begin spends the sole stop rerun even if alias allocation never ran")
+    }
+
+    @Test
+    fun `a stop rerun spends the held definition allowance when the current parser changed`() = runTest {
+        val blast = checks.register(Check(Checks.TESTS_BLAST, CheckKind.Unit, Selector.Blast, Closure.Known(setOf("src/a.py", "tests/test_a.py")), CostClass.Slow, Trigger.StepBoundary,
+            command = Command(listOf("pytest", "tests/test_a.py"))))
+        val red = scheduler.runCheck(blast, 1) { passed(Counts(failed = 1, discovered = 1), exit = 1, outcome = Outcome.Failed) }
+        repo.write("src/a.py", "def a():\n    return 2\n")
+        val changed = checks.replace(blast.copy(parserPolicy = "shaper/next"))
+        assertEquals(listOf(red.receiptId), scheduler.unconfirmed(changed, stamper.stamp().id).map { it.receiptId })
+        val marker = assertNotNull(scheduler.beginRerun(changed, 1, red.checkDefinitionVersion))
+        assertEquals(red.checkDefinitionVersion, marker.checkDefinitionVersion)
+        assertTrue(scheduler.unconfirmed(changed, stamper.stamp().id).isEmpty(), "the attempted rerun is bounded by the held definition")
+        assertNull(scheduler.beginRerun(changed, 1, red.checkDefinitionVersion), "a stale rerun selection cannot claim the allowance twice")
+    }
+
+    @Test
+    fun `concurrent receipt writers claim exactly one baseline and stop rerun in memory and sqlite`() = runTest {
+        val original = scheduler.runCheck(accept(), 1) { passed(Counts(failed = 1, discovered = 1), exit = 1, outcome = Outcome.Failed) }
+        for (scope in ReceiptClaim.entries) {
+            val markerKind = if (scope == ReceiptClaim.Baseline) Regressions.BASELINE_STARTED else Regressions.RERUN
+            val marker = original.copy(receiptId = "${scope.name}-marker", outcome = Outcome.NotRun, parsed = null, tests = null,
+                limits = listOf(io.astrolabe.evidence.Limit(markerKind, "began")))
+            val memory = InMemoryReceipts()
+            for ((first, second) in listOf(memory to memory, SqliteReceipts(store, clock) to SqliteReceipts(store, clock))) {
+                val ready = CountDownLatch(2)
+                val start = CountDownLatch(1)
+                Executors.newFixedThreadPool(2).use { executor ->
+                    val results = listOf(first, second).mapIndexed { index, writer -> executor.submit<Boolean> {
+                        ready.countDown()
+                        check(start.await(10, TimeUnit.SECONDS))
+                        writer.claim(marker.copy(receiptId = "${marker.receiptId}-$index"), scope)
+                    } }
+                    assertTrue(ready.await(10, TimeUnit.SECONDS))
+                    start.countDown()
+                    assertEquals(1, results.count { it.get(10, TimeUnit.SECONDS) }, "$scope has one durable owner")
+                }
+                assertFalse(first.claim(marker.copy(receiptId = "${marker.receiptId}-reopened"), scope), "replay sees the claimed allowance")
+                if (scope == ReceiptClaim.Baseline) {
+                    assertFalse(first.claim(marker.copy(receiptId = "baseline-another-workspace", workspaceId = WorkspaceId("ws-2"),
+                        checkDefinitionVersion = io.astrolabe.id.Digest.ofUtf8("another definition")), scope), "baseline allowance is per check and attempt")
+                } else {
+                    assertTrue(first.claim(marker.copy(receiptId = "rerun-another-workspace", workspaceId = WorkspaceId("ws-2")), scope))
+                    assertTrue(first.claim(marker.copy(receiptId = "rerun-another-definition", checkDefinitionVersion = io.astrolabe.id.Digest.ofUtf8("another definition")), scope))
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `legacy receipts without workspace attribution retain opaque holds and cannot discharge them`() = runTest {
+        val blast = checks.register(Check(Checks.TESTS_BLAST, CheckKind.Unit, Selector.Blast, Closure.Known(setOf("src/a.py", "tests/test_a.py")), CostClass.Slow, Trigger.StepBoundary,
+            command = Command(listOf("pytest", "tests/test_a.py"))))
+        val key = Regressions.key(io.astrolabe.tool.run.TestIdentity(file = "tests/test_a.py", name = "test_a"))
+        val failure = FailedTest(key, "tests/test_a.py::test_a", Regressions.fingerprint("assert 1 == 2", emptyList()), "assert 1 == 2", contentComplete = true)
+        val original = scheduler.runCheck(blast, 1) {
+            Executed(blast.command!!.argv, null, false, 1, Outcome.Failed, Counts(failed = 1, discovered = 1), null,
+                tests = TestOutcomes(listOf(failure), reportComplete = true, multiplicity = mapOf(key to 1)))
+        }
+        for (outcome in listOf(Outcome.Failed, Outcome.Timeout, Outcome.Inconclusive)) {
+            val legacy = InMemoryReceipts()
+            legacy.record(original.copy(receiptId = "legacy-red", workspaceId = null, outcome = outcome))
+            legacy.record(original.copy(receiptId = "legacy-green", workspaceId = null, outcome = Outcome.Passed, exitCode = 0, parsed = Counts(passed = 1, discovered = 1),
+                tests = TestOutcomes(passed = listOf(key), reportComplete = true, multiplicity = mapOf(key to 1))))
+            val reopenedChecks = Checks.empty()
+            val reopenedBlast = reopenedChecks.register(blast.copy(last = null))
+            val reopened = Scheduler(reopenedChecks, workspace, registry, stamper, legacy, InMemoryAliases(), idGen, ids, clock)
+            val hold = assertNotNull(reopened.currency(reopenedBlast, stamper.stamp().id).hold, outcome.name)
+            assertEquals(RedClass.Unclassified, hold.kind)
+            assertEquals(listOf("legacy-red"), hold.since)
+            assertTrue(hold.regressions.isEmpty() && hold.inherited.isEmpty())
+        }
     }
 
     @Test

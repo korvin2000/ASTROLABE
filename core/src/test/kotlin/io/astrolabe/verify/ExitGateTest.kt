@@ -366,7 +366,7 @@ class ExitGateTest {
                 val resolved = resolve(register = register, currencies = mapOf("CHK-accept-AC-1" to green(), id to regression))
                 assertEquals(Resolution.Rework, resolved.resolution, id)
                 // The instruction and the command come first, so a cut line still says what to do.
-                assertTrue(resolved.missing.single().startsWith("$id: fix and rerun `pytest tests/test_b.py` — new failures against the baseline at s0, which no Open item clears: tests/test_b.py::test_b"), resolved.missing.toString())
+                assertTrue(resolved.missing.single().startsWith("fix and rerun `pytest tests/test_b.py` — $id has new failures against the baseline at s0, which no Open item clears: tests/test_b.py::test_b"), resolved.missing.toString())
                 assertEquals(GapKind.Failed, resolved.gaps.single().kind, "an executed red check: no decision covers it")
             }
             // Inherited only: complete without an Open item; the finish receipt discloses it.
