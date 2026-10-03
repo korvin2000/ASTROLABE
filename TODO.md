@@ -2246,6 +2246,11 @@ Goal: the model decides; the runtime executes, waits, records and finishes. Plan
 - Pkg: `verify/Scheduler.kt`, `tool/run`, `cell/Gates.kt`. Spec: D-394 (open), [report](../plan2/reports/WP-C1b.md) «Хвосты» (item 5).
 - Build: a receipt produced while a background handle is live carries a `concurrent` limit; the exit gate returns the work with "background run live: wait or cancel". Changes whether a campaign completes (`campaign.ResumeTest` runs `sleep 30` in the background during the stop verification) — decide the transition with that test.
 - Done: stop verification never certifies a tree a live background run may still change.
+#### P8.C.13 [V] C3r Task limits: second Codex review round (tail of C3, D-401) · IN_PROGRESS
+- Deps: P8.C.4. Pkg: `budget/`, `campaign/Limits.kt`, `campaign/Controller.kt`, `cell/Cell.kt`, `tool/verify/Verify.kt`. Spec: D-401, [card](../plan2/WP-C3r.md).
+- Build: seven findings — time paused only while every branch waits; no edits in a task-limit `Reserve`; a grown estimate re-renders the turn as verify/report instead of ending the cell; the reserve latch survives reopen until the effective limits change; operation deadlines cut at dispatch by the current remainder (also `verify`); Economy applied once to a child cell's routing; a hold released when the call was provably never dispatched.
+- Done: each finding reproduced by a test and fixed, or refuted with evidence; no change without limits and under Balanced.
+- Log: 2026-10-03 — S3: sub-agent line `v2/C3r` started after the second Codex round on the merged C3 (1 P1 + 6 P2).
 - [ ] **Gate P8.C:** L2 → push `main` → CI green on Ubuntu + Windows; Codex review.
 
 ### P8.D Wave D — direct protocol
