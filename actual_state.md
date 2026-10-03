@@ -3,9 +3,9 @@
 Snapshot: TODO owns task status; CONTINUE-TASK.md owns next work; audit/SESSION-HISTORY.md records history.
 
 ## Counts (2026-10-03, from `#### P… · STATUS` headings)
-**P0–P6 185/185 DONE.** P8 (ASTROLABE 2.0, plan `../ASTROLABE-2-PLAN.md`): **17 DONE** — wave A 9/9, wave B 4/4 (B1,
-B2, B4, B4 follow-up A3 ablation), wave C 4/9 (C1a, C2, C8, C9); **19 TODO** (C1b, C3, C4, Dp1, Dp2, D1–D5, E1–E4, F1–F2,
-R1, reserve G1–G2). Recount: `rg -c '^#### P8\..*· DONE' TODO.md`. P7 out of scope except the AI Gate transport.
+**P0–P6 185/185 DONE.** P8 (ASTROLABE 2.0, plan `../ASTROLABE-2-PLAN.md`): **27 DONE** — wave A 9/9, wave B 4/4,
+wave C 14/14 (C1a, C1b, C2, C3, C4, Dp1, Dp2, C8–C14); **14 TODO** (D1–D5, E1–E4, F1–F2, R1, reserve G1–G2).
+Recount: `rg -c '^#### P8\..*· DONE' TODO.md`. P7 out of scope except the AI Gate transport.
 
 ## Completion levels
 - **P0–P6:** `FIXTURE_VALIDATED` on Windows + Linux CI (JDK 26). Every live gate is `UNMEASURED` (P7).
@@ -37,23 +37,26 @@ Schema **v5** (phase 0: `pending_completions`, `acceptance_decisions`); skills/b
 
 ## Last verification
 CI (Ubuntu + Windows, JDK 26, full `check`): run 37049344584 green at `4bb181b` (wave A + review fixes, 2026-10-02).
-S2 (2026-10-03): local L2 at every merge (packages per card; the C9 merge broke `cell.ResultRecallTest`, fixed in
-`c61490a`); CI 37078198525 green at `c592289` (Ubuntu + Windows; gate P8.B); S2 push with C2: CI 37081214729. `provider-ai-gate`, SDK and eval-live run only locally.
+S2: CI 37078198525 green at `c592289` (gate P8.B). S3 (2026-10-03): local L2 by each line on main merged into its
+branch; CI green on Ubuntu + Windows at `6daabfc` (ripgrep fix), `13cea02` (Dp1, Dp2, C1b), `611dbad` (C3), `878d5fe`
+(C3r, C11); the final S3 push (C14, C10) — see the Gate P8.C line in `TODO.md`. Studio tests run only locally.
 
 ## History (details in `audit/SESSION-HISTORY.md`; decisions D-112… in TODO §3, owner D-175 deps)
 Audit remediation 2026-09-28 (D-321–D-325); AI Gate transport (D-326–D-336, `liveTest` not run); phase 0 acceptance rule
 (D-337–D-355); plan-handoff fix (D-357–D-362); efficiency fix (D-363–D-375): Windows program resolution, `ContentCache`
 with fresh stamps at every acceptance boundary, input tolerance + `JsonRepair`, a refused call refuses only itself.
-## ASTROLABE 2.0 wave A (2026-10-02, P8, D-376–D-387)
-`create` answers with a receipt (D-376); `run(op=wait)` until exit/line/port (D-377, D-381); `ModelResponded` carries the
-billed amount, reasoning tokens, timings, upstream, price tier (D-378); stable `[S]`, mask in `[A]`, schema set by role,
-fingerprints cover `[S]`/schemas (D-379, D-382); `eval-live` headless runner + 3 v0 tasks (D-380); shell-accurate
-`EffectPolicy`, proven deletes/redirects, toolchain collapse in the atlas (D-383); wire/reserve/output apart, window-scaled
-growth reserve, capacity fallback (D-384); session key, price tiers, conservative tiered reservation (D-385).
-BL baseline 12/12 accepted, $0.106; reviews Fable (A3, A4+A5, A6) and Codex (A1, A2b, wave: 2 P1 + 4 P2) — fixed (D-387).
-## ASTROLABE 2.0 S2 (2026-10-03, P8.B, P8.C.1/3/8/9, D-388–D-396)
-Screening set of 8 tasks with known-wrong patches, hidden parts packed out of the distribution, `interrupt` scenario
-(D-388); `run` output redacted as a live stream, whole-line polls (D-390); offline auditor `eval/audit` (D-391); kept
-return re-verified on reopen without a model call (D-392); B4: wave A not worse on any metric over 128 runs (D-393);
-method: provider-independent metrics first (D-395); declared acceptance recognised in `run`, `CHK-model-*` checks
-(D-394); provenance axis `independent`/`agent_test`/`unverified` with a final-tree test-integrity taint (D-396).
+## ASTROLABE 2.0 waves A and B (2026-10-02/03, D-376–D-396)
+Wave A: `create` receipt, `run(op=wait)`, billed amount and timings in `ModelResponded`, stable `[S]` with the mask in
+`[A]`, `eval-live` runner, shell-accurate `EffectPolicy`, wire/reserve/output apart, session key and price tiers (D-376–D-387).
+S2: screening set of 8 tasks, live-stream redaction of `run` output, offline auditor `eval/audit`, kept return re-verified
+on reopen, B4 (wave A not worse over 128 runs), declared acceptance recognised in `run`, provenance axis (D-388–D-396).
+## ASTROLABE 2.0 S3 (2026-10-03, wave C closed, D-397–D-406)
+Seeds behind `SeedSelector` (V1 default, V2 for direct) and a `v` fact with a dropped anchor kept as `h` (D-398); the
+direct protocol specification `kernel-direct/1` in `docs/` (D-399, SPEC until P8.D); optional red checks recorded by the
+runtime, sufficiency hint, `Verdict.reviewer` — a model's approval is never `independent` (D-397, D-400); hard per-task
+limits (money, minutes, requests) with a one-price reserve, atomic admission, typed `BudgetStop`, raise-and-resume, and
+balance profiles Economy/Balanced/Thorough (D-401, D-403); under `IntegrityApproval.Human` only a person clears a
+test-integrity flag (D-404); contract tokens follow the policy upward on a reopen, `limitHold`, wire names,
+`Astrolabe.resume` (D-405); strict regression gate for blast and types-touched with holds per test identity and a quiet
+stop for background runs (D-406). Studio (root repository): per-run limits and approach, live meter, outcome labels,
+raise-and-continue, human review card (D-402). Reviews: Codex and Fable on every line; all found defects fixed.

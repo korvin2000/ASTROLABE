@@ -751,3 +751,16 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - The C9 merge broke `cell.ResultRecallTest` (scripted poll without a readable log) — fixed in `c61490a`.
 - Owner decisions №12–13 (KB configurable, reserve P8.G) reached `main` inside commit `4dc1ceb`.
 - Push of `main` (ASTROLABE + root) at the end; CI not awaited. Next: S3 (C1b → C3 → C4 ∥ Dp1, Dp2).
+
+## 2026-10-03: ASTROLABE 2.0 S3 — wave C closed (P8.C.2–C.14, D-397–D-406)
+- Lines as background sub-agents in worktrees (no owner-started sessions): Dp1, Dp2 (t6), C1b, C3, C3r, C10 (+C12), C11,
+  C14 in the core; C4 (design t5 → t3), C11s, C14s in Studio (root repository). All merged `--no-ff`.
+- Reviews before every merge: Codex — seed rule, limit math ×2, direct spec ×2 + consult, mandatory-check boundary,
+  regression gate ×4; Fable — C1b, C3, C10, C11, C14; t4 on the Studio diff; Opus tie-break on two spec rules.
+- Owner in the session: default limits must be generous ($50 / 8 h / 3000 requests, hidden caps raised); the 14 spec
+  questions delegated to the orchestrator; C10 (strict regression gate) and C11 (human-only integrity) approved.
+- Regression gate: five rounds; the text-comparison design and Codex's own full implementation (`v2/C10x`, kept) failed
+  review; the simplified rule (fixed / new / failed before / unknown, any hold caps the class) was merged.
+- CI: the Windows `rg: command not found` was choco exiting 0 on a 503 — fixed with a verified install and a pinned
+  fallback. CI green at every S3 push; gate P8.C in `TODO.md`. Next: S4 (D1 → D2 ∥ D3).
+
