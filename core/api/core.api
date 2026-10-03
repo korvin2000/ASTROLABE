@@ -24389,14 +24389,17 @@ public final class io/astrolabe/tool/run/TestOutcome$Companion {
 public final class io/astrolabe/tool/run/TestResult {
 	public static final field Companion Lio/astrolabe/tool/run/TestResult$Companion;
 	public fun <init> (Lio/astrolabe/tool/run/TestIdentity;Lio/astrolabe/tool/run/TestOutcome;Ljava/lang/String;Ljava/lang/Long;)V
-	public synthetic fun <init> (Lio/astrolabe/tool/run/TestIdentity;Lio/astrolabe/tool/run/TestOutcome;Ljava/lang/String;Ljava/lang/Long;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Lio/astrolabe/tool/run/TestIdentity;Lio/astrolabe/tool/run/TestOutcome;Ljava/lang/String;Ljava/lang/Long;Ljava/lang/String;)V
+	public synthetic fun <init> (Lio/astrolabe/tool/run/TestIdentity;Lio/astrolabe/tool/run/TestOutcome;Ljava/lang/String;Ljava/lang/Long;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Lio/astrolabe/tool/run/TestIdentity;
 	public final fun component2 ()Lio/astrolabe/tool/run/TestOutcome;
 	public final fun component3 ()Ljava/lang/String;
 	public final fun component4 ()Ljava/lang/Long;
-	public final fun copy (Lio/astrolabe/tool/run/TestIdentity;Lio/astrolabe/tool/run/TestOutcome;Ljava/lang/String;Ljava/lang/Long;)Lio/astrolabe/tool/run/TestResult;
-	public static synthetic fun copy$default (Lio/astrolabe/tool/run/TestResult;Lio/astrolabe/tool/run/TestIdentity;Lio/astrolabe/tool/run/TestOutcome;Ljava/lang/String;Ljava/lang/Long;ILjava/lang/Object;)Lio/astrolabe/tool/run/TestResult;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun copy (Lio/astrolabe/tool/run/TestIdentity;Lio/astrolabe/tool/run/TestOutcome;Ljava/lang/String;Ljava/lang/Long;Ljava/lang/String;)Lio/astrolabe/tool/run/TestResult;
+	public static synthetic fun copy$default (Lio/astrolabe/tool/run/TestResult;Lio/astrolabe/tool/run/TestIdentity;Lio/astrolabe/tool/run/TestOutcome;Ljava/lang/String;Ljava/lang/Long;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/tool/run/TestResult;
 	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDetail ()Ljava/lang/String;
 	public final fun getDurationMillis ()Ljava/lang/Long;
 	public final fun getFailing ()Z
 	public final fun getIdentity ()Lio/astrolabe/tool/run/TestIdentity;
@@ -26545,10 +26548,12 @@ public final class io/astrolabe/verify/Regressions {
 	public static final field MAX_FAILED I
 	public static final field MAX_PASSED I
 	public static final field NO_BASELINE Ljava/lang/String;
+	public static final field RERUN Ljava/lang/String;
 	public static final fun baselineDue (Ljava/util/List;Ljava/util/List;Lio/astrolabe/id/CandidateId;)Lio/astrolabe/evidence/Receipt;
 	public static final fun fingerprint (Ljava/lang/String;Ljava/util/List;)Ljava/lang/String;
 	public static final fun hold (Ljava/util/List;Ljava/util/List;Lio/astrolabe/id/CandidateId;Lkotlin/jvm/functions/Function1;)Lio/astrolabe/verify/RegressionHold;
 	public static final fun isBaseline (Lio/astrolabe/evidence/Receipt;)Z
+	public static final fun isMarker (Lio/astrolabe/evidence/Receipt;)Z
 	public static final fun key (Lio/astrolabe/tool/run/TestIdentity;)Ljava/lang/String;
 	public static final fun of (Lio/astrolabe/verify/Check;)Z
 	public static final fun outcomes (Ljava/util/List;Lkotlin/jvm/functions/Function1;Ljava/util/List;)Lio/astrolabe/evidence/TestOutcomes;
