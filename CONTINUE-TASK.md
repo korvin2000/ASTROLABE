@@ -2,38 +2,36 @@
 
 Rewritten every session (≤40 lines). Workflow: `CLAUDE.md` § Workflow. State snapshot: `actual_state.md`.
 **Active program: ASTROLABE 2.0** — plan `../ASTROLABE-2-PLAN.md` (changes only via its §17), status = phase P8 in
-`TODO.md` (`rg -n '^#### P8' TODO.md`), cards/reports `../plan2/`. Next session: prompt A.2 of the plan with S2.
+`TODO.md` (`rg -n '^#### P8' TODO.md`), cards/reports `../plan2/`. Next session: prompt A.2 of the plan with S3.
+Owner 2026-10-03 (plan §11 №12–13, §17): KB is configurable, not frozen; reserve group P8.G (G1 KB off/live run, G2 small project memory) after D and E; D5's confirmation set gets "second task in the same project" pairs (P8.D.5 Build).
 
-**Checkpoint (2026-10-02, S1 done):** wave A **9/9 DONE** (P8.A.1–A.9), decisions **D-376–D-387**. Rollback tag
-`v1.0.1-final` in all three repos. Merged `--no-ff` into `main`: A4, A5 (+A5r), A2a (SDK `dba7ab7` + core), A3 (+A3r),
-A0, A6, A1 (+A1r), A2b, then the wave review fixes AR (core) and SDK `fdbd733`. Baseline BL (`../plan2/reports/WP-BL.md`): 12/12 accepted, billed $0.106 vs estimate $0.207,
-N 150, built from branch `v2/BL` (= `a245ac7` + A2a's own commits + A0) — the reference for B4.
+**Checkpoint (2026-10-03, S2 done):** P8 **17 DONE / 19 TODO** (incl. P8.G ×2), none in progress. Merged `--no-ff`:
+B2 (B2a + B2b, D-388), C9 (D-390), B1 (+ B1r, D-391), C8 (D-392), C1a (D-394), C2 (D-396). B4 + replication (128 runs) +
+two ablations → every wave-A line kept (D-393); benchmark method D-395; owner defaults №9a, №3 (D-389).
+Reviews: Fable ×2 each on C9, C8, C1a, C2; Codex — B1 ×2 (math), B4 (statistics); all fixed or listed below.
 
-## Reviews this session (owner rule: Codex for math, Fable for architecture/logic — plan §17)
-Fable: A4+A5 (1 bug + 3 risks → A3 masks, A5r), A3 (3 risks → A3r), A6 security (6 bugs → fixed on v2/A6). Codex: A1 (in
-line), A2b (2 × P2 → fixed; router follow-up A1r). Wave adversarial review (Codex, §A.7): 2 × P1 (secrets via `until_line`; failed/cancelled calls missing from bench totals) + 4 × P2 (Java constructors, eval-live sums, SDK late route, poll-only roles) — all fixed (D-387).
+## Next (S3 per plan §7)
+1. C1b → C3 → C4 (ships with C2: provenance labels; owner decides whether a judge-only approval is independent —
+   `AcceptanceLine.verifiedBy`) ∥ Dp1, Dp2 (direct spec, t6). Owner §11 №2–4, 6, 7 default to the plan (D-389).
+2. Gate P8.B: tick it with the CI run of the S2 push (`actual_state.md`, Last verification) once green.
 
-## Next (S2 per plan §7)
-1. B2 (screening set ≤ 8 tasks; move hidden acceptance out of the distribution; add a known-wrong patch per task) →
-   B1 (offline auditor) → B4 (baseline vs wave A on the screening set, billed money, pinned upstream).
-2. Start C1a, C2 (tasks). Tails: P8.C.8 (pending-save idempotency, `campaign/Controller.kt`), P8.C.9 (`run(op=poll)` slices redacted across polls).
-3. Owner decisions due before S3: plan §11 №2–4, 6, 7; before S2: №9a (non-inferiority threshold).
+## Tails from S2 (owner task in brackets)
+- C1a: a live background handle during stop verification is invisible to `Scheduler.exclusive` [C1b/C3]; `lostPin`
+  wording; tests for the `make -i` refusal and v1.0 constructors; `nmake /I /K`.
+- C2: a model check without `requirementIds` strengthens every requirement [C1b]; judge-only independence [C4].
+- C9: a key block begun > `maxBytes` before the cursor; a handle-less slice keeps the body's mask; a `wait` tail may
+  show half of a single-line secret. C8: `router.record`/cadence/S1 boundary not redone after a crash; S3 writers.
+- B1/E1: per-result sizes in events for an exact Residency replay. D5: the set did not exercise A1 (small window), A4,
+  A5 (background commands); pin the upstream, adjacent AB/BA blocks (D-395).
 
-## Risks to watch in B4
-Stricter `EffectPolicy` (D-383: delete/move/redirect after a non-link-safe segment is D, e.g. `build && test > log`;
-`> $null` in `cmd`); `create` receipt may cause compensating reads (D-376); accept-unverified share (6/12 in BL, no
-`ReviewPass` in the runner); router money estimates now dearest-rate (D-386); every dispatched call emits `ModelResponded`, failed/cancelled too (D-387); `Precompile.Fingerprint` constructor is a Java break.
+## Debts, branches, leftovers
+Frozen debts (plan §12): D-254, D-70/D-71/D-241, D-252, D-113/D-120, D-124/D-244, D-200; D-66, D-28, D-92. Transient:
+`StamperTest` `git exited -1`; Windows `ProcOwnershipTest`; FX-22.
+Kept branches: `v2/BL` (baseline), `v2/B4` (base-arm shim `00ff898`), `v2/B4a3` (A3 ablation arm — never merge). Bench
+`../bench/b4-2026-10-02/` (not in git). Unregistered dirs in `.claude/worktrees/` held by closed sessions
+(`wonderful-yalow-*`, `jolly-visvesvaraya-*`, `bold-leavitt-*`, `b4-nokey`, older ones): `Remove-Item -LiteralPath '\\?\<path>' -Recurse -Force`.
 
-## Carried-forward debts (frozen in 2.0, plan §12)
-D-254, D-70/D-71/D-241, D-252, D-113/D-120, D-124/D-244, D-200; D-66, D-28, D-92 (D-220/D-221 partly paid by eval-live).
-Transient (A6 hardened the probes, keep watching): `StamperTest` `git exited -1`; Windows `ProcOwnershipTest`; FX-22.
-
-## Branches
-All wave-A branches merged and deleted (local + origin, both repos); only `v2/BL` is kept as the baseline source.
-
-## Last gate
-Gate P8.A closed: L2 at every merge (counts in each task's `Log:`); CI green on Ubuntu + Windows — run 37044497216
-(`488db92`, wave A) and run 37049344584 (`4bb181b`, with the review fixes); tag `v2-wave-A` at `4bb181b`.
-
-## Blockers
-None. `gh` not installed; CI status via the public API (`curl -s https://api.github.com/repos/korvin2000/ASTROLABE/actions/runs?branch=main`).
+## Last gate / blockers
+Gate P8.A closed (CI 37049344584). Gate P8.B: L2 at every merge; CI of the S2 push not awaited. No blockers.
+`gh` not installed; CI via `curl -s https://api.github.com/repos/korvin2000/ASTROLABE/actions/runs?branch=main`.
+`.llm-memory`: 26 entries stale by content, no missing paths — re-verify a card when its topic is touched.

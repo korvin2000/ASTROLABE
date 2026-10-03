@@ -741,3 +741,13 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - L2 at every merge, green; merge order deviated from plan §7 (recorded in plan §17).
 - Codex adversarial review of the wave (2 P1 + 4 P2) fixed (D-387); CI 37044497216 and 37049344584 green on Ubuntu +
   Windows; tag `v2-wave-A` (three repos). Next: S2 (B2 → B1 → B4, C1a, C2).
+
+## 2026-10-02/03: ASTROLABE 2.0 S2 — wave B + start of wave C (P8.B, P8.C.1/3/8/9, D-388–D-396)
+- Lines: tasks B1, C1a, C2 (owner-started sessions); sub-agents B2a, B2b, C9, C8, B4 arms (build), A3-ablation arm.
+- Reviews: Fable ×2 each on C9, C8, C1a, C2 (2 + 1 + 1 + 3 bugs fixed); Codex on B1 ×2 (math) and B4 (statistics).
+- B4 + replication (128 runs) + session-key and A3 ablations: wave A not worse on any metric, acceptance equal → every A
+  line kept (D-393); the first-pass deepseek slowdown was provider variance → method D-395 (owner remark: cache and speed
+  belong to the binding; decide on provider-independent metrics). Live spend ≈ $1.6.
+- The C9 merge broke `cell.ResultRecallTest` (scripted poll without a readable log) — fixed in `c61490a`.
+- Owner decisions №12–13 (KB configurable, reserve P8.G) reached `main` inside commit `4dc1ceb`.
+- Push of `main` (ASTROLABE + root) at the end; CI not awaited. Next: S3 (C1b → C3 → C4 ∥ Dp1, Dp2).
