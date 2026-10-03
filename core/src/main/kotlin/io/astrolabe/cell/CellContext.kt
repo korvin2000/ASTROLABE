@@ -56,6 +56,8 @@ public class CellModel @JvmOverloads constructor(
     /**
      * The host chose [effort] itself (C14): the attempt's balance profile never steps it. `false` — the default — is effort
      * "by approach": the profile's step for the model's price class moves [effort] (`BalanceProfiles.effort`). [rebind] keeps it.
+     * A routing row with an effort of its own (the function table, e.g. `ReviewCritical` at high) still runs at that row's
+     * effort, as it always did: the flag only outranks the profile's step.
      */
     public val effortExplicit: Boolean = false,
 ) {

@@ -301,7 +301,7 @@ class TaskLimitsTest {
     }
 
     @Test
-    fun `the contract's tokens follow the host's policy on a reopen and a raise continues a contract budget stop`() = runBlocking<Unit> {
+    fun `the contract's tokens follow the host's policy upward on a reopen and a raise continues a contract budget stop`() = runBlocking<Unit> {
         val small = CampaignRequest(WorkId("W-c14-tokens"), AttemptId("a1"), request.text)
         seed(small, tokens = Tokens(4_000))
         fun set(c: OpenedCampaign) = c.journal.events(JournalScope(small.work, kinds = setOf(JournalKind.Reconcile))).filter { it.text.startsWith(ContractTokens.SET) }
@@ -309,6 +309,8 @@ class TaskLimitsTest {
             val replies = planning() + implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"") + implement(c, "src/b.py", "    return 2", "    return 20", "\"AC-1\",\"AC-2\"")
             val run = controller().run(c, CellModel(FakeAdapter(ScriptedModel.of(*replies.toTypedArray())), FakeProfiles.main, HeuristicEstimator()))
             assertEquals(BudgetStop.ContractBudget, run.budgetStop, run.state?.reason)
+            assertEquals(ContractBudgetStop(ContractBudgetCause.Tokens, 4_000), run.state!!.contractStop, "the stop records its cause and the tokens then")
+            assertTrue(run.state!!.reason!!.endsWith("contract budget (tokens)"), run.state!!.reason)
         }
         val calls = Store.open(stateRoot, repo.git, clock).use { Accounting(it, clock).calls(small.work).size }
         controller().open(repo.root, small, CampaignPolicy(Tokens(4_000))).use { c ->
@@ -318,6 +320,7 @@ class TaskLimitsTest {
             assertTrue(c.journal.events(JournalScope(small.work, kinds = setOf(JournalKind.Reconcile))).any { it.text.startsWith(ContractTokens.STILL) })
             val hold = assertNotNull(c.limitHold)
             assertEquals(BudgetStop.ContractBudget, hold.stop)
+            assertEquals(ContractBudgetCause.Tokens, hold.cause)
             assertNull(hold.limit, "the contract budget is no task limit")
             assertTrue(hold.reason.endsWith(ContractTokens.RAISE_TO_CONTINUE), hold.reason)
         }
@@ -333,13 +336,94 @@ class TaskLimitsTest {
             val run = controller().run(c, CellModel(FakeAdapter(ScriptedModel.of(*replies.toTypedArray())), FakeProfiles.main, HeuristicEstimator()))
             assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
         }
-        controller().open(repo.root, small, CampaignPolicy(Tokens(400_000))).use { c ->
-            assertEquals(1, set(c).size, "the same policy again changes nothing")
+        controller().open(repo.root, small, CampaignPolicy(Tokens(800_000))).use { c ->
+            assertEquals(400_000L, c.contract.budget.tokens.value, "a finished task's contract is never touched")
+            assertEquals(1, set(c).size)
         }
-        controller().open(repo.root, small, CampaignPolicy(Tokens(1_000))).use { c ->
-            val spent = 400_000L - Accounting(c.store, clock).remainingTokens(small.work, 400_000L)
-            assertTrue(spent > 1_000L, "spent $spent")
-            assertEquals(spent, c.contract.budget.tokens.value, "a decrease stops at what is already spent")
+    }
+
+    @Test
+    fun `a reopen never lowers the contract's tokens - a placeholder policy keeps them and the task continues`() = runBlocking<Unit> {
+        controller().open(repo.root, request, CampaignPolicy(Tokens(400_000))).use { c ->
+            val run = controller().run(c, CellModel(FakeAdapter(ScriptedModel.of(*(planning() + implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"")).toTypedArray())), FakeProfiles.main, HeuristicEstimator()), maxCells = 1)
+            assertEquals(BudgetStop.CellCap, run.budgetStop, run.state?.reason)
+        }
+        // A host that resumes with a stub (Studio's StartSpec("resume", 1, …)) keeps the stored tokens.
+        controller().open(repo.root, request, CampaignPolicy(Tokens(1))).use { c ->
+            assertEquals(400_000L, c.contract.budget.tokens.value)
+            assertTrue(c.journal.events(JournalScope(request.work)).none { it.text.startsWith(ContractTokens.SET) })
+            assertEquals(CampaignPhase.Running, c.state!!.phase)
+            val run = controller().run(c, CellModel(FakeAdapter(ScriptedModel.of(*implement(c, "src/b.py", "    return 2", "    return 20", "\"AC-1\",\"AC-2\"").toTypedArray())), FakeProfiles.main, HeuristicEstimator()))
+            assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+        }
+    }
+
+    @Test
+    fun `a raise that died before its transition still continues the stop on the next open`() = runBlocking<Unit> {
+        val small = CampaignRequest(WorkId("W-c14-death"), AttemptId("a1"), request.text)
+        seed(small, tokens = Tokens(4_000))
+        controller().open(repo.root, small, CampaignPolicy(Tokens(4_000))).use { c ->
+            val run = controller().run(c, CellModel(FakeAdapter(ScriptedModel.of(*planning().toTypedArray())), FakeProfiles.main, HeuristicEstimator()))
+            assertEquals(ContractBudgetCause.Tokens, run.state?.contractStop?.cause, run.state?.reason)
+        }
+        // The open that raised the tokens died after the contract row and its journal line, before LimitRaised.
+        Store.open(stateRoot, repo.git, clock).use { store ->
+            val ids = io.astrolabe.id.Identities(small.work, small.attempt)
+            val raised = ContractTokens.raise(Contracts(SqliteContractRepository(store, clock), idGen, clock), io.astrolabe.evidence.Journal(store, clock), ids, idGen, clock, Tokens(400_000))
+            assertEquals(400_000L, raised?.budget?.tokens?.value)
+            assertEquals(CampaignOutcome.BudgetExhausted, SqliteCampaigns(store, clock).load(small.work, small.attempt)?.outcome)
+        }
+        controller().open(repo.root, small, CampaignPolicy(Tokens(400_000))).use { c ->
+            assertEquals(CampaignPhase.Running, c.state!!.phase, "the raise is a durable fact: the same policy continues the stop")
+            assertEquals(1, c.journal.events(JournalScope(small.work)).count { it.text.startsWith(ContractTokens.SET) }, "and is not written twice")
+        }
+    }
+
+    @Test
+    fun `a contract budget stop by its money, its turns or unknown usage says so, and only turns continue`() = runBlocking<Unit> {
+        fun hold(c: OpenedCampaign) = assertNotNull(c.limitHold)
+        fun set(c: OpenedCampaign) = c.journal.events(JournalScope(c.ids.work)).count { it.text.startsWith(ContractTokens.SET) }
+        // Money: the router refuses the plan cell; a token raise neither rewrites the contract nor continues.
+        val money = CampaignRequest(WorkId("W-c14-money"), AttemptId("a1"), request.text)
+        seed(money, cost = usd("0.000001"))
+        controller().open(repo.root, money, CampaignPolicy(Tokens(400_000))).use { c ->
+            val run = controller().run(c, CellModel(FakeAdapter(ScriptedModel.of(*planning().toTypedArray())), FakeProfiles.main, HeuristicEstimator()))
+            assertEquals(ContractBudgetCause.Cost, run.state?.contractStop?.cause, run.state?.reason)
+            assertTrue(run.state!!.reason!!.endsWith("contract budget (cost)"))
+        }
+        controller().open(repo.root, money, CampaignPolicy(Tokens(800_000))).use { c ->
+            assertEquals(CampaignOutcome.BudgetExhausted, c.state!!.outcome)
+            assertEquals(400_000L, c.contract.budget.tokens.value, "tokens cannot lift a money stop: the contract is kept")
+            assertEquals(0, set(c))
+            assertEquals(ContractBudgetCause.Cost, hold(c).cause)
+            assertTrue(hold(c).reason.startsWith("contract budget (cost)"), hold(c).reason)
+        }
+        // Turns: three turns per cell; a reopen continues in a new cell with fresh turns, no raise needed.
+        val turns = CampaignRequest(WorkId("W-c14-turns"), AttemptId("a1"), "make a return 10")
+        seed(turns, shape = Shape.S0, defaults = io.astrolabe.Defaults(turnsPerCell = 3))
+        controller().open(repo.root, turns, CampaignPolicy(Tokens(400_000))).use { c ->
+            val n = java.util.concurrent.atomic.AtomicInteger()
+            val reading = FakeAdapter(ScriptedModel(listOf(ScriptedModel.Turn({ true }, { Scripted.Reply(listOf<Item>(say("reading"), read("r-${n.incrementAndGet()}", "src/a.py"))) }, once = false))))
+            val run = controller().runS0(c, CellModel(reading, FakeProfiles.main, HeuristicEstimator()))
+            assertEquals(ContractBudgetCause.Turns, run.state?.contractStop?.cause, run.state?.reason)
+        }
+        controller().open(repo.root, turns, CampaignPolicy(Tokens(400_000))).use { c ->
+            assertEquals(CampaignPhase.Running, c.state!!.phase, "a new cell gets a fresh turn budget")
+            assertNull(c.limitHold)
+        }
+        // Unknown usage: a call with no known token count spends the whole budget, so no raise leaves room.
+        val unknown = CampaignRequest(WorkId("W-c14-unknown"), AttemptId("a1"), "make a return 10")
+        seed(unknown, shape = Shape.S0)
+        Store.open(stateRoot, repo.git, clock).use { Accounting(it, clock).record(io.astrolabe.id.Identities(unknown.work, unknown.attempt), "inv-unknown", FakeProfiles.main, null, null) }
+        controller().open(repo.root, unknown, CampaignPolicy(Tokens(400_000))).use { c ->
+            val run = controller().runS0(c, CellModel(FakeAdapter(ScriptedModel.of(Scripted.Reply(listOf<Item>(say("reading"), read("r-u", "src/a.py"))))), FakeProfiles.main, HeuristicEstimator()))
+            assertEquals(ContractBudgetCause.UnknownUsage, run.state?.contractStop?.cause, run.state?.reason)
+        }
+        controller().open(repo.root, unknown, CampaignPolicy(Tokens(800_000))).use { c ->
+            assertEquals(CampaignOutcome.BudgetExhausted, c.state!!.outcome)
+            assertEquals(400_000L, c.contract.budget.tokens.value)
+            assertEquals(0, set(c))
+            assertEquals(ContractBudgetCause.UnknownUsage, hold(c).cause)
         }
     }
 
@@ -353,6 +437,16 @@ class TaskLimitsTest {
             assertTrue("\"budgetStop\":\"task_limit_requests\"" in body, "the state carries the wire word")
             val journal = c.store.db.query("SELECT body FROM journal WHERE work_id = ?", request.work) { it.string("body") }.joinToString("\n")
             assertTrue("\"limit\":\"requests\"" in journal && "\"costBasis\":\"estimated\"" in journal, "the latch and the stop carry wire words")
+            // A finish receipt and an event written before C14 read back too.
+            fun old(json: String) = json.replace("\"limit\":\"requests\"", "\"limit\":\"Requests\"").replace("\"costBasis\":\"estimated\"", "\"costBasis\":\"Estimated\"")
+            val finish = assertNotNull(run.finish)
+            val receipt = old(TaskLimitControl.JSON.encodeToString(FinishReceipt.serializer(), finish))
+            assertTrue("\"limit\":\"Requests\"" in receipt && "\"costBasis\":\"Estimated\"" in receipt)
+            assertEquals(finish.limit, TaskLimitControl.JSON.decodeFromString(FinishReceipt.serializer(), receipt).limit, "an old receipt's limit reads back")
+            val event: AgentEvent = AgentEvent.Budget.Spent(c.ids, finish.limit!!.status)
+            val written = old(kotlinx.serialization.json.Json.encodeToString(AgentEvent.serializer(), event))
+            assertTrue("\"costBasis\":\"Estimated\"" in written)
+            assertEquals(event, kotlinx.serialization.json.Json.decodeFromString(AgentEvent.serializer(), written), "an old event reads back")
             // A store from before C14 holds the constants' names in the state, the latch and the stop.
             c.store.db.tx { tx ->
                 tx.execute("UPDATE campaigns SET body = replace(body, ?, ?) WHERE work_id = ?", "\"task_limit_requests\"", "\"TaskLimitRequests\"", request.work)
@@ -650,10 +744,10 @@ class TaskLimitsTest {
         seed(request)
     }
 
-    private fun seed(work: CampaignRequest, shape: Shape = Shape.S1, defaults: io.astrolabe.Defaults = io.astrolabe.Defaults(), risk: io.astrolabe.contract.Risk? = null, tokens: Tokens = Tokens(400_000)) {
+    private fun seed(work: CampaignRequest, shape: Shape = Shape.S1, defaults: io.astrolabe.Defaults = io.astrolabe.Defaults(), risk: io.astrolabe.contract.Risk? = null, tokens: Tokens = Tokens(400_000), cost: Money? = null) {
         Store.open(stateRoot, repo.git, clock).use { store ->
             val contracts = Contracts(SqliteContractRepository(store, clock), idGen, clock)
-            val derived = contracts.deriveS0(work.work, work.attempt, work.text, Atlas.build(repo.root), Config(defaults = defaults), tokens).contract
+            val derived = contracts.deriveS0(work.work, work.attempt, work.text, Atlas.build(repo.root), Config(defaults = defaults), tokens, cost = cost).contract
             val ref = derived.requests.single().id
             contracts.open(derived.copy(
                 shape = shape,

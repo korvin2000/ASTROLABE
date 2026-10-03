@@ -117,17 +117,20 @@ public class Astrolabe @JvmOverloads public constructor(
     /**
      * Reopens [work]'s campaign in [project] and starts it again (C14, "raise the limit and continue"): the same work and
      * attempt, its contract and verified ledger kept. A [policy] with raised limits or contract tokens lifts the budget stop
-     * that held it; `null` keeps everything stored with the campaign — its limits and the contract's tokens and money.
-     * Returns once the campaign is open and reconciled; when the raise was not enough, [CampaignHandle.limitHold] names the
-     * limit that still holds it and [CampaignHandle.await] returns that stop's outcome without a model call. A work this
-     * project has no campaign for is an [IllegalArgumentException].
+     * that held it; `null` keeps everything stored with the campaign — its limits, the contract's tokens and money, and the
+     * host's notes and resume expectation of its last open. Returns once the campaign is open and reconciled; when the raise
+     * was not enough, [CampaignHandle.limitHold] names what still holds it and [CampaignHandle.await] returns that stop's
+     * outcome without a model call. A work this project has no campaign for is an [IllegalArgumentException].
      */
     @JvmOverloads
     public suspend fun resume(project: Project, work: WorkId, policy: CampaignPolicy? = null, publication: PublicationRequest? = null): CampaignHandle {
         val contract = SqliteContractRepository(project.store, clock).latest(work)
             ?: throw IllegalArgumentException("project ${project.root} has no campaign for work ${work.value}")
         // The first request is what the campaign was opened for; amendments live in the stored contract.
-        return start(project, { CampaignRequest(work, contract.attemptId, contract.requests.first().text) }, policy ?: CampaignPolicy(contract.budget.tokens, contract.budget.cost), publication)
+        val text = contract.requests.firstOrNull()?.text ?: throw IllegalArgumentException("work ${work.value}'s contract holds no request to reopen it with")
+        val chosen = policy ?: io.astrolabe.campaign.HostPolicy.stored(io.astrolabe.evidence.Journal(project.store, clock), work)
+            .let { CampaignPolicy(contract.budget.tokens, contract.budget.cost, it.resumeExpected, it.hostNotes) }
+        return start(project, { CampaignRequest(work, contract.attemptId, text) }, chosen, publication)
     }
 
     private fun mainProfile() = config.profiles[config.profileRoles.main]

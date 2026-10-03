@@ -26,6 +26,7 @@ import io.astrolabe.cell.Cell
 import io.astrolabe.cell.CellContext
 import io.astrolabe.cell.CellEvidence
 import io.astrolabe.cell.CellExit
+import io.astrolabe.cell.PartialReason
 import io.astrolabe.cell.CellModel
 import io.astrolabe.atlas.RiskFloorInput
 import io.astrolabe.route.CacheKey
@@ -276,8 +277,10 @@ public data class CampaignRequest(val work: WorkId, val attempt: AttemptId, val 
 }
 
 /**
- * The host's campaign policy: the token (and optional money) budget the contract freezes — there is no default
- * campaign budget — and whether a resume is expected, which rules out S0 (§3.5).
+ * The host's campaign policy: the contract's token (and optional money) budget — there is no default campaign budget —
+ * and whether a resume is expected, which rules out S0 (§3.5). The contract takes [tokens] and [cost] at its first open; on
+ * a reopen [tokens] raises the contract's tokens when above them and is otherwise ignored (C14: a value at or below keeps
+ * the stored ones), never for a finished campaign; [cost] stays as the contract froze it.
  */
 public data class CampaignPolicy @JvmOverloads constructor(
     val tokens: Tokens,
@@ -365,7 +368,9 @@ public class OpenedCampaign internal constructor(
     public val limits: TaskLimits = TaskLimits.NONE,
     /**
      * What still holds a `budget_exhausted` campaign this open could not continue (C14): the task limit or the contract
-     * budget to raise next; `null` when the campaign was not stopped on a budget or this open continued it.
+     * budget (with its cause) to raise next; `null` when the campaign was not stopped on a budget or this open continued it.
+     * A `budget_exhausted` state written before C3 carries no `BudgetStop`: nothing typed holds it (`null`), and its
+     * `CampaignState.reason` says why it stopped.
      */
     public val limitHold: LimitHold? = null,
 ) : AutoCloseable {
@@ -525,8 +530,7 @@ public class Controller @JvmOverloads public constructor(
         val kb = StoreKb(store, request.work, registry::version) { negatives.retrievalMiss(ids, null, it) }
         val intents = SqliteIntentJournal(store, clock)
         io.astrolabe.delegate.IntegrationPublication.recover(workspace, registry, store.blobs, intents)
-        val repository = SqliteContractRepository(store, clock)
-        val contracts = Contracts(repository, idGen, clock, events)
+        val contracts = Contracts(SqliteContractRepository(store, clock), idGen, clock, events)
         val campaigns = SqliteCampaigns(store, clock)
         val attempts = Attempts(store, clock)
         val storedAttempt = attempts.load(request.work, request.attempt)
@@ -552,10 +556,8 @@ public class Controller @JvmOverloads public constructor(
         val derived = contracts.deriveS0(request.work, request.attempt, request.text, atlas, effective, policy.tokens, protected, policy.cost)
         val stored = contracts.current(request.work)
         check(stored == null || stored.attemptId == request.attempt) { "work ${request.work.value} is attempt ${stored?.attemptId?.value}; a new attempt is P2" }
-        // C14: a reopen's contract tokens follow the host's policy (a raise kept at the contract's version, journaled).
-        val tokens = stored?.let { ContractTokens.atOpen(repository, store, journal, ids, idGen, clock, it, policy.tokens) }
         // §3.5: a new contract carries the shape its campaign runs in; the tool masks derive from it.
-        val contract = tokens?.contract ?: contracts.open(derived.contract.let { d ->
+        val contract = stored ?: contracts.open(derived.contract.let { d ->
             val initial = (ShapeSelector.select(d, impactPrescan.prescan, effective.defaults.shapePolicy, policy.resumeExpected, capabilities = CAPABILITIES) as? ShapeDecision.Selected)?.shape
             if (initial == Shape.S1 || initial == Shape.S2) d.copy(shape = initial) else d
         })
@@ -585,6 +587,8 @@ public class Controller @JvmOverloads public constructor(
         }
         // C3 (K): the limits in force — the host's when it names them, else the ones kept with the campaign.
         val limits = TaskLimitControl.atOpen(journal, ids, idGen, clock, policy.limits)
+        // C14: the host's notes and resume expectation, kept for a facade reopen that names no policy.
+        HostPolicy.atOpen(journal, ids, idGen, clock, policy)
         // C3r: a reserve latched under these limits holds until the host changes them.
         val latched = TaskLimitControl.latched(journal, request.work)
         val budgetStop = state?.takeIf { it.phase == CampaignPhase.Ended && it.outcome == CampaignOutcome.BudgetExhausted }?.budgetStop
@@ -592,18 +596,6 @@ public class Controller @JvmOverloads public constructor(
         var limitHold: LimitHold? = null
         if (budgetStop == BudgetStop.CellCap) {
             state = Lifecycle.apply(checkNotNull(state), contract, Transition.LimitRaised("reopened after the run's cell cap: the cap counts per run")).also(campaigns::save)
-        }
-        // C14: a contract budget stop continues only when this open's policy raised the contract's tokens and they leave room.
-        if (budgetStop == BudgetStop.ContractBudget) {
-            val budget = contract.budget.tokens.value
-            val left = Accounting(store, clock).remainingTokens(request.work, budget)
-            if (tokens?.raised == true && left > 0) {
-                state = Lifecycle.apply(checkNotNull(state), contract, Transition.LimitRaised("${ContractTokens.RAISED}: ${tokens.from} → $budget tokens; ${budget - left} spent")).also(campaigns::save)
-            } else {
-                val why = "contract budget: ${budget - left} of $budget tokens spent; ${ContractTokens.RAISE_TO_CONTINUE}"
-                journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Reconcile, text = "${ContractTokens.STILL}: $why", at = clock.instant()))
-                limitHold = LimitHold(BudgetStop.ContractBudget, LimitRule.status(limits, limitControl.spend(store, journal, request.work, limits)), why)
-            }
         }
         // C3: a task limit's stop continues the same attempt only once the host's limits leave room again — priced at the
         // call it was refused at — and says which limit still holds it otherwise.
@@ -691,6 +683,20 @@ public class Controller @JvmOverloads public constructor(
         // D-171: another work's intents that never committed nor were reconciled fence a new holder (Fence.grant).
         val unreconciled = intents.open().map { it.intentId } + SqliteHandles(store, clock).open().map { it.handleId }
         val lease = leases.acquire(WORKSPACE, ids, "controller:${store.holder.pid}", leaseDuration, unreconciled)
+        // C14: under the lease, the contract's tokens follow the host's policy upward only — not for a finished campaign or a
+        // stop more tokens cannot lift — and a contract budget stop continues by its recorded cause, else says what holds it.
+        if (ContractTokens.raisable(state)) ContractTokens.raise(contracts, journal, ids, idGen, clock, policy.tokens)
+        if (budgetStop == BudgetStop.ContractBudget) {
+            val current = checkNotNull(contracts.current(request.work))
+            val held = ContractTokens.held(store, clock, current, state?.contractStop)
+            if (held == null) {
+                state = Lifecycle.apply(checkNotNull(state), current, Transition.LimitRaised("${ContractTokens.CONTINUED} (${state?.contractStop?.cause?.wire}) at ${current.budget.tokens.value} tokens")).also(campaigns::save)
+                state = Lifecycle.apply(checkNotNull(state), current, Transition.Reconciled(reconciliation.unknownOutcomes)).also(campaigns::save)
+            } else {
+                journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Reconcile, text = "${ContractTokens.STILL}: ${held.second}", at = clock.instant()))
+                limitHold = LimitHold(BudgetStop.ContractBudget, LimitRule.status(limits, limitControl.spend(store, journal, request.work, limits)), held.second, held.first)
+            }
+        }
         val prescan = impactPrescan.prescan
         journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, refs = impactPrescan.blast, text = "open: impact ${impactPrescan.log}", at = clock.instant()))
         val selected = ShapeSelector.select(contract, prescan, effective.defaults.shapePolicy, policy.resumeExpected, capabilities = CAPABILITIES)
@@ -872,7 +878,8 @@ public class Controller @JvmOverloads public constructor(
                 // C3: a plan cell the task limits ended stops on the limit, so a raised limit resumes it; any other stop keeps its cause.
                 onLimit(c, authority)?.let { return S0Run(it, null, null, null) }
                 val outcome = if (c.refusal() != null) stopOutcome(c) else stop.outcome
-                return S0Run(c.advance(Transition.Stopped(outcome, stop.reason, budget = stop.budget.takeIf { outcome == CampaignOutcome.BudgetExhausted })), null, null, null)
+                return S0Run(c.advance(Transition.Stopped(outcome, stop.reason, budget = stop.budget.takeIf { outcome == CampaignOutcome.BudgetExhausted },
+                    contract = stop.contract.takeIf { outcome == CampaignOutcome.BudgetExhausted })), null, null, null)
             }
             // §3.5 select_shape(contract, impact, plan): the S3 branch reads the admitted plan's records (D-183, P5.8.1).
             s3 = S3Intake.admit(c, writerEstimates(c, model), CAPABILITIES, events, idGen, clock).takeIf { it.units.isNotEmpty() }
@@ -968,7 +975,7 @@ public class Controller @JvmOverloads public constructor(
                 is Compiled.NeedsEvidence -> return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, "NEEDS_MORE_EVIDENCE for ${ready.id}: ${compiled.missing}")), compiled = compiled)
             }
             // FX-32: an unaffordable tier is refused, never clamped; the campaign stops on the router's options.
-            routing.refused?.let { return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.BudgetExhausted, it.reason, budget = BudgetStop.ContractBudget)), compiled = compiled) }
+            routing.refused?.let { return last.copy(state = c.advance(contractBudget(c, it.reason, null)), compiled = compiled) }
             routing.selected?.let { tiers[ready.id] = it.tier }
             lastKey = routing.selected?.let { CellOrder.key(it.tier) }
             val cellId = ContextId(idGen.next("cell"))
@@ -1108,6 +1115,15 @@ public class Controller @JvmOverloads public constructor(
     }
 
     private suspend fun onLimit(c: OpenedCampaign, authority: Authority): CampaignState? = if (c.limitState.block == null) null else limitStop(c, authority)
+
+    /**
+     * C14: a `contract_budget` stop with what spent the budget — [partial] the main-line cell's reason, `null` a router
+     * refusal — and the contract's tokens then: what a reopen reads to continue it, named in the reason too.
+     */
+    private fun contractBudget(c: OpenedCampaign, reason: String, partial: PartialReason?): Transition.Stopped {
+        val stop = ContractBudgetStop(ContractTokens.cause(c.store, clock, c.contract, partial), c.contract.budget.tokens.value)
+        return Transition.Stopped(CampaignOutcome.BudgetExhausted, "$reason — contract budget (${stop.cause.wire})", budget = BudgetStop.ContractBudget, contract = stop)
+    }
 
     private suspend fun limitStop(c: OpenedCampaign, authority: Authority): CampaignState? {
         if (c.refusal() != null) return null
@@ -1328,7 +1344,7 @@ public class Controller @JvmOverloads public constructor(
         }
         val compiled = routing.compiled
         if (compiled !is Compiled.Ready) return blocked("the plan cell cannot be compiled: $compiled")
-        routing.refused?.let { return Transition.Stopped(CampaignOutcome.BudgetExhausted, it.reason, budget = BudgetStop.ContractBudget) }
+        routing.refused?.let { return contractBudget(c, it.reason, null) }
         val cellId = ContextId(idGen.next("cell"))
         val proposals = SqlitePlanProposals(c.store, idGen, clock)
         // The plan cell's own decisions travel with its packet: its register as last patched (handoff debt 1).
@@ -1344,8 +1360,9 @@ public class Controller @JvmOverloads public constructor(
                 is Disposition.Continue -> d.fallback.takeIf { it == CampaignOutcome.BudgetExhausted } ?: CampaignOutcome.BlockedExternal
                 is Disposition.Close -> CampaignOutcome.BlockedExternal
             }
-            return Transition.Stopped(outcome, "the plan cell ended ${exit.packet.status.wire}: ${exit.packet.reason}",
-                budget = BudgetStop.ContractBudget.takeIf { outcome == CampaignOutcome.BudgetExhausted })
+            val reason = "the plan cell ended ${exit.packet.status.wire}: ${exit.packet.reason}"
+            return if (outcome == CampaignOutcome.BudgetExhausted) contractBudget(c, reason, (exit as? CellExit.Partial)?.reason ?: PartialReason.TokenBudget)
+            else Transition.Stopped(outcome, reason)
         }
         val stored = proposals.latest(c.ids.work, cellId) ?: return blocked("the plan cell proposed no plan")
         return when (val admission = PlanIntake(c.contracts).admit(c.ids.work, stored, authority)) {
@@ -1559,7 +1576,7 @@ public class Controller @JvmOverloads public constructor(
             is Compiled.NeedsRescoping -> return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "NEEDS_RESCOPING_OR_LARGER_PROFILE: ${compiled.reason}${profileBound(c, cellModel)}")), null, null, compiled)
             is Compiled.NeedsEvidence -> return S0Run(c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, "NEEDS_MORE_EVIDENCE: acceptance without definition ${compiled.missing}")), null, null, compiled)
         }
-        routing.refused?.let { return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BudgetExhausted, it.reason, budget = BudgetStop.ContractBudget)), null, null, compiled) }
+        routing.refused?.let { return S0Run(c.advance(contractBudget(c, it.reason, null)), null, null, compiled) }
 
         val cellId = ContextId(idGen.next("cell"))
         events?.emit(AgentEvent.Campaign.IncrementSelected(c.ids, ready.id))
@@ -1603,8 +1620,9 @@ public class Controller @JvmOverloads public constructor(
             is Disposition.Close -> commit(c, ids, exit.turns, increment, disposition.accepted, stampNow)
                 ?: stopOrFinish(c, "requirements remain unverified after ${increment.id}", scheduler, authority = authority)
             // S0 has no continuation cell of its own: the fallback is the honest outcome (D-64) — the limit's own when a task limit ended the cell (C3).
-            is Disposition.Continue -> onLimit(c, authority) ?: c.advance(Transition.Stopped(disposition.fallback, disposition.reason,
-                budget = BudgetStop.ContractBudget.takeIf { disposition.fallback == CampaignOutcome.BudgetExhausted }))
+            is Disposition.Continue -> onLimit(c, authority) ?: c.advance(
+                if (disposition.fallback == CampaignOutcome.BudgetExhausted) contractBudget(c, disposition.reason, (exit as? CellExit.Partial)?.reason ?: PartialReason.TokenBudget)
+                else Transition.Stopped(disposition.fallback, disposition.reason))
             is Disposition.Stop -> if (completion is CompletionResult.Pending) {
                 when (val settled = settle(c, ids, increment, checkNotNull(kept), completion, authority)) {
                     is Settled.Commit -> commit(c, ids, exit.turns, increment, Verifier().commit(completion.proposal, c.contract, checkNotNull(c.state).graph.increments.first { it.id == increment.id }, kept.cell, checkNotNull(c.state).ledger, settled.resolved), stampNow)

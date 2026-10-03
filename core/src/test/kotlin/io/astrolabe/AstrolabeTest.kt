@@ -107,7 +107,9 @@ class AstrolabeTest {
         // C14: the model only reads, so each run ends on its request limit.
         val n = AtomicInteger()
         val adapter = FakeAdapter(ScriptedModel(listOf(ScriptedModel.Turn({ true }, { Scripted.Reply(listOf(say("reading"), read("r-${n.incrementAndGet()}", "src/a.py"))) }, once = false))))
-        fun policy(requests: Int) = CampaignPolicy(Tokens(400_000), limits = TaskLimits(maxRequests = requests))
+        fun policy(requests: Int) = CampaignPolicy(Tokens(400_000), hostNotes = listOf("keep the public API"), limits = TaskLimits(maxRequests = requests))
+        fun hostPolicies(project: Project, work: WorkId) = io.astrolabe.evidence.Journal(project.store, java.time.Clock.systemUTC())
+            .events(io.astrolabe.evidence.JournalScope(work)).count { it.text.startsWith(io.astrolabe.campaign.HostPolicy.SET) }
         Astrolabe(config, adapter, AutonomousAuthority()).use { sdk ->
             sdk.open(repo.root).use { project ->
                 val first = sdk.campaign(project, "make a return 10", policy(1))
@@ -127,6 +129,13 @@ class AstrolabeTest {
                 withTimeout(60_000) { raised.await() }
                 assertTrue(adapter.calls.size > calls, "the same work continues under the raised limit")
                 assertEquals(1, project.views.contract(first.workId).contracts.size, "the same contract, no new work")
+
+                // No policy: the stored limits, tokens, notes and resume expectation, so nothing new is recorded.
+                assertEquals(1, hostPolicies(project, first.workId))
+                val kept = sdk.resume(project, first.workId)
+                withTimeout(60_000) { kept.await() }
+                assertEquals(1, hostPolicies(project, first.workId), "the host's notes are kept, not dropped")
+                assertEquals(listOf("keep the public API"), io.astrolabe.campaign.HostPolicy.stored(io.astrolabe.evidence.Journal(project.store, java.time.Clock.systemUTC()), first.workId).hostNotes)
             }
         }
     }

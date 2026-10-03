@@ -70,8 +70,10 @@ public sealed interface AgentEvent {
             /** Who verified the result, from the finish receipt (§4.4 C2): `independent` · `agent_test` · `unverified`. */
             val provenanceClass: String? = null,
             /**
-             * Which ceiling ended a `budget_exhausted` campaign (C3): `task_limit_money` · `task_limit_minutes` ·
-             * `task_limit_requests` · `cell_cap` (a reopen continues these) · `contract_budget`.
+             * Which ceiling ended a `budget_exhausted` campaign (C3), its `BudgetStop.wire`: `task_limit_money` ·
+             * `task_limit_minutes` · `task_limit_requests` (a reopen with the limit raised continues these) · `cell_cap` (a
+             * reopen continues it) · `contract_budget` — a reopen continues it by its cause in `CampaignState.contractStop`
+             * (C14: `tokens` once the policy raised them, `turns`), never for `cost` or `unknown_usage`.
              */
             val budgetStop: String? = null,
         ) : Campaign

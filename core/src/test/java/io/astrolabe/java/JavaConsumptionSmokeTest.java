@@ -14,6 +14,7 @@ import io.astrolabe.budget.Tokens;
 import io.astrolabe.campaign.BudgetStop;
 import io.astrolabe.campaign.CampaignOutcome;
 import io.astrolabe.campaign.CampaignPolicy;
+import io.astrolabe.campaign.ContractBudgetCause;
 import io.astrolabe.campaign.LimitHold;
 import io.astrolabe.cell.CellModel;
 import io.astrolabe.context.ContextArithmetic;
@@ -315,7 +316,12 @@ class JavaConsumptionSmokeTest {
         assertEquals(LimitKind.Requests, hold.getLimit());
         assertEquals("task_limit_requests", hold.getStop().getWire());
         assertEquals(null, BudgetStop.ContractBudget.getLimit());
-        assertTrue(BudgetStop.ContractBudget.getResumable());
+        assertFalse(BudgetStop.ContractBudget.getResumable());
+        assertTrue(ContractBudgetCause.Tokens.getResumable());
+        assertEquals("unknown_usage", ContractBudgetCause.UnknownUsage.getWire());
+        LimitHold contract = new LimitHold(BudgetStop.ContractBudget, hold.getStatus(), "contract budget (cost)", ContractBudgetCause.Cost);
+        assertEquals(ContractBudgetCause.Cost, contract.getCause());
+        assertEquals(null, hold.getCause());
         Profile profile = FakeProfiles.INSTANCE.getMain();
         CellModel model = new CellModel(ProviderAdapters.fromJava(new ScriptedJavaAdapter(Collections.emptyList())), profile, new HeuristicEstimator(),
                 Effort.High, profile.getCapabilities().getOutputLimitTokens(), false, true);

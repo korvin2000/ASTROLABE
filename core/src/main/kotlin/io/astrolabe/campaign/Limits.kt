@@ -10,8 +10,9 @@ import io.astrolabe.budget.Spend
 import io.astrolabe.budget.TaskLimits
 import io.astrolabe.budget.Tokens
 import io.astrolabe.cell.CellModel
+import io.astrolabe.cell.PartialReason
 import io.astrolabe.contract.Contract
-import io.astrolabe.contract.ContractRepository
+import io.astrolabe.contract.Contracts
 import io.astrolabe.event.AgentEvent
 import io.astrolabe.event.AmendmentProposal
 import io.astrolabe.event.Authority
@@ -34,6 +35,8 @@ import io.astrolabe.verify.AcceptanceDecisionRequest
 import io.astrolabe.verify.ReviewRequest
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.math.BigDecimal
+import java.math.MathContext
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -81,17 +84,22 @@ public data class LimitStop(
 
 /**
  * What still holds a `budget_exhausted` campaign after an open that could not continue it (C14): the ceiling — a task
- * limit, possibly another than the one it stopped on, or the contract budget — the task limits beside their spend at that
- * open, and why. A host reads it from [OpenedCampaign.limitHold] after a reopen with raised limits to say what to raise
- * next; the open also journals it (`limits: still reached`, `budget: contract budget still reached`).
+ * limit, possibly another than the one it stopped on, or the contract budget with its [cause] — the task limits beside their
+ * spend at that open, and why. A host reads it from [OpenedCampaign.limitHold] after a reopen with raised limits to say what
+ * to raise next; the open also journals it (`limits: still reached`, `budget: contract budget still reached`).
  */
 @Serializable
-public data class LimitHold(
+public data class LimitHold @JvmOverloads constructor(
     /** `task_limit_money` · `task_limit_minutes` · `task_limit_requests` · `contract_budget`. */
     val stop: BudgetStop,
     /** The task limits beside their spend at this open, as `budget.spent` reports them. */
     val status: LimitStatus,
     val reason: String,
+    /**
+     * What holds a `contract_budget` stop: `tokens` (raise the policy's tokens), `cost` or `unknown_usage` (no reopen
+     * continues it); `null` for a task limit, and for a contract budget stop recorded before C14.
+     */
+    val cause: ContractBudgetCause? = null,
 ) {
     /** The task limit that holds; `null` when the contract budget does. */
     val limit: LimitKind? get() = stop.limit
@@ -131,36 +139,100 @@ internal class LimitState {
     @Volatile var calls: List<CallAccount> = emptyList()
 }
 
-/** The contract a reopen runs under after [ContractTokens.atOpen]: the tokens it had ([from]) and those spent of them. */
-internal class TokensAtOpen(val contract: Contract, val from: Long, val spent: Long) {
-    /** The host raised the contract's tokens at this open. */
-    val raised: Boolean get() = contract.budget.tokens.value > from
+/**
+ * C14: the contract's tokens follow the host's `CampaignPolicy.tokens` on a reopen **upward only** — a value at or below the
+ * stored tokens keeps them, since hosts send a placeholder there — and never for a finished campaign or one a stop more
+ * tokens cannot lift ([raisable]). A raise is kept in the contract row at its version (a budget is not an amendment, so
+ * nothing bound to the version is invalidated), written under the lease with its journal line in one transaction; the
+ * same policy changes nothing, and spend is read from the `usage` rows alone, so a reopen never charges anything (D-392,
+ * invariant 10). A [BudgetStop.ContractBudget] stop continues by its recorded cause ([ContractBudgetStop]): tokens once the
+ * contract holds more than when it stopped — a durable fact, so a raise survives a death before the transition — and
+ * turns while tokens are left; the contract's money and unknown usage hold.
+ */
+internal object ContractTokens {
+    const val SET: String = "budget: contract tokens raised by the host"
+    const val CONTINUED: String = "budget: contract budget continued"
+    const val STILL: String = "budget: contract budget still reached"
+
+    /** The host's action on a contract budget stop by tokens. */
+    const val RAISE_TO_CONTINUE: String = "raise the policy's tokens and reopen the task to continue this attempt"
+
+    /** A reopen may raise [state]'s contract tokens: a campaign not ended, or stopped on something a reopen continues. */
+    fun raisable(state: CampaignState?): Boolean = when {
+        state == null || state.phase != CampaignPhase.Ended -> true
+        state.outcome?.resumable == true -> true
+        state.outcome == CampaignOutcome.BudgetExhausted -> state.budgetStop?.resumable == true || state.contractStop?.cause?.resumable == true
+        else -> false
+    }
+
+    /** Raises [ids]'s contract tokens to [requested] when above them: the row and its journal line commit together. */
+    fun raise(contracts: Contracts, journal: Journal, ids: Identities, idGen: IdGen, clock: Clock, requested: Tokens): Contract? =
+        contracts.raiseTokens(ids.work, requested) { tx, from, to ->
+            journal.append(tx, JournalEvent(idGen.next("ev"), ids, null, JournalKind.Reconcile,
+                text = "$SET: ${from.budget.tokens.value} → ${to.budget.tokens.value} tokens at contract v${from.version}", at = clock.instant()))
+        }
+
+    /**
+     * What spent [contract]'s budget when a main-line cell ended [partial] — `null`: the router refused it, which prices only
+     * the contract's money (D-109). A call of unknown tokens counts as the whole budget; a cell's turn budget is turns; of
+     * tokens and money, the one with the smaller share left.
+     */
+    fun cause(store: Store, clock: Clock, contract: Contract, partial: PartialReason?): ContractBudgetCause {
+        if (partial == null) return ContractBudgetCause.Cost
+        val accounting = Accounting(store, clock)
+        if (accounting.calls(contract.workId).any { it.fundedTokens == null && it.quantities.billedUsage == null }) return ContractBudgetCause.UnknownUsage
+        if (partial == PartialReason.TurnBudget) return ContractBudgetCause.Turns
+        val money = contract.budget.cost ?: return ContractBudgetCause.Tokens
+        val moneyLeft = accounting.remainingCost(contract.workId, money)
+        if (moneyLeft == null || moneyLeft.unknown || money.amount.signum() <= 0) return ContractBudgetCause.Cost
+        val tokens = contract.budget.tokens.value
+        val tokenShare = BigDecimal.valueOf(accounting.remainingTokens(contract.workId, tokens)).divide(BigDecimal.valueOf(tokens), MathContext.DECIMAL64)
+        return if (moneyLeft.amount.divide(money.amount, MathContext.DECIMAL64) <= tokenShare) ContractBudgetCause.Cost else ContractBudgetCause.Tokens
+    }
+
+    /**
+     * A contract budget [stop] at an open, after any raise of [contract]'s tokens: `null` when it continues, else the cause
+     * that holds it and why — for a stop before C14, which recorded no cause, `null` cause.
+     */
+    fun held(store: Store, clock: Clock, contract: Contract, stop: ContractBudgetStop?): Pair<ContractBudgetCause?, String>? {
+        val accounting = Accounting(store, clock)
+        val tokens = contract.budget.tokens.value
+        val left = accounting.remainingTokens(contract.workId, tokens)
+        return when (stop?.cause) {
+            ContractBudgetCause.Turns -> if (left > 0) null else ContractBudgetCause.Tokens to tokensReason(tokens, left)
+            ContractBudgetCause.Tokens -> if (tokens > stop.tokens && left > 0) null else ContractBudgetCause.Tokens to tokensReason(tokens, left)
+            ContractBudgetCause.Cost -> ContractBudgetCause.Cost to "contract budget (cost): " +
+                (contract.budget.cost?.let { m -> accounting.remainingCost(contract.workId, m)?.let { "${(m.amount - it.amount).toPlainString()} of ${m.amount.toPlainString()} ${m.currency} spent; " } }.orEmpty()) +
+                "the contract's money does not follow the policy on a reopen, so this attempt does not continue"
+            ContractBudgetCause.UnknownUsage -> ContractBudgetCause.UnknownUsage to "contract budget (unknown usage): a call without a known token count counts as the whole budget, so no raise leaves room; this attempt does not continue"
+            null -> null to "contract budget: the stop recorded no cause (before C14), so this attempt does not continue"
+        }
+    }
+
+    private fun tokensReason(tokens: Long, left: Long) = "contract budget (tokens): ${tokens - left} of $tokens tokens spent; $RAISE_TO_CONTINUE"
 }
 
 /**
- * C14: the contract's token budget follows the host's `CampaignPolicy.tokens` on a reopen. Only the host changes it, and
- * only at an open: a raise is kept in the contract row at its version — a budget is not an amendment, so nothing bound to
- * the version is invalidated — and journaled; a decrease stops at what is already spent; the same policy changes nothing,
- * and spend is read from the `usage` rows alone, so a reopen never charges anything (D-392, invariant 10).
+ * The host's policy a facade reopen keeps (C14): its notes and whether a resume was expected, journaled at an open when they
+ * change, so `Astrolabe.resume` without a policy opens with the ones the campaign had.
  */
-internal object ContractTokens {
-    const val SET: String = "budget: contract tokens set by the host"
-    const val RAISED: String = "budget: contract tokens raised by the host"
-    const val STILL: String = "budget: contract budget still reached"
+@Serializable
+internal data class HostPolicy(val hostNotes: List<String> = emptyList(), val resumeExpected: Boolean = false) {
+    companion object {
+        const val SET: String = "host: policy set"
 
-    /** The host's action on a contract budget stop. */
-    const val RAISE_TO_CONTINUE: String = "raise the policy's tokens and reopen the task to continue this attempt"
+        fun of(policy: CampaignPolicy): HostPolicy = HostPolicy(policy.hostNotes.filter { it.isNotBlank() }, policy.resumeExpected)
 
-    fun atOpen(repository: ContractRepository, store: Store, journal: Journal, ids: Identities, idGen: IdGen, clock: Clock, stored: Contract, requested: Tokens): TokensAtOpen {
-        val from = stored.budget.tokens.value
-        val spent = from - Accounting(store, clock).remainingTokens(stored.workId, from)
-        val target = if (requested.value >= from) requested.value else maxOf(requested.value, spent)
-        if (target == from) return TokensAtOpen(stored, from, spent)
-        val changed = stored.copy(budget = stored.budget.copy(tokens = Tokens(target)))
-        repository.replaceLatest(changed)
-        journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Reconcile,
-            text = "$SET: $from → $target tokens at contract v${stored.version} ($spent spent)", at = clock.instant()))
-        return TokensAtOpen(changed, from, spent)
+        fun stored(journal: Journal, work: WorkId): HostPolicy =
+            journal.events(JournalScope(work, kinds = setOf(JournalKind.Reconcile))).lastOrNull { it.text.startsWith(SET) && it.payload != null }
+                ?.let { runCatching { TaskLimitControl.JSON.decodeFromJsonElement(serializer(), it.payload!!) }.getOrNull() } ?: HostPolicy()
+
+        fun atOpen(journal: Journal, ids: Identities, idGen: IdGen, clock: Clock, policy: CampaignPolicy) {
+            val now = of(policy)
+            if (now == stored(journal, ids.work)) return
+            journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Reconcile, text = "$SET: ${now.hostNotes.size} notes, resumeExpected ${now.resumeExpected}",
+                payload = TaskLimitControl.JSON.encodeToJsonElement(serializer(), now), at = clock.instant()))
+        }
     }
 }
 
