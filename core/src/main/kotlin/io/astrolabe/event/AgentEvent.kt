@@ -65,7 +65,7 @@ public sealed interface AgentEvent {
             override val phase: Phase = Phase.Verify,
             override val span: SpanId? = null,
             override val parent: SpanId? = null,
-            /** Why a `waiting_for_input` campaign waits, machine-readable (D-339): `acceptance_decision` · `review_rejected`. */
+            /** Why a `waiting_for_input` campaign waits, machine-readable (D-339): `acceptance_decision` · `review_rejected` · `integrity_review` (a test-integrity change waits for a person, C11). */
             val stopCode: String? = null,
             /** Who verified the result, from the finish receipt (§4.4 C2): `independent` · `agent_test` · `unverified`. */
             val provenanceClass: String? = null,
