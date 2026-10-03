@@ -18,7 +18,7 @@ class DefaultsTest {
         "Register cap / contract digest cap / patch cap" to listOf("registerCapTokens", "digestCapTokens", "digestTokensPerRequirement", "digestCapCeilingTokens", "patchCapTokens"),
         "Fact line / note body / note summary" to listOf("factLineMaxChars", "noteBodyMaxTokens", "noteSummaryMaxChars"),
         "Workset seeds per cell / KB injection / focus notes / focus zoom" to
-            listOf("seedsMaxTokens", "injectionMaxNotes", "injectionMaxTokens", "focusNotesMaxTokens", "focusZoomMaxTokens"),
+            listOf("seedsMaxTokens", "seedRule", "injectionMaxNotes", "injectionMaxTokens", "focusNotesMaxTokens", "focusZoomMaxTokens"),
         "Touched ledger in [A]" to listOf("touchedInAnchor"),
         "Checker time box" to listOf("checkerTimeBoxSeconds", "checkerFallbackTimeBoxSeconds"),
         "θ risk threshold for early slow checks" to listOf("theta"),

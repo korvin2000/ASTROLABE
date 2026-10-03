@@ -49,6 +49,7 @@ public data class Defaults(
     val noteSummaryMaxChars: Int = 200,
     // Workset seeds per cell / KB injection / focus notes / focus zoom
     val seedsMaxTokens: Int = 4_000,
+    val seedRule: io.astrolabe.context.SeedRule = io.astrolabe.context.SeedRule.V1,
     val injectionMaxNotes: Int = 8,
     val injectionMaxTokens: Int = 1_500,
     val focusNotesMaxTokens: Int = 300,
