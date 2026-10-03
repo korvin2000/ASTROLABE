@@ -3747,6 +3747,7 @@ public final class io/astrolabe/campaign/CampaignState {
 	public final fun component10 ()J
 	public final fun component11 ()Lio/astrolabe/verify/StopCode;
 	public final fun component12 ()Lio/astrolabe/campaign/BudgetStop;
+	public final fun component13 ()Lio/astrolabe/campaign/ContractBudgetStop;
 	public final fun component2 ()Lio/astrolabe/id/AttemptId;
 	public final fun component3 ()I
 	public final fun component4 ()Lio/astrolabe/campaign/CampaignPhase;
@@ -3759,6 +3760,7 @@ public final class io/astrolabe/campaign/CampaignState {
 	public final fun getAttempt ()Lio/astrolabe/id/AttemptId;
 	public final fun getBudgetStop ()Lio/astrolabe/campaign/BudgetStop;
 	public final fun getCells ()Ljava/util/List;
+	public final fun getContractStop ()Lio/astrolabe/campaign/ContractBudgetStop;
 	public final fun getContractVersion ()I
 	public final fun getGraph ()Lio/astrolabe/graph/RequirementGraph;
 	public final fun getLedger ()Lio/astrolabe/contract/Ledger;
@@ -3929,6 +3931,52 @@ public final synthetic class io/astrolabe/campaign/CheckRun$$serializer : kotlin
 }
 
 public final class io/astrolabe/campaign/CheckRun$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/campaign/ContractBudgetCause : java/lang/Enum {
+	public static final field Companion Lio/astrolabe/campaign/ContractBudgetCause$Companion;
+	public static final field Cost Lio/astrolabe/campaign/ContractBudgetCause;
+	public static final field Tokens Lio/astrolabe/campaign/ContractBudgetCause;
+	public static final field Turns Lio/astrolabe/campaign/ContractBudgetCause;
+	public static final field UnknownUsage Lio/astrolabe/campaign/ContractBudgetCause;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getResumable ()Z
+	public final fun getWire ()Ljava/lang/String;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/campaign/ContractBudgetCause;
+	public static fun values ()[Lio/astrolabe/campaign/ContractBudgetCause;
+}
+
+public final class io/astrolabe/campaign/ContractBudgetCause$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/campaign/ContractBudgetStop {
+	public static final field Companion Lio/astrolabe/campaign/ContractBudgetStop$Companion;
+	public fun <init> (Lio/astrolabe/campaign/ContractBudgetCause;J)V
+	public final fun component1 ()Lio/astrolabe/campaign/ContractBudgetCause;
+	public final fun component2 ()J
+	public final fun copy (Lio/astrolabe/campaign/ContractBudgetCause;J)Lio/astrolabe/campaign/ContractBudgetStop;
+	public static synthetic fun copy$default (Lio/astrolabe/campaign/ContractBudgetStop;Lio/astrolabe/campaign/ContractBudgetCause;JILjava/lang/Object;)Lio/astrolabe/campaign/ContractBudgetStop;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCause ()Lio/astrolabe/campaign/ContractBudgetCause;
+	public final fun getTokens ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class io/astrolabe/campaign/ContractBudgetStop$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Lio/astrolabe/campaign/ContractBudgetStop$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Lio/astrolabe/campaign/ContractBudgetStop;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Lio/astrolabe/campaign/ContractBudgetStop;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/campaign/ContractBudgetStop$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
 }
 
@@ -4363,12 +4411,16 @@ public final class io/astrolabe/campaign/Lifecycle {
 public final class io/astrolabe/campaign/LimitHold {
 	public static final field Companion Lio/astrolabe/campaign/LimitHold$Companion;
 	public fun <init> (Lio/astrolabe/campaign/BudgetStop;Lio/astrolabe/budget/LimitStatus;Ljava/lang/String;)V
+	public fun <init> (Lio/astrolabe/campaign/BudgetStop;Lio/astrolabe/budget/LimitStatus;Ljava/lang/String;Lio/astrolabe/campaign/ContractBudgetCause;)V
+	public synthetic fun <init> (Lio/astrolabe/campaign/BudgetStop;Lio/astrolabe/budget/LimitStatus;Ljava/lang/String;Lio/astrolabe/campaign/ContractBudgetCause;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Lio/astrolabe/campaign/BudgetStop;
 	public final fun component2 ()Lio/astrolabe/budget/LimitStatus;
 	public final fun component3 ()Ljava/lang/String;
-	public final fun copy (Lio/astrolabe/campaign/BudgetStop;Lio/astrolabe/budget/LimitStatus;Ljava/lang/String;)Lio/astrolabe/campaign/LimitHold;
-	public static synthetic fun copy$default (Lio/astrolabe/campaign/LimitHold;Lio/astrolabe/campaign/BudgetStop;Lio/astrolabe/budget/LimitStatus;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/campaign/LimitHold;
+	public final fun component4 ()Lio/astrolabe/campaign/ContractBudgetCause;
+	public final fun copy (Lio/astrolabe/campaign/BudgetStop;Lio/astrolabe/budget/LimitStatus;Ljava/lang/String;Lio/astrolabe/campaign/ContractBudgetCause;)Lio/astrolabe/campaign/LimitHold;
+	public static synthetic fun copy$default (Lio/astrolabe/campaign/LimitHold;Lio/astrolabe/campaign/BudgetStop;Lio/astrolabe/budget/LimitStatus;Ljava/lang/String;Lio/astrolabe/campaign/ContractBudgetCause;ILjava/lang/Object;)Lio/astrolabe/campaign/LimitHold;
 	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCause ()Lio/astrolabe/campaign/ContractBudgetCause;
 	public final fun getLimit ()Lio/astrolabe/budget/LimitKind;
 	public final fun getReason ()Ljava/lang/String;
 	public final fun getStatus ()Lio/astrolabe/budget/LimitStatus;
@@ -5441,16 +5493,19 @@ public final class io/astrolabe/campaign/Transition$Stopped : io/astrolabe/campa
 	public fun <init> (Lio/astrolabe/campaign/CampaignOutcome;Ljava/lang/String;)V
 	public fun <init> (Lio/astrolabe/campaign/CampaignOutcome;Ljava/lang/String;Lio/astrolabe/verify/StopCode;)V
 	public fun <init> (Lio/astrolabe/campaign/CampaignOutcome;Ljava/lang/String;Lio/astrolabe/verify/StopCode;Lio/astrolabe/campaign/BudgetStop;)V
-	public synthetic fun <init> (Lio/astrolabe/campaign/CampaignOutcome;Ljava/lang/String;Lio/astrolabe/verify/StopCode;Lio/astrolabe/campaign/BudgetStop;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Lio/astrolabe/campaign/CampaignOutcome;Ljava/lang/String;Lio/astrolabe/verify/StopCode;Lio/astrolabe/campaign/BudgetStop;Lio/astrolabe/campaign/ContractBudgetStop;)V
+	public synthetic fun <init> (Lio/astrolabe/campaign/CampaignOutcome;Ljava/lang/String;Lio/astrolabe/verify/StopCode;Lio/astrolabe/campaign/BudgetStop;Lio/astrolabe/campaign/ContractBudgetStop;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Lio/astrolabe/campaign/CampaignOutcome;
 	public final fun component2 ()Ljava/lang/String;
 	public final fun component3 ()Lio/astrolabe/verify/StopCode;
 	public final fun component4 ()Lio/astrolabe/campaign/BudgetStop;
-	public final fun copy (Lio/astrolabe/campaign/CampaignOutcome;Ljava/lang/String;Lio/astrolabe/verify/StopCode;Lio/astrolabe/campaign/BudgetStop;)Lio/astrolabe/campaign/Transition$Stopped;
-	public static synthetic fun copy$default (Lio/astrolabe/campaign/Transition$Stopped;Lio/astrolabe/campaign/CampaignOutcome;Ljava/lang/String;Lio/astrolabe/verify/StopCode;Lio/astrolabe/campaign/BudgetStop;ILjava/lang/Object;)Lio/astrolabe/campaign/Transition$Stopped;
+	public final fun component5 ()Lio/astrolabe/campaign/ContractBudgetStop;
+	public final fun copy (Lio/astrolabe/campaign/CampaignOutcome;Ljava/lang/String;Lio/astrolabe/verify/StopCode;Lio/astrolabe/campaign/BudgetStop;Lio/astrolabe/campaign/ContractBudgetStop;)Lio/astrolabe/campaign/Transition$Stopped;
+	public static synthetic fun copy$default (Lio/astrolabe/campaign/Transition$Stopped;Lio/astrolabe/campaign/CampaignOutcome;Ljava/lang/String;Lio/astrolabe/verify/StopCode;Lio/astrolabe/campaign/BudgetStop;Lio/astrolabe/campaign/ContractBudgetStop;ILjava/lang/Object;)Lio/astrolabe/campaign/Transition$Stopped;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getBudget ()Lio/astrolabe/campaign/BudgetStop;
 	public final fun getCode ()Lio/astrolabe/verify/StopCode;
+	public final fun getContract ()Lio/astrolabe/campaign/ContractBudgetStop;
 	public final fun getOutcome ()Lio/astrolabe/campaign/CampaignOutcome;
 	public final fun getReason ()Ljava/lang/String;
 	public fun hashCode ()I
