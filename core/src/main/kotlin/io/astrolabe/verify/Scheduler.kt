@@ -88,9 +88,9 @@ public data class Currency @JvmOverloads constructor(
      */
     val mandatory: Boolean = true,
     /**
-     * C1b: for an optional check that is known red, the red receipt that began it (its alias, else its id) — the earliest
-     * red receipt that no later `passed` receipt on the tree now followed; a timeout, an inconclusive run or a missing
-     * receipt never ends it. `null` when the check is not known red, or mandatory.
+     * C1b: for an optional check that is known red, the red receipt that began it (its alias, else its id) — the first
+     * red receipt after the check's last `passed` one in this attempt, whatever tree that pass was on; a timeout, an
+     * inconclusive run or a missing receipt never ends it. `null` when the check is not known red, or mandatory.
      */
     val knownRed: String? = null,
 ) {
@@ -441,16 +441,16 @@ public class Scheduler(
         // D-338: an unverified result names its cause for the decider — "cannot start python3", not just "unavailable".
         if (receipt != null && !green) reasons += "outcome ${receipt.outcome.name.lowercase()}" + (receipt.limits.firstOrNull()?.detail?.let { ": $it" } ?: "")
         return Currency(last.receiptId, refreshed.applicability, eligible, green, reasons, red = receipt?.outcome == Outcome.Failed, mandatory = mandatory,
-            knownRed = if (mandatory) null else knownRedSince(check.id, stampNow))
+            knownRed = if (mandatory) null else knownRedSince(check.id))
     }
 
-    /** C1b ([Currency.knownRed]): walks this attempt's receipts of [checkId] in order; only a `passed` one on [stampNow] ends a red. */
-    private fun knownRedSince(checkId: String, stampNow: CandidateId?): String? {
+    /** C1b ([Currency.knownRed]): walks this attempt's receipts of [checkId] in order; only a later `passed` one ends a red. */
+    private fun knownRedSince(checkId: String): String? {
         var since: Receipt? = null
         for (r in receipts.forCheck(checkId)) {
             if (r.ids.work != ids.work || r.ids.attempt != ids.attempt) continue
             if (r.outcome == Outcome.Failed && since == null) since = r
-            if (r.outcome == Outcome.Passed && stampNow != null && r.stampAfter == stampNow) since = null
+            if (r.outcome == Outcome.Passed) since = null
         }
         return since?.let { aliasByReceipt[it.receiptId] ?: aliases.byCanonical(ids.work, it.receiptId)?.text ?: it.receiptId }
     }
