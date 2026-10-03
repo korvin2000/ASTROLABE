@@ -2,11 +2,10 @@ package io.astrolabe.context
 
 import io.astrolabe.cell.ResultPacket
 import io.astrolabe.evidence.ClaimKind
+import io.astrolabe.evidence.Receipt
 import io.astrolabe.id.FileVersion
-import io.astrolabe.register.Mark
 import io.astrolabe.register.Register
 import io.astrolabe.workset.Entry
-import io.astrolabe.workset.EntrySource
 import io.astrolabe.workspace.Ranges
 
 /** The last receipt of one check with its validity at the next cell's base (§6.2 "verification status"). */
@@ -83,7 +82,11 @@ public data class Carry(
     }
 }
 
-/** `carry_forward` (§6.2, P2.4.1): a pure function of the previous cell's records and the current file versions. */
+/**
+ * `carry_forward` (§6.2, P2.4.1): a pure function of the previous cell's records and the current file versions. The
+ * seeds come from the attempt's [SeedSelector] under the one budget of [Seeds.fit], at cell boundaries and at pressure
+ * rebuilds alike.
+ */
 public object CarryForward {
     public const val SEED_CAP_TOKENS: Long = 4_000
 
@@ -98,6 +101,12 @@ public object CarryForward {
         receipts: List<CarriedReceipt>,
         pinned: List<String>,
         seedCapTokens: Long = SEED_CAP_TOKENS,
+        /** The attempt's seed rule (`Defaults.seedRule`); Seeds v1 when not given. */
+        selector: SeedSelector = SeedSelector.V1,
+        /** Paths the cell changed beyond [packet]'s `changes`: a pressure rebuild has no packet yet. */
+        touched: Collection<String> = emptyList(),
+        /** The latest receipt of each check: Seeds v2 re-serves the inputs of the red ones. */
+        latestReceipts: List<Receipt> = emptyList(),
     ): Carry {
         val unresolved = ArrayList<Int>()
         val facts = previous.facts.map { fact ->
@@ -108,41 +117,15 @@ public object CarryForward {
         }
         val register = previous.copy(facts = facts)
 
-        val next = previous.cursor ?: previous.plan.firstOrNull { it.mark == Mark.Todo }
-        val texts = listOfNotNull(next?.text, next?.accept, previous.next)
-        val referenced = export.filter { entry -> mentions(texts, entry.path) || inFocus(previous.focus, entry.path) }
-            .sortedWith(compareBy({ it.path }, { it.range.ranges.first().from }))
-        val seeds = ArrayList<Entry>()
-        val notSeen = ArrayList<NotSeen>()
-        var budget = seedCapTokens
-        for (entry in referenced) {
-            val now = currentVersion(entry.path)
-            when {
-                now != entry.version -> notSeen += NotSeen(entry.path, entry.range, entry.version, now, "changed")
-                entry.tokens > budget -> notSeen += NotSeen(entry.path, entry.range, entry.version, now, "over the ${seedCapTokens}-token seed budget")
-                else -> {
-                    seeds += entry.copy(source = EntrySource.Seed)
-                    budget -= entry.tokens
-                }
-            }
-        }
+        val changed = (packet?.changes.orEmpty().map { it.path } + touched).toSet()
+        val (seeds, notSeen) = Seeds.fit(selector.candidates(SeedInputs(previous, export, changed, latestReceipts)), currentVersion, seedCapTokens)
 
-        val touched = packet?.changes.orEmpty().groupBy { it.path }.map { (path, changes) -> CarriedTouch(path, changes.last().after) }.sortedBy { it.path }
+        val ledger = packet?.changes.orEmpty().groupBy { it.path }.map { (path, changes) -> CarriedTouch(path, changes.last().after) }.sortedBy { it.path }
         val packetLine = packet?.let { p ->
             "${p.status.wire}" + (p.reason?.let { " ($it)" } ?: "") +
                 (if (p.gaps.isEmpty()) "" else " · gaps: ${p.gaps.joinToString("; ")}") +
                 (if (p.receipts.isEmpty()) "" else " · receipts: ${p.receipts.joinToString(", ")}")
         }
-        return Carry(register, seeds, notSeen, receipts, touched, pinned, packetLine, unresolved)
-    }
-
-    private fun mentions(texts: List<String>, path: String): Boolean {
-        val name = path.substringAfterLast('/')
-        return texts.any { text -> path in text || Regex("(^|[^\\w.])${Regex.escape(name)}($|[^\\w])").containsMatchIn(text) }
-    }
-
-    private fun inFocus(focus: String?, path: String): Boolean {
-        val dir = focus?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() } ?: return false
-        return path == dir || path.startsWith("$dir/")
+        return Carry(register, seeds, notSeen, receipts, ledger, pinned, packetLine, unresolved)
     }
 }
