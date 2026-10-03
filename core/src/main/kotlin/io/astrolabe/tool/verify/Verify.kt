@@ -358,9 +358,10 @@ public class Verify(
 
     /**
      * P8.C.10 A, G: the command of every red run behind a regression check's hold that no run of its definition confirms on
-     * this tree reruns here — once per definition and tree, its deadline cut to the time left; with none left it does not
-     * run and the failure stays unclassified. Then, for this tree's red run, one baseline per check on `s0`, recorded as
-     * begun before it runs, so a failure, an exception or an interruption is never retried in the attempt.
+     * this tree reruns here, with that run's closure — once per definition and tree (begun on record, no flaky retry), its
+     * deadline cut to the time left; with none left it does not run and the failure stays unclassified. Then, for this
+     * tree's red run, one baseline per check and attempt on `s0`, recorded as begun before it runs, its time left read again
+     * just before the process starts — so a failure, an exception or an interruption is never retried in the attempt.
      */
     private suspend fun refreshRegressions(): List<Receipt> {
         val contract = contracts.current(ids.work) ?: return emptyList()
@@ -370,10 +371,13 @@ public class Verify(
             for (red in scheduler.unconfirmed(check, stamper.stamp().id)) {
                 val left = timeLeft()
                 if (left != null && left <= 0) break
-                recorded += runTriaged(check.copy(command = io.astrolabe.contract.Command(red.command, red.cwd)), contract).first
+                // P8.C.10: the red run's own command and closure, so the rescan watches what it tested; one run, begun on record.
+                val rerun = check.copy(command = io.astrolabe.contract.Command(red.command, red.cwd), inputClosure = red.inputClosure)
+                scheduler.beginRerun(rerun, contract.version)
+                runOne(rerun, contract)?.let { recorded += it.first }
             }
             val due = scheduler.baselineDue(check, stamper.stamp().id) ?: continue
-            baselineOf(check.copy(command = io.astrolabe.contract.Command(due.command, due.cwd)), contract)?.let { recorded += it }
+            baselineOf(check.copy(command = io.astrolabe.contract.Command(due.command, due.cwd), inputClosure = due.inputClosure), contract)?.let { recorded += it }
         }
         return recorded
     }
@@ -385,6 +389,7 @@ public class Verify(
         val left = timeLeft()
         if (left != null && left <= 0) return null
         runner.begin(check, contract.version, stamp)
+        runner.timeLeft = timeLeft
         return try {
             runner.run(check, contract.version, stamp, cut(timeoutSeconds, left)).receipt
         } catch (failure: IOException) {

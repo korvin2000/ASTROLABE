@@ -486,6 +486,25 @@ public class Scheduler(
     internal fun unconfirmed(check: Check, stampNow: CandidateId): List<Receipt> =
         if (Regressions.of(checks[check.id] ?: check)) Regressions.unconfirmed(history(check.id), baselines(check.id), stampNow) else emptyList()
 
+    /**
+     * P8.C.10 A: records, before the stop reruns [check] (a red command with the red run's closure) on the tree now, that the
+     * rerun began — a `not_run` marker of its definition on this stamp, in this workspace — so it runs once per definition
+     * and tree, a crash or a reopen included. The marker is no run of the change and never the check's last result.
+     */
+    internal fun beginRerun(check: Check, contractVersion: Int): Receipt {
+        val report = stamper.report(fresh = true)
+        val receipt = Receipt(
+            receiptId = idGen.next("rcpt"), ids = ids, checkId = check.id, acceptanceIds = check.acceptanceIds, command = check.command?.argv.orEmpty(), cwd = check.command?.cwd,
+            shell = false, stampBefore = report.candidateId, stampAfter = report.candidateId, envId = report.env.envId, verifierVersion = verifierVersion,
+            checkDefinitionVersion = check.definitionVersion, contractVersion = contractVersion, outcome = Outcome.NotRun, parsed = null, inputClosure = check.inputClosure,
+            testedInputs = TestedInputs(emptyMap(), InputStability.Unknown), raw = null, limits = listOf(Limit(Regressions.RERUN, "the stop's rerun of ${check.id} on @${report.candidateId.hash8} began")),
+            at = clock.instant(), evidenceKind = check.evidenceKind, checkOrigin = check.origin,
+        )
+        receipts.record(receipt)
+        aliasByReceipt[receipt.receiptId] = aliases.allocate(ids.work, receipt.receiptId, "receipt", ids.context, workspace.id).text
+        return receipt
+    }
+
     /** P8.C.10 G: this tree's red run of a regression [check] that the attempt has no baseline for yet, or `null`. */
     internal fun baselineDue(check: Check, stampNow: CandidateId): Receipt? =
         if (Regressions.of(checks[check.id] ?: check)) Regressions.baselineDue(history(check.id), baselines(check.id), stampNow) else null

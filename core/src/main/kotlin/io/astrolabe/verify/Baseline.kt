@@ -124,24 +124,25 @@ public data class PreexistingLedger(
 }
 
 /**
- * P8.C.10: how one failure of a harness regression check ([Regressions]) relates to the baseline at `s0` (§8.5).
+ * P8.C.10: how one failure of a harness regression check ([Regressions]) relates to the baseline at `s0` (§8.5). Only
+ * positive, unambiguous, complete evidence makes a failure [New] or [Inherited]; anything less is [Unclassified].
  */
 public enum class RedClass {
-    /** The baseline ran the same set on `s0`, the identity is unambiguous and did not fail there: a regression no `Open` item clears. */
+    /** It fails on this tree, and on `s0` the same set showed it pass — individually, or by running to its end without it failing: a regression no `Open` item clears. */
     New,
 
     /** The same identity failed on `s0` with the same fingerprint: inherited, disclosed in the finish receipt, never a gap. */
     Inherited,
 
-    /** Anything else (no usable baseline, a changed fingerprint, an ambiguous identity, not rerun or not executed on this tree, flaky, unidentified): the D-400 rule. */
+    /** Anything else (no usable baseline, a changed fingerprint, an ambiguous identity, not shown on this tree, flaky, unidentified): the D-400 rule. */
     Unclassified,
 }
 
 /**
  * P8.C.10: the failures of a harness regression check not shown fixed on the tree at hand, by class — [regressions]
- * ([RedClass.New]), [inherited] and [unclassified], one line each — with [since] the red receipts they come from (alias
- * or id), [current] this tree's red receipts of the check (empty when none is current: then an `Open` item is not asked
- * for), and [command] the command whose rerun shows them fixed.
+ * ([RedClass.New]), [inherited] and [unclassified], one line each — with [since] the receipts they come from (alias or
+ * id), [current] this tree's red receipts of the check (empty when none is current: then an `Open` item is not asked
+ * for), and [command] the command whose run shows them fixed.
  */
 public data class RegressionHold(
     val since: List<String>,
@@ -160,9 +161,11 @@ public data class RegressionHold(
 }
 
 /**
- * The regressions the harness finds itself (P8.C.10): the blast radius and the types of touched files. A failure counts by
- * its test identity across every red run of the check in the attempt and the workspace, until it executed and passed in a
- * run on the tree at hand; it is then classified against the baseline the same command recorded on `s0`. Pure over
+ * The regressions the harness finds itself (P8.C.10): the blast radius and the types of touched files. A red stops
+ * mattering in two ways only — its identity shown fixed, or its failure shown inherited — and both take positive,
+ * unambiguous, complete evidence; so does [RedClass.New]. Every failure any run of the check reported in the attempt and
+ * the workspace counts by its test identity until it executed and passed, alone and unambiguously, in an eligible run on
+ * the tree at hand that ran to its end; it is then classified against the baseline its check recorded on `s0`. Pure over
  * receipts, in their insertion order (I-05).
  */
 public object Regressions {
@@ -172,6 +175,9 @@ public object Regressions {
 
     /** The limit kind that marks a baseline receipt: one run of a check's command on the captured initial candidate. */
     public const val BASELINE: String = "baseline"
+
+    /** The limit kind that marks the stop's rerun of a red command on a tree as begun (P8.C.10): never a run of the change. */
+    public const val RERUN: String = "rerun_started"
 
     /** The disclosure when no baseline classifies a failure. */
     public const val NO_BASELINE: String = "no baseline: pre-existing failures cannot be told from regressions"
@@ -187,10 +193,14 @@ public object Regressions {
     @JvmStatic
     public fun isBaseline(receipt: Receipt): Boolean = receipt.limits.any { it.kind == BASELINE }
 
+    /** A marker receipt (a baseline begun, a rerun begun): it reports nothing of a run. */
+    @JvmStatic
+    public fun isMarker(receipt: Receipt): Boolean = receipt.limits.any { it.kind == RERUN || it.kind == BASELINE_STARTED }
+
     /**
      * What a run reported test by test (D-27): a key and a fingerprint for comparison — digests over the unredacted
-     * identity and failure, the runner's volatile fields normalized ([fingerprint]) — and redacted text to show; every
-     * identity reported more than once, whatever its outcome, is ambiguous. Bounded; [roots] are the run's root paths.
+     * identity and the whole failure ([fingerprint]) — and redacted text to show; every identity reported more than once,
+     * whatever its outcomes, is ambiguous; skipped and expected failures are no pass. Bounded; [roots] are the run's roots.
      */
     @JvmStatic
     public fun outcomes(tests: List<TestResult>, redact: (String) -> String, roots: List<String>): TestOutcomes {
@@ -199,7 +209,7 @@ public object Regressions {
         val passing = tests.filter { it.outcome == TestOutcome.Passed }
         val failed = failing.take(MAX_FAILED).map { t ->
             val first = t.message?.lineSequence()?.map { it.trim() }?.firstOrNull { it.isNotEmpty() } ?: t.outcome.name.lowercase()
-            FailedTest(key(t.identity), redact(t.identity.display).take(MAX_TEXT), fingerprint(t.message ?: t.outcome.name.lowercase(), roots), redact(first).take(MAX_TEXT))
+            FailedTest(key(t.identity), redact(t.identity.display).take(MAX_TEXT), fingerprint(t.detail ?: t.message ?: t.outcome.name.lowercase(), roots), redact(first).take(MAX_TEXT))
         }
         return TestOutcomes(failed, passing.take(MAX_PASSED).map { key(it.identity) }, repeated.take(MAX_FAILED).map(::keyOf),
             truncated = failing.size > MAX_FAILED || passing.size > MAX_PASSED || repeated.size > MAX_FAILED)
@@ -212,27 +222,23 @@ public object Regressions {
     private fun keyOf(canonical: String): String = Digest.ofUtf8(canonical).hex.take(KEY_HEX)
 
     /**
-     * The comparison fingerprint of a failure (P8.C.10 D): a digest of its unredacted text with only the runner's volatile
-     * fields normalized — the run's root paths, `file:line` and `line N`, durations, addresses, timestamps, temp paths —
-     * so an assertion's literals, numbers and secrets included, still tell two failures apart.
+     * The comparison fingerprint of a failure (P8.C.10 D): a digest of its whole unredacted text, line endings aside, with
+     * only the run's own root paths — and the separators of the paths under them — made neutral; every other value in it,
+     * line numbers, durations and addresses included, tells two failures apart (in doubt they differ: unclassified).
      */
     @JvmStatic
     public fun fingerprint(text: String, roots: List<String>): String {
         var t = text.replace("\r\n", "\n").trim()
-        for (root in roots.filter { it.isNotBlank() }.sortedByDescending { it.length }) {
-            t = t.replace(root, "<root>").replace(root.replace('\\', '/'), "<root>")
+        for (root in roots.filter { it.isNotBlank() }.flatMap { listOf(it, it.replace('\\', '/')) }.distinct().sortedByDescending { it.length }) {
+            t = t.replace(root, ROOT)
         }
-        t = t.replace(FILE_LINE, "$1:<line>").replace(LINE_WORD, "line <n>").replace(DURATION, "<duration>")
-            .replace(HEX_ADDRESS, "0x…").replace(TIMESTAMP, "<time>").replace(TEMP_PATH, "<tmp>")
+        t = UNDER_ROOT.replace(t) { ROOT + it.groupValues[1].replace('\\', '/') }
         return Digest.ofUtf8(t).hex.take(KEY_HEX)
     }
 
     /**
      * P8.C.10 B–C: the hold of one check on the tree [stamp] from its receipts in the attempt and the workspace ([history],
-     * no baselines, insertion order) and the attempt's [baselines]. A failure stays until it executed and passed in an
-     * eligible run on [stamp] and failed in none there; one that failed there is classified against the latest baseline of
-     * that run's definition; one not executed there, or with no run there, is unclassified; the unidentified failures of a
-     * red run stay until a passed run of the same command on [stamp]. `null` when nothing is held.
+     * no baselines, insertion order) and the attempt's [baselines]. `null` when nothing is held.
      */
     @JvmStatic
     public fun hold(history: List<Receipt>, baselines: List<Receipt>, stamp: CandidateId?, alias: (Receipt) -> String): RegressionHold? =
@@ -240,34 +246,42 @@ public object Regressions {
             RegressionHold(h.from.map(alias).distinct(), h.current.map { it.receiptId }, h.command, h.regressions, h.inherited, h.unclassified)
         }
 
-    /** The red receipts of [history] behind the hold on [stamp] whose definition has no receipt on it: what verify-on-stop reruns (P8.C.10 A), one per definition. */
+    /** The red runs of [history] behind the hold on [stamp] whose definition has no receipt on it, marker included: what verify-on-stop reruns once (P8.C.10 A). */
     @JvmStatic
     public fun unconfirmed(history: List<Receipt>, baselines: List<Receipt>, stamp: CandidateId): List<Receipt> {
         val h = held(history, baselines, stamp) ?: return emptyList()
         val onStamp = history.filter { it.stampAfter == stamp }.map { it.checkDefinitionVersion }.toSet()
-        return h.from.filter { it.outcome == Outcome.Failed && it.checkDefinitionVersion !in onStamp }.reversed().distinctBy { it.checkDefinitionVersion }
+        return h.from.filter { reported(it) && it.checkDefinitionVersion !in onStamp }.reversed().distinctBy { it.checkDefinitionVersion }
     }
 
-    /** This tree's latest red run with identified failures whose definition has no baseline in the attempt yet (P8.C.10 G), or `null`. */
+    /** This tree's latest eligible run with identified failures, when the check has no baseline in the attempt yet (P8.C.10 G: one per check), or `null`. */
     @JvmStatic
     public fun baselineDue(history: List<Receipt>, baselines: List<Receipt>, stamp: CandidateId): Receipt? {
-        val covered = baselines.map { it.checkDefinitionVersion }.toSet()
-        return history.lastOrNull { it.stampAfter == stamp && it.testedInputs.eligible && it.outcome == Outcome.Failed && it.tests?.failed?.isNotEmpty() == true }
-            ?.takeIf { it.checkDefinitionVersion !in covered }
+        if (baselines.isNotEmpty()) return null
+        return history.lastOrNull { it.stampAfter == stamp && it.testedInputs.eligible && !isMarker(it) && it.tests?.failed?.isNotEmpty() == true }
     }
 
     private class Held(val from: List<Receipt>, val current: List<Receipt>, val command: String, val regressions: List<String>, val inherited: List<String>, val unclassified: List<String>)
 
+    /** A run that reported a failure: a red outcome, or a failing test of a run that did not finish. */
+    private fun reported(r: Receipt): Boolean = !isMarker(r) && (r.outcome == Outcome.Failed || r.tests?.failed?.isNotEmpty() == true)
+
+    /** A run whose test list is complete evidence: eligible, finished, untruncated. */
+    private fun finished(r: Receipt): Boolean =
+        r.testedInputs.eligible && !isMarker(r) && (r.outcome == Outcome.Passed || r.outcome == Outcome.Failed) && r.tests?.truncated == false
+
     private fun held(history: List<Receipt>, baselines: List<Receipt>, stamp: CandidateId?): Held? {
-        val runs = history.filter { it.testedInputs.eligible && !isBaseline(it) }
-        val reds = runs.filter { it.outcome == Outcome.Failed }
+        val runs = history.filter { !isBaseline(it) && !isMarker(it) }
+        val reds = runs.filter(::reported)
         if (reds.isEmpty()) return null
         val fresh = if (stamp == null) emptyList() else runs.filter { it.stampAfter == stamp }
         val failures = LinkedHashMap<String, Pair<FailedTest, Receipt>>()
         for (red in reds) for (failure in red.tests?.failed.orEmpty()) failures[failure.key] = failure to red
+        // On this tree: a failure any run reported, and a pass only a finished, eligible run reported alone and unambiguously.
         val failingNow = LinkedHashMap<String, Pair<FailedTest, Receipt>>()
         for (run in fresh) for (failure in run.tests?.failed.orEmpty()) failingNow[failure.key] = failure to run
-        val passedNow = fresh.flatMap { it.tests?.passed.orEmpty() }.toSet()
+        val passedNow = fresh.filter(::finished).flatMap { r -> r.tests!!.passed.filter { it !in r.tests.ambiguous } }.toSet()
+        val reportedNow = fresh.filter(::finished).flatMap { r -> r.tests!!.passed + r.tests.failed.map { it.key } }.toSet()
         val from = LinkedHashSet<Receipt>()
         val regressions = ArrayList<String>()
         val inherited = ArrayList<String>()
@@ -278,6 +292,7 @@ public object Regressions {
             when {
                 now == null && key in passedNow -> Unit
                 now != null && key in passedNow -> { unclassified += "${failure.name}: failed and passed on this tree (flaky)"; from += now.second }
+                now != null && !now.second.testedInputs.eligible -> { unclassified += "${failure.name}: failed on this tree in a run that cannot certify it"; from += now.second }
                 now != null -> {
                     from += now.second
                     val (kind, line) = classify(now.first, now.second, baselines.lastOrNull { it.checkDefinitionVersion == now.second.checkDefinitionVersion })
@@ -287,65 +302,78 @@ public object Regressions {
                         RedClass.Unclassified -> unclassified += line
                     }
                 }
-                fresh.isEmpty() -> { unclassified += "${failure.name}: failed in ${red.receiptId}, not rerun on this tree"; from += red }
+                fresh.none(::finished) && fresh.any { !isMarker(it) } -> { unclassified += "${failure.name}: failed in ${red.receiptId}; the run on this tree did not finish"; from += red }
+                fresh.none(::finished) -> { unclassified += "${failure.name}: failed in ${red.receiptId}, not rerun on this tree"; from += red }
+                key in reportedNow -> { unclassified += "${failure.name}: failed in ${red.receiptId}; reported more than once on this tree: ambiguous"; from += red }
                 else -> { unclassified += "${failure.name}: failed in ${red.receiptId}, not executed on this tree (removed, skipped or renamed)"; from += red }
             }
         }
+        // P8.C.10 B: failures a run counted but did not identify (or cut from its record) stay: nothing shows them fixed one by one.
         for (red in reds.filter(::unidentified)) {
-            if (fresh.any { it.outcome == Outcome.Passed && it.command == red.command && it.cwd == red.cwd }) continue
-            unclassified += "failures of ${red.receiptId} the runner did not identify"
+            unclassified += "failures of ${red.receiptId} the runner did not identify one by one"
             from += red
         }
         if (from.isEmpty()) return null
-        val current = fresh.filter { it.outcome == Outcome.Failed }
+        val current = fresh.filter { it.testedInputs.eligible && reported(it) }
         val last = current.lastOrNull() ?: from.last()
         return Held(from.toList(), current, (last.command + listOfNotNull(last.cwd?.let { "(in $it)" })).joinToString(" "), regressions, inherited, unclassified)
     }
 
-    /** P8.C.10 C, one failing identity of [red] against [baseline]. */
+    /** P8.C.10 C, one failing identity of [red] (eligible, on this tree) against [baseline]: New and Inherited on positive evidence only. */
     private fun classify(failure: FailedTest, red: Receipt, baseline: Receipt?): Pair<RedClass, String> {
         fun unclassified(why: String) = RedClass.Unclassified to "${failure.name} — ${failure.signature} ($why)"
         if (baseline == null) return unclassified(NO_BASELINE)
         unusable(baseline)?.let { return unclassified("baseline ${baseline.receiptId} $it: $NO_BASELINE") }
         if (red.envId != baseline.envId) return unclassified("environment ${red.envId.hash8} differs from the baseline's ${baseline.envId.hash8}")
-        if (failure.key in red.tests?.ambiguous.orEmpty() || failure.key in baseline.tests?.ambiguous.orEmpty()) return unclassified("reported more than once: ambiguous")
-        val before = baseline.tests?.failed?.firstOrNull { it.key == failure.key }
+        val s0 = baseline.tests!!
+        if (failure.key in red.tests?.ambiguous.orEmpty() || failure.key in s0.ambiguous) return unclassified("reported more than once: ambiguous")
+        val before = s0.failed.firstOrNull { it.key == failure.key }
         return when {
-            before == null -> RedClass.New to "${failure.name} — ${failure.signature} (did not fail on s0 in baseline ${baseline.receiptId})"
-            before.fingerprint == failure.fingerprint -> RedClass.Inherited to "${failure.name} — ${failure.signature} (unchanged since baseline ${baseline.receiptId} on s0)"
-            else -> unclassified("failed on s0 another way: ${before.signature}")
+            before != null && before.fingerprint == failure.fingerprint -> RedClass.Inherited to "${failure.name} — ${failure.signature} (unchanged since baseline ${baseline.receiptId} on s0)"
+            before != null -> unclassified("failed on s0 another way: ${before.signature}")
+            failure.key in s0.passed -> RedClass.New to "${failure.name} — ${failure.signature} (passed on s0 in baseline ${baseline.receiptId})"
+            ranToEnd(baseline) -> RedClass.New to "${failure.name} — ${failure.signature} (not failing on s0: baseline ${baseline.receiptId} ran the set to its end)"
+            else -> unclassified("baseline ${baseline.receiptId} stopped before showing it on s0")
         }
     }
 
-    /** Why a baseline did not run the set on `s0` (eligible, passed or failed with every failure identified, untruncated), or `null`. */
+    /** Why a baseline is no evidence (not eligible, not finished, an incomplete or unidentified test list), or `null`. */
     private fun unusable(baseline: Receipt): String? {
         val tests = baseline.tests
         return when {
             !baseline.testedInputs.eligible -> "is not eligible"
             baseline.outcome != Outcome.Passed && baseline.outcome != Outcome.Failed -> "is ${baseline.outcome.name.lowercase()}"
             tests == null || tests.truncated -> "recorded no complete test list"
-            tests.failed.isEmpty() && tests.passed.isEmpty() -> "executed no identified test"
             unidentified(baseline) -> "has failures the runner did not identify"
             else -> null
         }
     }
 
-    /** A red run with more failures counted than identified. */
+    /** The baseline executed every test it discovered (no fail-fast stop): its absence of a failure is evidence. */
+    private fun ranToEnd(baseline: Receipt): Boolean {
+        val counts = baseline.parsed ?: return false
+        return counts.discovered > 0 && counts.passed + counts.failed + counts.errors + counts.skipped >= counts.discovered
+    }
+
+    /** A red run with more failures counted than identified, a cut failure list, or a red outcome with none identified. */
     private fun unidentified(red: Receipt): Boolean {
         val identified = red.tests?.failed?.size ?: 0
         val counted = red.parsed?.let { it.failed + it.errors }
-        return if (counted == null) identified == 0 && red.outcome == Outcome.Failed else identified < counted
+        return when {
+            red.tests?.truncated == true && identified >= MAX_FAILED -> true
+            counted != null -> identified < counted
+            else -> identified == 0 && red.outcome == Outcome.Failed
+        }
     }
 
+    /** The limit kind of a baseline's start marker ([Baseline.begin]). */
+    internal const val BASELINE_STARTED: String = "baseline_started"
     private const val KEY_HEX = 16
     private const val MAX_TEXT = 200
-    private val FILE_LINE = Regex("""([\w.\-/\\]+\.\w+):\d+(:\d+)?""")
-    private val LINE_WORD = Regex("""\bline \d+""")
-    private val DURATION = Regex("""\b\d+(\.\d+)?\s?(ms|s|sec|secs|seconds)\b""")
-    private val HEX_ADDRESS = Regex("""0x[0-9a-fA-F]+""")
-    private val TIMESTAMP = Regex("""\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?""")
-    private val TEMP_PATH = Regex("""(/tmp/\S+|[A-Za-z]:\\[^\s]*\\Temp\\[^\s]*)""")
+    private const val ROOT = "<root>"
+    private val UNDER_ROOT = Regex("""<root>([\\/][^\s'"`:;,()\[\]]*)""")
 }
+
 
 public data class BaselineResult(
     val receipt: Receipt,
@@ -381,6 +409,9 @@ public class Baseline(
     private val scratch: ScratchPolicy = ScratchPolicy(),
 ) {
     internal var beforeDispatch: () -> Unit = {}
+
+    /** C3r: the whole seconds of active time a minutes limit leaves, read just before the process starts; `null` without one. */
+    internal var timeLeft: () -> Long? = { null }
     public suspend fun run(check: Check, contractVersion: Int, s0: CandidateId, timeoutSeconds: Long = 600): BaselineResult {
         require(timeoutSeconds > 0) { "timeoutSeconds must be positive" }
         val command = requireNotNull(check.command) { "check ${check.id} declares no command" }
@@ -405,7 +436,15 @@ public class Baseline(
         val cwd = command.cwd?.let { dir.resolve(it) } ?: dir
         val logsDir = layout.campaigns.resolve(ids.work.value).resolve("logs")
         Files.createDirectories(logsDir)
-        val spec = SpawnSpec(Command.Argv(command.argv), cwd, logsDir.resolve("baseline-${check.id}-$actionId.log"), EnvPolicy(inheritedNames = envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")), timeoutSeconds)
+        // P8.C.10 (C3r): the time a minutes limit leaves is read again here, after the export, just before the process starts.
+        val left = timeLeft()
+        if (left != null && left <= 0) {
+            limits += Limit("runner", io.astrolabe.budget.NO_ACTIVE_TIME)
+            val receipt = receipt(receiptId, check, contractVersion, s0, command.argv, command.cwd, null, Outcome.Unavailable, null, TestedInputs(inputs, InputStability.Isolated), null, limits)
+            return BaselineResult(receipt, null, dir, materialized)
+        }
+        val deadline = if (left == null) timeoutSeconds else minOf(timeoutSeconds, left)
+        val spec = SpawnSpec(Command.Argv(command.argv), cwd, logsDir.resolve("baseline-${check.id}-$actionId.log"), EnvPolicy(inheritedNames = envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")), deadline)
         var proc = try {
             beforeDispatch()
             runner.start(spec)
@@ -414,7 +453,7 @@ public class Baseline(
             val receipt = receipt(receiptId, check, contractVersion, s0, command.argv, command.cwd, null, Outcome.Unavailable, null, TestedInputs(inputs, InputStability.Isolated), null, limits)
             return BaselineResult(receipt, null, dir, materialized)
         }
-        val observed = io.astrolabe.tool.run.Executions.observeCancellable(os, proc, POLL_SLICE_SECONDS, timeoutSeconds)
+        val observed = io.astrolabe.tool.run.Executions.observeCancellable(os, proc, POLL_SLICE_SECONDS, deadline)
         proc = observed.proc
         val lost = observed.lost
         if (lost) limits += Limit("observation", "the process observation was lost; reconcile before retry")
@@ -501,7 +540,7 @@ public class Baseline(
     public fun begin(check: Check, contractVersion: Int, s0: CandidateId): Receipt {
         val command = requireNotNull(check.command) { "check ${check.id} declares no command" }
         return receipt(idGen.next("rcpt"), check, contractVersion, s0, command.argv, command.cwd, null, Outcome.Unavailable, null, TestedInputs(emptyMap(), InputStability.Isolated), null,
-            listOf(Limit("baseline_started", "the baseline began; a receipt of its end follows it unless it failed, threw or was interrupted")))
+            listOf(Limit(Regressions.BASELINE_STARTED, "the baseline began; a receipt of its end follows it unless it failed, threw or was interrupted")))
     }
 
     /** JUnit XML written by this invocation (mtime after the start): fresh, invocation-bound evidence (D-50). */

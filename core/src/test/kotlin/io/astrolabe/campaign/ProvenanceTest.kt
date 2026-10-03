@@ -269,7 +269,7 @@ class ProvenanceTest {
     }
 
     /** P8.C.10: `pytest -rA` output of `tests/test_discount.py`: `test_other` passes, `test_tier` passes or fails. */
-    private fun blastOutput(tierFails: Boolean): String = """
+    private fun blastOutput(tierFails: Boolean, message: String = "AssertionError: assert 4 == 5"): String = """
         ============================= test session starts ==============================
         collected 2 items
 
@@ -277,7 +277,7 @@ class ProvenanceTest {
 
         =========================== short test summary info ============================
         PASSED tests/test_discount.py::test_other
-        ${if (tierFails) "FAILED tests/test_discount.py::test_tier - AssertionError: assert 4 == 5" else "PASSED tests/test_discount.py::test_tier"}
+        ${if (tierFails) "FAILED tests/test_discount.py::test_tier - $message" else "PASSED tests/test_discount.py::test_tier"}
         ========================= ${if (tierFails) "1 passed, 1 failed" else "2 passed"} in 0.10s ==========================
     """.trimIndent() + "\n"
 
@@ -349,6 +349,57 @@ class ProvenanceTest {
         assertTrue(run.state?.reason.orEmpty().contains("new failures against the baseline at s0"), run.state?.reason)
     }
 
+
+    /**
+     * P8.C.10 F, two increments of an S1 plan in two cells: I1 runs the blast radius red — the failure changed since s0, so
+     * unclassified — and notes it in Open; I2, a new cell with nothing touched, proposes completion without a note, on a tree
+     * that [fixedInI2] or not.
+     */
+    private fun twoIncrements(fixedInI2: Boolean): S0Run = runBlocking {
+        val pytest = modelPytest("blast_out.txt", blastOutput(true, "AssertionError: assert 3 == 5"))
+        Store.open(stateRoot, repo.git, clock).use { store ->
+            val contracts = Contracts(SqliteContractRepository(store, clock), idGen, clock)
+            val derived = contracts.deriveS0(request.work, request.attempt, request.text, Atlas.build(repo.root), Config(), policy.tokens).contract
+            contracts.open(derived.copy(shape = Shape.S1, scope = derived.scope.copy(writePaths = listOf("src/", "tests/")),
+                requirements = listOf(Requirement("R1", "a", listOf("AC-1"), authorityRef = derived.requests.single().id), Requirement("R2", "b", listOf("AC-2"), authorityRef = derived.requests.single().id)),
+                acceptance = listOf(Acceptance.Run("AC-1", printing, Origin.User), Acceptance.Run("AC-2", printing, Origin.User))))
+        }
+        val plan = """{"increments":[{"id":"I1","requirements":["R1"],"accept":["AC-1"],"write_scope":["src/"],"expected_files":1,"produces":"artifact"},""" +
+            """{"id":"I2","requirements":["R2"],"accept":["AC-2"],"write_scope":["src/"],"expected_files":1,"depends_on":["I1"],"produces":"artifact"}]}"""
+        val controller = Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all, defaults = alwaysPlan), clock, idGen)
+        controller.open(repo.root, request, policy).use { c ->
+            c.checks.replace(io.astrolabe.verify.Check(Checks.TESTS_BLAST, io.astrolabe.verify.CheckKind.Unit, io.astrolabe.verify.Selector.Blast, io.astrolabe.evidence.Closure.Unknown,
+                io.astrolabe.verify.CostClass.Slow, io.astrolabe.verify.Trigger.StepBoundary, command = Command(listOf(pytest, "-q"))))
+            val replies = listOf<Pair<(() -> Unit)?, Scripted>>(
+                null to Scripted.Reply(listOf(say("planning two increments"), call("p1", "task", """{"op":"propose","kind":"plan","proposal":$plan}"""))),
+                null to Scripted.Reply(listOf(say("plan ready"))),
+                { repo.write("blast_out.txt", blastOutput(true)); Unit } to Scripted.Reply(listOf(call("v1", "verify", """{"what":"tests","selection":"ids","ids":["${Checks.TESTS_BLAST}"]}"""))),
+                null to Scripted.Reply(listOf(call("s1", "state", """{"op":"patch","patch":[{"open.add":{"text":"${Checks.TESTS_BLAST} red: tests/test_discount.py, tracked"}},{"next":"propose completion"}]}"""), say("done"))),
+                { if (fixedInI2) repo.write("blast_out.txt", blastOutput(false)); Unit } to Scripted.Reply(listOf(say("I2 done"))),
+            )
+            val turns = replies.map { (before, reply) -> ScriptedModel.Turn({ true }, { before?.invoke(); reply }) }
+            controller.run(c, CellModel(FakeAdapter(ScriptedModel(turns)), FakeProfiles.main, HeuristicEstimator(), maxOutputTokens = 4_000))
+        }
+    }
+
+    @Test
+    fun `a second increment is not refused for the red the first acknowledged, and a new cell shows it fixed by the stop's rerun`() {
+        val same = twoIncrements(fixedInI2 = false)
+        assertEquals(CampaignOutcome.Completed, same.outcome, same.state?.reason)
+        assertEquals(listOf("I1", "I2"), same.state!!.graph.increments.map { it.id })
+        val held = assertNotNull(same.finish)
+        assertTrue(held.openItems.any { it.startsWith("${Checks.TESTS_BLAST}: failure not classified") }, held.openItems.toString())
+        assertEquals(ProvenanceClass.Unverified, held.provenanceClass)
+    }
+
+    @Test
+    fun `a new cell with nothing touched shows the earlier red fixed by the stop's own rerun of its command`() {
+        val fixed = twoIncrements(fixedInI2 = true)
+        assertEquals(CampaignOutcome.Completed, fixed.outcome, fixed.state?.reason)
+        val finish = assertNotNull(fixed.finish)
+        assertTrue(finish.openItems.none { it.startsWith("${Checks.TESTS_BLAST}: ") } && finish.notVerified.none { it.startsWith(Checks.TESTS_BLAST) }, finish.toString())
+        assertEquals(ProvenanceClass.Independent, finish.provenanceClass)
+    }
 
     /** A `pytest` the model can run that prints [output], committed with [text] in it. */
     private fun modelPytest(output: String, text: String): String {

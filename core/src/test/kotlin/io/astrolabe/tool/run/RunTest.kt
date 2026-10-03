@@ -1403,6 +1403,34 @@ class RunTest {
     }
 
     @Test
+    fun `the stop reruns a red command once with the closure it tested, so a run that rewrites it cannot certify`() = runTest {
+        repo.write("pytest_pass.txt", recorded("pytest-pass.txt"))
+        val checks = io.astrolabe.verify.Checks.empty().also { coherence.register(it) }
+        val receipts = SqliteReceipts(store, clock)
+        val scheduler = Scheduler(checks, workspace, registry, stamper, receipts, SqliteAliases(store, clock), idGen, ids, clock)
+        val verify = Verify(checks, scheduler, null, null, null, workspace, TrustedLocalRunner(os), os, stamper, store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, contracts, stateRoot.resolve("logs"))
+        // The red ran a command over src/a.py whose teardown rewrites it; the blast radius has since moved to src/b.py.
+        val rewrites = io.astrolabe.contract.Command(if (windows) listOf("cmd.exe", "/d", "/s", "/c", "type pytest_pass.txt & echo x>>src\\a.py") else listOf("/bin/sh", "-c", "cat pytest_pass.txt; echo x >> src/a.py"))
+        val red = io.astrolabe.verify.Check(io.astrolabe.verify.Checks.TESTS_BLAST, io.astrolabe.verify.CheckKind.Unit, io.astrolabe.verify.Selector.Blast,
+            io.astrolabe.evidence.Closure.Known(setOf("src/a.py")), io.astrolabe.verify.CostClass.Slow, io.astrolabe.verify.Trigger.StepBoundary, command = rewrites)
+        checks.register(red)
+        val failure = io.astrolabe.evidence.FailedTest(io.astrolabe.verify.Regressions.key(TestIdentity(file = "tests/t.py", name = "t")), "tests/t.py::t", "fp", "assert 1 == 2")
+        scheduler.runCheck(red, 1) {
+            io.astrolabe.verify.Executed(rewrites.argv, null, false, 1, io.astrolabe.evidence.Outcome.Failed, io.astrolabe.evidence.Counts(failed = 1, discovered = 1), null,
+                tests = io.astrolabe.evidence.TestOutcomes(listOf(failure)))
+        }
+        checks.replace(red.copy(command = printing("pytest_pass.txt"), inputClosure = io.astrolabe.evidence.Closure.Known(setOf("src/b.py"))))
+        repo.write("README.md", "# moved\n")
+        verify.onStop(emptyList())
+        val history = receipts.forCheck(io.astrolabe.verify.Checks.TESTS_BLAST)
+        val rerun = history.last()
+        assertEquals(rewrites.argv to io.astrolabe.evidence.Closure.Known(setOf("src/a.py")), rerun.command to rerun.inputClosure, "the red's own command and closure")
+        assertTrue("src/a.py" in rerun.testedInputs.mutatedDuringCheck, rerun.testedInputs.toString())
+        assertTrue(history.any { r -> r.limits.any { it.kind == io.astrolabe.verify.Regressions.RERUN } }, "begun on record")
+        assertEquals(1, history.count { it.stampBefore == rerun.stampBefore && !io.astrolabe.verify.Regressions.isMarker(it) }, "one run, no flaky retry")
+    }
+
+    @Test
     fun `recognition compares normalized commands exactly`() {
         assertEquals(listOf("pytest", "-q"), CommandMatch.tokens(listOf("pytest  -q"), shell = true, windows = false))
         assertEquals(listOf("pytest", "tests/test a.py"), CommandMatch.tokens(listOf("pytest \"tests/test a.py\""), shell = true, windows = false))

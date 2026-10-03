@@ -110,6 +110,9 @@ internal object JUnitXml {
             var caseOutcome = TestOutcome.Passed
             var caseMessage: String? = null
             var pendingText: StringBuilder? = null
+            // P8.C.10: the whole failure (attributes and body), unredacted, for its comparison fingerprint only.
+            var caseHead: String? = null
+            var caseDetail: String? = null
             while (reader.hasNext()) {
                 when (reader.next()) {
                     XMLStreamConstants.START_ELEMENT -> when (reader.localName) {
@@ -132,7 +135,8 @@ internal object JUnitXml {
                                 else -> TestOutcome.Skipped
                             }
                             caseMessage = reader.attr("message") ?: reader.attr("type")
-                            if (caseMessage == null) pendingText = StringBuilder()
+                            caseHead = listOfNotNull(reader.attr("type"), reader.attr("message")).joinToString(NEWLINE)
+                            pendingText = StringBuilder()
                         }
                         else -> Unit
                     }
@@ -145,6 +149,7 @@ internal object JUnitXml {
                             if (caseMessage == null) {
                                 caseMessage = pendingText?.toString()?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()
                             }
+                            caseDetail = listOfNotNull(caseHead?.ifBlank { null }, pendingText?.toString()?.trim()?.ifBlank { null }).joinToString(NEWLINE).ifBlank { null }
                             pendingText = null
                         }
                         "testcase" -> {
@@ -165,11 +170,14 @@ internal object JUnitXml {
                                     outcome = caseOutcome,
                                     message = caseMessage,
                                     durationMillis = caseTime,
+                                    detail = caseDetail,
                                 )
                             }
                             caseName = null
                             caseClass = null
                             caseMessage = null
+                            caseHead = null
+                            caseDetail = null
                             caseTime = null
                         }
                         "testsuite" -> {
@@ -201,3 +209,6 @@ internal object JUnitXml {
         runCatching { setProperty(XMLInputFactory.IS_COALESCING, true) }
     }
 }
+
+/** The separator of a failure's attribute and body lines in [TestResult.detail]. */
+private const val NEWLINE: String = "\n"
