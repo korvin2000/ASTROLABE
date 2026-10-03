@@ -128,6 +128,12 @@ public class Verify(
             checker?.beforeDispatch = value
             baseline?.beforeDispatch = value
         }
+
+    /** C3r: the whole seconds of active time a task's minutes limit leaves, read at each dispatch; `null` without one. */
+    internal var timeLeft: () -> Long? = { null }
+
+    /** [seconds] cut to [left], the active time a minutes limit leaves (C3r). */
+    private fun cut(seconds: Long, left: Long?): Long = if (left == null) seconds else minOf(seconds, left)
     init {
         require(ids.context != null) { "verify runs inside a cell: ids.context is its lineage" }
         require(timeoutSeconds > 0 && checkerTimeBoxSeconds > 0 && checkerFallbackTimeBoxSeconds > 0) { "timeouts must be positive" }
@@ -232,7 +238,9 @@ public class Verify(
         val runner = checker ?: return refused(args, "unavailable", "no end-of-turn checker is configured for this cell")
         val paths = args.paths?.takeIf { it.isNotEmpty() } ?: touched
         if (paths.isEmpty()) return refused(args, "ok", "nothing touched: no check to run")
-        val results = kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { runner.run(paths, checkerTimeBoxSeconds, checkerFallbackTimeBoxSeconds) }
+        val left = timeLeft()
+        if (left != null && left <= 0) return refused(args, "denied", io.astrolabe.budget.NO_ACTIVE_TIME)
+        val results = kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { runner.run(paths, cut(checkerTimeBoxSeconds, left), cut(checkerFallbackTimeBoxSeconds, left)) }
         if (results.isEmpty()) return refused(args, "unavailable", "no type or lint runner is registered for this repository")
         val receipts = results.map { scheduler.record(it, contract.version) }
         val lines = results.zip(receipts).map { (result, receipt) -> result.line(scheduler.aliasOf(receipt.receiptId)) }
@@ -276,7 +284,9 @@ public class Verify(
         val runner = baseline ?: return refused(args, "unavailable", "no baseline is configured for this cell (captured initial candidate missing)")
         val stamp = s0 ?: return refused(args, "unavailable", "the initial candidate stamp s0 is unknown")
         val suite = checks[Checks.FULL] ?: checks.all().firstOrNull { it.kind == CheckKind.Full } ?: return refused(args, "unavailable", "no full-suite check is registered; the baseline has nothing to run")
-        val result = runner.run(suite, contract.version, stamp, timeoutSeconds)
+        val left = timeLeft()
+        if (left != null && left <= 0) return refused(args, "denied", io.astrolabe.budget.NO_ACTIVE_TIME)
+        val result = runner.run(suite, contract.version, stamp, cut(timeoutSeconds, left))
         val receipt = result.receipt
         val line = ChecksRender.line(lineOf(suite, receipt, null, scheduler.aliasOf(receipt.receiptId)))
         val body = "baseline @${stamp.hash8.take(4)}: $line" + (result.ledger?.let { "\n" + it.render() } ?: "\nno pre-existing-failure ledger: the baseline produced no usable evidence (${receipt.outcome.name.lowercase()})")
@@ -401,16 +411,22 @@ public class Verify(
         if (cwd == null || !Files.isDirectory(cwd)) {
             return Invocation(Executed(command.argv, command.cwd, false, null, Outcome.Denied, null, null, listOf("working directory refused")), "denied — working directory must be a directory inside the verification workspace")
         }
+        // C3r: the check's deadline is cut at dispatch to the active time a minutes limit leaves; with none left it is not run.
+        val left = timeLeft()
+        if (left != null && left <= 0) {
+            return Invocation(Executed(command.argv, command.cwd, false, null, Outcome.NotRun, null, null, listOf(io.astrolabe.budget.NO_ACTIVE_TIME)), "not run — ${io.astrolabe.budget.NO_ACTIVE_TIME}")
+        }
+        val deadline = cut(timeoutSeconds, left)
         val reports = JUnitReports.forCommand(cwd, command.argv, actionId)
         val proc = try {
             beforeDispatch()
             reports?.prepare(logsDir.resolve("reports-$actionId"))
-            runner.start(SpawnSpec(Command.Argv(command.argv), cwd, logPath(check.id, actionId), EnvPolicy(inheritedNames = envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")), timeoutSeconds))
+            runner.start(SpawnSpec(Command.Argv(command.argv), cwd, logPath(check.id, actionId), EnvPolicy(inheritedNames = envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")), deadline))
         } catch (failure: IOException) {
             val reason = "cannot start ${command.argv.first()}: ${failure.message}"
             return Invocation(Executed(command.argv, command.cwd, false, null, Outcome.Unavailable, null, null, listOf(reason)), "unavailable — $reason")
         }
-        val observed = Executions.observeCancellable(os, proc, POLL_SLICE_SECONDS, timeoutSeconds)
+        val observed = Executions.observeCancellable(os, proc, POLL_SLICE_SECONDS, deadline)
         // D-390: the capture is a live stream, so a key block it opens and never closes stays hidden in the stored log.
         val safeLog = redaction.applyLive(observed.output, ContentClass.ReusableEvidence, openAtEnd = false)
         val blob = blobs.put(safeLog.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
