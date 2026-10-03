@@ -355,6 +355,10 @@ public class Verify(
                     runner.run(check.copy(command = io.astrolabe.contract.Command(red.command, red.cwd)), contract.version, stamp, timeoutSeconds).receipt
                 } catch (failure: IOException) {
                     null
+                } catch (failure: IllegalStateException) {
+                    null
+                } catch (failure: IllegalArgumentException) {
+                    null
                 }
             }
         }
