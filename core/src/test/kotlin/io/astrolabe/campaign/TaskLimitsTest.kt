@@ -326,6 +326,27 @@ class TaskLimitsTest {
         assertNull(recorder.ofType<AgentEvent.Budget.Spent>().last().status.maxRequests)
     }
 
+    @Test
+    fun `the cell boundary takes its seeds from the attempt's seed rule`() = runBlocking<Unit> {
+        // D-398 at the cell boundary: I1's first cell reads a.py without naming it in Next or Focus and runs out of turns;
+        // Seeds v1 carries nothing into the continuation, Seeds v2 carries the recent read.
+        suspend fun continuationK(rule: io.astrolabe.context.SeedRule): String {
+            val work = CampaignRequest(WorkId("W-c3-seed-${rule.wire}"), AttemptId("a1"), request.text)
+            seed(work, defaults = io.astrolabe.Defaults(turnsPerCell = 5))
+            val ctl = Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all, defaults = alwaysPlan.copy(seedRule = rule)), clock, idGen)
+            return ctl.open(repo.root, work, CampaignPolicy(Tokens(400_000))).use { c ->
+                val look = (1..4).map { Scripted.Reply(listOf<Item>(say("looking"), io.astrolabe.cell.CellFixture.Companion.tree("t-$it"))) }
+                val adapter = FakeAdapter(ScriptedModel.of(*(planning() + Scripted.Reply(listOf<Item>(say("reading"), read("r-a", "src/a.py"))) + look).toTypedArray()))
+                ctl.run(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator()), maxCells = 2)
+                assertEquals(2, c.state!!.cells.count { it.increment == "I1" }, "a continuation cell ran")
+                adapter.calls[7].request.segments.filter { it.kind == io.astrolabe.provider.SegmentKind.K }
+                    .flatMap { it.items.filterIsInstance<io.astrolabe.provider.Message>() }.joinToString("\n") { it.text }
+            }
+        }
+        assertFalse("SEED src/a.py" in continuationK(io.astrolabe.context.SeedRule.V1))
+        assertTrue("SEED src/a.py" in continuationK(io.astrolabe.context.SeedRule.V2))
+    }
+
     @TempDir
     lateinit var stateRoot: Path
 
@@ -356,10 +377,10 @@ class TaskLimitsTest {
         seed(request)
     }
 
-    private fun seed(work: CampaignRequest, shape: Shape = Shape.S1) {
+    private fun seed(work: CampaignRequest, shape: Shape = Shape.S1, defaults: io.astrolabe.Defaults = io.astrolabe.Defaults()) {
         Store.open(stateRoot, repo.git, clock).use { store ->
             val contracts = Contracts(SqliteContractRepository(store, clock), idGen, clock)
-            val derived = contracts.deriveS0(work.work, work.attempt, work.text, Atlas.build(repo.root), Config(), Tokens(400_000)).contract
+            val derived = contracts.deriveS0(work.work, work.attempt, work.text, Atlas.build(repo.root), Config(defaults = defaults), Tokens(400_000)).contract
             val ref = derived.requests.single().id
             contracts.open(derived.copy(
                 shape = shape,
