@@ -210,10 +210,13 @@ public class CellBudget @JvmOverloads constructor(
         null, LimitDecision.Within -> null
         is LimitDecision.Reserve -> if (spend.reportOrVerify) null else Admission.Refused(spend, estimate, "reserve reached: ${decision.reason}")
         is LimitDecision.Exhausted -> {
-            events?.let { e -> ids?.let { e.emit(AgentEvent.Budget.Exhausted(it, "task ${decision.kind.wire}")) } }
+            // One event per spent limit: the refused generation turn and the verify turn it falls back to are one stop.
+            if (exhaustedReported.add(decision.kind)) events?.let { e -> ids?.let { e.emit(AgentEvent.Budget.Exhausted(it, "task ${decision.kind.wire}")) } }
             Admission.Refused(spend, estimate, decision.reason)
         }
     }
+
+    private val exhaustedReported: MutableSet<LimitKind> = java.util.Collections.synchronizedSet(HashSet())
 
     private fun of(partition: Partition): Reservations = when (partition) {
         Partition.Working -> working

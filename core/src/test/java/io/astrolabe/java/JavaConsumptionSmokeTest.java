@@ -6,7 +6,6 @@ import io.astrolabe.Config;
 import io.astrolabe.Defaults;
 import io.astrolabe.Project;
 import io.astrolabe.budget.LimitRule;
-import io.astrolabe.budget.Reserves;
 import io.astrolabe.budget.TaskLimits;
 import io.astrolabe.budget.Tokens;
 import io.astrolabe.campaign.CampaignOutcome;
@@ -280,7 +279,7 @@ class JavaConsumptionSmokeTest {
         assertEquals(0L, packet.getReserveTokens());
         // C3: the policy's v1 constructors stay; limits and the balance profile are plain Java values.
         CampaignPolicy v1 = new CampaignPolicy(Tokens.of(1_000), null, false, Collections.emptyList());
-        assertEquals(TaskLimits.NONE, v1.getLimits());
+        assertEquals(null, v1.getLimits());
         assertEquals(null, v1.getBalance());
         Config config = new Config(d, Collections.emptyMap(), d.getProfileRoles(), d.getMode(), d.getExecutionMode(), d.getDClass(),
                 d.getIntegrityApproval(), d.getUnknownOutcomeReconciliation(), d.getCeiling(), null, new io.astrolabe.auth.RedactionConfig(),
@@ -294,7 +293,7 @@ class JavaConsumptionSmokeTest {
         CampaignPolicy policy = new CampaignPolicy(Tokens.of(1_000_000), null, false, Collections.emptyList(), limits, BalanceProfile.Economy);
         assertEquals(480, policy.getLimits().getMaxMinutes());
         assertEquals(BalanceProfile.Economy, policy.getBalance());
-        assertEquals(3, LimitRule.reserveRequests(3_000, new Reserves()));
+        assertEquals(3, LimitRule.reserveRequests(3_000));
         TaskLimits requestsOnly = new TaskLimits(null, null, 100);
         assertTrue(requestsOnly.getAny());
         assertEquals(BalanceProfile.Thorough, new Config().withBalance(BalanceProfile.Thorough).getBalance());

@@ -289,11 +289,12 @@ public data class CampaignPolicy @JvmOverloads constructor(
      */
     val hostNotes: List<String> = emptyList(),
     /**
-     * The user's hard limits on this task (plan §4.6, C3): money, active minutes, model requests. Read at every open —
-     * the start and each resume — and only from here: the model and the harness never raise them. A campaign a limit
-     * stopped resumes, the same attempt, when it is reopened with limits that leave room again.
+     * The user's limits on this task (plan §4.6, C3): money, active minutes, model requests. `null` keeps the limits kept
+     * with the campaign (none on a first open); [TaskLimits.NONE] lifts them all; any other value replaces them. Only the
+     * host sets them — the model and the harness never raise one. A campaign a limit stopped continues, the same attempt,
+     * when it is reopened with limits that leave room again.
      */
-    val limits: TaskLimits = TaskLimits.NONE,
+    val limits: TaskLimits? = null,
     /**
      * The balance profile chosen for this task (plan §4.6, C3); `null` takes [Config.balance]. It is frozen with the
      * attempt at its first open (invariant 12): a reopen naming another one changes nothing until the next attempt.
@@ -360,22 +361,14 @@ public class OpenedCampaign internal constructor(
     public val frozenNotes: List<Note> = emptyList(),
     /** The host's instructions (D-345), pinned as host notes in every main-line cell. */
     public val hostNotes: List<String> = emptyList(),
-    /** The user's limits on this task as the host gave them at this open (C3). */
+    /** The user's limits on this task in force at this open: the host's, or the ones kept with the campaign (C3). */
     public val limits: TaskLimits = TaskLimits.NONE,
 ) : AutoCloseable {
     /** Cancels this campaign: no further dispatch, no publication; effects already made are archived (D-26). */
     public val cancellation: Cancellation = Cancellation()
 
-    /** The controller's run in progress over this campaign, for the minutes limit (C3). */
-    @Volatile
-    internal var limitSession: LimitSession? = null
-
-    /** The request count the last `budget.spent` reported, and whether the limits' reserve was announced (C3). */
-    @Volatile
-    internal var limitRequestsSeen: Int = -1
-
-    @Volatile
-    internal var limitReserveSeen: Boolean = false
+    /** The task limits' running state for this open: session, latched reserve, a cell's limit stop, counters (C3). */
+    internal val limitState: LimitState = LimitState()
 
     /** Why dispatch or publication is refused now: cancellation first, then the lease; `null` when authorized. */
     public fun refusal(): String? = cancellation.reason?.let { "cancelled: $it" } ?: lease?.let { leases.authority(it).refusal() }
@@ -428,6 +421,9 @@ public data class S0Run @JvmOverloads constructor(
     val limit: LimitStop? = null,
 ) {
     public val outcome: CampaignOutcome? get() = state?.outcome
+
+    /** Which ceiling ended a `budget_exhausted` campaign (C3); `null` for every other ending. */
+    public val budgetStop: BudgetStop? get() = state?.budgetStop
 }
 
 /**
@@ -514,6 +510,8 @@ public class Controller @JvmOverloads public constructor(
         val registry = VersionRegistry(workspace)
         val stamper = Stamper(workspace, EnvFingerprint.compute(env))
         val journal = Journal(store, clock)
+        // C3: a run that died mid-session is closed at its last event before this open writes anything (minutes limit).
+        LimitSessions.closeDangling(journal, ids, idGen)
         // P4.1: the store-backed base; with no notes it behaves as the empty base (every search complete and empty).
         val negatives = KbNegatives(journal, idGen, clock)
         val kb = StoreKb(store, request.work, registry::version) { negatives.retrievalMiss(ids, null, it) }
@@ -574,14 +572,30 @@ public class Controller @JvmOverloads public constructor(
         if (state?.phase == CampaignPhase.Ended && state.outcome?.resumable == true) {
             state = Lifecycle.apply(state, contract, Transition.Resumed("reopened after ${state.outcome?.wire}")).also(campaigns::save)
         }
-        // C3: a task limit's stop resumes, the same attempt, only on the host's limits leaving room again.
-        if (state?.phase == CampaignPhase.Ended && state.outcome == CampaignOutcome.BudgetExhausted && state.reason?.startsWith(TaskLimitControl.LIMIT_REACHED) == true) {
-            val spend = limitControl.spend(store, journal, request.work, policy.limits, null)
-            if (LimitRule.decide(policy.limits, spend, contract.budget.reserves) == LimitDecision.Within) {
-                val raised = "${LimitSessions.RAISED}: ${policy.limits}; spent ${spend.requests} requests, ${spend.elapsedMillis} ms active" +
+        // C3 (K): the limits in force — the host's when it names them, else the ones kept with the campaign.
+        val limits = TaskLimitControl.atOpen(journal, ids, idGen, clock, policy.limits)
+        val budgetStop = state?.takeIf { it.phase == CampaignPhase.Ended && it.outcome == CampaignOutcome.BudgetExhausted }?.budgetStop
+        if (budgetStop == BudgetStop.CellCap) {
+            state = Lifecycle.apply(checkNotNull(state), contract, Transition.LimitRaised("reopened after the run's cell cap: the cap counts per run")).also(campaigns::save)
+        }
+        // C3: a task limit's stop continues the same attempt only once the host's limits leave room again — priced at the
+        // call it was refused at — and says which limit still holds it otherwise.
+        if (budgetStop?.taskLimit == true) {
+            val spend = limitControl.spend(store, journal, request.work, limits)
+            val decision = LimitRule.decide(limits, spend, LimitRule.nextCost(spend, TaskLimitControl.recorded(journal, request.work)?.status?.nextCallCost))
+            if (decision == LimitDecision.Within) {
+                val raised = "${LimitSessions.RAISED}: $limits; spent ${spend.requests} requests, ${spend.elapsedMillis} ms active" +
                     (spend.cost?.let { ", ${it.amount.toPlainString()} ${it.currency} (${spend.costBasis.wire})" } ?: "")
-                state = Lifecycle.apply(state, contract, Transition.LimitRaised(raised)).also(campaigns::save)
+                state = Lifecycle.apply(checkNotNull(state), contract, Transition.LimitRaised(raised)).also(campaigns::save)
                 journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Reconcile, text = raised, at = clock.instant()))
+            } else {
+                val (kind, why) = when (decision) {
+                    is LimitDecision.Reserve -> decision.kind to decision.reason
+                    is LimitDecision.Exhausted -> decision.kind to decision.reason
+                    LimitDecision.Within -> error("unreachable")
+                }
+                journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Reconcile, text = "${LimitSessions.STILL} (${kind.wire}) at $limits: $why", at = clock.instant()))
+                events?.emit(AgentEvent.Budget.LimitReached(ids, kind.wire, TaskLimitControl.STOPPED_STAGE, why, LimitRule.status(limits, spend)))
             }
         }
 
@@ -678,7 +692,7 @@ public class Controller @JvmOverloads public constructor(
         return OpenedCampaign(
             request, ids, store, os, workspace, registry, stamper, dirty, shadow, s0, atlas, derived.sniffed, commands,
             contracts, checks, rules, prime, kb, journal, intents, campaigns, reconciliation, prescan, impactPrescan, shape, state, refusal, owned,
-            frozen, lease, leases, frozenNotes = Notes(store).all(), hostNotes = policy.hostNotes.filter { it.isNotBlank() }, limits = policy.limits,
+            frozen, lease, leases, frozenNotes = Notes(store).all(), hostNotes = policy.hostNotes.filter { it.isNotBlank() }, limits = limits,
         ).also { plugged[it] = layered }
     }
 
@@ -697,10 +711,12 @@ public class Controller @JvmOverloads public constructor(
         syntax: SyntaxCheck = CliSyntax(campaign.os, campaign.workspace.root, campaign.store.layout.root.resolve("logs"), python = null, node = null),
     ): S0Run {
         val session = limitControl.begin(campaign)
+        // C3: the host's answers are a person's wait, not active time.
+        val host = limitControl.pausing(campaign, authority)
         try {
             behaviourSnapshot(campaign)
-            val result = spans?.span(Phase.Plan, campaign.ids) { span -> runS0(campaign, model, authority, syntax, span) }
-                ?: runS0(campaign, model, authority, syntax, null)
+            val result = spans?.span(Phase.Plan, campaign.ids) { span -> runS0(campaign, model, host, syntax, span) }
+                ?: runS0(campaign, model, host, syntax, null)
             return finish(campaign, result)
         } finally {
             limitControl.end(campaign, session)
@@ -741,11 +757,12 @@ public class Controller @JvmOverloads public constructor(
         val shape = (campaign.shape as? ShapeDecision.Selected)?.shape
         if (shape != Shape.S1 && shape != Shape.S2 && shape != Shape.S3) return runS0(campaign, model, authority, syntax)
         val session = limitControl.begin(campaign)
+        val host = limitControl.pausing(campaign, authority)
         try {
             behaviourSnapshot(campaign)
             val packets = ArrayList<ResultPacket>()
-            val result = spans?.span(Phase.Plan, campaign.ids) { span -> runS1(campaign, model, authority, syntax, span, maxCells, packets) }
-                ?: runS1(campaign, model, authority, syntax, null, maxCells, packets)
+            val result = spans?.span(Phase.Plan, campaign.ids) { span -> runS1(campaign, model, host, syntax, span, maxCells, packets) }
+                ?: runS1(campaign, model, host, syntax, null, maxCells, packets)
             return finish(campaign, result, packets)
         } finally {
             limitControl.end(campaign, session)
@@ -804,7 +821,7 @@ public class Controller @JvmOverloads public constructor(
         val pendingSplits = SqliteSplitRequests(c.store, idGen, clock).forPlanRole(c.ids.work).filter { split ->
             c.state?.graph?.increments?.any { it.id == split.split.increment && split.cell in it.cells && it.status !in setOf(IncrementStatus.Verified, IncrementStatus.Cancelled) } == true
         }
-        if (pendingSplits.isNotEmpty()) plan(c, model, authority, syntax, span, packets, pendingSplits)?.let { return S0Run(limitStop(c, authority) ?: c.advance(it), null, null, null) }
+        if (pendingSplits.isNotEmpty()) plan(c, model, authority, syntax, span, packets, pendingSplits)?.let { return S0Run(onLimit(c, authority) ?: c.advance(it), null, null, null) }
         reassessBlocked(c, authority)
         val opened = checkNotNull(c.state)
         check(opened.phase == CampaignPhase.Running && opened.running == null) { "run needs a reconciled campaign with no running cell; it is ${opened.phase}" }
@@ -819,10 +836,10 @@ public class Controller @JvmOverloads public constructor(
                 c.journal.append(JournalEvent(idGen.next("ev"), c.ids, null, JournalKind.Boundary,
                     text = "plan cell skipped: ${PlanNeed.reason(c.contract)}; single increment ${ShapeSelector.SINGLE}", at = clock.instant()))
             } else plan(c, model, authority, syntax, span, packets)?.let { stop ->
-                // C3: a plan cell the task limits ended stops on the limit, so a raised limit resumes it.
-                limitStop(c, authority)?.let { return S0Run(it, null, null, null) }
+                // C3: a plan cell the task limits ended stops on the limit, so a raised limit resumes it; any other stop keeps its cause.
+                onLimit(c, authority)?.let { return S0Run(it, null, null, null) }
                 val outcome = if (c.refusal() != null) stopOutcome(c) else stop.outcome
-                return S0Run(c.advance(Transition.Stopped(outcome, stop.reason)), null, null, null)
+                return S0Run(c.advance(Transition.Stopped(outcome, stop.reason, budget = stop.budget.takeIf { outcome == CampaignOutcome.BudgetExhausted })), null, null, null)
             }
             // §3.5 select_shape(contract, impact, plan): the S3 branch reads the admitted plan's records (D-183, P5.8.1).
             s3 = S3Intake.admit(c, writerEstimates(c, model), CAPABILITIES, events, idGen, clock).takeIf { it.units.isNotEmpty() }
@@ -872,7 +889,8 @@ public class Controller @JvmOverloads public constructor(
             // reporting. Regression refresh and the final acceptance above are the harness's own work and still run.
             limitStop(c, authority)?.let { return last.copy(state = it) }
             if (cells >= maxCells) {
-                return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.BudgetExhausted, "the campaign's $maxCells cells are spent with ${unverified.size} requirements unverified")))
+                return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.BudgetExhausted,
+                    "the run's $maxCells cells are spent with ${unverified.size} requirements unverified; reopen the task to continue with a fresh cap", budget = BudgetStop.CellCap)))
             }
             attempts.exhausted(c.ids.work, ready.id, contract.budget.attempts)?.let {
                 return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, it)))
@@ -913,11 +931,11 @@ public class Controller @JvmOverloads public constructor(
             }
             when (compiled) {
                 is Compiled.Ready -> Unit
-                is Compiled.NeedsRescoping -> return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "NEEDS_RESCOPING_OR_LARGER_PROFILE for ${ready.id}: ${compiled.reason} — ask the plan role for an increment_split")), compiled = compiled)
+                is Compiled.NeedsRescoping -> return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "NEEDS_RESCOPING_OR_LARGER_PROFILE for ${ready.id}: ${compiled.reason} — ask the plan role for an increment_split${profileBound(c, cellModel)}")), compiled = compiled)
                 is Compiled.NeedsEvidence -> return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, "NEEDS_MORE_EVIDENCE for ${ready.id}: ${compiled.missing}")), compiled = compiled)
             }
             // FX-32: an unaffordable tier is refused, never clamped; the campaign stops on the router's options.
-            routing.refused?.let { return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.BudgetExhausted, it.reason)), compiled = compiled) }
+            routing.refused?.let { return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.BudgetExhausted, it.reason, budget = BudgetStop.ContractBudget)), compiled = compiled) }
             routing.selected?.let { tiers[ready.id] = it.tier }
             lastKey = routing.selected?.let { CellOrder.key(it.tier) }
             val cellId = ContextId(idGen.next("cell"))
@@ -966,7 +984,7 @@ public class Controller @JvmOverloads public constructor(
             if (splits.isNotEmpty() && exit !is CellExit.Completed && cells < maxCells && c.refusal() == null) {
                 limitStop(c, authority)?.let { return last.copy(state = it) }
                 cells += 1
-                plan(c, model, authority, syntax, span, packets, splits)?.let { return last.copy(state = limitStop(c, authority) ?: c.advance(it)) }
+                plan(c, model, authority, syntax, span, packets, splits)?.let { return last.copy(state = onLimit(c, authority) ?: c.advance(it)) }
                 s3 = null
                 continue
             }
@@ -1044,13 +1062,23 @@ public class Controller @JvmOverloads public constructor(
     /**
      * C3 (plan §4.6) at a cell boundary: once the task limits leave no working part, nothing more is dispatched. The
      * tree is checkpointed, the verified increments are re-accepted on current receipts (the ordinary acceptance, nothing
-     * re-executed), the best verified candidate is chosen ([BestCandidate]) and named — the user's tree is never replaced
-     * — and the campaign ends `budget_exhausted` with the reserve kept. `null` when the limits leave room, none is set,
-     * or a cancellation or a lost lease decides the stop instead.
+     * re-executed) and the best verified candidate is named — the latest stamp the acceptance verified on the main line,
+     * with what was verified there, what only at an earlier stamp and what a decider accepted without verification; the
+     * user's tree is never replaced. The campaign ends `budget_exhausted` with its [BudgetStop] and the reserve kept.
+     * `null` when the limits leave room, or a cancellation or a lost lease decides the stop instead.
      */
+    /** C3: when the attempt's balance profile narrowed [model]'s window, the rescoping stop names that bound. */
+    private fun profileBound(c: OpenedCampaign, model: CellModel): String {
+        val window = c.attempt.config.profiles[model.profile.id]?.capabilities?.contextLimitTokens ?: return ""
+        val bound = model.profile.capabilities.contextLimitTokens
+        return if (bound >= window) "" else " (the ${c.attempt.config.balance.wire} balance profile bounds ${model.profile.id}'s window to $bound of $window tokens; a Balanced task uses all of it)"
+    }
+
+    private suspend fun onLimit(c: OpenedCampaign, authority: Authority): CampaignState? = if (c.limitState.block == null) null else limitStop(c, authority)
+
     private suspend fun limitStop(c: OpenedCampaign, authority: Authority): CampaignState? {
         if (c.refusal() != null) return null
-        val (spend, decision) = limitControl.boundary(c) ?: return null
+        val (spend, decision, price) = limitControl.boundary(c)
         val (kind, why) = when (decision) {
             LimitDecision.Within -> return null
             is LimitDecision.Reserve -> decision.kind to decision.reason
@@ -1059,27 +1087,38 @@ public class Controller @JvmOverloads public constructor(
         snapshot(c)
         reaccept(c, scheduler(c), authority, settle = false)
         val state = checkNotNull(c.state)
+        val contract = c.contract
         val current = c.stamper.report(fresh = true).candidateId
-        val stamps = state.graph.increments.filter { it.status == IncrementStatus.Verified }.mapNotNull { state.graph.evidence[it.id] }
-            .map { e -> e.stamp to state.cells.indexOfFirst { it.cell == e.contextId } } + (current to state.cells.size)
-        val scores = stamps.groupBy({ it.first }, { it.second }).map { (stamp, recency) ->
-            val verified = state.graph.ledger(c.contract, stamp).entries.values.filter { it.status == io.astrolabe.contract.RequirementStatus.Verified }.map { it.requirementId }.sorted()
-            CandidateScore(stamp, verified, stamp == current, recency.max())
-        }
-        val best = BestCandidate.select(scores)
-        val stop = LimitStop(kind, why, limitControl.status(c, spend), best?.stamp, best?.verified.orEmpty(), best?.current == true, current)
-        val unverified = c.contract.requirements.map { it.id }.filter { it !in stop.verified }
+        val done = state.graph.increments.filter { it.status == IncrementStatus.Verified }.mapNotNull { inc -> state.graph.evidence[inc.id]?.let { inc to it } }
+        // The main line only moves forward: the latest accepted stamp carries the work of every earlier one.
+        val best = done.maxByOrNull { (_, e) -> if (e.stamp == current) state.cells.size else state.cells.indexOfFirst { it.cell == e.contextId } }?.second?.stamp
+        val active = state.graph.increments.filter { it.status != IncrementStatus.Cancelled }
+        val complete = contract.requirements.filter { r -> active.filter { r.id in it.requirementIds }.let { it.isNotEmpty() && it.all { inc -> inc.status == IncrementStatus.Verified } } }.map { it.id }
+        val accepted = contract.requirements.filter { r ->
+            r.id in complete && done.any { (inc, e) -> r.id in inc.requirementIds && e.provenance.any { it.item in r.acceptance && it.how == io.astrolabe.verify.ProvenanceKind.Accepted } }
+        }.map { it.id }
+        val atBest = best?.let { s -> state.graph.ledger(contract, s).entries.values.filter { it.status == io.astrolabe.contract.RequirementStatus.Verified }.map { it.requirementId } }.orEmpty()
+        val verified = atBest.filter { it !in accepted }.sorted()
+        val earlier = complete.filter { it !in atBest && it !in accepted }.sorted()
+        val stop = LimitStop(kind, why, LimitRule.status(c.limits, spend, price), best.takeIf { verified.isNotEmpty() || earlier.isNotEmpty() || accepted.isNotEmpty() },
+            verified, best == current, current, earlier, accepted.sorted())
+        val parts = listOfNotNull(
+            verified.takeIf { it.isNotEmpty() }?.let { "verified ${it.joinToString(", ")}" },
+            earlier.takeIf { it.isNotEmpty() }?.let { "verified at an earlier stamp, not re-checked here: ${it.joinToString(", ")}" },
+            stop.accepted.takeIf { it.isNotEmpty() }?.let { "accepted without verification: ${it.joinToString(", ")}" },
+        ).joinToString("; ")
         val named = when {
-            best == null -> "no verified candidate: nothing is verified yet"
-            best.current -> "best verified candidate @${best.stamp.hash8} (${best.verified.joinToString(", ")}) — the tree as left"
-            else -> "best verified candidate @${best.stamp.hash8} (${best.verified.joinToString(", ")}); the tree as left @${current.hash8} holds unverified changes after it and is not replaced"
+            stop.bestCandidate == null -> "no verified candidate: nothing is verified yet"
+            stop.workingTree -> "best verified candidate @${stop.bestCandidate.hash8} ($parts) — the tree as left"
+            else -> "best verified candidate @${stop.bestCandidate.hash8} ($parts); the tree as left @${current.hash8} holds unverified changes after it and is not replaced"
         }
-        val reason = "${TaskLimitControl.LIMIT_REACHED} (${kind.wire}): $why · $named" + (if (unverified.isEmpty()) "" else " · unverified: ${unverified.joinToString(", ")}") +
+        val open = contract.requirements.map { it.id }.filter { it !in complete }
+        val reason = "${TaskLimitControl.LIMIT_REACHED} (${kind.wire}): $why · $named" + (if (open.isEmpty()) "" else " · unverified: ${open.joinToString(", ")}") +
             " · ${TaskLimitControl.RAISE_TO_CONTINUE}"
-        c.journal.append(JournalEvent(idGen.next("ev"), c.ids, null, JournalKind.Boundary, refs = listOfNotNull(best?.stamp?.digest?.hex),
+        c.journal.append(JournalEvent(idGen.next("ev"), c.ids, null, JournalKind.Boundary, refs = listOfNotNull(stop.bestCandidate?.digest?.hex),
             text = "${LimitSessions.REACHED} (${kind.wire}): $named", payload = TaskLimitControl.JSON.encodeToJsonElement(LimitStop.serializer(), stop), at = clock.instant()))
-        events?.emit(AgentEvent.Budget.LimitReached(c.ids, kind.wire, TaskLimitControl.STOPPED_STAGE, why, stop.status, best?.stamp?.toString()))
-        return c.advance(Transition.Stopped(CampaignOutcome.BudgetExhausted, reason))
+        events?.emit(AgentEvent.Budget.LimitReached(c.ids, kind.wire, TaskLimitControl.STOPPED_STAGE, why, stop.status, stop.bestCandidate?.toString()))
+        return c.advance(Transition.Stopped(CampaignOutcome.BudgetExhausted, reason, budget = BudgetStop.of(kind)))
     }
 
     /** §7.3 cadence: the full suite every K verified increments; a red result is a regression on record. */
@@ -1256,7 +1295,7 @@ public class Controller @JvmOverloads public constructor(
         }
         val compiled = routing.compiled
         if (compiled !is Compiled.Ready) return blocked("the plan cell cannot be compiled: $compiled")
-        routing.refused?.let { return Transition.Stopped(CampaignOutcome.BudgetExhausted, it.reason) }
+        routing.refused?.let { return Transition.Stopped(CampaignOutcome.BudgetExhausted, it.reason, budget = BudgetStop.ContractBudget) }
         val cellId = ContextId(idGen.next("cell"))
         val proposals = SqlitePlanProposals(c.store, idGen, clock)
         // The plan cell's own decisions travel with its packet: its register as last patched (handoff debt 1).
@@ -1272,7 +1311,8 @@ public class Controller @JvmOverloads public constructor(
                 is Disposition.Continue -> d.fallback.takeIf { it == CampaignOutcome.BudgetExhausted } ?: CampaignOutcome.BlockedExternal
                 is Disposition.Close -> CampaignOutcome.BlockedExternal
             }
-            return Transition.Stopped(outcome, "the plan cell ended ${exit.packet.status.wire}: ${exit.packet.reason}")
+            return Transition.Stopped(outcome, "the plan cell ended ${exit.packet.status.wire}: ${exit.packet.reason}",
+                budget = BudgetStop.ContractBudget.takeIf { outcome == CampaignOutcome.BudgetExhausted })
         }
         val stored = proposals.latest(c.ids.work, cellId) ?: return blocked("the plan cell proposed no plan")
         return when (val admission = PlanIntake(c.contracts).admit(c.ids.work, stored, authority)) {
@@ -1367,9 +1407,13 @@ public class Controller @JvmOverloads public constructor(
         }
         val register = withReviewOpenItems(c, retained.register)
         val aliases = SqliteAliases(c.store, clock)
+        val receipts = SqliteReceipts(c.store, clock)
+        // D-398: the cell boundary selects seeds by the attempt's seed rule, as the pressure rebuild does; v1 keeps its bytes.
         return CarryForward.carry(
             register, Seeds.cellEnd(SqliteCheckpoints(c.store, clock), cell), packet, { c.registry.version(it) },
             { id -> Aliases.parse(id)?.let { aliases.resolve(c.ids.work, it) } != null }, emptyList(), emptyList(),
+            selector = c.attempt.config.defaults.seedRule.selector,
+            latestReceipts = c.checks.all().mapNotNull { it.last?.receiptId?.let(receipts::get) },
         ).copy(capacityGap = retained.capacityGap)
     }
 
@@ -1381,11 +1425,13 @@ public class Controller @JvmOverloads public constructor(
         extract(c, packets)
         val report = c.stamper.report(fresh = true)
         // C3: a limit's stop names its best verified candidate in the receipt; the provenance class is the receipt's own (C2).
-        val limit = result.state?.takeIf { it.outcome == CampaignOutcome.BudgetExhausted && it.reason?.startsWith(TaskLimitControl.LIMIT_REACHED) == true }
-            ?.let { TaskLimitControl.recorded(c.journal, c.ids.work) }
+        val limit = result.state?.takeIf { it.budgetStop?.taskLimit == true }?.let { TaskLimitControl.recorded(c.journal, c.ids.work) }
         val receipt = FinishReceipts.build(c, packets, currencies(c, scheduler, report.candidateId), report, receipts::get).let { if (limit == null) it else it.copy(limit = limit) }
         val (ref, _) = FinishReceipts.export(c, receipt)
-        events?.emit(AgentEvent.Campaign.Finished(c.ids, outcome.wire, ref, stopCode = result.state?.stopCode?.wire, provenanceClass = receipt.provenanceClass.wire))
+        // C3: the counter's last word, with or without limits.
+        limitControl.report(c)
+        events?.emit(AgentEvent.Campaign.Finished(c.ids, outcome.wire, ref, stopCode = result.state?.stopCode?.wire, provenanceClass = receipt.provenanceClass.wire,
+            budgetStop = result.state?.budgetStop?.wire))
         return result.copy(finish = receipt, limit = limit)
     }
 
@@ -1395,7 +1441,9 @@ public class Controller @JvmOverloads public constructor(
      * aggregated over every stored campaign before the finish receipt is exported.
      */
     private fun extract(c: OpenedCampaign, packets: List<ResultPacket>) {
-        val accounting = Accounting(c.store, clock)
+        // C3: the extractor's call counts against the task limits, in the transaction of its hold; without a price bound it
+        // is refused under a money limit (fail closed).
+        val accounting = Accounting(c.store, clock, limitControl.reportAdmission(c))
         val bound = extraction.maxTokens.coerceAtLeast(1)
         val cap = c.contract.budget.cost
         val currency = cap?.currency ?: c.attempt.config.profiles.values.firstOrNull()?.priceTable?.currency ?: "USD"
@@ -1407,9 +1455,7 @@ public class Controller @JvmOverloads public constructor(
             // §8.8 findings are the campaign's, derived once: with the last packet; recurring dead ends see the earlier registers.
             val invocation = "extraction:${packet.ids.context?.value ?: packet.increment}"
             if (accounting.calls(c.ids.work).any { it.invocationId == invocation }) continue
-            // C3: the extractor's call counts against the task limits like any other; it never crosses one.
-            val withinLimits = !c.limits.any || LimitRule.decide(c.limits, limitControl.spend(c), c.contract.budget.reserves, extraction.maxCost) !is LimitDecision.Exhausted
-            val permitted = extraction !== Extraction.NONE && withinLimits && accounting.reserveExtraction(packet.ids, invocation, bound,
+            val permitted = extraction !== Extraction.NONE && accounting.reserveExtraction(packet.ids, invocation, bound,
                 extraction.maxCost, c.contract.budget.tokens.value, cap, currency)
             val active = if (permitted) Extractor(c.store, HeuristicEstimator(), idGen, clock, extraction, c.journal, events) else extractor
             val report = active.run(trace, packet.ids, if (i == packets.lastIndex) findings else emptyList(), packets.take(i).map { it.register })
@@ -1475,10 +1521,10 @@ public class Controller @JvmOverloads public constructor(
         val cellModel = routing.model
         when (compiled) {
             is Compiled.Ready -> Unit
-            is Compiled.NeedsRescoping -> return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "NEEDS_RESCOPING_OR_LARGER_PROFILE: ${compiled.reason}")), null, null, compiled)
+            is Compiled.NeedsRescoping -> return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "NEEDS_RESCOPING_OR_LARGER_PROFILE: ${compiled.reason}${profileBound(c, cellModel)}")), null, null, compiled)
             is Compiled.NeedsEvidence -> return S0Run(c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, "NEEDS_MORE_EVIDENCE: acceptance without definition ${compiled.missing}")), null, null, compiled)
         }
-        routing.refused?.let { return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BudgetExhausted, it.reason)), null, null, compiled) }
+        routing.refused?.let { return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BudgetExhausted, it.reason, budget = BudgetStop.ContractBudget)), null, null, compiled) }
 
         val cellId = ContextId(idGen.next("cell"))
         events?.emit(AgentEvent.Campaign.IncrementSelected(c.ids, ready.id))
@@ -1522,7 +1568,8 @@ public class Controller @JvmOverloads public constructor(
             is Disposition.Close -> commit(c, ids, exit.turns, increment, disposition.accepted, stampNow)
                 ?: stopOrFinish(c, "requirements remain unverified after ${increment.id}", scheduler, authority = authority)
             // S0 has no continuation cell of its own: the fallback is the honest outcome (D-64) — the limit's own when a task limit ended the cell (C3).
-            is Disposition.Continue -> limitStop(c, authority) ?: c.advance(Transition.Stopped(disposition.fallback, disposition.reason))
+            is Disposition.Continue -> onLimit(c, authority) ?: c.advance(Transition.Stopped(disposition.fallback, disposition.reason,
+                budget = BudgetStop.ContractBudget.takeIf { disposition.fallback == CampaignOutcome.BudgetExhausted }))
             is Disposition.Stop -> if (completion is CompletionResult.Pending) {
                 when (val settled = settle(c, ids, increment, checkNotNull(kept), completion, authority)) {
                     is Settled.Commit -> commit(c, ids, exit.turns, increment, Verifier().commit(completion.proposal, c.contract, checkNotNull(c.state).graph.increments.first { it.id == increment.id }, kept.cell, checkNotNull(c.state).ledger, settled.resolved), stampNow)
@@ -2030,7 +2077,8 @@ public class Controller @JvmOverloads public constructor(
     ): CellRun {
         val ids = c.ids.copy(context = cellId)
         val cancellation = child?.cancellation ?: c.cancellation
-        val config = c.attempt.config
+        // C3: under a minutes limit, the default `run` deadline and the check time boxes never exceed the time left.
+        val config = limitControl.bounded(c, c.attempt.config)
         val contract = c.contract
         val redaction = Redaction(config.redaction)
         tree.workspace.paths.bindWriteProtection { path, ignoreCase -> c.contracts.current(c.ids.work)?.scope?.protects(path, ignoreCase) != false }
@@ -2112,7 +2160,10 @@ public class Controller @JvmOverloads public constructor(
             },
         )
         val coherence = Coherence(tree.registry)
-        val accounting = Accounting(c.store, clock)
+        // C3: every cell, a child's included, asks the task limits before each turn and each admission, and its accounting
+        // checks them again in the transaction that writes the call's hold, so concurrent cells never pass a limit together.
+        val cellLimits = limitControl.cell(c, model)
+        val accounting = Accounting(c.store, clock, cellLimits.admission)
         // §6.5: every compiled context leaves a manifest; the cell's end event links it.
         val manifests = SqliteManifests(c.store, clock)
         val manifest = Manifest.of(idGen.next("manifest"), compiled, increment, contract, ids, model.profile, inputs, register?.version, boundary, model.effort.name.lowercase()).also { manifests.save(ids, it) }
@@ -2145,8 +2196,7 @@ public class Controller @JvmOverloads public constructor(
             } else null,
             noteHorizon = if (tree.workspace === c.workspace) NoteHorizon(KbWriter(c.store, estimator, clock), Notes(c.store), ids) else null,
         )
-        // C3: every cell, a child's included, asks the task limits before each turn and each model call.
-        val limits = limitControl.gate(c, model)
+        val limits = cellLimits.gate
         val budget = child?.budget?.let { CellBudget.of(it.tokens, it.turns, contract.budget.reserves, limits = limits) }
             ?: CellBudget.of(Tokens(Accounting(c.store, clock).remainingTokens(c.ids.work, contract.budget.tokens.value).coerceAtLeast(3)), contract.budget.turnsPerCell, contract.budget.reserves, limits = limits)
         val cellSpan = spans?.start(Phase.Edit, ids, span)
@@ -2260,7 +2310,16 @@ public class Controller @JvmOverloads public constructor(
         if (triggers.isEmpty()) return null
         val row = FunctionTable.DEFAULT.row(ReviewTriggers.function(triggers))
         val reviewer = if (humanIntegrity(c, flags)) hostReviewer(c, authority) else reviewCell(c, increment, model, authority, syntax, span)
-        return reviewer.obtain(evidence(c, increment, triggers, flags, kept.preexisting, authority), row.defaultTier, c.registry::version)
+        val outcome = reviewer.obtain(evidence(c, increment, triggers, flags, kept.preexisting, authority), row.defaultTier, c.registry::version)
+        // C3: a review a task limit cut short says so — an unverified result, never a block and never another cause.
+        val block = c.limitState.block?.decision
+        if (outcome !is ReviewOutcome.Unavailable || block == null) return outcome
+        val why = "review unavailable: task limit (" + when (block) {
+            is LimitDecision.Exhausted -> "${block.kind.wire}): ${block.reason}"
+            is LimitDecision.Reserve -> "${block.kind.wire}): ${block.reason}"
+            LimitDecision.Within -> "none)"
+        }
+        return ReviewOutcome.Unavailable(outcome.record.copy(unavailable = why), why)
     }
 
     private fun preexistingLines(ledger: io.astrolabe.verify.PreexistingLedger?): List<String> = ledger?.entries.orEmpty().map { "${it.identity} — ${it.signature}" }

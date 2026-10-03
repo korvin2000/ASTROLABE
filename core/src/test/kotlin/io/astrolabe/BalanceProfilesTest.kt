@@ -91,14 +91,22 @@ class BalanceProfilesTest {
     }
 
     @Test
-    fun `the economy window is a share of the model's and stays below its first price tier`() {
+    fun `the economy window stays below the first price tier only as far as the owner's ceiling allows`() {
         val economy = BalanceProfiles.vector(BalanceProfile.Economy)
         assertEquals(150_000, BalanceProfiles.contextLimitTokens(FakeProfiles.main, economy))
-        val tiered = FakeProfiles.main.copy(priceTable = FakeProfiles.main.priceTable.copy(tiers = listOf(
-            PriceTier(128_000, FakeProfiles.main.priceTable.perMillion), PriceTier(64_000, FakeProfiles.main.priceTable.perMillion),
-        )))
-        assertEquals(64_000, BalanceProfiles.contextLimitTokens(tiered, economy))
-        assertEquals(64_000, BalanceProfiles.bounded(tiered, economy).capabilities.contextLimitTokens)
+        val prices = FakeProfiles.main.priceTable
+        val tiered = FakeProfiles.main.copy(priceTable = prices.copy(tiers = listOf(PriceTier(128_000, prices.perMillion), PriceTier(64_000, prices.perMillion))))
+        val cheapTiered = tiered.copy(priceTable = tiered.priceTable.copy(perMillion = prices.perMillion + (BillingDimension.OUTPUT to BigDecimal("1.10"))))
+        // The tier at 64k would leave 0.32 of the window: (1/0.75)·(1/0.32) = 4.17. The ceiling's floor keeps 2/3 of it.
+        assertEquals(133_334, BalanceProfiles.contextLimitTokens(tiered, economy))
+        assertEquals(133_334, BalanceProfiles.bounded(tiered, economy).capabilities.contextLimitTokens)
+        val tight = FakeProfiles.main.copy(priceTable = prices.copy(tiers = listOf(PriceTier(160_000, prices.perMillion))))
+        assertEquals(150_000, BalanceProfiles.contextLimitTokens(tight, economy), "below the tier and above the floor: the share")
+        for (profile in listOf(FakeProfiles.main, tiered, cheapTiered, tight)) for (balance in BalanceProfile.entries) {
+            val slowdown = BalanceProfiles.slowdown(BalanceProfiles.vector(balance), profile)
+            assertTrue(slowdown.worst <= BalanceProfiles.SOFT_SLOWDOWN + 1e-9, "$balance on ${profile.priceTable.tiers} (${BalanceProfiles.modelClass(profile)}): $slowdown")
+        }
+        assertEquals(ModelClass.Cheap, BalanceProfiles.modelClass(cheapTiered))
         assertEquals(200_000, BalanceProfiles.contextLimitTokens(tiered, BalanceProfiles.vector(BalanceProfile.Thorough)), "a whole window is not bounded")
     }
 }

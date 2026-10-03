@@ -69,6 +69,11 @@ public sealed interface AgentEvent {
             val stopCode: String? = null,
             /** Who verified the result, from the finish receipt (§4.4 C2): `independent` · `agent_test` · `unverified`. */
             val provenanceClass: String? = null,
+            /**
+             * Which ceiling ended a `budget_exhausted` campaign (C3): `task_limit_money` · `task_limit_minutes` ·
+             * `task_limit_requests` · `cell_cap` (a reopen continues these) · `contract_budget`.
+             */
+            val budgetStop: String? = null,
         ) : Campaign
     }
 

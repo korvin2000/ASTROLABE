@@ -169,7 +169,8 @@ class LifecycleTest {
             "waiting for input" to running().then(Transition.Stopped(CampaignOutcome.WaitingForInput, "question")),
             "completed" to verified().then(Transition.Finishing(stamp), Transition.Finished(stamp, listOf("r"))),
             "failed" to running().then(Transition.Stopped(CampaignOutcome.Failed, "harness error")),
-            "budget exhausted" to verified().then(Transition.Stopped(CampaignOutcome.BudgetExhausted, "task limit reached (requests)")),
+            "budget exhausted" to verified().then(Transition.Stopped(CampaignOutcome.BudgetExhausted, "task limit reached (requests)", budget = BudgetStop.TaskLimitRequests)),
+            "contract budget" to verified().then(Transition.Stopped(CampaignOutcome.BudgetExhausted, "the contract's tokens are spent", budget = BudgetStop.ContractBudget)),
         )
         val legal = mapOf(
             "opened" to setOf("Reconciled", "IncrementCancelled", "Stopped"),
@@ -184,6 +185,7 @@ class LifecycleTest {
             "failed" to emptySet(),
             // C3: only the host's raised limit reopens a budget stop; it is not a stop on something outside the campaign.
             "budget exhausted" to setOf("LimitRaised"),
+            "contract budget" to emptySet(),
         )
         for ((name, state) in states) {
             val allowed = all.indices.filter { i ->
@@ -241,10 +243,13 @@ class LifecycleTest {
 
     @Test
     fun `a raised task limit reopens a budget stop with its verified ledger kept`() {
-        val stopped = verified().then(Transition.Stopped(CampaignOutcome.BudgetExhausted, "task limit reached (money)"))
+        val stopped = verified().then(Transition.Stopped(CampaignOutcome.BudgetExhausted, "task limit reached (money)", budget = BudgetStop.TaskLimitMoney))
+        assertEquals(BudgetStop.TaskLimitMoney, stopped.budgetStop)
         val resumed = stopped.then(Transition.LimitRaised("limits raised by the host: money 2 USD"), Transition.Reconciled())
         assertEquals(CampaignPhase.Running, resumed.phase)
         assertNull(resumed.outcome)
+        assertNull(resumed.budgetStop)
+        assertFailsWith<IllegalArgumentException> { Transition.Stopped(CampaignOutcome.Failed, "x", budget = BudgetStop.CellCap) }
         assertEquals(stopped.ledger, resumed.ledger, "the same attempt continues: nothing verified is lost")
         assertEquals(RequirementStatus.Verified, resumed.ledger["R1"]!!.status)
         assertFailsWith<IllegalArgumentException> { Transition.LimitRaised(" ") }

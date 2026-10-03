@@ -75,7 +75,17 @@ public data class AccountTotals(
  * the `usage` table (this component is its one writer). Reasoning is priced only as the provider's own
  * dimensions say — no field is added to another with a similar name.
  */
-public class Accounting(private val store: Store, private val clock: Clock) {
+public class Accounting internal constructor(
+    private val store: Store,
+    private val clock: Clock,
+    /**
+     * C3: the task limits' admission of one more call priced [Money] at most over the calls on record, asked inside the
+     * transaction that writes the call's durable hold — so concurrent cells can never pass the limit together.
+     */
+    private val admission: ((calls: List<CallAccount>, money: Money) -> Boolean)?,
+) {
+    public constructor(store: Store, clock: Clock) : this(store, clock, null)
+
     /** Records one call; a `null` [usage] is a call whose usage never arrived. */
     public fun record(ids: Identities, invocationId: String, profile: Profile, request: Request?, usage: BillableUsage?, fundedTokens: Long? = null): CallAccount {
         val table = profile.priceTable
@@ -108,6 +118,7 @@ public class Accounting(private val store: Store, private val clock: Clock) {
     internal fun reserve(ids: Identities, invocationId: String, profile: Profile, tokens: Long, money: Money,
                          tokenLimit: Long, costLimit: Money?): Boolean = store.db.tx { tx ->
         if (!affordable(ids.work, tokens, money, tokenLimit, costLimit)) return@tx false
+        if (admission != null && !admission.invoke(calls(ids.work), money)) return@tx false
         val account = CallAccount(invocationId, ids, profile.id, null, Money.unknown(profile.priceTable.currency),
             profile.priceTable.date.toString(), Quantities(null, null, null, null), null, clock.instant(), tokens, money)
         save(tx, account)
@@ -130,6 +141,8 @@ public class Accounting(private val store: Store, private val clock: Clock) {
     internal fun reserveExtraction(ids: Identities, invocationId: String, tokens: Long, money: Money?, tokenLimit: Long,
                                    costLimit: Money?, currency: String): Boolean = store.db.tx { tx ->
         if (calls(ids.work).any { it.invocationId == invocationId } || !affordable(ids.work, tokens, money ?: Money.unknown(currency), tokenLimit, costLimit)) return@tx false
+        // C3: a call without a known price bound is unknown to the limits, which refuse it under a money limit.
+        if (admission != null && !admission.invoke(calls(ids.work), money ?: Money.unknown(currency))) return@tx false
         save(tx, CallAccount(invocationId, ids, "extractor", null, Money.unknown(currency), "host",
             Quantities(null, null, null, null), null, clock.instant(), tokens, money))
         true

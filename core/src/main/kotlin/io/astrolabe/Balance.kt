@@ -83,7 +83,8 @@ public data class Slowdown(val requests: Double, val time: Double) {
  *   [EFFORT_LATENCY_PER_STEP] per effort step up, `κ` = [CHECK_TIME_SHARE] of a task's time in checks, and `c` the
  *   full-suite frequency ratio (`1/0.6` for [VerificationDepth.Extended], else `1`). Speed-ups are never credited.
  *
- * `λ` and `κ` are unmeasured starting values (F §4.2); the D5 benchmark and the E1 binding physics replace them.
+ * `λ` and `κ` are unmeasured starting values (F §4.2); the bound is the model's estimate at them, not a guarantee, and
+ * the D5 benchmark and the E1 binding physics replace them.
  */
 public object BalanceProfiles {
     /** The owner's soft ceiling: a profile is at most this many times slower than Balanced. */
@@ -155,7 +156,9 @@ public object BalanceProfiles {
 
     /**
      * The window a cell of [profile] may use under [vector]: the whole window at a fraction of `1`; below it, that share
-     * of the window and never above the first price tier's threshold, so no request is priced at a dearer tier.
+     * of the window kept below the first price tier's threshold — but never so small that the slowdown bound passes the
+     * owner's soft ceiling: `W_P ≥ W · ρ_b · λ^s · c / 2`, the rest of [slowdown] with the window left free. The owner's
+     * ceiling outranks "below the price tier".
      */
     @JvmStatic
     public fun contextLimitTokens(profile: Profile, vector: BalanceVector): Int {
@@ -163,7 +166,9 @@ public object BalanceProfiles {
         if (vector.contextWindowFraction >= 1.0) return window
         val share = floor(window * vector.contextWindowFraction).toLong()
         val tier = profile.priceTable.tiers.minOfOrNull { it.inputTokensAbove }
-        return maxOf(1L, minOf(share, tier ?: share)).toInt()
+        val rest = slowdown(vector.copy(contextWindowFraction = 1.0)).time
+        val floor = ceil(window * rest / SOFT_SLOWDOWN).toLong()
+        return maxOf(1L, minOf(window.toLong(), maxOf(minOf(share, tier ?: share), floor))).toInt()
     }
 
     /** [profile] with its window bounded by [contextLimitTokens]; [profile] itself when the bound is its window. */
@@ -174,7 +179,15 @@ public object BalanceProfiles {
         else profile.copy(capabilities = profile.capabilities.copy(contextLimitTokens = limit))
     }
 
-    /** The slowdown bound of [vector] against Balanced (see the object's KDoc). */
+    /**
+     * The slowdown bound of [vector] against Balanced for [profile] (see the object's KDoc), with the window fraction the
+     * profile actually gets — its share, its price tier and the ceiling's floor ([contextLimitTokens]) — not the nominal one.
+     */
+    @JvmStatic
+    public fun slowdown(vector: BalanceVector, profile: Profile): Slowdown =
+        slowdown(vector.copy(contextWindowFraction = contextLimitTokens(profile, vector).toDouble() / profile.capabilities.contextLimitTokens))
+
+    /** The slowdown bound of [vector] against Balanced at its nominal window fraction (see the object's KDoc). */
     @JvmStatic
     public fun slowdown(vector: BalanceVector): Slowdown {
         val requests = max(1.0, 1.0 / vector.resultBudgetFactor) * max(1.0, 1.0 / vector.contextWindowFraction)

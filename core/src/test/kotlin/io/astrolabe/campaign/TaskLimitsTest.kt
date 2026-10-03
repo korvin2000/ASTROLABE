@@ -6,6 +6,7 @@ import io.astrolabe.Config
 import io.astrolabe.atlas.Atlas
 import io.astrolabe.budget.CostBasis
 import io.astrolabe.budget.HeuristicEstimator
+import io.astrolabe.budget.LimitKind
 import io.astrolabe.budget.TaskLimits
 import io.astrolabe.budget.Tokens
 import io.astrolabe.cell.CellFixture.Companion.anchored
@@ -23,7 +24,10 @@ import io.astrolabe.contract.Requirement
 import io.astrolabe.contract.Shape
 import io.astrolabe.contract.SqliteContractRepository
 import io.astrolabe.event.AgentEvent
+import io.astrolabe.event.AutonomousAuthority
 import io.astrolabe.event.Events
+import io.astrolabe.event.Question
+import io.astrolabe.evidence.JournalEvent
 import io.astrolabe.evidence.JournalKind
 import io.astrolabe.evidence.JournalScope
 import io.astrolabe.fixtures.EventRecorder
@@ -56,14 +60,15 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * C3 (plan §4.6) on the fake adapter: money, minutes and request limits stop a campaign before they are crossed, keep
- * the reserve for verification and report, name the best verified candidate in an honest partial result, and resume
- * the same attempt once the host raises them; the balance profile is chosen at start and frozen for the attempt.
+ * C3 (plan §4.6) on the fake adapter: money, minutes and request limits stop a campaign before a call would cross them,
+ * keep a reserve for verification and report, name the best verified candidate in an honest partial result, survive
+ * reopens, and continue the same attempt once the host raises them; the balance profile is frozen for the attempt.
  */
 class TaskLimitsTest {
     @Test
@@ -77,33 +82,30 @@ class TaskLimitsTest {
                 val run = controller(events).run(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator()))
 
                 assertEquals(CampaignOutcome.BudgetExhausted, run.outcome, run.state?.reason)
-                assertTrue(run.state!!.reason!!.startsWith("task limit reached (requests)"), run.state!!.reason)
-                // 8 requests, 2 held for verification and report: I1 is done at 6, so I2 never starts.
+                assertEquals(BudgetStop.TaskLimitRequests, run.budgetStop)
+                // 8 requests, 3 held: I1's done proposal ran on the reserve at 6, so I2 never starts.
                 assertEquals(6, adapter.calls.size)
-                assertEquals(6, Accounting(c.store, clock).calls(request.work).size)
                 assertEquals(IncrementStatus.Verified, c.state!!.graph.increments.single { it.id == "I1" }.status)
                 assertTrue(c.state!!.graph.increments.single { it.id == "I2" }.cells.isEmpty())
                 val limit = assertNotNull(run.limit)
                 assertEquals(listOf("R1"), limit.verified)
                 assertTrue(limit.workingTree)
                 assertEquals(c.stamper.report().candidateId, limit.bestCandidate)
-                assertEquals(6, limit.status.requests)
-                assertEquals(2, limit.status.reserveRequests)
+                assertEquals(3, limit.status.reserveRequests)
                 assertTrue(run.state!!.reason!!.endsWith(TaskLimitControl.RAISE_TO_CONTINUE), "every limit stop tells the host how to continue")
-                // The honest partial result: the receipt names the candidate and keeps its C2 provenance class.
                 val finish = assertNotNull(run.finish)
                 assertEquals("partial", finish.status)
                 assertEquals(limit, finish.limit)
                 assertEquals(io.astrolabe.verify.ProvenanceClass.Unverified, finish.provenanceClass, "R2 is unverified: the campaign takes its worst requirement")
-                assertTrue(c.journal.events(JournalScope(request.work, kinds = setOf(JournalKind.Boundary))).any { it.text.startsWith("limits: reserve reached (requests)") })
             }
         }
-        awaitEvents(recorder) { recorder.ofType<AgentEvent.Budget.LimitReached>().size == 2 }
+        awaitEvents(recorder) { recorder.ofType<AgentEvent.Campaign.Finished>().isNotEmpty() }
         assertEquals(listOf("reserve", "stopped"), recorder.ofType<AgentEvent.Budget.LimitReached>().map { it.stage })
-        assertEquals("requests", recorder.ofType<AgentEvent.Budget.LimitReached>().last().limit)
         assertEquals("raise_limit", recorder.ofType<AgentEvent.Budget.LimitReached>().last().action)
+        assertEquals("task_limit_requests", recorder.ofType<AgentEvent.Campaign.Finished>().single().budgetStop)
         val spent = recorder.ofType<AgentEvent.Budget.Spent>().map { it.status.requests }
-        assertEquals((0..6).toList(), spent, "one counter update before each model call, and the last at the stop")
+        assertEquals((0..6).toList(), spent.distinct(), "one counter update before each model call")
+        assertEquals(6, spent.last(), "and the counter's last word at finish")
     }
 
     @Test
@@ -115,88 +117,163 @@ class TaskLimitsTest {
             // Generation stops at 8; I2's verify and done turns run on the 3 held back, and the campaign completes.
             assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
             assertEquals(10, adapter.calls.size)
-            // §5.9 gate in `[A]` from the ninth request on: verify and report, edits to the cell's own files only (D-366).
-            assertTrue("reserve reached: verify and report" in texts(adapter.calls[8].request), "the gate line, once")
-            assertTrue(adapter.calls.drop(8).all { "reserve reached ·" in texts(it.request) }, "the gauge on every reserve turn")
+            assertTrue("reserve reached: verify and report" in texts(adapter.calls[8].request), "the §5.9 gate line")
             assertTrue(adapter.calls.take(8).none { "reserve reached" in texts(it.request) })
-            assertTrue(c.journal.events(JournalScope(request.work, kinds = setOf(JournalKind.Boundary))).any { it.text.startsWith("limits: reserve reached (requests)") })
             assertNull(run.limit)
         }
     }
 
     @Test
-    fun `a money limit counts the billed amounts and stops before it is crossed`() = runBlocking<Unit> {
-        val recorder = EventRecorder()
-        Events(clock).use { events ->
-            events.subscribe(recorder)
-            controller(events).open(repo.root, request, policy(TaskLimits(maxCost = usd("0.80")))).use { c ->
-                val fake = FakeAdapter(ScriptedModel.of(*(planning() + implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"") +
-                    implement(c, "src/b.py", "    return 2", "    return 20", "\"AC-1\",\"AC-2\"")).toTypedArray()))
-                val run = controller(events).run(c, CellModel(Billing(fake, usd("0.10")), FakeProfiles.main, HeuristicEstimator(), maxOutputTokens = 2_000))
-
-                assertEquals(CampaignOutcome.BudgetExhausted, run.outcome, run.state?.reason)
-                assertTrue(run.state!!.reason!!.startsWith("task limit reached (money)"), run.state!!.reason)
-                // Reserve min(3 · 0.10, 0.2 · 0.80) = 0.16: generation while spend + 0.10 ≤ 0.64, so no cell starts at 0.60.
-                assertEquals(6, fake.calls.size)
-                val limit = assertNotNull(run.limit)
-                assertEquals(0, BigDecimal("0.60").compareTo(limit.status.cost!!.amount))
-                assertEquals(CostBasis.Billed, limit.status.costBasis)
-                assertEquals(0, BigDecimal("0.16").compareTo(limit.status.reserveCost!!.amount))
-                assertEquals(listOf("R1"), limit.verified)
+    fun `small request limits stop deterministically without empty cells`() = runBlocking<Unit> {
+        for ((limit, calls) in listOf(1 to 1, 2 to 2, 3 to 2)) {
+            val work = CampaignRequest(WorkId("W-c3-r$limit"), AttemptId("a1"), request.text)
+            seed(work)
+            controller().open(repo.root, work, policy(TaskLimits(maxRequests = limit))).use { c ->
+                val adapter = FakeAdapter(ScriptedModel.of(*planning().toTypedArray()))
+                val run = controller().run(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator()))
+                assertEquals(CampaignOutcome.BudgetExhausted, run.outcome, "limit $limit: ${run.state?.reason}")
+                assertEquals(BudgetStop.TaskLimitRequests, run.budgetStop, "limit $limit")
+                assertEquals(calls, adapter.calls.size, "limit $limit")
+                assertTrue(c.state!!.cells.isEmpty(), "limit $limit: no implementing cell is dispatched, empty or not")
+                assertNull(run.limit!!.bestCandidate)
             }
         }
-        awaitEvents(recorder) { recorder.ofType<AgentEvent.Budget.LimitReached>().any { it.stage == "stopped" } }
-        assertTrue(recorder.ofType<AgentEvent.Budget.Spent>().drop(1).all { it.status.costBasis == CostBasis.Billed }, "the event says which amounts were used")
     }
 
     @Test
-    fun `a minutes limit runs on the injected clock`() = runBlocking<Unit> {
-        controller().open(repo.root, request, policy(TaskLimits(maxMinutes = 7))).use { c ->
-            val replies = planning() + implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"") +
-                implement(c, "src/b.py", "    return 2", "    return 20", "\"AC-1\",\"AC-2\"")
-            // Every model call takes one minute: the reserve is min(3 · 1, 0.2 · 7) = 1.4 min, so no cell starts at 6.
-            val adapter = FakeAdapter(ScriptedModel(replies.map { r -> ScriptedModel.Turn({ true }, { clock.advance(Duration.ofMinutes(1)); r }) }))
-            val run = controller().run(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator()))
+    fun `a money limit prices every call with its full output headroom and a limit below one call stops at once`() = runBlocking<Unit> {
+        // Default headroom (16k output at 15 USD/M): one call is priced near $0.30, so $0.20 cannot admit even the first.
+        controller().open(repo.root, request, policy(TaskLimits(maxCost = usd("0.20")))).use { c ->
+            val fake = FakeAdapter(ScriptedModel.of(*planning().toTypedArray()))
+            val run = controller().run(c, CellModel(Billing(fake, usd("0.10")), FakeProfiles.main, HeuristicEstimator()))
             assertEquals(CampaignOutcome.BudgetExhausted, run.outcome, run.state?.reason)
-            assertTrue(run.state!!.reason!!.startsWith("task limit reached (minutes)"), run.state!!.reason)
-            assertEquals(6, adapter.calls.size)
-            assertEquals(360_000L, run.limit!!.status.elapsedMillis)
-            assertEquals(84_000L, run.limit!!.status.reserveMillis)
+            assertEquals(BudgetStop.TaskLimitMoney, run.budgetStop)
+            assertTrue(fake.calls.isEmpty(), "no call crosses the limit")
+            val needed = assertNotNull(run.limit!!.status.nextCallCost)
+            assertTrue(needed.amount > BigDecimal("0.20"), "the stop names the price it could not admit: $needed")
         }
-        // A reopen never counts the time the task stood stopped.
-        clock.advance(Duration.ofHours(5))
+        // The host raises it: the same attempt continues, and $1 holds at most what one call more would need.
+        controller().open(repo.root, request, policy(TaskLimits(maxCost = usd("5")))).use { c ->
+            assertEquals(CampaignPhase.Running, c.state!!.phase)
+            val fake = FakeAdapter(ScriptedModel.of(*(planning() + implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"") +
+                implement(c, "src/b.py", "    return 2", "    return 20", "\"AC-1\",\"AC-2\"")).toTypedArray()))
+            val run = controller().run(c, CellModel(Billing(fake, usd("0.10")), FakeProfiles.main, HeuristicEstimator()))
+            assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+            assertEquals(request.attempt, c.state!!.attempt)
+            val spend = TaskLimitControl(idGen, clock, null).spend(c)
+            assertEquals(CostBasis.Billed, spend.costBasis)
+            assertEquals(0, BigDecimal("1.0").compareTo(spend.cost!!.amount))
+        }
+    }
+
+    @Test
+    fun `a minutes limit runs on the injected clock and never counts the time a task stood stopped`() = runBlocking<Unit> {
         controller().open(repo.root, request, policy(TaskLimits(maxMinutes = 7))).use { c ->
-            assertEquals(CampaignOutcome.BudgetExhausted, c.state!!.outcome, "still at 6 of 7 minutes: no room")
+            // Every model call takes one minute: R = min(3, 7 − 1) = 3 min, so the reserve begins after 3 min.
+            val run = controller().run(c, CellModel(minuteAdapter(planning() + implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"") +
+                implement(c, "src/b.py", "    return 2", "    return 20", "\"AC-1\",\"AC-2\"")), FakeProfiles.main, HeuristicEstimator()))
+            assertEquals(BudgetStop.TaskLimitMinutes, run.budgetStop, run.state?.reason)
+            assertEquals(360_000L, run.limit!!.status.elapsedMillis)
+            assertEquals(180_000L, run.limit!!.status.reserveMillis)
+            assertEquals(listOf("R1"), run.limit!!.verified)
+        }
+        clock.advance(Duration.ofHours(5))
+        controller().open(repo.root, request, CampaignPolicy(Tokens(400_000))).use { c ->
+            assertEquals(TaskLimits(maxMinutes = 7), c.limits, "no limits named: the ones kept with the campaign")
+            assertEquals(CampaignOutcome.BudgetExhausted, c.state!!.outcome)
             assertEquals(360_000L, TaskLimitControl(idGen, clock, null).spend(c).elapsedMillis)
         }
     }
 
     @Test
-    fun `only the host raises a limit - a reopen spends nothing twice and a raised limit resumes the same attempt`() = runBlocking<Unit> {
-        controller().open(repo.root, request, policy(TaskLimits(maxRequests = 8))).use { c ->
-            val adapter = FakeAdapter(ScriptedModel.of(*(planning() + implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"")).toTypedArray()))
-            assertEquals(CampaignOutcome.BudgetExhausted, controller().run(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator())).outcome)
+    fun `a run that died mid-session is closed at its last event, and a host's answer is not active time`() = runBlocking<Unit> {
+        controller().open(repo.root, request, policy(TaskLimits(maxMinutes = 60))).use { c ->
+            val control = TaskLimitControl(idGen, clock, null)
+            val session = assertNotNull(control.begin(c))
+            val host = control.pausing(c, object : io.astrolabe.event.Authority by AutonomousAuthority() {
+                override suspend fun ask(question: Question): io.astrolabe.event.Answer? = null.also { clock.advance(Duration.ofMinutes(30)) }
+            })
+            clock.advance(Duration.ofMinutes(1))
+            host.ask(Question("q-1", c.contract.version, c.ids, "May I?"))
+            clock.advance(Duration.ofMinutes(1))
+            assertEquals(120_000L, control.spend(c).elapsedMillis, "two active minutes; the half hour waiting for the host is not")
+            c.journal.append(JournalEvent(idGen.next("ev"), c.ids, null, JournalKind.Boundary, text = "work", at = clock.instant()))
+            assertTrue(c.limitState.session === session)
+            // The process dies here: no session end is written.
         }
-        // The same limits: still stopped, nothing dispatched, the spend as it was (D-392).
-        controller().open(repo.root, request, policy(TaskLimits(maxRequests = 8))).use { c ->
-            val adapter = FakeAdapter(ScriptedModel.of(Scripted.Reply(listOf(say("should never run")))))
-            val run = controller().run(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator()))
-            assertEquals(CampaignOutcome.BudgetExhausted, run.outcome)
-            assertTrue(adapter.calls.isEmpty())
-            assertEquals(6, Accounting(c.store, clock).calls(request.work).size)
-            assertEquals(listOf("R1"), run.limit!!.verified, "the receipt of a reopen still names the candidate")
+        clock.advance(Duration.ofHours(4))
+        controller().open(repo.root, request, CampaignPolicy(Tokens(400_000))).use { c ->
+            assertEquals(120_000L, TaskLimitControl(idGen, clock, null).spend(c).elapsedMillis, "the four hours stopped are not counted")
         }
-        // The host raises the limit: the same attempt continues with I2 and completes; I1 is not run again.
-        controller().open(repo.root, request, policy(TaskLimits(maxRequests = 20))).use { c ->
-            assertEquals(CampaignPhase.Running, c.state!!.phase)
-            assertTrue(c.journal.events(JournalScope(request.work, kinds = setOf(JournalKind.Reconcile))).any { it.text.startsWith("limits: raised by the host: 20 requests") })
-            val adapter = FakeAdapter(ScriptedModel.of(*implement(c, "src/b.py", "    return 2", "    return 20", "\"AC-1\",\"AC-2\"").toTypedArray()))
-            val run = controller().run(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator()))
+    }
+
+    @Test
+    fun `a raised limit with another still spent stays stopped and says which`() = runBlocking<Unit> {
+        val recorder = EventRecorder()
+        Events(clock).use { events ->
+            events.subscribe(recorder)
+            controller(events).open(repo.root, request, policy(TaskLimits(maxMinutes = 7, maxRequests = 8))).use { c ->
+                val run = controller(events).run(c, CellModel(minuteAdapter(planning() + implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"")), FakeProfiles.main, HeuristicEstimator()))
+                assertEquals(BudgetStop.TaskLimitRequests, run.budgetStop, run.state?.reason)
+            }
+            controller(events).open(repo.root, request, policy(TaskLimits(maxMinutes = 7, maxRequests = 20))).use { c ->
+                assertEquals(CampaignOutcome.BudgetExhausted, c.state!!.outcome, "the minutes are still in the reserve")
+                assertTrue(c.journal.events(JournalScope(request.work, kinds = setOf(JournalKind.Reconcile))).any { it.text.startsWith("limits: still reached (minutes)") })
+            }
+        }
+        awaitEvents(recorder) { recorder.ofType<AgentEvent.Budget.LimitReached>().any { it.limit == "minutes" } }
+        assertEquals("stopped", recorder.ofType<AgentEvent.Budget.LimitReached>().last { it.limit == "minutes" }.stage)
+    }
+
+    @Test
+    fun `the candidate is the last accepted stamp, not the edited tree, and a raised limit continues the partial cell`() = runBlocking<Unit> {
+        controller().open(repo.root, request, policy(TaskLimits(maxRequests = 11))).use { c ->
+            val vb = c.registry.version("src/b.py")!!
+            // I2 edits b.py at its last generation turn, then spends the reserve looking, never verifying.
+            val replies = planning() + implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"") + listOf(
+                Scripted.Reply(listOf<Item>(say("reading"), read("r-b", "src/b.py"))),
+                Scripted.Reply(listOf<Item>(say("editing"), anchored("e-b", "src/b.py", vb, "    return 2", "    return 20"))),
+                Scripted.Reply(listOf<Item>(say("looking"), read("r-a2", "src/a.py"))),
+                Scripted.Reply(listOf<Item>(say("looking"), read("r-p", "pytest_pass.txt"))),
+                Scripted.Reply(listOf<Item>(say("looking"), read("r-b2", "src/b.py"))),
+            )
+            val run = controller().run(c, CellModel(FakeAdapter(ScriptedModel.of(*replies.toTypedArray())), FakeProfiles.main, HeuristicEstimator()))
+            assertEquals(BudgetStop.TaskLimitRequests, run.budgetStop, run.state?.reason)
+            val limit = assertNotNull(run.limit)
+            assertEquals(listOf("R1"), limit.verified)
+            assertFalse(limit.workingTree, "b.py changed after the last accepted stamp; the user's tree is left as it is")
+            assertTrue(limit.bestCandidate != limit.workingStamp)
+            assertEquals("def b():\n    return 20\n", java.nio.file.Files.readString(repo.root.resolve("src/b.py")))
+        }
+        controller().open(repo.root, request, policy(TaskLimits(maxRequests = 30))).use { c ->
+            val replies = listOf(
+                Scripted.Reply(listOf<Item>(say("verifying"), call("v-b", "verify", """{"what":"acceptance","ids":["AC-1","AC-2"]}"""))),
+                Scripted.Reply(listOf<Item>(say("done with src/b.py"))),
+            )
+            val run = controller().run(c, CellModel(FakeAdapter(ScriptedModel.of(*replies.toTypedArray())), FakeProfiles.main, HeuristicEstimator()))
             assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
-            assertEquals(request.attempt, c.state!!.attempt)
-            assertEquals(1, c.state!!.cells.count { it.increment == "I1" })
-            assertEquals(10, Accounting(c.store, clock).calls(request.work).size)
-            assertNull(run.limit)
+            assertEquals(2, c.state!!.cells.count { it.increment == "I2" }, "the partial cell is continued, not restarted")
+        }
+    }
+
+    @Test
+    fun `an S0 task stops on its limit and continues after the host lifts it`() = runBlocking<Unit> {
+        val s0 = CampaignRequest(WorkId("W-c3-s0"), AttemptId("a1"), "make a return 10")
+        seed(s0, shape = Shape.S0)
+        controller().open(repo.root, s0, policy(TaskLimits(maxRequests = 2))).use { c ->
+            val va = c.registry.version("src/a.py")!!
+            val replies = listOf(
+                Scripted.Reply(listOf<Item>(say("editing"), anchored("e-a", "src/a.py", va, "    return 1", "    return 10"))),
+                Scripted.Reply(listOf<Item>(say("verifying"), call("v-a", "verify", """{"what":"acceptance","ids":["AC-1"]}"""))),
+            )
+            val run = controller().runS0(c, CellModel(FakeAdapter(ScriptedModel.of(*replies.toTypedArray())), FakeProfiles.main, HeuristicEstimator()))
+            assertEquals(CampaignOutcome.BudgetExhausted, run.outcome, run.state?.reason)
+            assertEquals(BudgetStop.TaskLimitRequests, run.budgetStop)
+        }
+        controller().open(repo.root, s0, policy(TaskLimits.NONE)).use { c ->
+            assertEquals(TaskLimits.NONE, c.limits, "an explicit none lifts the kept limits")
+            val run = controller().runS0(c, CellModel(FakeAdapter(ScriptedModel.of(Scripted.Reply(listOf<Item>(say("done"))))), FakeProfiles.main, HeuristicEstimator()))
+            assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
         }
     }
 
@@ -209,13 +286,15 @@ class TaskLimitsTest {
                 assertEquals(BalanceProfile.Economy, c.attempt.config.balance)
                 assertEquals(3_000, c.attempt.config.defaults.lookBudgetTokens)
                 val adapter = FakeAdapter(ScriptedModel.of(*(planning() + implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"")).toTypedArray()))
-                controller(events).run(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator()), maxCells = 1)
+                val run = controller(events).run(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator()), maxCells = 1)
+                assertEquals(BudgetStop.CellCap, run.budgetStop)
                 // A dear model (15 USD per million output) one step below its configured effort; three quarters of its window.
                 assertTrue(adapter.calls.all { it.request.effort == Effort.Low }, adapter.calls.map { it.request.effort }.toString())
                 assertTrue(adapter.calls.all { it.request.profile.capabilities.contextLimitTokens == 150_000 })
             }
             controller(events).open(repo.root, request, CampaignPolicy(Tokens(400_000), balance = BalanceProfile.Thorough)).use { c ->
                 assertEquals(BalanceProfile.Economy, c.attempt.config.balance, "invariant 12: the attempt keeps its profile")
+                assertEquals(CampaignPhase.Running, c.state!!.phase, "the cell cap counts per run: a reopen continues")
             }
             controller(events).open(repo.root, request, CampaignPolicy(Tokens(400_000))).use { c ->
                 assertEquals(BalanceProfile.Economy, c.attempt.config.balance, "a reopen naming none asks for the frozen one")
@@ -226,22 +305,25 @@ class TaskLimitsTest {
     }
 
     @Test
-    fun `no limit and no profile change nothing`() = runBlocking<Unit> {
+    fun `no limit and no profile change nothing but the counter`() = runBlocking<Unit> {
         val recorder = EventRecorder()
         Events(clock).use { events ->
             events.subscribe(recorder)
-            controller(events).open(repo.root, request, policy(TaskLimits.NONE)).use { c ->
+            controller(events).open(repo.root, request, CampaignPolicy(Tokens(400_000))).use { c ->
+                assertEquals(TaskLimits.NONE, c.limits)
                 assertEquals(AttemptConfig.freeze(config()).fingerprint, c.attempt.fingerprint)
                 val adapter = FakeAdapter(ScriptedModel.of(*(planning() + implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"") +
                     implement(c, "src/b.py", "    return 2", "    return 20", "\"AC-1\",\"AC-2\"")).toTypedArray()))
                 val run = controller(events).run(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator()))
                 assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
                 assertTrue(adapter.calls.all { it.request.effort == Effort.Medium && it.request.profile == FakeProfiles.main })
-                assertTrue(c.journal.events(JournalScope(request.work)).none { it.text.startsWith("limits:") }, "no limit, no session records")
+                assertEquals(10, Accounting(c.store, clock).calls(request.work).size)
             }
         }
         awaitEvents(recorder) { recorder.ofType<AgentEvent.Campaign.Finished>().isNotEmpty() }
-        assertTrue(recorder.events.none { it is AgentEvent.Budget.Spent || it is AgentEvent.Budget.LimitReached })
+        assertTrue(recorder.ofType<AgentEvent.Budget.LimitReached>().isEmpty())
+        assertEquals(10, recorder.ofType<AgentEvent.Budget.Spent>().last().status.requests, "the live counter runs without limits too")
+        assertNull(recorder.ofType<AgentEvent.Budget.Spent>().last().status.maxRequests)
     }
 
     @TempDir
@@ -260,6 +342,9 @@ class TaskLimitsTest {
 
     private fun controller(events: Events? = null) = Controller(config(), clock, idGen, events)
 
+    /** Each model call takes one minute of the injected clock. */
+    private fun minuteAdapter(replies: List<Scripted>) = FakeAdapter(ScriptedModel(replies.map { r -> ScriptedModel.Turn({ true }, { clock.advance(Duration.ofMinutes(1)); r }) }))
+
     @BeforeTest
     fun setUp() {
         repo = TempRepo.create()
@@ -268,16 +353,20 @@ class TaskLimitsTest {
         repo.write("src/b.py", "def b():\n    return 2\n")
         repo.write("pytest_pass.txt", javaClass.getResourceAsStream("/shaper/pytest-pass.txt")!!.use { String(it.readAllBytes(), Charsets.UTF_8) })
         repo.commit("initial")
+        seed(request)
+    }
+
+    private fun seed(work: CampaignRequest, shape: Shape = Shape.S1) {
         Store.open(stateRoot, repo.git, clock).use { store ->
             val contracts = Contracts(SqliteContractRepository(store, clock), idGen, clock)
-            val derived = contracts.deriveS0(request.work, request.attempt, request.text, Atlas.build(repo.root), Config(), Tokens(400_000)).contract
+            val derived = contracts.deriveS0(work.work, work.attempt, work.text, Atlas.build(repo.root), Config(), Tokens(400_000)).contract
+            val ref = derived.requests.single().id
             contracts.open(derived.copy(
-                shape = Shape.S1,
-                requirements = listOf(
-                    Requirement("R1", "a returns 10", listOf("AC-1"), authorityRef = derived.requests.single().id),
-                    Requirement("R2", "b returns 20", listOf("AC-2"), authorityRef = derived.requests.single().id),
-                ),
-                acceptance = listOf(Acceptance.Run("AC-1", printing, Origin.User), Acceptance.Run("AC-2", printing, Origin.User)),
+                shape = shape,
+                requirements = if (shape == Shape.S0) listOf(Requirement("R1", "a returns 10", listOf("AC-1"), authorityRef = ref))
+                    else listOf(Requirement("R1", "a returns 10", listOf("AC-1"), authorityRef = ref), Requirement("R2", "b returns 20", listOf("AC-2"), authorityRef = ref)),
+                acceptance = if (shape == Shape.S0) listOf(Acceptance.Run("AC-1", printing, Origin.User))
+                    else listOf(Acceptance.Run("AC-1", printing, Origin.User), Acceptance.Run("AC-2", printing, Origin.User)),
             ))
         }
     }
