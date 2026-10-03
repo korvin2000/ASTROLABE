@@ -36,7 +36,9 @@ public sealed interface ParsedPatch {
  * D-365, with a [context]: an unknown key beside or inside a known op is ignored and named in a note; an `evidence`
  * naming several ids (`"#35 #36"`, `"op:4,op:5"`, an array) keeps the first in the op's one slot and names the rest in a
  * note, each id resolving or the op refused naming it; a fact anchor whose `version` is a short hash takes the one
- * known version of that path it prefixes, and any other non-hash `version` drops the anchor with a note.
+ * known version of that path it prefixes, and any other non-hash `version` drops the anchor with a note. A `v` fact
+ * whose anchor is dropped is kept as `h`: unanchored, its staleness could not be tracked, and an anchor naming a
+ * version this cell never showed (one carried from an earlier cell, say) is not current.
  *
  * D-373, with a [context]: an object carrying several op keys is split into one op per op key in key order, each other key
  * joining the one op whose form declares it (else ignored with a note); an op that does not parse is skipped with a note
@@ -187,8 +189,16 @@ public object PatchParser {
         }
         if (context != null) {
             (resolved["anchor"] as? JsonObject)?.let { anchor ->
-                val fixed = anchored(anchor, context) { notes += "op ${index + 1} ($name): $it" }
-                if (fixed == null) resolved.remove("anchor") else resolved["anchor"] = fixed
+                // A `v` fact without its anchor could never go stale: one whose version names no shown version is kept as `h`.
+                val verified = (resolved["kind"] as? JsonPrimitive)?.takeIf { it.isString }?.content == "v"
+                val kept = if (verified) "v fact kept as h without an anchor (its staleness could not be tracked); add it again with the @hash a look showed" else "fact kept without an anchor"
+                val fixed = anchored(anchor, context, kept) { notes += "op ${index + 1} ($name): $it" }
+                if (fixed == null) {
+                    resolved.remove("anchor")
+                    if (verified) resolved["kind"] = JsonPrimitive("h")
+                } else {
+                    resolved["anchor"] = fixed
+                }
             }
         }
         val op = try {
@@ -215,8 +225,8 @@ public object PatchParser {
         else -> null
     }?.takeIf { it.isNotEmpty() }
 
-    /** A fact anchor with a full version, a short one resolved against the path's known versions, or `null` (dropped, [note] says why). */
-    private fun anchored(anchor: JsonObject, context: ValidationContext, note: (String) -> Unit): JsonObject? {
+    /** A fact anchor with a full version, a short one resolved against the path's known versions, or `null` (dropped, [note] says why and what was [kept]). */
+    private fun anchored(anchor: JsonObject, context: ValidationContext, kept: String, note: (String) -> Unit): JsonObject? {
         val path = (anchor["path"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return anchor
         val given = (anchor["version"] as? JsonPrimitive)?.content?.trim().orEmpty()
         val hex = given.removePrefix("@").lowercase()
@@ -225,10 +235,10 @@ public object PatchParser {
         if (isHex && hex.length >= MIN_HASH && hex.length < FULL_HASH) {
             val matches = context.knownVersions(path).filter { it.digest.hex.startsWith(hex) }.distinct()
             matches.singleOrNull()?.let { return JsonObject(anchor + ("version" to JsonPrimitive(it.digest.hex))) }
-            note("anchor $path @$hex matches ${matches.size} known versions; fact kept without an anchor")
+            note("anchor $path @$hex matches ${matches.size} known versions; $kept")
             return null
         }
-        note("anchor $path version '$given' is not a content hash; fact kept without an anchor")
+        note("anchor $path version '$given' is not a content hash; $kept")
         return null
     }
 

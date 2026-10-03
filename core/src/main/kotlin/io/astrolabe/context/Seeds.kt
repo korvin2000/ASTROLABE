@@ -4,13 +4,18 @@ import io.astrolabe.atlas.decodeLines
 import io.astrolabe.cell.Checkpoints
 import io.astrolabe.evidence.Aliases
 import io.astrolabe.id.ContextId
+import io.astrolabe.id.FileVersion
 import io.astrolabe.id.WorkId
 import io.astrolabe.register.Register
 import io.astrolabe.workset.Entry
+import io.astrolabe.workset.EntrySource
 import io.astrolabe.workspace.FileContent
 
 /** Seeds as rendered into `[K]`: [shown] at their recorded hash, [notSeen] when the bytes moved in between. */
 public data class SeedRender(val text: String, val shown: List<Entry>, val notSeen: List<NotSeen>, val blocks: List<String> = emptyList())
+
+/** The seeds a carry re-serves and the candidates it announces NOT SEEN (§6.2), after [Seeds.fit]. */
+internal data class SeedFit(val seeds: List<Entry>, val notSeen: List<NotSeen>)
 
 /**
  * The Workset export/seed round trip (§6.2, P2.4.4). A cell's end export is the one checkpointed with its last turn;
@@ -19,6 +24,31 @@ public data class SeedRender(val text: String, val shown: List<Entry>, val notSe
  * campaign-global (D-46), so a carried `v … [#17]` fact and `recall #17` name the same evidence in every later cell.
  */
 public object Seeds {
+    /**
+     * The one seed budget over a [SeedSelector]'s order (§6.2), the same for every rule: candidates are taken in order; one
+     * whose file moved since it was displayed is not re-served, nor one larger than what is left of [capTokens] — first
+     * fit, so a later, smaller candidate may still use the rest. Re-served entries become [EntrySource.Seed] and never
+     * total more than [capTokens]. A candidate left out is announced NOT SEEN with its reason only when
+     * [SeedReason.announced].
+     */
+    internal fun fit(candidates: List<SeedCandidate>, currentVersion: (String) -> FileVersion?, capTokens: Long): SeedFit {
+        val seeds = ArrayList<Entry>()
+        val notSeen = ArrayList<NotSeen>()
+        var budget = capTokens
+        for ((entry, reason) in candidates) {
+            val now = currentVersion(entry.path)
+            when {
+                now != entry.version -> if (reason.announced) notSeen += NotSeen(entry.path, entry.range, entry.version, now, "changed")
+                entry.tokens > budget -> if (reason.announced) notSeen += NotSeen(entry.path, entry.range, entry.version, now, "over the ${capTokens}-token seed budget")
+                else -> {
+                    seeds += entry.copy(source = EntrySource.Seed)
+                    budget -= entry.tokens
+                }
+            }
+        }
+        return SeedFit(seeds, notSeen)
+    }
+
     internal fun selected(seeds: List<Entry>, compiled: Compiled.Ready): List<Entry> = seeds.filterIndexed { index, _ ->
         ContextUnitId("seed-$index") in compiled.selection.selectedIds && compiled.k.sections.any { it.id == "seed-$index" }
     }
