@@ -2,6 +2,13 @@ package io.astrolabe.java
 
 import io.astrolabe.Config
 import io.astrolabe.budget.HeuristicEstimator
+import io.astrolabe.budget.TaskLimits
+import io.astrolabe.budget.Tokens
+import io.astrolabe.campaign.BudgetStop
+import io.astrolabe.campaign.CampaignOutcome
+import io.astrolabe.campaign.CampaignPolicy
+import io.astrolabe.cell.CellFixture.Companion.read
+import io.astrolabe.cell.CellFixture.Companion.say
 import io.astrolabe.event.AgentEvent
 import io.astrolabe.event.AmendmentProposal
 import io.astrolabe.event.AutonomousAuthority
@@ -26,11 +33,14 @@ import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Path
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /** The Java facade mirrors the campaign's finish receipt and its provenance class (§4.4 C2) without `suspend` or `Flow`. */
 class AstrolabeJavaTest {
@@ -79,6 +89,37 @@ class AstrolabeJavaTest {
                     val finished = seen.map { it.event }.filterIsInstance<AgentEvent.Campaign.Finished>().single()
                     assertEquals(finish.provenanceClass.wire, finished.provenanceClass)
                 }
+            }
+        }
+    }
+
+    @OptIn(DelicateCoroutinesApi::class)
+    @Test
+    fun `a Java host raises a limit and continues the same work through futures`() {
+        val auto = AutonomousAuthority()
+        val authority = object : JavaAuthority {
+            override fun ask(question: Question) = GlobalScope.future { auto.ask(question) }
+            override fun approve(request: DClassRequest) = GlobalScope.future { auto.approve(request) }
+            override fun resolve(proposal: AmendmentProposal) = GlobalScope.future { auto.resolve(proposal) }
+            override fun review(request: ReviewRequest) = GlobalScope.future { auto.review(request) }
+        }
+        val n = AtomicInteger()
+        val adapter = FakeAdapter(ScriptedModel(listOf(ScriptedModel.Turn({ true }, { Scripted.Reply(listOf(say("reading"), read("r-${n.incrementAndGet()}", "src/a.py"))) }, once = false))))
+        fun policy(requests: Int) = CampaignPolicy(Tokens(400_000), limits = TaskLimits(maxRequests = requests))
+        val config = Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all)
+        AstrolabeJava(config, adapter, authority, EstimatorFactory { HeuristicEstimator() }).use { sdk ->
+            sdk.open(repo.root).use { project ->
+                val first = sdk.campaignBlocking(project, "make a return 10", policy(1))
+                assertEquals(CampaignOutcome.BudgetExhausted, first.await().get(60, TimeUnit.SECONDS))
+                val held = sdk.resumeBlocking(project, first.workId(), policy(1))
+                assertEquals(BudgetStop.TaskLimitRequests, held.limitHold()?.stop)
+                assertEquals(CampaignOutcome.BudgetExhausted, held.awaitBlocking())
+                val calls = adapter.calls.size
+                val raised = sdk.resume(project, first.workId(), policy(10)).get(60, TimeUnit.SECONDS)
+                assertEquals(first.workId(), raised.workId())
+                assertNull(raised.limitHold())
+                raised.awaitBlocking()
+                assertTrue(adapter.calls.size > calls)
             }
         }
     }

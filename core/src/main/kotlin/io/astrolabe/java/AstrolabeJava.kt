@@ -8,6 +8,7 @@ import io.astrolabe.campaign.CampaignOutcome
 import io.astrolabe.campaign.CampaignPolicy
 import io.astrolabe.campaign.Deployer
 import io.astrolabe.campaign.FinishReceipt
+import io.astrolabe.campaign.LimitHold
 import io.astrolabe.campaign.OptionalLayers
 import io.astrolabe.campaign.PublicationRequest
 import io.astrolabe.campaign.PublicationRun
@@ -94,6 +95,20 @@ public class AstrolabeJava private constructor(private val core: Astrolabe) : Au
     public fun campaignBlocking(project: Project, request: String, policy: CampaignPolicy? = null, publication: PublicationRequest? = null): JavaCampaignHandle =
         join(campaign(project, request, policy, publication))
 
+    /**
+     * Reopens [work]'s stopped campaign and starts it again, the same work and attempt (C14, [Astrolabe.resume]): a [policy]
+     * with raised limits or tokens continues it; `null` keeps what is stored. Completes once the campaign is open;
+     * [JavaCampaignHandle.limitHold] names what still holds it when the raise was not enough.
+     */
+    @JvmOverloads
+    public fun resume(project: Project, work: WorkId, policy: CampaignPolicy? = null, publication: PublicationRequest? = null): CompletableFuture<JavaCampaignHandle> =
+        scope.future { JavaCampaignHandle(core.resume(project, work, policy, publication), scope, core.events) }
+
+    /** [resume], blocking the calling thread until the campaign is open. */
+    @JvmOverloads
+    public fun resumeBlocking(project: Project, work: WorkId, policy: CampaignPolicy? = null, publication: PublicationRequest? = null): JavaCampaignHandle =
+        join(resume(project, work, policy, publication))
+
     /** Registers [sink] for every campaign's events; close the subscription to stop delivery. */
     public fun subscribe(sink: EventSink): Subscription = core.events.subscribe(sink)
 
@@ -131,6 +146,9 @@ public class JavaCampaignHandle internal constructor(
 
     /** The finish receipt with its provenance class (§4.4 C2); `null` until [await] completes, or when the campaign ended without one. */
     public fun finish(): FinishReceipt? = handle.finish
+
+    /** What still holds a budget stop the open could not continue (C14); `null` when nothing does. */
+    public fun limitHold(): LimitHold? = handle.limitHold
 
     /** The outcome; cancelling this future cancels the campaign. */
     public fun await(): CompletableFuture<CampaignOutcome> {

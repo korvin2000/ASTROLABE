@@ -1,6 +1,12 @@
 package io.astrolabe
 
+import io.astrolabe.budget.TaskLimits
+import io.astrolabe.budget.Tokens
+import io.astrolabe.campaign.BudgetStop
 import io.astrolabe.campaign.CampaignOutcome
+import io.astrolabe.campaign.CampaignPolicy
+import io.astrolabe.cell.CellFixture.Companion.read
+import io.astrolabe.cell.CellFixture.Companion.say
 import io.astrolabe.event.AgentEvent
 import io.astrolabe.event.AmendmentProposal
 import io.astrolabe.event.AutonomousAuthority
@@ -13,6 +19,7 @@ import io.astrolabe.fixtures.FakeProfiles
 import io.astrolabe.fixtures.Scripted
 import io.astrolabe.fixtures.ScriptedModel
 import io.astrolabe.fixtures.TempRepo
+import io.astrolabe.id.WorkId
 import io.astrolabe.java.AstrolabeJava
 import io.astrolabe.java.JavaAuthority
 import io.astrolabe.provider.JavaInvocation
@@ -32,11 +39,13 @@ import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Path
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** P1.9.6 facade: `Astrolabe` open/campaign/await/cancel/amend/events and `AstrolabeJava` futures over the Java SPIs. */
@@ -89,6 +98,35 @@ class AstrolabeTest {
                 handle.amend("also keep b unchanged")
                 handle.cancel()
                 assertEquals(CampaignOutcome.Cancelled, withTimeout(10_000) { handle.await() })
+            }
+        }
+    }
+
+    @Test
+    fun `a stopped task continues through the facade by its work id once the host raises its limit`() = runBlocking<Unit> {
+        // C14: the model only reads, so each run ends on its request limit.
+        val n = AtomicInteger()
+        val adapter = FakeAdapter(ScriptedModel(listOf(ScriptedModel.Turn({ true }, { Scripted.Reply(listOf(say("reading"), read("r-${n.incrementAndGet()}", "src/a.py"))) }, once = false))))
+        fun policy(requests: Int) = CampaignPolicy(Tokens(400_000), limits = TaskLimits(maxRequests = requests))
+        Astrolabe(config, adapter, AutonomousAuthority()).use { sdk ->
+            sdk.open(repo.root).use { project ->
+                val first = sdk.campaign(project, "make a return 10", policy(1))
+                assertEquals(CampaignOutcome.BudgetExhausted, withTimeout(60_000) { first.await() })
+                assertNull(first.limitHold)
+                val calls = adapter.calls.size
+                assertFailsWith<IllegalArgumentException> { sdk.resume(project, WorkId("W-unknown")) }
+
+                val held = sdk.resume(project, first.workId, policy(1))
+                assertEquals(first.workId, held.workId)
+                assertEquals(BudgetStop.TaskLimitRequests, held.limitHold?.stop, "nothing raised: the request limit still holds")
+                assertEquals(CampaignOutcome.BudgetExhausted, withTimeout(60_000) { held.await() })
+                assertEquals(calls, adapter.calls.size, "a held task dispatches nothing")
+
+                val raised = sdk.resume(project, first.workId, policy(10))
+                assertNull(raised.limitHold)
+                withTimeout(60_000) { raised.await() }
+                assertTrue(adapter.calls.size > calls, "the same work continues under the raised limit")
+                assertEquals(1, project.views.contract(first.workId).contracts.size, "the same contract, no new work")
             }
         }
     }

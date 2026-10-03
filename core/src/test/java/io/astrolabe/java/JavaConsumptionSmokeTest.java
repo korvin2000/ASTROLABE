@@ -5,11 +5,17 @@ import io.astrolabe.BalanceProfiles;
 import io.astrolabe.Config;
 import io.astrolabe.Defaults;
 import io.astrolabe.Project;
+import io.astrolabe.budget.HeuristicEstimator;
+import io.astrolabe.budget.LimitKind;
 import io.astrolabe.budget.LimitRule;
+import io.astrolabe.budget.LimitSpend;
 import io.astrolabe.budget.TaskLimits;
 import io.astrolabe.budget.Tokens;
+import io.astrolabe.campaign.BudgetStop;
 import io.astrolabe.campaign.CampaignOutcome;
 import io.astrolabe.campaign.CampaignPolicy;
+import io.astrolabe.campaign.LimitHold;
+import io.astrolabe.cell.CellModel;
 import io.astrolabe.context.ContextArithmetic;
 import io.astrolabe.event.AgentEvent;
 import io.astrolabe.event.AmendmentProposal;
@@ -40,6 +46,7 @@ import io.astrolabe.provider.Message;
 import io.astrolabe.provider.Money;
 import io.astrolabe.provider.PriceTable;
 import io.astrolabe.provider.Profile;
+import io.astrolabe.provider.ProviderAdapters;
 import io.astrolabe.provider.Request;
 import io.astrolabe.provider.Response;
 import io.astrolabe.provider.Role;
@@ -298,6 +305,21 @@ class JavaConsumptionSmokeTest {
         assertTrue(requestsOnly.getAny());
         assertEquals(BalanceProfile.Thorough, new Config().withBalance(BalanceProfile.Thorough).getBalance());
         assertTrue(BalanceProfiles.slowdown(BalanceProfiles.vector(BalanceProfile.Economy)).getWorst() <= BalanceProfiles.SOFT_SLOWDOWN);
+    }
+
+    @Test
+    void aJavaHostReadsTheHoldingLimitAndSetsAnExplicitEffort() {
+        // C14: the holding limit is a plain value with wire words; an explicit effort is a constructor argument.
+        TaskLimits limits = new TaskLimits(null, null, 100);
+        LimitHold hold = new LimitHold(BudgetStop.TaskLimitRequests, LimitRule.status(limits, LimitSpend.of(Collections.emptyList(), 0L, "USD")), "task limit: 100 of 100 model requests spent");
+        assertEquals(LimitKind.Requests, hold.getLimit());
+        assertEquals("task_limit_requests", hold.getStop().getWire());
+        assertEquals(null, BudgetStop.ContractBudget.getLimit());
+        assertTrue(BudgetStop.ContractBudget.getResumable());
+        Profile profile = FakeProfiles.INSTANCE.getMain();
+        CellModel model = new CellModel(ProviderAdapters.fromJava(new ScriptedJavaAdapter(Collections.emptyList())), profile, new HeuristicEstimator(),
+                Effort.High, profile.getCapabilities().getOutputLimitTokens(), false, true);
+        assertEquals(Effort.High, BalanceProfiles.effort(model, BalanceProfiles.vector(BalanceProfile.Economy)));
     }
 
     @Test
