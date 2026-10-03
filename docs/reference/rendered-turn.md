@@ -38,7 +38,7 @@
 
 ### 5.10-D One direct turn, rendered (abridged) `[ASTROLABE 2.0 plan §4.3]`
 
-> **Status: SPEC — implemented in P8.D.1–D.3** (the anchor is P8.D.2). No code renders this yet. *code:* cites the current code as `path:line` under `K = core/src/main/kotlin/io/astrolabe` at `main` `6daabfc`. The protocol itself is specified in [Appendix A-D](kernel-contract.md#sec-appendix-a-direct).
+> **Status: SPEC — implemented in P8.D.1–D.3** (the anchor is P8.D.2). No code renders this yet. *code:* cites the current code as `path:line` under `K = core/src/main/kotlin/io/astrolabe` at `main` `e28133a`. The protocol itself is specified in [Appendix A-D](kernel-contract.md#sec-appendix-a-direct).
 
 The same turn as §5.10, in a direct cell (S0). The harness journal replaces the STATE block; nothing else in the layout moves.
 
@@ -75,7 +75,7 @@ state → STATE v3 · note o1 recorded · register 212/3000 tokens
 |---|---|---|---|---|
 | 1 | contract digest | `effectiveDigestCapTokens(n)`: 150 tokens plus 8 per requirement, ceiling 2 000 (*code:* `K/Defaults.kt:41-44`, `K/cell/Cell.kt:731`); never line-capped (*code:* `K/cell/Anchor.kt:133`) | `ContractDigest` | never reduced |
 | 2 | `── Workset` — KNOWN and NOT SEEN | 60 tokens (*code:* `Anchor.kt:211`) | Workset | never reduced |
-| 3 | `── Touched` | the last 3 entries (the structured anchor shows 10 and falls to 3 under pressure: *code:* `K/Defaults.kt:57`, `Anchor.kt:148-152, 217`) | touched ledger | — |
+| 3 | `── Touched` | the last 3 entries (the structured anchor shows 10 and falls to 3 under pressure: *code:* `K/Defaults.kt:58`, `Anchor.kt:148-152, 217`) | touched ledger | — |
 | 4 | `── Checks` | 3 lines (*code:* `K/verify/ChecksRender.kt:57`) | check registry | never reduced |
 | 5 | `── Runs` | `directRunsMaxLines` = 5 lines | run handles and check receipts | step 1: live handles and red receipts only |
 | 6 | `── Notes (STATE v<N>)` | `directNotesMaxTokens` = 200 tokens, whole lines | register | step 2: 100 tokens |
@@ -88,12 +88,12 @@ Size. The target is `directAnchorTargetTokens` = 800 tokens. A typical S0 turn: 
 
 `── Runs`. The lines, in this order:
 
-1. every live handle of the cell, in handle order: `<handle> <command> → running`, with ` · ready (<line or port>)` once a readiness condition was met;
+1. every live handle of the cell, in handle order: `<handle> <command> → running`, with ` · ready (<line or port>)` once a readiness condition was met. Readiness is read from the typed fact `Handle.ready`, which D2 adds ([A-D.5](kernel-contract.md#sec-appendix-a-direct-5)); today it exists only as the text of a wait's result (*code:* `K/tool/run/Run.kt:739-756`, `K/tool/run/Handles.kt:19-35`);
 2. for each registered check that has a command and a last receipt — a declared acceptance command recognised in `run`, and the model's own checks `CHK-model-*` (D-394; *code:* `K/verify/Check.kt:182-196, 383`) — that last receipt: `<alias> <command> → green | red: <n> failed | timeout | unavailable | inconclusive @<stamp4>`, with ` (stale)` when the receipt is not current for the tree. Red receipts come first, then the others; inside each group the higher receipt alias first.
 
 The command is the canonical argv joined by spaces, cut at 60 characters with `…`. Lines beyond the cap collapse into a last line `+<n> more`. A command without a receipt is not listed: its last result is in `[T]`. A check listed here is still summarised in `── Checks`: Checks answers whether the candidate is green, Runs which command said so and what is still running. The runtime's record of a red non-mandatory check (P8.C.2: derived from the check's last receipt, never written into the register) is shown on that check's line as ` · known red, not required`.
 
-`── Notes (STATE v<N>)`. One note per line, `<id> <text>`, with the ids of [A-D.4](kernel-contract.md#sec-appendix-a-direct-4). `N` is the register version, the same number the gauge shows. The register keeps one numbered list per kind and no global order, so the order is by kind and then newest first: open items that are not closed (`o<n>`), dead ends (`dead<n>`, with ` [#id]`), decisions (`d<n>`), pending amendments (`a<n> … (pending)`), stale verified notes (`v<n>(stale @<hash4>)`), hypotheses (`h<n>`), verified notes (`v<n> … [#id]`). Lines are added in that order while they fit the cap; the rest is one line `… +<n> notes not shown`. A note that is not shown is not lost: it stays in the register, and dead ends, open items, decisions and amendments are written verbatim into `[K]` at every rebuild and cell boundary ([§6.2](../context/continuity.md#sec-6-2)).
+`── Notes (STATE v<N>)`. One note per line, `<id> <text>`, with the ids of [A-D.4](kernel-contract.md#sec-appendix-a-direct-4). `N` is the register version, the same number the gauge shows. The register keeps one numbered list per kind and no global order, so the order is by kind and then newest first: open items that are not closed (`o<n>`), dead ends (`dead<n>`, with ` [#id]`), decisions (`d<n>`), pending amendments (`a<n> … (pending)`), stale verified notes (`v<n>(stale @<hash4>)`), hypotheses (`h<n>`), verified notes (`v<n> … [#id]`). Lines are added in that order while they fit the cap. The notes that did not fit are named by id in one last line, which is outside the cap: `… +<n> not shown: o1 o3 d2 h4 — look(recall, id=notes)`, at most 30 ids and then `…`. So a note that is not shown stays addressable — `closes` and `refutes` take its number — and readable: `look(recall, id="notes")` returns every active note with its id, and at every rebuild and cell boundary the carry-forward in `[K]` carries the whole active register with ids ([A-D.4](kernel-contract.md#sec-appendix-a-direct-4), [§6.2](../context/continuity.md#sec-6-2)). Archived notes are not listed; `range="archive"` reads them.
 
 Absent in a direct anchor: the STATE block with its plan, `Focus` and `Next`; the focus zoom; focus notes; fired trips.
 
@@ -104,7 +104,9 @@ Absent in a direct anchor: the STATE block with its plan, `Focus` and `Next`; th
 - `[R]` and `[K]` are unchanged in kind: `[K]` is stable within the cell between rebuilds.
 - `[T]` is append-only between eviction batches. Every tool result carries its header and the gauge, so the step-by-step deltas — the result of a note, a check line, the gauge — stay in cached results, as they do today.
 - `[A]` is volatile: rebuilt every turn, never cached, never stored in `[T]` (*code:* `K/cell/Anchor.kt:82-85`). It is the only place the journal lives.
-- No timestamp and no counter enters a cached region; the protocol never changes inside a line.
+- The protocol never changes inside a line.
+
+The rule about volatile values, stated precisely. Nothing that changes from turn to turn may **rewrite bytes already sent** in `[S]`, `[R]`, `[K]` or the earlier part of `[T]`: no clock, and no counter rendered into a region that is re-sent as a stable prefix. A value recorded once and never rewritten is allowed, and two kinds exist today: the gauge closing each tool result in `[T]` — context percentage, STATE version, turn number, written when the result is appended (*code:* `K/cell/Cell.kt:512-521`, `K/tool/Envelope.kt:75-77`) — and the register version in the carry-forward header of `[K]`, written when a boundary or a rebuild builds `[K]` (*code:* `K/context/CarryForward.kt:49`). Both are history: they describe the moment they were written and are not updated afterwards.
 
 If the benchmark (D5) shows that the uncached `[A]` costs noticeably, the alternative is to append the journal to the last tool result instead of sending it as a tail message. That branch is not specified in 2.0.
 <!-- end-source-section: 5.10-direct -->
