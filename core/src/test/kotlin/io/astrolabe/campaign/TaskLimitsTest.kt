@@ -4,9 +4,14 @@ import io.astrolabe.AttemptConfig
 import io.astrolabe.BalanceProfile
 import io.astrolabe.Config
 import io.astrolabe.atlas.Atlas
+import io.astrolabe.budget.CellBudget
 import io.astrolabe.budget.CostBasis
 import io.astrolabe.budget.HeuristicEstimator
+import io.astrolabe.budget.LimitDecision
 import io.astrolabe.budget.LimitKind
+import io.astrolabe.budget.LimitRule
+import io.astrolabe.budget.LimitSpend
+import io.astrolabe.budget.Spend
 import io.astrolabe.budget.TaskLimits
 import io.astrolabe.budget.Tokens
 import io.astrolabe.cell.CellFixture.Companion.anchored
@@ -40,6 +45,8 @@ import io.astrolabe.fixtures.ScriptedModel
 import io.astrolabe.fixtures.TempRepo
 import io.astrolabe.id.AttemptId
 import io.astrolabe.id.WorkId
+import io.astrolabe.provider.BillableUsage
+import io.astrolabe.provider.BillingDimension
 import io.astrolabe.provider.Effort
 import io.astrolabe.provider.Invocation
 import io.astrolabe.provider.InvocationId
@@ -49,9 +56,13 @@ import io.astrolabe.provider.ProviderAdapter
 import io.astrolabe.provider.Request
 import io.astrolabe.provider.Response
 import io.astrolabe.provider.Terminal
+import io.astrolabe.provider.UsageProvenance
 import io.astrolabe.store.Store
 import io.astrolabe.telemetry.Accounting
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 import org.junit.jupiter.api.io.TempDir
 import java.math.BigDecimal
 import java.nio.file.Path
@@ -61,6 +72,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -209,6 +221,56 @@ class TaskLimitsTest {
     }
 
     @Test
+    fun `a host wait in one branch does not stop the clock while another branch works`() = runBlocking<Unit> {
+        // C3r 1: a 60 s limit; branch A (a child cell) waits for the host from t = 10 s while the run itself works 600 s more.
+        controller().open(repo.root, request, policy(TaskLimits(maxMinutes = 1))).use { c ->
+            val control = TaskLimitControl(idGen, clock, null)
+            assertNotNull(control.begin(c))
+            val answer = CompletableDeferred<io.astrolabe.event.Answer?>()
+            val host = control.pausing(c, object : io.astrolabe.event.Authority by AutonomousAuthority() {
+                override suspend fun ask(question: Question): io.astrolabe.event.Answer? = answer.await()
+            })
+            clock.advance(Duration.ofSeconds(10))
+            val a = launch { control.branch(c) { host.ask(Question("q-a", c.contract.version, c.ids, "May I?")) } }
+            yield()
+            clock.advance(Duration.ofSeconds(600))
+            val spend = control.spend(c)
+            assertEquals(610_000L, spend.elapsedMillis, "the run's own work is active time while a child waits for the host")
+            assertEquals(LimitKind.Minutes, (LimitRule.decide(c.limits, spend) as LimitDecision.Exhausted).kind)
+            // Once every branch waits — the child and the run itself — the clock stops.
+            val b = launch { host.ask(Question("q-b", c.contract.version, c.ids, "And I?")) }
+            yield()
+            clock.advance(Duration.ofMinutes(30))
+            assertEquals(610_000L, control.spend(c).elapsedMillis, "all branches wait for the host: not active time")
+            answer.complete(null)
+            a.join()
+            b.join()
+            clock.advance(Duration.ofSeconds(1))
+            assertEquals(611_000L, control.spend(c).elapsedMillis)
+        }
+    }
+
+    @Test
+    fun `a reopen keeps the latched reserve until the host changes the limits`() = runBlocking<Unit> {
+        // C3r 4: L = 60 s. A 15 s call latches the reserve (15 + 15 + 45 > 60); after a 1 s call the raw rule is Within (16 + 8 + 24 ≤ 60).
+        controller().open(repo.root, request, policy(TaskLimits(maxMinutes = 1))).use { c ->
+            val adapter = FakeAdapter(ScriptedModel(planning().zip(listOf(15L, 1L)).map { (r, s) -> ScriptedModel.Turn({ true }, { clock.advance(Duration.ofSeconds(s)); r }) }))
+            val run = controller().run(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator()))
+            assertEquals(BudgetStop.TaskLimitMinutes, run.budgetStop, run.state?.reason)
+            val spend = TaskLimitControl(idGen, clock, null).spend(c)
+            assertEquals(16_000L, spend.elapsedMillis)
+            assertEquals(LimitDecision.Within, LimitRule.decide(c.limits, spend), "the raw rule alone would reopen the working part")
+        }
+        controller().open(repo.root, request, CampaignPolicy(Tokens(400_000))).use { c ->
+            assertEquals(CampaignOutcome.BudgetExhausted, c.state!!.outcome, "the host changed no limit: the reserve stays latched")
+            assertTrue(c.journal.events(JournalScope(request.work, kinds = setOf(JournalKind.Reconcile))).any { it.text.startsWith("limits: still reached (minutes)") })
+        }
+        controller().open(repo.root, request, policy(TaskLimits(maxMinutes = 10))).use { c ->
+            assertEquals(CampaignPhase.Running, c.state!!.phase, "a changed limit releases the latch")
+        }
+    }
+
+    @Test
     fun `a raised limit with another still spent stays stopped and says which`() = runBlocking<Unit> {
         val recorder = EventRecorder()
         Events(clock).use { events ->
@@ -279,6 +341,97 @@ class TaskLimitsTest {
     }
 
     @Test
+    fun `the reserve of a task limit pays for verification and the report, never for edits`() = runBlocking<Unit> {
+        // C3r 2: 4 requests hold 3 back, so every turn after the first is a reserve turn — even for a file the cell changed (D-366 is the turn budget's).
+        val s0 = CampaignRequest(WorkId("W-c3-repair"), AttemptId("a1"), "make a return 10")
+        seed(s0, shape = Shape.S0)
+        controller().open(repo.root, s0, policy(TaskLimits(maxRequests = 4))).use { c ->
+            val adapter = FakeAdapter(ScriptedModel.of(
+                Scripted.Reply(listOf<Item>(say("scratch"), call("e-new", "edit", """{"ops":[{"create":"src/new.py","content":"new"}],"why":"scratch"}"""))),
+                Scripted.Reply(listOf<Item>(say("remove my scratch file"), call("e-del", "edit", """{"ops":[{"delete":"src/new.py","expect":"${io.astrolabe.id.Digest.of("new".toByteArray()).hex}"}],"why":"repair"}"""))),
+                Scripted.Reply(listOf<Item>(say("verifying"), call("v-a", "verify", """{"what":"acceptance","ids":["AC-1"]}"""))),
+                Scripted.Reply(listOf<Item>(say("done"))),
+            ))
+            val run = controller().runS0(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator()))
+            assertEquals(4, adapter.calls.size, run.state?.reason)
+            assertTrue(java.nio.file.Files.exists(repo.root.resolve("src/new.py")), "the edit on the limit's reserve is refused")
+            assertTrue(adapter.calls.drop(1).none { it.request.mask!!.allows("edit.delete") || it.request.mask!!.allows("edit.anchored") }, "no edit op on a task limit's reserve turn")
+            assertTrue(CellBudget.GATE in texts(adapter.calls[1].request), "the gate line")
+            assertTrue(adapter.calls.none { "repairs to your own files only" in texts(it.request) }, "never the repair line")
+        }
+    }
+
+    @Test
+    fun `a dearer rendered request reaches the reserve without ending the cell, and three verify calls still fit`() = runBlocking<Unit> {
+        // C3r 3: L = $10, S = $6 over six calls of u = $1, the last estimate E = $1: the turn starts Within; the rendered E = $1.10 is Reserve.
+        controller().open(repo.root, request, policy(TaskLimits(maxCost = usd("10")))).use { c ->
+            val dear = FakeProfiles.main.copy(priceTable = FakeProfiles.prices("10", "10", "10", "10", "62.5"))
+            val billed = BillableUsage(mapOf(BillingDimension.OUTPUT to 1L), UsageProvenance("fake", "fake-main", "test"), billed = usd("1"))
+            repeat(6) { Accounting(c.store, clock).record(c.ids, "inv-$it", dear, null, billed) }
+            c.limitState.lastEstimate = usd("1")
+            val gate = TaskLimitControl(idGen, clock, null).cell(c, CellModel(FakeAdapter(ScriptedModel.of()), dear, HeuristicEstimator())).gate
+            assertEquals(LimitDecision.Within, gate.check(Spend.Generation, Tokens.ZERO), "the turn starts at the last request's price")
+            // $0.10 of input at $10 per million plus the $1.00 output headroom (16k at $62.5 per million).
+            val rendered = Tokens(10_000L + 16_000L)
+            assertIs<LimitDecision.Reserve>(gate.check(Spend.Generation, rendered))
+            assertNull(c.limitState.block, "no refusal that ends the cell: the turn is rendered again as verify and report")
+            assertIs<LimitDecision.Reserve>(gate.check(Spend.Check, rendered), "which the reserve admits")
+            // The $4 left hold three verify-and-report calls at $1.10; a fourth would cross the limit.
+            fun spent(amount: String) = LimitSpend(6, usd(amount), CostBasis.Billed, 0, usd("1.1"))
+            for (amount in listOf("6", "7.1", "8.2")) assertIs<LimitDecision.Reserve>(LimitRule.decide(c.limits, spent(amount), usd("1.1")), amount)
+            assertIs<LimitDecision.Exhausted>(LimitRule.decide(c.limits, spent("9.3"), usd("1.1")))
+        }
+    }
+
+    @Test
+    fun `run and check deadlines are cut at dispatch to the time left, and nothing starts without any`() = runBlocking<Unit> {
+        // C3r 5: the cell is created with 60 s left; its model call takes 59 s, so a run launched after it gets 1 s, not 60.
+        fun timed(seconds: Long, vararg items: Item) =
+            FakeAdapter(ScriptedModel(listOf(ScriptedModel.Turn({ true }, { clock.advance(Duration.ofSeconds(seconds)); Scripted.Reply(items.toList()) }))))
+        fun handles(c: OpenedCampaign) = c.store.db.query("SELECT handle_id FROM handles WHERE work_id = ?", c.ids.work) { it.string("handle_id") }
+            .map { io.astrolabe.tool.run.SqliteHandles(c.store, clock).get(it)!! }
+        val early = CampaignRequest(WorkId("W-c3-deadline"), AttemptId("a1"), "make a return 10")
+        seed(early, shape = Shape.S0)
+        controller().open(repo.root, early, policy(TaskLimits(maxMinutes = 1))).use { c ->
+            val run = controller().runS0(c, CellModel(timed(59, say("starting"), call("r-bg", "run", """{"op":"run","cmd":"echo hi","bg":true}""")), FakeProfiles.main, HeuristicEstimator()))
+            assertEquals(BudgetStop.TaskLimitMinutes, run.budgetStop, run.state?.reason)
+            assertEquals(listOf(1L), handles(c).map { it.proc.deadlineSeconds }, "the deadline is the time left at launch")
+        }
+        // A 61 s call leaves no active time: its run is refused and its check is not run (never a minimal second).
+        val late = CampaignRequest(WorkId("W-c3-deadline-late"), AttemptId("a1"), "make a return 10")
+        seed(late, shape = Shape.S0)
+        controller().open(repo.root, late, policy(TaskLimits(maxMinutes = 1))).use { c ->
+            val adapter = timed(61, say("starting"), call("r-bg", "run", """{"op":"run","cmd":"echo hi","bg":true}"""), call("v-a", "verify", """{"what":"acceptance","ids":["AC-1"]}"""))
+            val run = controller().runS0(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator()))
+            assertEquals(BudgetStop.TaskLimitMinutes, run.budgetStop, run.state?.reason)
+            assertTrue(handles(c).isEmpty(), "no process is launched")
+            val outcomes = c.store.db.query("SELECT outcome FROM receipts WHERE work_id = ?", c.ids.work) { it.string("outcome") }
+            assertTrue(outcomes.isNotEmpty() && outcomes.all { it == "NotRun" }, outcomes.toString())
+        }
+    }
+
+    @Test
+    fun `a call that never reached the provider releases its hold and counts no request`() = runBlocking<Unit> {
+        // C3r 7: one request and a money limit; the progress relay fails before adapter.start(), so nothing was sent.
+        val s0 = CampaignRequest(WorkId("W-c3-unsent"), AttemptId("a1"), "make a return 10")
+        seed(s0, shape = Shape.S0)
+        Events(clock).use { events ->
+            controller(events).open(repo.root, s0, policy(TaskLimits(maxCost = usd("1"), maxRequests = 1))).use { c ->
+                val fake = FakeAdapter(ScriptedModel.of(Scripted.Reply(listOf<Item>(say("never sent")))))
+                controller(events).runS0(c, CellModel(RelayDown(fake), FakeProfiles.main, HeuristicEstimator()))
+                assertTrue(fake.calls.isEmpty(), "nothing reached the provider")
+                assertTrue(Accounting(c.store, clock).calls(s0.work).isEmpty(), "no hold and no request stay on record")
+            }
+            controller(events).open(repo.root, s0, CampaignPolicy(Tokens(400_000))).use { c ->
+                val spend = TaskLimitControl(idGen, clock, null).spend(c)
+                assertEquals(0, spend.requests, "a reopen counts no request")
+                assertNull(spend.cost)
+                assertEquals(LimitDecision.Within, LimitRule.decide(c.limits, spend))
+            }
+        }
+    }
+
+    @Test
     fun `the balance profile is chosen at start and frozen for the attempt`() = runBlocking<Unit> {
         val recorder = EventRecorder()
         Events(clock).use { events ->
@@ -303,6 +456,29 @@ class TaskLimitsTest {
         }
         awaitEvents(recorder) { recorder.ofType<AgentEvent.Warning>().any { it.kind == "config-frozen" } }
         assertEquals(1, recorder.ofType<AgentEvent.Warning>().count { it.kind == "config-frozen" }, "only the reopen that asked for another profile")
+    }
+
+    @Test
+    fun `a child cell gets the balance profile once, from the model the host supplied`() = runBlocking<Unit> {
+        // C3r 6: W = 200 000. Economy bounds the window once — 150 000 without tiers, 133 334 under a 64k tier; a child routed
+        // from its parent's model must not narrow it again (112 500, 88 890). Main-line cells step a dear model's High effort once.
+        val prices = FakeProfiles.main.priceTable
+        val tiered = FakeProfiles.main.copy(priceTable = prices.copy(tiers = listOf(io.astrolabe.provider.PriceTier(64_000, prices.perMillion))))
+        val approve = Scripted.Reply(listOf(say("""{"verdict":"approve","confidence":0.9,"findings":[]}""")))
+        for ((profile, window) in listOf(FakeProfiles.main to 150_000, tiered to 133_334)) {
+            val work = CampaignRequest(WorkId("W-c3-child-$window"), AttemptId("a1"), request.text)
+            seed(work, shape = Shape.S2, risk = io.astrolabe.contract.Risk(1, io.astrolabe.contract.Reversibility.Hard, false))
+            controller().open(repo.root, work, CampaignPolicy(Tokens(400_000), balance = BalanceProfile.Economy)).use { c ->
+                val adapter = FakeAdapter(ScriptedModel.of(*(planning() + implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"") + approve).toTypedArray()))
+                // The review child's 30K budget admits a turn only under a narrowed output headroom (D-123).
+                controller().run(c, CellModel(adapter, profile, HeuristicEstimator(), Effort.High, maxOutputTokens = 4_000), maxCells = 1)
+                val (reviews, mainLine) = adapter.calls.map { it.request }.partition { io.astrolabe.delegate.Judge.OUTPUT in texts(it) }
+                assertEquals(window, reviews.single().profile.capabilities.contextLimitTokens, "the review child's window")
+                assertEquals(Effort.High, reviews.single().effort, "the review row's own effort (ReviewCritical), as before")
+                assertTrue(adapter.calls.all { it.request.profile.capabilities.contextLimitTokens == window }, adapter.calls.map { it.request.profile.capabilities.contextLimitTokens }.toString())
+                assertTrue(mainLine.all { it.effort == Effort.Medium }, "a dear model one step below High, once: ${mainLine.map { it.effort }}")
+            }
+        }
     }
 
     @Test
@@ -378,13 +554,14 @@ class TaskLimitsTest {
         seed(request)
     }
 
-    private fun seed(work: CampaignRequest, shape: Shape = Shape.S1, defaults: io.astrolabe.Defaults = io.astrolabe.Defaults()) {
+    private fun seed(work: CampaignRequest, shape: Shape = Shape.S1, defaults: io.astrolabe.Defaults = io.astrolabe.Defaults(), risk: io.astrolabe.contract.Risk? = null) {
         Store.open(stateRoot, repo.git, clock).use { store ->
             val contracts = Contracts(SqliteContractRepository(store, clock), idGen, clock)
             val derived = contracts.deriveS0(work.work, work.attempt, work.text, Atlas.build(repo.root), Config(defaults = defaults), Tokens(400_000)).contract
             val ref = derived.requests.single().id
             contracts.open(derived.copy(
                 shape = shape,
+                risk = risk ?: derived.risk,
                 requirements = if (shape == Shape.S0) listOf(Requirement("R1", "a returns 10", listOf("AC-1"), authorityRef = ref))
                     else listOf(Requirement("R1", "a returns 10", listOf("AC-1"), authorityRef = ref), Requirement("R2", "b returns 20", listOf("AC-2"), authorityRef = ref)),
                 acceptance = if (shape == Shape.S0) listOf(Acceptance.Run("AC-1", printing, Origin.User))
@@ -427,6 +604,11 @@ class TaskLimitsTest {
         val deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos()
         while (!ready() && System.nanoTime() < deadline) Thread.sleep(10)
         assertTrue(ready(), "events not delivered: ${recorder.events.map { it::class.simpleName }}")
+    }
+
+    /** The fake adapter whose progress relay cannot be attached: the cell fails before the request reaches the provider. */
+    private class RelayDown(private val inner: FakeAdapter) : ProviderAdapter by inner, io.astrolabe.provider.ObservableAdapter {
+        override fun addListener(listener: io.astrolabe.provider.InvocationListener): AutoCloseable = throw IllegalStateException("progress relay unavailable")
     }
 
     /** The fake adapter with every call billed [perCall], as a gateway reports it (D-378). */

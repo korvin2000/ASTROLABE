@@ -125,6 +125,15 @@ public class Accounting internal constructor(
         true
     }
 
+    /**
+     * Releases the durable hold [reserve] wrote for [invocationId] when its request is known never to have reached the
+     * provider (C3r): nothing was sent, so nothing is spent and no request is counted. A settled call is never removed;
+     * an unknown outcome keeps its hold until it is reconciled.
+     */
+    internal fun release(ids: Identities, invocationId: String) {
+        store.db.tx { tx -> tx.execute("DELETE FROM usage WHERE invocation_id = ? AND work_id = ? AND normalized = 'null'", invocationId, ids.work) }
+    }
+
     private fun affordable(work: WorkId, tokens: Long, money: Money, tokenLimit: Long, costLimit: Money?): Boolean {
         require(tokens >= 0 && money.amount.signum() >= 0)
         val calls = calls(work)

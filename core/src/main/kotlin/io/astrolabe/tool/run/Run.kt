@@ -170,6 +170,9 @@ public class Run(
     /** P8.C.12: how long the stop waits for a live background run to end on its own before it cancels it. */
     internal var stopGraceMillis: Long = STOP_GRACE_MILLIS
 
+    /** C3r: the whole seconds of active time a task's minutes limit leaves, read at each dispatch; `null` without one. */
+    internal var timeLeft: () -> Long? = { null }
+
     /** Recognised background runs by handle, pinned at launch until their end (C1a); in memory, so a restart records none. */
     private val pins = HashMap<String, PinnedRun>()
 
@@ -191,10 +194,16 @@ public class Run(
     override suspend fun execute(call: ToolCall, context: TurnContext): ToolOutcome {
         require(call.family == ToolFamily.Run) { "not a run call: ${call.name}" }
         // D-352: a cwd naming the root is no cwd, so intents, handles and the unknown-outcome guard see one command.
-        val args = (call.args as Args.Run).args.let { if (it.cwd != null && namesWorkspaceRoot(it.cwd)) it.copy(cwd = null) else it }
+        val requested = (call.args as Args.Run).args.let { if (it.cwd != null && namesWorkspaceRoot(it.cwd)) it.copy(cwd = null) else it }
         if (!ToolOps.implied(mask).allows(call.name)) {
-            return refused(args, Outcome.Denied, "${call.name} is masked in this role")
+            return refused(requested, Outcome.Denied, "${call.name} is masked in this role")
         }
+        // C3r: under a minutes limit every launch and every wait is cut at dispatch to the active time left; none starts
+        // without any. A cancel always runs.
+        val left = if (requested.op == "cancel") null else timeLeft()
+        if (left != null && left <= 0) return refused(requested, Outcome.Denied, io.astrolabe.budget.NO_ACTIVE_TIME)
+        val args = if (left == null) requested
+            else requested.copy(timeout = minOf(if (requested.op == "poll") requested.pollWaitSeconds else requested.timeoutSeconds.toLong(), left).toInt())
         return when (args.op) {
             "run" -> run(if (!args.bg && !args.until().none) args.copy(bg = true) else args, context)
             // D-365 tolerance: a poll that names a readiness condition is a wait.
