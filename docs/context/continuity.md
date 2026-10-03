@@ -27,7 +27,7 @@ The store is campaign-scoped, so `recall #17` works across cells; a stub index o
 
 **Seed selector** `[ASTROLABE 2.0 plan §4.3, §1 row 18]`
 
-> **Status.** The v1 rule and the budget are the code at `main` `6daabfc` (`K = core/src/main/kotlin/io/astrolabe`). The selector seam and v2 are **SPEC — implemented in P8.C.6** (line `v2/Dp1`, commit `47e546f`, not merged when this was written; its [report](../../../plan2/reports/WP-Dp1.md) governs the names below). The binding of v2 to the direct protocol is **SPEC — implemented in P8.D.1**.
+> **Status.** The v1 rule and the budget are the code at `main` `6daabfc` (`K = core/src/main/kotlin/io/astrolabe`). The selector seam and v2 are **SPEC — implemented in P8.C.6** (line `v2/Dp1`, last commit `8b0f555`, ready to merge and not merged when this was written; its [report](../../../plan2/reports/WP-Dp1.md) governs the names below). The binding of v2 to the direct protocol is **SPEC — implemented in P8.D.1**.
 
 One implementation serves both consumers: the cell boundary (`Controller.carryFrom` → `CarryForward.carry`, *code:* `K/campaign/Controller.kt:1251-1263`) and the pressure rebuild inside a cell (*code:* `K/cell/Cell.kt:1098-1101` calls the same function with the live register and Workset export). A selector is a pure function of records and only **orders** candidates; one shared cut decides what becomes KNOWN.
 
