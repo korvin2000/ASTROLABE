@@ -197,6 +197,19 @@ class JUnitXmlShaperTest {
     }
 
     @Test
+    fun `the runner's file is part of a test's identity, so one-named tests of two files never meet (P8C10 round 4)`() {
+        val xml = "<testsuite name=\"tests\" tests=\"2\" failures=\"1\">" +
+            "<testcase classname=\"tests\" name=\"t\" file=\"tests/a.py\"><failure message=\"boom\">x</failure></testcase>" +
+            "<testcase classname=\"tests\" name=\"t\" file=\"tests/b.py\"/></testsuite>"
+        val tests = JUnitXml.parse(xml.toByteArray(), null, "CHK-tests-blast").tests
+        assertEquals(listOf("tests/a.py", "tests/b.py"), tests.map { it.identity.file })
+        assertNotEquals(tests[0].identity.canonical, tests[1].identity.canonical)
+        val record = io.astrolabe.verify.Regressions.outcomes(tests, { it })
+        assertEquals(emptyList(), record.ambiguous, "two tests, not one ambiguous identity")
+        assertNotEquals(record.failed.single().key, record.passed.single())
+    }
+
+    @Test
     fun `a report cut inside a failing test is incomplete evidence whatever status its counts give (P8C10)`() {
         // `t` passes whole, then a second `t` is cut off inside its failure.
         val cut = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuite name=\"com.acme.T\" tests=\"2\" failures=\"1\" errors=\"0\" skipped=\"0\">\n" +

@@ -225,9 +225,14 @@ class BaselineTest {
         val regression = assertNotNull(hold(listOf(now), stampA, passedOnS0))
         assertEquals(RedClass.New, regression.kind)
         assertTrue(regression.regressions.single().contains("passed on s0"), regression.toString())
-        // Two failures of one identity on this tree: still new, never "failed before", when s0 passed it.
+        // Two failures of one identity on this tree: never "failed before" when s0 passed it — and, ambiguous, no proof of new (round 4, 8).
         val twice = blast(Outcome.Failed, stampA, listOf(failure("total"), failure("total", "another way")), ambiguous = listOf(key("total")))
-        assertEquals(RedClass.New, hold(listOf(twice), stampA, passedOnS0)?.kind)
+        val ambiguousNow = assertNotNull(hold(listOf(twice), stampA, passedOnS0))
+        assertEquals(RedClass.Unknown to emptyList<String>(), ambiguousNow.kind to ambiguousNow.failedBefore)
+        // Round 4, 2: an ineligible rerun of the same red on this tree never masks the eligible failure: still new, and still due a rerun only without an eligible run.
+        val background = blast(Outcome.Failed, stampA, listOf(failure("total")), stability = InputStability.Unknown)
+        assertEquals(RedClass.New, hold(listOf(now, background), stampA, passedOnS0)?.kind)
+        assertEquals(listOf(background.receiptId), Regressions.unconfirmed(listOf(background), listOf(passedOnS0), stampA).map { it.receiptId }, "an ineligible run confirms nothing")
         // Codex round 3 №2: s0 never reported it — a fail-fast baseline stopped first, or the test did not exist — unknown.
         val stopped = blast(Outcome.Failed, stampA, listOf(failure("a")), s0 = true, counts = Counts(failed = 1, discovered = 5))
         val failFast = assertNotNull(hold(listOf(blast(Outcome.Failed, stampA, listOf(failure("b")), listOf(key("a")))), stampA, stopped))
@@ -254,6 +259,35 @@ class BaselineTest {
     }
 
     @Test
+    fun `round 4 - a key is bound to the run's directory, a typecheck is its own trace, and an unlisting runner says so`() {
+        // 3: one-named tests of two packages: a pass in pkgP never clears a failure in pkgA.
+        fun result(outcome: TestOutcome) = TestResult(TestIdentity(file = "tests/test_api.py", name = "test_ok"), outcome, if (outcome == TestOutcome.Failed) "boom" else null)
+        val inA = Regressions.outcomes(listOf(result(TestOutcome.Failed)), { it }, cwd = "pkgA")
+        val inP = Regressions.outcomes(listOf(result(TestOutcome.Passed)), { it }, cwd = "pkgP/")
+        assertTrue(inA.failed.single().key != inP.passed.single(), "the directory is part of the key")
+        assertEquals(Regressions.outcomes(listOf(result(TestOutcome.Passed)), { it }, cwd = "./pkgA").passed, Regressions.outcomes(listOf(result(TestOutcome.Passed)), { it }, cwd = "pkgA").passed)
+        val red = blast(Outcome.Failed, stampA, command = listOf("pytest"), counts = Counts(failed = 1, discovered = 1)).copy(tests = inA)
+        val green = blast(Outcome.Passed, stampB, command = listOf("pytest"), counts = Counts(passed = 1, discovered = 1)).copy(tests = inP)
+        assertNotNull(hold(listOf(red, green), stampB), "still held")
+        // 4a: the types of touched files name no failures; their own passed run on this tree, of the same definition, is the trace.
+        fun types(outcome: Outcome, stamp: io.astrolabe.id.CandidateId, command: List<String> = listOf("mypy", ".")) =
+            (if (outcome == Outcome.Passed) Counts(passed = 1, discovered = 1) else null).let { counts ->
+                blast(outcome, stamp, command = command, counts = counts ?: Counts()).copy(checkId = Checks.TYPES_TOUCHED, parsed = counts, tests = null)
+            }
+        val typesRed = types(Outcome.Failed, stampA)
+        assertTrue(assertNotNull(hold(listOf(typesRed), stampA)).unknown.single().contains("typecheck names no failures"))
+        assertNull(hold(listOf(typesRed, types(Outcome.Passed, stampB)), stampB))
+        assertNotNull(hold(listOf(typesRed, types(Outcome.Passed, stampB, listOf("pyright"))), stampB), "another definition")
+        assertNotNull(hold(listOf(typesRed, types(Outcome.Inconclusive, stampB)), stampB), "only a passed run")
+        // 4c: a runner that lists no passed tests says so — and so does a record that cannot keep them all.
+        val held = blast(Outcome.Failed, stampA, listOf(failure("total")))
+        val unlisted = blast(Outcome.Passed, stampB, counts = Counts(passed = 3, discovered = 3))
+        assertTrue(assertNotNull(hold(listOf(held, unlisted), stampB)).unknown.single().endsWith("the runner lists no passed tests"))
+        val many = blast(Outcome.Passed, stampB, passed = listOf(key("x")), truncated = true, counts = Counts(passed = 2_500, discovered = 2_500))
+        assertTrue(assertNotNull(hold(listOf(held, many), stampB)).unknown.single().contains("more tests than the record keeps"))
+    }
+
+    @Test
     fun `what a run records shows redacted text, compares identities only, and counts ambiguity over every reported case`() {
         fun result(name: String, outcome: TestOutcome, message: String? = null) = TestResult(TestIdentity(file = "tests/t.py", name = name), outcome, message)
         val redact = { text: String -> text.replace(Regex("secret\\w+"), "[REDACTED]") }
@@ -262,8 +296,23 @@ class BaselineTest {
         assertEquals(Regressions.key(TestIdentity(file = "tests/t.py", name = "test_login[secretAAA]")), one.failed.first().key, "the key digests the unredacted identity")
         assertEquals(listOf(key("same")), one.ambiguous, "a passed and a skipped instance of one identity")
         assertTrue(Regressions.outcomes(listOf(result("x", TestOutcome.Passed)), redact, complete = false).incomplete)
+        // Round 4, 4b: the harness's own pytest runs list their passed tests; anything it cannot safely change stays as it is.
+        assertEquals(listOf("pytest", "-q", "-rA"), Regressions.listingPasses(listOf("pytest", "-q")))
+        assertEquals(listOf("python", "-m", "pytest", "tests", "-rA"), Regressions.listingPasses(listOf("python", "-m", "pytest", "tests")))
+        assertEquals(listOf("pytest.cmd", "-rA"), Regressions.listingPasses(listOf("pytest.cmd")))
+        assertEquals(listOf("pytest", "-rf"), Regressions.listingPasses(listOf("pytest", "-rf")), "its own report option is kept")
+        assertEquals(listOf("npx", "jest"), Regressions.listingPasses(listOf("npx", "jest")), "no safe way known: unchanged")
+        assertEquals(listOf("cmd.exe", "/c", "pytest -q"), Regressions.listingPasses(listOf("cmd.exe", "/c", "pytest -q")))
     }
 
+
+    @Test
+    fun `the baseline's stored log hides a key block its output opens and never closes (round 4, 9)`() = runTest {
+        val result = baseline().run(suite("echo -----BEGIN PRIVATE KEY-----& echo MIIEvQIBADANBgkqhkiG9w0BAQEFAASC& exit /b 1",
+            "printf '%s\\n' '-----BEGIN PRIVATE KEY-----' 'MIIEvQIBADANBgkqhkiG9w0BAQEFAASC'; exit 1"), contractVersion = 1, s0 = s0)
+        val log = String(store.blobs.get(assertNotNull(result.receipt.raw)), Charsets.UTF_8)
+        assertFalse(log.contains("MIIEvQIBADANBgkqhkiG9w0BAQEFAASC"), log)
+    }
 
     @Test
     fun `the time a minutes limit leaves is read again just before the baseline's process starts`() = runTest {

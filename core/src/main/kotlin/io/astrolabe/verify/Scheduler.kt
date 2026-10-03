@@ -53,6 +53,11 @@ public data class Executed(
     val expectedExitCode: Int? = 0,
     /** What a harness regression check's run reported test by test, recorded on the receipt (P8.C.10); `null` otherwise. */
     val tests: TestOutcomes? = null,
+    /**
+     * P8.C.10: per check sharing one run, its own record — identities bound to that check's id — which replaces [tests]
+     * on that check's receipt (one `run` realizing the full suite and the blast radius gives each its own).
+     */
+    val testsByCheck: Map<String, TestOutcomes> = emptyMap(),
 ) {
     /** The constructor before [tests] (P8.C.10). Kept for Java callers. */
     public constructor(command: List<String>, cwd: String?, shell: Boolean, exit: Int?, outcome: Outcome, counts: Counts?, raw: Digest?, limits: List<String>, expectedExitCode: Int?) :
@@ -329,7 +334,7 @@ public class Scheduler(
             verifierVersion = verifierVersion, checkDefinitionVersion = check.definitionVersion, contractVersion = contractVersion,
             outcome = outcome, parsed = executed.counts, inputClosure = check.inputClosure, testedInputs = if (concurrent) testedInputs.copy(stability = InputStability.Unknown) else testedInputs,
             raw = executed.raw, limits = limits, exitCode = executed.exit, at = clock.instant(), closureManifest = manifest, expectedExitCode = executed.expectedExitCode,
-            evidenceKind = kind, checkOrigin = check.origin, evidenceDeclared = check.evidence != null, tests = executed.tests,
+            evidenceKind = kind, checkOrigin = check.origin, evidenceDeclared = check.evidence != null, tests = executed.testsByCheck[check.id] ?: executed.tests,
         )
         receipts.record(receipt)
         aliasByReceipt[receipt.receiptId] = aliases.allocate(ids.work, receipt.receiptId, "receipt", ids.context, workspace.id).text
@@ -491,12 +496,12 @@ public class Scheduler(
      * rerun began — a `not_run` marker of its definition on this stamp, in this workspace — so it runs once per definition
      * and tree, a crash or a reopen included. The marker is no run of the change and never the check's last result.
      */
-    internal fun beginRerun(check: Check, contractVersion: Int): Receipt {
+    internal fun beginRerun(check: Check, contractVersion: Int, definition: Digest = check.definitionVersion): Receipt {
         val report = stamper.report(fresh = true)
         val receipt = Receipt(
             receiptId = idGen.next("rcpt"), ids = ids, checkId = check.id, acceptanceIds = check.acceptanceIds, command = check.command?.argv.orEmpty(), cwd = check.command?.cwd,
             shell = false, stampBefore = report.candidateId, stampAfter = report.candidateId, envId = report.env.envId, verifierVersion = verifierVersion,
-            checkDefinitionVersion = check.definitionVersion, contractVersion = contractVersion, outcome = Outcome.NotRun, parsed = null, inputClosure = check.inputClosure,
+            checkDefinitionVersion = definition, contractVersion = contractVersion, outcome = Outcome.NotRun, parsed = null, inputClosure = check.inputClosure,
             testedInputs = TestedInputs(emptyMap(), InputStability.Unknown), raw = null, limits = listOf(Limit(Regressions.RERUN, "the stop's rerun of ${check.id} on @${report.candidateId.hash8} began")),
             at = clock.instant(), evidenceKind = check.evidenceKind, checkOrigin = check.origin,
         )

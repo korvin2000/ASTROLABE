@@ -198,29 +198,46 @@ public object Regressions {
     public fun isMarker(receipt: Receipt): Boolean = receipt.limits.any { it.kind == RERUN || it.kind == BASELINE_STARTED }
 
     /**
-     * What a run reported test by test (D-27): a key per identity — a digest of its canonical form — and redacted text to
-     * show; every identity reported more than once, whatever its outcomes, is ambiguous; a skipped or expected failure is
-     * no pass. Bounded; [complete] false when the capture or the structured report could not be read whole.
+     * What a run in the directory [cwd] reported test by test (D-27): a key per identity — a digest of its canonical form
+     * and of the run's directory, so one-named tests of two packages never meet — and redacted text to show; every identity
+     * reported more than once, whatever its outcomes, is ambiguous; a skipped or expected failure is no pass. Bounded;
+     * [complete] false when the capture or the structured report could not be read whole.
      */
     @JvmStatic
     @JvmOverloads
-    public fun outcomes(tests: List<TestResult>, redact: (String) -> String, complete: Boolean = true): TestOutcomes {
+    public fun outcomes(tests: List<TestResult>, redact: (String) -> String, complete: Boolean = true, cwd: String? = null): TestOutcomes {
         val repeated = tests.groupBy { it.identity.canonical }.filterValues { it.size > 1 }.keys
         val failing = tests.filter { it.failing }
         val passing = tests.filter { it.outcome == TestOutcome.Passed }
         val failed = failing.take(MAX_FAILED).map { t ->
             val first = t.message?.lineSequence()?.map { it.trim() }?.firstOrNull { it.isNotEmpty() } ?: t.outcome.name.lowercase()
-            FailedTest(key(t.identity), redact(t.identity.display).take(MAX_TEXT), redact(first).take(MAX_TEXT))
+            FailedTest(key(t.identity, cwd), redact(t.identity.display).take(MAX_TEXT), redact(first).take(MAX_TEXT))
         }
-        return TestOutcomes(failed, passing.take(MAX_PASSED).map { key(it.identity) }, repeated.take(MAX_FAILED).map(::keyOf),
+        return TestOutcomes(failed, passing.take(MAX_PASSED).map { key(it.identity, cwd) }, repeated.take(MAX_FAILED).map { keyOf(it, cwd) },
             truncated = failing.size > MAX_FAILED || passing.size > MAX_PASSED || repeated.size > MAX_FAILED, incomplete = !complete)
     }
 
-    /** The comparison key of an identity: a digest of its canonical form, never shown. */
+    /** The comparison key of an identity run in [cwd]: a digest of its canonical form and of the normalized directory, never shown. */
     @JvmStatic
-    public fun key(identity: TestIdentity): String = keyOf(identity.canonical)
+    @JvmOverloads
+    public fun key(identity: TestIdentity, cwd: String? = null): String = keyOf(identity.canonical, cwd)
 
-    private fun keyOf(canonical: String): String = Digest.ofUtf8(canonical).hex.take(KEY_HEX)
+    private fun keyOf(canonical: String, cwd: String?): String {
+        val dir = cwd?.replace('\\', '/')?.trim()?.trimEnd('/')?.removePrefix("./")?.takeUnless { it.isEmpty() || it == "." }.orEmpty()
+        return Digest.ofUtf8("$canonical|cwd=$dir").hex.take(KEY_HEX)
+    }
+
+    /**
+     * [argv] asking the runner to list its passed tests too, where the harness knows a safe way: a direct `pytest` call (or
+     * `python -m pytest`) without its own `-r` report option gets `-rA`; anything else is left as it is.
+     */
+    @JvmStatic
+    public fun listingPasses(argv: List<String>): List<String> {
+        fun base(token: String) = token.replace('\\', '/').substringAfterLast('/').lowercase().removeSuffix(".exe").removeSuffix(".cmd").removeSuffix(".bat")
+        val pytest = argv.firstOrNull()?.let(::base) in setOf("pytest", "py.test") ||
+            (argv.firstOrNull()?.let(::base)?.startsWith("python") == true && argv.getOrNull(1) == "-m" && argv.getOrNull(2) == "pytest")
+        return if (pytest && argv.none { it.startsWith("-r") }) argv + "-rA" else argv
+    }
 
     /**
      * P8.C.10: the hold of one check on the tree [stamp] from its receipts in the attempt and the workspace ([history],
@@ -232,11 +249,14 @@ public object Regressions {
             RegressionHold(h.from.map(alias).distinct(), h.current.map { it.receiptId }, h.command, h.regressions, h.failedBefore, h.unknown)
         }
 
-    /** The red runs of [history] behind the hold on [stamp] whose definition has no receipt on it, marker included: what verify-on-stop reruns once (P8.C.10 A). */
+    /**
+     * The red runs of [history] behind the hold on [stamp] whose definition has no eligible receipt or marker on it — what
+     * verify-on-stop reruns once (P8.C.10 A), latest first, one per definition.
+     */
     @JvmStatic
     public fun unconfirmed(history: List<Receipt>, baselines: List<Receipt>, stamp: CandidateId): List<Receipt> {
         val h = held(history, baselines, stamp) ?: return emptyList()
-        val onStamp = history.filter { it.stampAfter == stamp }.map { it.checkDefinitionVersion }.toSet()
+        val onStamp = history.filter { it.stampAfter == stamp && (it.testedInputs.eligible || isMarker(it)) }.map { it.checkDefinitionVersion }.toSet()
         return h.from.filter { reported(it) && it.checkDefinitionVersion !in onStamp }.reversed().distinctBy { it.checkDefinitionVersion }
     }
 
@@ -267,8 +287,13 @@ public object Regressions {
         val finishedNow = fresh.filter(::finished)
         val failures = LinkedHashMap<String, Pair<FailedTest, Receipt>>()
         for (red in reds) for (failure in red.tests?.failed.orEmpty()) failures[failure.key] = failure to red
+        // On this tree: a failure any run reported, and the latest eligible run that reported it (P8.C.10: any such run is evidence).
         val failingNow = LinkedHashMap<String, Pair<FailedTest, Receipt>>()
-        for (run in fresh) for (failure in run.tests?.failed.orEmpty()) failingNow[failure.key] = failure to run
+        val failingEligible = LinkedHashMap<String, Pair<FailedTest, Receipt>>()
+        for (run in fresh) for (failure in run.tests?.failed.orEmpty()) {
+            failingNow[failure.key] = failure to run
+            if (run.testedInputs.eligible) failingEligible[failure.key] = failure to run
+        }
         val baseline = baselines.lastOrNull()
         val from = LinkedHashSet<Receipt>()
         val regressions = ArrayList<String>()
@@ -276,22 +301,26 @@ public object Regressions {
         val unknown = ArrayList<String>()
         for ((key, earlier) in failures) {
             val (failure, red) = earlier
-            val now = failingNow[key]
             // P8.C.10 1: shown fixed — reported once, passed, by a finished eligible run on this tree, failing in none there.
-            if (now == null && finishedNow.any { passedOnce(it, key) }) continue
-            val source = now?.second ?: red
+            if (failingNow[key] == null && finishedNow.any { passedOnce(it, key) }) continue
+            val eligible = failingEligible[key]
+            val source = eligible?.second ?: failingNow[key]?.second ?: red
             from += source
-            val s0 = baseline?.takeIf { finished(it) && it.envId == source.envId }?.tests
+            val usable = baseline?.takeIf { finished(it) && it.envId == source.envId }
+            val s0 = usable?.tests
             when {
                 s0 != null && s0.failed.any { it.key == key } -> failedBefore += "failed before the change too: ${failure.name}"
-                now != null && now.second.testedInputs.eligible && finishedNow.none { passedOnce(it, key) } && baseline != null && s0 != null && passedOnce(baseline, key) ->
-                    regressions += "${failure.name} — ${failure.signature} (passed on s0 in baseline ${baseline.receiptId})"
-                else -> unknown += "${failure.name}: " + why(key, now, red, fresh, finishedNow, baseline, s0)
+                eligible != null && key !in eligible.second.tests!!.ambiguous && usable != null && passedOnce(usable, key) ->
+                    regressions += "${failure.name} — ${failure.signature} (passed on s0 in baseline ${usable.receiptId})"
+                else -> unknown += "${failure.name}: " + why(key, eligible, failingNow[key], red, fresh, finishedNow, baseline, s0)
             }
         }
-        // Failures a run counted but did not identify (or cut from its record) stay: nothing shows them fixed one by one.
+        // Failures a run counted but did not identify (or cut from its record) stay: nothing shows them fixed one by one —
+        // except for the types of touched files, whose own passed run on this tree, of the same definition, is the trace.
         for (red in reds.filter(::unidentified)) {
-            unknown += "failures of ${red.receiptId} the runner did not identify one by one"
+            if (red.checkId == Checks.TYPES_TOUCHED && fresh.any { it.testedInputs.eligible && it.outcome == Outcome.Passed && it.checkDefinitionVersion == red.checkDefinitionVersion }) continue
+            unknown += if (red.checkId == Checks.TYPES_TOUCHED) "failures of ${red.receiptId}: the typecheck names no failures one by one; a passed run of it on this tree shows them fixed"
+                else "failures of ${red.receiptId} the runner did not identify one by one"
             from += red
         }
         if (from.isEmpty()) return null
@@ -301,16 +330,23 @@ public object Regressions {
     }
 
     /** Why a held failure is unknown: what is missing of the evidence a fix or a regression would need. */
-    private fun why(key: String, now: Pair<FailedTest, Receipt>?, red: Receipt, fresh: List<Receipt>, finishedNow: List<Receipt>, baseline: Receipt?, s0: TestOutcomes?): String = when {
-        now != null && finishedNow.any { key in it.tests!!.passed } -> "failed and passed on this tree (flaky)"
-        now != null && !now.second.testedInputs.eligible -> "failed on this tree in a run that cannot certify it"
-        now != null && baseline == null -> NO_BASELINE
-        now != null && s0 == null -> "baseline ${baseline!!.receiptId} ${unfinished(baseline, now.second)}: $NO_BASELINE"
-        now != null && key in s0!!.ambiguous -> "reported more than once on s0: ambiguous"
-        now != null -> "not reported on s0 by baseline ${baseline!!.receiptId}"
+    private fun why(
+        key: String, eligible: Pair<FailedTest, Receipt>?, any: Pair<FailedTest, Receipt>?, red: Receipt, fresh: List<Receipt>, finishedNow: List<Receipt>,
+        baseline: Receipt?, s0: TestOutcomes?,
+    ): String = when {
+        any != null && eligible == null -> "failed on this tree only in a run that cannot certify it"
+        eligible != null && key in eligible.second.tests!!.ambiguous -> "reported more than once on this tree: ambiguous"
+        eligible != null && finishedNow.any { key in it.tests!!.passed } -> "failed and passed on this tree (flaky)"
+        eligible != null && baseline == null -> NO_BASELINE
+        eligible != null && s0 == null -> "baseline ${baseline!!.receiptId} ${unfinished(baseline, eligible.second)}: $NO_BASELINE"
+        eligible != null && key in s0!!.ambiguous -> "reported more than once on s0: ambiguous"
+        eligible != null -> "not reported on s0 by baseline ${baseline!!.receiptId}"
         fresh.isEmpty() -> "failed in ${red.receiptId}, not rerun on this tree"
+        finishedNow.isEmpty() && fresh.any { it.testedInputs.eligible && it.tests?.truncated == true && (it.outcome == Outcome.Passed || it.outcome == Outcome.Failed) } ->
+            "failed in ${red.receiptId}; the run on this tree passed more tests than the record keeps ($MAX_PASSED)"
         finishedNow.isEmpty() -> "failed in ${red.receiptId}; the run on this tree did not finish with a complete record"
         finishedNow.any { key in it.tests!!.passed } -> "failed in ${red.receiptId}; reported more than once on this tree: ambiguous"
+        finishedNow.all { it.tests!!.passed.isEmpty() && (it.parsed?.passed ?: 0) > 0 } -> "failed in ${red.receiptId}; the runner lists no passed tests"
         else -> "failed in ${red.receiptId}, not executed on this tree (removed, skipped or renamed)"
     }
 
@@ -429,7 +465,8 @@ public class Baseline(
         // D-323: report and coverage artifacts the suite writes are outputs, not inputs; any other change withholds.
         val mutated = (before.keys + after.keys).filter { before[it] != after[it] && !reportArtifact(it) }.toSet()
         if (mutated.isNotEmpty()) limits += Limit("input_mutation", "the suite changed its own inputs in the candidate: ${mutated.sorted().joinToString(", ")}; the receipt cannot certify them")
-        val redacted = redaction.applyBytes(observed.output, ContentClass.ReusableEvidence)
+        // D-390 (P8.C.10): the capture is a live stream, so a key block it opens and never closes stays hidden in the stored log.
+        val redacted = redaction.applyLive(observed.output, ContentClass.ReusableEvidence, openAtEnd = false)
         val blob = blobs.put(redacted.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
         val alias = aliases.allocate(ids.work, receiptId, "receipt", ids.context, null).text
         val capture = RunCapture(
@@ -447,7 +484,7 @@ public class Baseline(
             shaped.status == Outcome.Passed && (shaped.counts == null || (shaped.counts.executed == 0 && shaped.counts.discovered == 0)) -> Outcome.Inconclusive
             else -> shaped.status
         }
-        val tests = Regressions.outcomes(shaped.tests, { redaction.apply(it, ContentClass.ReusableEvidence).text }, complete = capture.captureComplete && !shaped.captureTruncated && !shaped.evidenceIncomplete)
+        val tests = Regressions.outcomes(shaped.tests, { redaction.apply(it, ContentClass.ReusableEvidence).text }, complete = capture.captureComplete && !shaped.captureTruncated && !shaped.evidenceIncomplete, cwd = command.cwd)
         val receipt = receipt(receiptId, check, contractVersion, s0, command.argv, command.cwd, capture.exitCode, outcome, shaped.counts, TestedInputs(inputs, InputStability.Isolated, mutated), blob, limits, tests)
         val ledger = if (receipt.testedInputs.eligible && (outcome == Outcome.Passed || outcome == Outcome.Failed || outcome == Outcome.Inconclusive)) {
             val ledgerLimits = ArrayList<String>()

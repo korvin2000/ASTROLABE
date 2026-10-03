@@ -108,6 +108,8 @@ internal object JUnitXml {
             var suitePackage: String? = null
             var caseName: String? = null
             var caseClass: String? = null
+            // P8.C.10: the runner's file (pytest, some JUnit writers) tells one-named tests of two files apart.
+            var caseFile: String? = null
             var caseTime: Long? = null
             var caseOutcome = TestOutcome.Passed
             var caseMessage: String? = null
@@ -123,6 +125,7 @@ internal object JUnitXml {
                         "testcase" -> {
                             caseName = reader.attr("name")
                             caseClass = reader.attr("classname")
+                            caseFile = reader.attr("file")
                             caseTime = reader.attr("time")?.toDoubleOrNull()?.let { (it * 1000).toLong() }
                             caseOutcome = TestOutcome.Passed
                             caseMessage = null
@@ -159,8 +162,8 @@ internal object JUnitXml {
                                     identity = TestIdentity(
                                         check = checkId,
                                         module = module ?: suitePackage,
-                                        file = caseClass ?: suite,
-                                        suite = suite?.takeIf { it != caseClass },
+                                        file = caseFile ?: caseClass ?: suite,
+                                        suite = if (caseFile != null) caseClass ?: suite else suite?.takeIf { it != caseClass },
                                         name = name,
                                         parameterization = param,
                                     ),
@@ -171,6 +174,7 @@ internal object JUnitXml {
                             }
                             caseName = null
                             caseClass = null
+                            caseFile = null
                             caseMessage = null
                             caseTime = null
                         }

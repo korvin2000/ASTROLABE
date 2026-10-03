@@ -493,8 +493,9 @@ public object Obligations {
 /**
  * The one acceptance rule (§8.7, D-337): the cell's exit gate, the verifier, final acceptance and resume all resolve a
  * proposal here, so the same inputs always give the same answer. Order:
- * 1. an executed red check → rework; no decision covers it (§8.8) — a regression the blast radius or the types of touched
- *    files found against the baseline at `s0` is one, whatever `Open` says, until a later passed run (P8.C.10);
+ * 1. an executed red check → rework; no decision covers it (§8.8) — a failure of the blast radius or the types of touched
+ *    files that is new against the baseline at `s0` is one, whatever `Open` says, until it is shown fixed on the tree at
+ *    hand: reported once, passed, by an eligible run that finished with a complete record (P8.C.10);
  * 2. something the agent must close ([other]: an open plan step while acceptance is not proven, a red mandatory check
  *    without an `Open` item, a contract or stamp mismatch, an unresolved impact nudge, an unjustified acceptance-surface
  *    change) → rework; a red optional check is no gap: the runtime records it as known red ([Resolved.knownRed], C1b);

@@ -269,7 +269,8 @@ class ProvenanceTest {
     }
 
     /** P8.C.10: `pytest -rA` output of `tests/test_discount.py`: `test_other` passes, `test_tier` passes or fails — or, without [tier], does not exist. */
-    private fun blastOutput(tierFails: Boolean, message: String = "AssertionError: assert 4 == 5", tier: Boolean = true): String = if (!tier) """
+    private fun blastOutput(tierFails: Boolean, message: String = "AssertionError: assert 4 == 5", tier: Boolean = true, listed: Boolean = true): String =
+        if (!listed) unlisted(tierFails, message) else if (!tier) """
         ============================= test session starts ==============================
         collected 1 item
 
@@ -294,12 +295,12 @@ class ProvenanceTest {
      * P8.C.10, an S1 increment: the blast radius (a `pytest` printing `blast_out.txt`: [atS0] at s0, then [outputs] — the
      * tree before each reply) runs through `verify` at the replies [verifying]; with [note] the agent records the red in Open
      * before its first `done`, which comes after them; verify-on-stop brings the blast radius to the tree and runs its
-     * baseline on s0.
+     * baseline on s0; without [listed] the runner names no passed test (pytest without `-rA`).
      */
-    private fun blastCampaign(atS0: Boolean, outputs: List<Boolean>, verifying: Set<Int>, note: Boolean = true): Pair<S0Run, AgentEvent.Campaign.Finished> {
-        val pytest = modelPytest("blast_out.txt", blastOutput(atS0))
+    private fun blastCampaign(atS0: Boolean, outputs: List<Boolean>, verifying: Set<Int>, note: Boolean = true, listed: Boolean = true): Pair<S0Run, AgentEvent.Campaign.Finished> {
+        val pytest = modelPytest("blast_out.txt", blastOutput(atS0, listed = listed))
         seed(listOf(Acceptance.Run("AC-1", printing, Origin.User)), r1 = listOf("AC-1"), host = listOf("AC-1"))
-        return run(before = { i -> outputs.getOrNull(i)?.let { repo.write("blast_out.txt", blastOutput(it)) } }) { c ->
+        return run(before = { i -> outputs.getOrNull(i)?.let { repo.write("blast_out.txt", blastOutput(it, listed = listed)) } }) { c ->
             c.checks.replace(io.astrolabe.verify.Check(Checks.TESTS_BLAST, io.astrolabe.verify.CheckKind.Unit, io.astrolabe.verify.Selector.Blast, io.astrolabe.evidence.Closure.Unknown,
                 io.astrolabe.verify.CostClass.Slow, io.astrolabe.verify.Trigger.StepBoundary, command = Command(listOf(pytest, "-q"))))
             outputs.indices.map { i ->
@@ -376,6 +377,36 @@ class ProvenanceTest {
         val finish = assertNotNull(run.finish)
         assertTrue(finish.openItems.none { it.startsWith("${Checks.TESTS_BLAST}: ") } && finish.notVerified.none { it.startsWith(Checks.TESTS_BLAST) }, finish.toString())
         assertTrue(finish.checksRun.single { it.checkId == Checks.TESTS_BLAST }.outcome == "passed", finish.checksRun.toString())
+    }
+
+    /** `pytest -q` output without `-rA`: only a failure is named. */
+    private fun unlisted(tierFails: Boolean, message: String): String = if (tierFails) """
+        ============================= test session starts ==============================
+        collected 2 items
+
+        tests/test_discount.py .F                                                [100%]
+
+        =========================== short test summary info ============================
+        FAILED tests/test_discount.py::test_tier - $message
+        ========================= 1 passed, 1 failed in 0.10s ==========================
+    """.trimIndent() + "\n" else """
+        ============================= test session starts ==============================
+        collected 2 items
+
+        tests/test_discount.py ..                                                [100%]
+
+        ============================== 2 passed in 0.10s ===============================
+    """.trimIndent() + "\n"
+
+    @Test
+    fun `red, fix, green through the shaper without passes listed - completed, capped, and said so (round 4)`() {
+        // With `-rA`-style output the same scenario is shown fixed and leaves no trace (`a fix proposed without a rerun …`).
+        val bare = blastCampaign(atS0 = false, outputs = listOf(true, false), verifying = setOf(0), listed = false).first
+        assertEquals(CampaignOutcome.Completed, bare.outcome, bare.state?.reason)
+        val finish = assertNotNull(bare.finish)
+        assertTrue(finish.openItems.any { it.startsWith("${Checks.TESTS_BLAST}: failure not classified (tests/test_discount.py::test_tier: ") && it.contains("the runner lists no passed tests") },
+            finish.openItems.toString())
+        assertEquals(ProvenanceClass.Unverified, finish.provenanceClass, "a documented limit: no fix is shown without the passes listed")
     }
 
     @Test

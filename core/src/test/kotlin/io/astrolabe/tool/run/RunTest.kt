@@ -1391,6 +1391,7 @@ class RunTest {
         fun baselines() = receipts.forCheck(io.astrolabe.verify.Checks.TESTS_BLAST).filter(io.astrolabe.verify.Regressions::isBaseline)
         // A minutes limit with no time left: no baseline runs, the red stays unknown.
         verify.timeLeft = { 0L }
+        assertEquals(0L, baseline.timeLeft(), "verify's time left reaches every baseline path, verify(baseline) included")
         verify.onStop(emptyList())
         assertEquals(emptyList(), baselines())
         // Time left, but s0 cannot be exported: the baseline is recorded as begun, and never retried in the attempt.
@@ -1428,6 +1429,75 @@ class RunTest {
         assertTrue("src/a.py" in rerun.testedInputs.mutatedDuringCheck, rerun.testedInputs.toString())
         assertTrue(history.any { r -> r.limits.any { it.kind == io.astrolabe.verify.Regressions.RERUN } }, "begun on record")
         assertEquals(1, history.count { it.stampBefore == rerun.stampBefore && !io.astrolabe.verify.Regressions.isMarker(it) }, "one run, no flaky retry")
+    }
+
+    /** P8.C.10 round 4: a registry with the full suite and, optionally, the blast radius on the same [command]; its scheduler and verify. */
+    private inner class Regression(command: io.astrolabe.contract.Command, blastClosure: io.astrolabe.evidence.Closure? = io.astrolabe.evidence.Closure.Unknown) {
+        val checks = io.astrolabe.verify.Checks.empty().also { coherence.register(it) }
+        val receipts = SqliteReceipts(store, clock)
+        val scheduler = Scheduler(checks, workspace, registry, stamper, receipts, SqliteAliases(store, clock), idGen, ids, clock)
+        val verify = Verify(checks, scheduler, null, null, null, workspace, TrustedLocalRunner(os), os, stamper, store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, contracts, stateRoot.resolve("logs"))
+        val full = checks.register(io.astrolabe.verify.Check(io.astrolabe.verify.Checks.FULL, io.astrolabe.verify.CheckKind.Full, io.astrolabe.verify.Selector.All,
+            io.astrolabe.evidence.Closure.Unknown, io.astrolabe.verify.CostClass.Expensive, io.astrolabe.verify.Trigger.CampaignEnd, command = command, origin = Origin.Harness))
+        val blast = blastClosure?.let {
+            checks.register(io.astrolabe.verify.Check(io.astrolabe.verify.Checks.TESTS_BLAST, io.astrolabe.verify.CheckKind.Unit, io.astrolabe.verify.Selector.Blast, it,
+                io.astrolabe.verify.CostClass.Slow, io.astrolabe.verify.Trigger.StepBoundary, command = command))
+        }
+        fun hold() = blast?.let { scheduler.currency(it, stamper.stamp().id).hold }
+    }
+
+    @Test
+    fun `one run realizing the full suite and the blast radius gives the blast radius its own record by test (round 4, 1)`() = runTest {
+        repo.write("blast_out.txt", recorded("pytest-fail-param.txt"))
+        val r = Regression(printing("blast_out.txt"))
+        run("""{"cmd":"${printingCmd("blast_out.txt")}"}""", runner().also { it.verify = r.verify })
+        val blastRun = r.receipts.forCheck(io.astrolabe.verify.Checks.TESTS_BLAST).single()
+        val failed = assertNotNull(blastRun.tests, "the blast radius's receipt records its tests").failed.single()
+        assertEquals("tests/test_discount.py::TestDiscount::test_tier[3]", failed.name)
+        assertNull(r.receipts.forCheck(io.astrolabe.verify.Checks.FULL).single().tests, "the full suite keeps no record")
+        assertEquals(io.astrolabe.verify.RedClass.Unknown, r.hold()?.kind, "held, by its identity, not as an unidentified red")
+        assertTrue(r.hold()!!.unknown.single().startsWith("tests/test_discount.py::TestDiscount::test_tier[3]: "), r.hold().toString())
+    }
+
+    @Test
+    fun `reports that cannot be collected keep the process's outcome and an opaque hold (round 4, 7)`() = runTest {
+        repo.write("gradle_out.txt", "> Task :test FAILED\n")
+        Files.write(repo.root.resolve("big.bin"), ByteArray(17 * 1024 * 1024) { 'x'.code.toByte() })
+        val gradle = if (windows) "gradlew.bat".also {
+            repo.write(it, "@mkdir build\\test-results\\test 2>nul\r\n@copy /y big.bin build\\test-results\\test\\TEST-big.xml >nul\r\n@type gradle_out.txt\r\n@exit /b 1\r\n")
+        } else "./gradlew".also {
+            repo.write("gradlew", "#!/bin/sh\nmkdir -p build/test-results/test\ncp big.bin build/test-results/test/TEST-big.xml\ncat gradle_out.txt\nexit 1\n")
+            Files.setPosixFilePermissions(repo.root.resolve("gradlew"), java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x"))
+        }
+        val r = Regression(io.astrolabe.contract.Command(listOf(gradle, "test")), blastClosure = io.astrolabe.evidence.Closure.Known(setOf("src/a.py")))
+        r.verify.runLayer(io.astrolabe.verify.Layer.BlastAndStepAccept)
+        val red = r.receipts.forCheck(io.astrolabe.verify.Checks.TESTS_BLAST).first()
+        assertEquals(io.astrolabe.evidence.Outcome.Failed to 1, red.outcome to red.exitCode, red.limits.toString())
+        assertTrue(red.limits.any { it.detail.startsWith("report capture failed") } && red.tests?.incomplete == true, red.toString())
+        assertTrue(r.hold()!!.unknown.single().contains("did not identify"), r.hold().toString())
+    }
+
+    @Test
+    fun `the stop reruns a types red under the red's own definition, once per tree (round 4, 5)`() = runTest {
+        repo.write("types_out.txt", "Success: no issues found in 1 source file\n")
+        val r = Regression(printing("types_out.txt"), blastClosure = null)
+        val types = r.checks.register(io.astrolabe.verify.Check(io.astrolabe.verify.Checks.TYPES_TOUCHED, io.astrolabe.verify.CheckKind.Type, io.astrolabe.verify.Selector.Touched,
+            io.astrolabe.evidence.Closure.Known(emptySet()), io.astrolabe.verify.CostClass.Fast, io.astrolabe.verify.Trigger.EndOfTurn, command = printing("types_out.txt"), origin = Origin.Harness))
+        // An end-of-turn checker red: the registered definition, its argv over the touched files, inputs never rescanned.
+        val stamp = stamper.stamp().id
+        r.receipts.record(io.astrolabe.evidence.Receipt(
+            receiptId = "rcpt-checker", ids = ids, checkId = types.id, acceptanceIds = emptyList(), command = printing("types_out.txt").argv + "src/a.py", cwd = null, shell = false,
+            stampBefore = stamp, stampAfter = stamp, envId = stamper.report().env.envId, verifierVersion = io.astrolabe.Astrolabe.VERSION, checkDefinitionVersion = types.definitionVersion,
+            contractVersion = 1, outcome = io.astrolabe.evidence.Outcome.Failed, parsed = null, inputClosure = types.inputClosure,
+            testedInputs = io.astrolabe.evidence.TestedInputs(emptyMap(), io.astrolabe.evidence.InputStability.Unknown), raw = null, at = clock.instant(),
+        ))
+        r.verify.onStop(emptyList())
+        r.verify.onStop(emptyList())
+        val history = r.receipts.forCheck(types.id)
+        val marker = history.single { io.astrolabe.verify.Regressions.isMarker(it) }
+        assertEquals(types.definitionVersion, marker.checkDefinitionVersion)
+        assertEquals(1, history.count { !io.astrolabe.verify.Regressions.isMarker(it) && it.receiptId != "rcpt-checker" }, "one rerun on this tree")
+        assertEquals(types.definitionVersion, history.last().checkDefinitionVersion, "the rerun is the registered check that defined the red")
     }
 
     @Test
