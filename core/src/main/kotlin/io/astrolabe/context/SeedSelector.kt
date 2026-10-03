@@ -93,14 +93,17 @@ public fun interface SeedSelector {
         }
 
         /**
-         * Seeds v2 (plan §4.3): every exported entry, ranked by [SeedReason] (touched, red, noted, recent) and then by
-         * [SEED_V2_ORDER]. An entry takes the first reason that holds for its path.
+         * Seeds v2 (plan §4.3): every exported entry with visible lines, ranked by [SeedReason] (touched, red, noted,
+         * recent) and then by [SEED_V2_ORDER]. An entry takes the first reason that holds for its path. An entry whose
+         * lines are all hidden (a transform's record) has nothing to show and is no candidate; of entries showing the
+         * same lines of the same version only the first in that order is one, so the budget never pays twice and the
+         * same lines are never both re-served and announced NOT SEEN.
          */
         @JvmField
         public val V2: SeedSelector = SeedSelector { inputs ->
             val red = redInputs(inputs.receipts)
             val notes = inputs.register.open.filter { !it.closed }.flatMap { listOfNotNull(it.text, it.needs) }
-            inputs.export.distinct().map { entry ->
+            inputs.export.filter { !it.coverage.isEmpty }.distinct().map { entry ->
                 val reason = when {
                     entry.path in inputs.touched -> SeedReason.Touched
                     red(entry.path) -> SeedReason.Red
@@ -108,7 +111,7 @@ public fun interface SeedSelector {
                     else -> SeedReason.Recent
                 }
                 SeedCandidate(entry, reason)
-            }.sortedWith(SEED_V2_ORDER)
+            }.sortedWith(SEED_V2_ORDER).distinctBy { Triple(it.entry.path, it.entry.version, it.entry.range) }
         }
     }
 }
@@ -116,22 +119,24 @@ public fun interface SeedSelector {
 /**
  * The Seeds v2 order, total over distinct entries so the result never depends on the export's order: reason
  * (declaration order); an entry displayed in this cell before one carried in as a seed (a seed's turn counts in
- * the cell it came from); the later display first; then path, first line, ranges, version, result id, tokens,
- * source and hidden lines.
+ * the cell it came from); the later display first; then path, first line, ranges, version, result id (`null` first,
+ * apart from `""`), tokens, source and hidden lines.
  */
-internal val SEED_V2_ORDER: Comparator<SeedCandidate> = compareBy<SeedCandidate>(
-    { it.reason.ordinal },
-    { if (it.entry.source == EntrySource.Seed) 1 else 0 },
-    { -it.entry.turn },
-    { it.entry.path },
-    { it.entry.range.ranges.first().from },
-    { it.entry.range.toString() },
-    { it.entry.version.digest.hex },
-    { it.entry.resultId.orEmpty() },
-    { it.entry.tokens },
-    { it.entry.source.ordinal },
-    { it.entry.hidden.toString() },
-)
+internal val SEED_V2_ORDER: Comparator<SeedCandidate> =
+    compareBy<SeedCandidate>({ it.reason.ordinal }, { if (it.entry.source == EntrySource.Seed) 1 else 0 })
+        .thenByDescending { it.entry.turn }
+        .then(
+            compareBy(
+                { it.entry.path },
+                { it.entry.range.ranges.first().from },
+                { it.entry.range.toString() },
+                { it.entry.version.digest.hex },
+                { it.entry.resultId },
+                { it.entry.tokens },
+                { it.entry.source.ordinal },
+                { it.entry.hidden.toString() },
+            ),
+        )
 
 /**
  * The input files of the red receipts — those whose outcome is `failed` (§8.7; a timeout or an unavailable run is

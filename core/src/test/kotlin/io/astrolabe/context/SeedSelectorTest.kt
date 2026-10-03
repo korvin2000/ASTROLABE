@@ -175,4 +175,35 @@ class SeedSelectorTest {
         assertEquals(listOf("src/moved.py" to "changed"), carry.notSeen.map { it.path to it.reason }, "the touched file is announced, the moved recent read is not")
         assertEquals(listOf(CarriedTouch("src/moved.py", v("moved-1"))), carry.touched, "the touched ledger is unchanged")
     }
+
+    @Test
+    fun `v2 never seeds a record without visible lines`() {
+        // A transform registers the whole file at zero tokens with every line hidden: nothing to show, so no candidate.
+        val transform = Entry("src/edit.py", Ranges.single(1, 10_000), versions.getValue("src/edit.py"), EntrySource.Transform, 5, "#t", 0, hidden = Ranges.single(1, 10_000))
+        val candidates = SeedSelector.V2.candidates(SeedInputs(register, listOf(transform, entry("src/old.py", turn = 1)), setOf("src/edit.py")))
+        assertEquals(listOf("src/old.py"), candidates.map { it.entry.path })
+        val fit = Seeds.fit(candidates, { versions[it] }, CarryForward.SEED_CAP_TOKENS)
+        assertEquals(listOf("src/old.py"), fit.seeds.map { it.path })
+        assertEquals(emptyList(), fit.notSeen)
+    }
+
+    @Test
+    fun `v2 keeps one candidate per shown lines and its order is strict`() {
+        // Two reads of the same lines at the same version: the later one is the candidate, the earlier one neither seed nor NOT SEEN.
+        val reads = listOf(entry("src/edit.py", turn = 2, tokens = 2_500), entry("src/edit.py", turn = 6, tokens = 2_500))
+        val carry = CarryForward.carry(register, reads, null, { versions[it] }, { true }, emptyList(), emptyList(), selector = SeedSelector.V2, touched = setOf("src/edit.py"))
+        assertEquals(listOf(6), carry.seeds.map { it.turn })
+        assertEquals(emptyList(), carry.notSeen)
+        assertEquals(2_500, carry.seedTokens)
+
+        // `null` and `""` result ids are different entries; the order tells them apart, so the export's order does not matter.
+        val twins = listOf(entry("src/old.py", turn = 1).copy(resultId = null), entry("src/old.py", turn = 1).copy(resultId = ""))
+        val forward = SeedSelector.V2.candidates(SeedInputs(register, twins))
+        assertEquals(forward, SeedSelector.V2.candidates(SeedInputs(register, twins.reversed())))
+        assertEquals(listOf(null), forward.map { it.entry.resultId })
+
+        // The later display first, even at the ends of the turn range.
+        val ends = listOf(entry("src/old.py", turn = Int.MIN_VALUE), entry("docs/notes.md", turn = 0))
+        assertEquals(listOf("docs/notes.md", "src/old.py"), SeedSelector.V2.candidates(SeedInputs(register, ends)).map { it.entry.path })
+    }
 }
