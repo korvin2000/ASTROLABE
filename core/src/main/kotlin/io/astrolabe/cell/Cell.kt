@@ -1093,13 +1093,16 @@ public class Cell @JvmOverloads constructor(
         /**
          * `Rebuild(Pressure)` inside the cell (§5.8, P2.5.2): the whole projection is replaced — `[T]` keeps the last
          * m = 6 complete protocol turns, the Workset becomes the carried seeds (KNOWN = seeds only), STATE is validated
-         * and a pinned `rebuilt:` note names the generation. Nothing is summarised by a model.
+         * and a pinned `rebuilt:` note names the generation. Nothing is summarised by a model. The seeds come from the
+         * attempt's `Defaults.seedRule`, the rule a cell boundary uses.
          */
         private fun rebuild(why: String) {
             val contract = contract()
             val carry = CarryForward.carry(
                 register, ws.workset.export(), null, ws.registry::version,
                 { id -> Aliases.parse(id)?.let { ev.aliases.resolve(ids.work, it) } != null }, emptyList(), pinned(contract),
+                selector = defaults.seedRule.selector, touched = changes().map { it.path },
+                latestReceipts = ws.checks.all().mapNotNull { check -> check.last?.receiptId?.let { ev.receipts.get(it) } },
             )
             val seeds = io.astrolabe.context.Seeds.render(carry.seeds, ws.registry::read)
             val carried = carry.copy(seeds = seeds.shown, notSeen = carry.notSeen + seeds.notSeen)

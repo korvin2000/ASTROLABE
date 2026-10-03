@@ -10,8 +10,18 @@ import io.astrolabe.register.DeadEnd
 import io.astrolabe.register.Decision
 import io.astrolabe.register.Fact
 import io.astrolabe.register.Register
+import io.astrolabe.register.RegisterRender
+import io.astrolabe.register.Validation
+import io.astrolabe.register.ValidationContext
+import io.astrolabe.register.Validator
+import io.astrolabe.tool.state.ParsedPatch
+import io.astrolabe.tool.state.PatchParser
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -92,5 +102,46 @@ class FactCoherenceTest {
         val tight = FactCoherence.retain(required, emptyMap(), emptySet(), { null }, { true }, estimator, capTokens = 200)
         assertNotNull(tight.capacityGap)
         assertEquals(30, tight.register.deadEnds.size, "required carry-forward is never deleted")
+    }
+
+    @Test
+    fun `a stale fact copied back with an anchor version this cell never showed does not come back fresh`() {
+        val shown = v("a-1")
+        val now = v("a-2")
+        val earlier = raceReport.copy(facts = listOf(Fact(1, ClaimKind.Verified, "a returns 1", Anchor("src/a.py", shown), "#3")), next = "check a")
+        val carried = CarryForward.carry(earlier, emptyList(), null, { now }, { true }, emptyList(), emptyList()).register
+        assertEquals(shown, carried.fact(1)!!.staleAt, "the carry tags the moved anchor stale")
+        assertTrue("v(stale @${shown.hash8}) a returns 1" in RegisterRender.markdown(carried))
+
+        // This cell knows only the current version, so the hash the carry rendered resolves to nothing (D-365).
+        val context = object : ValidationContext {
+            override fun evidenceExists(id: String): Boolean = id == "#3"
+            override fun currentVersion(path: String): FileVersion? = now
+            override fun acceptGreen(accept: String): Boolean = false
+            override val redChecks: Set<String> = emptySet()
+            override val greenOps: Set<Int> = emptySet()
+            override val appliedOps: Set<Int> = emptySet()
+        }
+        fun add(version: String): Pair<Fact, List<String>> {
+            val ops = Json.parseToJsonElement("""[{"fact.add":{"kind":"v","text":"a returns 1","evidence":"#3","anchor":{"path":"src/a.py","version":"$version"}}}]""").jsonArray
+            val parsed = assertIs<ParsedPatch.Valid>(PatchParser.parse(ops, emptyMap(), context))
+            val applied = assertIs<Validation.Applied>(Validator(estimator).check(carried, parsed.patch, context))
+            return applied.register.facts.last() to parsed.notes
+        }
+
+        for (version in listOf(shown.hash8, "latest", "")) {
+            val (back, notes) = add(version)
+            assertEquals(ClaimKind.Hypothesis, back.kind, "anchor '$version': without its anchor a v fact could never go stale, so it is kept as h")
+            assertEquals(null, back.anchor)
+            assertTrue(notes.single().endsWith("v fact kept as h without an anchor (its staleness could not be tracked); add it again with the @hash a look showed"), notes.single())
+            val next = CarryForward.carry(carried.copy(facts = carried.facts + back), emptyList(), null, { now }, { true }, emptyList(), emptyList()).register
+            assertFalse(RegisterRender.markdown(next).lines().any { it.contains("- v a returns 1") }, "the fact does not render as a fresh v in the next cell")
+        }
+        val (full, _) = add(shown.digest.hex)
+        assertEquals(ClaimKind.Verified, full.kind)
+        assertTrue(full.stale, "a full hash keeps its anchor and is stale at once")
+        val (current, _) = add(now.hash8)
+        assertEquals(Anchor("src/a.py", now), current.anchor)
+        assertFalse(current.stale, "a hash of the current version stays a fresh, tracked v fact")
     }
 }
