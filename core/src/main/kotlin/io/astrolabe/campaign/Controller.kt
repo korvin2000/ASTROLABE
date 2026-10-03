@@ -551,7 +551,10 @@ public class Controller @JvmOverloads public constructor(
         val commands = derived.primary?.let(RunnerCommands::of) ?: RunnerCommands()
         workspace.paths.bindWriteProtection { path, ignoreCase -> contracts.current(request.work)?.scope?.protects(path, ignoreCase) != false }
         val checks = Checks.seed(contract, commands, qualityGates = effective.qualityGates, packageManifest = TestIntegrity.packageManifests(workspace))
-        val rules = RulesTrust(workspace.root).approved(effective.rulesFile)?.let { RulesSnapshot(it.binding.path, it.digest, it.text) }
+        // P8.C.10 F: a reopened attempt gets its blast radius back from its last run, so resume and finish see its hold as live did.
+        SqliteReceipts(store, clock).forCheck(Checks.TESTS_BLAST).lastOrNull { it.ids.work == request.work && it.ids.attempt == request.attempt && !io.astrolabe.verify.Regressions.isBaseline(it) }
+            ?.let { if (checks[Checks.TESTS_BLAST] == null) checks.register(io.astrolabe.verify.Blast.restored(it)) }
+        val rules =RulesTrust(workspace.root).approved(effective.rulesFile)?.let { RulesSnapshot(it.binding.path, it.digest, it.text) }
         val prime = Prime.render(atlas, derived.sniffed, rules, host = HostFacts.of(host, atlas))
 
         var refusal: String? = null
@@ -1253,7 +1256,7 @@ public class Controller @JvmOverloads public constructor(
             val evidence = completionEvidence(c, increment)
             // No cell reworks a verified increment (FX-42): a standing rejection goes to the authority at once.
             val result = Verifier().accept(proposal, c.contract, increment, Register.empty(cell, increment.id, increment.title), checkNotNull(c.state).ledger, report.candidateId,
-                currencies(c, scheduler, report.candidateId), evidence.verdicts, evidence.unavailable, decision = evidence.decision, reworkSpent = true)
+                currencies(c, scheduler, report.candidateId), evidence.verdicts, evidence.unavailable, decision = evidence.decision, reworkSpent = true, acknowledged = acknowledged(c))
             when (result) {
                 is CompletionResult.Accepted -> c.advance(Transition.Committed(result, report.candidateId))
                 is CompletionResult.Pending -> {
@@ -1617,9 +1620,12 @@ public class Controller @JvmOverloads public constructor(
             kept.proposal(), c.contract, increment, kept.register, checkNotNull(c.state).ledger, stampNow, currencies,
             reviewed.verdicts, reviewed.unavailable, evidence.flags, decision = evidence.decision,
             // The cell deferred only past its rework round, or with nothing to rework: the same rule, the same answer.
-            reworkSpent = evidence.reworkSpent || kept.deferred, extra = reviewed.extra,
+            reworkSpent = evidence.reworkSpent || kept.deferred, extra = reviewed.extra, acknowledged = acknowledged(c),
         )
     }
+
+    /** P8.C.10: the red receipts accepted increments acknowledged with an `Open` item — one answer on every path (D-337). */
+    private fun acknowledged(c: OpenedCampaign): List<String> = checkNotNull(c.state).graph.evidence.values.flatMap { it.acknowledged }.distinct()
 
     /** The increment review an S2+ campaign obtained (§8.8): the verdict of its `review:` items, or its own obligation when it has none. */
     private class Reviewed(val verdicts: Map<String, io.astrolabe.verify.Verdict>, val unavailable: Map<String, String>, val extra: List<ObligationResult>)
@@ -1860,7 +1866,7 @@ public class Controller @JvmOverloads public constructor(
         // A fresh registry knows no result: each check's last receipt is the one the stopped controller held, re-assessed now.
         val receipts = SqliteReceipts(c.store, clock)
         for (check in c.checks.all().filter { it.last == null }) {
-            val receipt = receipts.forCheck(check.id).lastOrNull { it.ids.work == c.ids.work && it.ids.attempt == c.ids.attempt } ?: continue
+            val receipt = receipts.forCheck(check.id).lastOrNull { it.ids.work == c.ids.work && it.ids.attempt == c.ids.attempt && !io.astrolabe.verify.Regressions.isBaseline(it) } ?: continue
             c.checks.record(check.id, io.astrolabe.verify.LastResult(receipt.receiptId, receipt.stampAfter, receipt.checkDefinitionVersion, receipt.outcome, receipt.parsed, io.astrolabe.verify.Applicability.Current))
         }
         refreshPrescan(c, ids, kept.touched, kept.turns, once = true)?.let { return Resumed.Stopped(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, it))) }
@@ -2208,6 +2214,7 @@ public class Controller @JvmOverloads public constructor(
             pinned = hostBlock + pinned,
             precompile = precompile,
             rework = rework,
+            acknowledged = acknowledged(c),
             knowledge = knowledge,
             completionEvidence = if (child == null && role.packetKind == io.astrolabe.cell.PacketKind.Result) { flags ->
                 val required = increment.accept.any { c.contract.acceptance(it) is Acceptance.Check || c.contract.acceptance(it) is Acceptance.Review } || flags.any { it.blocksCompletion }

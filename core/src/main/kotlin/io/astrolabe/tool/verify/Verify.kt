@@ -17,7 +17,6 @@ import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Contract
 import io.astrolabe.contract.Contracts
 import io.astrolabe.contract.Origin
-import io.astrolabe.evidence.FailedTest
 import io.astrolabe.evidence.Outcome
 import io.astrolabe.evidence.Receipt
 import io.astrolabe.evidence.RedactionMask
@@ -72,7 +71,6 @@ import io.astrolabe.verify.Currency
 import io.astrolabe.verify.Executed
 import io.astrolabe.verify.Layer
 import io.astrolabe.verify.Layers
-import io.astrolabe.verify.PreexistingLedger
 import io.astrolabe.verify.Regressions
 import io.astrolabe.verify.Scheduler
 import io.astrolabe.verify.Selector
@@ -338,39 +336,63 @@ public class Verify(
     }
 
     /**
-     * Verify-on-stop (§8.1, P3.1.3): the increment's acceptance on a completion proposal; never the full suite. Then, before
-     * the decision, the baseline of every held red of the blast radius or the types of touched files that none classifies
-     * yet (P8.C.10): its command once on `s0`, per definition and attempt; without a baseline runner nothing runs and the
-     * red stays unclassified.
+     * Verify-on-stop (§8.1, P3.1.3): the increment's acceptance on a completion proposal; never the full suite.
+     * P8.C.12: it runs while the cell's background runs still live (an end-to-end check may need its server); they are then
+     * settled — a grace, a cancellation, its confirmation — and a check the settling made stale or that ran while the tree
+     * was not quiet runs again on the quiet tree; a run still live afterwards leaves every receipt uncertifying until a later
+     * stop finds the tree quiet ([Workspace.unquiet]). P8.C.10: then the blast radius and the types of touched files are
+     * brought to this tree ([refreshRegressions]).
      */
     public suspend fun onStop(acceptanceIds: Collection<String>): LayerRun {
-        // P8.C.12: a live background run may still change the tree, so the cell's runs are settled first; one still live
-        // after its cancellation leaves every receipt uncertifying until a later stop finds the tree quiet.
-        scheduler.unquiet = settleRuns?.invoke().orEmpty()
-        return runLayer(Layer.IncrementAcceptance, acceptanceIds).also { settleBaselines() }
+        val wasUnquiet = workspace.unquiet.isNotEmpty()
+        val first = runLayer(Layer.IncrementAcceptance, acceptanceIds)
+        val settled = settleRuns?.invoke()
+        if (settled != null) workspace.unquiet = settled.live
+        val again = if (settled != null && (settled.settled > 0 || wasUnquiet)) runLayer(Layer.IncrementAcceptance, acceptanceIds) else null
+        val regressions = refreshRegressions()
+        return LayerRun(first.layer, first.receipts + again?.receipts.orEmpty() + regressions, again?.notTested ?: first.notTested, settled?.notes.orEmpty())
     }
 
-    /** P8.C.12: settles the cell's live background runs before its stop's verification (the `run` tool sets it); returns those still live. */
-    internal var settleRuns: (suspend () -> List<String>)? = null
+    /** P8.C.12: settles the cell's live background runs after its stop's acceptance ran (the `run` tool sets it). */
+    internal var settleRuns: (suspend () -> StopSettle)? = null
 
-    /** P8.C.10 п. 3: the baseline receipts verify-on-stop records; they are the check's history, never its last result. */
-    private suspend fun settleBaselines(): List<Receipt> {
-        val runner = baseline ?: return emptyList()
-        val stamp = s0 ?: return emptyList()
+    /**
+     * P8.C.10 A, G: the command of every red run behind a regression check's hold that no run of its definition confirms on
+     * this tree reruns here — once per definition and tree, its deadline cut to the time left; with none left it does not
+     * run and the failure stays unclassified. Then, for this tree's red run, one baseline per check on `s0`, recorded as
+     * begun before it runs, so a failure, an exception or an interruption is never retried in the attempt.
+     */
+    private suspend fun refreshRegressions(): List<Receipt> {
         val contract = contracts.current(ids.work) ?: return emptyList()
-        return Regressions.CHECKS.mapNotNull { checks[it] }.flatMap { check ->
-            scheduler.unbaselined(check).mapNotNull { red ->
-                // A baseline that cannot be exported leaves the red unclassified (the D-400 rule), never the stop broken.
-                try {
-                    runner.run(check.copy(command = io.astrolabe.contract.Command(red.command, red.cwd)), contract.version, stamp, timeoutSeconds).receipt
-                } catch (failure: IOException) {
-                    null
-                } catch (failure: IllegalStateException) {
-                    null
-                } catch (failure: IllegalArgumentException) {
-                    null
-                }
+        val recorded = ArrayList<Receipt>()
+        for (id in Regressions.CHECKS) {
+            val check = checks[id] ?: continue
+            for (red in scheduler.unconfirmed(check, stamper.stamp().id)) {
+                val left = timeLeft()
+                if (left != null && left <= 0) break
+                recorded += runTriaged(check.copy(command = io.astrolabe.contract.Command(red.command, red.cwd)), contract).first
             }
+            val due = scheduler.baselineDue(check, stamper.stamp().id) ?: continue
+            baselineOf(check.copy(command = io.astrolabe.contract.Command(due.command, due.cwd)), contract)?.let { recorded += it }
+        }
+        return recorded
+    }
+
+    /** One baseline of [check] on `s0` (P8.C.10 G): begun on record, cut to the time left, a failure to export it unclassified. */
+    private suspend fun baselineOf(check: Check, contract: Contract): Receipt? {
+        val runner = baseline ?: return null
+        val stamp = s0 ?: return null
+        val left = timeLeft()
+        if (left != null && left <= 0) return null
+        runner.begin(check, contract.version, stamp)
+        return try {
+            runner.run(check, contract.version, stamp, cut(timeoutSeconds, left)).receipt
+        } catch (failure: IOException) {
+            null
+        } catch (failure: IllegalStateException) {
+            null
+        } catch (failure: IllegalArgumentException) {
+            null
         }
     }
 
@@ -492,9 +514,9 @@ public class Verify(
             else -> shaped.status
         }
         val note = if (passes) listOf("declared ${check.evidence?.wire} evidence of a host or user command: exit ${capture.exitCode}, no test counts (plan §4.4, D-50 relaxed)") else emptyList()
-        // P8.C.10: the failing identities, so a red can be compared with the baseline's; the signature is stored redacted.
-        val failures = shaped.tests.filter { it.failing }.map { FailedTest(it.identity, redaction.apply(PreexistingLedger.signatureOf(it), ContentClass.ReusableEvidence).text) }
-        return Executed(command.argv, command.cwd, false, capture.exitCode, outcome, shaped.counts, blob, shaped.limitations + limits + note, failures = failures)
+        // P8.C.10: a harness regression check records its tests one by one (bounded), compared by digest, shown redacted.
+        val tests = if (check.id in Regressions.CHECKS) Regressions.outcomes(shaped.tests, { redaction.apply(it, ContentClass.ReusableEvidence).text }, listOfNotNull(capture.executionRoot, workspace.root.toString())) else null
+        return Executed(command.argv, command.cwd, false, capture.exitCode, outcome, shaped.counts, blob, shaped.limitations + limits + note, tests = tests)
     }
 
     /**
@@ -713,7 +735,16 @@ public class Verify(
 }
 
 /** What [Verify.runLayer] recorded: the receipts of the checks it ran, and what the layer could not test. */
-public data class LayerRun(val layer: Layer, val receipts: List<Receipt>, val notTested: List<String>)
+public data class LayerRun @JvmOverloads constructor(
+    val layer: Layer,
+    val receipts: List<Receipt>,
+    val notTested: List<String>,
+    /** What the model must hear of the stop's own actions (P8.C.12): background runs it cancelled; the cell pins them. */
+    val notes: List<String> = emptyList(),
+)
+
+/** P8.C.12: what settling a cell's background runs at its stop did — [settled] runs ended or cancelled, [live] still running, [notes] for the model. */
+internal class StopSettle(val settled: Int, val live: List<String>, val notes: List<String>)
 
 /** One invocation of a check's command: the scheduler's record, and what the caller shows of it. */
 internal class Invocation(

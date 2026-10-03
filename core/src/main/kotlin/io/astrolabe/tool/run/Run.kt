@@ -59,6 +59,7 @@ import io.astrolabe.tool.ToolSet
 import io.astrolabe.tool.TurnContext
 import io.astrolabe.tool.verify.PinnedRun
 import io.astrolabe.tool.verify.RecognizedRun
+import io.astrolabe.tool.verify.StopSettle
 import io.astrolabe.tool.verify.Verify
 import io.astrolabe.verify.Check
 import io.astrolabe.workspace.Intent as PathIntent
@@ -675,6 +676,7 @@ public class Run(
      * process or cell, or never — has no receipt, and its view says so.
      */
     private fun lostPin(handle: Handle, status: ProcStatus): String {
+        atStop[handle.handleId]?.let { return "\n$it" }
         if (status !is ProcStatus.Exited && status != ProcStatus.DeadlineExceeded) return ""
         val contract = contracts.current(ids.work) ?: return ""
         val matching = verify?.recognize(handle.argv, handle.shell, handle.cwd, contract, modelChecks = false).orEmpty()
@@ -920,36 +922,45 @@ public class Run(
     // ------------------------------------------------------------ stop · P8.C.12
 
     /**
-     * P8.C.12: before the stop's verification certifies the tree, every live background run of this campaign workspace is
-     * settled — [stopGraceMillis] to end on its own (its end recorded as a poll records it: a recognised run's receipts,
-     * the interval announced), then cancelled, as it would end with the cell anyway (§5.4); a cancelled run records no
-     * receipt (C1a). Returns the aliases of the runs still live afterwards: a cancellation not delivered or not confirmed.
+     * P8.C.12: after the stop's acceptance ran, every live background run of this campaign workspace is settled before the
+     * tree is certified — [stopGraceMillis] to end on its own (its end recorded as a poll records it: a recognised run's
+     * receipts, the interval announced), then cancelled and the cancellation confirmed within [STOP_CONFIRM_MILLIS]; a
+     * cancelled run records no receipt (C1a), and the model hears of it (handles outlive the cell). Runs still live
+     * afterwards — a cancellation not delivered or not confirmed — are named in [StopSettle.live].
      */
-    internal suspend fun settleForStop(): List<String> {
+    internal suspend fun settleForStop(): StopSettle {
         val live = handles.open().filter(::owned)
-        if (live.isEmpty()) return emptyList()
+        if (live.isEmpty()) return StopSettle(0, emptyList(), emptyList())
         val seen = kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { awaitEnds(live, stopGraceMillis) }
         val still = ArrayList<String>()
+        val notes = ArrayList<String>()
+        var settled = 0
         for ((handle, proc) in live.zip(seen)) {
             if (proc.status.isTerminal) {
                 handles.save(handle.copy(proc = proc, status = wire(proc.status)))
                 ended(RunArgs(op = "poll", handle = handle.handleId), handle, proc, proc.status, ByteArray(0), note = null)
+                atStop[handle.handleId] = "ended ${wire(proc.status)} while the stop settled it; its end was recorded then"
+                settled++
                 continue
             }
             pins.remove(handle.handleId)
             val cancelled = try {
-                os.terminate(proc)
+                kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { confirmEnd(os.terminate(proc), STOP_CONFIRM_MILLIS) }
             } catch (failure: IOException) {
                 null
             }
             cancelled?.let { handles.save(handle.copy(proc = it, status = wire(it.status))) }
             if (cancelled == null || !cancelled.status.isTerminal) {
                 still += handle.alias
+                notes += "stop could not confirm the cancellation of background run ${handle.alias} (handle ${handle.handleId}, ${handle.argv.joinToString(" ")}): no receipt certifies the tree while it may run"
                 continue
             }
             announceBackground(handle, stamper.report(fresh = true))
+            atStop[handle.handleId] = "cancelled by the stop's verification"
+            notes += "stop cancelled background run ${handle.alias} (handle ${handle.handleId}, ${handle.argv.joinToString(" ")}) before certifying the tree: restart it if you still need it"
+            settled++
         }
-        return still
+        return StopSettle(settled, still, notes)
     }
 
     /** The grace before a cancellation: real time, since what it waits for is a process, whatever clock the cell keeps. */
@@ -962,6 +973,20 @@ public class Run(
         }
         return seen
     }
+
+    /** A cancellation is a request (§5.4): its end is looked for until [confirmMillis], never assumed from one look. */
+    private fun confirmEnd(after: Proc, confirmMillis: Long): Proc {
+        val deadline = System.nanoTime() + confirmMillis * 1_000_000L
+        var proc = after
+        while (!proc.status.isTerminal && System.nanoTime() < deadline) {
+            Thread.sleep(STOP_POLL_MILLIS)
+            proc = os.reattach(proc)
+        }
+        return proc
+    }
+
+    /** P8.C.12: handles the stop settled, with what a later poll says of them instead of a lost pin. */
+    private val atStop = HashMap<String, String>()
 
     // ---------------------------------------------------------------- render
 
@@ -1033,6 +1058,7 @@ private const val MAX_TIMEOUT_SECONDS: Int = 3_600
 /** P8.C.12: the stop's grace for a live background run before it is cancelled, and how often it looks. */
 private const val STOP_GRACE_MILLIS: Long = 2_000
 private const val STOP_POLL_MILLIS: Long = 100
+private const val STOP_CONFIRM_MILLIS: Long = 5_000
 
 /** How much of a wait's output stays in memory for its view; the log holds all of it. */
 private const val WAIT_TAIL_BYTES: Int = 256 * 1024

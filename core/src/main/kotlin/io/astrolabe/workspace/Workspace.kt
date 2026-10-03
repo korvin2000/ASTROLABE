@@ -36,6 +36,14 @@ public class Workspace @JvmOverloads public constructor(
     public val mutation: Mutex = Mutex()
 
     /**
+     * P8.C.12: background runs still live after a stop's verification settled them (a cancellation not delivered or not
+     * confirmed). While any is, no receipt certifies a tree of this workspace — whichever scheduler reads it. Each stop
+     * sets it.
+     */
+    @Volatile
+    internal var unquiet: List<String> = emptyList()
+
+    /**
      * False when the repository sets `core.fileMode=false` (D-293): the filesystem's executable bit is then
      * noise (WSL/NTFS, vfat) and git's reported/index mode is the mode. Read once per workspace.
      */

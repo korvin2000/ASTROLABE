@@ -55,7 +55,17 @@ public sealed interface CompletionResult {
         val decision: DecisionRecord? = null,
         /** Plan steps left unticked on a proven acceptance (D-368, [Resolved.leftOpen]). */
         val leftOpen: List<String> = emptyList(),
+        /** P8.C.10: red receipts of a harness regression check this acceptance acknowledged ([Resolved.acknowledged]). */
+        val acknowledged: List<String> = emptyList(),
     ) : CompletionResult {
+        /** The constructor before [acknowledged] (P8.C.10). Kept for Java callers. */
+        public constructor(
+            incrementId: String, baseStamp: CandidateId, patchHash: Digest?, resultingStamp: CandidateId, envId: Digest, receiptIds: List<String>, ledger: Ledger,
+            contractVersion: Int, workId: WorkId?, incrementDefinition: Digest?, attemptId: AttemptId?, evidenceRefs: List<String>, contextId: ContextId?,
+            provenance: List<ItemProvenance>, decision: DecisionRecord?, leftOpen: List<String>,
+        ) : this(incrementId, baseStamp, patchHash, resultingStamp, envId, receiptIds, ledger, contractVersion, workId, incrementDefinition, attemptId, evidenceRefs,
+            contextId, provenance, decision, leftOpen, emptyList())
+
         /** Every item was verified: nothing was accepted on a decider's word alone. */
         val verified: Boolean get() = provenance.none { it.how == ProvenanceKind.Accepted }
     }
@@ -108,6 +118,8 @@ public class Verifier(public val maxFinalizations: Int = 2) {
         decision: DecisionRecord? = null,
         reworkSpent: Boolean = false,
         extra: List<ObligationResult> = emptyList(),
+        /** P8.C.10: red receipts earlier accepted increments acknowledged ([Resolver.increment]). */
+        acknowledged: Collection<String> = emptyList(),
     ): CompletionResult {
         require(proposal.incrementId == increment.id) { "proposal is for ${proposal.incrementId}, not ${increment.id}" }
         require(register.increment == increment.id) { "register belongs to another increment" }
@@ -117,7 +129,7 @@ public class Verifier(public val maxFinalizations: Int = 2) {
         if (proposal.contractVersion != contract.version) binding += "proposal binds contract v${proposal.contractVersion}; the committed contract is v${contract.version}"
         if (proposal.resultingStamp != stampNow) binding += "resulting stamp @${proposal.resultingStamp.hash8} is not the tree now @${stampNow.hash8}"
         val resolved = Resolver.increment(register, contract, increment, currencies, verdicts, unavailable, flags, unresolvedImpactNudges, stampNow,
-            decision?.takeIf { it.appliesTo(stampNow, contract.version) && it.incrementId == increment.id }, reworkSpent, binding, extra)
+            decision?.takeIf { it.appliesTo(stampNow, contract.version) && it.incrementId == increment.id }, reworkSpent, binding, extra, acknowledged)
         return when (resolved.resolution) {
             Resolution.Rework -> {
                 val attempts = (finalizations[increment.id] ?: 0) + 1
@@ -145,7 +157,7 @@ public class Verifier(public val maxFinalizations: Int = 2) {
         return CompletionResult.Accepted(
             increment.id, proposal.baseStamp, proposal.patchHash, proposal.resultingStamp, proposal.envId,
             resolved.receiptIds, Ledger(entries), contract.version, contract.workId, increment.definitionDigest(),
-            contract.attemptId, resolved.evidenceRefs, cell, resolved.provenance, resolved.decision, resolved.leftOpen,
+            contract.attemptId, resolved.evidenceRefs, cell, resolved.provenance, resolved.decision, resolved.leftOpen, resolved.acknowledged,
         )
     }
 

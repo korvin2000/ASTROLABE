@@ -8,6 +8,7 @@ import io.astrolabe.evidence.Coherence
 import io.astrolabe.evidence.Counts
 import io.astrolabe.evidence.EvidenceKind
 import io.astrolabe.evidence.FailedTest
+import io.astrolabe.evidence.TestOutcomes
 import io.astrolabe.evidence.InMemoryAliases
 import io.astrolabe.evidence.InputStability
 import io.astrolabe.evidence.Outcome
@@ -39,6 +40,8 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** P1.7.4 receipts and currency: FX-08 (a wrapper's exit 0 is never green), IX-04 (tested inputs and stability), scratch policy, §8.4 applicability. */
@@ -451,37 +454,59 @@ class SchedulerTest {
     }
 
     @Test
-    fun `the blast radius stays red until a later passed run, classified against the baseline of its definition`() = runTest {
+    fun `the blast radius is held by identity on the tree at hand, from this workspace's receipts in the order recorded`() = runTest {
         val blast = checks.register(Check(Checks.TESTS_BLAST, CheckKind.Unit, Selector.Blast, Closure.Known(setOf("src/a.py", "tests/test_a.py")), CostClass.Slow, Trigger.StepBoundary,
             command = Command(listOf("pytest", "tests/test_a.py"))))
-        val identity = io.astrolabe.tool.run.TestIdentity(file = "tests/test_a.py", name = "test_a")
-        val failure = FailedTest(identity, "assert 1 == 2")
-        val failed = { Executed(listOf("pytest", "tests/test_a.py"), null, false, 1, Outcome.Failed, Counts(failed = 1, discovered = 1), null, failures = listOf(failure)) }
+        val key = Regressions.key(io.astrolabe.tool.run.TestIdentity(file = "tests/test_a.py", name = "test_a"))
+        val failure = FailedTest(key, "tests/test_a.py::test_a", Regressions.fingerprint("assert 1 == 2", emptyList()), "assert 1 == 2")
+        val failed = { Executed(listOf("pytest", "tests/test_a.py"), null, false, 1, Outcome.Failed, Counts(failed = 1, discovered = 1), null, tests = TestOutcomes(listOf(failure))) }
         val red = scheduler.runCheck(blast, 1, execute = { failed() })
-        assertEquals(listOf(failure), receipts.get(red.receiptId)!!.failures, "the failing identities are on the receipt")
-        val first = scheduler.currency(blast, stamper.stamp().id).held
-        assertEquals(HeldRed(listOf(scheduler.aliasOf(red.receiptId)!!), RedClass.Unclassified, listOf(Regressions.NO_BASELINE)), first)
-        assertEquals(listOf(red.receiptId), scheduler.unbaselined(blast).map { it.receiptId }, "verify-on-stop owes it a baseline")
+        assertEquals(listOf(failure), receipts.get(red.receiptId)!!.tests?.failed, "the failing identities are on the receipt")
+        val first = assertNotNull(scheduler.currency(blast, stamper.stamp().id).hold)
+        assertEquals(listOf(scheduler.aliasOf(red.receiptId)!!) to listOf(red.receiptId), first.since to first.current)
+        assertTrue(first.unclassified.single().contains(Regressions.NO_BASELINE), first.toString())
+        assertEquals(red, scheduler.baselineDue(blast, stamper.stamp().id))
 
         scheduler.runCheck(blast, 1, execute = { passed(null, exit = null, outcome = Outcome.Timeout) })
-        assertEquals(first, scheduler.currency(blast, stamper.stamp().id).held, "a timeout never ends the red")
+        assertEquals(first, scheduler.currency(blast, stamper.stamp().id).hold, "a timeout shows nothing fixed")
         repo.write("src/a.py", "def a():\n    return 2\n")
-        val stale = scheduler.currency(blast, stamper.stamp().id)
-        assertEquals(Applicability.Stale to first, stale.applicability to stale.held, "a moved tree never ends it either")
-
-        // The baseline of the same definition on s0 failed the same way: pre-existing, and owed nothing more.
-        receipts.record(red.copy(receiptId = "rcpt-base", limits = listOf(io.astrolabe.evidence.Limit(Regressions.BASELINE, "on s0"))))
-        assertEquals(RedClass.PreExisting, scheduler.currency(blast, stamper.stamp().id).held?.kind)
-        assertEquals(emptyList(), scheduler.unbaselined(blast))
-        // Another failure of the same definition is a regression the baseline does not have.
-        val other = FailedTest(identity.copy(name = "test_b"), "assert 0")
-        scheduler.runCheck(blast, 1, execute = { Executed(listOf("pytest", "tests/test_a.py"), null, false, 1, Outcome.Failed, Counts(failed = 2, discovered = 2), null, failures = listOf(failure, other)) })
-        val regression = scheduler.currency(blast, stamper.stamp().id).held
-        assertEquals(RedClass.Regression to listOf("tests/test_a.py::test_b (new) — assert 0"), regression?.kind to regression?.detail)
-
-        scheduler.runCheck(blast, 1, execute = { passed(Counts(passed = 2, discovered = 2)) })
-        assertEquals(null, scheduler.currency(blast, stamper.stamp().id).held, "a passed run of the same selection ends it")
+        val moved = assertNotNull(scheduler.currency(blast, stamper.stamp().id).hold)
+        assertEquals(emptyList<String>() to listOf(red.receiptId), moved.current to scheduler.unconfirmed(blast, stamper.stamp().id).map { it.receiptId },
+            "on a moved tree the red is not current, and the stop owes it a rerun")
+        // Passed on this tree with the identity executed: shown fixed; a stale green is never red.
+        scheduler.runCheck(blast, 1, execute = { Executed(listOf("pytest", "tests/test_a.py"), null, false, 0, Outcome.Passed, Counts(passed = 1, discovered = 1), null, tests = TestOutcomes(passed = listOf(key))) })
+        assertNull(scheduler.currency(blast, stamper.stamp().id).hold)
         repo.write("src/a.py", "def a():\n    return 3\n")
-        assertEquals(null, scheduler.currency(blast, stamper.stamp().id).held, "a stale green is never red")
+        assertTrue(assertNotNull(scheduler.currency(blast, stamper.stamp().id).hold).unclassified.single().endsWith("not rerun on this tree"), "the pass was on another tree")
+
+        // Another workspace's runs (a writer's worktree) never answer for this one.
+        val other = Scheduler(checks, Workspace(WorkspaceId("ws-2"), repo.root, repo.git), registry, stamper, receipts, InMemoryAliases(), idGen, ids, clock)
+        assertNull(other.currency(blast, stamper.stamp().id).hold)
+    }
+
+    @Test
+    fun `receipts are read in the order recorded, whatever their timestamps say`() = runTest {
+        val first = scheduler.runCheck(accept(), 1) { passed() }
+        clock.set(java.time.Instant.parse("2026-09-19T10:00:00Z"))
+        val second = scheduler.runCheck(accept(), 1) { passed() }
+        assertEquals(listOf(first.receiptId, second.receiptId), receipts.forCheck(accept().id).map { it.receiptId })
+    }
+
+    @Test
+    fun `a background run a stop could not settle leaves every scheduler of the workspace uncertifying`() = runTest {
+        scheduler.runCheck(accept(), 1) { passed() }
+        assertTrue(scheduler.currency(accept(), stamper.stamp().id).certifies)
+        workspace.unquiet = listOf("#7")
+        val fresh = Scheduler(checks, workspace, registry, stamper, receipts, InMemoryAliases(), idGen, ids, clock)
+        val currency = fresh.currency(accept(), stamper.stamp().id)
+        assertFalse(currency.certifies)
+        assertTrue(currency.reasons.any { it.contains("background run #7 still live") }, currency.reasons.toString())
+        val during = fresh.runCheck(accept(), 1) { passed() }
+        assertEquals(InputStability.Unknown, during.testedInputs.stability)
+        assertTrue(during.limits.any { it.kind == Scheduler.CONCURRENT })
+        workspace.unquiet = emptyList()
+        assertFalse(fresh.currency(accept(), stamper.stamp().id).certifies, "a receipt recorded while it was not quiet never certifies")
+        fresh.runCheck(accept(), 1) { passed() }
+        assertTrue(fresh.currency(accept(), stamper.stamp().id).certifies)
     }
 }

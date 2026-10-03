@@ -6,7 +6,6 @@ import io.astrolabe.id.Digest
 import io.astrolabe.id.FileVersion
 import io.astrolabe.id.Identities
 import io.astrolabe.id.InstantSerializer
-import io.astrolabe.tool.run.TestIdentity
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.time.Instant
@@ -79,11 +78,25 @@ public data class TestedInputs(
 }
 
 /**
- * One failing test a run reported (§8.5, P8.C.10): its namespaced identity and its failure signature — the first message
- * line with volatile data normalized and secrets redacted — so a later red can be compared with the baseline's.
+ * One failing test a run reported (§8.5, P8.C.10): [key] and [fingerprint] compare — opaque digests of its namespaced
+ * identity and of its unredacted failure, the runner's volatile fields normalized — while [name] and [signature] (the
+ * first failure line) are redacted and only shown.
  */
 @Serializable
-public data class FailedTest(val identity: TestIdentity, val signature: String)
+public data class FailedTest(val key: String, val name: String, val fingerprint: String, val signature: String)
+
+/**
+ * The per-test outcomes a run of a harness regression check reported (P8.C.10): its failing tests, the keys of the tests
+ * that executed and passed, and the keys reported more than once whatever their outcome (ambiguous, D-27). [truncated]
+ * when a bound cut a list: nothing missing from it is proven either way.
+ */
+@Serializable
+public data class TestOutcomes(
+    val failed: List<FailedTest> = emptyList(),
+    val passed: List<String> = emptyList(),
+    val ambiguous: List<String> = emptyList(),
+    val truncated: Boolean = false,
+)
 
 /** Where evidence about a receipt was truncated or could not be captured (§8.4 limitations). */
 @Serializable
@@ -145,10 +158,10 @@ public data class Receipt(
     val checkOrigin: Origin? = null,
     /** True when the host or the user declared [evidenceKind]; a recognised kind is a label and never decides a pass. */
     val evidenceDeclared: Boolean = false,
-    /** The failing tests the shaper identified (P8.C.10); empty when none were or the run predates them. */
-    val failures: List<FailedTest> = emptyList(),
+    /** What a run of a harness regression check reported test by test (P8.C.10); `null` for any other check or an older receipt. */
+    val tests: TestOutcomes? = null,
 ) {
-    /** The constructor before [failures] (P8.C.10). Kept for Java callers. */
+    /** The constructor before [tests] (P8.C.10). Kept for Java callers. */
     public constructor(
         receiptId: String,
         ids: Identities,
@@ -180,7 +193,7 @@ public data class Receipt(
     ) : this(
         receiptId, ids, checkId, acceptanceIds, command, cwd, shell, stampBefore, stampAfter, envId, verifierVersion, checkDefinitionVersion,
         contractVersion, outcome, parsed, inputClosure, testedInputs, raw, limits, reuseOf, exitCode, at, closureManifest, expectedExitCode,
-        evidenceKind, checkOrigin, evidenceDeclared, emptyList(),
+        evidenceKind, checkOrigin, evidenceDeclared, null,
     )
 
     /** The v1.0 full constructor: the evidence kind, the check's origin and the declaration take their defaults. Kept for Java callers. */
@@ -212,7 +225,7 @@ public data class Receipt(
     ) : this(
         receiptId, ids, checkId, acceptanceIds, command, cwd, shell, stampBefore, stampAfter, envId, verifierVersion, checkDefinitionVersion,
         contractVersion, outcome, parsed, inputClosure, testedInputs, raw, limits, reuseOf, exitCode, at, closureManifest, expectedExitCode,
-        null, null, false, emptyList(),
+        null, null, false, null,
     )
 
     init {

@@ -641,12 +641,13 @@ public class Cell @JvmOverloads constructor(
             val layerRuns = listOfNotNull(stepRun, riskRun, if (proposal && implementingCompletion && dispatchRefusal == null) tools.verify?.onStop(increment.accept) else null)
             for (layerRun in layerRuns) {
                 notTested += layerRun.notTested
+                reviewNotes += layerRun.notes
                 val what = if (layerRun.layer == Layer.IncrementAcceptance) "verify-on-stop" else if (layerRun === riskRun) "risk > θ" else "step boundary"
                 for (receipt in layerRun.receipts) {
                     ev.journal.append(JournalEvent(idGen.next("ev"), ids, turn, JournalKind.Check, refs = listOf(receipt.receiptId), text = "$what ${receipt.checkId}: ${receipt.outcome.name.lowercase()}", at = clock.instant()))
                 }
             }
-            val stampNow = if (layerRuns.all { it.receipts.isEmpty() }) turnEnd else ws.stamper.report()
+            val stampNow = if (layerRuns.all { it.receipts.isEmpty() && it.notes.isEmpty() }) turnEnd else ws.stamper.report()
             lastReport = stampNow
             ws.scheduler.refresh(stampNow.candidateId, stampNow.env)
             worksetDrops()
@@ -678,7 +679,7 @@ public class Cell @JvmOverloads constructor(
                 register, contract, increment, currenciesNow, validEvidence?.verdicts.orEmpty(), validEvidence?.unavailable.orEmpty(), gateFlags,
                 impact.unresolvedPublic.map { it.missing }, stampNow.candidateId,
                 validEvidence?.decision?.takeIf { it.appliesTo(stampNow.candidateId, contract.version) && it.incrementId == increment.id },
-                reworkSpent = validEvidence?.reworkSpent == true,
+                reworkSpent = validEvidence?.reworkSpent == true, acknowledged = ctx.acknowledged,
             ) else null
             val repeated = repeatedFailures(currenciesNow, repaired = calls.any { it.family == ToolFamily.Edit })
             val editedByEdit = editedPaths.filter { origins[it] == ChangeOrigin.Edit }

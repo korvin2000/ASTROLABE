@@ -329,13 +329,15 @@ public object FinishReceipts {
         }
         // C1b: a mandatory check outside the acceptance items and the campaign gate (the blast radius, the types of touched
         // files) red on the final tree — completed past on an Open item — leaves the campaign unverified; a known red does not.
-        // P8.C.10: theirs is the held red — until a later passed run, classified against the baseline at s0; a pre-existing
-        // failure is disclosed in openItems and caps nothing, an unclassified one caps the class like any red mandatory check.
-        val held = c.checks.all().filter(Regressions::of).mapNotNull { check -> currencies[check.id]?.let { Obligations.held(check.id, it) }?.let { check.id to it } }
+        // P8.C.10: theirs is the hold — the attempt's failures not shown fixed on the final tree, classified against the
+        // baseline at s0: inherited ones are disclosed in openItems and cap nothing; a new or unclassified one caps the class.
+        val holds = c.checks.all().filter(Regressions::of).mapNotNull { check -> currencies[check.id]?.let { Obligations.hold(check.id, it) }?.let { check.id to it } }
         val redOnFinalTree = c.checks.all()
             .filter { Obligations.mandatory(it) && !it.required && it.kind != io.astrolabe.verify.CheckKind.Full && it.kind != io.astrolabe.verify.CheckKind.Quality && !Regressions.of(it) }
-            .filter { check -> currencies[check.id]?.let { it.red && it.applicability == io.astrolabe.verify.Applicability.Current } == true }.map { it.id } +
-            held.filter { it.second.kind != RedClass.PreExisting }.map { it.first }
+            .filter { check -> currencies[check.id]?.let { it.red && it.applicability == io.astrolabe.verify.Applicability.Current } == true }.map { "${it.id}: red on the final tree" } +
+            holds.filter { it.second.kind != RedClass.Inherited }.map { (id, hold) ->
+                if (hold.current.isEmpty()) "$id: failures of ${hold.since.joinToString(", ")} not shown fixed on the final tree" else "$id: red on the final tree"
+            }
         val checksRun = c.checks.all().mapNotNull { check -> check.last?.receiptId?.let(receipts)?.let { check to it } }
             .map { (check, it) -> CheckRun(it.checkId, it.receiptId, it.outcome.name.lowercase(), it.verifierVersion, it.envId.hex, it.checkOrigin, it.evidenceKind, check.command) }
         val registers = packets.map { it.register }
@@ -368,7 +370,7 @@ public object FinishReceipts {
                 acceptance.filter { it.provenance == null }.map { it.id } +
                 acceptance.filter { it.provenance == "accepted" }.map { "${it.id}: accepted without verification by ${it.acceptedBy} (${it.decider}): ${it.acceptedReason}" } +
                 decided.values.filter { p -> acceptance.none { it.id == p.item } }.map { "${it.item}: accepted without verification by ${it.by} (${it.decider?.name?.lowercase()}): ${it.reason}" } +
-                redOnFinalTree.map { "$it: red on the final tree" },
+                redOnFinalTree,
             deadEnds = registers.flatMap { r -> r.deadEnds.map { it.text } },
             decisions = registers.flatMap { r -> r.decisions.map { "${it.text} because ${it.because}" } },
             // §4.2: a boundary-crossing decision is promoted to an ADR candidate; the curator admits it (P4.1).
@@ -380,7 +382,7 @@ public object FinishReceipts {
                     .flatMap { inc -> state.graph.evidence[inc.id]?.leftOpen.orEmpty().map { "${inc.id}: $it" } } +
                 // Plan §4.3 (C1b): an optional check that is known red, recorded by the runtime in place of the agent's Open item.
                 c.checks.all().filterNot(Obligations::mandatory).mapNotNull { check -> currencies[check.id]?.let { Obligations.knownRed(check.id, it) } } +
-                held.flatMap { (id, red) -> Obligations.disclosure(id, red) },
+                holds.flatMap { (id, hold) -> Obligations.disclosure(id, hold) },
             pendingAmendments = contract.amendmentsPending.map { it.change },
             routingDecisions = emptyList(),
             budget = BudgetLine(totals.quantities.mapKeys { it.key.id }, totals.money, billed?.takeIf { it > 0 }?.let { helper.toDouble() / it }),

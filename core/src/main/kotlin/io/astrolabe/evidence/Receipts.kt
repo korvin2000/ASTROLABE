@@ -12,7 +12,7 @@ public interface Receipts {
 
     public fun get(receiptId: String): Receipt?
 
-    /** Every receipt of [checkId], oldest first. */
+    /** Every receipt of [checkId] in the order it was recorded (I-05: never by its timestamp). */
     public fun forCheck(checkId: String): List<Receipt>
 }
 
@@ -47,7 +47,7 @@ public class SqliteReceipts(private val store: Store, private val clock: Clock) 
         store.db.query("SELECT body FROM receipts WHERE receipt_id = ?", receiptId) { decode(it.string("body")) }.firstOrNull()
 
     override fun forCheck(checkId: String): List<Receipt> =
-        store.db.query("SELECT body FROM receipts WHERE check_id = ? ORDER BY created_at, rowid", checkId) { decode(it.string("body")) }
+        store.db.query("SELECT body FROM receipts WHERE check_id = ? ORDER BY rowid", checkId) { decode(it.string("body")) }
 
     private fun decode(body: String) = JSON.decodeFromString(Receipt.serializer(), body)
 

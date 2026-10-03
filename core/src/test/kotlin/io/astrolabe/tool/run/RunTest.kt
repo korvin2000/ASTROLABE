@@ -1331,37 +1331,75 @@ class RunTest {
     }
 
     @Test
-    fun `the stop settles live background runs first - a short grace, then a cancel - and certifies only a quiet tree`() = runTest {
+    fun `the stop verifies while background runs live, then settles them, tells the model, and certifies only a quiet tree`() = runTest {
         repo.write("pytest_pass.txt", recorded("pytest-pass.txt"))
-        val r = Recognizing(listOf(Acceptance.Run("AC-1", printing("pytest_pass.txt"), Origin.User, evidence = EvidenceKind.Tests)))
+        // An end-to-end acceptance that needs its server: it passes only while the background run lives.
+        val needsServer = io.astrolabe.contract.Command(if (windows) listOf("cmd.exe", "/d", "/s", "/c", "tasklist | findstr /i PING.EXE >nul && type pytest_pass.txt")
+            else listOf("/bin/sh", "-c", "pgrep -f 'sleep 37' >/dev/null && cat pytest_pass.txt"))
+        val r = Recognizing(listOf(
+            Acceptance.Run("AC-1", needsServer, Origin.User, evidence = EvidenceKind.Tests),
+            Acceptance.Run("AC-2", printing("pytest_pass.txt"), Origin.User, evidence = EvidenceKind.Tests),
+        ))
         r.run.stopGraceMillis = 3_000
-        // A server the model left running, and a recognised check that ends within the grace.
-        val server = run("""{"cmd":"${shell("ping -n 30 127.0.0.1", "sleep 30")}","bg":true}""", r.run)
+        val server = run("""{"cmd":"${shell("ping -n 37 127.0.0.1", "sleep 37")}","bg":true}""", r.run)
         val serverHandle = assertNotNull(Regex("handle (handle-\\d+)").find(server.body)).groupValues[1]
-        run("""{"cmd":"${printingCmd("pytest_pass.txt")}","bg":true}""", r.run)
+        // A recognised check left in the background that ends within the grace.
+        val quick = run("""{"cmd":"${printingCmd("pytest_pass.txt")}","bg":true}""", r.run)
+        val quickHandle = assertNotNull(Regex("handle (handle-\\d+)").find(quick.body)).groupValues[1]
 
         val stop = r.verify.onStop(listOf("AC-1"))
-        val receipts = r.receiptsOf("CHK-accept-AC-1")
-        assertEquals(2, receipts.size, "the background run's own receipt at its end, then the stop's exclusive run")
-        assertTrue(receipts.first().limits.any { it.kind == "input_stability" && it.detail.startsWith("background run") })
-        assertEquals(listOf(receipts.last()), stop.receipts)
-        assertTrue(r.scheduler.currency(r.checks["CHK-accept-AC-1"]!!, stamper.stamp().id).certifies, "the quiet tree is certified")
+        assertEquals(io.astrolabe.evidence.Outcome.Passed, r.receiptsOf("CHK-accept-AC-1").single().outcome, "the acceptance ran while its server lived")
+        assertTrue(r.scheduler.currency(r.checks["CHK-accept-AC-1"]!!, stamper.stamp().id).certifies, "nothing moved: the quiet tree keeps the receipt")
+        assertEquals(1, r.receiptsOf("CHK-accept-AC-2").size, "the run that ended in the grace has its receipt")
+        assertTrue(stop.notes.single().startsWith("stop cancelled background run ") && stop.notes.single().endsWith("restart it if you still need it"), stop.notes.toString())
         val polled = run("""{"op":"poll","handle":"$serverHandle","timeout":1}""", r.run)
-        assertTrue(polled.body.contains("\nhandle $serverHandle cancelled\n"), polled.body)
+        assertTrue(polled.body.contains("\nhandle $serverHandle cancelled\n") && polled.body.contains("cancelled by the stop's verification"), polled.body)
+        val ended = run("""{"op":"poll","handle":"$quickHandle","timeout":1}""", r.run)
+        assertFalse(ended.body.contains("pin lost"), ended.body)
+        assertTrue(ended.body.contains("while the stop settled it; its end was recorded then"), ended.body)
 
-        // A run the stop could not cancel: nothing certifies the tree while it may still change it.
-        r.verify.settleRuns = { listOf("#9") }
-        r.verify.onStop(listOf("AC-1"))
-        val unquiet = r.receiptsOf("CHK-accept-AC-1").last()
-        assertEquals(io.astrolabe.evidence.InputStability.Unknown, unquiet.testedInputs.stability)
-        assertTrue(unquiet.limits.any { it.kind == Scheduler.CONCURRENT && it.detail.startsWith("#9 live") }, unquiet.limits.toString())
-        val currency = r.scheduler.currency(r.checks["CHK-accept-AC-1"]!!, stamper.stamp().id)
+        // A run the stop could not cancel: nothing certifies the tree while it may still change it, whichever scheduler asks.
+        r.verify.settleRuns = { io.astrolabe.tool.verify.StopSettle(0, listOf("#9"), listOf("stop could not confirm the cancellation of background run #9")) }
+        r.verify.onStop(listOf("AC-2"))
+        val currency = r.scheduler.currency(r.checks["CHK-accept-AC-2"]!!, stamper.stamp().id)
         assertFalse(currency.certifies)
         assertTrue(currency.reasons.any { it.contains("background run #9 still live") }, currency.reasons.toString())
-        // A later stop that finds the tree quiet certifies it again.
-        r.verify.settleRuns = { emptyList() }
-        assertEquals(1, r.verify.onStop(listOf("AC-1")).receipts.size)
-        assertTrue(r.scheduler.currency(r.checks["CHK-accept-AC-1"]!!, stamper.stamp().id).certifies)
+        // A later stop that finds the tree quiet runs it again there and certifies it.
+        r.verify.settleRuns = { io.astrolabe.tool.verify.StopSettle(0, emptyList(), emptyList()) }
+        r.verify.onStop(listOf("AC-2"))
+        assertTrue(r.receiptsOf("CHK-accept-AC-2").any { receipt -> receipt.limits.any { it.kind == Scheduler.CONCURRENT } })
+        assertTrue(r.scheduler.currency(r.checks["CHK-accept-AC-2"]!!, stamper.stamp().id).certifies)
+    }
+
+    @Test
+    fun `the stop's baseline is bounded - none without time left, one per definition when s0 cannot be exported, its red unclassified`() = runTest {
+        val checks = io.astrolabe.verify.Checks.empty().also { coherence.register(it) }
+        val receipts = SqliteReceipts(store, clock)
+        val scheduler = Scheduler(checks, workspace, registry, stamper, receipts, SqliteAliases(store, clock), idGen, ids, clock)
+        val dirty = io.astrolabe.workspace.DirtyState(workspace, store.blobs, stamper, ids, clock)
+        // A shadow never opened: exporting s0 throws, as a broken capture would.
+        val shadow = io.astrolabe.workspace.ShadowRef(ids.work, ids.attempt, workspace, store, dirty, os, clock)
+        val baseline = io.astrolabe.verify.Baseline(shadow, store.layout, TrustedLocalRunner(os), os, receipts, SqliteAliases(store, clock), store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, clock, stamper.report().env)
+        val verify = Verify(checks, scheduler, null, baseline, stamper.stamp().id, workspace, TrustedLocalRunner(os), os, stamper, store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, contracts, stateRoot.resolve("logs"))
+        val blast = checks.register(io.astrolabe.verify.Check(io.astrolabe.verify.Checks.TESTS_BLAST, io.astrolabe.verify.CheckKind.Unit, io.astrolabe.verify.Selector.Blast,
+            io.astrolabe.evidence.Closure.Unknown, io.astrolabe.verify.CostClass.Slow, io.astrolabe.verify.Trigger.StepBoundary, command = printing("README.md")))
+        val failure = io.astrolabe.evidence.FailedTest(io.astrolabe.verify.Regressions.key(TestIdentity(file = "tests/t.py", name = "t")), "tests/t.py::t", "fp", "assert 1 == 2")
+        scheduler.runCheck(blast, 1, listOf("src/a.py", "README.md")) {
+            io.astrolabe.verify.Executed(printing("README.md").argv, null, false, 1, io.astrolabe.evidence.Outcome.Failed, io.astrolabe.evidence.Counts(failed = 1, discovered = 1), null,
+                tests = io.astrolabe.evidence.TestOutcomes(listOf(failure)))
+        }
+        fun baselines() = receipts.forCheck(io.astrolabe.verify.Checks.TESTS_BLAST).filter(io.astrolabe.verify.Regressions::isBaseline)
+        // A minutes limit with no time left: no baseline runs, the red stays unclassified.
+        verify.timeLeft = { 0L }
+        verify.onStop(emptyList())
+        assertEquals(emptyList(), baselines())
+        // Time left, but s0 cannot be exported: the baseline is recorded as begun, and never retried in the attempt.
+        verify.timeLeft = { null }
+        verify.onStop(emptyList())
+        verify.onStop(emptyList())
+        assertEquals(1, baselines().size)
+        val hold = assertNotNull(scheduler.currency(blast, stamper.stamp().id).hold)
+        assertTrue(hold.unclassified.single().contains("is unavailable"), hold.toString())
     }
 
     @Test

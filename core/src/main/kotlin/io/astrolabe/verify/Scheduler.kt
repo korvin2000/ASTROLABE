@@ -7,7 +7,7 @@ import io.astrolabe.evidence.Closure
 import io.astrolabe.evidence.ClosureCompleteness
 import io.astrolabe.evidence.ClosureManifest
 import io.astrolabe.evidence.Counts
-import io.astrolabe.evidence.FailedTest
+import io.astrolabe.evidence.TestOutcomes
 import io.astrolabe.evidence.InputStability
 import io.astrolabe.evidence.Limit
 import io.astrolabe.evidence.Outcome
@@ -51,12 +51,12 @@ public data class Executed(
     val raw: Digest?,
     val limits: List<String> = emptyList(),
     val expectedExitCode: Int? = 0,
-    /** The failing tests the shaper identified, recorded on the receipt (P8.C.10). */
-    val failures: List<FailedTest> = emptyList(),
+    /** What a harness regression check's run reported test by test, recorded on the receipt (P8.C.10); `null` otherwise. */
+    val tests: TestOutcomes? = null,
 ) {
-    /** The constructor before [failures] (P8.C.10). Kept for Java callers. */
+    /** The constructor before [tests] (P8.C.10). Kept for Java callers. */
     public constructor(command: List<String>, cwd: String?, shell: Boolean, exit: Int?, outcome: Outcome, counts: Counts?, raw: Digest?, limits: List<String>, expectedExitCode: Int?) :
-        this(command, cwd, shell, exit, outcome, counts, raw, limits, expectedExitCode, emptyList())
+        this(command, cwd, shell, exit, outcome, counts, raw, limits, expectedExitCode, null)
 }
 
 /** Paths a check may write without touching its inputs (declared scratch/output policy, D-45): caches, build output, reports. */
@@ -101,11 +101,11 @@ public data class Currency @JvmOverloads constructor(
      */
     val knownRed: String? = null,
     /**
-     * P8.C.10: for the blast radius or the types of touched files ([Regressions]), the red that holds until a later passed
-     * run covers it, with its classification against the baseline at `s0`; `null` when none holds, or when the caller did
+     * P8.C.10: for the blast radius or the types of touched files ([Regressions]), the failures of the attempt not shown
+     * fixed on the tree at hand, classified against the baseline at `s0`; `null` when none is held, or when the caller did
      * not compute it (the resolver then reads a current, eligible red as unclassified).
      */
-    val held: HeldRed? = null,
+    val hold: RegressionHold? = null,
 ) {
     /** Only a current, eligible, green receipt certifies the final tree for its check. */
     val certifies: Boolean get() = applicability == Applicability.Current && eligible && green
@@ -146,12 +146,8 @@ public class Scheduler(
 ) {
     private val aliasByReceipt = HashMap<String, String>()
 
-    /**
-     * P8.C.12: background runs still live after the stop settled them (a cancellation not delivered or not confirmed):
-     * while any is, no receipt certifies a tree — those recorded are `input_stability = unknown`, and currency reads every
-     * receipt as ineligible. Set by each stop's verification.
-     */
-    internal var unquiet: List<String> = emptyList()
+    /** P8.C.12: the workspace's background runs a stop could not settle ([Workspace.unquiet]); any scheduler of it reads them. */
+    private val unquiet: List<String> get() = workspace.unquiet
 
     /** The campaign-global `#n` of [receiptId], when this scheduler recorded it. */
     public fun aliasOf(receiptId: String): String? = aliasByReceipt[receiptId]
@@ -333,7 +329,7 @@ public class Scheduler(
             verifierVersion = verifierVersion, checkDefinitionVersion = check.definitionVersion, contractVersion = contractVersion,
             outcome = outcome, parsed = executed.counts, inputClosure = check.inputClosure, testedInputs = if (concurrent) testedInputs.copy(stability = InputStability.Unknown) else testedInputs,
             raw = executed.raw, limits = limits, exitCode = executed.exit, at = clock.instant(), closureManifest = manifest, expectedExitCode = executed.expectedExitCode,
-            evidenceKind = kind, checkOrigin = check.origin, evidenceDeclared = check.evidence != null, failures = executed.failures,
+            evidenceKind = kind, checkOrigin = check.origin, evidenceDeclared = check.evidence != null, tests = executed.tests,
         )
         receipts.record(receipt)
         aliasByReceipt[receipt.receiptId] = aliases.allocate(ids.work, receipt.receiptId, "receipt", ids.context, workspace.id).text
@@ -470,47 +466,41 @@ public class Scheduler(
         // D-338: an unverified result names its cause for the decider — "cannot start python3", not just "unavailable".
         if (receipt != null && !green) reasons += "outcome ${receipt.outcome.name.lowercase()}" + (receipt.limits.firstOrNull()?.detail?.let { ": $it" } ?: "")
         return Currency(last.receiptId, refreshed.applicability, eligible, green, reasons, red = receipt?.outcome == Outcome.Failed, mandatory = mandatory,
-            knownRed = if (mandatory) null else knownRedSince(check.id), held = if (Regressions.of(registered)) held(check.id) else null)
+            knownRed = if (mandatory) null else knownRedSince(check.id), hold = if (Regressions.of(registered)) hold(check.id, stampNow) else null)
     }
 
     /** C1b ([Currency.knownRed]): walks this attempt's receipts of [checkId] in order; only a later `passed` one ends a red. */
     private fun knownRedSince(checkId: String): String? {
         var since: Receipt? = null
-        for (r in attempt(checkId)) {
-            if (Regressions.isBaseline(r)) continue
+        for (r in history(checkId)) {
             if (r.outcome == Outcome.Failed && since == null) since = r
             if (r.outcome == Outcome.Passed) since = null
         }
         return since?.let(::alias)
     }
 
-    /**
-     * P8.C.10 ([Currency.held]): the reds of [checkId] no later passed run covers ([Regressions.open]), each classified
-     * against the latest baseline of its own definition in this attempt; one regression makes the whole check a regression,
-     * else one unclassified red makes it unclassified.
-     */
-    private fun held(checkId: String): HeldRed? {
-        val history = attempt(checkId)
-        val open = Regressions.open(history)
-        if (open.isEmpty()) return null
-        val baselines = history.filter(Regressions::isBaseline)
-        val classes = open.map { red -> Regressions.classify(red, baselines.lastOrNull { it.checkDefinitionVersion == red.checkDefinitionVersion }) }
-        val kind = listOf(RedClass.Regression, RedClass.Unclassified).firstOrNull { k -> classes.any { it.first == k } } ?: RedClass.PreExisting
-        return HeldRed(open.map(::alias), kind, classes.filter { it.first == kind }.flatMap { it.second }.distinct())
-    }
+    /** P8.C.10 ([Currency.hold]): [Regressions.hold] over this workspace's receipts of [checkId] in the attempt, on [stampNow]. */
+    private fun hold(checkId: String, stampNow: CandidateId?): RegressionHold? = Regressions.hold(history(checkId), baselines(checkId), stampNow, ::alias)
+
+    /** P8.C.10 A: the red runs of a regression [check] behind its hold that no run of their definition confirms on [stampNow]. */
+    internal fun unconfirmed(check: Check, stampNow: CandidateId): List<Receipt> =
+        if (Regressions.of(checks[check.id] ?: check)) Regressions.unconfirmed(history(check.id), baselines(check.id), stampNow) else emptyList()
+
+    /** P8.C.10 G: this tree's red run of a regression [check] that the attempt has no baseline for yet, or `null`. */
+    internal fun baselineDue(check: Check, stampNow: CandidateId): Receipt? =
+        if (Regressions.of(checks[check.id] ?: check)) Regressions.baselineDue(history(check.id), baselines(check.id), stampNow) else null
 
     /**
-     * P8.C.10 п. 3: the held reds of a regression [check] that no baseline of their definition classifies yet in this
-     * attempt, one per definition — what verify-on-stop runs once on `s0` before the decision.
+     * The receipts of [checkId] this scheduler's workspace recorded in the attempt, in the order they were recorded,
+     * baselines aside: a writer's worktree never answers for another's (P8.C.10 F).
      */
-    internal fun unbaselined(check: Check): List<Receipt> {
-        if (!Regressions.of(checks[check.id] ?: check)) return emptyList()
-        val history = attempt(check.id)
-        val covered = history.filter(Regressions::isBaseline).map { it.checkDefinitionVersion }.toSet()
-        return Regressions.open(history).filter { it.checkDefinitionVersion !in covered }.distinctBy { it.checkDefinitionVersion }
+    private fun history(checkId: String): List<Receipt> = receipts.forCheck(checkId).filter {
+        it.ids.work == ids.work && it.ids.attempt == ids.attempt && !Regressions.isBaseline(it) &&
+            (aliasByReceipt.containsKey(it.receiptId) || aliases.byCanonical(ids.work, it.receiptId)?.workspace == workspace.id)
     }
 
-    private fun attempt(checkId: String): List<Receipt> = receipts.forCheck(checkId).filter { it.ids.work == ids.work && it.ids.attempt == ids.attempt }
+    /** The attempt's baseline receipts of [checkId]: runs on the captured `s0`, whichever workspace asked for them. */
+    private fun baselines(checkId: String): List<Receipt> = receipts.forCheck(checkId).filter { it.ids.work == ids.work && it.ids.attempt == ids.attempt && Regressions.isBaseline(it) }
 
     private fun alias(receipt: Receipt): String = aliasByReceipt[receipt.receiptId] ?: aliases.byCanonical(ids.work, receipt.receiptId)?.text ?: receipt.receiptId
 
