@@ -59,7 +59,10 @@ public enum class BudgetStop(public val wire: String) {
     @SerialName("cell_cap") @JsonNames("CellCap")
     CellCap("cell_cap"),
 
-    /** The contract's own budget — tokens, turns per cell, its money — frozen with the contract (§4.1). */
+    /**
+     * The contract's own budget — tokens, turns per cell, its money — kept with the contract (§4.1). Its tokens follow the
+     * host's `CampaignPolicy.tokens` on a reopen (C14): a reopen that raises them so they leave room continues the attempt.
+     */
     @SerialName("contract_budget") @JsonNames("ContractBudget")
     ContractBudget("contract_budget"),
     ;
@@ -67,8 +70,11 @@ public enum class BudgetStop(public val wire: String) {
     /** A task limit stop: a reopen continues it once the host's limits leave room. */
     public val taskLimit: Boolean get() = this == TaskLimitMoney || this == TaskLimitMinutes || this == TaskLimitRequests
 
-    /** A reopen may continue the attempt: a raised task limit, or a fresh per-run cell cap. */
-    public val resumable: Boolean get() = this != ContractBudget
+    /**
+     * A reopen may continue the attempt: a raised task limit, a fresh per-run cell cap, or contract tokens the host raised
+     * (C14) — every budget stop, so none is a dead end; only the host's raise lifts a task limit or the contract budget.
+     */
+    public val resumable: Boolean get() = true
 
     public companion object {
         @JvmStatic
@@ -256,8 +262,9 @@ public sealed interface Transition {
 
     /**
      * C3 (plan §4.6): a campaign stopped `budget_exhausted` on a resumable [BudgetStop] — a task limit the host has raised
-     * so it leaves room again, or the per-run cell cap — is reopened and continues the same attempt from reconciliation,
-     * its verified ledger kept. Only the host raises a limit: the controller applies this at open, on the host's limits.
+     * so it leaves room again, the per-run cell cap, or the contract's tokens the host raised (C14) — is reopened and
+     * continues the same attempt from reconciliation, its verified ledger kept. Only the host raises a limit: the controller
+     * applies this at open, on the host's limits and policy.
      */
     public data class LimitRaised(val reason: String) : Transition {
         init {

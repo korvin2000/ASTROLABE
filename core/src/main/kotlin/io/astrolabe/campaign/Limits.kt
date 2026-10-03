@@ -8,7 +8,10 @@ import io.astrolabe.budget.LimitSpend
 import io.astrolabe.budget.LimitStatus
 import io.astrolabe.budget.Spend
 import io.astrolabe.budget.TaskLimits
+import io.astrolabe.budget.Tokens
 import io.astrolabe.cell.CellModel
+import io.astrolabe.contract.Contract
+import io.astrolabe.contract.ContractRepository
 import io.astrolabe.event.AgentEvent
 import io.astrolabe.event.AmendmentProposal
 import io.astrolabe.event.Authority
@@ -108,6 +111,39 @@ internal class LimitState {
     @Volatile var requestsSeen: Int = -1
     @Volatile var callsKey: Pair<Long, Long>? = null
     @Volatile var calls: List<CallAccount> = emptyList()
+}
+
+/** The contract a reopen runs under after [ContractTokens.atOpen]: the tokens it had ([from]) and those spent of them. */
+internal class TokensAtOpen(val contract: Contract, val from: Long, val spent: Long) {
+    /** The host raised the contract's tokens at this open. */
+    val raised: Boolean get() = contract.budget.tokens.value > from
+}
+
+/**
+ * C14: the contract's token budget follows the host's `CampaignPolicy.tokens` on a reopen. Only the host changes it, and
+ * only at an open: a raise is kept in the contract row at its version — a budget is not an amendment, so nothing bound to
+ * the version is invalidated — and journaled; a decrease stops at what is already spent; the same policy changes nothing,
+ * and spend is read from the `usage` rows alone, so a reopen never charges anything (D-392, invariant 10).
+ */
+internal object ContractTokens {
+    const val SET: String = "budget: contract tokens set by the host"
+    const val RAISED: String = "budget: contract tokens raised by the host"
+    const val STILL: String = "budget: contract budget still reached"
+
+    /** The host's action on a contract budget stop. */
+    const val RAISE_TO_CONTINUE: String = "raise the policy's tokens and reopen the task to continue this attempt"
+
+    fun atOpen(repository: ContractRepository, store: Store, journal: Journal, ids: Identities, idGen: IdGen, clock: Clock, stored: Contract, requested: Tokens): TokensAtOpen {
+        val from = stored.budget.tokens.value
+        val spent = from - Accounting(store, clock).remainingTokens(stored.workId, from)
+        val target = if (requested.value >= from) requested.value else maxOf(requested.value, spent)
+        if (target == from) return TokensAtOpen(stored, from, spent)
+        val changed = stored.copy(budget = stored.budget.copy(tokens = Tokens(target)))
+        repository.replaceLatest(changed)
+        journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Reconcile,
+            text = "$SET: $from → $target tokens at contract v${stored.version} ($spent spent)", at = clock.instant()))
+        return TokensAtOpen(changed, from, spent)
+    }
 }
 
 /**

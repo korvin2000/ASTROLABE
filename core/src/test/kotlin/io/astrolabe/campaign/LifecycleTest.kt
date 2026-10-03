@@ -185,7 +185,8 @@ class LifecycleTest {
             "failed" to emptySet(),
             // C3: only the host's raised limit reopens a budget stop; it is not a stop on something outside the campaign.
             "budget exhausted" to setOf("LimitRaised"),
-            "contract budget" to emptySet(),
+            // C14: the contract's tokens follow the host's policy on a reopen, so its stop is no dead end either.
+            "contract budget" to setOf("LimitRaised"),
         )
         for ((name, state) in states) {
             val allowed = all.indices.filter { i ->

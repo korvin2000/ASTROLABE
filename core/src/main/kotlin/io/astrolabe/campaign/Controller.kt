@@ -520,7 +520,8 @@ public class Controller @JvmOverloads public constructor(
         val kb = StoreKb(store, request.work, registry::version) { negatives.retrievalMiss(ids, null, it) }
         val intents = SqliteIntentJournal(store, clock)
         io.astrolabe.delegate.IntegrationPublication.recover(workspace, registry, store.blobs, intents)
-        val contracts = Contracts(SqliteContractRepository(store, clock), idGen, clock, events)
+        val repository = SqliteContractRepository(store, clock)
+        val contracts = Contracts(repository, idGen, clock, events)
         val campaigns = SqliteCampaigns(store, clock)
         val attempts = Attempts(store, clock)
         val storedAttempt = attempts.load(request.work, request.attempt)
@@ -546,8 +547,10 @@ public class Controller @JvmOverloads public constructor(
         val derived = contracts.deriveS0(request.work, request.attempt, request.text, atlas, effective, policy.tokens, protected, policy.cost)
         val stored = contracts.current(request.work)
         check(stored == null || stored.attemptId == request.attempt) { "work ${request.work.value} is attempt ${stored?.attemptId?.value}; a new attempt is P2" }
+        // C14: a reopen's contract tokens follow the host's policy (a raise kept at the contract's version, journaled).
+        val tokens = stored?.let { ContractTokens.atOpen(repository, store, journal, ids, idGen, clock, it, policy.tokens) }
         // §3.5: a new contract carries the shape its campaign runs in; the tool masks derive from it.
-        val contract = stored ?: contracts.open(derived.contract.let { d ->
+        val contract = tokens?.contract ?: contracts.open(derived.contract.let { d ->
             val initial = (ShapeSelector.select(d, impactPrescan.prescan, effective.defaults.shapePolicy, policy.resumeExpected, capabilities = CAPABILITIES) as? ShapeDecision.Selected)?.shape
             if (initial == Shape.S1 || initial == Shape.S2) d.copy(shape = initial) else d
         })
@@ -582,6 +585,17 @@ public class Controller @JvmOverloads public constructor(
         val budgetStop = state?.takeIf { it.phase == CampaignPhase.Ended && it.outcome == CampaignOutcome.BudgetExhausted }?.budgetStop
         if (budgetStop == BudgetStop.CellCap) {
             state = Lifecycle.apply(checkNotNull(state), contract, Transition.LimitRaised("reopened after the run's cell cap: the cap counts per run")).also(campaigns::save)
+        }
+        // C14: a contract budget stop continues only when this open's policy raised the contract's tokens and they leave room.
+        if (budgetStop == BudgetStop.ContractBudget) {
+            val budget = contract.budget.tokens.value
+            val left = Accounting(store, clock).remainingTokens(request.work, budget)
+            if (tokens?.raised == true && left > 0) {
+                state = Lifecycle.apply(checkNotNull(state), contract, Transition.LimitRaised("${ContractTokens.RAISED}: ${tokens.from} → $budget tokens; ${budget - left} spent")).also(campaigns::save)
+            } else {
+                val why = "contract budget: ${budget - left} of $budget tokens spent; ${ContractTokens.RAISE_TO_CONTINUE}"
+                journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Reconcile, text = "${ContractTokens.STILL}: $why", at = clock.instant()))
+            }
         }
         // C3: a task limit's stop continues the same attempt only once the host's limits leave room again — priced at the
         // call it was refused at — and says which limit still holds it otherwise.
