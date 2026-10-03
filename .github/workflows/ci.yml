@@ -42,13 +42,24 @@ jobs:
           node-version: "24"
       # Without ripgrep the whole search backend-parity suite skips (128 tests on the 2026-09-20
       # run), so the P0.6.3 both-backends criterion would never be exercised on CI.
+      # On Windows `choco install` exits 0 when its community feed answers 503 ("installed 0/0 packages",
+      # CI run 37081275026), so the result is checked here and the pinned GitHub release is the fallback.
       - name: Install ripgrep
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
-            choco install ripgrep -y --no-progress
+            choco install ripgrep -y --no-progress || true
+            if ! command -v rg >/dev/null 2>&1; then
+              v=15.2.0
+              tmp="$(cygpath -u "$RUNNER_TEMP")"
+              curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o "$tmp/rg.zip"                 "https://github.com/BurntSushi/ripgrep/releases/download/$v/ripgrep-$v-x86_64-pc-windows-msvc.zip"
+              unzip -q "$tmp/rg.zip" -d "$tmp/rg"
+              export PATH="$tmp/rg/ripgrep-$v-x86_64-pc-windows-msvc:$PATH"
+              cygpath -w "$tmp/rg/ripgrep-$v-x86_64-pc-windows-msvc" >> "$GITHUB_PATH"
+            fi
           else
             sudo apt-get update && sudo apt-get install -y ripgrep
           fi
+          rg --version
         shell: bash
       - uses: gradle/actions/setup-gradle@v4
         with:
