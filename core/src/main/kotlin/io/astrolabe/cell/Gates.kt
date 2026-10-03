@@ -15,9 +15,12 @@ import io.astrolabe.tool.ToolCall
 import io.astrolabe.tool.ToolFamily
 import io.astrolabe.tool.ToolOutcome
 import io.astrolabe.verify.Currency
+import io.astrolabe.verify.GapKind
+import io.astrolabe.verify.ObligationKind
 import io.astrolabe.verify.Resolution
 import io.astrolabe.verify.Resolved
 import io.astrolabe.verify.Resolver
+import io.astrolabe.verify.ResultStatus
 import io.astrolabe.verify.TestIntegrityFlag
 import io.astrolabe.verify.Verdict
 import kotlin.math.ceil
@@ -227,6 +230,8 @@ public data class GateState @JvmOverloads constructor(
     val acceptance: Resolved? = null,
     /** Every refused call since a call of the cell last executed, this turn's included. */
     val refusals: List<RefusalSignature> = emptyList(),
+    /** The cell implements [increment]: its completion is the exit gate's, so the sufficiency hint applies (plan §4.4 C1b). */
+    val implementing: Boolean = false,
 ) {
     init {
         require(turn >= 1) { "turn is 1-based, got $turn" }
@@ -301,13 +306,31 @@ public class Gates(gates: List<Gate>) {
         public const val SCOPE: String = "scope"
         public const val ACCEPTANCE_SURFACE: String = "acceptance-surface"
         public const val IMPACT: String = "impact"
+        public const val SUFFICIENCY: String = "sufficiency"
 
         /**
          * The S0 set, in the order of the §5.6 table; contract touch, repeated failure, scope and acceptance surface
-         * are registered too (P3.4.3), and impact (P3.2.4). Judge-dependent gates are not.
+         * are registered too (P3.4.3), and impact (P3.2.4); the sufficiency hint follows the exit gate (plan §4.4 C1b).
+         * Judge-dependent gates are not.
          */
         @JvmStatic
-        public fun s0(): Gates = Gates(listOf(Entry, Exit, Pressure, Stall, Loop, RefusalLoop, RegisterInvariants, StaleFact, Impact, ContractTouch, RepeatedFailure, Scope, AcceptanceSurfaceGate, Reserve, Turns))
+        public fun s0(): Gates = Gates(listOf(Entry, Exit, Sufficiency, Pressure, Stall, Loop, RefusalLoop, RegisterInvariants, StaleFact, Impact, ContractTouch, RepeatedFailure, Scope, AcceptanceSurfaceGate, Reserve, Turns))
+    }
+
+    // Plan §4.4 (C1b): once per cell, when every `run:` item of the increment is green on this tree and the D-337
+    // resolver leaves the agent nothing to close — a reviewer's word aside, which the proposal itself obtains.
+    private object Sufficiency : Gate {
+        override val name: String get() = SUFFICIENCY
+
+        override fun evaluate(state: GateState): List<GateOutcome> {
+            if (!state.implementing || state.completionProposed) return emptyList()
+            val resolved = Resolver.increment(state.register, state.contract, state.increment, state.currencies, state.verdicts, state.unavailable, state.flags, state.unresolvedImpactNudges)
+            val runs = resolved.results.filter { it.kind == ObligationKind.Run && it.obligation in state.increment.accept }
+            if (runs.isEmpty() || runs.any { it.status != ResultStatus.Passed } || resolved.gaps.any { it.kind != GapKind.Unverified }) return emptyList()
+            val reviews = resolved.gaps.mapNotNull { it.obligation }
+            val then = if (reviews.isEmpty()) "further checks are optional" else "the review of ${reviews.joinToString(", ")} follows the proposal"
+            return listOf(GateOutcome.Nudge(GateKey(name, "ready"), "evidence suffices: ${runs.joinToString(", ") { it.obligation }} green on this tree and nothing left to close — finish now; $then"))
+        }
     }
 
     // §5.6 Impact: once per changed symbol while its references are not inspected; the key carries the change turn.

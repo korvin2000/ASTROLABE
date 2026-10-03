@@ -664,7 +664,7 @@ public class Cell @JvmOverloads constructor(
                 outsideIncrement = editedByEdit.filter { p -> contract.scope.covers(p) && increment.writeScope.none { PathPattern.matches(it, p) } },
                 surfaceFlags = flags.values.filter { it.path in editedPaths }, editedPaths = editedPaths.toSet(),
                 contractAnchors = (tools.kb as? KbTool)?.contractAnchors().orEmpty(), repeatedFailures = repeated, acceptance = acceptance,
-                refusals = refused.toList(),
+                refusals = refused.toList(), implementing = implementingCompletion,
             )
             val report = gates.evaluate(state)
             fired = report.fired

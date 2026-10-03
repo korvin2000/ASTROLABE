@@ -454,4 +454,35 @@ class GatesTest {
         ledger.changed(3, emptyList()) { 426 }
         assertEquals(emptyList(), ledger.overflow, "the overflow is the last batch's only")
     }
+
+    private val greenAc1 = mapOf("CHK-accept-AC-1" to Currency("rcpt-1", Applicability.Current, eligible = true, green = true, reasons = emptyList()))
+
+    private fun hints(report: GateReport): List<String> = report.nudges.filter { it.key.gate == Gates.SUFFICIENCY }.map { it.line }
+
+    @Test
+    fun `the sufficiency hint fires once per cell when the increment's checks are green and nothing is left to close`() {
+        val ready = state(2).copy(currencies = greenAc1, implementing = true)
+        val (first, second) = turns(ready, ready.copy(turn = 3, lastProgressTurn = 2))
+        assertEquals(listOf("evidence suffices: AC-1 green on this tree and nothing left to close — finish now; further checks are optional"), hints(first))
+        assertEquals(emptyList(), hints(second), "once per cell")
+        assertEquals(emptyList(), hints(gates.evaluate(state(2).copy(implementing = true))), "no receipt: the checks are not green yet")
+        assertEquals(emptyList(), hints(gates.evaluate(ready.copy(implementing = false))), "only the cell that implements the increment")
+        assertEquals(emptyList(), hints(gates.evaluate(ready.copy(completionProposed = true))), "the proposal is already made")
+        val stale = mapOf("CHK-accept-AC-1" to greenAc1.getValue("CHK-accept-AC-1").copy(applicability = Applicability.Stale))
+        assertEquals(emptyList(), hints(gates.evaluate(ready.copy(currencies = stale))), "green for another tree")
+        val fullRed = Currency("rcpt-2", Applicability.Current, eligible = true, green = false, reasons = listOf("outcome failed"), red = true)
+        assertEquals(emptyList(), hints(gates.evaluate(ready.copy(currencies = greenAc1 + ("CHK-full" to fullRed)))), "a red mandatory check is the agent's to close")
+        assertEquals(1, hints(gates.evaluate(ready.copy(currencies = greenAc1 + ("CHK-lint" to fullRed.copy(mandatory = false))))).size, "a red optional check is the runtime's record")
+        assertEquals(emptyList(), hints(gates.evaluate(ready.copy(unresolvedImpactNudges = listOf("public def total() changed; 3 importers unread")))))
+    }
+
+    @Test
+    fun `the sufficiency hint names the review the proposal obtains, once the plan is closed`() {
+        val reviewed = contract.copy(acceptance = contract.acceptance + Acceptance.Review("AC-2", "rounding matches the finance policy", Origin.User))
+        val both = increment.copy(accept = listOf("AC-1", "AC-2"))
+        val open = state(2).copy(contract = reviewed, increment = both, currencies = greenAc1, implementing = true)
+        assertEquals(emptyList(), hints(gates.evaluate(open)), "acceptance is not proven yet, so the open step is the agent's to close")
+        val closed = open.copy(register = register.copy(plan = listOf(Step(1, Mark.Done, "round half-up", evidence = "#12"))))
+        assertEquals(listOf("evidence suffices: AC-1 green on this tree and nothing left to close — finish now; the review of AC-2 follows the proposal"), hints(gates.evaluate(closed)))
+    }
 }
