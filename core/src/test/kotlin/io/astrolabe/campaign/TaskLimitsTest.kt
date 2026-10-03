@@ -411,6 +411,27 @@ class TaskLimitsTest {
     }
 
     @Test
+    fun `a call that never reached the provider releases its hold and counts no request`() = runBlocking<Unit> {
+        // C3r 7: one request and a money limit; the progress relay fails before adapter.start(), so nothing was sent.
+        val s0 = CampaignRequest(WorkId("W-c3-unsent"), AttemptId("a1"), "make a return 10")
+        seed(s0, shape = Shape.S0)
+        Events(clock).use { events ->
+            controller(events).open(repo.root, s0, policy(TaskLimits(maxCost = usd("1"), maxRequests = 1))).use { c ->
+                val fake = FakeAdapter(ScriptedModel.of(Scripted.Reply(listOf<Item>(say("never sent")))))
+                controller(events).runS0(c, CellModel(RelayDown(fake), FakeProfiles.main, HeuristicEstimator()))
+                assertTrue(fake.calls.isEmpty(), "nothing reached the provider")
+                assertTrue(Accounting(c.store, clock).calls(s0.work).isEmpty(), "no hold and no request stay on record")
+            }
+            controller(events).open(repo.root, s0, CampaignPolicy(Tokens(400_000))).use { c ->
+                val spend = TaskLimitControl(idGen, clock, null).spend(c)
+                assertEquals(0, spend.requests, "a reopen counts no request")
+                assertNull(spend.cost)
+                assertEquals(LimitDecision.Within, LimitRule.decide(c.limits, spend))
+            }
+        }
+    }
+
+    @Test
     fun `the balance profile is chosen at start and frozen for the attempt`() = runBlocking<Unit> {
         val recorder = EventRecorder()
         Events(clock).use { events ->
@@ -583,6 +604,11 @@ class TaskLimitsTest {
         val deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos()
         while (!ready() && System.nanoTime() < deadline) Thread.sleep(10)
         assertTrue(ready(), "events not delivered: ${recorder.events.map { it::class.simpleName }}")
+    }
+
+    /** The fake adapter whose progress relay cannot be attached: the cell fails before the request reaches the provider. */
+    private class RelayDown(private val inner: FakeAdapter) : ProviderAdapter by inner, io.astrolabe.provider.ObservableAdapter {
+        override fun addListener(listener: io.astrolabe.provider.InvocationListener): AutoCloseable = throw IllegalStateException("progress relay unavailable")
     }
 
     /** The fake adapter with every call billed [perCall], as a gateway reports it (D-378). */

@@ -412,8 +412,11 @@ public class Cell @JvmOverloads constructor(
             var failure: Throwable? = null
             var terminal: io.astrolabe.provider.Terminal? = null
             var progress: AutoCloseable? = null
+            // C3r: false until the request is handed to the adapter; a failure before that is known never to have been sent.
+            var sent = false
             try {
                 progress = progressRelay(invocationId)
+                sent = true
                 invocation = ctx.model.adapter.start(request, invocationId)
                 received = invocation.await()
             } catch (error: Throwable) {
@@ -445,9 +448,15 @@ public class Cell @JvmOverloads constructor(
                 val charge = Accounting.add(inputCharge, outputCharge)
                 val complete = usage?.isComplete == true && inputKnown && BillingDimension.OUTPUT in usage.quantities
                 val funded = if (complete) charge else maxOf(charge, admission.estimate.value)
-                admission.reconcile(Tokens(funded))
-                cost += usage
-                accounting?.record(ids, invocationId.value, ctx.model.profile, request, usage, funded)
+                if (sent) {
+                    admission.reconcile(Tokens(funded))
+                    cost += usage
+                    accounting?.record(ids, invocationId.value, ctx.model.profile, request, usage, funded)
+                } else {
+                    // C3r: nothing reached the provider — the token reservation and the durable hold are released, no request counted.
+                    admission.release()
+                    accounting?.release(ids, invocationId.value)
+                }
                 // Every dispatched call reaches the bus once with its reconciled usage; an answered one is emitted below.
                 if (failure != null || received == null || settled?.cancelled == true) {
                     val stop = when {
