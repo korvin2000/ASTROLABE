@@ -438,6 +438,29 @@ class TaskLimitsTest {
     }
 
     @Test
+    fun `a child cell gets the balance profile once, from the model the host supplied`() = runBlocking<Unit> {
+        // C3r 6: W = 200 000. Economy bounds the window once — 150 000 without tiers, 133 334 under a 64k tier; a child routed
+        // from its parent's model must not narrow it again (112 500, 88 890). Main-line cells step a dear model's High effort once.
+        val prices = FakeProfiles.main.priceTable
+        val tiered = FakeProfiles.main.copy(priceTable = prices.copy(tiers = listOf(io.astrolabe.provider.PriceTier(64_000, prices.perMillion))))
+        val approve = Scripted.Reply(listOf(say("""{"verdict":"approve","confidence":0.9,"findings":[]}""")))
+        for ((profile, window) in listOf(FakeProfiles.main to 150_000, tiered to 133_334)) {
+            val work = CampaignRequest(WorkId("W-c3-child-$window"), AttemptId("a1"), request.text)
+            seed(work, shape = Shape.S2, risk = io.astrolabe.contract.Risk(1, io.astrolabe.contract.Reversibility.Hard, false))
+            controller().open(repo.root, work, CampaignPolicy(Tokens(400_000), balance = BalanceProfile.Economy)).use { c ->
+                val adapter = FakeAdapter(ScriptedModel.of(*(planning() + implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"") + approve).toTypedArray()))
+                // The review child's 30K budget admits a turn only under a narrowed output headroom (D-123).
+                controller().run(c, CellModel(adapter, profile, HeuristicEstimator(), Effort.High, maxOutputTokens = 4_000), maxCells = 1)
+                val (reviews, mainLine) = adapter.calls.map { it.request }.partition { io.astrolabe.delegate.Judge.OUTPUT in texts(it) }
+                assertEquals(window, reviews.single().profile.capabilities.contextLimitTokens, "the review child's window")
+                assertEquals(Effort.High, reviews.single().effort, "the review row's own effort (ReviewCritical), as before")
+                assertTrue(adapter.calls.all { it.request.profile.capabilities.contextLimitTokens == window }, adapter.calls.map { it.request.profile.capabilities.contextLimitTokens }.toString())
+                assertTrue(mainLine.all { it.effort == Effort.Medium }, "a dear model one step below High, once: ${mainLine.map { it.effort }}")
+            }
+        }
+    }
+
+    @Test
     fun `no limit and no profile change nothing but the counter`() = runBlocking<Unit> {
         val recorder = EventRecorder()
         Events(clock).use { events ->
@@ -510,13 +533,14 @@ class TaskLimitsTest {
         seed(request)
     }
 
-    private fun seed(work: CampaignRequest, shape: Shape = Shape.S1, defaults: io.astrolabe.Defaults = io.astrolabe.Defaults()) {
+    private fun seed(work: CampaignRequest, shape: Shape = Shape.S1, defaults: io.astrolabe.Defaults = io.astrolabe.Defaults(), risk: io.astrolabe.contract.Risk? = null) {
         Store.open(stateRoot, repo.git, clock).use { store ->
             val contracts = Contracts(SqliteContractRepository(store, clock), idGen, clock)
             val derived = contracts.deriveS0(work.work, work.attempt, work.text, Atlas.build(repo.root), Config(defaults = defaults), Tokens(400_000)).contract
             val ref = derived.requests.single().id
             contracts.open(derived.copy(
                 shape = shape,
+                risk = risk ?: derived.risk,
                 requirements = if (shape == Shape.S0) listOf(Requirement("R1", "a returns 10", listOf("AC-1"), authorityRef = ref))
                     else listOf(Requirement("R1", "a returns 10", listOf("AC-1"), authorityRef = ref), Requirement("R2", "b returns 20", listOf("AC-2"), authorityRef = ref)),
                 acceptance = if (shape == Shape.S0) listOf(Acceptance.Run("AC-1", printing, Origin.User))

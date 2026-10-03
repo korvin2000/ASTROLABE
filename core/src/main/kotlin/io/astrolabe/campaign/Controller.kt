@@ -1905,6 +1905,12 @@ public class Controller @JvmOverloads public constructor(
     private fun scheduler(c: OpenedCampaign): Scheduler =
         Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = candidates(c), retryCandidates = c.store.layout.candidates)
 
+    /**
+     * The model the host supplied behind each model [route] bound (C3r), by identity and held weakly: a child is routed
+     * from its parent's routed model, and the balance profile must apply to the supplied one once, never again.
+     */
+    private val boundFrom: MutableMap<CellModel, CellModel> = java.util.Collections.synchronizedMap(java.util.WeakHashMap())
+
     /** One cell's routing: the model to run it with, the selection to record, or the refusal that stops the campaign. */
     private class Routing(val model: CellModel, val compiled: Compiled, val selected: Routed.Selected?, val refused: Routed.Refused?)
 
@@ -1925,11 +1931,14 @@ public class Controller @JvmOverloads public constructor(
         val config = c.attempt.config
         val contract = c.contract
         // C3: the attempt's balance profile bounds every candidate's window and steps the configured effort; Balanced changes neither.
+        // C3r: it applies once, to the model the host supplied — a child routed from its parent's routed model starts from that one.
         val vector = BalanceProfiles.vector(config.balance)
-        val model = supplied.let { m ->
+        val base = boundFrom[supplied] ?: supplied
+        val model = base.let { m ->
             val profile = BalanceProfiles.bounded(m.profile, vector)
             val effort = BalanceProfiles.effort(m.effort, vector, BalanceProfiles.modelClass(m.profile))
-            if (profile === m.profile && effort == m.effort) m else CellModel(m.adapter, profile, m.estimator, effort, m.maxOutputTokens, m.narrowedOutput)
+            // A profile that changes nothing (Balanced) routes the supplied model as it always did.
+            if (profile === m.profile && effort == m.effort) supplied else CellModel(m.adapter, profile, m.estimator, effort, m.maxOutputTokens, m.narrowedOutput).also { boundFrom[it] = base }
         }
         val tiered = config.tierTable.profiles.isNotEmpty() && config.tierTable.profileIds.all { it in config.profiles }
         val table = if (tiered) config.tierTable else TierTable.single(model.profile.id)
@@ -1937,7 +1946,7 @@ public class Controller @JvmOverloads public constructor(
         val factory = estimators ?: io.astrolabe.provider.EstimatorFactory { model.estimator }
         // Always bound from the supplied model, so a narrowing is capped by each routed limit once, never compounded.
         fun bind(profile: Profile, effort: io.astrolabe.provider.Effort) =
-            if (profile.id == model.profile.id && effort == model.effort) model else model.rebind(profile, effort, factory)
+            if (profile.id == model.profile.id && effort == model.effort) model else model.rebind(profile, effort, factory).also { boundFrom[it] = base }
         val first = initial ?: compile(model)
         val misfits = LinkedHashMap<String, String>()
         val fallback = first.windowBound()
