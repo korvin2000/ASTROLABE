@@ -2234,18 +2234,21 @@ Goal: the model decides; the runtime executes, waits, records and finishes. Plan
 - Build: a poll slice that starts or ends inside a multi-line secret (PEM block, host multi-line patterns) never shows its lines; reuse the `wait` readiness scan state per handle.
 - Done: RunTest cases — a key split across two polls and a poll starting mid-block show no key lines.
 - Log: 2026-10-02 — sub-agent line `v2/C9`: `tool/run/Run.kt` (`logBefore`, `safeView`, `wholeLines`, seeded `ReadinessScan`), `auth/Redaction.kt` (`applyLive` context); beyond the card: terminal views, LOG blobs and MCP replies redacted live (a foreground BEGIN + body without END leaked). Fable review ×2: MCP path, `wait` without context, over-hiding of a block on the shaper's cut, a liveness bug in the line completion — all fixed. RunTest 60, RedactionTest 14, MountTest 3; L2 on the branch (`tool.run.*`, `auth.*`): 187 tests, 0 failures, 1 skip; ABI unchanged (merged main differs only in `eval-live`). D-390. Merge `0f8c8a3`; [report](../plan2/reports/WP-C9.md).
-#### P8.C.10 [V] Strict regression gate: blast and types-touched without the `Open` escape (tail of C1b, Codex) · TODO
-- Deps: owner decision (stricter than v1.0: changes when a campaign may complete). Pkg: `verify/Resolution.kt`, `verify/Scheduler.kt`, `verify/Baseline.kt`. Spec: D-400, [report](../plan2/reports/WP-C1b.md) «Хвосты» (a).
+#### P8.C.10 [V] Strict regression gate: blast and types-touched without the `Open` escape (tail of C1b, Codex) · IN_PROGRESS
+- Deps: owner decision — **given 2026-10-03: do it**. Pkg: `verify/Resolution.kt`, `verify/Scheduler.kt`, `verify/Baseline.kt`. Spec: D-400, [report](../plan2/reports/WP-C1b.md) «Хвосты» (a).
 - Build: a current, eligible red `CHK-tests-blast` / `CHK-types-touched` blocks completion without the `Open` escape, **after** pre-existing failures are excluded through `PreexistingLedger.classify` (today unused in acceptance: `red = outcome == Failed`); red until a later `passed` receipt also for acceptance (a timeout after a failure must not clear it).
 - Done: a regression the harness found cannot be acknowledged away; a pre-existing failure does not stall a cheap model (fixtures for both).
-#### P8.C.11 [V] `IntegrityApproval.Human` requires a human verdict (tail of C1b, Codex) · TODO
-- Deps: owner decision (changes the acceptance decision and the Studio flow). Pkg: `campaign/Controller.kt` (≈ 2202, 1519), `delegate/ReviewCell.kt` (158, 171), `verify/Resolution.kt` (≈ 424); Studio `ReviewPass`, `DecisionService`. Spec: D-397, D-400, [report](../plan2/reports/WP-C1b.md) «Хвосты» (b).
+- Log: 2026-10-03 — S3: sub-agent line `v2/C10` started ([card](../plan2/WP-C10.md); carries P8.C.12 as its second part).
+#### P8.C.11 [V] `IntegrityApproval.Human` requires a human verdict (tail of C1b, Codex) · IN_PROGRESS
+- Deps: owner decision — **given 2026-10-03: do it**. Pkg: `campaign/Controller.kt` (≈ 2202, 1519), `delegate/ReviewCell.kt` (158, 171), `verify/Resolution.kt` (≈ 424); Studio `ReviewPass`, `DecisionService`. Spec: D-397, D-400, [report](../plan2/reports/WP-C1b.md) «Хвосты» (b).
 - Build: under `IntegrityApproval.Human` only an approving verdict with `reviewer == human` clears a blocking test-integrity flag — in live resolution, review reuse and resumed pending completions; ordinary policy acceptance does not cover it; a host that wants model approval chooses `Autonomous`.
 - Done: a host model answering `Authority.review` leaves the flag awaiting a person (fixture); Studio either asks the user or runs `Autonomous`.
-#### P8.C.12 [V] Live background run during stop verification (tail of C1a/C1b) · TODO
+- Log: 2026-10-03 — S3: sub-agent line `v2/C11` started ([card](../plan2/WP-C11.md)), core first; the Studio step follows the C4 merge.
+#### P8.C.12 [V] Live background run during stop verification (tail of C1a/C1b) · IN_PROGRESS
 - Pkg: `verify/Scheduler.kt`, `tool/run`, `cell/Gates.kt`. Spec: D-394 (open), [report](../plan2/reports/WP-C1b.md) «Хвосты» (item 5).
 - Build: a receipt produced while a background handle is live carries a `concurrent` limit; the exit gate returns the work with "background run live: wait or cancel". Changes whether a campaign completes (`campaign.ResumeTest` runs `sleep 30` in the background during the stop verification) — decide the transition with that test.
 - Done: stop verification never certifies a tree a live background run may still change.
+- Log: 2026-10-03 — S3: second part of the line `v2/C10` ([card](../plan2/WP-C10.md)).
 #### P8.C.13 [V] C3r Task limits: second Codex review round (tail of C3, D-401) · IN_PROGRESS
 - Deps: P8.C.4. Pkg: `budget/`, `campaign/Limits.kt`, `campaign/Controller.kt`, `cell/Cell.kt`, `tool/verify/Verify.kt`. Spec: D-401, [card](../plan2/WP-C3r.md).
 - Build: seven findings — time paused only while every branch waits; no edits in a task-limit `Reserve`; a grown estimate re-renders the turn as verify/report instead of ending the cell; the reserve latch survives reopen until the effective limits change; operation deadlines cut at dispatch by the current remainder (also `verify`); Economy applied once to a child cell's routing; a hold released when the call was provably never dispatched.
