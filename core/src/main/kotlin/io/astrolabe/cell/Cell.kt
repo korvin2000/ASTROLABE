@@ -664,7 +664,9 @@ public class Cell @JvmOverloads constructor(
                 outsideIncrement = editedByEdit.filter { p -> contract.scope.covers(p) && increment.writeScope.none { PathPattern.matches(it, p) } },
                 surfaceFlags = flags.values.filter { it.path in editedPaths }, editedPaths = editedPaths.toSet(),
                 contractAnchors = (tools.kb as? KbTool)?.contractAnchors().orEmpty(), repeatedFailures = repeated, acceptance = acceptance,
-                refusals = refused.toList(),
+                refusals = refused.toList(), implementing = implementingCompletion,
+                // D-340: the controller pins a `rework` decision's text as "rework requested by …" (`Controller.reworkNotes`).
+                reworked = ctx.rework || ctx.pinned.any { it.startsWith("rework requested by ") },
             )
             val report = gates.evaluate(state)
             fired = report.fired
@@ -1429,9 +1431,9 @@ public class Cell @JvmOverloads constructor(
                 return ws.checks.forAcceptance(accept).any { currencies[it.id]?.certifies == true } || currencies[accept]?.certifies == true
             }
 
-            // Plan §4.4 (C1a): the model's own checks are not acceptance; a red one does not hold the cursor back (C1b records it).
+            // Plan §4.3 (C1b): only a mandatory red check holds the cursor back; the runtime records an optional one (the model's own included).
             override val redChecks: Set<String>
-                get() = if (redOkUntilIncrementEnd) emptySet() else ws.checks.all().filter { it.last?.outcome == Outcome.Failed && !it.id.startsWith(io.astrolabe.verify.Checks.MODEL_PREFIX) }.map { it.id }.toSet()
+                get() = if (redOkUntilIncrementEnd) emptySet() else ws.checks.all().filter { it.last?.outcome == Outcome.Failed && io.astrolabe.verify.Obligations.mandatory(it) }.map { it.id }.toSet()
 
             override val greenOps: Set<Int> get() = outcomes.filterValues { it.green }.keys
 

@@ -81,6 +81,18 @@ public data class Currency @JvmOverloads constructor(
      * into a refusal. Defaults to `!green` for callers that predate the distinction.
      */
     val red: Boolean = !green,
+    /**
+     * The check is mandatory ([Obligations.mandatory]): a red one outside the increment's own items still needs an
+     * `Open` item, while an optional red check is recorded by the runtime as known red (plan §4.3, C1b). Defaults to
+     * `true`, the stricter rule, for callers that predate the distinction.
+     */
+    val mandatory: Boolean = true,
+    /**
+     * C1b: for an optional check that is known red, the red receipt that began it (its alias, else its id) — the first
+     * red receipt after the check's last `passed` one in this attempt, whatever tree that pass was on; a timeout, an
+     * inconclusive run or a missing receipt never ends it. `null` when the check is not known red, or mandatory.
+     */
+    val knownRed: String? = null,
 ) {
     /** Only a current, eligible, green receipt certifies the final tree for its check. */
     val certifies: Boolean get() = applicability == Applicability.Current && eligible && green
@@ -409,7 +421,8 @@ public class Scheduler(
 
     /** §8.4 applicability plus D-45 eligibility of a check's last receipt against [stampNow]. */
     public fun currency(check: Check, stampNow: CandidateId?): Currency {
-        val last = checks[check.id]?.last ?: return Currency(null, Applicability.Unknown, false, false, listOf("no receipt for ${check.id}"))
+        val mandatory = Obligations.mandatory(checks[check.id] ?: check)
+        val last = checks[check.id]?.last ?: return Currency(null, Applicability.Unknown, false, false, listOf("no receipt for ${check.id}"), mandatory = mandatory)
         val receipt = receipts.get(last.receiptId)
         val registered = checks[check.id] ?: check
         val refreshed = if (receipt == null || stampNow == null) {
@@ -427,7 +440,19 @@ public class Scheduler(
         val green = receipt?.outcome?.green ?: false
         // D-338: an unverified result names its cause for the decider — "cannot start python3", not just "unavailable".
         if (receipt != null && !green) reasons += "outcome ${receipt.outcome.name.lowercase()}" + (receipt.limits.firstOrNull()?.detail?.let { ": $it" } ?: "")
-        return Currency(last.receiptId, refreshed.applicability, eligible, green, reasons, red = receipt?.outcome == Outcome.Failed)
+        return Currency(last.receiptId, refreshed.applicability, eligible, green, reasons, red = receipt?.outcome == Outcome.Failed, mandatory = mandatory,
+            knownRed = if (mandatory) null else knownRedSince(check.id))
+    }
+
+    /** C1b ([Currency.knownRed]): walks this attempt's receipts of [checkId] in order; only a later `passed` one ends a red. */
+    private fun knownRedSince(checkId: String): String? {
+        var since: Receipt? = null
+        for (r in receipts.forCheck(checkId)) {
+            if (r.ids.work != ids.work || r.ids.attempt != ids.attempt) continue
+            if (r.outcome == Outcome.Failed && since == null) since = r
+            if (r.outcome == Outcome.Passed) since = null
+        }
+        return since?.let { aliasByReceipt[it.receiptId] ?: aliases.byCanonical(ids.work, it.receiptId)?.text ?: it.receiptId }
     }
 
     private fun assess(check: Check, receipt: Receipt, stampNow: CandidateId?, env: Lazy<EnvFingerprint>): ApplicabilityVerdict {

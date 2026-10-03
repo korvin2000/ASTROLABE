@@ -26,6 +26,7 @@ import io.astrolabe.verify.Obligations
 import io.astrolabe.verify.ProvenanceClass
 import io.astrolabe.verify.ProvenanceKind
 import io.astrolabe.verify.ResultStatus
+import io.astrolabe.verify.ReviewerKind
 import io.astrolabe.verify.RiskAcceptor
 import io.astrolabe.verify.SurfaceChange
 import io.astrolabe.verify.TestIntegrity
@@ -99,7 +100,11 @@ public data class ChangeSplit(
     val unattributed: List<String>,
 )
 
-/** A check's last receipt; [checkOrigin] says whose check it is (`model(…)`: the agent's own, C1a) and [evidenceKind] what a pass proves. */
+/**
+ * A check's last receipt; [checkOrigin] says whose check it is (`model(…)`: the agent's own, C1a), [evidenceKind] what a
+ * pass proves and [command] the check's definition — argv and workspace-relative cwd — so a host can declare an agent's
+ * check as the project's own (`run:` item, plan §4.4 C1b).
+ */
 @Serializable
 public data class CheckRun @JvmOverloads constructor(
     val checkId: String,
@@ -109,6 +114,7 @@ public data class CheckRun @JvmOverloads constructor(
     val envId: String,
     val checkOrigin: Origin? = null,
     val evidenceKind: EvidenceKind? = null,
+    val command: io.astrolabe.contract.Command? = null,
 )
 
 @Serializable
@@ -164,6 +170,8 @@ public data class FinishReceipt @JvmOverloads constructor(
     val acceptedWithoutVerification: List<io.astrolabe.verify.ItemProvenance> = emptyList(),
     val provenanceClass: ProvenanceClass = ProvenanceClass.Unverified,
     val acceptanceSurfaceUnreviewed: List<String> = emptyList(),
+    /** Such changes only a model approved (owner 2026-10-03): completion went ahead, the run checks they touch stay the agent's evidence. */
+    val acceptanceSurfaceModelApproved: List<String> = emptyList(),
     /** How a task limit ended the campaign, with the best verified candidate it names (C3); `null` for every other ending. */
     val limit: LimitStop? = null,
 )
@@ -251,19 +259,24 @@ public object FinishReceipts {
                 .filter { TestIntegrity.surfaceOf(it, contract, c.checks.packageManifest) != null }
                 .map { SurfaceChange(it, textAtS0(c, it), textNow(c, it)) }.filterNot { sameText(it.before, it.after) },
             "finish", contract, c.checks,
-        ).filter { flag ->
-            flag.requiredChecks.isNotEmpty() && flag.kind != TestIntegrity.ADDITIONS_ONLY && !reviewed(c, flag.path, reviews, report)
-        }
-        val unreviewedSurface = surface.map { it.path }.sorted()
-        val surfaceTouched = surface.flatMap { it.requiredChecks }.flatMap { c.checks[it]?.acceptanceIds.orEmpty() }.toSet()
+        ).filter { flag -> flag.requiredChecks.isNotEmpty() && flag.kind != TestIntegrity.ADDITIONS_ONLY }
+        val approvals = surface.associate { it.path to reviewed(c, it.path, reviews, report) }
+        val unreviewedSurface = surface.filter { approvals[it.path] == null }.map { it.path }.sorted()
+        // Owner 2026-10-03: a model's approval (the judge's, or a host's model's) lets completion proceed, but only a person's
+        // clears the change for the class — the run checks it touches stay the agent's evidence.
+        val tainted = surface.filter { approvals[it.path] != ReviewerKind.Human }
+        val surfaceTouched = tainted.flatMap { it.requiredChecks }.flatMap { c.checks[it]?.acceptanceIds.orEmpty() }.toSet()
         // The certifying (else the latest) receipt of each `run:` item at the final stamp.
         val runs = contract.acceptance.filterIsInstance<Acceptance.Run>().associate { item ->
             val checks = c.checks.forAcceptance(item.id)
             val currency = checks.firstNotNullOfOrNull { currencies[it.id]?.takeIf(Currency::certifies) } ?: checks.firstNotNullOfOrNull { currencies[it.id] }
             item.id to Triple(currency, currency?.receiptId?.let(receipts), checks.firstNotNullOfOrNull { it.evidenceKind })
         }
+        // A `check:`/`review:` item a model approved (the review cell's judge, or a host's model) is the agent's evidence (owner 2026-10-03).
+        val modelApproved = contract.acceptance.filter { item -> item !is Acceptance.Run && assessments.firstOrNull { item.id in it.criteria }?.let { it.verdict?.reviewer != ReviewerKind.Human } == true }
+            .map { it.id }.toSet()
         fun evidenceBy(item: Acceptance): Author =
-            if (item.id in surfaceTouched || runs[item.id]?.second?.independent == false) Author.Model else Author.of(item.origin)
+            if (item.id in surfaceTouched || item.id in modelApproved || runs[item.id]?.second?.independent == false) Author.Model else Author.of(item.origin)
         // §4.4 C2: who created the check, who took the residual risk, and the class this gives the item at the final tree.
         fun axis(line: AcceptanceLine, item: Acceptance): AcceptanceLine = line.copy(
             origin = item.origin,
@@ -288,11 +301,11 @@ public object FinishReceipts {
                 }
                 is Acceptance.Check -> assessments.firstOrNull { item.id in it.criteria }?.let {
                     AcceptanceLine(item.id, "check", "assessed", it.candidate.hash8, "current", listOf(it.packetId), provenance = "reviewed", acceptedBy = it.verdict?.signedBy, result = ResultStatus.Passed,
-                        verifiedBy = it.path.lastOrNull() ?: it.verdict?.signedBy)
+                        verifiedBy = verifiedBy(it))
                 } ?: AcceptanceLine(item.id, "check", "not_assessed", null, null, emptyList())
                 is Acceptance.Review -> assessments.firstOrNull { item.id in it.criteria }?.let {
                     AcceptanceLine(item.id, "review", "approved", it.candidate.hash8, "current", listOf(it.packetId), provenance = "reviewed", acceptedBy = it.verdict?.signedBy, result = ResultStatus.Passed,
-                        verifiedBy = it.path.lastOrNull() ?: it.verdict?.signedBy)
+                        verifiedBy = verifiedBy(it))
                 } ?: AcceptanceLine(item.id, "review", "not_reviewed", null, null, emptyList())
             }.let(::accepted).let { axis(it, item) }
         }
@@ -312,8 +325,13 @@ public object FinishReceipts {
             RequirementLine(r.id, entry?.status?.wire ?: RequirementStatus.Pending.wire, blockers, Author.of(r, contract.requests), r.authorityRef, items, provenanceClass,
                 own.map { it.id })
         }
-        val checksRun = c.checks.all().flatMap { check -> check.last?.receiptId?.let(receipts)?.let(::listOf).orEmpty() }
-            .map { CheckRun(it.checkId, it.receiptId, it.outcome.name.lowercase(), it.verifierVersion, it.envId.hex, it.checkOrigin, it.evidenceKind) }
+        // C1b: a mandatory check outside the acceptance items and the campaign gate (the blast radius, the types of touched
+        // files) red on the final tree — completed past on an Open item — leaves the campaign unverified; a known red does not.
+        val redOnFinalTree = c.checks.all()
+            .filter { Obligations.mandatory(it) && !it.required && it.kind != io.astrolabe.verify.CheckKind.Full && it.kind != io.astrolabe.verify.CheckKind.Quality }
+            .filter { check -> currencies[check.id]?.let { it.red && it.applicability == io.astrolabe.verify.Applicability.Current } == true }.map { it.id }
+        val checksRun = c.checks.all().mapNotNull { check -> check.last?.receiptId?.let(receipts)?.let { check to it } }
+            .map { (check, it) -> CheckRun(it.checkId, it.receiptId, it.outcome.name.lowercase(), it.verifierVersion, it.envId.hex, it.checkOrigin, it.evidenceKind, check.command) }
         val registers = packets.map { it.register }
         val totals = Accounting.totals(Accounting(c.store, java.time.Clock.systemUTC()).calls(c.ids.work), state.graph.increments.count { it.status == io.astrolabe.contract.IncrementStatus.Verified }, c.attempt.config.profiles.values.firstOrNull()?.priceTable?.currency ?: "USD")
         val billed = totals.quantities.values.takeIf { values -> values.none { it == null } }?.sumOf { it!! }
@@ -343,7 +361,8 @@ public object FinishReceipts {
             notVerified = requirements.filter { it.status != RequirementStatus.Verified.wire }.map { it.id } +
                 acceptance.filter { it.provenance == null }.map { it.id } +
                 acceptance.filter { it.provenance == "accepted" }.map { "${it.id}: accepted without verification by ${it.acceptedBy} (${it.decider}): ${it.acceptedReason}" } +
-                decided.values.filter { p -> acceptance.none { it.id == p.item } }.map { "${it.item}: accepted without verification by ${it.by} (${it.decider?.name?.lowercase()}): ${it.reason}" },
+                decided.values.filter { p -> acceptance.none { it.id == p.item } }.map { "${it.item}: accepted without verification by ${it.by} (${it.decider?.name?.lowercase()}): ${it.reason}" } +
+                redOnFinalTree.map { "$it: red on the final tree" },
             deadEnds = registers.flatMap { r -> r.deadEnds.map { it.text } },
             decisions = registers.flatMap { r -> r.decisions.map { "${it.text} because ${it.because}" } },
             // §4.2: a boundary-crossing decision is promoted to an ADR candidate; the curator admits it (P4.1).
@@ -352,7 +371,9 @@ public object FinishReceipts {
             },
             openItems = registers.flatMap { r -> r.open.filter { !it.closed }.map { it.text } } +
                 state.graph.increments.filter { it.status == io.astrolabe.contract.IncrementStatus.Verified }
-                    .flatMap { inc -> state.graph.evidence[inc.id]?.leftOpen.orEmpty().map { "${inc.id}: $it" } },
+                    .flatMap { inc -> state.graph.evidence[inc.id]?.leftOpen.orEmpty().map { "${inc.id}: $it" } } +
+                // Plan §4.3 (C1b): an optional check that is known red, recorded by the runtime in place of the agent's Open item.
+                c.checks.all().filterNot(Obligations::mandatory).mapNotNull { check -> currencies[check.id]?.let { Obligations.knownRed(check.id, it) } },
             pendingAmendments = contract.amendmentsPending.map { it.change },
             routingDecisions = emptyList(),
             budget = BudgetLine(totals.quantities.mapKeys { it.key.id }, totals.money, billed?.takeIf { it > 0 }?.let { helper.toDouble() / it }),
@@ -367,8 +388,9 @@ public object FinishReceipts {
             qa = QaRuns.forAttempt(c.store, state.work, state.attempt),
             acceptedWithoutVerification = acceptance.mapNotNull { line -> decided[line.id]?.takeIf { line.provenance == "accepted" } } +
                 decided.values.filter { p -> acceptance.none { it.id == p.item } },
-            provenanceClass = ProvenanceClass.campaign(requirements.map { it.provenanceClass }),
+            provenanceClass = if (redOnFinalTree.isEmpty()) ProvenanceClass.campaign(requirements.map { it.provenanceClass }) else ProvenanceClass.Unverified,
             acceptanceSurfaceUnreviewed = unreviewedSurface,
+            acceptanceSurfaceModelApproved = surface.filter { approvals[it.path] == ReviewerKind.Model }.map { it.path }.sorted(),
         )
     }
 
@@ -394,16 +416,28 @@ public object FinishReceipts {
     private fun content(text: String): List<String> = text.lines().map { it.trimEnd() }.filter { it.isNotEmpty() }
 
     /**
-     * Whether an approving review covered [path] as it is at [report]'s stamp: a `reviewed` integrity obligation of an
-     * increment verified at that stamp and contract, or an approving review that [covers] it.
+     * Who approved the change of [path] as it is at [report]'s stamp — a `reviewed` integrity obligation of an increment
+     * verified at that stamp and contract, or an approving review that [covers] it — [ReviewerKind.Human] when a person
+     * did (the verdict says so), else [ReviewerKind.Model]; `null` when no approval covered it.
      */
-    private fun reviewed(c: OpenedCampaign, path: String, reviews: List<io.astrolabe.delegate.ReviewRecord>, report: StampReport): Boolean {
+    private fun reviewed(c: OpenedCampaign, path: String, reviews: List<io.astrolabe.delegate.ReviewRecord>, report: StampReport): ReviewerKind? {
         val state = checkNotNull(c.state)
         val obligation = Obligations.INTEGRITY + path
         val human = c.attempt.config.integrityApproval == io.astrolabe.IntegrityApproval.Human
-        return state.graph.evidence.values.any { e ->
-            e.stamp == report.candidateId && e.contractVersion == c.contract.version && e.provenance.any { it.item == obligation && it.how == ProvenanceKind.Reviewed }
-        } || reviews.any { covers(it, path, c.registry.version(path), report.candidateId, c.contract.version, human) }
+        // The obligation's evidence is its verdict's request, which is the reviewed packet's id.
+        val obligations = state.graph.evidence.values.filter { e -> e.stamp == report.candidateId && e.contractVersion == c.contract.version }
+            .flatMap { e -> e.provenance.filter { it.item == obligation && it.how == ProvenanceKind.Reviewed } }
+            .map { p -> reviews.firstOrNull { it.packetId == p.evidenceRef }?.verdict?.reviewer ?: ReviewerKind.Model }
+        val covering = reviews.filter { covers(it, path, c.registry.version(path), report.candidateId, c.contract.version, human) }.map { it.verdict?.reviewer ?: ReviewerKind.Model }
+        val approvals = obligations + covering
+        return if (ReviewerKind.Human in approvals) ReviewerKind.Human else approvals.firstOrNull()
+    }
+
+    /** Who verified an approving review (§4.4 C2): `human` for a person, `host_model` for a host's answer not marked a person's, else the judge's tier. */
+    private fun verifiedBy(r: io.astrolabe.delegate.ReviewRecord): String? = when {
+        r.verdict?.reviewer == ReviewerKind.Human -> HUMAN
+        r.path.lastOrNull() == HUMAN -> HOST_MODEL
+        else -> r.path.lastOrNull() ?: r.verdict?.signedBy
     }
 
     /**
@@ -418,6 +452,9 @@ public object FinishReceipts {
 
     /** The last tier of a review that went to the host's authority (`ReviewCell`). */
     private const val HUMAN: String = "human"
+
+    /** `verifiedBy` of a host's verdict that does not say a person reviewed (owner 2026-10-03: a model's). */
+    private const val HOST_MODEL: String = "host_model"
 
     /** Stores [receipt] as a packet blob and writes `exports/<work>/finish-receipt.json`; returns the blob ref and file. */
     @JvmStatic

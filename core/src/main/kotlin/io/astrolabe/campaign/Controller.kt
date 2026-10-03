@@ -947,7 +947,7 @@ public class Controller @JvmOverloads public constructor(
             // The pre-compile job lives in this scope: joined at cell close, cancelled with the cell (§6.6).
             val run = coroutineScope {
                 val trigger = precompile?.let { p -> trigger(c, this, p, cellId, increment, cellModel) }
-                runCell(c, cellId, increment, Roles.implementing, cellModel, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = pinned, boundary = boundaryReason, inputs = inputs, precompile = trigger).also { run ->
+                runCell(c, cellId, increment, Roles.implementing, cellModel, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = pinned, boundary = boundaryReason, inputs = inputs, precompile = trigger, rework = reworkLines.isNotEmpty()).also { run ->
                     if (run.exit !is CellExit.Completed) precompile?.discard("cell ${cellId.value} ended ${run.exit?.let { it::class.simpleName!!.lowercase() } ?: "cancelled"}: never a continuation of a red increment")
                 }
             }
@@ -1425,8 +1425,10 @@ public class Controller @JvmOverloads public constructor(
         extract(c, packets)
         val report = c.stamper.report(fresh = true)
         // C3: a limit's stop names its best verified candidate in the receipt; the provenance class is the receipt's own (C2).
-        val limit = result.state?.takeIf { it.budgetStop?.taskLimit == true }?.let { TaskLimitControl.recorded(c.journal, c.ids.work) }
-        val receipt = FinishReceipts.build(c, packets, currencies(c, scheduler, report.candidateId), report, receipts::get).let { if (limit == null) it else it.copy(limit = limit) }
+        val built = FinishReceipts.build(c, packets, currencies(c, scheduler, report.candidateId), report, receipts::get)
+        // The stop's labels follow the receipt's own provenance calculation, never a second one.
+        val limit = result.state?.takeIf { it.budgetStop?.taskLimit == true }?.let { TaskLimitControl.recorded(c.journal, c.ids.work) }?.labelledBy(built)
+        val receipt = if (limit == null) built else built.copy(limit = limit)
         val (ref, _) = FinishReceipts.export(c, receipt)
         // C3: the counter's last word, with or without limits.
         limitControl.report(c)
@@ -1533,7 +1535,7 @@ public class Controller @JvmOverloads public constructor(
         spendReworks(c, cellId, reworkRecords)
         val increment = dispatched.graph.increments.first { it.id == ready.id }
         val register = carry?.register?.copy(cell = cellId, increment = increment.id, incrementTitle = increment.title)
-        val run = runCell(c, cellId, increment, Roles.implementing, cellModel, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = listOfNotNull(resume) + hostAnswers(c, ready) + reworkLines, inputs = inputs)
+        val run = runCell(c, cellId, increment, Roles.implementing, cellModel, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = listOfNotNull(resume) + hostAnswers(c, ready) + reworkLines, inputs = inputs, rework = reworkLines.isNotEmpty())
         val ids = run.ids
         val scheduler = run.scheduler
         val exit = run.exit
@@ -2074,6 +2076,8 @@ public class Controller @JvmOverloads public constructor(
         child: ChildForm? = null,
         /** The tree the cell edits: the main line's unless a writer runs in its worktree (§10.4). */
         tree: CellTree = CellTree.main(c),
+        /** D-340: the controller dispatches this cell on a decider's `rework` answer (C1b reads it as `GateState.reworked`). */
+        rework: Boolean = false,
     ): CellRun {
         val ids = c.ids.copy(context = cellId)
         val cancellation = child?.cancellation ?: c.cancellation
@@ -2181,6 +2185,7 @@ public class Controller @JvmOverloads public constructor(
             sections = compiled.k.sections,
             pinned = hostBlock + pinned,
             precompile = precompile,
+            rework = rework,
             knowledge = knowledge,
             completionEvidence = if (child == null && role.packetKind == io.astrolabe.cell.PacketKind.Result) { flags ->
                 val required = increment.accept.any { c.contract.acceptance(it) is Acceptance.Check || c.contract.acceptance(it) is Acceptance.Review } || flags.any { it.blocksCompletion }

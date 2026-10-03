@@ -295,14 +295,32 @@ public data class Resolved(
     val binding: List<String> = emptyList(),
     /** Plan steps the agent left unticked on an increment whose acceptance is proven (D-368): shown, never a gap. */
     val leftOpen: List<String> = emptyList(),
+    /** Optional checks red at their latest receipt, as the runtime records them ([Obligations.knownRed], C1b): shown, never a gap. */
+    val knownRed: List<String> = emptyList(),
 ) {
+    /** The constructor before [knownRed] (C1b). Kept for Java callers. */
+    public constructor(
+        resolution: Resolution,
+        gaps: List<Gap>,
+        results: List<ObligationResult>,
+        provenance: List<ItemProvenance>,
+        code: StopCode?,
+        receiptIds: List<String>,
+        evidenceRefs: List<String>,
+        decision: DecisionRecord?,
+        other: List<String>,
+        considered: DecisionRecord?,
+        binding: List<String>,
+        leftOpen: List<String>,
+    ) : this(resolution, gaps, results, provenance, code, receiptIds, evidenceRefs, decision, other, considered, binding, leftOpen, emptyList())
+
     val missing: List<String> get() = gaps.map { it.text }
 
     /**
      * The same inputs once the rework round is spent (I4): a reviewer's standing rejection, and whatever the agent left
      * open, then await a decision.
      */
-    public fun spent(): Resolved = Resolver.resolve(results, other, considered, reworkSpent = true, binding = binding).copy(leftOpen = leftOpen)
+    public fun spent(): Resolved = Resolver.resolve(results, other, considered, reworkSpent = true, binding = binding).copy(leftOpen = leftOpen, knownRed = knownRed)
 
     /** Results the authority is asked about when this resolution awaits: uncovered unverified ones and reviewer rejections. */
     val undecided: List<ObligationResult>
@@ -361,6 +379,31 @@ public object Obligations {
         }
     }
 
+    /**
+     * Plan §4.3 (C1b): whether a check keeps the I2 rule — red on this tree outside the increment's own items, it needs
+     * an `Open` item that names it, and it holds `[>]` back. Only these checks are optional, their red recorded by the
+     * runtime instead: the model's own (`CHK-model-*`), lint, and a check the host or the user declared that no acceptance
+     * item requires and that is neither the full suite nor a quality gate. Everything else the harness runs itself — the
+     * blast radius, the types of touched files, the campaign gate's checks, any check of unknown origin — is mandatory.
+     */
+    @JvmStatic
+    public fun mandatory(check: Check): Boolean = when {
+        check.required || check.kind == CheckKind.Full || check.kind == CheckKind.Quality -> true
+        check.origin is Origin.Model || check.kind == CheckKind.Lint -> false
+        else -> check.origin !is Origin.User && check.origin !is Origin.Amended
+    }
+
+    /**
+     * The runtime's record of an optional check that is known red (plan §4.3, C1b), in place of the agent's `Open` item:
+     * since the red receipt that began it ([Currency.knownRed]); `null` for a mandatory check or one that is not known red.
+     */
+    @JvmStatic
+    public fun knownRed(checkId: String, currency: Currency): String? {
+        if (currency.mandatory) return null
+        val since = currency.knownRed ?: currency.receiptId?.takeIf { currency.red } ?: return null
+        return "$checkId known red since receipt $since (recorded by the runtime)"
+    }
+
     /** The obligation id prefix of a test-integrity flag; the path follows it. */
     public const val INTEGRITY: String = "integrity:"
 
@@ -379,8 +422,9 @@ public object Obligations {
  * The one acceptance rule (§8.7, D-337): the cell's exit gate, the verifier, final acceptance and resume all resolve a
  * proposal here, so the same inputs always give the same answer. Order:
  * 1. an executed red check → rework; no decision covers it (§8.8);
- * 2. something the agent must close ([other]: an open plan step while acceptance is not proven, a red check without an
- *    `Open` item, a contract or stamp mismatch, an unresolved impact nudge, an unjustified acceptance-surface change) → rework;
+ * 2. something the agent must close ([other]: an open plan step while acceptance is not proven, a red mandatory check
+ *    without an `Open` item, a contract or stamp mismatch, an unresolved impact nudge, an unjustified acceptance-surface
+ *    change) → rework; a red optional check is no gap: the runtime records it as known red ([Resolved.knownRed], C1b);
  * 3. a current `rework` decision → rework;
  * 4. a reviewer rejection not accepted by a decision → rework, or — once the rework round is spent — await
  *    ([StopCode.ReviewRejected]);
@@ -471,15 +515,20 @@ public object Resolver {
                 is Acceptance.Review -> results += Obligations.verdict(id, ObligationKind.Review, item.criterion, verdicts[id], contract.version, candidate, unavailable[id]).copy(origin = item.origin)
             }
         }
-        // A red check outside the increment's required set needs an Open item that names it; a required red is a result above.
+        // A red check outside the increment's required set: a mandatory one needs an Open item that names it; a required red is a result above.
         val requiredIds = increment.accept.map { Checks.acceptId(it) }.toSet() + increment.accept.toSet()
         val openTexts = register.open.filter { !it.closed }.map { it.text }
+        val knownRed = ArrayList<String>()
         for ((checkId, currency) in currencies) {
-            // Plan §4.4 (C1a): the model's own checks are neither required nor independent; recording a red one is C1b's.
-            if (checkId.startsWith(Checks.MODEL_PREFIX)) continue
+            if (checkId in requiredIds || currency.receiptId == null) continue
+            // Plan §4.3 (C1b): an optional check's red is the runtime's record, not the agent's, until a later `passed`
+            // receipt of it on the tree now; a mandatory one keeps the rule below.
+            if (!currency.mandatory) {
+                Obligations.knownRed(checkId, currency)?.let { knownRed += it }
+                continue
+            }
             // Only a red receipt of this very tree is a red line; a stale red one is history (D-337).
-            val redNow = currency.red && currency.applicability == Applicability.Current && currency.eligible
-            if (checkId in requiredIds || !redNow || currency.receiptId == null) continue
+            if (!(currency.red && currency.applicability == Applicability.Current && currency.eligible)) continue
             // A red test is "not done" (I2) until the agent records it in Open: never put to a decider.
             if (openTexts.none { it.contains(checkId) }) results += ObligationResult("red:$checkId", ObligationKind.Run, ResultStatus.Failed, "$checkId is red without an Open item naming it", currency.receiptId)
         }
@@ -497,6 +546,6 @@ public object Resolver {
             results += result
         }
         unresolvedImpactNudges.forEach { open += "unresolved impact nudge: $it" }
-        return resolve(results, open, decision, reworkSpent, binding).copy(leftOpen = leftOpen)
+        return resolve(results, open, decision, reworkSpent, binding).copy(leftOpen = leftOpen, knownRed = knownRed)
     }
 }

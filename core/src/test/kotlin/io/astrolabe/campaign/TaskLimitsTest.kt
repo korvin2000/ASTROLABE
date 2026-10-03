@@ -96,6 +96,7 @@ class TaskLimitsTest {
                 val finish = assertNotNull(run.finish)
                 assertEquals("partial", finish.status)
                 assertEquals(limit, finish.limit)
+                assertEquals(finish.requirements.associate { it.id to it.provenanceClass }, limit.provenance, "the receipt's own provenance calculation")
                 assertEquals(io.astrolabe.verify.ProvenanceClass.Unverified, finish.provenanceClass, "R2 is unverified: the campaign takes its worst requirement")
             }
         }

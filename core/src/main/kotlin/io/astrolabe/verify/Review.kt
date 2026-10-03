@@ -2,6 +2,7 @@ package io.astrolabe.verify
 
 import io.astrolabe.id.CandidateId
 import io.astrolabe.id.Identities
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /** Review scopes of §8.8: increment scope and campaign scope. */
@@ -67,8 +68,19 @@ public data class ReviewCoverage(
 )
 
 /**
+ * Who reviewed (plan §4.4 C2, owner 2026-10-03): a model — the review cell's judge or a model a host answers with — or a
+ * person. Only a person's approval verifies independently; a model's never raises the provenance class.
+ */
+@Serializable
+public enum class ReviewerKind(public val wire: String) {
+    @SerialName("model") Model("model"),
+    @SerialName("human") Human("human"),
+}
+
+/**
  * The judge verdict (§8.8). It binds the contract revision, the reviewed candidate and the criteria it assessed;
- * changed dependencies invalidate it (§8.7). A verdict can never override a failed required check.
+ * changed dependencies invalidate it (§8.7). A verdict can never override a failed required check. [reviewer] says who
+ * reviewed: [ReviewerKind.Model] unless the host states a person did — a verdict without it never counts as a person's.
  */
 @Serializable
 public data class Verdict(
@@ -84,7 +96,22 @@ public data class Verdict(
     val signedBy: String,
     /** The criterion a judge could not assess, required for [VerdictOutcome.InsufficientEvidence]. */
     val missingCriterion: String? = null,
+    val reviewer: ReviewerKind = ReviewerKind.Model,
 ) {
+    /** The v1.0 full constructor: [reviewer] is [ReviewerKind.Model]. Kept for Java callers. */
+    public constructor(
+        requestId: String,
+        contractRevision: Int,
+        reviewedCandidate: CandidateId,
+        outcome: VerdictOutcome,
+        findings: List<Finding>,
+        coverage: ReviewCoverage?,
+        contractViolations: List<String>,
+        confidence: Double,
+        signedBy: String,
+        missingCriterion: String?,
+    ) : this(requestId, contractRevision, reviewedCandidate, outcome, findings, coverage, contractViolations, confidence, signedBy, missingCriterion, ReviewerKind.Model)
+
     init {
         require(confidence in 0.0..1.0) { "confidence must be within 0..1" }
         require(signedBy.isNotBlank()) { "a verdict must be signed" }

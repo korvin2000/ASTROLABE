@@ -56,7 +56,25 @@ public data class LimitStop(
     val verifiedEarlier: List<String> = emptyList(),
     /** Requirements a decider accepted without verification (I7): never shown as verified. */
     val accepted: List<String> = emptyList(),
-)
+    /** Each requirement's provenance class as the finish receipt computes it (§4.4 C2, the reviewer's kind included). */
+    val provenance: Map<String, io.astrolabe.verify.ProvenanceClass> = emptyMap(),
+) {
+    /**
+     * This stop labelled by [receipt]'s own calculation: a requirement whose items were accepted on a decider's word
+     * moves to [accepted], and every requirement carries the receipt's provenance class.
+     */
+    public fun labelledBy(receipt: FinishReceipt): LimitStop {
+        val decided = receipt.acceptedWithoutVerification.map { it.item }.toSet()
+        val byDecision = receipt.requirements.filter { r -> r.acceptance.any { it in decided } }.map { it.id }.toSet()
+        val known = verified + verifiedEarlier + accepted
+        return copy(
+            verified = verified.filter { it !in byDecision },
+            verifiedEarlier = verifiedEarlier.filter { it !in byDecision },
+            accepted = (accepted + byDecision.filter { it in known }).distinct().sorted(),
+            provenance = receipt.requirements.associate { it.id to it.provenanceClass },
+        )
+    }
+}
 
 /** A refusal that ended a cell on a task limit: the stop the next boundary takes, with the price it was refused at. */
 internal class LimitBlock(val decision: LimitDecision, val price: Money?)
