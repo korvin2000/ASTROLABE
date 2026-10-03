@@ -20,6 +20,7 @@ import io.astrolabe.contract.RequirementStatus
 import io.astrolabe.contract.Scope
 import io.astrolabe.contract.Shape
 import io.astrolabe.contract.UserRequest
+import io.astrolabe.evidence.Closure
 import io.astrolabe.id.AttemptId
 import io.astrolabe.id.CandidateId
 import io.astrolabe.id.ContextId
@@ -322,33 +323,56 @@ class ExitGateTest {
     // ------------------------------------------------------------ C1b: the runtime records a red optional check
 
     @Test
-    fun `mandatory checks are those an acceptance item or the campaign gate requires, every other check is optional`() {
+    fun `only the model's checks, lint and declared checks no item requires are optional, every check the harness runs keeps the old rule`() {
         val commands = RunnerCommands(test = Command(listOf("pytest")), lint = Command(listOf("ruff", "check")), typecheck = Command(listOf("mypy")))
         val checks = Checks.seed(contract, commands, qualityGates = listOf(Command(listOf("make", "audit"))))
         val mandatory = checks.all().associate { it.id to Obligations.mandatory(it) }
         assertEquals(
-            mapOf(Checks.TYPES_TOUCHED to false, Checks.LINT to false, "CHK-accept-AC-1" to true, Checks.FULL to true, Checks.QUALITY_GATE to true),
+            mapOf(Checks.TYPES_TOUCHED to true, Checks.LINT to false, "CHK-accept-AC-1" to true, Checks.FULL to true, Checks.QUALITY_GATE to true),
             mandatory,
         )
-        assertFalse(Obligations.mandatory(Checks.modelCheck(Command(listOf("pytest", "-q")), io.astrolabe.evidence.EvidenceKind.Tests, "R1")), "the model's own check is optional")
+        val pytest = Command(listOf("pytest", "tests/"))
+        fun check(id: String, kind: CheckKind, origin: Origin?, trigger: Trigger = Trigger.OnDemand, selector: Selector = Selector.Named(pytest)) =
+            Check(id, kind, selector, Closure.Unknown, CostClass.Slow, trigger, command = pytest, origin = origin)
+        assertTrue(Obligations.mandatory(check(Checks.TESTS_BLAST, CheckKind.Unit, null, Trigger.StepBoundary, Selector.Blast)), "the blast radius")
+        assertFalse(Obligations.mandatory(Checks.modelCheck(Command(listOf("pytest", "-q")), io.astrolabe.evidence.EvidenceKind.Tests, "R1")), "the model's own check")
+        assertFalse(Obligations.mandatory(check("CHK-user-smoke", CheckKind.Unit, Origin.User)), "a user's check no item requires")
+        assertFalse(Obligations.mandatory(check("CHK-host-smoke", CheckKind.Unit, Origin.Amended(3))), "a host's amendment no item requires")
+        assertTrue(Obligations.mandatory(check("CHK-user-gate", CheckKind.Quality, Origin.User)), "a quality gate, whatever its trigger")
+        assertTrue(Obligations.mandatory(check("CHK-user-suite", CheckKind.Full, Origin.User)), "a full suite")
+        assertTrue(Obligations.mandatory(check("CHK-sniffed", CheckKind.Unit, Origin.Harness)), "the harness's own")
+        assertTrue(Obligations.mandatory(check("CHK-unknown", CheckKind.Unit, null)), "a check of unknown origin")
     }
 
     @Test
-    fun `a red optional check is the runtime's known red, never a gap, until a later receipt of it is not red`() {
-        val known = "CHK-lint known red since receipt rcpt-9 (recorded by the runtime)"
-        val lintRed = red("rcpt-9").copy(mandatory = false)
+    fun `a regression the blast radius or the types of touched files catches is rework as before, unless Open records it`() {
+        // S0: AC-1 runs tests/test_a.py; the change breaks tests/test_b.py, which only the blast radius runs.
+        for (id in listOf(Checks.TESTS_BLAST, Checks.TYPES_TOUCHED)) {
+            val regression = resolve(currencies = mapOf("CHK-accept-AC-1" to green(), id to red("rcpt-9")))
+            assertEquals(Resolution.Rework to listOf("$id is red without an Open item naming it"), regression.resolution to regression.missing, id)
+            assertEquals(emptyList(), regression.knownRed)
+            assertEquals(Resolution.Complete, resolve(register = done.copy(open = listOf(OpenItem(1, "$id red: tests/test_b.py, tracked"))), currencies = mapOf("CHK-accept-AC-1" to green(), id to red("rcpt-9"))).resolution)
+        }
+    }
+
+    @Test
+    fun `a red optional check is the runtime's known red, never a gap, until the scheduler ends it`() {
+        val known = "CHK-lint known red since receipt #12 (recorded by the runtime)"
+        val lintRed = red("rcpt-9").copy(mandatory = false, knownRed = "#12")
         val red = resolve(currencies = mapOf("CHK-accept-AC-1" to green(), "CHK-lint" to lintRed))
         assertEquals(Resolution.Complete, red.resolution, red.missing.toString())
         assertEquals(listOf(known), red.knownRed, "no Open item is asked of the agent")
-        assertEquals(listOf(known), resolve(currencies = mapOf("CHK-accept-AC-1" to green(), "CHK-lint" to lintRed.copy(applicability = Applicability.Stale))).knownRed,
-            "a stale red receipt is still the check's latest word")
-        val model = resolve(currencies = mapOf("CHK-accept-AC-1" to green(), "CHK-model-1a2b3c4d" to red("rcpt-10")))
-        assertEquals(Resolution.Complete to listOf("CHK-model-1a2b3c4d known red since receipt rcpt-10 (recorded by the runtime)"), model.resolution to model.knownRed)
-        // The same check green on the tree now: the record is gone.
+        // A timeout after the red does not end it (the scheduler keeps the record, SchedulerTest).
+        assertEquals(listOf(known), resolve(currencies = mapOf("CHK-accept-AC-1" to green(), "CHK-lint" to notGreen("timeout").copy(mandatory = false, knownRed = "#12"))).knownRed)
+        // Without the scheduler's history, a red receipt names itself.
+        assertEquals(listOf("CHK-lint known red since receipt rcpt-9 (recorded by the runtime)"), resolve(currencies = mapOf("CHK-accept-AC-1" to green(), "CHK-lint" to red("rcpt-9").copy(mandatory = false))).knownRed)
+        // A passed receipt on the tree now: no record.
         val green = resolve(currencies = mapOf("CHK-accept-AC-1" to green(), "CHK-lint" to green("rcpt-11").copy(mandatory = false)))
         assertEquals(Resolution.Complete to emptyList<String>(), green.resolution to green.knownRed)
-        // Inconclusive is not red: nothing to record.
-        assertEquals(emptyList(), resolve(currencies = mapOf("CHK-accept-AC-1" to green(), "CHK-lint" to notGreen("inconclusive").copy(mandatory = false))).knownRed)
+        // The model's prefix frees nothing by itself: only an optional currency is the runtime's record.
+        val model = resolve(currencies = mapOf("CHK-accept-AC-1" to green(), "CHK-model-1a2b3c4d" to red("rcpt-10").copy(mandatory = false, knownRed = "#10")))
+        assertEquals(Resolution.Complete to listOf("CHK-model-1a2b3c4d known red since receipt #10 (recorded by the runtime)"), model.resolution to model.knownRed)
+        assertEquals(listOf("CHK-model-1a2b3c4d is red without an Open item naming it"), resolve(currencies = mapOf("CHK-accept-AC-1" to green(), "CHK-model-1a2b3c4d" to red("rcpt-10"))).missing)
         // A required red check is untouched: still the increment's failed result.
         val required = resolve(currencies = mapOf("CHK-accept-AC-1" to red().copy(mandatory = false)))
         assertEquals(Resolution.Rework to emptyList<String>(), required.resolution to required.knownRed)

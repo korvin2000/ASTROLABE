@@ -291,7 +291,8 @@ class ProvenanceTest {
         assertEquals("failed", own.outcome)
         // C1b: what a host needs to declare the agent's check as the project's own — its command, origin, kind and last result.
         assertEquals(listOf<Any?>(Command(listOf(pytest, "-q")), Origin.Model("R1"), EvidenceKind.Tests), listOf(own.command, own.checkOrigin, own.evidenceKind))
-        assertEquals(listOf("${own.checkId} known red since receipt ${own.receiptId} (recorded by the runtime)"), finish.openItems)
+        // Named by the red receipt's alias, the way the model saw it.
+        assertTrue(finish.openItems.single().let { it.startsWith("${own.checkId} known red since receipt #") && it.endsWith(" (recorded by the runtime)") }, finish.openItems.toString())
         assertEquals(ProvenanceClass.Independent, finish.provenanceClass, "the model's red test never lowers a declared verification")
         assertEquals("independent", finished.provenanceClass)
     }
@@ -395,6 +396,52 @@ class ProvenanceTest {
         assertEquals(listOf("tests/test_a.py"), finish.acceptanceSurfaceModelApproved)
         assertEquals(listOf<Any?>("tested", passed, ProvenanceClass.AgentTest), finish.acceptance.single().let { listOf(it.provenance, it.result, it.provenanceClass) })
         assertEquals("completed" to ProvenanceClass.AgentTest, finish.status to finish.provenanceClass)
+    }
+
+    @Test
+    fun `a test edit the review cell's judge approved completes as before, but the declared check stays the agent's evidence`() {
+        seed(listOf(Acceptance.Run("AC-1", printing, Origin.User)), r1 = listOf("AC-1"))
+        val path = "tests/test_a.py"
+        // Autonomous integrity approval: the review cell's judge (this scripted model) answers; the host has no reviewer.
+        val (run, finished) = run(integrity = IntegrityApproval.Autonomous) { c ->
+            listOf(
+                Scripted.Reply(listOf(read("read-test", path))),
+                Scripted.Reply(listOf(anchored("edit-test", path, c.registry.version(path)!!, "    assert 1 == 1", "    assert (1 == 1)"))),
+                Scripted.Reply(listOf(say("done"))),
+                Scripted.Reply(listOf(say("""{"verdict":"approve","confidence":0.9,"findings":[]}"""))),
+            )
+        }
+        assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+        val finish = assertNotNull(run.finish)
+        assertEquals(emptyList(), finish.acceptanceSurfaceUnreviewed, "the judge's approval lets completion proceed")
+        assertEquals(listOf(path), finish.acceptanceSurfaceModelApproved)
+        assertEquals(listOf<Any?>("tested", passed, ProvenanceClass.AgentTest), finish.acceptance.single().let { listOf(it.provenance, it.result, it.provenanceClass) })
+        assertEquals("completed" to ProvenanceClass.AgentTest, finish.status to finish.provenanceClass)
+        assertEquals("agent_test", finished.provenanceClass)
+    }
+
+    @Test
+    fun `a red blast radius on the final tree leaves the campaign unverified, a known red of an optional check does not`() = runBlocking<Unit> {
+        seed(listOf(Acceptance.Run("AC-1", printing, Origin.User)), r1 = listOf("AC-1"))
+        val controller = Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all), clock, idGen)
+        controller.open(repo.root, request, policy).use { c ->
+            val model = CellModel(FakeAdapter(ScriptedModel.of(Scripted.Reply(listOf(say("done"))))), FakeProfiles.main, HeuristicEstimator(), maxOutputTokens = 4_000)
+            val finish = assertNotNull(controller.run(c, model).finish)
+            assertEquals(ProvenanceClass.Independent, finish.provenanceClass)
+            val green = Checks.acceptId("AC-1") to Currency(finish.acceptance.single().receiptId, Applicability.Current, eligible = true, green = true, reasons = emptyList())
+            c.checks.replace(io.astrolabe.verify.Check(Checks.TESTS_BLAST, io.astrolabe.verify.CheckKind.Unit, io.astrolabe.verify.Selector.Blast, io.astrolabe.evidence.Closure.Unknown,
+                io.astrolabe.verify.CostClass.Slow, io.astrolabe.verify.Trigger.StepBoundary, command = printing))
+            c.checks.replace(io.astrolabe.verify.Check(Checks.LINT, io.astrolabe.verify.CheckKind.Lint, io.astrolabe.verify.Selector.Touched, io.astrolabe.evidence.Closure.Known(emptySet()),
+                io.astrolabe.verify.CostClass.Fast, io.astrolabe.verify.Trigger.EndOfTurn, command = printing, origin = Origin.Harness))
+            val red = Currency("rcpt-x", Applicability.Current, eligible = true, green = false, reasons = listOf("outcome failed"), red = true)
+            // Completed past the red blast on an Open item: the requirement keeps its class, the campaign does not.
+            val blast = FinishReceipts.build(c, emptyList(), mapOf(green, Checks.TESTS_BLAST to red), SqliteReceipts(c.store, clock)::get)
+            assertEquals(ProvenanceClass.Independent to ProvenanceClass.Unverified, blast.requirements.single().provenanceClass to blast.provenanceClass)
+            assertTrue("${Checks.TESTS_BLAST}: red on the final tree" in blast.notVerified, blast.notVerified.toString())
+            val lint = FinishReceipts.build(c, emptyList(), mapOf(green, Checks.LINT to red.copy(mandatory = false, knownRed = "#9")), SqliteReceipts(c.store, clock)::get)
+            assertEquals(ProvenanceClass.Independent, lint.provenanceClass)
+            assertTrue("${Checks.LINT} known red since receipt #9 (recorded by the runtime)" in lint.openItems, lint.openItems.toString())
+        }
     }
 
     @Test

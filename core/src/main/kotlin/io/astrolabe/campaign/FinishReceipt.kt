@@ -323,6 +323,11 @@ public object FinishReceipts {
             RequirementLine(r.id, entry?.status?.wire ?: RequirementStatus.Pending.wire, blockers, Author.of(r, contract.requests), r.authorityRef, items, provenanceClass,
                 own.map { it.id })
         }
+        // C1b: a mandatory check outside the acceptance items and the campaign gate (the blast radius, the types of touched
+        // files) red on the final tree — completed past on an Open item — leaves the campaign unverified; a known red does not.
+        val redOnFinalTree = c.checks.all()
+            .filter { Obligations.mandatory(it) && !it.required && it.kind != io.astrolabe.verify.CheckKind.Full && it.kind != io.astrolabe.verify.CheckKind.Quality }
+            .filter { check -> currencies[check.id]?.let { it.red && it.applicability == io.astrolabe.verify.Applicability.Current } == true }.map { it.id }
         val checksRun = c.checks.all().mapNotNull { check -> check.last?.receiptId?.let(receipts)?.let { check to it } }
             .map { (check, it) -> CheckRun(it.checkId, it.receiptId, it.outcome.name.lowercase(), it.verifierVersion, it.envId.hex, it.checkOrigin, it.evidenceKind, check.command) }
         val registers = packets.map { it.register }
@@ -354,7 +359,8 @@ public object FinishReceipts {
             notVerified = requirements.filter { it.status != RequirementStatus.Verified.wire }.map { it.id } +
                 acceptance.filter { it.provenance == null }.map { it.id } +
                 acceptance.filter { it.provenance == "accepted" }.map { "${it.id}: accepted without verification by ${it.acceptedBy} (${it.decider}): ${it.acceptedReason}" } +
-                decided.values.filter { p -> acceptance.none { it.id == p.item } }.map { "${it.item}: accepted without verification by ${it.by} (${it.decider?.name?.lowercase()}): ${it.reason}" },
+                decided.values.filter { p -> acceptance.none { it.id == p.item } }.map { "${it.item}: accepted without verification by ${it.by} (${it.decider?.name?.lowercase()}): ${it.reason}" } +
+                redOnFinalTree.map { "$it: red on the final tree" },
             deadEnds = registers.flatMap { r -> r.deadEnds.map { it.text } },
             decisions = registers.flatMap { r -> r.decisions.map { "${it.text} because ${it.because}" } },
             // §4.2: a boundary-crossing decision is promoted to an ADR candidate; the curator admits it (P4.1).
@@ -364,10 +370,8 @@ public object FinishReceipts {
             openItems = registers.flatMap { r -> r.open.filter { !it.closed }.map { it.text } } +
                 state.graph.increments.filter { it.status == io.astrolabe.contract.IncrementStatus.Verified }
                     .flatMap { inc -> state.graph.evidence[inc.id]?.leftOpen.orEmpty().map { "${inc.id}: $it" } } +
-                // Plan §4.3 (C1b): an optional check red at its latest receipt, recorded by the runtime in place of the agent's Open item.
-                c.checks.all().filterNot(Obligations::mandatory).mapNotNull { check ->
-                    currencies[check.id]?.takeIf { it.red }?.receiptId?.let { Obligations.knownRed(check.id, it) }
-                },
+                // Plan §4.3 (C1b): an optional check that is known red, recorded by the runtime in place of the agent's Open item.
+                c.checks.all().filterNot(Obligations::mandatory).mapNotNull { check -> currencies[check.id]?.let { Obligations.knownRed(check.id, it) } },
             pendingAmendments = contract.amendmentsPending.map { it.change },
             routingDecisions = emptyList(),
             budget = BudgetLine(totals.quantities.mapKeys { it.key.id }, totals.money, billed?.takeIf { it > 0 }?.let { helper.toDouble() / it }),
@@ -382,7 +386,7 @@ public object FinishReceipts {
             qa = QaRuns.forAttempt(c.store, state.work, state.attempt),
             acceptedWithoutVerification = acceptance.mapNotNull { line -> decided[line.id]?.takeIf { line.provenance == "accepted" } } +
                 decided.values.filter { p -> acceptance.none { it.id == p.item } },
-            provenanceClass = ProvenanceClass.campaign(requirements.map { it.provenanceClass }),
+            provenanceClass = if (redOnFinalTree.isEmpty()) ProvenanceClass.campaign(requirements.map { it.provenanceClass }) else ProvenanceClass.Unverified,
             acceptanceSurfaceUnreviewed = unreviewedSurface,
             acceptanceSurfaceModelApproved = surface.filter { approvals[it.path] == ReviewerKind.Model }.map { it.path }.sorted(),
         )

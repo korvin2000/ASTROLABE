@@ -14,6 +14,7 @@ import io.astrolabe.register.Validator
 import io.astrolabe.tool.ToolCall
 import io.astrolabe.tool.ToolFamily
 import io.astrolabe.tool.ToolOutcome
+import io.astrolabe.verify.Applicability
 import io.astrolabe.verify.Currency
 import io.astrolabe.verify.GapKind
 import io.astrolabe.verify.ObligationKind
@@ -232,6 +233,8 @@ public data class GateState @JvmOverloads constructor(
     val refusals: List<RefusalSignature> = emptyList(),
     /** The cell implements [increment]: its completion is the exit gate's, so the sufficiency hint applies (plan §4.4 C1b). */
     val implementing: Boolean = false,
+    /** The cell continues a `rework` decision (D-340): the sufficiency hint does not apply. */
+    val reworked: Boolean = false,
 ) {
     init {
         require(turn >= 1) { "turn is 1-based, got $turn" }
@@ -318,18 +321,23 @@ public class Gates(gates: List<Gate>) {
     }
 
     // Plan §4.4 (C1b): once per cell, when every `run:` item of the increment is green on this tree and the D-337
-    // resolver leaves the agent nothing to close — a reviewer's word aside, which the proposal itself obtains.
+    // resolver leaves the agent nothing to close — a reviewer's word aside, which the proposal itself obtains. Never in
+    // a cell an exit refusal or a `rework` decision already spoke to, nor while a mandatory check is red on this tree,
+    // whatever `Open` says of it.
     private object Sufficiency : Gate {
         override val name: String get() = SUFFICIENCY
+        private val ready = GateKey(SUFFICIENCY, "ready")
 
         override fun evaluate(state: GateState): List<GateOutcome> {
-            if (!state.implementing || state.completionProposed) return emptyList()
+            if (!state.implementing || state.reworked || state.completionProposed || ready in state.fired || state.fired.any { it.gate == EXIT }) return emptyList()
+            if (state.currencies.values.any { it.mandatory && it.red && it.applicability == Applicability.Current }) return emptyList()
             val resolved = Resolver.increment(state.register, state.contract, state.increment, state.currencies, state.verdicts, state.unavailable, state.flags, state.unresolvedImpactNudges)
             val runs = resolved.results.filter { it.kind == ObligationKind.Run && it.obligation in state.increment.accept }
             if (runs.isEmpty() || runs.any { it.status != ResultStatus.Passed } || resolved.gaps.any { it.kind != GapKind.Unverified }) return emptyList()
             val reviews = resolved.gaps.mapNotNull { it.obligation }
-            val then = if (reviews.isEmpty()) "further checks are optional" else "the review of ${reviews.joinToString(", ")} follows the proposal"
-            return listOf(GateOutcome.Nudge(GateKey(name, "ready"), "evidence suffices: ${runs.joinToString(", ") { it.obligation }} green on this tree and nothing left to close — finish now; $then"))
+            val then = listOfNotNull(reviews.takeIf { it.isNotEmpty() }?.let { "the review of ${it.joinToString(", ")} follows the proposal" }) + resolved.knownRed
+            return listOf(GateOutcome.Nudge(ready, "evidence suffices: ${runs.joinToString(", ") { it.obligation }} green on this tree and nothing left to close — finish now; " +
+                then.ifEmpty { listOf("further checks are optional") }.joinToString("; ")))
         }
     }
 

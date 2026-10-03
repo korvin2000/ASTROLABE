@@ -298,6 +298,22 @@ public data class Resolved(
     /** Optional checks red at their latest receipt, as the runtime records them ([Obligations.knownRed], C1b): shown, never a gap. */
     val knownRed: List<String> = emptyList(),
 ) {
+    /** The constructor before [knownRed] (C1b). Kept for Java callers. */
+    public constructor(
+        resolution: Resolution,
+        gaps: List<Gap>,
+        results: List<ObligationResult>,
+        provenance: List<ItemProvenance>,
+        code: StopCode?,
+        receiptIds: List<String>,
+        evidenceRefs: List<String>,
+        decision: DecisionRecord?,
+        other: List<String>,
+        considered: DecisionRecord?,
+        binding: List<String>,
+        leftOpen: List<String>,
+    ) : this(resolution, gaps, results, provenance, code, receiptIds, evidenceRefs, decision, other, considered, binding, leftOpen, emptyList())
+
     val missing: List<String> get() = gaps.map { it.text }
 
     /**
@@ -364,16 +380,29 @@ public object Obligations {
     }
 
     /**
-     * Plan §4.3 (C1b): a mandatory check — required by an acceptance item, or by the campaign gate (the full suite, a
-     * quality gate) — keeps the I2 rule: red outside the increment's own items, it needs an `Open` item that names it.
-     * Every other check is optional: a fast check on touched files, a step check without an item, the model's own.
+     * Plan §4.3 (C1b): whether a check keeps the I2 rule — red on this tree outside the increment's own items, it needs
+     * an `Open` item that names it, and it holds `[>]` back. Only these checks are optional, their red recorded by the
+     * runtime instead: the model's own (`CHK-model-*`), lint, and a check the host or the user declared that no acceptance
+     * item requires and that is neither the full suite nor a quality gate. Everything else the harness runs itself — the
+     * blast radius, the types of touched files, the campaign gate's checks, any check of unknown origin — is mandatory.
      */
     @JvmStatic
-    public fun mandatory(check: Check): Boolean = check.required || check.trigger == Trigger.CampaignEnd
+    public fun mandatory(check: Check): Boolean = when {
+        check.required || check.kind == CheckKind.Full || check.kind == CheckKind.Quality -> true
+        check.origin is Origin.Model || check.kind == CheckKind.Lint -> false
+        else -> check.origin !is Origin.User && check.origin !is Origin.Amended
+    }
 
-    /** The runtime's record of an optional check whose latest receipt is red (plan §4.3, C1b): it replaces the agent's `Open` item. */
+    /**
+     * The runtime's record of an optional check that is known red (plan §4.3, C1b), in place of the agent's `Open` item:
+     * since the red receipt that began it ([Currency.knownRed]); `null` for a mandatory check or one that is not known red.
+     */
     @JvmStatic
-    public fun knownRed(checkId: String, receiptId: String): String = "$checkId known red since receipt $receiptId (recorded by the runtime)"
+    public fun knownRed(checkId: String, currency: Currency): String? {
+        if (currency.mandatory) return null
+        val since = currency.knownRed ?: currency.receiptId?.takeIf { currency.red } ?: return null
+        return "$checkId known red since receipt $since (recorded by the runtime)"
+    }
 
     /** The obligation id prefix of a test-integrity flag; the path follows it. */
     public const val INTEGRITY: String = "integrity:"
@@ -492,10 +521,10 @@ public object Resolver {
         val knownRed = ArrayList<String>()
         for ((checkId, currency) in currencies) {
             if (checkId in requiredIds || currency.receiptId == null) continue
-            // Plan §4.3 (C1b): an optional check (the model's own included, C1a) red at its latest receipt is recorded by
-            // the runtime, not by the agent; the record goes once a later receipt of the check is not red.
-            if (!currency.mandatory || checkId.startsWith(Checks.MODEL_PREFIX)) {
-                if (currency.red) knownRed += Obligations.knownRed(checkId, currency.receiptId)
+            // Plan §4.3 (C1b): an optional check's red is the runtime's record, not the agent's, until a later `passed`
+            // receipt of it on the tree now; a mandatory one keeps the rule below.
+            if (!currency.mandatory) {
+                Obligations.knownRed(checkId, currency)?.let { knownRed += it }
                 continue
             }
             // Only a red receipt of this very tree is a red line; a stale red one is history (D-337).

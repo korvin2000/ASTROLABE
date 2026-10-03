@@ -472,8 +472,24 @@ class GatesTest {
         assertEquals(emptyList(), hints(gates.evaluate(ready.copy(currencies = stale))), "green for another tree")
         val fullRed = Currency("rcpt-2", Applicability.Current, eligible = true, green = false, reasons = listOf("outcome failed"), red = true)
         assertEquals(emptyList(), hints(gates.evaluate(ready.copy(currencies = greenAc1 + ("CHK-full" to fullRed)))), "a red mandatory check is the agent's to close")
-        assertEquals(1, hints(gates.evaluate(ready.copy(currencies = greenAc1 + ("CHK-lint" to fullRed.copy(mandatory = false))))).size, "a red optional check is the runtime's record")
+        val noted = register.copy(open = listOf(io.astrolabe.register.OpenItem(1, "CHK-full: 3 failures in the legacy module, tracked")))
+        assertEquals(emptyList(), hints(gates.evaluate(ready.copy(register = noted, currencies = greenAc1 + ("CHK-full" to fullRed)))),
+            "an Open item lets the exit pass a red mandatory check, never the hint call the evidence sufficient")
+        assertEquals(
+            listOf("evidence suffices: AC-1 green on this tree and nothing left to close — finish now; CHK-lint known red since receipt #7 (recorded by the runtime)"),
+            hints(gates.evaluate(ready.copy(currencies = greenAc1 + ("CHK-lint" to fullRed.copy(mandatory = false, knownRed = "#7"))))),
+            "a red optional check is the runtime's record, and the hint names it",
+        )
         assertEquals(emptyList(), hints(gates.evaluate(ready.copy(unresolvedImpactNudges = listOf("public def total() changed; 3 importers unread")))))
+    }
+
+    @Test
+    fun `no sufficiency hint in a cell an exit refusal or a rework decision already spoke to`() {
+        val ready = state(4).copy(currencies = greenAc1, implementing = true)
+        val refused = ready.copy(fired = setOf(GateKey(Gates.EXIT, "v3:1a2b3c4d")))
+        assertEquals(emptyList(), hints(gates.evaluate(refused)), "after an exit refusal")
+        assertEquals(emptyList(), hints(gates.evaluate(ready.copy(reworked = true))), "in a cell that continues a rework decision")
+        assertEquals(1, hints(gates.evaluate(ready)).size)
     }
 
     @Test

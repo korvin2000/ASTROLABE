@@ -422,4 +422,23 @@ class SchedulerTest {
         assertFalse(busy.greenForFinalTree)
         assertEquals(Outcome.Passed, busy.outcome, "the factual outcome is kept")
     }
+
+    @Test
+    fun `an optional check is known red from its first red receipt until a later passed one on the tree now`() = runTest {
+        val lint = checks.register(Check("CHK-lint", CheckKind.Lint, Selector.Touched, Closure.Known(setOf("src/a.py")), CostClass.Fast, Trigger.EndOfTurn,
+            command = Command(listOf("ruff", "check")), origin = Origin.Harness))
+        val failed = { passed(Counts(failed = 1, discovered = 1), exit = 1, outcome = Outcome.Failed) }
+        val red = scheduler.runCheck(lint, 1, execute = { failed() })
+        val first = scheduler.currency(lint, stamper.stamp().id)
+        assertEquals(false to scheduler.aliasOf(red.receiptId), first.mandatory to first.knownRed, "named by its alias")
+        scheduler.runCheck(lint, 1, execute = { passed(null, exit = null, outcome = Outcome.Timeout) })
+        assertEquals(scheduler.aliasOf(red.receiptId), scheduler.currency(lint, stamper.stamp().id).knownRed, "a timeout never ends a known red")
+        scheduler.runCheck(lint, 1, execute = { failed() })
+        assertEquals(scheduler.aliasOf(red.receiptId), scheduler.currency(lint, stamper.stamp().id).knownRed, "a later red keeps the one that began it")
+        scheduler.runCheck(lint, 1, execute = { passed() })
+        assertEquals(null, scheduler.currency(lint, stamper.stamp().id).knownRed, "a passed receipt on the tree now ends it")
+        scheduler.runCheck(checks["CHK-full"]!!, 1, execute = { failed() })
+        val full = scheduler.currency(checks["CHK-full"]!!, stamper.stamp().id)
+        assertEquals(true to null, full.mandatory to full.knownRed, "a mandatory check keeps the I2 rule, never a runtime record")
+    }
 }
