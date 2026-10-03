@@ -13,7 +13,7 @@ Reviews: Fable ×2 each on C9, C8, C1a, C2; Codex — B1 ×2 (math), B4 (statist
 ## Next (S3 per plan §7)
 1. C1b → C3 → C4 (ships with C2: provenance labels; owner decides whether a judge-only approval is independent —
    `AcceptanceLine.verifiedBy`) ∥ Dp1, Dp2 (direct spec, t6). Owner §11 №2–4, 6, 7 default to the plan (D-389).
-2. Gate P8.B: tick it with the CI run of the S2 push (`actual_state.md`, Last verification) once green.
+2. First: CI 37081214729 (S2 push with C2) green? A red run reopens only the tasks it implicates.
 
 ## Tails from S2 (owner task in brackets)
 - C1a: a live background handle during stop verification is invisible to `Scheduler.exclusive` [C1b/C3]; `lostPin`
@@ -32,6 +32,6 @@ Kept branches: `v2/BL` (baseline), `v2/B4` (base-arm shim `00ff898`), `v2/B4a3` 
 (`wonderful-yalow-*`, `jolly-visvesvaraya-*`, `bold-leavitt-*`, `b4-nokey`, older ones): `Remove-Item -LiteralPath '\\?\<path>' -Recurse -Force`.
 
 ## Last gate / blockers
-Gate P8.A closed (CI 37049344584). Gate P8.B: L2 at every merge; CI of the S2 push not awaited. No blockers.
+Gate P8.B closed: CI 37078198525 green at `c592289` (Ubuntu + Windows). S2 push `d7ab99d` (adds C2): CI 37081214729 — check first. No blockers.
 `gh` not installed; CI via `curl -s https://api.github.com/repos/korvin2000/ASTROLABE/actions/runs?branch=main`.
 `.llm-memory`: 26 entries stale by content, no missing paths — re-verify a card when its topic is touched.

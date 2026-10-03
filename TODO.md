@@ -2195,7 +2195,7 @@ Goal: the model decides; the runtime executes, waits, records and finishes. Plan
 - Build: deepseek only, wave A vs wave A without A3 (both the stable prefix and the role schema subset), 8 × 2 paired tasks in randomized adjacent AB/BA blocks, upstream pinned, actual output cap and request differences logged.
 - Done: the slowdown is attributed to A3 (then keep/rework A3 by a D-nn) or ruled out with an interval; the result recorded in D-393's successor.
 - Log: 2026-10-03 — arm `waveA-noA3` (`v2/B4a3`: mask line back in `[S]`, every schema family in the request; bench only, not for `main`), 32 deepseek runs, Relace in all 352 responses: decode speed waveA/noA3 0.97 [0.89; 1.05], wall 1.01 [0.85; 1.20], billed 0.94 [0.80; 1.11] — A3 ruled out (> ≈ 11 % slowdown excluded); A3 kept. D-395. [report](../plan2/reports/WP-B4a3.md).
-- [ ] **Gate P8.B:** L2 → push `main` → CI green on Ubuntu + Windows.
+- [x] **Gate P8.B:** L2 → push `main` → CI green on Ubuntu + Windows. — L2 at every merge; [CI run 37078198525](https://github.com/korvin2000/ASTROLABE/actions/runs/37078198525) green at `c592289` (wave B: B1, B1r, B2, B4, B4 follow-up; with C1a, C8, C9), Ubuntu + Windows (2026-10-03); C2 (`a742095`) in the S2 push run 37081214729.
 
 ### P8.C Wave C — completion (C1 before D; C2 parallel to D)
 #### P8.C.1 [M] C1a Declared acceptance recognised in `run` · DONE

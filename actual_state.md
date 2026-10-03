@@ -38,7 +38,7 @@ Schema **v5** (phase 0: `pending_completions`, `acceptance_decisions`); skills/b
 ## Last verification
 CI (Ubuntu + Windows, JDK 26, full `check`): run 37049344584 green at `4bb181b` (wave A + review fixes, 2026-10-02).
 S2 (2026-10-03): local L2 at every merge (packages per card; the C9 merge broke `cell.ResultRecallTest`, fixed in
-`c61490a`); CI of the S2 push of `main` — pending, not awaited. `provider-ai-gate`, SDK and eval-live run only locally.
+`c61490a`); CI 37078198525 green at `c592289` (Ubuntu + Windows; gate P8.B); S2 push with C2: CI 37081214729. `provider-ai-gate`, SDK and eval-live run only locally.
 
 ## History (details in `audit/SESSION-HISTORY.md`; decisions D-112… in TODO §3, owner D-175 deps)
 Audit remediation 2026-09-28 (D-321–D-325); AI Gate transport (D-326–D-336, `liveTest` not run); phase 0 acceptance rule
