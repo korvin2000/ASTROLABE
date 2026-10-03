@@ -1146,7 +1146,7 @@ class RunTest {
     }
 
     /** A contract amended (by the host) to [items], its check registry, scheduler and `verify`, and a `run` that recognises them. */
-    private inner class Recognizing(items: List<Acceptance>, config: Config = Config()) {
+    private inner class Recognizing(items: List<Acceptance>, config: Config = Config(), requirementIds: List<String> = listOf("R1")) {
         val contract = contracts.amendByHost(ids.work, "C1a acceptance") { c ->
             c.copy(acceptance = items, requirements = c.requirements.map { it.copy(acceptance = items.map { a -> a.id }) })
         }
@@ -1155,6 +1155,8 @@ class RunTest {
         val scheduler = Scheduler(checks, workspace, registry, stamper, receipts, SqliteAliases(store, clock), idGen, ids, clock)
         val verify = Verify(checks, scheduler, null, null, null, workspace, TrustedLocalRunner(os), os, stamper, store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, contracts, stateRoot.resolve("logs"))
             .also { v -> v.inputs = Files.list(repo.root).use { files -> files.map { it.fileName.toString() }.filter { !it.startsWith(".") && Files.isRegularFile(repo.root.resolve(it)) }.toList() } + "src/a.py" }
+            // The cell sets the requirements its increment serves; the model's own check strengthens those (C1a, C1b).
+            .also { v -> v.requirementIds = requirementIds }
         val run = runner(config = config).also { it.verify = verify }
 
         fun receiptsOf(checkId: String) = receipts.forCheck(checkId)
@@ -1263,6 +1265,12 @@ class RunTest {
         val plain = run("""{"argv":["$pytest","-x"]}""", off.run)
         assertFalse(plain.body.contains("receipt "), plain.body)
         assertTrue(off.checks.all().none { it.id.startsWith(Checks.MODEL_PREFIX) })
+
+        // C1b: without the increment's requirements the model's command strengthens none — never every one — and stays plain.
+        val unserved = Recognizing(listOf(Acceptance.Run("AC-1", printing("pytest_pass.txt"), Origin.User)), requirementIds = emptyList())
+        val bare = run("""{"argv":["$pytest","-x"]}""", unserved.run)
+        assertFalse(bare.body.contains("receipt "), bare.body)
+        assertTrue(unserved.checks.all().none { it.id.startsWith(Checks.MODEL_PREFIX) })
     }
 
     @Test

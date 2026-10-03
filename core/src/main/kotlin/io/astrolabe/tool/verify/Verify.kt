@@ -142,7 +142,7 @@ public class Verify(
     /** The campaign's current atlas; the blast selection builds its import graph from it (P3.2.5). */
     public var atlas: Atlas? = null
 
-    /** The requirements the cell's increment serves: what the model's own check strengthens (C1a); the cell sets it. */
+    /** The requirements the cell's increment serves: what the model's own check strengthens (C1a); the cell sets it, and none means no model check (C1b). */
     internal var requirementIds: List<String> = emptyList()
 
     private var graphOf: Pair<Atlas, ImportGraph>? = null
@@ -481,7 +481,8 @@ public class Verify(
         if (declared.isNotEmpty() || !modelChecks) return declared
         checks.all().firstOrNull { it.id.startsWith(Checks.MODEL_PREFIX) && realizes(it) }?.let { return listOf(it) }
         val kind = EvidenceKinds.recognize(tokens) ?: return emptyList()
-        val strengthens = requirementIds.ifEmpty { contract.requirements.map { it.id } }.joinToString("+").ifEmpty { return emptyList() }
+        // C1b: never every requirement of the contract — without the increment's requirements the run stays plain.
+        val strengthens = requirementIds.joinToString("+").ifEmpty { return emptyList() }
         val check = Checks.modelCheck(io.astrolabe.contract.Command(tokens, dir.ifEmpty { null }), kind, strengthens)
         // An id taken by another command (a digest collision) is never reused: that run stays plain.
         val known = checks[check.id] ?: return listOf(check)
