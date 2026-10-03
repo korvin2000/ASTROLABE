@@ -544,6 +544,17 @@ class TaskLimitsTest {
     }
 
     @Test
+    fun `the host's explicit effort is not moved by the profile's step, the rest of the profile still applies`() = runBlocking<Unit> {
+        controller().open(repo.root, request, CampaignPolicy(Tokens(400_000), balance = BalanceProfile.Economy)).use { c ->
+            val adapter = FakeAdapter(ScriptedModel.of(*(planning() + implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"")).toTypedArray()))
+            val run = controller().run(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator(), Effort.High, effortExplicit = true), maxCells = 1)
+            assertEquals(BudgetStop.CellCap, run.budgetStop, run.state?.reason)
+            assertTrue(adapter.calls.isNotEmpty() && adapter.calls.all { it.request.effort == Effort.High }, adapter.calls.map { it.request.effort }.toString())
+            assertTrue(adapter.calls.all { it.request.profile.capabilities.contextLimitTokens == 150_000 }, "Economy's window still applies")
+        }
+    }
+
+    @Test
     fun `a child cell gets the balance profile once, from the model the host supplied`() = runBlocking<Unit> {
         // C3r 6: W = 200 000. Economy bounds the window once — 150 000 without tiers, 133 334 under a 64k tier; a child routed
         // from its parent's model must not narrow it again (112 500, 88 890). Main-line cells step a dear model's High effort once.

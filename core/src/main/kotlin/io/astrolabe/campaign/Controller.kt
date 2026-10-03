@@ -2010,9 +2010,10 @@ public class Controller @JvmOverloads public constructor(
         val base = boundFrom[supplied] ?: supplied
         val model = base.let { m ->
             val profile = BalanceProfiles.bounded(m.profile, vector)
-            val effort = BalanceProfiles.effort(m.effort, vector, BalanceProfiles.modelClass(m.profile))
+            // C14: the host's explicit effort is stronger than the profile's step.
+            val effort = BalanceProfiles.effort(m, vector)
             // A profile that changes nothing (Balanced) routes the supplied model as it always did.
-            if (profile === m.profile && effort == m.effort) supplied else CellModel(m.adapter, profile, m.estimator, effort, m.maxOutputTokens, m.narrowedOutput).also { boundFrom[it] = base }
+            if (profile === m.profile && effort == m.effort) supplied else CellModel(m.adapter, profile, m.estimator, effort, m.maxOutputTokens, m.narrowedOutput, m.effortExplicit).also { boundFrom[it] = base }
         }
         val tiered = config.tierTable.profiles.isNotEmpty() && config.tierTable.profileIds.all { it in config.profiles }
         val table = if (tiered) config.tierTable else TierTable.single(model.profile.id)

@@ -53,6 +53,11 @@ public class CellModel @JvmOverloads constructor(
     public val maxOutputTokens: Int = profile.capabilities.outputLimitTokens,
     /** Whether the caller narrowed [maxOutputTokens] below the profile limit; [rebind] keeps a narrowing. */
     public val narrowedOutput: Boolean = maxOutputTokens != profile.capabilities.outputLimitTokens,
+    /**
+     * The host chose [effort] itself (C14): the attempt's balance profile never steps it. `false` — the default — is effort
+     * "by approach": the profile's step for the model's price class moves [effort] (`BalanceProfiles.effort`). [rebind] keeps it.
+     */
+    public val effortExplicit: Boolean = false,
 ) {
     init {
         require(maxOutputTokens in 1..profile.capabilities.outputLimitTokens) {
@@ -67,7 +72,7 @@ public class CellModel @JvmOverloads constructor(
     public fun rebind(routed: Profile, effort: Effort, estimators: EstimatorFactory): CellModel {
         val limit = routed.capabilities.outputLimitTokens
         val headroom = if (narrowedOutput) minOf(maxOutputTokens, limit) else limit
-        return CellModel(adapter, routed, estimators.estimatorFor(routed), effort, headroom, narrowedOutput)
+        return CellModel(adapter, routed, estimators.estimatorFor(routed), effort, headroom, narrowedOutput, effortExplicit)
     }
 }
 

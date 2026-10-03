@@ -91,6 +91,24 @@ class BalanceProfilesTest {
     }
 
     @Test
+    fun `the host's explicit effort is stronger than the profile's step`() {
+        val estimator = io.astrolabe.budget.HeuristicEstimator()
+        val adapter = io.astrolabe.fixtures.FakeAdapter(io.astrolabe.fixtures.ScriptedModel.of())
+        // A dear model: Economy steps it −1, Thorough +1 — unless the host chose the effort itself.
+        for (profile in BalanceProfile.entries) {
+            val vector = BalanceProfiles.vector(profile)
+            for (effort in Effort.entries) {
+                val explicit = io.astrolabe.cell.CellModel(adapter, FakeProfiles.main, estimator, effort, effortExplicit = true)
+                assertEquals(effort, BalanceProfiles.effort(explicit, vector), "$profile keeps the host's $effort")
+                val byProfile = io.astrolabe.cell.CellModel(adapter, FakeProfiles.main, estimator, effort)
+                assertEquals(BalanceProfiles.effort(effort, vector, ModelClass.Expensive), BalanceProfiles.effort(byProfile, vector), "$profile steps an effort the host left to it")
+            }
+        }
+        val explicit = io.astrolabe.cell.CellModel(adapter, FakeProfiles.main, estimator, Effort.High, effortExplicit = true)
+        assertTrue(explicit.rebind(FakeProfiles.main, Effort.High, io.astrolabe.provider.EstimatorFactory { estimator }).effortExplicit, "a routed model keeps it")
+    }
+
+    @Test
     fun `the economy window stays below the first price tier only as far as the owner's ceiling allows`() {
         val economy = BalanceProfiles.vector(BalanceProfile.Economy)
         assertEquals(150_000, BalanceProfiles.contextLimitTokens(FakeProfiles.main, economy))
