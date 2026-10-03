@@ -313,7 +313,7 @@ public data class Resolved(
     /** Optional checks red at their latest receipt, as the runtime records them ([Obligations.knownRed], C1b): shown, never a gap. */
     val knownRed: List<String> = emptyList(),
     /**
-     * P8.C.10: this tree's red receipts of a harness regression check whose unclassified failures an `Open` item (or an earlier
+     * P8.C.10: this tree's red receipts of a harness regression check whose unknown failures an `Open` item (or an earlier
      * acknowledgment) covered; an accepted increment keeps them, so a later resolution of the same receipt asks no `Open` item.
      */
     val acknowledged: List<String> = emptyList(),
@@ -443,25 +443,25 @@ public object Obligations {
 
     /**
      * P8.C.10: the hold of a harness regression check ([Regressions.CHECKS]) — the scheduler's [Currency.hold], or, from a
-     * caller that did not compute it, a current, eligible red read as unclassified (no baseline); `null` otherwise.
+     * caller that did not compute it, a current, eligible red read as unknown (no baseline); `null` otherwise.
      */
     @JvmStatic
     public fun hold(checkId: String, currency: Currency): RegressionHold? {
         if (checkId !in Regressions.CHECKS || !currency.mandatory) return null
         currency.hold?.let { return it }
         val receipt = currency.receiptId?.takeIf { currency.red && currency.applicability == Applicability.Current && currency.eligible } ?: return null
-        return RegressionHold(listOf(receipt), listOf(receipt), checkId, unclassified = listOf(Regressions.NO_BASELINE))
+        return RegressionHold(listOf(receipt), listOf(receipt), checkId, unknown = listOf(Regressions.NO_BASELINE))
     }
 
     /**
-     * P8.C.10: what the finish receipt discloses of a [hold]: each pre-existing failure, each unclassified one with why, and
-     * each new one (a gap while the work is open; listed when the campaign ended otherwise).
+     * P8.C.10: what the finish receipt discloses of a [hold]: each failure that failed before the change too, each unknown
+     * one with why, and each new one (a gap while the work is open; listed when the campaign ended otherwise).
      */
     @JvmStatic
     public fun disclosure(checkId: String, hold: RegressionHold): List<String> =
         hold.regressions.map { "$checkId: new failure against the baseline at s0: $it" } +
-            hold.inherited.map { "$checkId: pre-existing failure $it" } +
-            hold.unclassified.map { "$checkId: failure not classified ($it)" }
+            hold.failedBefore.map { "$checkId: $it" } +
+            hold.unknown.map { "$checkId: failure not classified ($it)" }
 
     /** The obligation id prefix of a test-integrity flag; the path follows it. */
     public const val INTEGRITY: String = "integrity:"
@@ -615,18 +615,18 @@ public object Resolver {
                 continue
             }
             // P8.C.10: the failures the harness found itself (blast radius, types of touched files), held until they pass on
-            // this tree: a new one against the baseline at s0 is never covered by an Open item; an inherited one is no gap (the
-            // finish receipt discloses it); an unclassified one keeps the D-400 rule while a red run is current — an Open item,
-            // or an earlier acceptance that acknowledged that same red receipt.
+            // this tree: a new one against the baseline at s0 is never covered by an Open item; one that failed before the
+            // change too the runtime acknowledges (disclosed, no gap); an unknown one keeps the D-400 rule while a red run is
+            // current — an Open item, or an earlier acceptance that acknowledged that same red receipt.
             if (checkId in Regressions.CHECKS) {
                 val hold = Obligations.hold(checkId, currency) ?: continue
                 when (hold.kind) {
-                    RedClass.Inherited -> Unit
+                    RedClass.FailedBefore -> Unit
                     RedClass.New -> results += ObligationResult("red:$checkId", ObligationKind.Run, ResultStatus.Failed,
                         "$checkId: fix and rerun `${hold.command}` — new failures against the baseline at s0, which no Open item clears: " +
                             hold.regressions.take(MAX_NAMED).joinToString("; ") + (if (hold.regressions.size > MAX_NAMED) "; +${hold.regressions.size - MAX_NAMED} more" else ""),
                         currency.receiptId)
-                    RedClass.Unclassified -> when {
+                    RedClass.Unknown -> when {
                         hold.current.isEmpty() -> Unit
                         hold.current.all { it in acknowledged } -> acknowledging += hold.current
                         openTexts.any { it.contains(checkId) } -> acknowledging += hold.current

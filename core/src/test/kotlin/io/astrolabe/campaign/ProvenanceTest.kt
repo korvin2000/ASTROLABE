@@ -268,8 +268,17 @@ class ProvenanceTest {
         assertEquals("agent_test", finished.provenanceClass)
     }
 
-    /** P8.C.10: `pytest -rA` output of `tests/test_discount.py`: `test_other` passes, `test_tier` passes or fails. */
-    private fun blastOutput(tierFails: Boolean, message: String = "AssertionError: assert 4 == 5"): String = """
+    /** P8.C.10: `pytest -rA` output of `tests/test_discount.py`: `test_other` passes, `test_tier` passes or fails — or, without [tier], does not exist. */
+    private fun blastOutput(tierFails: Boolean, message: String = "AssertionError: assert 4 == 5", tier: Boolean = true): String = if (!tier) """
+        ============================= test session starts ==============================
+        collected 1 item
+
+        tests/test_discount.py .                                                 [100%]
+
+        =========================== short test summary info ============================
+        PASSED tests/test_discount.py::test_other
+        ============================== 1 passed in 0.10s ===============================
+    """.trimIndent() + "\n" else """
         ============================= test session starts ==============================
         collected 2 items
 
@@ -283,10 +292,11 @@ class ProvenanceTest {
 
     /**
      * P8.C.10, an S1 increment: the blast radius (a `pytest` printing `blast_out.txt`: [atS0] at s0, then [outputs] — the
-     * tree before each reply) runs through `verify` at the replies [verifying]; the agent notes the red in Open before its
-     * first `done`, which comes after them; verify-on-stop brings the blast radius to the tree and runs its baseline on s0.
+     * tree before each reply) runs through `verify` at the replies [verifying]; with [note] the agent records the red in Open
+     * before its first `done`, which comes after them; verify-on-stop brings the blast radius to the tree and runs its
+     * baseline on s0.
      */
-    private fun blastCampaign(atS0: Boolean, outputs: List<Boolean>, verifying: Set<Int>): Pair<S0Run, AgentEvent.Campaign.Finished> {
+    private fun blastCampaign(atS0: Boolean, outputs: List<Boolean>, verifying: Set<Int>, note: Boolean = true): Pair<S0Run, AgentEvent.Campaign.Finished> {
         val pytest = modelPytest("blast_out.txt", blastOutput(atS0))
         seed(listOf(Acceptance.Run("AC-1", printing, Origin.User)), r1 = listOf("AC-1"), host = listOf("AC-1"))
         return run(before = { i -> outputs.getOrNull(i)?.let { repo.write("blast_out.txt", blastOutput(it)) } }) { c ->
@@ -294,19 +304,22 @@ class ProvenanceTest {
                 io.astrolabe.verify.CostClass.Slow, io.astrolabe.verify.Trigger.StepBoundary, command = Command(listOf(pytest, "-q"))))
             outputs.indices.map { i ->
                 if (i in verifying) Scripted.Reply(listOf(call("t$i", "verify", """{"what":"tests","selection":"ids","ids":["${Checks.TESTS_BLAST}"]}""")))
+                else if (!note) Scripted.Reply(listOf(say("done")))
                 else Scripted.Reply(listOf(call("t$i", "state", """{"op":"patch","patch":[{"open.add":{"text":"${Checks.TESTS_BLAST} red: tests/test_discount.py, tracked"}},{"next":"propose completion"}]}"""), say("done")))
             } + Scripted.Reply(listOf(say("done")))
         }
     }
 
     @Test
-    fun `an S1 increment completes over a failure the harness's own baseline shows pre-existing, and a reopened campaign reports it as the live one did`() {
-        val (run, _) = blastCampaign(atS0 = true, outputs = listOf(true, true), verifying = setOf(0))
+    fun `an S1 increment completes without an Open item over a failure s0 had too, capped and disclosed, and a reopened campaign reports it as the live one did`() {
+        // On s0 the test failed too (no failure text is compared): it failed before the change, and the runtime says so.
+        val run = blastCampaign(atS0 = true, outputs = listOf(true, true), verifying = setOf(0), note = false).first
         assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
         val finish = assertNotNull(run.finish)
         val disclosed = finish.openItems.filter { it.startsWith("${Checks.TESTS_BLAST}: ") }
-        assertTrue(disclosed.single().startsWith("${Checks.TESTS_BLAST}: pre-existing failure tests/test_discount.py::test_tier — AssertionError: assert 4 == 5 (unchanged since baseline"), disclosed.toString())
-        assertTrue(finish.notVerified.none { it.startsWith(Checks.TESTS_BLAST) }, finish.notVerified.toString())
+        assertEquals(listOf("${Checks.TESTS_BLAST}: failed before the change too: tests/test_discount.py::test_tier"), disclosed)
+        assertEquals(ProvenanceClass.Unverified, finish.provenanceClass, "only a fix shown on the final tree leaves no trace")
+        assertTrue("${Checks.TESTS_BLAST}: red on the final tree" in finish.notVerified, finish.notVerified.toString())
         // Reopened: no blast check is seeded, yet the hold, its disclosure and the class are the live ones (P8.C.10 F).
         runBlocking {
             Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all), clock, idGen).open(repo.root, request, policy).use { c ->
@@ -322,6 +335,30 @@ class ProvenanceTest {
                 assertEquals(disclosed, again.openItems.filter { it.startsWith("${Checks.TESTS_BLAST}: ") })
                 assertEquals(finish.provenanceClass, again.provenanceClass)
             }
+        }
+    }
+
+    @Test
+    fun `a reopened campaign gets back the types of touched files' last run, so its hold reaches the finish receipt`() = runBlocking<Unit> {
+        repo.write("pyproject.toml", "[project]\nname = \"shop\"\n\n[tool.mypy]\nstrict = true\n")
+        repo.commit("typecheck")
+        seed(listOf(Acceptance.Run("AC-1", printing, Origin.User)), r1 = listOf("AC-1"))
+        val controller = Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all), clock, idGen)
+        controller.open(repo.root, request, policy).use { c ->
+            val types = assertNotNull(c.checks[Checks.TYPES_TOUCHED], "a mypy project seeds the types of touched files")
+            val scheduler = io.astrolabe.verify.Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), io.astrolabe.evidence.SqliteAliases(c.store, clock), idGen, c.ids, clock)
+            // A typecheck red the agent noted in Open; the controller stops before the campaign is finished.
+            scheduler.runCheck(types, 1) { io.astrolabe.verify.Executed(types.command!!.argv, null, false, 1, io.astrolabe.evidence.Outcome.Failed, null, null) }
+        }
+        controller.open(repo.root, request, policy).use { c ->
+            assertNotNull(c.checks[Checks.TYPES_TOUCHED]?.last, "restored before any resume, reacceptance or finish")
+            val stamp = c.stamper.report(fresh = true).candidateId
+            val scheduler = io.astrolabe.verify.Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), io.astrolabe.evidence.SqliteAliases(c.store, clock), idGen, c.ids, clock)
+            // The currencies reacceptance and the finish receipt are built from carry the hold, as the live run's did.
+            val currencies = c.checks.all().filter { it.last != null }.associate { it.id to scheduler.currency(it, stamp) }
+            val hold = assertNotNull(currencies[Checks.TYPES_TOUCHED]?.let { io.astrolabe.verify.Obligations.hold(Checks.TYPES_TOUCHED, it) })
+            assertEquals(io.astrolabe.verify.RedClass.Unknown, hold.kind)
+            assertTrue(io.astrolabe.verify.Obligations.disclosure(Checks.TYPES_TOUCHED, hold).single().startsWith("${Checks.TYPES_TOUCHED}: failure not classified (failures of "), hold.toString())
         }
     }
 
@@ -351,12 +388,12 @@ class ProvenanceTest {
 
 
     /**
-     * P8.C.10 F, two increments of an S1 plan in two cells: I1 runs the blast radius red — the failure changed since s0, so
-     * unclassified — and notes it in Open; I2, a new cell with nothing touched, proposes completion without a note, on a tree
+     * P8.C.10 F, two increments of an S1 plan in two cells: I1 runs the blast radius red — a test s0 never reported, so
+     * unknown — and notes it in Open; I2, a new cell with nothing touched, proposes completion without a note, on a tree
      * that [fixedInI2] or not.
      */
     private fun twoIncrements(fixedInI2: Boolean): S0Run = runBlocking {
-        val pytest = modelPytest("blast_out.txt", blastOutput(true, "AssertionError: assert 3 == 5"))
+        val pytest = modelPytest("blast_out.txt", blastOutput(false, tier = false))
         Store.open(stateRoot, repo.git, clock).use { store ->
             val contracts = Contracts(SqliteContractRepository(store, clock), idGen, clock)
             val derived = contracts.deriveS0(request.work, request.attempt, request.text, Atlas.build(repo.root), Config(), policy.tokens).contract
@@ -643,18 +680,18 @@ class ProvenanceTest {
             assertTrue("${Checks.TESTS_BLAST}: red on the final tree" in blast.notVerified, blast.notVerified.toString())
             // P8.C.10: without a baseline the red cannot be told from a regression, and the receipt says so.
             assertTrue("${Checks.TESTS_BLAST}: failure not classified (${Regressions.NO_BASELINE})" in blast.openItems, blast.openItems.toString())
-            // Every failure pre-existing at s0: disclosed, and no cap on the class.
-            val inherited = red.copy(hold = RegressionHold(listOf("#7"), listOf("rcpt-x"), "pytest", inherited = listOf("tests/test_c.py::test_c — assert 0")))
+            // Every failure failed on s0 too: acknowledged by the runtime and disclosed, yet the class is capped — only a fix shows nothing.
+            val inherited = red.copy(hold = RegressionHold(listOf("#7"), listOf("rcpt-x"), "pytest", failedBefore = listOf("failed before the change too: tests/test_c.py::test_c")))
             val preexisting = FinishReceipts.build(c, emptyList(), mapOf(green, Checks.TESTS_BLAST to inherited), SqliteReceipts(c.store, clock)::get)
-            assertEquals(ProvenanceClass.Independent, preexisting.provenanceClass)
-            assertTrue(preexisting.notVerified.none { it.startsWith(Checks.TESTS_BLAST) }, preexisting.notVerified.toString())
-            assertEquals(listOf("${Checks.TESTS_BLAST}: pre-existing failure tests/test_c.py::test_c — assert 0"), preexisting.openItems)
+            assertEquals(ProvenanceClass.Unverified, preexisting.provenanceClass)
+            assertTrue("${Checks.TESTS_BLAST}: red on the final tree" in preexisting.notVerified, preexisting.notVerified.toString())
+            assertEquals(listOf("${Checks.TESTS_BLAST}: failed before the change too: tests/test_c.py::test_c"), preexisting.openItems)
             // Not shown fixed, though no red run is current: not verified, and said so without "red".
-            val stale = red.copy(hold = RegressionHold(listOf("#7"), emptyList(), "pytest", unclassified = listOf("x: failed in rcpt-x, not rerun on this tree")))
+            val stale = red.copy(hold = RegressionHold(listOf("#7"), emptyList(), "pytest", unknown = listOf("x: failed in rcpt-x, not rerun on this tree")))
             val notShown = FinishReceipts.build(c, emptyList(), mapOf(green, Checks.TESTS_BLAST to stale), SqliteReceipts(c.store, clock)::get)
             assertEquals(ProvenanceClass.Unverified, notShown.provenanceClass)
             assertTrue("${Checks.TESTS_BLAST}: failures of #7 not shown fixed on the final tree" in notShown.notVerified, notShown.notVerified.toString())
-            val lint =FinishReceipts.build(c, emptyList(), mapOf(green, Checks.LINT to red.copy(mandatory = false, knownRed = "#9")), SqliteReceipts(c.store, clock)::get)
+            val lint = FinishReceipts.build(c, emptyList(), mapOf(green, Checks.LINT to red.copy(mandatory = false, knownRed = "#9")), SqliteReceipts(c.store, clock)::get)
             assertEquals(ProvenanceClass.Independent, lint.provenanceClass)
             assertTrue("${Checks.LINT} known red since receipt #9 (recorded by the runtime)" in lint.openItems, lint.openItems.toString())
         }

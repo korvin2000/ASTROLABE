@@ -357,7 +357,7 @@ class ExitGateTest {
     }
 
     @Test
-    fun `a new failure against the baseline is rework whatever Open says, an inherited one is no gap, an unclassified one keeps the Open rule while current`() {
+    fun `a new failure against the baseline is rework whatever Open says, one that failed before is no gap, an unknown one keeps the Open rule while current`() {
         val noted = done.copy(open = listOf(OpenItem(1, "CHK-tests-blast CHK-types-touched red: tracked")))
         for (id in listOf(Checks.TESTS_BLAST, Checks.TYPES_TOUCHED)) {
             fun held(hold: RegressionHold) = red("rcpt-9").copy(hold = hold)
@@ -369,12 +369,12 @@ class ExitGateTest {
                 assertTrue(resolved.missing.single().startsWith("$id: fix and rerun `pytest tests/test_b.py` — new failures against the baseline at s0, which no Open item clears: tests/test_b.py::test_b"), resolved.missing.toString())
                 assertEquals(GapKind.Failed, resolved.gaps.single().kind, "an executed red check: no decision covers it")
             }
-            // Inherited only: complete without an Open item; the finish receipt discloses it.
-            val inherited = held(RegressionHold(listOf("#9"), listOf("rcpt-9"), "pytest", inherited = listOf("tests/test_c.py::test_c — assert 0 (unchanged since baseline rcpt-3 on s0)")))
+            // Failed before the change too, only: complete without an Open item; the finish receipt discloses it.
+            val inherited = held(RegressionHold(listOf("#9"), listOf("rcpt-9"), "pytest", failedBefore = listOf("failed before the change too: tests/test_c.py::test_c")))
             assertEquals(Resolution.Complete to emptyList<String>(), resolve(currencies = mapOf("CHK-accept-AC-1" to green(), id to inherited)).let { it.resolution to it.missing })
-            assertEquals(listOf("$id: pre-existing failure tests/test_c.py::test_c — assert 0 (unchanged since baseline rcpt-3 on s0)"), Obligations.disclosure(id, inherited.hold!!))
-            // Unclassified and current: the D-400 rule — an Open item, which the acceptance then acknowledges.
-            val unclassified = held(RegressionHold(listOf("#9"), listOf("rcpt-9"), "pytest", unclassified = listOf("x — y (${Regressions.NO_BASELINE})")))
+            assertEquals(listOf("$id: failed before the change too: tests/test_c.py::test_c"), Obligations.disclosure(id, inherited.hold!!))
+            // Unknown and current: the D-400 rule — an Open item, which the acceptance then acknowledges.
+            val unclassified = held(RegressionHold(listOf("#9"), listOf("rcpt-9"), "pytest", unknown = listOf("x — y (${Regressions.NO_BASELINE})")))
             assertEquals(listOf("$id is red without an Open item naming it"), resolve(currencies = mapOf("CHK-accept-AC-1" to green(), id to unclassified)).missing)
             val acknowledged = resolve(register = noted, currencies = mapOf("CHK-accept-AC-1" to green(), id to unclassified))
             assertEquals(Resolution.Complete to listOf("rcpt-9"), acknowledged.resolution to acknowledged.acknowledged)
@@ -382,11 +382,11 @@ class ExitGateTest {
             assertEquals(Resolution.Complete, Resolver.increment(Register.empty(ContextId("cell-final"), "I1", "fix rounding"), contract, increment,
                 mapOf("CHK-accept-AC-1" to green(), id to unclassified), mapOf("AC-2" to approve, "AC-3" to approve), acknowledged = listOf("rcpt-9")).resolution)
             // Not current (a green run on this tree did not execute it): no gap, disclosed, the class stays unverified (FinishReceipt).
-            val stale = held(RegressionHold(listOf("#9"), emptyList(), "pytest", unclassified = listOf("x: failed in rcpt-9, not executed on this tree (removed, skipped or renamed)")))
+            val stale = held(RegressionHold(listOf("#9"), emptyList(), "pytest", unknown = listOf("x: failed in rcpt-9, not executed on this tree (removed, skipped or renamed)")))
             assertEquals(Resolution.Complete, resolve(currencies = mapOf("CHK-accept-AC-1" to green(), id to stale)).resolution)
             assertEquals(listOf("$id: failure not classified (x: failed in rcpt-9, not executed on this tree (removed, skipped or renamed))"), Obligations.disclosure(id, stale.hold!!))
-            // Without the scheduler's record, a current eligible red is unclassified; a stale or ineligible one holds nothing.
-            assertEquals(RedClass.Unclassified, Obligations.hold(id, red("rcpt-9"))?.kind)
+            // Without the scheduler's record, a current eligible red is unknown; a stale or ineligible one holds nothing.
+            assertEquals(RedClass.Unknown, Obligations.hold(id, red("rcpt-9"))?.kind)
             assertNull(Obligations.hold(id, red("rcpt-9").copy(applicability = Applicability.Stale)))
             assertNull(Obligations.hold(id, red("rcpt-9").copy(eligible = false)))
         }
@@ -398,7 +398,7 @@ class ExitGateTest {
 
     @Test
     fun `the verifier keeps what an acceptance acknowledged, so the final reacceptance answers as the increment's did`() {
-        val unclassified = red("rcpt-9").copy(hold = RegressionHold(listOf("#9"), listOf("rcpt-9"), "pytest", unclassified = listOf("x — y (${Regressions.NO_BASELINE})")))
+        val unclassified = red("rcpt-9").copy(hold = RegressionHold(listOf("#9"), listOf("rcpt-9"), "pytest", unknown = listOf("x — y (${Regressions.NO_BASELINE})")))
         val currencies = mapOf("CHK-accept-AC-1" to green(), Checks.TESTS_BLAST to unclassified)
         val proposal = CompletionProposal("I1", "done", 2, s8, s9, null, env)
         val noted = done.copy(open = listOf(OpenItem(1, "CHK-tests-blast red: tracked")))

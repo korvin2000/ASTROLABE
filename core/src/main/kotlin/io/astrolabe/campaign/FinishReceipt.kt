@@ -25,7 +25,6 @@ import io.astrolabe.verify.EquivalenceReport
 import io.astrolabe.verify.Obligations
 import io.astrolabe.verify.ProvenanceClass
 import io.astrolabe.verify.ProvenanceKind
-import io.astrolabe.verify.RedClass
 import io.astrolabe.verify.Regressions
 import io.astrolabe.verify.ResultStatus
 import io.astrolabe.verify.ReviewerKind
@@ -324,13 +323,13 @@ public object FinishReceipts {
         }
         // C1b: a mandatory check outside the acceptance items and the campaign gate (the blast radius, the types of touched
         // files) red on the final tree — completed past on an Open item — leaves the campaign unverified; a known red does not.
-        // P8.C.10: theirs is the hold — the attempt's failures not shown fixed on the final tree, classified against the
-        // baseline at s0: inherited ones are disclosed in openItems and cap nothing; a new or unclassified one caps the class.
+        // P8.C.10: theirs is the hold — the attempt's failures not shown fixed on the final tree: each is disclosed in
+        // openItems and caps the class; only a fix shown on the final tree leaves no trace.
         val holds = c.checks.all().filter(Regressions::of).mapNotNull { check -> currencies[check.id]?.let { Obligations.hold(check.id, it) }?.let { check.id to it } }
         val redOnFinalTree = c.checks.all()
             .filter { Obligations.mandatory(it) && !it.required && it.kind != io.astrolabe.verify.CheckKind.Full && it.kind != io.astrolabe.verify.CheckKind.Quality && !Regressions.of(it) }
             .filter { check -> currencies[check.id]?.let { it.red && it.applicability == io.astrolabe.verify.Applicability.Current } == true }.map { "${it.id}: red on the final tree" } +
-            holds.filter { it.second.kind != RedClass.Inherited }.map { (id, hold) ->
+            holds.map { (id, hold) ->
                 if (hold.current.isEmpty()) "$id: failures of ${hold.since.joinToString(", ")} not shown fixed on the final tree" else "$id: red on the final tree"
             }
         val checksRun = c.checks.all().mapNotNull { check -> check.last?.receiptId?.let(receipts)?.let { check to it } }

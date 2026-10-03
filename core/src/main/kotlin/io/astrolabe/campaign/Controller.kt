@@ -554,9 +554,18 @@ public class Controller @JvmOverloads public constructor(
         val commands = derived.primary?.let(RunnerCommands::of) ?: RunnerCommands()
         workspace.paths.bindWriteProtection { path, ignoreCase -> contracts.current(request.work)?.scope?.protects(path, ignoreCase) != false }
         val checks = Checks.seed(contract, commands, qualityGates = effective.qualityGates, packageManifest = TestIntegrity.packageManifests(workspace))
-        // P8.C.10 F: a reopened attempt gets its blast radius back from its last run, so resume and finish see its hold as live did.
-        SqliteReceipts(store, clock).forCheck(Checks.TESTS_BLAST).lastOrNull { it.ids.work == request.work && it.ids.attempt == request.attempt && !io.astrolabe.verify.Regressions.isBaseline(it) }
-            ?.let { if (checks[Checks.TESTS_BLAST] == null) checks.register(io.astrolabe.verify.Blast.restored(it)) }
+        // P8.C.10 F: a reopened attempt gets back the last run of the blast radius and of the types of touched files before any
+        // resume, reacceptance or finish, so their holds are seen as the live run saw them.
+        for (id in io.astrolabe.verify.Regressions.CHECKS) {
+            val last = SqliteReceipts(store, clock).forCheck(id).lastOrNull {
+                it.ids.work == request.work && it.ids.attempt == request.attempt && !io.astrolabe.verify.Regressions.isBaseline(it) && !io.astrolabe.verify.Regressions.isMarker(it)
+            } ?: continue
+            val known = checks[id]
+            when {
+                known == null -> if (id == Checks.TESTS_BLAST) checks.register(io.astrolabe.verify.Blast.restored(last))
+                known.last == null -> checks.record(id, io.astrolabe.verify.LastResult(last.receiptId, last.stampAfter, last.checkDefinitionVersion, last.outcome, last.parsed, io.astrolabe.verify.Applicability.Current))
+            }
+        }
         val rules =RulesTrust(workspace.root).approved(effective.rulesFile)?.let { RulesSnapshot(it.binding.path, it.digest, it.text) }
         val prime = Prime.render(atlas, derived.sniffed, rules, host = HostFacts.of(host, atlas))
 
@@ -1267,7 +1276,7 @@ public class Controller @JvmOverloads public constructor(
                     val record = PendingCompletion(
                         idGen.next("pending"), c.ids.work, c.ids.attempt, increment.id, cell, proposal.contractVersion, proposal.baseStamp, proposal.resultingStamp,
                         null, proposal.envId, null, emptyList(), result.resolved.results, result.resolved.other, result.resolved.gaps, result.code,
-                        result.resolved.results.mapNotNull { it.evidenceRef }.distinct(), null, idGen.next("decide"),
+                        result.resolved.results.mapNotNull { it.evidenceRef }.distinct(), null, idGen.next("decide"), acknowledged = result.resolved.acknowledged,
                     )
                     Acceptances(c.store, clock).save(ids, record)
                     when (val settled = decide(c, ids, record, authority)) {
@@ -1682,6 +1691,7 @@ public class Controller @JvmOverloads public constructor(
             proposal.baseStamp, proposal.resultingStamp, proposal.patchHash, proposal.envId, kept.register.version,
             acceptanceFlags(c, kept.testIntegrity()).map { it.line }, pending.resolved.results, pending.resolved.other, pending.resolved.gaps, pending.code,
             pending.resolved.results.mapNotNull { it.evidenceRef }.distinct(), kept.text.take(MAX_SUMMARY_CHARS), idGen.next("decide"),
+            acknowledged = pending.resolved.acknowledged,
         )
         Acceptances(c.store, clock).save(ids, record)
         c.journal.append(JournalEvent(idGen.next("ev"), ids, kept.turns, JournalKind.Boundary, refs = record.evidence,

@@ -195,4 +195,18 @@ class JUnitXmlShaperTest {
         val shaped = Shapers.shape(Recorded.capture("gradle-no-tests.txt", gradle, exitCode = 0, reports = listOf(artifact)))
         assertEquals(Outcome.Inconclusive, shaped.status)
     }
+
+    @Test
+    fun `a report cut inside a failing test is incomplete evidence whatever status its counts give (P8C10)`() {
+        // `t` passes whole, then a second `t` is cut off inside its failure.
+        val cut = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuite name=\"com.acme.T\" tests=\"2\" failures=\"1\" errors=\"0\" skipped=\"0\">\n" +
+            "  <testcase name=\"t\" classname=\"com.acme.T\" time=\"0.01\"/>\n  <testcase name=\"t\" classname=\"com.acme.T\" time=\"0.01\"><failure message=\"boom\">at com.acme"
+        val artifact = ReportArtifact(
+            path = "build/test-results/test/TEST-com.acme.T.xml", kind = ReportKind.JUnitXml, freshForThisInvocation = true,
+            provenance = "written by this invocation", content = cut.toByteArray(),
+        )
+        val shaped = Shapers.shape(Recorded.capture("gradle-no-tests.txt", gradle, exitCode = 1, reports = listOf(artifact)))
+        assertTrue(shaped.evidenceIncomplete, shaped.limitations.toString())
+        assertTrue(io.astrolabe.verify.Regressions.outcomes(shaped.tests, { it }, complete = !shaped.evidenceIncomplete).incomplete, "nothing in it is shown fixed")
+    }
 }

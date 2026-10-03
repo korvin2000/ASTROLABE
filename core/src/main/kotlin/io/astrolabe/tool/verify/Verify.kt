@@ -359,7 +359,7 @@ public class Verify(
     /**
      * P8.C.10 A, G: the command of every red run behind a regression check's hold that no run of its definition confirms on
      * this tree reruns here, with that run's closure — once per definition and tree (begun on record, no flaky retry), its
-     * deadline cut to the time left; with none left it does not run and the failure stays unclassified. Then, for this
+     * deadline cut to the time left; with none left it does not run and the failure stays unknown. Then, for this
      * tree's red run, one baseline per check and attempt on `s0`, recorded as begun before it runs, its time left read again
      * just before the process starts — so a failure, an exception or an interruption is never retried in the attempt.
      */
@@ -382,7 +382,7 @@ public class Verify(
         return recorded
     }
 
-    /** One baseline of [check] on `s0` (P8.C.10 G): begun on record, cut to the time left, a failure to export it unclassified. */
+    /** One baseline of [check] on `s0` (P8.C.10 G): begun on record, cut to the time left, a failure to export it unknown. */
     private suspend fun baselineOf(check: Check, contract: Contract): Receipt? {
         val runner = baseline ?: return null
         val stamp = s0 ?: return null
@@ -520,7 +520,7 @@ public class Verify(
         }
         val note = if (passes) listOf("declared ${check.evidence?.wire} evidence of a host or user command: exit ${capture.exitCode}, no test counts (plan §4.4, D-50 relaxed)") else emptyList()
         // P8.C.10: a harness regression check records its tests one by one (bounded), compared by digest, shown redacted.
-        val tests = if (check.id in Regressions.CHECKS) Regressions.outcomes(shaped.tests, { redaction.apply(it, ContentClass.ReusableEvidence).text }, listOfNotNull(capture.executionRoot, workspace.root.toString())) else null
+        val tests = if (check.id in Regressions.CHECKS) Regressions.outcomes(shaped.tests, { redaction.apply(it, ContentClass.ReusableEvidence).text }, complete = !lost && capture.captureComplete && !shaped.captureTruncated && !shaped.evidenceIncomplete) else null
         return Executed(command.argv, command.cwd, false, capture.exitCode, outcome, shaped.counts, blob, shaped.limitations + limits + note, tests = tests)
     }
 

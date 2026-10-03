@@ -55,6 +55,7 @@ public class PytestShaper : Shaper {
                 "report (${counts.executed} executed): the fresh report is authoritative (D-50)"
         }
 
+        val incomplete = fromReport?.let { it.problems.isNotEmpty() || (it.declaredTests != null && it.declaredTests != it.tests.size) } == true
         val status = deriveStatus(
             StatusInputs(
                 capture = capture,
@@ -62,7 +63,7 @@ public class PytestShaper : Shaper {
                 wrapper = wrapper,
                 runnerName = Invocations.runnerName(capture) ?: "pytest",
                 nothingCollected = terminal.noTestsRan && !useReport,
-                evidenceIncomplete = fromReport?.let { it.problems.isNotEmpty() || (it.declaredTests != null && it.declaredTests != it.tests.size) } == true,
+                evidenceIncomplete = incomplete,
                 infraExitCodes = INFRA_EXITS,
                 inconclusiveExitCodes = INCONCLUSIVE_EXITS,
             ),
@@ -80,6 +81,7 @@ public class PytestShaper : Shaper {
             wrapper = wrapper,
             shaper = id,
             limitations = limitations,
+            evidenceIncomplete = incomplete,
         )
     }
 

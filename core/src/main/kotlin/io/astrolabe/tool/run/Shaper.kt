@@ -183,7 +183,18 @@ public data class Shaped(
     val wrapper: WrapperDetection? = null,
     val shaper: String,
     val limitations: List<String> = emptyList(),
+    /**
+     * Structured evidence existed but could not be read whole — a parse error, a cut report, totals that disagree (§8.4).
+     * Whatever status the counts gave, [tests] is then no complete list (P8.C.10: nothing in it is shown fixed).
+     */
+    val evidenceIncomplete: Boolean = false,
 ) {
+    /** The constructor before [evidenceIncomplete] (P8.C.10). Kept for Java callers. */
+    public constructor(
+        status: Outcome, counts: Counts?, tests: List<TestResult>, view: String, viewTruncated: Boolean, captureTruncated: Boolean,
+        recallHint: String?, wrapper: WrapperDetection?, shaper: String, limitations: List<String>,
+    ) : this(status, counts, tests, view, viewTruncated, captureTruncated, recallHint, wrapper, shaper, limitations, false)
+
     init {
         require(!(status == Outcome.Passed && counts == null)) {
             "a passed status needs parsed counts; missing structured evidence is inconclusive (D-50)"

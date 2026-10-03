@@ -155,21 +155,20 @@ class BaselineTest {
 
     private fun key(name: String) = Regressions.key(TestIdentity(file = "tests/t.py", name = name))
 
-    private fun failure(name: String, message: String = "AssertionError: assert 1 == 2") =
-        io.astrolabe.evidence.FailedTest(key(name), "tests/t.py::$name", Regressions.fingerprint(message, emptyList()), message)
+    private fun failure(name: String, message: String = "AssertionError: assert 1 == 2") = io.astrolabe.evidence.FailedTest(key(name), "tests/t.py::$name", message)
 
     /** A receipt of the blast radius: [failed] and [passed] tests on [stamp]; [s0] marks a baseline. */
     private fun blast(
         outcome: Outcome, stamp: io.astrolabe.id.CandidateId, failed: List<io.astrolabe.evidence.FailedTest> = emptyList(), passed: List<String> = emptyList(),
         ambiguous: List<String> = emptyList(), command: List<String> = listOf("pytest", "tests"), s0: Boolean = false, counts: Counts? = null, envId: Digest = env.envId,
-        truncated: Boolean = false, stability: InputStability = InputStability.Exclusive,
+        truncated: Boolean = false, stability: InputStability = InputStability.Exclusive, incomplete: Boolean = false,
     ) = io.astrolabe.evidence.Receipt(
         receiptId = "r${++serial}", ids = ids, checkId = Checks.TESTS_BLAST, acceptanceIds = emptyList(), command = command, cwd = null, shell = false,
         stampBefore = stamp, stampAfter = stamp, envId = envId, verifierVersion = "v", checkDefinitionVersion = Digest.ofUtf8(command.joinToString(" ")), contractVersion = 1,
         outcome = outcome, parsed = counts ?: Counts(passed = passed.size, failed = failed.size, discovered = passed.size + failed.size), inputClosure = Closure.Unknown,
         testedInputs = io.astrolabe.evidence.TestedInputs(emptyMap(), stability), raw = null,
         limits = if (s0) listOf(io.astrolabe.evidence.Limit(Regressions.BASELINE, "on s0")) else emptyList(), at = clock.instant(),
-        tests = io.astrolabe.evidence.TestOutcomes(failed, passed, ambiguous, truncated),
+        tests = io.astrolabe.evidence.TestOutcomes(failed, passed, ambiguous, truncated, incomplete),
     )
 
     private fun hold(history: List<io.astrolabe.evidence.Receipt>, stamp: io.astrolabe.id.CandidateId?, vararg baselines: io.astrolabe.evidence.Receipt) =
@@ -180,106 +179,91 @@ class BaselineTest {
         val red = blast(Outcome.Failed, stampA, listOf(failure("total")), listOf(key("other")))
         assertEquals(listOf("r1"), hold(listOf(red), stampA)?.current, "a red run on this tree is current")
         // `pytest -x`: the next red stops before `total`; a later red never erases an earlier failure.
-        val legacy = blast(Outcome.Failed, stampB, listOf(failure("legacy")))
-        val x = assertNotNull(hold(listOf(red, legacy), stampB))
-        assertTrue(x.unclassified.any { it.startsWith("tests/t.py::total: failed in r1, not executed on this tree") }, x.toString())
-        assertTrue(x.unclassified.any { it.startsWith("tests/t.py::legacy") }, x.toString())
-        // Removed, skipped or renamed: a green run that did not execute it proves nothing — unclassified, not current.
+        val x = assertNotNull(hold(listOf(red, blast(Outcome.Failed, stampB, listOf(failure("legacy")))), stampB))
+        assertTrue(x.unknown.any { it.startsWith("tests/t.py::total: failed in r1, not executed on this tree") }, x.toString())
+        assertTrue(x.unknown.any { it.startsWith("tests/t.py::legacy") }, x.toString())
+        // Removed, skipped or renamed: a green run that did not execute it proves nothing — unknown, not current.
         val deleted = assertNotNull(hold(listOf(red, blast(Outcome.Passed, stampB, passed = listOf(key("other")))), stampB))
-        assertEquals(RedClass.Unclassified to emptyList<String>(), deleted.kind to deleted.current)
-        // Executed and passed alone in a finished run on this tree: shown fixed.
+        assertEquals(RedClass.Unknown to emptyList<String>(), deleted.kind to deleted.current)
+        // Executed once and passed in a finished run on this tree: shown fixed — the one way a red leaves no trace.
         assertNull(hold(listOf(red, blast(Outcome.Passed, stampB, passed = listOf(key("total"), key("other")))), stampB))
-        // Codex 2: a pass reported beside another case of the same identity (a skipped one) is ambiguous: nothing shown.
-        val twice = assertNotNull(hold(listOf(red, blast(Outcome.Passed, stampB, passed = listOf(key("total")), ambiguous = listOf(key("total")))), stampB))
-        assertTrue(twice.unclassified.single().contains("ambiguous"), twice.toString())
-        // Codex 1: a run on this tree that timed out clears nothing, and the failure it did see is held.
+        // A pass beside another case of the same identity is ambiguous; a cut or partly read record shows nothing fixed.
+        assertTrue(assertNotNull(hold(listOf(red, blast(Outcome.Passed, stampB, passed = listOf(key("total")), ambiguous = listOf(key("total")))), stampB)).unknown.single().contains("ambiguous"))
+        assertNotNull(hold(listOf(red, blast(Outcome.Passed, stampB, passed = listOf(key("total")), truncated = true)), stampB))
+        // Codex round 3 A: a report read in part (a complete pass of `t`, then a cut-off failing `t`) clears nothing.
+        val partial = blast(Outcome.Failed, stampB, listOf(failure("other")), listOf(key("total")), incomplete = true)
+        assertTrue(assertNotNull(hold(listOf(red, partial), stampB)).unknown.any { it.startsWith("tests/t.py::total: failed in r1; the run on this tree did not finish with a complete record") })
+        // A run on this tree that timed out clears nothing, and the failure it did see is held.
         val hung = blast(Outcome.Timeout, stampB, listOf(failure("y")), listOf(key("total")), counts = Counts(passed = 1, failed = 1, discovered = 3))
         val timedOut = assertNotNull(hold(listOf(red, hung), stampB))
-        assertTrue(timedOut.unclassified.any { it.startsWith("tests/t.py::total: failed in r1; the run on this tree did not finish") }, timedOut.toString())
-        assertTrue(timedOut.unclassified.any { it.startsWith("tests/t.py::y") } && timedOut.current == listOf(hung.receiptId), timedOut.toString())
-        // A truncated record clears nothing either (Codex 3).
-        assertNotNull(hold(listOf(red, blast(Outcome.Passed, stampB, passed = listOf(key("total")), truncated = true)), stampB))
-        // A pass on an earlier tree is history: the failure returned at C is held, and the stop reruns its command there.
+        assertTrue(timedOut.unknown.any { it.startsWith("tests/t.py::total: failed in r1; the run on this tree did not finish") }, timedOut.toString())
+        assertTrue(timedOut.unknown.any { it.startsWith("tests/t.py::y") } && timedOut.current == listOf(hung.receiptId), timedOut.toString())
+        // A pass on an earlier tree is history; the stop reruns the red's command once per definition and tree.
         val fixedAtB = blast(Outcome.Passed, stampB, passed = listOf(key("total")))
-        val atC = assertNotNull(hold(listOf(red, fixedAtB), stampC))
-        assertTrue(atC.unclassified.single().endsWith("not rerun on this tree"), atC.toString())
+        assertTrue(assertNotNull(hold(listOf(red, fixedAtB), stampC)).unknown.single().endsWith("not rerun on this tree"))
         assertEquals(listOf(red), Regressions.unconfirmed(listOf(red, fixedAtB), emptyList(), stampC))
-        assertEquals(emptyList(), Regressions.unconfirmed(listOf(red, fixedAtB, blast(Outcome.Timeout, stampC)), emptyList(), stampC), "once per definition and tree")
+        assertEquals(emptyList(), Regressions.unconfirmed(listOf(red, fixedAtB, blast(Outcome.Timeout, stampC)), emptyList(), stampC))
         val begun = blast(Outcome.NotRun, stampC, counts = Counts()).copy(tests = null, limits = listOf(io.astrolabe.evidence.Limit(Regressions.RERUN, "began")))
-        assertEquals(emptyList(), Regressions.unconfirmed(listOf(red, fixedAtB, begun), emptyList(), stampC), "a rerun begun on record is never repeated (Codex 9)")
-        assertTrue(assertNotNull(hold(listOf(red, fixedAtB, begun), stampC)).unclassified.single().endsWith("not rerun on this tree"), "the marker reports nothing")
-        // Failed and passed on the same tree (§8.10): flaky, unclassified.
-        val flaky = assertNotNull(hold(listOf(red, blast(Outcome.Passed, stampA, passed = listOf(key("total")))), stampA))
-        assertTrue(flaky.unclassified.single().contains("flaky"), flaky.toString())
-        // A failure an ineligible run saw is held all the same, never classified by it; a baseline is never a run of the change.
-        val background = assertNotNull(hold(listOf(blast(Outcome.Failed, stampA, listOf(failure("total")), stability = InputStability.Unknown)), stampA))
-        assertTrue(background.unclassified.single().contains("cannot certify"), background.toString())
-        assertNull(hold(listOf(blast(Outcome.Failed, stampA, listOf(failure("total")), s0 = true)), stampA))
-        // Codex 3: failures counted but not identified, or cut from the record, stay whatever later passes say.
+        assertEquals(emptyList(), Regressions.unconfirmed(listOf(red, fixedAtB, begun), emptyList(), stampC), "a rerun begun on record is never repeated")
+        // Failed and passed on the same tree: flaky, unknown; a failure only an ineligible run saw is held, never classified by it.
+        assertTrue(assertNotNull(hold(listOf(red, blast(Outcome.Passed, stampA, passed = listOf(key("total")))), stampA)).unknown.single().contains("flaky"))
+        assertTrue(assertNotNull(hold(listOf(blast(Outcome.Failed, stampA, listOf(failure("total")), stability = InputStability.Unknown)), stampA)).unknown.single().contains("cannot certify"))
+        assertNull(hold(listOf(blast(Outcome.Failed, stampA, listOf(failure("total")), s0 = true)), stampA), "a baseline is never a run of the change")
+        // Failures counted but not identified, or cut from the record, stay whatever later passes say.
         val unidentified = blast(Outcome.Failed, stampA, counts = Counts(failed = 1, discovered = 1))
-        assertTrue(assertNotNull(hold(listOf(unidentified, blast(Outcome.Passed, stampB, passed = listOf(key("total")), command = unidentified.command)), stampB))
-            .unclassified.single().contains("did not identify"), "a passing run of the same command proves nothing one by one")
+        assertTrue(assertNotNull(hold(listOf(unidentified, blast(Outcome.Passed, stampB, passed = listOf(key("total")), command = unidentified.command)), stampB)).unknown.single().contains("did not identify"))
         val many = (1..Regressions.MAX_FAILED).map { failure("t$it") }
         val cut = blast(Outcome.Failed, stampA, many, counts = Counts(failed = Regressions.MAX_FAILED + 1, discovered = Regressions.MAX_FAILED + 1), truncated = true)
-        val allPass = blast(Outcome.Passed, stampB, passed = many.map { it.key })
-        assertTrue(assertNotNull(hold(listOf(cut, allPass), stampB)).unclassified.single().contains("did not identify"), "the 201st failure stays")
+        assertTrue(assertNotNull(hold(listOf(cut, blast(Outcome.Passed, stampB, passed = many.map { it.key })), stampB)).unknown.single().contains("did not identify"))
     }
 
     @Test
-    fun `a failure is new only on positive evidence from s0, and inherited only on the same fingerprint`() {
+    fun `a held failure is new only if a finished baseline reported it once passed, and failed before when s0 reported it failing`() {
         val now = blast(Outcome.Failed, stampA, listOf(failure("total", "AssertionError: assert total(3) == 1234567")), listOf(key("other")))
-        val clean = blast(Outcome.Passed, stampA, passed = listOf(key("total"), key("other")), s0 = true)
-        val regression = assertNotNull(hold(listOf(now), stampA, clean))
+        // Reported once, passed, by a finished baseline on s0, and failing now: new, a hard refusal.
+        val passedOnS0 = blast(Outcome.Passed, stampA, passed = listOf(key("total"), key("other")), s0 = true)
+        val regression = assertNotNull(hold(listOf(now), stampA, passedOnS0))
         assertEquals(RedClass.New, regression.kind)
         assertTrue(regression.regressions.single().contains("passed on s0"), regression.toString())
-        assertEquals(RedClass.New, hold(listOf(blast(Outcome.Failed, stampA, listOf(failure("brand_new")))), stampA, clean)?.kind, "s0 ran every test it found and none failed")
-        // Codex 7: a fail-fast baseline that stopped before the test proves nothing about it.
+        // Two failures of one identity on this tree: still new, never "failed before", when s0 passed it.
+        val twice = blast(Outcome.Failed, stampA, listOf(failure("total"), failure("total", "another way")), ambiguous = listOf(key("total")))
+        assertEquals(RedClass.New, hold(listOf(twice), stampA, passedOnS0)?.kind)
+        // Codex round 3 №2: s0 never reported it — a fail-fast baseline stopped first, or the test did not exist — unknown.
         val stopped = blast(Outcome.Failed, stampA, listOf(failure("a")), s0 = true, counts = Counts(failed = 1, discovered = 5))
         val failFast = assertNotNull(hold(listOf(blast(Outcome.Failed, stampA, listOf(failure("b")), listOf(key("a")))), stampA, stopped))
-        assertEquals(RedClass.Unclassified, failFast.kind)
-        assertTrue(failFast.unclassified.single().contains("stopped before showing it on s0"), failFast.toString())
-        // The same failure on s0: inherited.
-        val same = blast(Outcome.Failed, stampA, listOf(failure("total", "AssertionError: assert total(3) == 1234567")), listOf(key("other")), s0 = true)
-        assertEquals(RedClass.Inherited, hold(listOf(now), stampA, same)?.kind)
-        // Another number in the assertion is another failure: never inherited.
-        val number = blast(Outcome.Failed, stampA, listOf(failure("total", "AssertionError: assert total(3) == 7654321")), s0 = true)
-        assertTrue(assertNotNull(hold(listOf(now), stampA, number)).unclassified.single().contains("failed on s0 another way"))
-        // Codex 5: durations and addresses in the text are the assertion's: they tell failures apart.
-        assertTrue(Regressions.fingerprint("expected latency 1 ms, got 2 ms", emptyList()) != Regressions.fingerprint("expected latency 1 ms, got 999 ms", emptyList()))
-        assertTrue(Regressions.fingerprint("flag 0x01", emptyList()) != Regressions.fingerprint("flag 0x02", emptyList()))
-        // Only the run's roots are neutral (Codex 11: whichever separators); a shifted line is another failure, unclassified, never new.
-        assertEquals(Regressions.fingerprint("assert x at C:\\repo\\tests\\x.py:12", listOf("C:\\repo")), Regressions.fingerprint("assert x at /repo/tests/x.py:12", listOf("/repo")))
-        assertTrue(Regressions.fingerprint("assert x at tests/x.py:12", emptyList()) != Regressions.fingerprint("assert x at tests/x.py:14", emptyList()))
-        // Unclassified: an ambiguous identity, another environment, no baseline, a baseline with unidentified failures, a begun one.
-        assertEquals(RedClass.Unclassified, hold(listOf(now.copy(tests = now.tests!!.copy(ambiguous = listOf(key("total"))))), stampA, same)?.kind)
-        assertEquals(RedClass.Unclassified, hold(listOf(now.copy(envId = Digest.ofUtf8("other-env"))), stampA, same)?.kind)
-        assertTrue(assertNotNull(hold(listOf(now), stampA)).unclassified.single().contains(Regressions.NO_BASELINE))
-        assertEquals(RedClass.Unclassified, hold(listOf(now), stampA, blast(Outcome.Failed, stampA, listOf(failure("total")), s0 = true, counts = Counts(failed = 2, discovered = 2)))?.kind)
+        assertEquals(RedClass.Unknown, failFast.kind)
+        assertTrue(failFast.unknown.single().contains("not reported on s0"), failFast.toString())
+        assertEquals(RedClass.Unknown, hold(listOf(blast(Outcome.Failed, stampA, listOf(failure("brand_new")))), stampA, passedOnS0)?.kind)
+        // Codex round 3 №3: s0 reported it failing, whatever its text: failed before the change too — acknowledged by the runtime.
+        val failedOnS0 = blast(Outcome.Failed, stampA, listOf(failure("total", "AssertionError: assert total(3) == 7654321")), listOf(key("other")), s0 = true)
+        val before = assertNotNull(hold(listOf(now), stampA, failedOnS0))
+        assertEquals(RedClass.FailedBefore to listOf("failed before the change too: tests/t.py::total"), before.kind to before.failedBefore)
+        val ambiguousOnS0 = blast(Outcome.Failed, stampA, listOf(failure("total"), failure("total")), ambiguous = listOf(key("total")), s0 = true)
+        assertEquals(RedClass.FailedBefore, hold(listOf(now), stampA, ambiguousOnS0)?.kind, "in any form")
+        // Unknown: no baseline, one that did not finish or was read in part, another environment, a begun one, ambiguous on s0.
+        assertTrue(assertNotNull(hold(listOf(now), stampA)).unknown.single().contains(Regressions.NO_BASELINE))
+        assertEquals(RedClass.Unknown, hold(listOf(now), stampA, passedOnS0.copy(tests = passedOnS0.tests!!.copy(incomplete = true)))?.kind)
+        assertEquals(RedClass.Unknown, hold(listOf(now), stampA, failedOnS0.copy(outcome = Outcome.Timeout))?.kind, "an unfinished s0 run: not even failed before")
+        assertEquals(RedClass.Unknown, hold(listOf(now.copy(envId = Digest.ofUtf8("other-env"))), stampA, passedOnS0)?.kind)
         val begun = blast(Outcome.Unavailable, stampA, s0 = true).copy(tests = null)
-        assertEquals(RedClass.Unclassified, hold(listOf(now), stampA, clean, begun)?.kind, "the latest baseline of the definition answers: an interrupted one")
-        // Codex 8: one baseline per check and attempt — any baseline, of any definition, ends the due.
+        assertEquals(RedClass.Unknown, hold(listOf(now), stampA, passedOnS0, begun)?.kind, "the latest baseline answers: an interrupted one")
+        assertEquals(RedClass.Unknown, hold(listOf(now), stampA, blast(Outcome.Passed, stampA, passed = listOf(key("total"), key("total")), ambiguous = listOf(key("total")), s0 = true))?.kind)
+        // One baseline per check and attempt: any baseline, of any definition, ends the due.
         assertEquals(now, Regressions.baselineDue(listOf(now), emptyList(), stampA))
         assertNull(Regressions.baselineDue(listOf(now), listOf(begun), stampA))
-        assertNull(Regressions.baselineDue(listOf(now), listOf(blast(Outcome.Passed, stampA, passed = listOf(key("x")), command = listOf("pytest", "other"), s0 = true)), stampA))
     }
 
     @Test
-    fun `what a run records shows redacted text and compares the whole unredacted failure, ambiguity over every reported case`() {
-        fun result(name: String, outcome: TestOutcome, message: String? = null, detail: String? = null) = TestResult(TestIdentity(file = "tests/t.py", name = name), outcome, message, null, detail)
+    fun `what a run records shows redacted text, compares identities only, and counts ambiguity over every reported case`() {
+        fun result(name: String, outcome: TestOutcome, message: String? = null) = TestResult(TestIdentity(file = "tests/t.py", name = name), outcome, message)
         val redact = { text: String -> text.replace(Regex("secret\\w+"), "[REDACTED]") }
-        val one = Regressions.outcomes(listOf(result("test_login[secretAAA]", TestOutcome.Failed, "token secretAAA rejected"), result("same", TestOutcome.Passed), result("same", TestOutcome.Skipped)), redact, emptyList())
-        val two = Regressions.outcomes(listOf(result("test_login[secretAAA]", TestOutcome.Failed, "token secretBBB rejected")), redact, emptyList())
+        val one = Regressions.outcomes(listOf(result("test_login[secretAAA]", TestOutcome.Failed, "token secretAAA rejected"), result("same", TestOutcome.Passed), result("same", TestOutcome.Skipped)), redact)
         assertEquals("tests/t.py::test_login[[REDACTED]]" to "token [REDACTED] rejected", one.failed.first().name to one.failed.first().signature)
-        assertEquals(one.failed.first().signature, two.failed.single().signature)
-        assertTrue(one.failed.first().fingerprint != two.failed.single().fingerprint, "another secret is another failure")
+        assertEquals(Regressions.key(TestIdentity(file = "tests/t.py", name = "test_login[secretAAA]")), one.failed.first().key, "the key digests the unredacted identity")
         assertEquals(listOf(key("same")), one.ambiguous, "a passed and a skipped instance of one identity")
-        // Codex 6: the JUnit XML body is part of the failure — `expected=1` and `expected=2` under one type differ.
-        fun xml(body: String) = """<testsuite name="s"><testcase classname="C" name="t"><failure type="AssertionError">$body</failure></testcase></testsuite>""".toByteArray()
-        val first = io.astrolabe.tool.run.JUnitXml.parse(xml("expected=1"), null, null).tests.single()
-        val second = io.astrolabe.tool.run.JUnitXml.parse(xml("expected=2"), null, null).tests.single()
-        assertEquals(first.message, second.message, "what is shown is the same")
-        assertTrue(Regressions.outcomes(listOf(first), { it }, emptyList()).failed.single().fingerprint != Regressions.outcomes(listOf(second), { it }, emptyList()).failed.single().fingerprint)
+        assertTrue(Regressions.outcomes(listOf(result("x", TestOutcome.Passed)), redact, complete = false).incomplete)
     }
+
 
     @Test
     fun `the time a minutes limit leaves is read again just before the baseline's process starts`() = runTest {

@@ -103,7 +103,7 @@ public data class Currency @JvmOverloads constructor(
     /**
      * P8.C.10: for the blast radius or the types of touched files ([Regressions]), the failures of the attempt not shown
      * fixed on the tree at hand, classified against the baseline at `s0`; `null` when none is held, or when the caller did
-     * not compute it (the resolver then reads a current, eligible red as unclassified).
+     * not compute it (the resolver then reads a current, eligible red as unknown).
      */
     val hold: RegressionHold? = null,
 ) {
@@ -511,11 +511,12 @@ public class Scheduler(
 
     /**
      * The receipts of [checkId] this scheduler's workspace recorded in the attempt, in the order they were recorded,
-     * baselines aside: a writer's worktree never answers for another's (P8.C.10 F).
+     * baselines aside: a writer's worktree never answers for another's (P8.C.10 F). A receipt whose alias a crash left
+     * unwritten belongs to no known workspace and is counted here — a failure is never orphaned (it can only hold more).
      */
     private fun history(checkId: String): List<Receipt> = receipts.forCheck(checkId).filter {
         it.ids.work == ids.work && it.ids.attempt == ids.attempt && !Regressions.isBaseline(it) &&
-            (aliasByReceipt.containsKey(it.receiptId) || aliases.byCanonical(ids.work, it.receiptId)?.workspace == workspace.id)
+            (aliasByReceipt.containsKey(it.receiptId) || aliases.byCanonical(ids.work, it.receiptId).let { alias -> alias == null || alias.workspace == workspace.id })
     }
 
     /** The attempt's baseline receipts of [checkId]: runs on the captured `s0`, whichever workspace asked for them. */

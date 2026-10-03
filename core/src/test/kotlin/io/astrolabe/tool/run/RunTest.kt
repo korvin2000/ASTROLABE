@@ -1372,7 +1372,7 @@ class RunTest {
     }
 
     @Test
-    fun `the stop's baseline is bounded - none without time left, one per definition when s0 cannot be exported, its red unclassified`() = runTest {
+    fun `the stop's baseline is bounded - none without time left, one per definition when s0 cannot be exported, its red unknown`() = runTest {
         val checks = io.astrolabe.verify.Checks.empty().also { coherence.register(it) }
         val receipts = SqliteReceipts(store, clock)
         val scheduler = Scheduler(checks, workspace, registry, stamper, receipts, SqliteAliases(store, clock), idGen, ids, clock)
@@ -1383,13 +1383,13 @@ class RunTest {
         val verify = Verify(checks, scheduler, null, baseline, stamper.stamp().id, workspace, TrustedLocalRunner(os), os, stamper, store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, contracts, stateRoot.resolve("logs"))
         val blast = checks.register(io.astrolabe.verify.Check(io.astrolabe.verify.Checks.TESTS_BLAST, io.astrolabe.verify.CheckKind.Unit, io.astrolabe.verify.Selector.Blast,
             io.astrolabe.evidence.Closure.Unknown, io.astrolabe.verify.CostClass.Slow, io.astrolabe.verify.Trigger.StepBoundary, command = printing("README.md")))
-        val failure = io.astrolabe.evidence.FailedTest(io.astrolabe.verify.Regressions.key(TestIdentity(file = "tests/t.py", name = "t")), "tests/t.py::t", "fp", "assert 1 == 2")
+        val failure = io.astrolabe.evidence.FailedTest(io.astrolabe.verify.Regressions.key(TestIdentity(file = "tests/t.py", name = "t")), "tests/t.py::t", "assert 1 == 2")
         scheduler.runCheck(blast, 1, listOf("src/a.py", "README.md")) {
             io.astrolabe.verify.Executed(printing("README.md").argv, null, false, 1, io.astrolabe.evidence.Outcome.Failed, io.astrolabe.evidence.Counts(failed = 1, discovered = 1), null,
                 tests = io.astrolabe.evidence.TestOutcomes(listOf(failure)))
         }
         fun baselines() = receipts.forCheck(io.astrolabe.verify.Checks.TESTS_BLAST).filter(io.astrolabe.verify.Regressions::isBaseline)
-        // A minutes limit with no time left: no baseline runs, the red stays unclassified.
+        // A minutes limit with no time left: no baseline runs, the red stays unknown.
         verify.timeLeft = { 0L }
         verify.onStop(emptyList())
         assertEquals(emptyList(), baselines())
@@ -1399,7 +1399,7 @@ class RunTest {
         verify.onStop(emptyList())
         assertEquals(1, baselines().size)
         val hold = assertNotNull(scheduler.currency(blast, stamper.stamp().id).hold)
-        assertTrue(hold.unclassified.single().contains("is unavailable"), hold.toString())
+        assertTrue(hold.unknown.single().contains("is unavailable"), hold.toString())
     }
 
     @Test
@@ -1414,7 +1414,7 @@ class RunTest {
         val red = io.astrolabe.verify.Check(io.astrolabe.verify.Checks.TESTS_BLAST, io.astrolabe.verify.CheckKind.Unit, io.astrolabe.verify.Selector.Blast,
             io.astrolabe.evidence.Closure.Known(setOf("src/a.py")), io.astrolabe.verify.CostClass.Slow, io.astrolabe.verify.Trigger.StepBoundary, command = rewrites)
         checks.register(red)
-        val failure = io.astrolabe.evidence.FailedTest(io.astrolabe.verify.Regressions.key(TestIdentity(file = "tests/t.py", name = "t")), "tests/t.py::t", "fp", "assert 1 == 2")
+        val failure = io.astrolabe.evidence.FailedTest(io.astrolabe.verify.Regressions.key(TestIdentity(file = "tests/t.py", name = "t")), "tests/t.py::t", "assert 1 == 2")
         scheduler.runCheck(red, 1) {
             io.astrolabe.verify.Executed(rewrites.argv, null, false, 1, io.astrolabe.evidence.Outcome.Failed, io.astrolabe.evidence.Counts(failed = 1, discovered = 1), null,
                 tests = io.astrolabe.evidence.TestOutcomes(listOf(failure)))

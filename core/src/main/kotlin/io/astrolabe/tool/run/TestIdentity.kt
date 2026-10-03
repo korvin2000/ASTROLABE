@@ -76,15 +76,7 @@ public data class TestResult(
     /** First assertion/error line, already trimmed; null when the runner printed none. */
     val message: String? = null,
     val durationMillis: Long? = null,
-    /**
-     * The whole failure as the runner reported it — every attribute and the body, unredacted — when the shaper read more
-     * than [message] (P8.C.10: a failure's comparison fingerprint); never shown. `null`: [message] is all there is.
-     */
-    val detail: String? = null,
 ) {
-    /** The constructor before [detail] (P8.C.10). Kept for Java callers. */
-    public constructor(identity: TestIdentity, outcome: TestOutcome, message: String?, durationMillis: Long?) : this(identity, outcome, message, durationMillis, null)
-
     val failing: Boolean get() = outcome == TestOutcome.Failed || outcome == TestOutcome.Error
 }
 

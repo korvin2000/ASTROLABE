@@ -78,17 +78,17 @@ public data class TestedInputs(
 }
 
 /**
- * One failing test a run reported (§8.5, P8.C.10): [key] and [fingerprint] compare — opaque digests of its namespaced
- * identity and of its unredacted failure, the runner's volatile fields normalized — while [name] and [signature] (the
- * first failure line) are redacted and only shown.
+ * One failing test a run reported (§8.5, P8.C.10): [key], an opaque digest of its namespaced identity, is what decisions
+ * compare; [name] and [signature] (the first failure line) are redacted and only shown — no failure text is ever compared.
  */
 @Serializable
-public data class FailedTest(val key: String, val name: String, val fingerprint: String, val signature: String)
+public data class FailedTest(val key: String, val name: String, val signature: String)
 
 /**
  * The per-test outcomes a run of a harness regression check reported (P8.C.10): its failing tests, the keys of the tests
  * that executed and passed, and the keys reported more than once whatever their outcome (ambiguous, D-27). [truncated]
- * when a bound cut a list: nothing missing from it is proven either way.
+ * when a bound cut a list, [incomplete] when the capture or the structured report could not be read whole: either way
+ * the record shows nothing fixed and nothing new.
  */
 @Serializable
 public data class TestOutcomes(
@@ -96,6 +96,7 @@ public data class TestOutcomes(
     val passed: List<String> = emptyList(),
     val ambiguous: List<String> = emptyList(),
     val truncated: Boolean = false,
+    val incomplete: Boolean = false,
 )
 
 /** Where evidence about a receipt was truncated or could not be captured (§8.4 limitations). */
