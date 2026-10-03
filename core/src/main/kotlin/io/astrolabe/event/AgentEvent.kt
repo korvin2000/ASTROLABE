@@ -240,6 +240,37 @@ public sealed interface AgentEvent {
         @Serializable
         @SerialName("budget.exhausted")
         public data class Exhausted(override val ids: Identities, val scope: String, override val phase: Phase = Phase.Recover, override val span: SpanId? = null, override val parent: SpanId? = null) : Budget
+
+        /**
+         * The task's spend against its limits (C3), emitted before each model call while any limit is set: money (and the
+         * [LimitStatus.costBasis] it was summed from — billed or estimated), active minutes and requests, each with its
+         * limit and the reserve held for verification and report.
+         */
+        @Serializable
+        @SerialName("budget.spent")
+        public data class Spent(override val ids: Identities, val status: io.astrolabe.budget.LimitStatus, override val phase: Phase = Phase.Understand, override val span: SpanId? = null, override val parent: SpanId? = null) : Budget
+
+        /**
+         * A task limit was reached (C3): [stage] `reserve` — the working part of [limit] (`money` · `minutes` · `requests`)
+         * is spent and only verification and the report may spend — or `stopped`: the campaign ended `budget_exhausted`
+         * with [bestCandidate], the best verified candidate (its stamp; `null` when nothing is verified), named and never
+         * swapped into the user's tree. [action] is what the host offers: `raise_limit` — a reopen with a raised limit
+         * continues the same attempt; no limit is a hidden ceiling.
+         */
+        @Serializable
+        @SerialName("budget.limit_reached")
+        public data class LimitReached(
+            override val ids: Identities,
+            val limit: String,
+            val stage: String,
+            val reason: String,
+            val status: io.astrolabe.budget.LimitStatus,
+            val bestCandidate: String? = null,
+            val action: String = "raise_limit",
+            override val phase: Phase = Phase.Recover,
+            override val span: SpanId? = null,
+            override val parent: SpanId? = null,
+        ) : Budget
     }
 
     @Serializable

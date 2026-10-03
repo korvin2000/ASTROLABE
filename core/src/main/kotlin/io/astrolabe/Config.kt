@@ -10,6 +10,8 @@ import io.astrolabe.id.Digest
 import io.astrolabe.kb.KbInjection
 import io.astrolabe.provider.Profile
 import io.astrolabe.route.TierTable
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 
 /**
@@ -69,7 +71,39 @@ public data class Config(
      * acceptance command is recognised in `run` either way.
      */
     val modelChecks: Boolean = true,
+    /**
+     * The balance profile (plan §4.6, C3) a task runs under when its `CampaignPolicy` names none; [defaults] are the
+     * Balanced values and the profile applies when the attempt freezes ([BalanceProfiles.applied]). The default is not
+     * encoded, so a Balanced attempt keeps its fingerprint.
+     */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val balance: BalanceProfile = BalanceProfile.Balanced,
 ) {
+    /** The v2.0 C1a constructor: [balance] takes its default. Kept for Java callers. */
+    public constructor(
+        defaults: Defaults,
+        profiles: Map<String, Profile>,
+        profileRoles: ProfileRoles,
+        mode: Mode,
+        executionMode: ExecutionMode,
+        dClass: DClassPolicy,
+        integrityApproval: IntegrityApproval,
+        unknownOutcomeReconciliation: UnknownOutcomeReconciliation,
+        ceiling: Stage,
+        rulesFile: RulesBinding?,
+        redaction: RedactionConfig,
+        stateRoot: String?,
+        flags: Flags,
+        roles: Map<String, Role>,
+        qualityGates: List<io.astrolabe.contract.Command>,
+        tierTable: TierTable,
+        modelChecks: Boolean,
+    ) : this(
+        defaults, profiles, profileRoles, mode, executionMode, dClass, integrityApproval, unknownOutcomeReconciliation, ceiling,
+        rulesFile, redaction, stateRoot, flags, roles, qualityGates, tierTable, modelChecks, BalanceProfile.Balanced,
+    )
+
     /** The v1.0 full constructor: [modelChecks] takes its default. Kept for Java callers. */
     public constructor(
         defaults: Defaults,
@@ -103,6 +137,8 @@ public data class Config(
     public fun withTierTable(tierTable: TierTable): Config = copy(tierTable = tierTable)
 
     public fun withModelChecks(modelChecks: Boolean): Config = copy(modelChecks = modelChecks)
+
+    public fun withBalance(balance: BalanceProfile): Config = copy(balance = balance)
 
     /** The role [name] as configured, else the SDK default; `null` for a name neither declares. */
     public fun role(name: String): Role? = roles[name] ?: Roles.defaults[name]

@@ -61,6 +61,15 @@ public sealed interface Admission {
     public data class Refused(val spend: Spend, val estimate: Tokens, val reason: String) : Admission
 }
 
+/**
+ * The task limits as a cell sees them (C3, plan §4.6): asked before every turn and every admission, so no model call
+ * is dispatched past a limit, and generation stops where the reserve for verification and report begins.
+ */
+public fun interface LimitGate {
+    /** The standing for [spend] about to start with [estimate] tokens; [Tokens.ZERO] at a turn's start. */
+    public fun check(spend: Spend, estimate: Tokens): LimitDecision
+}
+
 /** What the cell must do when the working budget is gone (§5.9 reserve gate, FX-43). */
 public data class ReserveVerdict(
     val reached: Boolean,
@@ -78,13 +87,16 @@ public data class ReserveVerdict(
  * the working partition — tokens or turns — is exhausted the `reserve reached` gate blocks new edits and
  * generation ("verify and report"); reaching it with checks outstanding ends the cell `partial`, naming the
  * unverified scope (FX-43). Reservations are enforced across concurrent calls and reconciled to actual usage.
+ * The task's [limits] (C3) gate the same way: once their working part is spent the gate fires and only
+ * verify-and-report spends proceed, until one more call would cross a limit.
  */
-public class CellBudget(
+public class CellBudget @JvmOverloads constructor(
     public val tokens: Tokens,
     public val turns: Int,
     public val reserve: CellReserve,
     private val events: Events? = null,
     private val ids: Identities? = null,
+    private val limits: LimitGate? = null,
 ) {
     public enum class Partition { Working, Verification, Recovery }
 
@@ -109,12 +121,15 @@ public class CellBudget(
 
     public val turnsLeft: Int get() = synchronized(lock) { maxOf(0, turns - turnsUsed) }
 
-    /** The gate condition: no working tokens or no generation turns remain. */
-    public val reserveReached: Boolean get() = working.available.value <= 0 || generationTurnsLeft <= 0
+    /** The gate condition: no working tokens or no generation turns remain, or the task limits' working part is spent (C3). */
+    public val reserveReached: Boolean
+        get() = working.available.value <= 0 || generationTurnsLeft <= 0 ||
+            limits?.check(Spend.Generation, Tokens.ZERO).let { it != null && it !is LimitDecision.Within }
 
     /** Admits [estimate] tokens for [spend] from the partitions its purpose allows, splitting across them in order. */
     public fun admit(spend: Spend, estimate: Tokens): Admission {
         require(estimate.value >= 0) { "an estimate is never negative" }
+        limitRefusal(spend, estimate)?.let { return it }
         val order = when (spend) {
             Spend.Generation, Spend.Edit -> listOf(Partition.Working)
             Spend.Check, Spend.RegisterPatch -> listOf(Partition.Working, Partition.Verification)
@@ -154,6 +169,7 @@ public class CellBudget(
      * only verify-and-report turns proceed, on the reserve turns, until the cell's turns are spent.
      */
     public fun startTurn(spend: Spend): Admission {
+        limitRefusal(spend, Tokens.ZERO)?.let { return it }
         synchronized(lock) {
             val generationLeft = turns - reserve.turns - turnsUsed
             val anyLeft = turns - turnsUsed
@@ -189,6 +205,16 @@ public class CellBudget(
 
     public data class Snapshot(val spentTokens: Tokens, val percentUsed: Int, val reserveOk: Boolean, val turnsTaken: Int)
 
+    /** C3: a spent limit refuses every spend; a spent working part refuses all but verify-and-report spends. */
+    private fun limitRefusal(spend: Spend, estimate: Tokens): Admission.Refused? = when (val decision = limits?.check(spend, estimate)) {
+        null, LimitDecision.Within -> null
+        is LimitDecision.Reserve -> if (spend.reportOrVerify) null else Admission.Refused(spend, estimate, "reserve reached: ${decision.reason}")
+        is LimitDecision.Exhausted -> {
+            events?.let { e -> ids?.let { e.emit(AgentEvent.Budget.Exhausted(it, "task ${decision.kind.wire}")) } }
+            Admission.Refused(spend, estimate, decision.reason)
+        }
+    }
+
     private fun of(partition: Partition): Reservations = when (partition) {
         Partition.Working -> working
         Partition.Verification -> verification
@@ -202,7 +228,7 @@ public class CellBudget(
         /** A cell budget from the cell's share of tokens and turns, with the reserves of [reserves] (raised to [knownCheckCostTokens]). */
         @JvmStatic
         @JvmOverloads
-        public fun of(cellTokens: Tokens, cellTurns: Int, reserves: Reserves, knownCheckCostTokens: Tokens = Tokens.ZERO, events: Events? = null, ids: Identities? = null): CellBudget =
-            CellBudget(cellTokens, cellTurns, Reserve.cell(cellTokens, cellTurns, reserves, knownCheckCostTokens), events, ids)
+        public fun of(cellTokens: Tokens, cellTurns: Int, reserves: Reserves, knownCheckCostTokens: Tokens = Tokens.ZERO, events: Events? = null, ids: Identities? = null, limits: LimitGate? = null): CellBudget =
+            CellBudget(cellTokens, cellTurns, Reserve.cell(cellTokens, cellTurns, reserves, knownCheckCostTokens), events, ids, limits)
     }
 }

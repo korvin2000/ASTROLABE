@@ -164,6 +164,8 @@ public data class FinishReceipt @JvmOverloads constructor(
     val acceptedWithoutVerification: List<io.astrolabe.verify.ItemProvenance> = emptyList(),
     val provenanceClass: ProvenanceClass = ProvenanceClass.Unverified,
     val acceptanceSurfaceUnreviewed: List<String> = emptyList(),
+    /** How a task limit ended the campaign, with the best verified candidate it names (C3); `null` for every other ending. */
+    val limit: LimitStop? = null,
 )
 
 /** The campaign review as the receipt reports it: the request, the diff it saw, and the signed verdict or why none arrived. */

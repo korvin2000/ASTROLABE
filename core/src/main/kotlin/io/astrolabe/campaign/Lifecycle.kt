@@ -197,6 +197,17 @@ public sealed interface Transition {
 
     /** A reopened campaign that stopped on something outside it starts over at reconciliation. */
     public data class Resumed(val reason: String) : Transition
+
+    /**
+     * C3 (plan §4.6): a campaign that a task limit stopped `budget_exhausted` is reopened by its host with limits that
+     * leave room again; it continues the same attempt from reconciliation, its verified ledger kept. Only the host
+     * raises a limit — the controller applies this transition at open, on the host's limits, never on its own.
+     */
+    public data class LimitRaised(val reason: String) : Transition {
+        init {
+            require(reason.isNotBlank()) { "a raised limit records why" }
+        }
+    }
 }
 
 /** What the controller does with a returned cell (§3.7 `dispatch_outcome`). */
@@ -330,6 +341,11 @@ public object Lifecycle {
                 check(interrupted || s.outcome?.resumable == true) { "a ${s.outcome?.wire} campaign does not resume" }
                 s.next(phase = CampaignPhase.Opened, outcome = null, reason = null, contractVersion = v, stopCode = null,
                     ledger = if (interrupted) Ledger.initial(contract) else s.ledger)
+            }
+            is Transition.LimitRaised -> {
+                expect(s, CampaignPhase.Ended)
+                check(s.outcome == CampaignOutcome.BudgetExhausted) { "only a budget_exhausted campaign resumes on a raised limit; this one is ${s.outcome?.wire}" }
+                s.next(phase = CampaignPhase.Opened, outcome = null, reason = null, contractVersion = v, stopCode = null)
             }
         }
     }
