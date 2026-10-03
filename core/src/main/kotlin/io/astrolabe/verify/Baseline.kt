@@ -5,6 +5,9 @@ import io.astrolabe.auth.ContentClass
 import io.astrolabe.auth.Redaction
 import io.astrolabe.auth.RedactionConfig
 import io.astrolabe.evidence.Aliases
+import io.astrolabe.evidence.Closure
+import io.astrolabe.evidence.EvidenceKind
+import io.astrolabe.evidence.FailedTest
 import io.astrolabe.evidence.InputStability
 import io.astrolabe.evidence.Limit
 import io.astrolabe.evidence.Outcome
@@ -32,6 +35,7 @@ import io.astrolabe.tool.run.Runner
 import io.astrolabe.tool.run.ShapeBudget
 import io.astrolabe.tool.run.Shapers
 import io.astrolabe.tool.run.TestIdentity
+import io.astrolabe.tool.run.TestOutcome
 import io.astrolabe.tool.run.TestResult
 import io.astrolabe.tool.run.TestResults
 import io.astrolabe.workspace.EnvFingerprint
@@ -118,6 +122,155 @@ public data class PreexistingLedger(
         public fun normalize(line: String): String =
             line.replace(HEX_ADDRESS, "0x…").replace(LONG_HEX, "<hex>").replace(TIMESTAMP, "<time>").replace(TEMP_PATH, "<tmp>")
     }
+}
+
+/** P8.C.10: how a held red of a harness regression check ([Regressions]) relates to the baseline at `s0` (§8.5). */
+public enum class RedClass {
+    /** A failure the baseline did not have, or had with another signature: a regression no `Open` item clears. */
+    Regression,
+
+    /** Every failure is the baseline's, unchanged: inherited, disclosed in the finish receipt, never a gap. */
+    PreExisting,
+
+    /** No usable baseline tells the two apart: the D-400 rule applies (an `Open` item) and the campaign class is `unverified`. */
+    Unclassified,
+}
+
+/**
+ * P8.C.10: the red of a harness regression check that holds until a later passed run covers it — [since] the red
+ * receipts not yet covered (alias or id), [kind] their classification against the baseline, [detail] the new or changed
+ * failures, the pre-existing ones, or why there is no classification.
+ */
+public data class HeldRed(val since: List<String>, val kind: RedClass, val detail: List<String>)
+
+/**
+ * The regressions the harness finds itself (P8.C.10): a red blast radius or types-of-touched-files check is "not done"
+ * whatever an `Open` item says, unless the baseline at `s0` shows every failure pre-existing; with no usable baseline the
+ * D-400 rule stands. Every function here is pure over receipts.
+ */
+public object Regressions {
+    /** The checks the harness runs itself over the change: the blast radius and the types of touched files. */
+    @JvmField
+    public val CHECKS: Set<String> = setOf(Checks.TESTS_BLAST, Checks.TYPES_TOUCHED)
+
+    /** The limit kind that marks a baseline receipt: one run of a check's command on the captured initial candidate. */
+    public const val BASELINE: String = "baseline"
+
+    /** The disclosure when no baseline classifies a red. */
+    public const val NO_BASELINE: String = "no baseline: pre-existing failures cannot be told from regressions"
+
+    /** Whether [check] is one of [CHECKS] under the mandatory rule (an acceptance item's check is its item's result instead). */
+    @JvmStatic
+    public fun of(check: Check): Boolean = check.id in CHECKS && !check.required && Obligations.mandatory(check)
+
+    @JvmStatic
+    public fun isBaseline(receipt: Receipt): Boolean = receipt.limits.any { it.kind == BASELINE }
+
+    /**
+     * P8.C.10 п. 4, red until passed: of one check's receipts in this attempt, oldest first, the red ones no later passed
+     * receipt covers. Only an eligible receipt begins or ends a red; a timeout, an inconclusive run or a missing receipt
+     * ends nothing; the passing half of a flaky pair (§8.10) ends nothing; a passed run ends only the reds whose selection
+     * its own contains, so a narrowed blast set never clears an uncovered failure. A later red replaces the reds it covers.
+     */
+    @JvmStatic
+    public fun open(history: List<Receipt>): List<Receipt> {
+        val flaky = history.flatMap { r -> r.limits.filter { it.kind == FLAKY }.flatMap { it.detail.split(' ', ',', ':') } }.toSet()
+        val open = ArrayList<Receipt>()
+        for (r in history) {
+            if (isBaseline(r) || !r.testedInputs.eligible) continue
+            when (r.outcome) {
+                Outcome.Failed -> {
+                    open.removeAll { covers(r, it) }
+                    open += r
+                }
+                Outcome.Passed -> if (r.receiptId !in flaky) open.removeAll { covers(r, it) }
+                else -> Unit
+            }
+        }
+        return open
+    }
+
+    /**
+     * The pre-existing-failure ledger a baseline receipt records (§8.5): a clean baseline (passed, or a typecheck that
+     * exited as expected with nothing failing) has no entries; a red one lists every failure it identified. `null` when
+     * it cannot classify anything — not eligible, not run, or red with failures it did not identify.
+     */
+    @JvmStatic
+    public fun ledger(baseline: Receipt): PreexistingLedger? {
+        if (!baseline.testedInputs.eligible) return null
+        val clean = baseline.outcome == Outcome.Passed || (baseline.outcome == Outcome.Inconclusive && baseline.evidenceKind == EvidenceKind.Typecheck &&
+            baseline.failures.isEmpty() && baseline.exitCode != null && baseline.exitCode == baseline.expectedExitCode)
+        if (!clean) {
+            if (baseline.outcome != Outcome.Failed || baseline.failures.isEmpty()) return null
+            val counted = baseline.parsed?.let { it.failed + it.errors }
+            if (counted != null && baseline.failures.size < counted) return null
+        }
+        val byIdentity = baseline.failures.groupBy { it.identity.canonical }
+        val entries = byIdentity.values.map { PreexistingFailure(it.first().identity, PreexistingLedger.normalize(it.first().signature), it.size) }.sortedBy { it.identity.canonical }
+        return PreexistingLedger(baseline.receiptId, null, baseline.stampAfter, baseline.envId, entries, byIdentity.filterValues { it.size > 1 }.keys)
+    }
+
+    /**
+     * P8.C.10 п. 2–3: [red] against the latest [baseline] of the same check definition, failure by failure through
+     * [PreexistingLedger.classify]: any new or changed failure is a regression (named); all of them pre-existing is
+     * inherited; a missing or unusable baseline, another environment, an ambiguous or unidentified failure is unclassified.
+     * A clean baseline makes every failure new, identified or not.
+     */
+    @JvmStatic
+    public fun classify(red: Receipt, baseline: Receipt?): Pair<RedClass, List<String>> {
+        if (baseline == null) return RedClass.Unclassified to listOf(NO_BASELINE)
+        val ledger = ledger(baseline)
+            ?: return RedClass.Unclassified to listOf("baseline ${baseline.receiptId} (${baseline.outcome.name.lowercase()}) identifies no failures: $NO_BASELINE")
+        if (red.envId != ledger.envId) return RedClass.Unclassified to listOf("environment ${red.envId.hash8} differs from the baseline's ${ledger.envId.hash8}: $NO_BASELINE")
+        val counted = red.parsed?.let { it.failed + it.errors }
+        val unidentified = if (counted == null) red.failures.isEmpty() else red.failures.size < counted
+        val repeated = red.failures.groupBy { it.identity.canonical }.filterValues { it.size > 1 }.keys
+        val regressions = ArrayList<String>()
+        val inherited = ArrayList<String>()
+        val unclear = ArrayList<String>()
+        for (failure in red.failures.distinctBy { it.identity.canonical }) {
+            if (failure.identity.canonical in repeated) {
+                unclear += "'${failure.identity}' fails more than once"
+                continue
+            }
+            when (val match = ledger.classify(TestResult(failure.identity, TestOutcome.Failed, failure.signature), red.envId)) {
+                BaselineMatch.PreExisting -> inherited += "${failure.identity} — ${failure.signature}"
+                BaselineMatch.New -> regressions += "${failure.identity} (new) — ${failure.signature}"
+                is BaselineMatch.Changed -> regressions += "${failure.identity} (changed since the baseline) — ${failure.signature}"
+                is BaselineMatch.Ambiguous -> unclear += match.reason
+            }
+        }
+        return when {
+            regressions.isNotEmpty() -> RedClass.Regression to regressions
+            unidentified && ledger.entries.isEmpty() -> RedClass.Regression to listOf("${counted?.let { "$it failure(s)" } ?: "a failure"} on a tree whose baseline ${baseline.receiptId} was clean")
+            unidentified -> RedClass.Unclassified to listOf("failures the runner did not identify: $NO_BASELINE")
+            unclear.isNotEmpty() -> RedClass.Unclassified to unclear.map { "$it: $NO_BASELINE" }
+            else -> RedClass.PreExisting to inherited
+        }
+    }
+
+    /** Whether the [newer] run's selection covers the [older] one's: the same command, or a selection containing it. */
+    private fun covers(newer: Receipt, older: Receipt): Boolean =
+        (newer.command == older.command && newer.cwd == older.cwd) || contains(newer.inputClosure, older.inputClosure)
+
+    /** A selection contains another (P8.C.10 п. 4): the workspace suite every one, a package its members, a path set its subsets. */
+    private fun contains(outer: Closure, inner: Closure): Boolean = when (outer) {
+        Closure.Unknown -> true
+        is Closure.Package -> when (inner) {
+            is Closure.Known -> inner.paths.all { under(it, outer.path) }
+            is Closure.Package -> under(inner.path, outer.path)
+            Closure.Unknown -> false
+        }
+        is Closure.Known -> inner is Closure.Known && outer.paths.containsAll(inner.paths)
+    }
+
+    private fun under(path: String, dir: String): Boolean {
+        val prefix = dir.trimEnd('/')
+        return prefix.isEmpty() || prefix == "." || path == prefix || path.startsWith("$prefix/")
+    }
+
+    /** The limit kind of a flaky receipt (§8.10, [Scheduler.flaky]): it names both attempts. */
+    private const val FLAKY = "flaky"
 }
 
 public data class BaselineResult(
@@ -215,7 +368,8 @@ public class Baseline(
             shaped.status == Outcome.Passed && (shaped.counts == null || (shaped.counts.executed == 0 && shaped.counts.discovered == 0)) -> Outcome.Inconclusive
             else -> shaped.status
         }
-        val receipt = receipt(receiptId, check, contractVersion, s0, command.argv, command.cwd, capture.exitCode, outcome, shaped.counts, TestedInputs(inputs, InputStability.Isolated, mutated), blob, limits)
+        val failures = shaped.tests.filter { it.failing }.map { FailedTest(it.identity, redaction.apply(PreexistingLedger.signatureOf(it), ContentClass.ReusableEvidence).text) }
+        val receipt = receipt(receiptId, check, contractVersion, s0, command.argv, command.cwd, capture.exitCode, outcome, shaped.counts, TestedInputs(inputs, InputStability.Isolated, mutated), blob, limits, failures)
         val ledger = if (receipt.testedInputs.eligible && (outcome == Outcome.Passed || outcome == Outcome.Failed || outcome == Outcome.Inconclusive)) {
             val ledgerLimits = ArrayList<String>()
             if (shaped.tests.isEmpty() && outcome != Outcome.Passed) ledgerLimits += "no test identities parsed by ${shaped.shaper}: nothing can be called pre-existing"
@@ -252,13 +406,15 @@ public class Baseline(
 
     private fun receipt(
         receiptId: String, check: Check, contractVersion: Int, s0: CandidateId, argv: List<String>, cwd: String?, exit: Int?,
-        outcome: Outcome, counts: io.astrolabe.evidence.Counts?, tested: TestedInputs, raw: Digest?, limits: List<Limit>,
+        outcome: Outcome, counts: io.astrolabe.evidence.Counts?, tested: TestedInputs, raw: Digest?, limits: List<Limit>, failures: List<FailedTest> = emptyList(),
     ): Receipt {
         val receipt = Receipt(
             receiptId = receiptId, ids = ids, checkId = check.id, acceptanceIds = check.acceptanceIds, command = argv, cwd = cwd, shell = false,
             stampBefore = s0, stampAfter = s0, envId = env.envId, verifierVersion = verifierVersion, checkDefinitionVersion = check.definitionVersion,
             contractVersion = contractVersion, outcome = outcome, parsed = counts, inputClosure = check.inputClosure, testedInputs = tested,
-            raw = raw, limits = limits, exitCode = exit, at = clock.instant(),
+            // P8.C.10: marked, so the check's own history never reads a run on s0 as a run of the change.
+            raw = raw, limits = limits + Limit(Regressions.BASELINE, "${check.id} on the captured initial candidate @${s0.hash8}"), exitCode = exit, at = clock.instant(),
+            evidenceKind = check.evidenceKind, checkOrigin = check.origin, failures = failures,
         )
         receipts.record(receipt)
         return receipt

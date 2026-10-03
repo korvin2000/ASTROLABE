@@ -36,6 +36,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -353,6 +354,43 @@ class ExitGateTest {
             assertEquals(emptyList(), regression.knownRed)
             assertEquals(Resolution.Complete, resolve(register = done.copy(open = listOf(OpenItem(1, "$id red: tests/test_b.py, tracked"))), currencies = mapOf("CHK-accept-AC-1" to green(), id to red("rcpt-9"))).resolution)
         }
+    }
+
+    @Test
+    fun `a regression against the baseline is rework whatever Open says, a pre-existing failure is no gap, an unclassified red keeps the Open rule`() {
+        val noted = done.copy(open = listOf(OpenItem(1, "CHK-tests-blast CHK-types-touched red: tracked")))
+        for (id in listOf(Checks.TESTS_BLAST, Checks.TYPES_TOUCHED)) {
+            fun held(kind: RedClass, vararg detail: String) = red("rcpt-9").copy(held = HeldRed(listOf("#9"), kind, detail.toList()))
+            val regression = held(RedClass.Regression, "tests/test_b.py::test_b (new) — assert 2 == 1")
+            for (register in listOf(done, noted)) {
+                val resolved = resolve(register = register, currencies = mapOf("CHK-accept-AC-1" to green(), id to regression))
+                assertEquals(Resolution.Rework, resolved.resolution, id)
+                assertTrue(resolved.missing.single().startsWith("$id is red since #9 with a regression no Open item clears — tests/test_b.py::test_b (new)"), resolved.missing.toString())
+                assertEquals(GapKind.Failed, resolved.gaps.single().kind, "an executed red check: no decision covers it")
+            }
+            // Mixed: the gap names the new failures only (the scheduler classified them, SchedulerTest).
+            val mixed = resolve(register = noted, currencies = mapOf("CHK-accept-AC-1" to green(), id to held(RedClass.Regression, "t::new (new) — x")))
+            assertEquals("t::new (new) — x", mixed.missing.single().substringAfter("clears — ").substringBefore("; fix it"))
+            // Every failure pre-existing: complete without an Open item; the finish receipt discloses them.
+            val inherited = held(RedClass.PreExisting, "tests/test_c.py::test_c — assert 0")
+            val complete = resolve(currencies = mapOf("CHK-accept-AC-1" to green(), id to inherited))
+            assertEquals(Resolution.Complete to emptyList<String>(), complete.resolution to complete.missing)
+            assertEquals(listOf("$id: pre-existing failure tests/test_c.py::test_c — assert 0 (unchanged since the baseline at s0; red since #9)"),
+                Obligations.disclosure(id, assertNotNull(Obligations.held(id, inherited))))
+            // A held red whose receipt is stale still holds (red until passed); unclassified, it keeps the D-400 rule.
+            val unclassified = held(RedClass.Unclassified, Regressions.NO_BASELINE).copy(applicability = Applicability.Stale)
+            assertEquals(listOf("$id is red without an Open item naming it"), resolve(currencies = mapOf("CHK-accept-AC-1" to green(), id to unclassified)).missing)
+            assertEquals(Resolution.Complete, resolve(register = noted, currencies = mapOf("CHK-accept-AC-1" to green(), id to unclassified)).resolution)
+            assertEquals(listOf("$id red since #9: ${Regressions.NO_BASELINE}"), Obligations.disclosure(id, assertNotNull(Obligations.held(id, unclassified))))
+            // Without the scheduler's record, a current eligible red is unclassified; a stale or ineligible one holds nothing.
+            assertEquals(RedClass.Unclassified, Obligations.held(id, red("rcpt-9"))?.kind)
+            assertNull(Obligations.held(id, red("rcpt-9").copy(applicability = Applicability.Stale)))
+            assertNull(Obligations.held(id, red("rcpt-9").copy(eligible = false)))
+        }
+        // Not a harness regression check: the full suite keeps the D-400 rule, a held record on it changes nothing.
+        val full = red("rcpt-9").copy(held = HeldRed(listOf("#9"), RedClass.Regression, listOf("x (new)")))
+        assertEquals(Resolution.Complete, resolve(register = done.copy(open = listOf(OpenItem(1, "CHK-full red: tracked"))), currencies = mapOf("CHK-accept-AC-1" to green(), Checks.FULL to full)).resolution)
+        assertNull(Obligations.held(Checks.FULL, full))
     }
 
     @Test

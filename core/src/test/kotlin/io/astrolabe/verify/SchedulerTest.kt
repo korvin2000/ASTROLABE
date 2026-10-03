@@ -7,6 +7,7 @@ import io.astrolabe.evidence.ClosureCompleteness
 import io.astrolabe.evidence.Coherence
 import io.astrolabe.evidence.Counts
 import io.astrolabe.evidence.EvidenceKind
+import io.astrolabe.evidence.FailedTest
 import io.astrolabe.evidence.InMemoryAliases
 import io.astrolabe.evidence.InputStability
 import io.astrolabe.evidence.Outcome
@@ -447,5 +448,40 @@ class SchedulerTest {
         scheduler.runCheck(checks["CHK-full"]!!, 1, execute = { failed() })
         val full = scheduler.currency(checks["CHK-full"]!!, stamper.stamp().id)
         assertEquals(true to null, full.mandatory to full.knownRed, "a mandatory check keeps the I2 rule, never a runtime record")
+    }
+
+    @Test
+    fun `the blast radius stays red until a later passed run, classified against the baseline of its definition`() = runTest {
+        val blast = checks.register(Check(Checks.TESTS_BLAST, CheckKind.Unit, Selector.Blast, Closure.Known(setOf("src/a.py", "tests/test_a.py")), CostClass.Slow, Trigger.StepBoundary,
+            command = Command(listOf("pytest", "tests/test_a.py"))))
+        val identity = io.astrolabe.tool.run.TestIdentity(file = "tests/test_a.py", name = "test_a")
+        val failure = FailedTest(identity, "assert 1 == 2")
+        val failed = { Executed(listOf("pytest", "tests/test_a.py"), null, false, 1, Outcome.Failed, Counts(failed = 1, discovered = 1), null, failures = listOf(failure)) }
+        val red = scheduler.runCheck(blast, 1, execute = { failed() })
+        assertEquals(listOf(failure), receipts.get(red.receiptId)!!.failures, "the failing identities are on the receipt")
+        val first = scheduler.currency(blast, stamper.stamp().id).held
+        assertEquals(HeldRed(listOf(scheduler.aliasOf(red.receiptId)!!), RedClass.Unclassified, listOf(Regressions.NO_BASELINE)), first)
+        assertEquals(listOf(red.receiptId), scheduler.unbaselined(blast).map { it.receiptId }, "verify-on-stop owes it a baseline")
+
+        scheduler.runCheck(blast, 1, execute = { passed(null, exit = null, outcome = Outcome.Timeout) })
+        assertEquals(first, scheduler.currency(blast, stamper.stamp().id).held, "a timeout never ends the red")
+        repo.write("src/a.py", "def a():\n    return 2\n")
+        val stale = scheduler.currency(blast, stamper.stamp().id)
+        assertEquals(Applicability.Stale to first, stale.applicability to stale.held, "a moved tree never ends it either")
+
+        // The baseline of the same definition on s0 failed the same way: pre-existing, and owed nothing more.
+        receipts.record(red.copy(receiptId = "rcpt-base", limits = listOf(io.astrolabe.evidence.Limit(Regressions.BASELINE, "on s0"))))
+        assertEquals(RedClass.PreExisting, scheduler.currency(blast, stamper.stamp().id).held?.kind)
+        assertEquals(emptyList(), scheduler.unbaselined(blast))
+        // Another failure of the same definition is a regression the baseline does not have.
+        val other = FailedTest(identity.copy(name = "test_b"), "assert 0")
+        scheduler.runCheck(blast, 1, execute = { Executed(listOf("pytest", "tests/test_a.py"), null, false, 1, Outcome.Failed, Counts(failed = 2, discovered = 2), null, failures = listOf(failure, other)) })
+        val regression = scheduler.currency(blast, stamper.stamp().id).held
+        assertEquals(RedClass.Regression to listOf("tests/test_a.py::test_b (new) — assert 0"), regression?.kind to regression?.detail)
+
+        scheduler.runCheck(blast, 1, execute = { passed(Counts(passed = 2, discovered = 2)) })
+        assertEquals(null, scheduler.currency(blast, stamper.stamp().id).held, "a passed run of the same selection ends it")
+        repo.write("src/a.py", "def a():\n    return 3\n")
+        assertEquals(null, scheduler.currency(blast, stamper.stamp().id).held, "a stale green is never red")
     }
 }

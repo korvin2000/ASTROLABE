@@ -7,6 +7,7 @@ import io.astrolabe.evidence.Closure
 import io.astrolabe.evidence.ClosureCompleteness
 import io.astrolabe.evidence.ClosureManifest
 import io.astrolabe.evidence.Counts
+import io.astrolabe.evidence.FailedTest
 import io.astrolabe.evidence.InputStability
 import io.astrolabe.evidence.Limit
 import io.astrolabe.evidence.Outcome
@@ -50,7 +51,13 @@ public data class Executed(
     val raw: Digest?,
     val limits: List<String> = emptyList(),
     val expectedExitCode: Int? = 0,
-)
+    /** The failing tests the shaper identified, recorded on the receipt (P8.C.10). */
+    val failures: List<FailedTest> = emptyList(),
+) {
+    /** The constructor before [failures] (P8.C.10). Kept for Java callers. */
+    public constructor(command: List<String>, cwd: String?, shell: Boolean, exit: Int?, outcome: Outcome, counts: Counts?, raw: Digest?, limits: List<String>, expectedExitCode: Int?) :
+        this(command, cwd, shell, exit, outcome, counts, raw, limits, expectedExitCode, emptyList())
+}
 
 /** Paths a check may write without touching its inputs (declared scratch/output policy, D-45): caches, build output, reports. */
 public data class ScratchPolicy(val prefixes: Set<String> = DEFAULT_PREFIXES) {
@@ -93,6 +100,12 @@ public data class Currency @JvmOverloads constructor(
      * inconclusive run or a missing receipt never ends it. `null` when the check is not known red, or mandatory.
      */
     val knownRed: String? = null,
+    /**
+     * P8.C.10: for the blast radius or the types of touched files ([Regressions]), the red that holds until a later passed
+     * run covers it, with its classification against the baseline at `s0`; `null` when none holds, or when the caller did
+     * not compute it (the resolver then reads a current, eligible red as unclassified).
+     */
+    val held: HeldRed? = null,
 ) {
     /** Only a current, eligible, green receipt certifies the final tree for its check. */
     val certifies: Boolean get() = applicability == Applicability.Current && eligible && green
@@ -308,7 +321,7 @@ public class Scheduler(
             verifierVersion = verifierVersion, checkDefinitionVersion = check.definitionVersion, contractVersion = contractVersion,
             outcome = outcome, parsed = executed.counts, inputClosure = check.inputClosure, testedInputs = testedInputs,
             raw = executed.raw, limits = limits, exitCode = executed.exit, at = clock.instant(), closureManifest = manifest, expectedExitCode = executed.expectedExitCode,
-            evidenceKind = kind, checkOrigin = check.origin, evidenceDeclared = check.evidence != null,
+            evidenceKind = kind, checkOrigin = check.origin, evidenceDeclared = check.evidence != null, failures = executed.failures,
         )
         receipts.record(receipt)
         aliasByReceipt[receipt.receiptId] = aliases.allocate(ids.work, receipt.receiptId, "receipt", ids.context, workspace.id).text
@@ -441,19 +454,49 @@ public class Scheduler(
         // D-338: an unverified result names its cause for the decider — "cannot start python3", not just "unavailable".
         if (receipt != null && !green) reasons += "outcome ${receipt.outcome.name.lowercase()}" + (receipt.limits.firstOrNull()?.detail?.let { ": $it" } ?: "")
         return Currency(last.receiptId, refreshed.applicability, eligible, green, reasons, red = receipt?.outcome == Outcome.Failed, mandatory = mandatory,
-            knownRed = if (mandatory) null else knownRedSince(check.id))
+            knownRed = if (mandatory) null else knownRedSince(check.id), held = if (Regressions.of(registered)) held(check.id) else null)
     }
 
     /** C1b ([Currency.knownRed]): walks this attempt's receipts of [checkId] in order; only a later `passed` one ends a red. */
     private fun knownRedSince(checkId: String): String? {
         var since: Receipt? = null
-        for (r in receipts.forCheck(checkId)) {
-            if (r.ids.work != ids.work || r.ids.attempt != ids.attempt) continue
+        for (r in attempt(checkId)) {
+            if (Regressions.isBaseline(r)) continue
             if (r.outcome == Outcome.Failed && since == null) since = r
             if (r.outcome == Outcome.Passed) since = null
         }
-        return since?.let { aliasByReceipt[it.receiptId] ?: aliases.byCanonical(ids.work, it.receiptId)?.text ?: it.receiptId }
+        return since?.let(::alias)
     }
+
+    /**
+     * P8.C.10 ([Currency.held]): the reds of [checkId] no later passed run covers ([Regressions.open]), each classified
+     * against the latest baseline of its own definition in this attempt; one regression makes the whole check a regression,
+     * else one unclassified red makes it unclassified.
+     */
+    private fun held(checkId: String): HeldRed? {
+        val history = attempt(checkId)
+        val open = Regressions.open(history)
+        if (open.isEmpty()) return null
+        val baselines = history.filter(Regressions::isBaseline)
+        val classes = open.map { red -> Regressions.classify(red, baselines.lastOrNull { it.checkDefinitionVersion == red.checkDefinitionVersion }) }
+        val kind = listOf(RedClass.Regression, RedClass.Unclassified).firstOrNull { k -> classes.any { it.first == k } } ?: RedClass.PreExisting
+        return HeldRed(open.map(::alias), kind, classes.filter { it.first == kind }.flatMap { it.second }.distinct())
+    }
+
+    /**
+     * P8.C.10 п. 3: the held reds of a regression [check] that no baseline of their definition classifies yet in this
+     * attempt, one per definition — what verify-on-stop runs once on `s0` before the decision.
+     */
+    internal fun unbaselined(check: Check): List<Receipt> {
+        if (!Regressions.of(checks[check.id] ?: check)) return emptyList()
+        val history = attempt(check.id)
+        val covered = history.filter(Regressions::isBaseline).map { it.checkDefinitionVersion }.toSet()
+        return Regressions.open(history).filter { it.checkDefinitionVersion !in covered }.distinctBy { it.checkDefinitionVersion }
+    }
+
+    private fun attempt(checkId: String): List<Receipt> = receipts.forCheck(checkId).filter { it.ids.work == ids.work && it.ids.attempt == ids.attempt }
+
+    private fun alias(receipt: Receipt): String = aliasByReceipt[receipt.receiptId] ?: aliases.byCanonical(ids.work, receipt.receiptId)?.text ?: receipt.receiptId
 
     private fun assess(check: Check, receipt: Receipt, stampNow: CandidateId?, env: Lazy<EnvFingerprint>): ApplicabilityVerdict {
         // Re-pinning hashes the closure: only worth it when a complete closure could back a reuse proof.

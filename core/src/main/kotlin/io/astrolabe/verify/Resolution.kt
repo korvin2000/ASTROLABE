@@ -404,6 +404,29 @@ public object Obligations {
         return "$checkId known red since receipt $since (recorded by the runtime)"
     }
 
+    /**
+     * P8.C.10: the held red of a harness regression check ([Regressions.CHECKS]) — the scheduler's [Currency.held], or,
+     * from a caller that did not compute it, a current, eligible red read as unclassified (no baseline); `null` otherwise.
+     */
+    @JvmStatic
+    public fun held(checkId: String, currency: Currency): HeldRed? {
+        if (checkId !in Regressions.CHECKS || !currency.mandatory) return null
+        currency.held?.let { return it }
+        val receipt = currency.receiptId?.takeIf { currency.red && currency.applicability == Applicability.Current && currency.eligible } ?: return null
+        return HeldRed(listOf(receipt), RedClass.Unclassified, listOf(Regressions.NO_BASELINE))
+    }
+
+    /**
+     * P8.C.10: what the finish receipt discloses of a held red ([held]) — each pre-existing failure, or that no baseline
+     * classified it; a regression is a gap instead, and is reported as not verified.
+     */
+    @JvmStatic
+    public fun disclosure(checkId: String, held: HeldRed): List<String> = when (held.kind) {
+        RedClass.PreExisting -> held.detail.map { "$checkId: pre-existing failure $it (unchanged since the baseline at s0; red since ${held.since.joinToString(", ")})" }
+        RedClass.Unclassified -> listOf("$checkId red since ${held.since.joinToString(", ")}: " + held.detail.joinToString("; "))
+        RedClass.Regression -> emptyList()
+    }
+
     /** The obligation id prefix of a test-integrity flag; the path follows it. */
     public const val INTEGRITY: String = "integrity:"
 
@@ -421,7 +444,8 @@ public object Obligations {
 /**
  * The one acceptance rule (§8.7, D-337): the cell's exit gate, the verifier, final acceptance and resume all resolve a
  * proposal here, so the same inputs always give the same answer. Order:
- * 1. an executed red check → rework; no decision covers it (§8.8);
+ * 1. an executed red check → rework; no decision covers it (§8.8) — a regression the blast radius or the types of touched
+ *    files found against the baseline at `s0` is one, whatever `Open` says, until a later passed run (P8.C.10);
  * 2. something the agent must close ([other]: an open plan step while acceptance is not proven, a red mandatory check
  *    without an `Open` item, a contract or stamp mismatch, an unresolved impact nudge, an unjustified acceptance-surface
  *    change) → rework; a red optional check is no gap: the runtime records it as known red ([Resolved.knownRed], C1b);
@@ -527,6 +551,23 @@ public object Resolver {
                 Obligations.knownRed(checkId, currency)?.let { knownRed += it }
                 continue
             }
+            // P8.C.10: a red the harness found itself (blast radius, types of touched files) holds until a later passed run
+            // covers it; a regression against the baseline at s0 is never covered by an Open item, a pre-existing failure is
+            // no gap (the finish receipt discloses it), and an unclassified one keeps the rule below.
+            if (checkId in Regressions.CHECKS) {
+                val held = Obligations.held(checkId, currency) ?: continue
+                when (held.kind) {
+                    RedClass.PreExisting -> Unit
+                    RedClass.Regression -> results += ObligationResult("red:$checkId", ObligationKind.Run, ResultStatus.Failed,
+                        "$checkId is red since ${held.since.joinToString(", ")} with a regression no Open item clears — " + held.detail.take(MAX_NAMED).joinToString("; ") +
+                            (if (held.detail.size > MAX_NAMED) "; +${held.detail.size - MAX_NAMED} more" else "") + "; fix it and rerun the check: only a later passed run covering it ends the red",
+                        currency.receiptId)
+                    RedClass.Unclassified -> if (openTexts.none { it.contains(checkId) }) {
+                        results += ObligationResult("red:$checkId", ObligationKind.Run, ResultStatus.Failed, "$checkId is red without an Open item naming it", currency.receiptId)
+                    }
+                }
+                continue
+            }
             // Only a red receipt of this very tree is a red line; a stale red one is history (D-337).
             if (!(currency.red && currency.applicability == Applicability.Current && currency.eligible)) continue
             // A red test is "not done" (I2) until the agent records it in Open: never put to a decider.
@@ -548,4 +589,7 @@ public object Resolver {
         unresolvedImpactNudges.forEach { open += "unresolved impact nudge: $it" }
         return resolve(results, open, decision, reworkSpent, binding).copy(leftOpen = leftOpen, knownRed = knownRed)
     }
+
+    /** How many failures a regression gap names before it counts the rest. */
+    private const val MAX_NAMED = 5
 }

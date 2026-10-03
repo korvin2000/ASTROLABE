@@ -133,6 +133,78 @@ class BaselineTest {
         TestResult(TestIdentity(check = "CHK-full", file = file, suite = suite, name = name, parameterization = parameterization), TestOutcome.Failed, message)
 
     @Test
+    fun `a baseline receipt records its failures and is marked, and a later red is classified failure by failure against it`() = runTest {
+        val baseline = baseline().run(suite("type pytest_output.txt&exit /b 1", "cat pytest_output.txt; exit 1"), contractVersion = 1, s0 = s0).receipt
+        assertTrue(Regressions.isBaseline(baseline), baseline.limits.toString())
+        val inherited = baseline.failures.single()
+        assertEquals("tests/test_discount.py::TestDiscount::test_tier[3]" to "AssertionError: assert 4 == 5", inherited.identity.display to inherited.signature)
+        assertEquals(baseline, SqliteReceipts(store, clock).get(baseline.receiptId), "the failures round-trip through the store")
+        assertEquals(listOf(inherited.identity), assertNotNull(Regressions.ledger(baseline)).entries.map { it.identity })
+
+        // The same run of the change: every failure the baseline's, unchanged ⇒ pre-existing.
+        val moved = io.astrolabe.id.CandidateId(Digest.ofUtf8("s1"))
+        val red = baseline.copy(receiptId = "rcpt-red", limits = emptyList(), stampBefore = moved, stampAfter = moved)
+        assertEquals(RedClass.PreExisting to listOf("tests/test_discount.py::TestDiscount::test_tier[3] — AssertionError: assert 4 == 5"), Regressions.classify(red, baseline))
+        // Mixed: the new failure is named, the inherited one is not.
+        val other = FailedTestOf("test_other", "AssertionError: assert 1 == 2")
+        val mixed = red.copy(parsed = Counts(passed = 4, failed = 2, discovered = 7), failures = listOf(inherited, other))
+        assertEquals(RedClass.Regression to listOf("tests/test_discount.py::TestDiscount::test_other[3] (new) — AssertionError: assert 1 == 2"), Regressions.classify(mixed, baseline))
+        // The same test failing another way is a regression too.
+        val changed = red.copy(failures = listOf(inherited.copy(signature = "AssertionError: assert 3 == 5")))
+        assertEquals(RedClass.Regression, Regressions.classify(changed, baseline).first)
+        assertTrue(Regressions.classify(changed, baseline).second.single().contains("(changed since the baseline)"))
+        // No baseline, another environment, a failure the runner did not identify: no classification (the D-400 rule).
+        assertEquals(RedClass.Unclassified to listOf(Regressions.NO_BASELINE), Regressions.classify(red, null))
+        assertEquals(RedClass.Unclassified, Regressions.classify(red.copy(envId = Digest.ofUtf8("other-env")), baseline).first)
+        assertEquals(RedClass.Unclassified, Regressions.classify(red.copy(parsed = Counts(passed = 4, failed = 2, discovered = 7)), baseline).first)
+        assertEquals(RedClass.Unclassified, Regressions.classify(red, baseline.copy(failures = emptyList())).first, "a red baseline that identifies nothing")
+        // A clean baseline: every failure is new, identified or not.
+        val clean = baseline.copy(outcome = Outcome.Passed, parsed = Counts(passed = 7, discovered = 7), failures = emptyList(), exitCode = 0)
+        assertEquals(RedClass.Regression, Regressions.classify(red, clean).first)
+        assertEquals(RedClass.Regression, Regressions.classify(red.copy(parsed = null, failures = emptyList()), clean).first)
+        val typecheck = clean.copy(outcome = Outcome.Inconclusive, parsed = null, evidenceKind = io.astrolabe.evidence.EvidenceKind.Typecheck)
+        assertEquals(RedClass.Regression, Regressions.classify(red.copy(parsed = null, failures = emptyList()), typecheck).first, "a typecheck that exited clean on s0")
+        assertEquals(RedClass.Unclassified, Regressions.classify(red, typecheck.copy(evidenceKind = io.astrolabe.evidence.EvidenceKind.Tests)).first, "tests that printed nothing countable")
+    }
+
+    private fun FailedTestOf(name: String, signature: String) =
+        io.astrolabe.evidence.FailedTest(TestIdentity(check = null, file = "tests/test_discount.py", suite = "TestDiscount", name = name, parameterization = "3"), signature)
+
+    @Test
+    fun `a red holds until a later eligible passed run that covers its selection`() {
+        val t = io.astrolabe.id.CandidateId(Digest.ofUtf8("t"))
+        val wide = Closure.Known(setOf("src/a.py", "tests/test_a.py", "tests/test_b.py"))
+        var n = 0
+        fun receipt(outcome: Outcome, command: List<String> = listOf("pytest", "tests/test_a.py", "tests/test_b.py"), closure: io.astrolabe.evidence.Closure = wide,
+                    stability: InputStability = InputStability.Exclusive, limits: List<io.astrolabe.evidence.Limit> = emptyList()) = io.astrolabe.evidence.Receipt(
+            receiptId = "r${++n}", ids = ids, checkId = Checks.TESTS_BLAST, acceptanceIds = emptyList(), command = command, cwd = null, shell = false,
+            stampBefore = t, stampAfter = t, envId = env.envId, verifierVersion = "v", checkDefinitionVersion = Digest.ofUtf8(command.joinToString(" ")), contractVersion = 1,
+            outcome = outcome, parsed = if (outcome == Outcome.Passed) Counts(passed = 2, discovered = 2) else Counts(failed = 1, discovered = 2), inputClosure = closure,
+            testedInputs = io.astrolabe.evidence.TestedInputs(emptyMap(), stability), raw = null, limits = limits, at = clock.instant())
+        fun open(vararg history: io.astrolabe.evidence.Receipt) = Regressions.open(history.toList()).map { it.receiptId }
+        val red = receipt(Outcome.Failed)
+        assertEquals(listOf(red.receiptId), open(red))
+        assertEquals(listOf(red.receiptId), open(red, receipt(Outcome.Timeout), receipt(Outcome.Inconclusive), receipt(Outcome.Unavailable)), "only a passed run ends a red")
+        assertEquals(emptyList(), open(red, receipt(Outcome.Passed)))
+        assertEquals(listOf(red.receiptId), open(red, receipt(Outcome.Passed, stability = InputStability.Unknown)), "an ineligible pass ends nothing")
+        assertEquals(emptyList(), open(receipt(Outcome.Failed, stability = InputStability.Unknown)), "an ineligible red begins nothing")
+        val narrowed = receipt(Outcome.Passed, listOf("pytest", "tests/test_a.py"), Closure.Known(setOf("src/a.py", "tests/test_a.py")))
+        assertEquals(listOf(red.receiptId), open(red, narrowed), "a narrowed blast set never clears an uncovered failure")
+        assertEquals(emptyList(), open(red, receipt(Outcome.Passed, listOf("pytest"), Closure.Unknown)), "the workspace suite covers it")
+        assertEquals(emptyList(), open(red, receipt(Outcome.Passed, listOf("pytest"), Closure.Package("."))))
+        assertEquals(listOf(red.receiptId), open(red, receipt(Outcome.Passed, listOf("pytest", "lib"), Closure.Package("lib"))), "another package does not")
+        val later = receipt(Outcome.Failed)
+        assertEquals(listOf(later.receiptId), open(red, later), "a later red of the same selection replaces it")
+        val narrowRed = receipt(Outcome.Failed, narrowed.command, narrowed.inputClosure)
+        assertEquals(listOf(red.receiptId, narrowRed.receiptId), open(red, narrowRed), "a narrower red does not replace the wider one")
+        // §8.10: a flaky pair is inconclusive — its passing half never ends the red.
+        val retry = receipt(Outcome.Passed)
+        val flaky = receipt(Outcome.Inconclusive, limits = listOf(io.astrolabe.evidence.Limit("flaky", "${red.receiptId} failed, isolated rerun ${retry.receiptId} passed: two disagreeing outcomes are inconclusive (§8.10)")))
+        assertEquals(listOf(red.receiptId), open(red, retry, flaky))
+        assertEquals(emptyList(), open(receipt(Outcome.Failed, limits = listOf(io.astrolabe.evidence.Limit(Regressions.BASELINE, "on s0")))), "a baseline is never a run of the change")
+    }
+
+    @Test
     fun `the baseline runs on the captured initial candidate even after edits and its ledger matches identity and signature, not counts or names (IX-13)`() = runTest {
         // Edits after the capture: the working tree now shows a passing run, the captured tree still fails.
         repo.write("pytest_output.txt", recorded.replace("tests/test_discount.py .F.", "tests/test_discount.py ...").replace("5 passed, 1 failed, 1 skipped", "7 passed"))

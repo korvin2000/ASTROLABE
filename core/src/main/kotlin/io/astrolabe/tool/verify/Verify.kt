@@ -17,6 +17,7 @@ import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Contract
 import io.astrolabe.contract.Contracts
 import io.astrolabe.contract.Origin
+import io.astrolabe.evidence.FailedTest
 import io.astrolabe.evidence.Outcome
 import io.astrolabe.evidence.Receipt
 import io.astrolabe.evidence.RedactionMask
@@ -71,6 +72,8 @@ import io.astrolabe.verify.Currency
 import io.astrolabe.verify.Executed
 import io.astrolabe.verify.Layer
 import io.astrolabe.verify.Layers
+import io.astrolabe.verify.PreexistingLedger
+import io.astrolabe.verify.Regressions
 import io.astrolabe.verify.Scheduler
 import io.astrolabe.verify.Selector
 import io.astrolabe.workspace.Stamper
@@ -324,8 +327,30 @@ public class Verify(
         return last.stamp == stampNow && last.outcome in SETTLED_UNVERIFIED
     }
 
-    /** Verify-on-stop (§8.1, P3.1.3): the increment's acceptance on a completion proposal; never the full suite. */
-    public suspend fun onStop(acceptanceIds: Collection<String>): LayerRun = runLayer(Layer.IncrementAcceptance, acceptanceIds)
+    /**
+     * Verify-on-stop (§8.1, P3.1.3): the increment's acceptance on a completion proposal; never the full suite. Then, before
+     * the decision, the baseline of every held red of the blast radius or the types of touched files that none classifies
+     * yet (P8.C.10): its command once on `s0`, per definition and attempt; without a baseline runner nothing runs and the
+     * red stays unclassified.
+     */
+    public suspend fun onStop(acceptanceIds: Collection<String>): LayerRun = runLayer(Layer.IncrementAcceptance, acceptanceIds).also { settleBaselines() }
+
+    /** P8.C.10 п. 3: the baseline receipts verify-on-stop records; they are the check's history, never its last result. */
+    private suspend fun settleBaselines(): List<Receipt> {
+        val runner = baseline ?: return emptyList()
+        val stamp = s0 ?: return emptyList()
+        val contract = contracts.current(ids.work) ?: return emptyList()
+        return Regressions.CHECKS.mapNotNull { checks[it] }.flatMap { check ->
+            scheduler.unbaselined(check).mapNotNull { red ->
+                // A baseline that cannot be exported leaves the red unclassified (the D-400 rule), never the stop broken.
+                try {
+                    runner.run(check.copy(command = io.astrolabe.contract.Command(red.command, red.cwd)), contract.version, stamp, timeoutSeconds).receipt
+                } catch (failure: IOException) {
+                    null
+                }
+            }
+        }
+    }
 
     // --------------------------------------------------------------- running
 
@@ -439,7 +464,9 @@ public class Verify(
             else -> shaped.status
         }
         val note = if (passes) listOf("declared ${check.evidence?.wire} evidence of a host or user command: exit ${capture.exitCode}, no test counts (plan §4.4, D-50 relaxed)") else emptyList()
-        return Executed(command.argv, command.cwd, false, capture.exitCode, outcome, shaped.counts, blob, shaped.limitations + limits + note)
+        // P8.C.10: the failing identities, so a red can be compared with the baseline's; the signature is stored redacted.
+        val failures = shaped.tests.filter { it.failing }.map { FailedTest(it.identity, redaction.apply(PreexistingLedger.signatureOf(it), ContentClass.ReusableEvidence).text) }
+        return Executed(command.argv, command.cwd, false, capture.exitCode, outcome, shaped.counts, blob, shaped.limitations + limits + note, failures = failures)
     }
 
     /**

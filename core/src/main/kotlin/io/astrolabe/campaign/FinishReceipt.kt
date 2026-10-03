@@ -25,6 +25,8 @@ import io.astrolabe.verify.EquivalenceReport
 import io.astrolabe.verify.Obligations
 import io.astrolabe.verify.ProvenanceClass
 import io.astrolabe.verify.ProvenanceKind
+import io.astrolabe.verify.RedClass
+import io.astrolabe.verify.Regressions
 import io.astrolabe.verify.ResultStatus
 import io.astrolabe.verify.ReviewerKind
 import io.astrolabe.verify.RiskAcceptor
@@ -327,9 +329,13 @@ public object FinishReceipts {
         }
         // C1b: a mandatory check outside the acceptance items and the campaign gate (the blast radius, the types of touched
         // files) red on the final tree — completed past on an Open item — leaves the campaign unverified; a known red does not.
+        // P8.C.10: theirs is the held red — until a later passed run, classified against the baseline at s0; a pre-existing
+        // failure is disclosed in openItems and caps nothing, an unclassified one caps the class like any red mandatory check.
+        val held = c.checks.all().filter(Regressions::of).mapNotNull { check -> currencies[check.id]?.let { Obligations.held(check.id, it) }?.let { check.id to it } }
         val redOnFinalTree = c.checks.all()
-            .filter { Obligations.mandatory(it) && !it.required && it.kind != io.astrolabe.verify.CheckKind.Full && it.kind != io.astrolabe.verify.CheckKind.Quality }
-            .filter { check -> currencies[check.id]?.let { it.red && it.applicability == io.astrolabe.verify.Applicability.Current } == true }.map { it.id }
+            .filter { Obligations.mandatory(it) && !it.required && it.kind != io.astrolabe.verify.CheckKind.Full && it.kind != io.astrolabe.verify.CheckKind.Quality && !Regressions.of(it) }
+            .filter { check -> currencies[check.id]?.let { it.red && it.applicability == io.astrolabe.verify.Applicability.Current } == true }.map { it.id } +
+            held.filter { it.second.kind != RedClass.PreExisting }.map { it.first }
         val checksRun = c.checks.all().mapNotNull { check -> check.last?.receiptId?.let(receipts)?.let { check to it } }
             .map { (check, it) -> CheckRun(it.checkId, it.receiptId, it.outcome.name.lowercase(), it.verifierVersion, it.envId.hex, it.checkOrigin, it.evidenceKind, check.command) }
         val registers = packets.map { it.register }
@@ -373,7 +379,8 @@ public object FinishReceipts {
                 state.graph.increments.filter { it.status == io.astrolabe.contract.IncrementStatus.Verified }
                     .flatMap { inc -> state.graph.evidence[inc.id]?.leftOpen.orEmpty().map { "${inc.id}: $it" } } +
                 // Plan §4.3 (C1b): an optional check that is known red, recorded by the runtime in place of the agent's Open item.
-                c.checks.all().filterNot(Obligations::mandatory).mapNotNull { check -> currencies[check.id]?.let { Obligations.knownRed(check.id, it) } },
+                c.checks.all().filterNot(Obligations::mandatory).mapNotNull { check -> currencies[check.id]?.let { Obligations.knownRed(check.id, it) } } +
+                held.flatMap { (id, red) -> Obligations.disclosure(id, red) },
             pendingAmendments = contract.amendmentsPending.map { it.change },
             routingDecisions = emptyList(),
             budget = BudgetLine(totals.quantities.mapKeys { it.key.id }, totals.money, billed?.takeIf { it > 0 }?.let { helper.toDouble() / it }),

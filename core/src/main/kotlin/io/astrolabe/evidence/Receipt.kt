@@ -6,6 +6,7 @@ import io.astrolabe.id.Digest
 import io.astrolabe.id.FileVersion
 import io.astrolabe.id.Identities
 import io.astrolabe.id.InstantSerializer
+import io.astrolabe.tool.run.TestIdentity
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.time.Instant
@@ -77,6 +78,13 @@ public data class TestedInputs(
     val eligible: Boolean get() = stability != InputStability.Unknown && mutatedDuringCheck.isEmpty()
 }
 
+/**
+ * One failing test a run reported (§8.5, P8.C.10): its namespaced identity and its failure signature — the first message
+ * line with volatile data normalized and secrets redacted — so a later red can be compared with the baseline's.
+ */
+@Serializable
+public data class FailedTest(val identity: TestIdentity, val signature: String)
+
 /** Where evidence about a receipt was truncated or could not be captured (§8.4 limitations). */
 @Serializable
 public data class Limit(val kind: String, val detail: String)
@@ -137,7 +145,44 @@ public data class Receipt(
     val checkOrigin: Origin? = null,
     /** True when the host or the user declared [evidenceKind]; a recognised kind is a label and never decides a pass. */
     val evidenceDeclared: Boolean = false,
+    /** The failing tests the shaper identified (P8.C.10); empty when none were or the run predates them. */
+    val failures: List<FailedTest> = emptyList(),
 ) {
+    /** The constructor before [failures] (P8.C.10). Kept for Java callers. */
+    public constructor(
+        receiptId: String,
+        ids: Identities,
+        checkId: String,
+        acceptanceIds: List<String>,
+        command: List<String>,
+        cwd: String?,
+        shell: Boolean,
+        stampBefore: CandidateId,
+        stampAfter: CandidateId,
+        envId: Digest,
+        verifierVersion: String,
+        checkDefinitionVersion: Digest,
+        contractVersion: Int,
+        outcome: Outcome,
+        parsed: Counts?,
+        inputClosure: Closure,
+        testedInputs: TestedInputs,
+        raw: Digest?,
+        limits: List<Limit>,
+        reuseOf: String?,
+        exitCode: Int?,
+        at: Instant,
+        closureManifest: ClosureManifest?,
+        expectedExitCode: Int?,
+        evidenceKind: EvidenceKind?,
+        checkOrigin: Origin?,
+        evidenceDeclared: Boolean,
+    ) : this(
+        receiptId, ids, checkId, acceptanceIds, command, cwd, shell, stampBefore, stampAfter, envId, verifierVersion, checkDefinitionVersion,
+        contractVersion, outcome, parsed, inputClosure, testedInputs, raw, limits, reuseOf, exitCode, at, closureManifest, expectedExitCode,
+        evidenceKind, checkOrigin, evidenceDeclared, emptyList(),
+    )
+
     /** The v1.0 full constructor: the evidence kind, the check's origin and the declaration take their defaults. Kept for Java callers. */
     public constructor(
         receiptId: String,
@@ -167,7 +212,7 @@ public data class Receipt(
     ) : this(
         receiptId, ids, checkId, acceptanceIds, command, cwd, shell, stampBefore, stampAfter, envId, verifierVersion, checkDefinitionVersion,
         contractVersion, outcome, parsed, inputClosure, testedInputs, raw, limits, reuseOf, exitCode, at, closureManifest, expectedExitCode,
-        null, null, false,
+        null, null, false, emptyList(),
     )
 
     init {
