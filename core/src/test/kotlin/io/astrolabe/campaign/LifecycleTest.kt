@@ -171,6 +171,14 @@ class LifecycleTest {
             "failed" to running().then(Transition.Stopped(CampaignOutcome.Failed, "harness error")),
             "budget exhausted" to verified().then(Transition.Stopped(CampaignOutcome.BudgetExhausted, "task limit reached (requests)", budget = BudgetStop.TaskLimitRequests)),
             "contract budget" to verified().then(Transition.Stopped(CampaignOutcome.BudgetExhausted, "the contract's tokens are spent", budget = BudgetStop.ContractBudget)),
+            "contract tokens" to verified().then(Transition.Stopped(CampaignOutcome.BudgetExhausted, "the contract's tokens are spent", budget = BudgetStop.ContractBudget,
+                contract = ContractBudgetStop(ContractBudgetCause.Tokens, 4_000))),
+            "contract turns" to verified().then(Transition.Stopped(CampaignOutcome.BudgetExhausted, "the cell's turns are spent", budget = BudgetStop.ContractBudget,
+                contract = ContractBudgetStop(ContractBudgetCause.Turns, 4_000))),
+            "contract cost" to verified().then(Transition.Stopped(CampaignOutcome.BudgetExhausted, "the contract's money is spent", budget = BudgetStop.ContractBudget,
+                contract = ContractBudgetStop(ContractBudgetCause.Cost, 4_000))),
+            "unknown usage" to verified().then(Transition.Stopped(CampaignOutcome.BudgetExhausted, "a call of unknown tokens", budget = BudgetStop.ContractBudget,
+                contract = ContractBudgetStop(ContractBudgetCause.UnknownUsage, 4_000))),
         )
         val legal = mapOf(
             "opened" to setOf("Reconciled", "IncrementCancelled", "Stopped"),
@@ -185,7 +193,12 @@ class LifecycleTest {
             "failed" to emptySet(),
             // C3: only the host's raised limit reopens a budget stop; it is not a stop on something outside the campaign.
             "budget exhausted" to setOf("LimitRaised"),
+            // C14: a contract budget stop reopens by its recorded cause — tokens and turns — never money, unknown usage or none.
             "contract budget" to emptySet(),
+            "contract tokens" to setOf("LimitRaised"),
+            "contract turns" to setOf("LimitRaised"),
+            "contract cost" to emptySet(),
+            "unknown usage" to emptySet(),
         )
         for ((name, state) in states) {
             val allowed = all.indices.filter { i ->

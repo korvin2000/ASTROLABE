@@ -12,8 +12,10 @@ import io.astrolabe.campaign.OpenedCampaign
 import io.astrolabe.campaign.OptionalLayers
 import io.astrolabe.campaign.PublicationRequest
 import io.astrolabe.campaign.PublicationRun
+import io.astrolabe.campaign.LimitHold
 import io.astrolabe.cell.CellModel
 import io.astrolabe.contract.Contract
+import io.astrolabe.contract.SqliteContractRepository
 import io.astrolabe.event.AgentEvent
 import io.astrolabe.event.Authority
 import io.astrolabe.event.Events
@@ -107,12 +109,38 @@ public class Astrolabe @JvmOverloads public constructor(
      */
     @JvmOverloads
     public suspend fun campaign(project: Project, request: String, policy: CampaignPolicy? = null, publication: PublicationRequest? = null): CampaignHandle {
-        val profile = config.profiles[config.profileRoles.main]
-            ?: throw IllegalStateException("no profile '${config.profileRoles.main}' is configured for the main routing function")
+        val profile = mainProfile()
         val chosen = policy ?: CampaignPolicy(Tokens(profile.capabilities.contextLimitTokens.toLong() * config.defaults.campaignCells))
+        return start(project, { CampaignRequest(WorkId(idGen.next("W")), AttemptId(FIRST_ATTEMPT), request) }, chosen, publication)
+    }
+
+    /**
+     * Reopens [work]'s campaign in [project] and starts it again (C14, "raise the limit and continue"): the same work and
+     * attempt, its contract and verified ledger kept. A [policy] with raised limits or contract tokens lifts the budget stop
+     * that held it; `null` keeps everything stored with the campaign — its limits, the contract's tokens and money, and the
+     * host's notes and resume expectation of its last open. Returns once the campaign is open and reconciled; when the raise
+     * was not enough, [CampaignHandle.limitHold] names what still holds it and [CampaignHandle.await] returns that stop's
+     * outcome without a model call. A work this project has no campaign for is an [IllegalArgumentException].
+     */
+    @JvmOverloads
+    public suspend fun resume(project: Project, work: WorkId, policy: CampaignPolicy? = null, publication: PublicationRequest? = null): CampaignHandle {
+        val contract = SqliteContractRepository(project.store, clock).latest(work)
+            ?: throw IllegalArgumentException("project ${project.root} has no campaign for work ${work.value}")
+        // The first request is what the campaign was opened for; amendments live in the stored contract.
+        val text = contract.requests.firstOrNull()?.text ?: throw IllegalArgumentException("work ${work.value}'s contract holds no request to reopen it with")
+        val chosen = policy ?: io.astrolabe.campaign.HostPolicy.stored(io.astrolabe.evidence.Journal(project.store, clock), work)
+            .let { CampaignPolicy(contract.budget.tokens, contract.budget.cost, it.resumeExpected, it.hostNotes) }
+        return start(project, { CampaignRequest(work, contract.attemptId, text) }, chosen, publication)
+    }
+
+    private fun mainProfile() = config.profiles[config.profileRoles.main]
+        ?: throw IllegalStateException("no profile '${config.profileRoles.main}' is configured for the main routing function")
+
+    private fun start(project: Project, request: () -> CampaignRequest, chosen: CampaignPolicy, publication: PublicationRequest?): CampaignHandle {
+        val profile = mainProfile()
         synchronized(project) {
             check(project.active?.done != false) { "project already runs campaign ${project.active?.workId?.value}" }
-            val opened = controller.open(project, CampaignRequest(WorkId(idGen.next("W")), AttemptId(FIRST_ATTEMPT), request), chosen)
+            val opened = controller.open(project, request(), chosen)
             val model = CellModel(adapter, profile, estimators.estimatorFor(profile))
             val published = AtomicReference<PublicationRun?>(null)
             val finished = AtomicReference<FinishReceipt?>(null)
@@ -202,6 +230,12 @@ public class CampaignHandle internal constructor(
      * returns, or for a campaign that ended without one.
      */
     public val finish: FinishReceipt? get() = finished.get()
+
+    /**
+     * What still holds a budget stop this open could not continue (C14): the task limit or the contract budget to raise
+     * next; `null` when the campaign runs, or was not stopped on a budget.
+     */
+    public val limitHold: LimitHold? get() = opened.limitHold
 
     public val events: Flow<AgentEvent> get() = bus.records().filter { it.event.ids.work == workId }.map { it.event }
 

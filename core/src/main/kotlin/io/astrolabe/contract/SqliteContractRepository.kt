@@ -37,6 +37,20 @@ public class SqliteContractRepository(private val store: Store, private val cloc
 
     override fun replaceLatest(contract: Contract): Unit = store.db.tx { tx -> replaceLatest(tx, contract) }
 
+    /**
+     * In one transaction: re-reads [work]'s latest version, replaces it with [change] of it (`null` keeps it) and runs [also]
+     * with the old and the new contract, so what [also] writes commits with the row (C14).
+     */
+    internal fun replaceLatest(work: WorkId, change: (Contract) -> Contract?, also: (Tx, Contract, Contract) -> Unit): Contract? = store.db.tx { tx ->
+        val latest = tx.query("SELECT body FROM contracts WHERE work_id = ? ORDER BY version DESC LIMIT 1", work) {
+            JSON.decodeFromString(Contract.serializer(), it.string("body"))
+        }.firstOrNull() ?: return@tx null
+        val next = change(latest) ?: return@tx null
+        replaceLatest(tx, next)
+        also(tx, latest, next)
+        next
+    }
+
     private fun replaceLatest(tx: Tx, contract: Contract) {
         val latest = tx.query("SELECT coalesce(max(version), 0) AS v FROM contracts WHERE work_id = ?", contract.workId) { it.long("v").toInt() }.first()
         require(latest == contract.version) { "replaceLatest must keep version $latest, got ${contract.version}" }

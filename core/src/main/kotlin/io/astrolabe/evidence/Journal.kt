@@ -7,6 +7,7 @@ import io.astrolabe.id.InstantSerializer
 import io.astrolabe.id.WorkId
 import io.astrolabe.store.Migrations
 import io.astrolabe.store.Store
+import io.astrolabe.store.Tx
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -78,7 +79,10 @@ public data class JournalHits(val events: List<JournalEvent>, val scope: Journal
  * assigned inside the append transaction, so two events of one work never share or reorder sequence numbers.
  */
 public class Journal(private val store: Store, private val clock: Clock) {
-    public fun append(event: JournalEvent): JournalEvent = store.db.tx { tx ->
+    public fun append(event: JournalEvent): JournalEvent = store.db.tx { tx -> append(tx, event) }
+
+    /** [append] inside [tx], so the event commits with the other rows the transaction writes (C14: the contract budget). */
+    internal fun append(tx: Tx, event: JournalEvent): JournalEvent {
         val seq = tx.query("SELECT coalesce(max(seq), 0) AS s FROM journal WHERE work_id = ?", event.ids.work) { it.long("s") }.first() + 1
         val stamped = event.copy(seq = seq)
         tx.execute(
@@ -87,7 +91,7 @@ public class Journal(private val store: Store, private val clock: Clock) {
             stamped.eventId, stamped.ids.work, stamped.ids.attempt, stamped.ids.candidate, stamped.ids.context,
             seq, stamped.turn, stamped.kind.name, Migrations.SCHEMA_VERSION, clock.instant(), JSON.encodeToString(JournalEvent.serializer(), stamped),
         )
-        stamped
+        return stamped
     }
 
     public fun get(eventId: String): JournalEvent? =

@@ -1,5 +1,6 @@
 package io.astrolabe.budget
 
+import io.astrolabe.campaign.BudgetStop
 import io.astrolabe.id.AttemptId
 import io.astrolabe.id.Identities
 import io.astrolabe.id.WorkId
@@ -9,6 +10,8 @@ import io.astrolabe.provider.Money
 import io.astrolabe.provider.UsageProvenance
 import io.astrolabe.telemetry.CallAccount
 import io.astrolabe.telemetry.Quantities
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.json.Json
 import java.math.BigDecimal
 import java.time.Instant
 import kotlin.test.Test
@@ -158,5 +161,23 @@ class LimitsTest {
         cell.startTurn(Spend.Generation)
         assertIs<Admission.Admitted>(cell.admit(Spend.Generation, Tokens(1_234))).release()
         assertEquals(listOf(Spend.Generation to 0L, Spend.Generation to 1_234L), asked)
+    }
+
+    @Test
+    fun `limit kinds, cost bases and budget stops travel as their wire words and still read their constant names`() {
+        fun <E : Enum<E>> check(serializer: KSerializer<E>, entries: List<E>, wire: (E) -> String) {
+            for (entry in entries) {
+                assertEquals("\"${wire(entry)}\"", Json.encodeToString(serializer, entry))
+                assertEquals(entry, Json.decodeFromString(serializer, "\"${wire(entry)}\""))
+                assertEquals(entry, Json.decodeFromString(serializer, "\"${entry.name}\""), "a record written before C14 names the constant")
+            }
+        }
+        check(LimitKind.serializer(), LimitKind.entries) { it.wire }
+        check(CostBasis.serializer(), CostBasis.entries) { it.wire }
+        check(BudgetStop.serializer(), BudgetStop.entries) { it.wire }
+        assertEquals(listOf("money", "minutes", "requests"), LimitKind.entries.map { it.wire })
+        // What `budget.spent` and `budget.limit_reached` carry.
+        val status = LimitRule.status(TaskLimits(maxCost = usd("5")), spend(requests = 1, cost = "1"))
+        assertTrue("\"costBasis\":\"estimated\"" in Json.encodeToString(LimitStatus.serializer(), status))
     }
 }
