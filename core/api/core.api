@@ -26896,6 +26896,7 @@ public final class io/astrolabe/verify/SnapshotReceipt$Companion {
 public final class io/astrolabe/verify/StopCode : java/lang/Enum {
 	public static final field AcceptanceDecision Lio/astrolabe/verify/StopCode;
 	public static final field Companion Lio/astrolabe/verify/StopCode$Companion;
+	public static final field IntegrityReview Lio/astrolabe/verify/StopCode;
 	public static final field ReviewRejected Lio/astrolabe/verify/StopCode;
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;
 	public final fun getWire ()Ljava/lang/String;

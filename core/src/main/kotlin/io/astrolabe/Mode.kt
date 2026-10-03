@@ -22,8 +22,9 @@ public enum class DClassPolicy { Ask, Deny }
  * asked, and only a person's approving verdict ([io.astrolabe.verify.ReviewerKind.Human]) resolves it — the request says
  * so ([io.astrolabe.verify.ReviewRequest.humanOnly]). A model's answer is kept as the person's information: its approval
  * resolves nothing and its rejection is a rejection as before; a policy's acceptance does not cover the flag, a user's
- * does (the class stays the agent's evidence). Until a person answers, the campaign waits, and the host is asked again on
- * resume.
+ * does (the class stays the agent's evidence). Every acceptance-surface change since s0 on the tree counts, whichever cell
+ * made it. Until a person answers, the campaign waits ([io.astrolabe.verify.StopCode.IntegrityReview]), and the host is
+ * asked again on resume. S3 writers ask no person: `Human` with `Flags.s3Writers` is a configuration error.
  */
 @Serializable
 public enum class IntegrityApproval { Autonomous, Human }
