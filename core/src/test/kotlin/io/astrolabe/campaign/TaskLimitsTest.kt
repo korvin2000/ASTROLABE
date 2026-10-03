@@ -4,6 +4,7 @@ import io.astrolabe.AttemptConfig
 import io.astrolabe.BalanceProfile
 import io.astrolabe.Config
 import io.astrolabe.atlas.Atlas
+import io.astrolabe.budget.CellBudget
 import io.astrolabe.budget.CostBasis
 import io.astrolabe.budget.HeuristicEstimator
 import io.astrolabe.budget.LimitDecision
@@ -310,6 +311,27 @@ class TaskLimitsTest {
             assertEquals(TaskLimits.NONE, c.limits, "an explicit none lifts the kept limits")
             val run = controller().runS0(c, CellModel(FakeAdapter(ScriptedModel.of(Scripted.Reply(listOf<Item>(say("done"))))), FakeProfiles.main, HeuristicEstimator()))
             assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+        }
+    }
+
+    @Test
+    fun `the reserve of a task limit pays for verification and the report, never for edits`() = runBlocking<Unit> {
+        // C3r 2: 4 requests hold 3 back, so every turn after the first is a reserve turn — even for a file the cell changed (D-366 is the turn budget's).
+        val s0 = CampaignRequest(WorkId("W-c3-repair"), AttemptId("a1"), "make a return 10")
+        seed(s0, shape = Shape.S0)
+        controller().open(repo.root, s0, policy(TaskLimits(maxRequests = 4))).use { c ->
+            val adapter = FakeAdapter(ScriptedModel.of(
+                Scripted.Reply(listOf<Item>(say("scratch"), call("e-new", "edit", """{"ops":[{"create":"src/new.py","content":"new"}],"why":"scratch"}"""))),
+                Scripted.Reply(listOf<Item>(say("remove my scratch file"), call("e-del", "edit", """{"ops":[{"delete":"src/new.py","expect":"${io.astrolabe.id.Digest.of("new".toByteArray()).hex}"}],"why":"repair"}"""))),
+                Scripted.Reply(listOf<Item>(say("verifying"), call("v-a", "verify", """{"what":"acceptance","ids":["AC-1"]}"""))),
+                Scripted.Reply(listOf<Item>(say("done"))),
+            ))
+            val run = controller().runS0(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator()))
+            assertEquals(4, adapter.calls.size, run.state?.reason)
+            assertTrue(java.nio.file.Files.exists(repo.root.resolve("src/new.py")), "the edit on the limit's reserve is refused")
+            assertTrue(adapter.calls.drop(1).none { it.request.mask!!.allows("edit.delete") || it.request.mask!!.allows("edit.anchored") }, "no edit op on a task limit's reserve turn")
+            assertTrue(CellBudget.GATE in texts(adapter.calls[1].request), "the gate line")
+            assertTrue(adapter.calls.none { "repairs to your own files only" in texts(it.request) }, "never the repair line")
         }
     }
 

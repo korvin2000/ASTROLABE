@@ -325,8 +325,9 @@ public class Cell @JvmOverloads constructor(
                 ev.journal.append(JournalEvent(idGen.next("ev"), ids, turn, JournalKind.Boundary, text = "refactor mode (${refactor.reasons.first()}): red_ok_until ${RefactorMode.RED_OK_UNTIL}", at = clock.instant()))
             }
             redOkUntilIncrementEnd = refactor.active
-            // D-366: a reserve reached by the turn count, with working tokens left, still lets the cell repair what it changed.
-            val repairable = if (reserveTurn && budget.working.available.value > 0) ownPaths() else emptySet()
+            // D-366: a reserve reached by the turn count, with working tokens left, still lets the cell repair what it changed —
+            // never a task limit's reserve (C3r), which pays for verification and the report only.
+            val repairable = if (reserveTurn && budget.working.available.value > 0 && !budget.limitReserve) ownPaths() else emptySet()
             val mask = maskFor(contract, reserveTurn, repairable.isNotEmpty())
             val schemas = when (val selection = schemaSelection) {
                 is SchemaSelection.Supported -> selection.set
