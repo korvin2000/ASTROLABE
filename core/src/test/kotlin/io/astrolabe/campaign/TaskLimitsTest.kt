@@ -6,7 +6,9 @@ import io.astrolabe.Config
 import io.astrolabe.atlas.Atlas
 import io.astrolabe.budget.CostBasis
 import io.astrolabe.budget.HeuristicEstimator
+import io.astrolabe.budget.LimitDecision
 import io.astrolabe.budget.LimitKind
+import io.astrolabe.budget.LimitRule
 import io.astrolabe.budget.TaskLimits
 import io.astrolabe.budget.Tokens
 import io.astrolabe.cell.CellFixture.Companion.anchored
@@ -51,7 +53,10 @@ import io.astrolabe.provider.Response
 import io.astrolabe.provider.Terminal
 import io.astrolabe.store.Store
 import io.astrolabe.telemetry.Accounting
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 import org.junit.jupiter.api.io.TempDir
 import java.math.BigDecimal
 import java.nio.file.Path
@@ -205,6 +210,36 @@ class TaskLimitsTest {
         clock.advance(Duration.ofHours(4))
         controller().open(repo.root, request, CampaignPolicy(Tokens(400_000))).use { c ->
             assertEquals(120_000L, TaskLimitControl(idGen, clock, null).spend(c).elapsedMillis, "the four hours stopped are not counted")
+        }
+    }
+
+    @Test
+    fun `a host wait in one branch does not stop the clock while another branch works`() = runBlocking<Unit> {
+        // C3r 1: a 60 s limit; branch A (a child cell) waits for the host from t = 10 s while the run itself works 600 s more.
+        controller().open(repo.root, request, policy(TaskLimits(maxMinutes = 1))).use { c ->
+            val control = TaskLimitControl(idGen, clock, null)
+            assertNotNull(control.begin(c))
+            val answer = CompletableDeferred<io.astrolabe.event.Answer?>()
+            val host = control.pausing(c, object : io.astrolabe.event.Authority by AutonomousAuthority() {
+                override suspend fun ask(question: Question): io.astrolabe.event.Answer? = answer.await()
+            })
+            clock.advance(Duration.ofSeconds(10))
+            val a = launch { control.branch(c) { host.ask(Question("q-a", c.contract.version, c.ids, "May I?")) } }
+            yield()
+            clock.advance(Duration.ofSeconds(600))
+            val spend = control.spend(c)
+            assertEquals(610_000L, spend.elapsedMillis, "the run's own work is active time while a child waits for the host")
+            assertEquals(LimitKind.Minutes, (LimitRule.decide(c.limits, spend) as LimitDecision.Exhausted).kind)
+            // Once every branch waits — the child and the run itself — the clock stops.
+            val b = launch { host.ask(Question("q-b", c.contract.version, c.ids, "And I?")) }
+            yield()
+            clock.advance(Duration.ofMinutes(30))
+            assertEquals(610_000L, control.spend(c).elapsedMillis, "all branches wait for the host: not active time")
+            answer.complete(null)
+            a.join()
+            b.join()
+            clock.advance(Duration.ofSeconds(1))
+            assertEquals(611_000L, control.spend(c).elapsedMillis)
         }
     }
 

@@ -82,8 +82,16 @@ internal class LimitBlock(val decision: LimitDecision, val price: Money?)
 /** A run of the controller over a campaign (C3 minutes): its start, the active time before it and its paused waits. */
 internal class LimitSession(val startEventId: String, val start: Instant, val priorMillis: Long) {
     var pausedMillis: Long = 0
-    var pauseDepth: Int = 0
+
+    /** The branches at work: the run itself and every child cell in flight (C3r). */
+    var branches: Int = 1
+
+    /** The host's answers being waited for, one per waiting branch. */
+    var waiting: Int = 0
     var pauseStart: Instant? = null
+
+    /** The clock stops only while every branch waits for the host; one working branch keeps it running (C3r). */
+    val paused: Boolean get() = waiting > 0 && waiting >= branches
 }
 
 /** The limits' running state of one opened campaign: the session, the latched reserve, the stop, the counter, a spend cache. */
@@ -99,8 +107,8 @@ internal class LimitState {
 }
 
 /**
- * Active time from the journal (C3 minutes): every run writes a session start and end, and pauses around the host's
- * answers (a person's wait is not active time). A run that died without its end is closed at reopen at its last
+ * Active time from the journal (C3 minutes): every run writes a session start and end, and pauses while every branch of
+ * it waits for the host's answers (a person's wait is not active time; C3r). A run that died without its end is closed at reopen at its last
  * journal event, before the reopen writes anything, so a reopen never counts the time the task stood stopped.
  */
 internal object LimitSessions {
@@ -206,6 +214,21 @@ internal class TaskLimitControl(private val idGen: IdGen, private val clock: Clo
         c.limitState.session = null
     }
 
+    /**
+     * [block] as a branch of [c]'s run beside the one that started it — a child cell (C3r): a host wait elsewhere stops
+     * the clock only while this branch waits too. A parent blocked on its child still counts as working, so a child's
+     * own host wait is active time (conservative: the clock may run long, never short).
+     */
+    suspend fun <T> branch(c: OpenedCampaign, block: suspend () -> T): T {
+        val session = c.limitState.session ?: return block()
+        shift(c, session) { it.branches += 1 }
+        try {
+            return block()
+        } finally {
+            shift(c, session) { it.branches -= 1 }
+        }
+    }
+
     /** [authority] with the run's session paused while the host answers: a person's wait is not active time. */
     fun pausing(c: OpenedCampaign, authority: Authority): Authority = object : Authority by authority {
         override suspend fun ask(question: Question) = paused(c) { authority.ask(question) }
@@ -217,27 +240,31 @@ internal class TaskLimitControl(private val idGen: IdGen, private val clock: Clo
 
     private suspend fun <T> paused(c: OpenedCampaign, block: suspend () -> T): T {
         val session = c.limitState.session ?: return block()
-        mark(c, session, pause = true)
+        shift(c, session) { it.waiting += 1 }
         try {
             return block()
         } finally {
-            mark(c, session, pause = false)
+            shift(c, session) { it.waiting -= 1 }
         }
     }
 
-    private fun mark(c: OpenedCampaign, session: LimitSession, pause: Boolean) {
+    /** Applies [change] to [session]'s counters and journals the edge when it stops or restarts the clock. */
+    private fun shift(c: OpenedCampaign, session: LimitSession, change: (LimitSession) -> Unit) {
         val now = clock.instant()
-        val edge = synchronized(session) {
-            if (pause) {
-                session.pauseDepth += 1
-                (session.pauseDepth == 1).also { if (it) session.pauseStart = now }
-            } else {
-                session.pauseDepth -= 1
-                (session.pauseDepth == 0).also { if (it) { session.pausedMillis += session.pauseStart?.let { s -> LimitSessions.span(s, now) } ?: 0; session.pauseStart = null } }
+        val edge: Boolean? = synchronized(session) {
+            val was = session.paused
+            change(session)
+            when {
+                !was && session.paused -> true.also { session.pauseStart = now }
+                was && !session.paused -> false.also {
+                    session.pausedMillis += session.pauseStart?.let { s -> LimitSessions.span(s, now) } ?: 0
+                    session.pauseStart = null
+                }
+                else -> null
             }
         }
-        if (edge) c.journal.append(JournalEvent(idGen.next("ev"), c.ids, null, JournalKind.Boundary, refs = listOf(session.startEventId),
-            text = if (pause) LimitSessions.PAUSED + " · waiting for the host" else LimitSessions.RESUMED, at = now))
+        if (edge != null) c.journal.append(JournalEvent(idGen.next("ev"), c.ids, null, JournalKind.Boundary, refs = listOf(session.startEventId),
+            text = if (edge) LimitSessions.PAUSED + " · waiting for the host" else LimitSessions.RESUMED, at = now))
     }
 
     /**

@@ -2251,7 +2251,8 @@ public class Controller @JvmOverloads public constructor(
      * with the runtime brief pinned in `[T]` — the parent's transcript never reaches it (D13).
      */
     private fun childCell(c: OpenedCampaign, increment: Increment, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?): ChildCell =
-        ChildCell { seat, declared, completion, budget, brief ->
+        // C3r: a child is a branch of the run: a host wait elsewhere stops the minutes clock only while it waits too.
+        ChildCell { seat, declared, completion, budget, brief -> limitControl.branch(c) {
             // D-38: the frozen attempt configuration words the child's role; its mask and packet stay the caller's.
             val role = RoleTexts.worded(declared, c.attempt.config.role(declared.name))
             // §11.1: a child is routed by its own function row, never by the parent's tier; an escalated tier is its floor.
@@ -2262,7 +2263,7 @@ public class Controller @JvmOverloads public constructor(
             routing.refused?.let { throw ChildNotStarted("the ${role.name} child of ${increment.id} is unaffordable: ${it.reason}") }
             runCell(c, seat.context, increment, role, routing.model, authority, syntax, compiled, span, null, completion = completion, pinned = listOf(brief), child = ChildForm(seat.cancellation, budget, isolated = role.name == Roles.review.name))
                 .exit.also { exit -> routing.selected?.let { router.record(it, outcomeOf(exit)) } }
-        }
+        } }
 
     /**
      * The controller-side writer cell (§10.4, D-181): the child-context form of [runCell] over the writer's worktree —
@@ -2270,7 +2271,7 @@ public class Controller @JvmOverloads public constructor(
      * the child's cancellation and budget. Its exit is kept in [exits] for the campaign state (D-243).
      */
     private fun writerCell(c: OpenedCampaign, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?, exits: MutableMap<String, CellExit>): WriterCell =
-        WriterCell { seat, dispatch, declared, budget, brief ->
+        WriterCell { seat, dispatch, declared, budget, brief -> limitControl.branch(c) {
             val increment = checkNotNull(c.state).graph.increments.first { it.id == dispatch.task.incrementId }
             val role = RoleTexts.worded(declared, c.attempt.config.role(declared.name))
             val routing = route(c, seat.function, increment, model, seat.tier, null) { bound ->
@@ -2286,7 +2287,7 @@ public class Controller @JvmOverloads public constructor(
                     routing.selected?.let { router.record(it, outcomeOf(exit)) }
                     exit?.let { exits[dispatch.handle.id] = it }
                 }
-        }
+        } }
 
     /** D-242: each pending unit's writer-token estimate from its compiled writer `[K]`; `null` (slack unmeasured) when one cannot compile. */
     private fun writerEstimates(c: OpenedCampaign, model: CellModel): Map<String, Long>? {
