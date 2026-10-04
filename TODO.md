@@ -2139,7 +2139,7 @@ Listed so the contracts above stay clean; none of these tasks start under this p
 ---
 
 ## P8 ASTROLABE 2.0
-Goal: the model decides; the runtime executes, waits, records and finishes. Plan, design and order: [`../ASTROLABE-2-PLAN.md`](../ASTROLABE-2-PLAN.md) (changes only through its §17); one task per work package (WP) of plan §6, `Done` = the plan's "done when" column. Task cards `../plan2/WP-<id>.md`, line reports `../plan2/reports/WP-<id>.md`; branches `v2/<id>`, merged `--no-ff` into `main` by the orchestrator (plan §8.7). Verification: plan §8.4 (L1 focused, L2 touched packages at merge, L3 = CI on push to `main`). `Repo:` names the repository when not `ASTROLABE`. Counts: `rg -c '^#### P8\..*· DONE' TODO.md`. **Amendment 2026-10-04 (plan §0 item 10, §4.3a, §11 №14–25):** the role contour — direct for every shape, shape S2 live (group P8.H), then S3; order D → H → E → F → release. In this file `S0`–`S3` name execution shapes only; plan sessions are "session N". Frozen in 2.0 (plan §12, as amended): KB curation, QA cell, generated tools, MCP, the recovery ladder above capsule repair, learned routing — their debts stay as they are; S2, delegation to a probe, the review cell and function routing are unfrozen by P8.H, S3 by P8.H.9. The KB itself is not frozen but off by default and configurable (`Flags.kbInjection`; plan §11 №12): keep its code and the `kb` family in the structured protocol; its measurement and the small project memory are the reserve group P8.G (not a release criterion).
+Goal: the model decides; the runtime executes, waits, records and finishes. Plan, design and order: [`../ASTROLABE-2-PLAN.md`](../ASTROLABE-2-PLAN.md) (changes only through its §17); one task per work package (WP) of plan §6, `Done` = the plan's "done when" column. Task cards `../plan2/WP-<id>.md`, line reports `../plan2/reports/WP-<id>.md`; branches `v2/<id>`, merged `--no-ff` into `main` by the orchestrator (plan §8.7). Verification: plan §8.4 and §8.8 (L1 focused, once per change; L2 at merge = touched packages + every module compiles + ABI; the full suite only on a wave tag or before release and never awaited — owner №28). `Repo:` names the repository when not `ASTROLABE`. Counts: `rg -c '^#### P8\..*· DONE' TODO.md`. **Amendment 2026-10-04 (plan §0 item 10, §4.3a, §11 №14–25):** the role contour — direct for every shape, shape S2 live (group P8.H), then S3; order D → H → E → F → release. In this file `S0`–`S3` name execution shapes only; plan sessions are "session N". Frozen in 2.0 (plan §12, as amended): KB curation, QA cell, generated tools, MCP, the recovery ladder above capsule repair, learned routing — their debts stay as they are; S2, delegation to a probe, the review cell and function routing are unfrozen by P8.H, S3 by P8.H.9. The KB itself is not frozen but off by default and configurable (`Flags.kbInjection`; plan §11 №12): keep its code and the `kb` family in the structured protocol; its measurement and the small project memory are the reserve group P8.G (not a release criterion).
 **Rollback point:** tag `v1.0.1-final` in all three repositories (2026-10-02).
 
 ### P8.A Wave A — foundation: free and visible
@@ -2308,7 +2308,7 @@ Goal: the model decides; the runtime executes, waits, records and finishes. Plan
 #### P8.D.5 [V] D5 Paired benchmark direct vs structured; default protocol per model class · TODO
 - Deps: P8.D.1–P8.D.4, P8.B.2, P8.B.5–P8.B.7. Spec: plan §6 D5, §9, appendix A.6. Amendment 2026-10-04: a third arm `loop` and a separate stratum of long tasks (confirmation set of P8.B.6).
 - Build: the confirmation set (plan §9.2) includes the class "second task in the same project" (pairs on one base, one working directory and one store per pair; the runner gains a pair mode) so P8.G.1–G.2 reuse it; in D5 the pairs count as ordinary tasks.
-- [ ] **Gate P8.D:** L2 → push `main` → CI green on Ubuntu + Windows; Fable review of D5.
+- [ ] **Gate P8.D:** L2 with compile-all and ABI → push `main` (fast CI job) → the wave tag starts the full suite, not awaited (plan §8.4, owner №28); Fable review of D5.
 
 ### P8.H Wave H — role contour: shape S2 live, then S3 (amendment 2026-10-04; plan §4.3a, §6, owner №15–18; before E)
 #### P8.H.1 [V] H0 Role-contour specification · TODO
@@ -2337,7 +2337,7 @@ Goal: the model decides; the runtime executes, waits, records and finishes. Plan
 - Done: the policy frozen by a tag before the runs; a report with per-task intervals from the automated part (4–6 closed long tasks, cheap models) and a summary of the owner's Studio runs (observations, not a paired comparison); the owner's decision on the "Auto" thresholds and on the combination of mechanisms; "not proven" leaves S2 a manual option.
 #### P8.H.9 [M] H8 Shape S3 live (reserve, after P8.H.8) · TODO
 - Deps: P8.H.8, P8.H.2. Pkg: `campaign/S3Run.kt`, `campaign/Controller.kt`, Studio. Spec: plan §4.3a item 8, §6 H8.
-- [ ] **Gate P8.H:** L2 → push `main` → CI green on Ubuntu + Windows; Java ABI; resume of attempts created before the amendment; old config snapshots read without the new policies; Codex statistics of H7.
+- [ ] **Gate P8.H:** L2 with compile-all and ABI → push `main` (fast CI job) → the wave tag starts the full suite, not awaited (plan §8.4, owner №28); Java ABI; resume of attempts created before the amendment; old config snapshots read without the new policies; Codex statistics of H7.
 
 ### P8.E Wave E — balance (owner goal)
 #### P8.E.1 [M] E1 Binding key and binding-physics table (store v6), estimators, `routing_log` · TODO
@@ -2348,14 +2348,14 @@ Goal: the model decides; the runtime executes, waits, records and finishes. Plan
 - Deps: P8.E.1, P8.E.2. Repo: root (Studio). Spec: plan §6 E3.
 #### P8.E.4 [O] E4 Shadow stop-loss · TODO
 - Deps: P8.E.2. Pkg: `cell/Gates.kt`, `campaign/`, `telemetry/`. Spec: plan §6 E4, §10.3.
-- [ ] **Gate P8.E:** L2 → push `main` → CI green on Ubuntu + Windows; Codex review.
+- [ ] **Gate P8.E:** L2 with compile-all and ABI → push `main` (fast CI job) → the wave tag starts the full suite, not awaited (plan §8.4, owner №28); Codex review.
 
 ### P8.F Wave F — context economics (shadow and safe only)
 #### P8.F.1 [O] F1 Hysteresis at R_max (on); payback eviction rule (shadow) · TODO
 - Spec: plan §6 F1, §10.2.
 #### P8.F.2 [O] F2 Epoch trigger (shadow) · TODO
 - Spec: plan §6 F2, §10.3.
-- [ ] **Gate P8.F:** L2 → push `main` → CI green on Ubuntu + Windows.
+- [ ] **Gate P8.F:** L2 with compile-all and ABI → push `main` (fast CI job) → the wave tag starts the full suite, not awaited (plan §8.4, owner №28).
 
 ### P8.G Reserve — memory between tasks (reserve sessions 11–12, after D and E; owner decisions plan §11 №12–13; not a release criterion)
 #### P8.G.1 [V] G1 KB measurement: pipeline behind flags + paired run off/live · TODO
@@ -2366,12 +2366,12 @@ Goal: the model decides; the runtime executes, waits, records and finishes. Plan
 - Deps: P8.C.1 (evidence kinds), P8.D.3 (`Controller`/`Compiler` owners free), P8.G.1 (pair set). Pkg: `store/` (table), `context/Compiler.kt` (`[K]` block), `verify/`, Studio (view). Spec: plan §6 G2, §11 №13.
 - Build: environment facts (toolchain, build and test commands, approved commands) with provenance (receipt, file version) and validity, collected by the runtime from receipts and `EffectPolicy`, never by the model; ≤ ~300 tokens, compiled in at task start in the same project; behind a `Config` flag, off by default; measured by the P8.G.1 arm.
 - Done: the second task of a pair does not rediscover the test command (pair run); `[S]` bytes unchanged; flag off → byte-identical behaviour.
-- [ ] **Gate P8.G:** L2 → push `main` → CI green on Ubuntu + Windows; Codex statistics of G1.
+- [ ] **Gate P8.G:** L2 with compile-all and ABI → push `main` (fast CI job) → the wave tag starts the full suite, not awaited (plan §8.4, owner №28); Codex statistics of G1.
 
 ### P8.R Release
 #### P8.R.1 [V] R1 Release 2.0.0 · TODO
 - Deps: plan §7.1. Build: `docs/` (INDEX, decisions, defaults, roadmap), `CHANGELOG`, version 2.0.0, ABI dumps, migration v6, Studio notes; final Codex and Fable reviews.
-- [ ] **Gate P8.R:** CI ×2 green on Ubuntu + Windows; tag `v2.0.0`.
+- [ ] **Gate P8.R:** the full suite green on Ubuntu + Windows (the release tag starts it); tag `v2.0.0`.
 
 ---
 

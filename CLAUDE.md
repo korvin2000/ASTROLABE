@@ -69,8 +69,9 @@ Skip at startup: `PREPARE_IMPLEMENTATION_PLAN.md` (historical), `sources/`, `REV
 Sandbox wrapper: it waits for the bootstrap marker, syncs the tree and re-applies the retarget, then prints one OK line
 with test totals, or the failure lines plus the log tail. The full log is in `${TMPDIR:-/tmp}/astrolabe-jdk25.state/last.log`,
 and a manual bootstrap is `scripts/sandbox-gradle.sh --setup`. The scratch copy is never committed; CI on JDK 26 remains the authority.
-CI (`.github/workflows/ci.yml`) runs `./gradlew check` (incl. `checkKotlinAbi`) on ubuntu-latest + windows-latest, JDK 26.
-It triggers on **push to `main`** and on **pull requests**, so a session branch gets CI only through an open PR.
+CI (`.github/workflows/ci.yml`), JDK 26: a **push to `main`** or a **pull request** runs the fast job — every module and its
+tests compile, `checkKotlinAbi` — on ubuntu-latest. The full `./gradlew check` on ubuntu-latest + windows-latest runs only on
+a wave tag `v2-wave-*`, a release tag or a manual dispatch (plan §8.4, owner 2026-10-04).
 
 ## Known failures and gotchas
 - **Environmental; never block a gate and are never re-proved:** in the Linux sandbox, `FixtureReposTest` gradle-small
@@ -114,6 +115,10 @@ No doc tour, no exploration. Get counts with `rg -c`.
   then waits for CI on both platforms, once. Tick its `- [ ] **Gate …**` line in TODO.md with the run link.
   Fix failures before the next block; bisect via the per-task commits.
 - Task entries' per-task "full build / both platforms / ABI" wording is discharged at the gate (TODO §0.1 precedence line).
+- *ASTROLABE 2.0 (P8), owner decision 2026-10-04 — overrides the block gate above:* targeted tests only (plan §8.4, §8.8).
+  No local full `build`. At a merge: the touched packages plus `./gradlew assemble testClasses checkKotlinAbi`. The full
+  suite runs unattended on a wave or release tag; never wait for it — read its result at the next session start and
+  fix failures with targeted tests.
 - Known environmental failures (above) don't block a gate; no baseline reruns to re-prove them.
 - Long commands run quietly; never paste full logs.
 
