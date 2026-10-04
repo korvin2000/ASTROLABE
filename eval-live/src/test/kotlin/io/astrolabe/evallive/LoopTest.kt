@@ -152,6 +152,89 @@ class LoopTest {
     }
 
     @Test
+    fun `a second session of the same work continues the first one's spend`() {
+        val workspace = Files.createDirectories(dir.resolve("ws2"))
+        workspace.resolve("notes.txt").writeText("first line\n")
+        val events = Events(Clock.systemUTC())
+        val recorder = Recorder(events, dir.resolve("events2.jsonl"))
+        try {
+            val base = RunSpec.defaults(FakeProfiles.main, dir.resolve("state").toString())
+            val spec = base.copy(policy = base.policy.copy(limits = TaskLimits(maxRequests = 3)))
+            val budget = LoopBudget()
+            val ids = FixedIdGen()
+            val work = io.astrolabe.id.WorkId("W-loop")
+            val adapter = endless()
+            val first = runBlocking { LoopAttempt(Clock.systemUTC(), ids).run(workspace, "Read the notes.", binding(adapter), events, spec, Duration.ofMinutes(5), SessionScript(closeAfterResponses = 2), work, budget) }
+            val second = runBlocking { LoopAttempt(Clock.systemUTC(), ids).run(workspace, "Read the notes.", binding(adapter), events, spec, Duration.ofMinutes(5), SessionScript(), work, budget) }
+            recorder.drain()
+            val totals = Totals.of(recorder.events(), FakeProfiles.main.priceTable)
+
+            assertEquals(StudioAttempt.CLOSED, first.reason)
+            assertEquals("budget_exhausted", second.outcome, second.reason)
+            assertEquals("task_limit_requests", second.stopCode)
+            assertEquals(3, totals.modelRequests, "the limit holds across both sessions: $totals")
+            assertEquals(3, budget.calls.size)
+        } finally {
+            recorder.close()
+            events.close()
+        }
+    }
+
+    @Test
+    fun `with a provider bill both arms count exactly the calls, tokens, bills and table prices`() {
+        val task = LoopFixtures.task(dir)
+        val core = LoopFixtures.plan(dir, task, Arms.DEFAULT)
+        val bill = Money("USD", BigDecimal("0.0100"))
+        val coreAdapter = Billed(FakeAdapter(ScriptedModel(listOf(
+            ScriptedModel.Turn({ true }, {
+                LoopFixtures.workspace(core).resolve("notes.txt").writeText(LoopFixtures.EXPECTED)
+                Scripted.Reply(listOf(Message.text(Role.Assistant, "done")))
+            }, once = false),
+        ))), bill)
+        val loopAdapter = Billed(solving(), bill)
+        val bound = { adapter: Billed -> ModelSource { ModelBinding(adapter, FakeProfiles.main, EstimatorFactory { HeuristicEstimator() }) } }
+
+        val byCore = Bench(core, bound(coreAdapter), Interpreters.detect("python"), Clock.systemUTC(), FixedIdGen()).run().single()
+        val byLoop = Bench(core.copy(arm = Arms.LOOP), bound(loopAdapter), Interpreters.detect("python"), Clock.systemUTC(), FixedIdGen()).run().single()
+
+        assertEquals(3, loopAdapter.usages.size, "the loop's three calls")
+        for ((result, adapter) in listOf(byCore to coreAdapter, byLoop to loopAdapter)) {
+            val t = assertNotNull(result.totals, result.arm)
+            val usages = adapter.usages
+            fun sum(dimension: io.astrolabe.provider.BillingDimension) = usages.sumOf { it.quantities[dimension] ?: 0L }
+            val n = usages.size
+            assertEquals(n, t.modelRequests, "${result.arm}: $t")
+            assertEquals(n, t.modelResponses)
+            assertEquals(sum(io.astrolabe.provider.BillingDimension.UNCACHED_INPUT), t.uncachedInputTokens, result.arm)
+            assertEquals(sum(io.astrolabe.provider.BillingDimension.CACHE_READ), t.cacheReadTokens, result.arm)
+            assertEquals(sum(io.astrolabe.provider.BillingDimension.OUTPUT), t.outputTokens, result.arm)
+            assertEquals(0, bill.amount.multiply(BigDecimal(n)).compareTo(BigDecimal(assertNotNull(t.cost))), "${result.arm}: the bills, $t")
+            val byTable = usages.map { it.price(FakeProfiles.main.priceTable).amount }.reduce(BigDecimal::add)
+            assertEquals(0, byTable.compareTo(BigDecimal(assertNotNull(t.costByTable))), "${result.arm}: the table prices, $t")
+            assertEquals("billed", t.costBasis, result.arm)
+            assertEquals(0, t.unpricedCalls)
+        }
+    }
+
+    /** The fake provider with a reported bill of [bill] on every call; [usages] are the reconciled usages it reported. */
+    private class Billed(private val inner: FakeAdapter, private val bill: Money) : io.astrolabe.provider.ProviderAdapter by inner {
+        val usages: MutableList<io.astrolabe.provider.BillableUsage> = java.util.concurrent.CopyOnWriteArrayList()
+
+        override fun start(request: io.astrolabe.provider.Request, id: io.astrolabe.provider.InvocationId): io.astrolabe.provider.Invocation {
+            val call = inner.start(request, id)
+            return object : io.astrolabe.provider.Invocation by call {
+                override suspend fun await(): io.astrolabe.provider.Response = call.await().let { r -> r.copy(usage = r.usage?.copy(billed = bill)) }
+
+                override suspend fun terminal(): io.astrolabe.provider.Terminal = call.terminal().let { t ->
+                    val usage = t.usage?.copy(billed = bill)
+                    usage?.let(usages::add)
+                    t.copy(usage = usage, response = t.response?.let { r -> r.copy(usage = r.usage?.copy(billed = bill)) })
+                }
+            }
+        }
+    }
+
+    @Test
     fun `the accounting of the loop and of the core arm has the same fields in result json`() {
         val task = LoopFixtures.task(dir)
         val core = LoopFixtures.plan(dir, task, Arms.DEFAULT)
@@ -175,7 +258,7 @@ class LoopTest {
             assertNotNull(t.outputTokens, "${result.arm}: $t")
             assertNotNull(t.cacheReadTokens, "${result.arm}: $t")
             assertNotNull(t.cost, "${result.arm}: $t")
-            assertEquals("paid", t.costBasis, "${result.arm}: $t")
+            assertEquals("estimated", t.costBasis, "${result.arm}: $t")
             assertEquals("USD", t.currency)
             assertEquals(mapOf("main" to t.modelResponses), t.profiles, "${result.arm}: $t")
         }

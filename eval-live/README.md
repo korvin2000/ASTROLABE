@@ -85,12 +85,17 @@ the core arm except the agent's own machinery. These rules were written before t
    working notes describe its own state and task tools and are not given. Workspace, base commit and follow-ups
    (interruption recap + constraint, a message mid-run, a second session) are the bench's, as for the core.
 2. **Permissions.** Every shell line is classified by the core's `EffectPolicy.classify` with the core's default
-   `EffectPolicyConfig`; a D-class line is refused, as the Studio's `auto` mode refuses a D-class effect no contract
-   allowlists, and recorded as the policy decision `effect skipped`. File tools stay inside the workspace and never
-   touch `.git`. Processes get the platform essentials plus `redaction.envAllowlist`, as the core's do.
+   `EffectPolicyConfig`, the default contract scope's protected paths and a containment probe over the real disk, as
+   the core's `run` tool gets them (a delete inside the workspace is W, one outside D); a D-class line is refused, as
+   the Studio's `auto` mode refuses a D-class effect no contract allowlists, and recorded as the policy decision
+   `effect skipped`. File tools resolve through the core's `WorkspacePath`: never outside the workspace (`..` or a
+   link), never `.git` in any case, never a write through a link or into a protected path. Processes get the platform
+   essentials plus `redaction.envAllowlist`, as the core's do.
 3. **External budget.** The task limits of `RunSpec.defaults` (money, minutes, requests) are checked before every model
-   call by the core's own `LimitRule.decide` over the loop's spend: per call the billed amount, else the priced usage,
-   else the conservative hold (every input token at the dearest input rate plus the full output headroom). `Exhausted`
+   call by the core's own `LimitRule.decide` over the work's spend summed by the core's `LimitSpend.of` — each call's
+   money chosen exactly as `Totals` chooses it (the provider's bill, else the usage at the profile's table, paid or
+   nominal; an unpriced profile counts no money), else the conservative hold of the core's rule (every input token at
+   the dearest input rate plus the full output headroom). A second session of the same work continues its spend. `Exhausted`
    stops before dispatch (outcome `budget_exhausted`, stop code `task_limit_money|minutes|requests`); the first `Reserve`
    of a kind tells the model to check its work and finish. Minutes are active time on the injected clock. The same
    `--deadline-minutes` applies. The cell cap does not: the loop has no cells.
@@ -106,7 +111,8 @@ the core arm except the agent's own machinery. These rules were written before t
    that fails with a transport error, a rate limit or a timeout is sent again at most twice. Every dispatched call —
    answered, failed or cancelled — is a request and ends in one `ModelResponded` with its reconciled usage (`terminal()`,
    bounded by `providerTerminalWaitSeconds`), so both arms are counted by the same `Totals`. Another provider error
-   ends the attempt `failed`; refused credentials end it `blocked_external`.
+   ends the attempt `failed`; refused credentials end it `blocked_external`. Known limit: retries inside the SDK are not
+   visible in N for either arm, while the loop's own repeats are separate calls.
 9. **Window overflow.** The loop never compacts or summarises. When the next request does not fit — the adapter's
    validation or the provider's `ContextOverflow` — the content of every tool result but the last four is replaced by a
    stub, once; if the request still does not fit, the attempt ends `failed` ("context window full").

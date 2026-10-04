@@ -170,7 +170,10 @@ internal data class Totals(
                 outputTokens = dimension { it == BillingDimension.OUTPUT },
                 currency = currency,
                 cost = priced?.takeIf { !it.unknown }?.amount?.toPlainString(),
-                costPricedPart = priced?.amount?.toPlainString(),
+                // The known part keeps a partially priced call's priced dimensions, which `LimitSpend` folds into "unknown".
+                costPricedPart = priced?.let {
+                    accounts.fold(BigDecimal.ZERO) { sum, a -> sum + (a.usage?.billed?.takeIf { b -> a.charge == Charge.Paid || b.amount.signum() > 0 }?.amount ?: a.money.amount) }.toPlainString()
+                },
                 spanCost = spanTotal?.toPlainString(),
                 providerModels = usages.mapNotNull { it?.provenance?.model }.distinct(),
                 stops = responded.groupingBy { it.stop.name }.eachCount(),
