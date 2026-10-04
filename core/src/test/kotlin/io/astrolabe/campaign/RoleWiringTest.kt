@@ -133,4 +133,34 @@ class RoleWiringTest {
             assertTrue(kbLines.isNotEmpty() && kbLines.all { "skills SKILL-returns" in it }, kbLines.toString())
         }
     }
+
+    @Test
+    fun `a direct attempt runs its S1 main line as the direct role beside a structured plan cell`() = runBlocking<Unit> {
+        val controller = Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all, defaults = alwaysPlan, protocol = io.astrolabe.cell.Protocol.Direct), clock, idGen)
+        controller.open(repo.root, request, policy).use { c ->
+            assertEquals(io.astrolabe.cell.Protocol.Direct, c.attempt.config.protocol, "frozen with the attempt")
+            val plan = """{"increments":[{"id":"I1","requirements":["R1","R2"],"accept":["AC-1","AC-2"],"write_scope":["src/"],"expected_files":1,"produces":"artifact"}]}"""
+            val v = c.registry.version("src/a.py")!!
+            val replies = listOf(
+                Scripted.Reply(listOf(say("planning"), call("p1", "task", """{"op":"propose","kind":"plan","proposal":$plan}"""))),
+                Scripted.Reply(listOf(say("plan ready"))),
+                Scripted.Reply(listOf<Item>(say("reading"), read("r1", "src/a.py"))),
+                Scripted.Reply(listOf<Item>(say("editing"), anchored("e1", "src/a.py", v, "    return 1", "    return 10"))),
+                Scripted.Reply(listOf<Item>(say("done"))),
+            )
+            val adapter = FakeAdapter(ScriptedModel.of(*replies.toTypedArray()))
+            val run = controller.run(c, CellModel(adapter, FakeProfiles.main, HeuristicEstimator()))
+
+            val requests = adapter.calls.map { it.request }
+            val planCell = texts(requests.first(), SegmentKind.S)
+            assertTrue(planCell.startsWith("astrolabe · role plan · kernel/2 · "), "helpers stay structured: $planCell")
+            val mainLine = requests.filter { it.mask!!.allows("edit.anchored") }
+            assertTrue(mainLine.isNotEmpty(), "outcome ${run.outcome}: ${run.state?.reason}")
+            for (r in mainLine) {
+                assertTrue(texts(r, SegmentKind.S).startsWith("astrolabe · role direct · kernel-direct/1 · "), texts(r, SegmentKind.S))
+                assertEquals(listOf("look", "edit", "run", "verify", "state", "task"), r.tools.map { it.name })
+                assertTrue(r.mask!!.allows("task.propose") && r.mask!!.allows("state.note"), "S1 enables propose and the direct-only names")
+            }
+        }
+    }
 }

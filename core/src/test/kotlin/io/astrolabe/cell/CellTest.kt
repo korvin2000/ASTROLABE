@@ -643,6 +643,32 @@ class CellTest {
     }
 
     @Test
+    fun `a direct cell sends its own S and schemas and refuses the declared note and finish typed until they exist`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(
+                    call("c1", "state", """{"op":"note","note":{"kind":"hypothesis","text":"a returns 1"}}"""),
+                    call("c2", "task", """{"op":"finish","after_checks":true}"""),
+                    call("c3", "task", """{"op":"propose","kind":"plan","proposal":{"increments":[]}}"""),
+                )),
+                Scripted.Reply(listOf(call("c4", "state", """{"op":"blocked","blocked":{"reason":"stop here"}}"""))),
+            )
+
+            assertIs<CellExit.Blocked>(f.run(model, role = Roles.direct))
+
+            assertEquals(listOf("look", "edit", "run", "verify", "state", "task"), f.request(1).tools.map { it.name })
+            assertEquals(f.request(1).tools, f.request(2).tools, "one schema set for the line")
+            val system = (f.request(1).segment(SegmentKind.S)!!.items.single() as io.astrolabe.provider.Message).text
+            assertTrue(system.startsWith("astrolabe · role direct · kernel-direct/1 · ") && KernelDirect.render() in system, system)
+            assertTrue(f.anchorText(1).contains("enabled this turn: all role tools except task.propose"), f.anchorText(1))
+            val results = f.transcript(2).filterIsInstance<ToolResult>().associate { it.callId to resultText(it) }
+            assertTrue(results.getValue("c1").contains("state.note is declared by the direct protocol and not implemented in this harness version"), results.getValue("c1"))
+            assertTrue(results.getValue("c2").contains("task.finish is declared by the direct protocol and not implemented in this harness version"), results.getValue("c2"))
+            assertTrue(results.getValue("c3").contains("task.propose is not enabled in shape S0"), results.getValue("c3"))
+        }
+    }
+
+    @Test
     fun `a state op the loop gate requires still refuses the whole turn`() = runTest {
         CellFixture(stateRoot).use { f ->
             val model = ScriptedModel.of(

@@ -134,6 +134,42 @@ class LayoutTest {
         val set = assertIs<SchemaSelection.Supported>(ToolSchemas.forLineage(adapter, FakeProfiles.main, role.toolMask)).set
         assertEquals(GOLDEN_SCHEMAS_IMPLEMENTING, set.fingerprint.hex, "the implementing schema bytes moved")
         assertEquals(ToolFamily.entries.map { it.wire }, set.schemas.map { it.name })
+        // A-D.1 "Unchanged bytes": the role-built set and the compile fingerprint of every structured role equal the mask-built ones.
+        assertEquals(GOLDEN_SCHEMAS_IMPLEMENTING, ToolSchemas.fingerprint(role).hex, "Fingerprint.schemas")
+        for (structured in Roles.defaults.values.filter { it.protocol == Protocol.Structured }) {
+            val byRole = assertIs<SchemaSelection.Supported>(ToolSchemas.forLineage(adapter, FakeProfiles.main, structured)).set
+            assertEquals(assertIs<SchemaSelection.Supported>(ToolSchemas.forLineage(adapter, FakeProfiles.main, structured.toolMask)).set, byRole, structured.name)
+            assertEquals(byRole.fingerprint, ToolSchemas.fingerprint(structured), structured.name)
+        }
+    }
+
+    @Test
+    fun `the direct S speaks kernel-direct-1, lists the direct names and thirteen error rows, whatever the shape`() {
+        val direct = Roles.direct
+        val system = Layout.system(direct, ExecutionMode.TrustedLocal)
+        val lines = system.lines()
+        assertEquals("astrolabe · role direct · kernel-direct/1 · roles/5 · error-policy/5", lines.first())
+        assertEquals(2_194, KernelDirect.render().length, "the eight frozen lines of A-D.2")
+        assertTrue(system.startsWith(lines.first() + "\n" + KernelDirect.render() + "\n"), system)
+        assertTrue(KernelDirect.lines.indices.all { i -> lines[i + 1].startsWith("${i + 1}. ") } && lines[9].startsWith("duties: "), system)
+        assertEquals("duties: execute one increment to green acceptance · keep notes with state(note) · finish through task(finish)", lines[9])
+        assertEquals("ask-back: ask the parent", lines[10])
+        assertEquals("packet: Result", lines[11])
+        assertEquals(
+            "tools: look(tree, outline, read, find, def, refs, recall) · edit(anchored, create, delete, rename, revert) · run(run, wait, cancel) · " +
+                "verify(check, baseline) · state(note, blocked) · task(ask, answer, finish, propose) (the role's tools, masked, never removed; [A] names those enabled this turn)",
+            lines[12],
+        )
+        assertEquals(13, ErrorPolicy.directRows.size)
+        assertTrue(ErrorPolicy.directRows.none { it.first in setOf("delegated result with a moved base", "transform outside its scope", "STATE invariant violated") })
+        assertEquals(ErrorPolicy.rows.indexOfFirst { it.first == "STATE invariant violated" }, ErrorPolicy.directRows.indexOfFirst { it.first == "note refused" }, "replaced in place")
+        assertTrue(system.contains("error policy:\n" + ErrorPolicy.render(Protocol.Direct) + "\n"), system)
+        assertTrue("STATE" !in system && "kb" !in system.substringBefore("evidence:"), system)
+        assertEquals(ErrorPolicy.render(), ErrorPolicy.render(Protocol.Structured))
+        // A-D.2: [S] is a function of the role and the mode only; the shape speaks in [A].
+        val ceiling = Ceiling(CapabilitySet("wide", Capability.entries.toSet()), Stage.LocalCommit, ExecutionMode.TrustedLocal)
+        assertEquals("enabled this turn: all role tools except task.propose", Layout.enabled(direct, direct.effectiveOps(Shape.S0, ceiling)))
+        assertEquals("enabled this turn: all role tools", Layout.enabled(direct, direct.effectiveOps(Shape.S1, ceiling)))
     }
 
     @Test
