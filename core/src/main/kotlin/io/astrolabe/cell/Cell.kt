@@ -1073,7 +1073,7 @@ public class Cell @JvmOverloads constructor(
                 }
                 when (parsed.family) {
                     ToolFamily.Edit -> if (!outcome.applied) return "$op did not apply in full"
-                    else -> if (!outcome.green) return "$op did not pass"
+                    else -> if (!outcome.green) return "$op is not passing: neither green nor ready"
                 }
             }
             return null

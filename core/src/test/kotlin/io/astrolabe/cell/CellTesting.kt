@@ -184,24 +184,27 @@ internal class CellFixture(
     private fun newRun(readOnlyRole: String?) = Run(workspace, registry, stamper, TrustedLocalRunner(os), os, intents, SqliteHandles(store, clock), observations, aliases, store.blobs, Redaction(), estimator, idGen, ids, contracts, AutonomousAuthority(), Config(), clock, logs, readOnlyRole = readOnlyRole)
     val verify = Verify(checks, scheduler, checker, null, null, workspace, TrustedLocalRunner(os), os, stamper, store.blobs, Redaction(), estimator, idGen, ids, contracts, logs)
     val task = TaskTool(AutonomousAuthority(), contracts, journal, estimator, idGen, ids, clock, events)
+    /** The direct role's executor mask holds `task.finish` (A-D.5), as the controller's effective mask does. */
+    val directTask = TaskTool(AutonomousAuthority(), contracts, journal, estimator, idGen, ids, clock, events, Roles.direct.toolMask)
     val kb = KbTool(EmptyKb, estimator, idGen)
 
     lateinit var adapter: FakeAdapter
         private set
 
-    fun context(model: ScriptedModel, profile: Profile = FakeProfiles.main, profiles: Map<String, Profile> = FakeProfiles.all, holdResponses: Boolean = false, role: Role = Roles.implementing, manifest: String? = null, diagnoses: Diagnoses? = null): CellContext {
+    fun context(model: ScriptedModel, profile: Profile = FakeProfiles.main, profiles: Map<String, Profile> = FakeProfiles.all, holdResponses: Boolean = false, role: Role = Roles.implementing, manifest: String? = null, diagnoses: Diagnoses? = null, turnBudgetHandoff: Boolean = false): CellContext {
         adapter = FakeAdapter(model, profiles, holdResponses = holdResponses)
         return CellContext(
             ids = ids,
             role = role,
             contracts = contracts,
             model = CellModel(adapter, profile, estimator),
-            tools = CellTools(state, look, edit, if (Roles.readOnlyRuns(role)) newRun(role.name) else run, verify, task, kb),
+            tools = CellTools(state, look, edit, if (Roles.readOnlyRuns(role)) newRun(role.name) else run, verify, if (role.protocol == Protocol.Direct) directTask else task, kb),
             workspace = CellWorkspace(workspace, registry, coherence, stamper, workset, checks, scheduler, atlas, checker),
             evidence = CellEvidence(journal, observations, aliases, receipts, intents, registerVersions, checkpoints, preimages),
             prime = Prime.render(atlas, Sniff.commands(atlas)),
             manifest = manifest,
             diagnoses = diagnoses,
+            turnBudgetHandoff = turnBudgetHandoff,
         )
     }
 
@@ -220,7 +223,8 @@ internal class CellFixture(
         role: Role = Roles.implementing,
         completion: RoleCompletion? = null,
         manifest: String? = null,
-    ): CellExit = cell(defaults, completion, authority).run(context(model, profile, profiles, role = role, manifest = manifest), increment, budget(turns))
+        turnBudgetHandoff: Boolean = false,
+    ): CellExit = cell(defaults, completion, authority).run(context(model, profile, profiles, role = role, manifest = manifest, turnBudgetHandoff = turnBudgetHandoff), increment, budget(turns))
 
     /** The `[T]` items of the [n]th request the adapter received (1-based). */
     fun transcript(n: Int): List<Item> = request(n).segment(SegmentKind.T)?.items.orEmpty()

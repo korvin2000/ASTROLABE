@@ -106,7 +106,8 @@ class LifecycleTest {
         return CellExit.Blocked(1, Register.empty(cell, "I1", "Fix it"), checkpoint(cell, CellStatus.Blocked), packet(cell, PacketStatus.Blocked, request), request)
     }
     private fun partial(reason: PartialReason, cell: ContextId = c1) =
-        CellExit.Partial(1, Register.empty(cell, "I1", "Fix it"), checkpoint(cell, CellStatus.Partial), packet(cell, PacketStatus.Partial), reason, "continue")
+        CellExit.Partial(1, Register.empty(cell, "I1", "Fix it"), checkpoint(cell, CellStatus.Partial), packet(cell, PacketStatus.Partial), reason, "continue",
+            io.astrolabe.cell.HandoffCause.Pressure.takeIf { reason == PartialReason.Handoff })
     private fun failed(cell: ContextId = c1) =
         CellExit.Failed(1, Register.empty(cell, "I1", "Fix it"), checkpoint(cell, CellStatus.Failed), packet(cell, PacketStatus.Failed), "provider error")
     private fun cancelled(cell: ContextId = c1) =
@@ -295,6 +296,7 @@ class LifecycleTest {
             PartialReason.Reserve to CampaignOutcome.BudgetExhausted,
             PartialReason.Pressure to CampaignOutcome.Failed,
             PartialReason.CompletionStalled to CampaignOutcome.Failed,
+            PartialReason.Handoff to CampaignOutcome.BudgetExhausted,
         ), fallbacks)
         // Only the table's outcomes exist; completed is never a disposition of a single cell.
         assertEquals(setOf("waiting_for_process", "waiting_for_input", "blocked_external"), CampaignOutcome.entries.filter { it.resumable }.map { it.wire }.toSet())
@@ -329,6 +331,23 @@ class LifecycleTest {
         assertEquals(1, interrupted.graph.increments.single().sizing.turns)
         val lost = dispatched().then(Transition.Lost(c1, null))
         assertEquals(0, lost.graph.increments.single().sizing.turns, "a lost cell without a checkpoint adds nothing it cannot show")
+    }
+
+    @Test
+    fun `a handoff continues in an epoch that sizing keeps apart from continuations and from pressure rebuilds`() {
+        val handedOff = partial(PartialReason.Handoff)
+        assertEquals(io.astrolabe.cell.HandoffCause.Pressure, handedOff.handoffCause)
+        assertFailsWith<IllegalArgumentException>("a handoff names its cause") {
+            CellExit.Partial(1, Register.empty(c1, "I1", "Fix it"), checkpoint(c1, CellStatus.Partial), packet(c1, PacketStatus.Partial), PartialReason.Handoff, "h")
+        }
+        val continued = assertIs<Disposition.Continue>(Lifecycle.disposition(handedOff, null))
+        assertEquals(CampaignOutcome.BudgetExhausted, continued.fallback, "the stop when the handoffs are spent")
+        val state = dispatched().then(Transition.Returned(handedOff), Transition.Dispatched("I1", c2, epoch = true))
+        val sizing = state.graph.increments.single().sizing
+        assertEquals(0, sizing.continuations, "an epoch is not a continuation")
+        assertEquals(1, sizing.handoffs)
+        assertEquals(0, sizing.rebuilds, "only a terminating pressure stop adds a rebuild")
+        assertEquals(listOf(c1, c2), state.graph.increments.single().cells)
     }
 
     @Test
