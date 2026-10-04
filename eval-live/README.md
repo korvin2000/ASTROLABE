@@ -45,6 +45,7 @@ C:/work.astrolab/bench/<tag>/bin/eval-live run --models deepseek/deepseek-v4.1-f
 | `--python <program>` | detected | interpreter for `{python}` in acceptance commands |
 | `--temp <dir>` | `<java.io.tmpdir>/eval-live` | parent of the per-run directories |
 | `--keep-workspaces` | off | keep each run's temporary directory for inspection |
+| `--arm <name>` | `default` | the arm: a named configuration over the core's `RunSpec` (below) |
 
 Keys are resolved by the SDK: the provider's environment variable (`OPENROUTER_API_KEY`) or the credential store given
 with `--credentials`. The runner never reads or prints a key; without one it stops before the first run and names the
@@ -56,6 +57,67 @@ when a task is unsound; `TaskValidityTest` asserts the same.
 The agent's processes (`run`, `verify`, transforms) get no variable of the start scripts (`APP_HOME`, `CLASSPATH`,
 `JAVA_OPTS`, `EVAL_LIVE_OPTS`): the core starts them with the platform essentials plus the attempt's
 `redaction.envAllowlist` only (`EnvironmentTest`).
+
+## Arms
+
+An arm is a named configuration of one bench, not a branch (plan §6 B5): what runs the task — the core or the loop —
+and the core's protocol, shape forcing and model table over `RunSpec.defaults`. Arms are compared on the same tasks,
+models, acceptance, limits and accounting; one results directory can hold several arms side by side.
+
+| arm | runs | state |
+|---|---|---|
+| `default` | the core, structured protocol, the Studio's default launch (`RunSpec.defaults`) | runs |
+| `loop` | the reference loop below, over `provider-api` only | runs |
+| `direct` | the core with the direct protocol | refused until the core has it (D1) |
+
+An arm that sets a field the core cannot honour yet — the direct protocol (D1), a forced shape (H2), a model table (H3),
+or any core field on the loop — is refused with an error naming the field, never run as if it were not set.
+
+### The loop arm: rules of a fair comparison
+
+`loop` is the yardstick for every axis (plan §9.1), not a product interface: one transcript, four tools — `read`,
+`edit`, `write`, `shell` — and a model that calls them until it answers without a tool call. It shares everything with
+the core arm except the agent's own machinery. These rules were written before the code and bind it:
+
+1. **Inputs.** The request is `prompt.md` verbatim as the first user message. The system text is the loop's tool
+   description plus the host facts the default arm gets: `StudioPolicy.platform` and `StudioPolicy.verificationText` of
+   the same verification setup (the declared test command, else the review setup with its declared hints). The core's
+   working notes describe its own state and task tools and are not given. Workspace, base commit and follow-ups
+   (interruption recap + constraint, a message mid-run, a second session) are the bench's, as for the core.
+2. **Permissions.** Every shell line is classified by the core's `EffectPolicy.classify` with the core's default
+   `EffectPolicyConfig`; a D-class line is refused, as the Studio's `auto` mode refuses a D-class effect no contract
+   allowlists, and recorded as the policy decision `effect skipped`. File tools stay inside the workspace and never
+   touch `.git`. Processes get the platform essentials plus `redaction.envAllowlist`, as the core's do.
+3. **External budget.** The task limits of `RunSpec.defaults` (money, minutes, requests) are checked before every model
+   call by the core's own `LimitRule.decide` over the loop's spend: per call the billed amount, else the priced usage,
+   else the conservative hold (every input token at the dearest input rate plus the full output headroom). `Exhausted`
+   stops before dispatch (outcome `budget_exhausted`, stop code `task_limit_money|minutes|requests`); the first `Reserve`
+   of a kind tells the model to check its work and finish. Minutes are active time on the injected clock. The same
+   `--deadline-minutes` applies. The cell cap does not: the loop has no cells.
+4. **Effort and output.** `RunSpec.effort` and `RunSpec.outputHeadroom(profile)` on every request; the same profile,
+   adapter and estimator.
+5. **Acceptance.** The same hidden acceptance on a copy of the finished workspace.
+6. **Cache points.** The core's layout rule: the system region `[S]` and the transcript `[T]` are each closed by a
+   breakpoint when the profile has explicit breakpoints (`caching.breakpoints`), and carry none otherwise; every request
+   carries the work's `sessionKey`. The transcript only grows, so its prefix stays cacheable.
+7. **Tool output.** A `read` result is cut to `Defaults.lookBudgetTokens`, a `shell` result to `runBudgetTokens`, at the
+   core shaper's 3.6 characters per token, head and tail kept; a shell line runs at most `runTimeoutSeconds`.
+8. **Retries and their accounting.** Transport retries are the adapter's — the same AI Gate adapter in both arms. A call
+   that fails with a transport error, a rate limit or a timeout is sent again at most twice. Every dispatched call —
+   answered, failed or cancelled — is a request and ends in one `ModelResponded` with its reconciled usage (`terminal()`,
+   bounded by `providerTerminalWaitSeconds`), so both arms are counted by the same `Totals`. Another provider error
+   ends the attempt `failed`; refused credentials end it `blocked_external`.
+9. **Window overflow.** The loop never compacts or summarises. When the next request does not fit — the adapter's
+   validation or the provider's `ContextOverflow` — the content of every tool result but the last four is replaced by a
+   stub, once; if the request still does not fit, the attempt ends `failed` ("context window full").
+10. **Final check.** When the model answers without a tool call, the loop runs the verification setup's commands (those
+    the default arm's contract accepts against). A failing one goes back to the model with its output and the loop
+    continues, at most twice; then the attempt ends `completed` either way, and the hidden acceptance judges. A review
+    setup (no test command) runs nothing.
+11. **Events.** The loop emits what the core emits for model work — `cell.turn_started`, `cell.model_requested`,
+    `cell.model_responded`, `cell.tool_called` — on the run's bus, so `events.jsonl` and `Totals` come from the same code
+    for both arms. It starts no cell (`cellsStarted` 0, `cells` `null`) and has no contract (a message has no contract
+    version; a second session starts a fresh transcript on the same workspace).
 
 ## What a run is
 
