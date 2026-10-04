@@ -189,6 +189,28 @@ class ToolContractsTest {
     }
 
     @Test
+    fun `a direct-only field on any other op is refused before dispatch as the unknown key it was before the direct protocol`() {
+        fun refusal(tool: String, json: String) = assertIs<ParsedCalls.Invalid>(ToolCalls.parse(listOf(ProviderCall("c1", tool, json))), json).error
+        // The same schema error a key no form knows gets, with the field's own name.
+        val unknown = refusal("task", """{"op":"ask","question":"Q","colour":true}""")
+        assertTrue(unknown.startsWith("task: ") && "'colour'" in unknown, unknown)
+        assertEquals(unknown.replace("'colour'", "'after_checks'"), refusal("task", """{"op":"ask","question":"Q","after_checks":true}"""))
+        assertEquals(unknown.replace("'colour'", "'after_checks'"), refusal("task", """{"op":"answer","text":"t","after_checks":false}"""))
+        val blocked = """"blocked":{"reason":"r","evidence":["e"]}"""
+        val unknownState = refusal("state", """{"op":"blocked",$blocked,"colour":"x"}""")
+        assertEquals(unknownState.replace("'colour'", "'note'"), refusal("state", """{"op":"blocked",$blocked,"note":"x"}"""))
+        assertEquals(unknownState.replace("'colour'", "'note'"), refusal("state", """{"op":"patch","patch":[{"next":"go"}],"note":{"kind":"open","text":"x"}}"""))
+        // The first key the op does not know is the one named, as the decoder named it.
+        assertEquals(unknownState, refusal("state", """{"op":"blocked",$blocked,"colour":"x","note":"x"}"""))
+        // The two accepted exceptions still parse: the mask refuses them in a structured cell (A-D.3 rule 2).
+        val calls = assertIs<ParsedCalls.Valid>(ToolCalls.parse(listOf(
+            ProviderCall("c1", "state", """{"op":"note","note":{"kind":"open","text":"x"}}"""),
+            ProviderCall("c2", "task", """{"op":"finish","after_checks":true}"""),
+        ))).calls
+        assertEquals(listOf("state.note", "task.finish"), calls.map { it.name })
+    }
+
+    @Test
     fun `the state schema and description name every op form of the typed vocabulary`() {
         val serialNames = io.astrolabe.register.Op.serializer().descriptor.getElementDescriptor(1).elementDescriptors.map { it.serialName }.toSet()
         assertEquals(serialNames, io.astrolabe.tool.state.PatchParser.FORMS.keys)
