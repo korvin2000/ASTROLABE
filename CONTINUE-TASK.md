@@ -5,7 +5,7 @@ Rewritten every session (≤40 lines). Workflow: `CLAUDE.md` § Workflow. State 
 `TODO.md` (`rg -n '^#### P8' TODO.md`), cards/reports `../plan2/`.
 
 **Checkpoint (2026-10-04):** the first live Studio run failed on basics (`../ASTROLABE-DIAGNOSTICS-2026-10-04.md`); hotfix
-D-407–D-413 is committed locally, not pushed, its Studio half uncommitted in the root; no live run has confirmed it and
+D-407–D-413 is pushed (core `7b402d3`, Studio half root `bd3a4ca`; CI status unchecked); no live run has confirmed it and
 the owner decided not to wait for one (plan §11 №26: assume it works; a failure seen later is fixed out of turn).
 **Owner: continue in place with the plan amended** (plan §0 item 10, §4.3a, §11 №14–25, §13, §17): direct for every
 shape, S2 live (P8.H), then S3; D → H → E → F → release. P8: **27 DONE / 29 TODO**.
