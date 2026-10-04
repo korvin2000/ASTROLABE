@@ -180,6 +180,51 @@ class TaskLimitsTest {
     }
 
     @Test
+    fun `a task only on a subscription shows nominal spend and stops on its money limit`() = runBlocking<Unit> {
+        // C16: the plan-billed profile states its model's official price, so a call is priced as a per-token one would be.
+        val subscription = FakeProfiles.main.copy(priceTable = FakeProfiles.main.priceTable.copy(billing = io.astrolabe.provider.Billing.Plan))
+        controller().open(repo.root, request, policy(TaskLimits(maxCost = usd("0.20")))).use { c ->
+            val fake = FakeAdapter(ScriptedModel.of(*planning().toTypedArray()))
+            val run = controller().run(c, CellModel(fake, subscription, HeuristicEstimator()))
+            assertEquals(CampaignOutcome.BudgetExhausted, run.outcome, run.state?.reason)
+            assertEquals(BudgetStop.TaskLimitMoney, run.budgetStop)
+            assertTrue(fake.calls.isEmpty(), "a subscription call is not free: its nominal price does not fit")
+        }
+        controller().open(repo.root, request, policy(TaskLimits(maxCost = usd("5")))).use { c ->
+            val fake = FakeAdapter(ScriptedModel.of(*(planning() + implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"") +
+                implement(c, "src/b.py", "    return 2", "    return 20", "\"AC-1\",\"AC-2\"")).toTypedArray()))
+            // A reported bill never replaces the nominal price.
+            val run = controller().run(c, CellModel(Billing(fake, usd("0.10")), subscription, HeuristicEstimator()))
+            assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+            val spend = TaskLimitControl(idGen, clock, null).spend(c)
+            assertEquals(CostBasis.Nominal, spend.costBasis)
+            val cost = assertNotNull(spend.cost)
+            assertFalse(cost.unknown)
+            assertTrue(cost.amount.signum() > 0, "nominal spend is shown, never zero")
+            assertEquals(0, cost.amount.compareTo(spend.nominalCost!!.amount))
+            assertEquals(0, spend.paidCost!!.amount.signum())
+            assertTrue(cost.amount.compareTo(BigDecimal("0.10").multiply(BigDecimal(spend.requests))) != 0, "priced from usage, not the bill")
+        }
+    }
+
+    @Test
+    fun `a model without a price runs without money accounting, marked, and its request limit still stops it`() = runBlocking<Unit> {
+        val local = FakeProfiles.main.copy(priceTable = io.astrolabe.provider.PriceTable(FakeProfiles.main.priceTable.date, "USD", emptyMap(),
+            billing = io.astrolabe.provider.Billing.Plan))
+        controller().open(repo.root, request, policy(TaskLimits(maxCost = usd("0.20"), maxRequests = 8))).use { c ->
+            val adapter = FakeAdapter(ScriptedModel.of(*(planning() + implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"") +
+                implement(c, "src/b.py", "    return 2", "    return 20", "\"AC-1\",\"AC-2\"")).toTypedArray()))
+            val run = controller().run(c, CellModel(adapter, local, HeuristicEstimator()))
+            assertEquals(CampaignOutcome.BudgetExhausted, run.outcome, run.state?.reason)
+            assertEquals(BudgetStop.TaskLimitRequests, run.budgetStop, "the money limit does not hold it; the request limit does")
+            val spend = TaskLimitControl(idGen, clock, null).spend(c)
+            assertEquals(spend.requests, spend.unpricedRequests, "every call is marked as without money accounting")
+            assertEquals(CostBasis.None, spend.costBasis)
+            assertEquals(0, spend.cost!!.amount.signum())
+        }
+    }
+
+    @Test
     fun `a minutes limit runs on the injected clock and never counts the time a task stood stopped`() = runBlocking<Unit> {
         controller().open(repo.root, request, policy(TaskLimits(maxMinutes = 7))).use { c ->
             // Every model call takes one minute: R = min(3, 7 − 1) = 3 min, so the reserve begins after 3 min.

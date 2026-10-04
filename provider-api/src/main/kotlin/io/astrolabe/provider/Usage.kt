@@ -45,11 +45,29 @@ public enum class Billing {
     PerToken,
 
     /**
-     * By a plan the account already pays for — a subscription with its own hourly or monthly quotas — or by nobody (a
-     * local server): the table states no token price and a call charges a money limit nothing.
+     * By a plan the account already pays for — a subscription with its own hourly or weekly quotas — or by nobody (a
+     * local server). The table states the model's official price, if any (the same model at a paying provider, or a price
+     * the user entered): calls are then charged at it as [Charge.Nominal], counted as real and marked apart from paid
+     * spend (plan §4.3a item 5, C16). Without a price a call is [Charge.Unpriced]: no money accounting.
      */
     @SerialName("plan")
     Plan,
+}
+
+/** How a profile's calls are charged in money, from its [PriceTable] (C16). JSON carries [wire]. */
+@Serializable
+public enum class Charge(public val wire: String) {
+    /** Per token: the provider's bill, else the table's estimate. */
+    @SerialName("paid")
+    Paid("paid"),
+
+    /** A plan-billed model at its official price: counted as real in limits, statistics and ranking, shown apart. */
+    @SerialName("nominal")
+    Nominal("nominal"),
+
+    /** A plan-billed model without a price: no money accounting, explicitly marked; request and minute limits still bound it. */
+    @SerialName("unpriced")
+    Unpriced("unpriced"),
 }
 
 /**
@@ -57,7 +75,7 @@ public enum class Billing {
  * request-size prices (a long-context tier): the highest tier whose [PriceTier.inputTokensAbove] a request's total
  * input exceeds replaces, for that whole request, the base prices of the dimensions it states ([at]). An empty
  * [tiers] and the default [billing] are not serialized, so a table without them keeps its bytes and its attempt
- * fingerprint.
+ * fingerprint. A [Billing.Plan] table may state the model's official price (a nominal price, [charge]).
  */
 @Serializable
 public data class PriceTable @JvmOverloads constructor(
@@ -75,8 +93,16 @@ public data class PriceTable @JvmOverloads constructor(
         require(currency.length == 3 && currency.all { it in 'A'..'Z' }) { "currency must be an ISO code, got '$currency'" }
         require(perMillion.values.all { it.signum() >= 0 }) { "prices must be ≥ 0" }
         require(tiers.map { it.inputTokensAbove }.toSet().size == tiers.size) { "price tier thresholds must be distinct" }
-        require(billing == Billing.PerToken || (perMillion.isEmpty() && tiers.isEmpty())) { "a plan-billed table states no token price" }
+        require(billing == Billing.PerToken || perMillion.isNotEmpty() || tiers.isEmpty()) { "a plan-billed table without a base price has no tiers" }
     }
+
+    /** How calls priced by this table are charged (C16): [Charge.Paid] per token, else nominal or unpriced by whether a price is stated. */
+    val charge: Charge
+        get() = when {
+            billing == Billing.PerToken -> Charge.Paid
+            perMillion.isEmpty() -> Charge.Unpriced
+            else -> Charge.Nominal
+        }
 
     /** Price of [quantity] units of [dimension] at base prices, or `null` when the dimension is not in this table. */
     public fun price(dimension: BillingDimension, quantity: Long): Money? {
@@ -90,7 +116,7 @@ public data class PriceTable @JvmOverloads constructor(
     /** The flat table (no tiers) a request of [inputTokens] total input is priced with: base prices overridden by its [tier]. */
     public fun at(inputTokens: Long): PriceTable {
         if (tiers.isEmpty()) return this
-        return PriceTable(date, currency, tier(inputTokens)?.let { perMillion + it.perMillion } ?: perMillion)
+        return PriceTable(date, currency, tier(inputTokens)?.let { perMillion + it.perMillion } ?: perMillion, billing = billing)
     }
 }
 

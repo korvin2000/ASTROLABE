@@ -6,12 +6,15 @@ import io.astrolabe.id.Identities
 import io.astrolabe.id.WorkId
 import io.astrolabe.provider.BillableUsage
 import io.astrolabe.provider.BillingDimension
+import io.astrolabe.provider.Charge
 import io.astrolabe.provider.Money
 import io.astrolabe.provider.UsageProvenance
 import io.astrolabe.telemetry.CallAccount
 import io.astrolabe.telemetry.Quantities
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import java.math.BigDecimal
 import java.time.Instant
 import kotlin.test.Test
@@ -129,6 +132,65 @@ class LimitsTest {
         assertEquals(CostBasis.Estimated, LimitSpend.of(listOf(estimated, held), 0, "USD").costBasis)
         assertTrue(LimitSpend.of(listOf(call("c4", Money.unknown("USD"))), 0, "USD").cost!!.unknown, "unknown, never zero")
         assertTrue(LimitSpend.of(listOf(estimated), 0, "EUR").cost!!.unknown, "a foreign amount is not counted as this currency")
+    }
+
+    @Test
+    fun `a mixed task shows paid and nominal spend apart and its money limit counts their sum`() {
+        val ids = Identities(WorkId("W-m"), AttemptId("a1"))
+        fun call(id: String, money: Money, charge: Charge, billed: Money? = null) = CallAccount(
+            id, ids, "main", BillableUsage(mapOf(BillingDimension.OUTPUT to 10L), UsageProvenance("fake", "fake", "reported"), billed = billed),
+            money, "2026-01-01", Quantities(null, null, null, null), null, Instant.EPOCH, null, null, charge,
+        )
+        val calls = listOf(
+            call("p1", usd("0.30"), Charge.Paid, billed = usd("0.25")),
+            call("n1", usd("0.50"), Charge.Nominal),
+            call("u1", Money.zero("USD"), Charge.Unpriced),
+        )
+        val spend = LimitSpend.of(calls, 0, "USD")
+        assertEquals(3, spend.requests)
+        assertEquals(1, spend.unpricedRequests)
+        assertEquals(CostBasis.Mixed, spend.costBasis)
+        assertEquals(0, BigDecimal("0.25").compareTo(spend.paidCost!!.amount))
+        assertEquals(0, BigDecimal("0.50").compareTo(spend.nominalCost!!.amount))
+        assertEquals(0, BigDecimal("0.75").compareTo(spend.cost!!.amount), "the limit counts paid plus nominal")
+        assertEquals(usd("0.50"), spend.largestCallCost)
+        // Paid alone (0.25 + 0.20) would fit 0.90; the sum (0.75 + 0.20) does not.
+        val limits = TaskLimits(maxCost = usd("0.90"))
+        assertEquals(LimitKind.Cost, assertIs<LimitDecision.Exhausted>(LimitRule.decide(limits, spend, usd("0.20"))).kind)
+        assertIs<LimitDecision.Reserve>(LimitRule.decide(TaskLimits(maxCost = usd("1.50")), spend, usd("0.20")))
+        val status = LimitRule.status(limits, spend, usd("0.20"))
+        assertEquals(spend.paidCost, status.paidCost)
+        assertEquals(spend.nominalCost, status.nominalCost)
+        assertEquals(1, status.unpricedRequests)
+        val totals = io.astrolabe.telemetry.Accounting.totals(calls, 0, "USD")
+        assertEquals(0, BigDecimal("0.30").compareTo(totals.paidMoney!!.amount))
+        assertEquals(0, BigDecimal("0.50").compareTo(totals.nominalMoney!!.amount))
+        assertEquals(0, BigDecimal("0.80").compareTo(totals.money.amount))
+        assertEquals(1, totals.unpricedCalls)
+    }
+
+    @Test
+    fun `a spend, a limit status and a call recorded before nominal charges read back with their old basis`() {
+        val json = Json { encodeDefaults = true }
+        // A record as written before C16: without the new fields, the basis under the constant's old name.
+        fun <T> old(serializer: KSerializer<T>, value: T, basis: String?): T {
+            val full = json.encodeToJsonElement(serializer, value) as JsonObject
+            val kept = full - setOf("paidCost", "nominalCost", "unpricedRequests", "charge")
+            val written = if (basis == null) kept else kept + ("costBasis" to JsonPrimitive(basis))
+            return json.decodeFromJsonElement(serializer, JsonObject(written))
+        }
+        val spend = old(LimitSpend.serializer(), LimitSpend(2, usd("0.40"), CostBasis.Estimated, 5, usd("0.30"), usd("0.40"), usd("0"), 0), "Estimated")
+        assertEquals(CostBasis.Estimated, spend.costBasis)
+        assertNull(spend.paidCost)
+        assertNull(spend.nominalCost)
+        assertEquals(0, spend.unpricedRequests)
+        val status = old(LimitStatus.serializer(), LimitRule.status(TaskLimits(maxCost = usd("5")), spend(requests = 2, cost = "0.4", basis = CostBasis.Mixed)), "Mixed")
+        assertEquals(CostBasis.Mixed, status.costBasis)
+        assertNull(status.nominalCost)
+        val call = CallAccount("c1", Identities(WorkId("W-o"), AttemptId("a1")), "main", null, Money.zero("USD"), "2026-01-01",
+            Quantities(null, null, null, null), null, Instant.EPOCH, charge = Charge.Nominal)
+        assertEquals(Charge.Paid, old(CallAccount.serializer(), call, null).charge, "a row written before C16 reads as paid")
+        assertEquals(CostBasis.Nominal, Json.decodeFromString(CostBasis.serializer(), "\"nominal\""))
     }
 
     @Test

@@ -499,6 +499,10 @@ public class Cell @JvmOverloads constructor(
                     // D-331: credentials are the host's to fix; retrying or failing the increment would not help.
                     is ProviderError.Authentication -> return blocked(BlockedRequest("provider authentication failed for profile ${ctx.model.profile.id}: ${error.message}",
                         listOf("invocation ${invocationId.value}"), null, turn))
+                    // C16: a spent plan quota (a subscription's 5-hour or weekly window) refills only with time; the host resumes.
+                    is ProviderError.QuotaExhausted -> return blocked(BlockedRequest("provider plan quota exhausted for profile ${ctx.model.profile.id}" +
+                        (error.retryAfterSeconds?.let { " (refills in about $it s)" } ?: "") + "; reopen the campaign once it refills: ${error.message}",
+                        listOf("invocation ${invocationId.value}"), null, turn))
                     is ProviderError -> return failed("provider ${error::class.simpleName}: ${error.message}")
                     else -> throw error
                 }
