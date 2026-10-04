@@ -700,7 +700,7 @@ class CellTest {
             val v = f.version("src/a.py")
             val seam = Refusing()
             val model = ScriptedModel.of(
-                Scripted.Reply(listOf(say("first try"), finish("c1", ""","text":"a returns 1 still""""))),
+                Scripted.Reply(listOf(say("first try"), read("c0", "src/a.py"), finish("c1", ""","text":"a returns 1 still""""))),
                 Scripted.Reply(listOf(say("editing"), anchored("c2", "src/a.py", v, "    return 1", "    return 10"))),
                 Scripted.Reply(listOf(say("second try"), finish("c3"))),
                 Scripted.Reply(listOf(say("third try"), finish("c4"))),
@@ -806,14 +806,16 @@ class CellTest {
     fun `a spent turn budget hands off only where the loop allows it and only after work in the epoch`() = runTest {
         suspend fun spent(root: String, work: Boolean, flag: Boolean, role: Role = Roles.direct): CellExit.Partial = CellFixture(stateRoot.resolve(root)).use { f ->
             val v = f.version("src/a.py")
-            val first = if (work) anchored("c1", "src/a.py", v, "    return 1", "    return 10") else read("c1", "src/b.py")
+            // Four turns: two working turns (an edit needs its range read first), then the two of the reserve.
+            val second = if (work) anchored("c2", "src/a.py", v, "    return 1", "    return 10") else read("c2", "src/b.py")
             val model = ScriptedModel.of(
-                Scripted.Reply(listOf(say("one"), first)),
-                Scripted.Reply(listOf(say("two"), tree("c2"))),
-                Scripted.Reply(listOf(say("three"), read("c3", "README.md"))),
+                Scripted.Reply(listOf(say("one"), read("c1", "src/a.py"))),
+                Scripted.Reply(listOf(say("two"), second)),
+                Scripted.Reply(listOf(say("three"), tree("c3"))),
+                Scripted.Reply(listOf(say("four"), read("c4", "README.md"))),
                 Scripted.Reply(listOf(say("never sent"))),
             )
-            assertIs<CellExit.Partial>(f.run(model, turns = 3, role = role, turnBudgetHandoff = flag))
+            assertIs<CellExit.Partial>(f.run(model, turns = 4, role = role, turnBudgetHandoff = flag))
         }
         val handedOff = spent("flag-work", work = true, flag = true)
         assertEquals(PartialReason.Handoff, handedOff.reason)
