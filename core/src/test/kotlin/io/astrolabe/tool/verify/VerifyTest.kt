@@ -159,7 +159,7 @@ class VerifyTest {
     }
 
     @Test
-    fun `a gradle check with no gradle on PATH runs through the repository's wrapper, and without one is unavailable with the reason`() = runTest {
+    fun `a gradle check with no gradle on PATH is unavailable with the reason, and a wrapper beside it is named, never run`() = runTest {
         val launched = ArrayList<List<String>>()
         val recording = object : io.astrolabe.tool.run.Runner {
             override val mode = io.astrolabe.auth.ExecutionMode.TrustedLocal
@@ -176,56 +176,23 @@ class VerifyTest {
             override fun onPath(program: String) = program != "gradle"
             override fun env(name: String): String? = System.getenv(name)
         }
-        val wrapperName = if (windows) "gradlew.bat" else "gradlew"
-        fun wrapper(dir: String, line: String) {
-            val path = (if (dir.isEmpty()) "" else "$dir/") + wrapperName
-            if (windows) {
-                repo.write(path, "@echo off\r\necho $line %*\r\n")
-            } else {
-                repo.write(path, "#!/bin/sh\necho $line \"\$@\"\n")
-                assertTrue(repo.root.resolve(path).toFile().setExecutable(true))
-            }
-        }
-        // The base tree (s0) holds the root's wrapper; `sub` has none.
-        wrapper("", "base wrapper")
-        repo.write("sub/keep.txt", "k\n")
-        repo.commit("wrapper")
-        val dirtyState = io.astrolabe.workspace.DirtyState(workspace, store.blobs, stamper, ids, clock)
-        val shadow = io.astrolabe.workspace.ShadowRef(ids.work, ids.attempt, workspace, store, dirtyState, os, clock)
-        shadow.open(dirtyState.capture(0))
-        val env = EnvFingerprint.compute(EnvInputs(osName = "test-os", osArch = "test-arch", runnerPolicyId = "trusted-local/v1"))
-        verify.regressionBaseline = io.astrolabe.verify.Baseline(shadow, store.layout, recording, os, SqliteReceipts(store, clock), InMemoryAliases(), store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, clock, env)
         checks.register(Check("CHK-jvm", CheckKind.Full, Selector.All, Closure.Known(setOf("src/a.py")), CostClass.Fast, Trigger.OnDemand, command = Command(listOf("gradle", "test"))))
-        checks.register(Check("CHK-sub", CheckKind.Full, Selector.All, Closure.Known(setOf("src/a.py")), CostClass.Fast, Trigger.OnDemand, command = Command(listOf("gradle", "test"), "sub")))
         val receipts = SqliteReceipts(store, clock)
-        fun reason(checkId: String) = receipts.forCheck(checkId).last().also { assertEquals(Outcome.Unavailable, it.outcome) }.limits.first { it.kind == Scheduler.UNAVAILABLE }.detail
+        fun reason() = receipts.forCheck("CHK-jvm").last().also { assertEquals(Outcome.Unavailable, it.outcome) }.limits.first { it.kind == Scheduler.UNAVAILABLE }.detail
 
         // Neither gradle nor a wrapper: unavailable, and the typed reason reaches the receipt, the view and the currency.
-        val missing = run("""{"what":"tests","selection":"ids","ids":["CHK-sub"]}""")
+        val missing = run("""{"what":"tests","selection":"ids","ids":["CHK-jvm"]}""")
         assertEquals("unavailable", status(missing))
-        assertTrue(reason("CHK-sub").startsWith("gradle is not on PATH and sub has no $wrapperName wrapper"), reason("CHK-sub"))
-        assertTrue(missing.body.contains("has no $wrapperName wrapper"), missing.body)
-        assertTrue(scheduler.currency(checks["CHK-sub"]!!, stamper.stamp().id).reasons.any { it.contains("gradle is not on PATH") })
+        assertTrue(reason().startsWith("gradle is not on PATH and the workspace root has no Gradle wrapper"), reason())
+        assertTrue(missing.body.contains("has no Gradle wrapper"), missing.body)
+        assertTrue(scheduler.currency(checks["CHK-jvm"]!!, stamper.stamp().id).reasons.any { it.contains("gradle is not on PATH") })
 
-        // A wrapper written in the task is the model's code: never run in gradle's place.
-        wrapper("sub", "task wrapper")
-        assertEquals("unavailable", status(run("""{"what":"tests","selection":"ids","ids":["CHK-sub"]}""")))
-        assertTrue(reason("CHK-sub").startsWith("gradle is not on PATH and the wrapper sub/$wrapperName is not the base tree's"), reason("CHK-sub"))
-        assertEquals(listOf("gradle", "test"), launched.last())
-
-        // The base tree's wrapper in the check's directory runs instead, and the receipt says so.
-        run("""{"what":"tests","selection":"ids","ids":["CHK-jvm"]}""")
-        assertTrue(launched.last().first().replace('\\', '/').endsWith("/$wrapperName") && launched.last().drop(1) == listOf("test"), "$launched")
-        val wrapped = receipts.forCheck("CHK-jvm").last()
-        assertEquals(listOf("gradle", "test"), wrapped.command, "the receipt keeps the declared command")
-        assertTrue(wrapped.outcome != Outcome.Unavailable, "${wrapped.outcome}: ${wrapped.limits}")
-        assertTrue(wrapped.limits.any { it.detail == "gradle is not on PATH: ran the repository's wrapper $wrapperName instead" }, "${wrapped.limits}")
-        assertTrue(String(store.blobs.get(wrapped.raw!!)).contains("base wrapper"))
-
-        // Changed in the task: no longer the base tree's.
-        wrapper("", "changed wrapper")
+        // A wrapper beside it may be the model's code: it is named in the reason, and never started in gradle's place.
+        val wrapperName = if (windows) "gradlew.bat" else "gradlew"
+        repo.write(wrapperName, if (windows) "@echo off\r\necho wrapper ran\r\n" else "#!/bin/sh\necho wrapper ran\n")
         assertEquals("unavailable", status(run("""{"what":"tests","selection":"ids","ids":["CHK-jvm"]}""")))
-        assertTrue(reason("CHK-jvm").startsWith("gradle is not on PATH and the wrapper $wrapperName is not the base tree's"), reason("CHK-jvm"))
+        assertTrue(reason().contains("holds the wrapper $wrapperName, which is not run in gradle's place"), reason())
+        assertEquals(listOf(listOf("gradle", "test"), listOf("gradle", "test")), launched, "only the declared command was started")
     }
 
     @Test

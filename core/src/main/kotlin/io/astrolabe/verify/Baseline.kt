@@ -435,11 +435,8 @@ public class Baseline(
     /** C3r: the whole seconds of active time a minutes limit leaves, read just before the process starts; `null` without one. */
     internal var timeLeft: () -> Long? = { null }
 
-    /** Where the check's `gradle` is looked up before the wrapper replaces it (P8.C.15). */
+    /** Where the check's `gradle` is looked up to name why it cannot run (P8.C.15). */
     internal var hostProbe: io.astrolabe.atlas.HostProbe = io.astrolabe.atlas.HostProbe.system()
-
-    /** The captured initial candidate's manifest (s0): what a workspace check's Gradle wrapper must still match (P8.C.15). */
-    internal fun initial(): io.astrolabe.workspace.Snapshot? = shadowRef.manifest(0)
 
     public suspend fun run(check: Check, contractVersion: Int, s0: CandidateId, timeoutSeconds: Long = 600): BaselineResult {
         require(timeoutSeconds > 0) { "timeoutSeconds must be positive" }
@@ -474,16 +471,14 @@ public class Baseline(
         }
         val deadline = if (left == null) timeoutSeconds else minOf(timeoutSeconds, left)
         // P8.C.15: `gradle` off PATH runs through the candidate's own wrapper, as the check does in the workspace.
-        // The candidate is s0 itself, verified against its manifest: a wrapper in it is the base tree's.
-        val plan = GradleWrapper.plan(command.argv, dir, cwd, hostProbe) { _, _ -> true }
-        if (plan is GradleWrapper.Plan.Wrapped) limits += Limit("runner", plan.note)
-        val spec = SpawnSpec(Command.Argv(plan.argv), cwd, logsDir.resolve("baseline-${check.id}-$actionId.log"), EnvPolicy(inheritedNames = envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")), deadline)
+        val missing = GradleWrapper.missing(command.argv, dir, cwd, hostProbe)
+        val spec = SpawnSpec(Command.Argv(command.argv), cwd, logsDir.resolve("baseline-${check.id}-$actionId.log"), EnvPolicy(inheritedNames = envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")), deadline)
         var proc = try {
             beforeDispatch()
             runner.start(spec)
         } catch (failure: IOException) {
-            if (plan is GradleWrapper.Plan.Missing) limits += Limit(Scheduler.UNAVAILABLE, plan.reason)
-            limits += Limit(Scheduler.UNAVAILABLE, "cannot start ${plan.argv.first()}: ${failure.message}")
+            missing?.let { limits += Limit(Scheduler.UNAVAILABLE, it) }
+            limits += Limit(Scheduler.UNAVAILABLE, "cannot start ${command.argv.first()}: ${failure.message}")
             val receipt = receipt(receiptId, check, contractVersion, s0, command.argv, command.cwd, null, Outcome.Unavailable, null, TestedInputs(inputs, InputStability.Isolated), null, limits)
             return BaselineResult(receipt, null, dir, materialized)
         }
@@ -502,7 +497,7 @@ public class Baseline(
         val blob = blobs.put(redacted.text.toByteArray(Charsets.UTF_8), BlobKind.LOG, ids)
         val alias = aliases.allocate(ids.work, receiptId, "receipt", ids.context, null).text
         val capture = RunCapture(
-            actionId = actionId, argv = plan.argv, shell = false, cwd = command.cwd,
+            actionId = actionId, argv = command.argv, shell = false, cwd = command.cwd,
             exitCode = (proc.status as? ProcStatus.Exited)?.exitCode, timedOut = proc.status == ProcStatus.DeadlineExceeded,
             output = observed.output, captureComplete = !lost && !observed.truncated && proc.status !is ProcStatus.Lost,
             reports = reports(dir, started, actionId), checkId = check.id, selector = check.selector.toString(),
@@ -516,7 +511,7 @@ public class Baseline(
             shaped.status == Outcome.Passed && (shaped.counts == null || (shaped.counts.executed == 0 && shaped.counts.discovered == 0)) -> Outcome.Inconclusive
             else -> shaped.status
         }
-        if (plan is GradleWrapper.Plan.Missing && outcome == Outcome.Unavailable) limits += Limit(Scheduler.UNAVAILABLE, plan.reason)
+        if (missing != null && outcome == Outcome.Unavailable) limits += Limit(Scheduler.UNAVAILABLE, missing)
         val tests = Regressions.outcomes(shaped.tests, { redaction.apply(it, ContentClass.ReusableEvidence).text }, complete = capture.captureComplete && !shaped.captureTruncated && !shaped.evidenceIncomplete, cwd = command.cwd)
         val receipt = receipt(receiptId, check, contractVersion, s0, command.argv, command.cwd, capture.exitCode, outcome, shaped.counts, TestedInputs(inputs, InputStability.Isolated, mutated), blob, limits, tests)
         val ledger = if (receipt.testedInputs.eligible && (outcome == Outcome.Passed || outcome == Outcome.Failed || outcome == Outcome.Inconclusive)) {

@@ -154,7 +154,7 @@ public class Verify(
             value?.hostProbe = hostProbe
         }
 
-    /** Where a check's `gradle` is looked up before the wrapper replaces it (P8.C.15); tests set their own. */
+    /** Where a check's `gradle` is looked up to name why it cannot run (P8.C.15); tests set their own. */
     internal var hostProbe: HostProbe = HostProbe.system()
         set(value) {
             field = value
@@ -521,20 +521,15 @@ public class Verify(
             return Invocation(Executed(command.argv, command.cwd, false, null, Outcome.NotRun, null, null, listOf(io.astrolabe.budget.NO_ACTIVE_TIME)), "not run — ${io.astrolabe.budget.NO_ACTIVE_TIME}")
         }
         val deadline = cut(timeoutSeconds, left)
-        val plan = GradleWrapper.plan(argv, root, cwd, hostProbe) { relative, real ->
-            // P8.C.15: only the base tree's wrapper runs on the check's authority; without a captured s0 none does.
-            val initial = (regressionBaseline ?: baseline)?.initial()
-            initial != null && GradleWrapper.atS0(workspace, initial, relative, Files.readAllBytes(real))
-        }
-        val launched = plan.argv
-        val reports = JUnitReports.forCommand(cwd, launched, actionId)
+        val missing = GradleWrapper.missing(argv, root, cwd, hostProbe)
+        val reports = JUnitReports.forCommand(cwd, argv, actionId)
         val proc = try {
             beforeDispatch()
             reports?.prepare(logsDir.resolve("reports-$actionId"))
-            runner.start(SpawnSpec(Command.Argv(launched), cwd, logPath(check.id, actionId), EnvPolicy(inheritedNames = envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")), deadline))
+            runner.start(SpawnSpec(Command.Argv(argv), cwd, logPath(check.id, actionId), EnvPolicy(inheritedNames = envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")), deadline))
         } catch (failure: IOException) {
-            val reason = "cannot start ${launched.first()}: ${failure.message}"
-            val unavailable = withPlan(plan, Executed(command.argv, command.cwd, false, null, Outcome.Unavailable, null, null, listOf(reason)))
+            val reason = "cannot start ${command.argv.first()}: ${failure.message}"
+            val unavailable = withMissing(missing, Executed(command.argv, command.cwd, false, null, Outcome.Unavailable, null, null, listOf(reason)))
             return Invocation(unavailable, "unavailable — ${unavailable.limits.joinToString("; ")}")
         }
         val observed = Executions.observeCancellable(os, proc, POLL_SLICE_SECONDS, deadline)
@@ -549,7 +544,7 @@ public class Verify(
         }
         val capture = RunCapture(
             reports = collected,
-            actionId = actionId, argv = launched, shell = false, cwd = command.cwd,
+            actionId = actionId, argv = argv, shell = false, cwd = command.cwd,
             executionRoot = runCatching { cwd.toRealPath() }.getOrDefault(cwd.toAbsolutePath()).toString(),
             exitCode = (observed.proc.status as? ProcStatus.Exited)?.exitCode, timedOut = observed.proc.status == ProcStatus.DeadlineExceeded,
             output = observed.output, captureComplete = !observed.lost && !observed.truncated && observed.proc.status !is ProcStatus.Lost, checkId = check.id, selector = check.selector.toString(),
@@ -559,20 +554,14 @@ public class Verify(
             // Every check keeps the receipt it always had (an inconclusive run, its view the failure); only the two regression
             // checks get the process's outcome and the log's failures besides, as an incomplete record (P8.C.10).
             val plain = Executed(command.argv, command.cwd, false, null, Outcome.Inconclusive, null, blob, listOf(reportFailure))
-            return Invocation(withPlan(plan, withRegressionEvidence(plain, check, command, capture, shaped, lost, blob, sharing)), reportFailure, lost = lost, mask = safeLog.mask)
+            return Invocation(withRegressionEvidence(plain, check, command, capture, shaped, lost, blob, sharing), reportFailure, lost = lost, mask = safeLog.mask)
         }
-        return Invocation(withPlan(plan, executedOf(check, command, capture, shaped, lost, blob, safeLog.limitations, sharing)), shaped.view, shaped, capture, lost, safeLog.mask)
+        return Invocation(withMissing(missing, executedOf(check, command, capture, shaped, lost, blob, safeLog.limitations, sharing)), shaped.view, shaped, capture, lost, safeLog.mask)
     }
 
-    /**
-     * P8.C.15: [executed] with the wrapper substitution on its receipt, or — unavailable with no `gradle` and no wrapper —
-     * that reason first, so it reaches the result before any other limit.
-     */
-    private fun withPlan(plan: GradleWrapper.Plan, executed: Executed): Executed = when (plan) {
-        is GradleWrapper.Plan.Direct -> executed
-        is GradleWrapper.Plan.Wrapped -> executed.copy(limits = executed.limits + plan.note)
-        is GradleWrapper.Plan.Missing -> if (executed.outcome == Outcome.Unavailable) executed.copy(limits = listOf(plan.reason) + executed.limits) else executed
-    }
+    /** P8.C.15: an unavailable [executed] with an off-PATH `gradle`'s [reason] first, so it reaches the result before any other limit. */
+    private fun withMissing(reason: String?, executed: Executed): Executed =
+        if (reason != null && executed.outcome == Outcome.Unavailable) executed.copy(limits = listOf(reason) + executed.limits) else executed
 
     /**
      * P8.C.10: [plain] — the receipt every check gets when its reports could not be collected — with, for each regression
