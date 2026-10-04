@@ -492,7 +492,7 @@ class GatesTest {
             assertEquals(s.rejections.map { it.endsTurn to it.requiredOp }, d.rejections.map { it.endsTurn to it.requiredOp }, "the same required op")
         }
         fun line(i: Int, gate: String) = direct[i].outcomes.single { it.key.gate == gate }.line
-        assertEquals("loop: look.read returned the same result 3 times — turn ended; a note is required: state(note) what you learned, or end with state(blocked) or task(ask)", line(0, Gates.LOOP))
+        assertEquals("loop: look.read returned the same result 3 times — turn ended; a note is required: state(note) what you learned, or end with state(blocked) or task(ask)", direct[0].rejections.single().line)
         assertEquals("entry: editing while acceptance AC-9 is not in contract v2 — name the command that will check the result and run it, or ask one question (task.ask)", line(1, Gates.ENTRY))
         assertTrue(line(2, Gates.PRESSURE).endsWith(" — record what matters with state(note); the harness rebuilds"), line(2, Gates.PRESSURE))
         assertTrue(line(3, Gates.PRESSURE).endsWith(" — second rebuild: the work continues in a fresh cell"), line(3, Gates.PRESSURE))

@@ -123,10 +123,11 @@ class RoleTest {
         assertFalse("protocol" in json.encodeToString(Config.serializer(), Config()), "a structured configuration keeps its bytes")
         assertFalse("protocol" in json.encodeToString(Role.serializer(), Roles.implementing), "a structured role keeps its bytes")
         assertEquals(Roles.direct, json.decodeFromString(Role.serializer(), json.encodeToString(Role.serializer(), Roles.direct)))
-        val frozen = io.astrolabe.AttemptConfig.freeze(Config().withProtocol(Protocol.Direct))
+        val host = Config(profiles = io.astrolabe.fixtures.FakeProfiles.all)
+        val frozen = io.astrolabe.AttemptConfig.freeze(host.withProtocol(Protocol.Direct))
         assertEquals(Protocol.Direct, frozen.config.protocol)
         assertEquals(frozen, json.decodeFromString(io.astrolabe.AttemptConfig.serializer(), json.encodeToString(io.astrolabe.AttemptConfig.serializer(), frozen)))
-        assertTrue(frozen.fingerprint != io.astrolabe.AttemptConfig.freeze(Config()).fingerprint, "the protocol enters the attempt fingerprint")
+        assertTrue(frozen.fingerprint != io.astrolabe.AttemptConfig.freeze(host).fingerprint, "the protocol enters the attempt fingerprint")
         assertEquals(Roles.implementing, Role(
             Roles.implementing.name, Roles.implementing.contextView, Roles.implementing.noteScope, Roles.implementing.skillFilter, Roles.implementing.toolMask,
             Roles.implementing.permission, Roles.implementing.tierPrior, Roles.implementing.duties, Roles.implementing.askBack, Roles.implementing.packetKind,
