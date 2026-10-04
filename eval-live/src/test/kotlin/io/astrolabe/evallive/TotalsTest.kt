@@ -10,6 +10,7 @@ import io.astrolabe.provider.BillingDimension
 import io.astrolabe.provider.CallFacts
 import io.astrolabe.provider.StopReason
 import io.astrolabe.provider.UsageProvenance
+import java.math.BigDecimal
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -68,6 +69,31 @@ class TotalsTest {
     }
 
     @Test
+    fun `each call is priced by the profile its request named, two profiles in one run`() {
+        val usage = BillableUsage(mapOf(BillingDimension.UNCACHED_INPUT to 1_000_000L, BillingDimension.OUTPUT to 100_000L), provenance)
+        val tables = mapOf("main" to FakeProfiles.main.priceTable, "helper" to FakeProfiles.helper.priceTable)
+        val events = listOf(
+            AgentEvent.Cell.ModelRequested(ids, "i-1", 2_000, "main"), responded("i-1", usage),
+            AgentEvent.Cell.ModelRequested(ids, "i-2", 2_000, "helper"), responded("i-2", usage),
+        )
+
+        val totals = Totals.of(events, tables, "USD")
+
+        // main: 1 M × 3 + 0.1 M × 15 = 4.5; helper: 1 M × 0.8 + 0.1 M × 4 = 1.2 — never 9.0 at the run's main table.
+        assertEquals(0, BigDecimal("5.7").compareTo(BigDecimal(totals.cost)), "${totals.cost}")
+        assertEquals("estimated", totals.costBasis)
+        assertEquals(mapOf("helper" to 1, "main" to 1), totals.profiles)
+        assertEquals(0, BigDecimal("9.0").compareTo(BigDecimal(Totals.of(events, prices).cost)), "one table for the run prices both calls alike")
+
+        // A call of a profile without a table is unknown, never priced at another profile's prices.
+        val unknown = Totals.of(events + listOf(AgentEvent.Cell.ModelRequested(ids, "i-3", 2_000, "escalation"), responded("i-3", usage)), tables, "USD")
+        assertNull(unknown.cost)
+        assertEquals(0, BigDecimal("5.7").compareTo(BigDecimal(unknown.costPricedPart)))
+        assertEquals("estimated", unknown.costBasis, "an unknown amount is no other basis")
+        assertEquals(1, unknown.profiles["escalation"])
+    }
+
+    @Test
     fun `facts aggregate with known counts and price tiers are buckets never sums`() {
         fun facts(id: String, facts: CallFacts?) = AgentEvent.Cell.ModelResponded(ids, id, StopReason.EndTurn, null, facts = facts)
         val events = listOf(
@@ -105,6 +131,6 @@ class TotalsTest {
         assertNull(row["uncached_input"])
         assertNull(row["cost"])
         assertNull(row["accepted"])
-        assertEquals("0", row["model_requests"], "a count of events is known even when it is zero")
+        assertEquals("1", row["model_requests"], "a call is counted by its response, its usage unknown or not")
     }
 }

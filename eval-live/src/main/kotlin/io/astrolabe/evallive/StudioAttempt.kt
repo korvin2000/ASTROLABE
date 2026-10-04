@@ -40,7 +40,9 @@ import io.astrolabe.verify.ReviewRequest
 import io.astrolabe.verify.Verdict
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -275,9 +277,9 @@ internal data class AttemptOutcome(
     val decisions: List<PolicyDecision>,
     /** The response count after which the runner stopped the attempt (WP-B2 `interrupt`), or null when it did not. */
     val interruptedAt: Int? = null,
-    /** The response count after which the runner closed the session (`reopen`), or null when it did not. */
+    /** The session's responses, measured, when the runner's close ended it (`reopen`); null when the run ended first. */
     val closedAt: Int? = null,
-    /** The response count after which the user's message reached the contract (`message`), or null when it did not. */
+    /** The session's responses seen, measured, when the user's message reached the agent (`message`); null when it did not. */
     val messageAt: Int? = null,
     /** The contract version the user's message made, or null when it was not delivered. */
     val messageContractVersion: Int? = null,
@@ -297,6 +299,61 @@ internal class Interrupter(events: Events, private val afterResponses: Int, priv
     }, Recorder.BUFFER)
 
     override fun close(): Unit = subscription.close()
+}
+
+/**
+ * Counts the `ModelResponded` the bus carries after this subscription began (B7 review P2-2: what a session reports is
+ * measured, not the script's number). Delivery is asynchronous: [settled] waits until every event emitted so far is seen.
+ */
+internal class ResponseCount(private val events: Events) : AutoCloseable {
+    private val from = events.lastSeq
+    private val seen = AtomicInteger()
+
+    @Volatile
+    private var lastSeen = from
+    private val subscription = events.subscribe({ record ->
+        if (record.seq > from && record.event is AgentEvent.Cell.ModelResponded) seen.incrementAndGet()
+        if (record.seq > lastSeen) lastSeen = record.seq
+    }, Recorder.BUFFER)
+
+    /** The responses seen so far, which may lag the bus. */
+    val now: Int get() = seen.get()
+
+    /** The responses of everything emitted until now, waiting up to [waitMillis] for delivery. */
+    fun settled(waitMillis: Long = 10_000): Int {
+        val target = events.lastSeq
+        val until = System.nanoTime() + waitMillis * 1_000_000
+        while (lastSeen < target && System.nanoTime() < until) Thread.sleep(5)
+        return seen.get()
+    }
+
+    override fun close(): Unit = subscription.close()
+}
+
+/**
+ * The close of a session (B7 review P2-1): it counts as closed only when the close cancelled the run. A run that ended
+ * before the close reached it keeps its outcome, and no second session opens a finished work.
+ */
+internal class SessionClose {
+    private val requested = AtomicBoolean()
+
+    @Volatile
+    var closed: Boolean = false
+        private set
+
+    fun request(job: Job) {
+        requested.set(true)
+        job.cancel(CancellationException(StudioAttempt.CLOSED))
+    }
+
+    /** [job]'s value, or `null` when the close cancelled it; any other cancellation is rethrown. */
+    suspend fun <T> await(job: Deferred<T>): T? = try {
+        job.await()
+    } catch (cancelled: CancellationException) {
+        if (!requested.get() || !job.isCancelled) throw cancelled
+        closed = true
+        null
+    }
 }
 
 /** What the runner does to one session of an attempt, each after a count of `ModelResponded` of that session. */
@@ -355,10 +412,14 @@ internal class StudioAttempt(private val clock: Clock, private val idGen: IdGen,
                 val model = spec.cellModel(binding.adapter, main, binding.estimators.estimatorFor(main))
                 val campaign = opened
                 val interrupter = script.interruptAfterResponses?.let { k -> Interrupter(events, k) { campaign.cancellation.cancel(INTERRUPTED) } }
-                val closed = AtomicBoolean()
+                val close = SessionClose()
+                val counter = ResponseCount(events)
                 val delivered = AtomicInteger()
+                val deliveredAt = AtomicInteger()
                 fun outcome(failure: String?, run: S0Run?): AttemptOutcome {
-                    val ended = failure == null && !closed.get()
+                    val closedAt = if (close.closed) counter.settled() else null
+                    counter.close()
+                    val ended = failure == null && !close.closed
                     return AttemptOutcome(
                         workId = work.value,
                         fingerprint = campaign.attempt.fingerprint.hex,
@@ -371,8 +432,8 @@ internal class StudioAttempt(private val clock: Clock, private val idGen: IdGen,
                         cells = (run?.state ?: campaign.state)?.cells?.size,
                         decisions = authority.decisions.toList(),
                         interruptedAt = script.interruptAfterResponses.takeIf { campaign.cancellation.reason == INTERRUPTED },
-                        closedAt = script.closeAfterResponses.takeIf { closed.get() },
-                        messageAt = script.message?.afterResponses.takeIf { delivered.get() > 0 },
+                        closedAt = closedAt,
+                        messageAt = deliveredAt.get().takeIf { delivered.get() > 0 },
                         messageContractVersion = delivered.get().takeIf { it > 0 },
                         openedContractVersion = openedVersion,
                     )
@@ -384,20 +445,20 @@ internal class StudioAttempt(private val clock: Clock, private val idGen: IdGen,
                             delay(deadline.toMillis())
                             campaign.cancellation.cancel("eval-live: the attempt passed its deadline of ${deadline.toMinutes()} minutes")
                         }
-                        val closer = script.closeAfterResponses?.let { k -> Interrupter(events, k) { closed.set(true); job.cancel(CancellationException(CLOSED)) } }
+                        val closer = script.closeAfterResponses?.let { k -> Interrupter(events, k) { close.request(job) } }
                         val due = CompletableDeferred<Unit>()
                         val messenger = script.message?.let { m -> Interrupter(events, m.afterResponses) { due.complete(Unit) } }
                         val delivery = script.message?.let { m ->
                             launch {
                                 due.await()
                                 // `StudioHost.amend` of a live campaign: the user's words become a contract request at once.
-                                delivered.set(withContext(Dispatchers.IO) { campaign.contracts.amendByUser(work, m.text).version })
+                                val version = withContext(Dispatchers.IO) { campaign.contracts.amendByUser(work, m.text).version }
+                                deliveredAt.set(counter.now)
+                                delivered.set(version)
                             }
                         }
                         try {
-                            job.await()
-                        } catch (cancelled: CancellationException) {
-                            if (closed.get() && job.isCancelled) null else throw cancelled
+                            close.await(job)
                         } finally {
                             watchdog.cancel()
                             delivery?.cancel()
