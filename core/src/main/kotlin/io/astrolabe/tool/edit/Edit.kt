@@ -6,6 +6,7 @@ import io.astrolabe.auth.ContentClass
 import io.astrolabe.auth.ExecutionModeLabel
 import io.astrolabe.auth.InstructionShape
 import io.astrolabe.auth.Redaction
+import io.astrolabe.cell.Protocol
 import io.astrolabe.contract.Contract
 import io.astrolabe.contract.Contracts
 import io.astrolabe.contract.Increment
@@ -178,6 +179,9 @@ public class Edit(
 
     /** The increment whose write scope earns a warning when crossed (§8.6); the cell sets it. */
     public var increment: Increment? = null
+
+    /** The cell's protocol, for the wording of a repeated scope crossing (A-D.7 G8); the cell sets it. */
+    public var protocol: Protocol = Protocol.Structured
 
     public var generation: Generation = Generation.INITIAL
 
@@ -381,7 +385,9 @@ public class Edit(
     private fun unjustified(outside: List<String>, why: String): EditError? {
         val unjustified = if (warnedOutsideIncrement) outside.filterNot { justified(it, why) } else emptyList()
         if (unjustified.isEmpty()) return null
-        return EditError("scope", null, unjustified.first(), "outside the increment's write scope again: ${unjustified.joinToString(", ")} — name each path in `why` with the reason, or task.propose(increment_split)")
+        // G8: the direct text names no operation a shape can hide (task.propose is masked in S0).
+        val next = if (protocol == Protocol.Direct) "justify each path in `why`" else "name each path in `why` with the reason, or task.propose(increment_split)"
+        return EditError("scope", null, unjustified.first(), "outside the increment's write scope again: ${unjustified.joinToString(", ")} — $next")
     }
 
     private fun revertPaths(op: EditOpArgs): List<String> {

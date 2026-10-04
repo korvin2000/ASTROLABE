@@ -44,6 +44,18 @@ class ValidatorTest {
     private fun rejected(v: Validation): String = assertIs<Validation.Rejected>(v, v.toString()).rule
 
     @Test
+    fun `the direct protocol turns the Next rule off and keeps every other rule`() {
+        val note = Patch.of(Op.FactAdd(ClaimKind.Hypothesis, "rounding happens in total()"))
+        assertEquals("exactly one Next", rejected(validator.check(base, note, Ctx())), "structured: a register without Next or [>] refuses every patch")
+        val direct = Validator(HeuristicEstimator(), protocol = io.astrolabe.cell.Protocol.Direct)
+        val applied = applied(direct.check(base, note, Ctx()))
+        assertEquals(1, applied.version)
+        assertEquals(null, applied.next, "the rule is off, not satisfied: no Next is invented")
+        assertEquals("line ≤ 240 chars", rejected(Validator(HeuristicEstimator(), factLineMaxChars = 240, protocol = io.astrolabe.cell.Protocol.Direct).check(base, Patch.of(Op.FactAdd(ClaimKind.Hypothesis, "x".repeat(500))), Ctx())))
+        assertEquals("register cap", rejected(Validator(HeuristicEstimator(), registerCapTokens = 1, protocol = io.astrolabe.cell.Protocol.Direct).check(base, note, Ctx())))
+    }
+
+    @Test
     fun `a patch applies atomically and bumps the version`() {
         val patch = Patch.of(
             Op.PlanAdd("locate dispatch"),

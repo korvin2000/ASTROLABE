@@ -88,6 +88,14 @@ class SeedSelectorTest {
         SeedInputs(register, export, touched, receipts)
 
     @Test
+    fun `a direct cell always takes seeds v2 and a structured cell the configured rule`() {
+        assertEquals(SeedRule.V2, SeedRule.of(io.astrolabe.cell.Protocol.Direct, SeedRule.V1))
+        assertEquals(SeedRule.V2, SeedRule.of(io.astrolabe.cell.Protocol.Direct, SeedRule.V2))
+        assertEquals(SeedRule.V1, SeedRule.of(io.astrolabe.cell.Protocol.Structured, Defaults().seedRule))
+        assertEquals(SeedRule.V2, SeedRule.of(io.astrolabe.cell.Protocol.Structured, SeedRule.V2))
+    }
+
+    @Test
     fun `seeds v1 is the default rule and the default selector of the carry`() {
         assertEquals(SeedRule.V1, Defaults().seedRule)
         assertEquals(SeedSelector.V1, SeedRule.V1.selector)

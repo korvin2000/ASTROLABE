@@ -1,5 +1,6 @@
 package io.astrolabe.context
 
+import io.astrolabe.cell.Protocol
 import io.astrolabe.evidence.Closure
 import io.astrolabe.evidence.Outcome
 import io.astrolabe.evidence.Receipt
@@ -31,6 +32,12 @@ public enum class SeedRule(public val wire: String) {
             V1 -> SeedSelector.V1
             V2 -> SeedSelector.V2
         }
+
+    public companion object {
+        /** A-D.7 K1: the rule a cell of [protocol] takes — [configured] in the structured protocol, always [V2] in the direct one. */
+        @JvmStatic
+        public fun of(protocol: Protocol, configured: SeedRule): SeedRule = if (protocol == Protocol.Direct) V2 else configured
+    }
 }
 
 /**

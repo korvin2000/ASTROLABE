@@ -6,7 +6,23 @@ import io.astrolabe.contract.Shape
 import io.astrolabe.provider.ToolMask
 import io.astrolabe.route.Tier
 import io.astrolabe.tool.ToolOps
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+
+/**
+ * The cell protocol a role speaks (kernel contract Appendix A-D.1): the structured protocol of Appendix A, or the direct
+ * protocol `kernel-direct/1`. A configuration field, never a consequence of the shape: [Roles.mainLine] picks the role.
+ */
+@Serializable
+public enum class Protocol {
+    @SerialName("structured")
+    Structured,
+
+    @SerialName("direct")
+    Direct,
+}
 
 /** What a role's compiled context is built from (§3.4 "context view"). */
 @Serializable
@@ -45,11 +61,32 @@ public data class Role(
     val policyTextVersion: String = Roles.POLICY_TEXT_VERSION,
     /** Note kinds the role may never propose (`kb.propose`): a writer's CON/ADR writes stay with the main line (§10.4). */
     val deniedNoteKinds: Set<String> = emptySet(),
+    /** A-D.1: the protocol the cell loop speaks for this role; not encoded at its default, so a structured role keeps its bytes. */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val protocol: Protocol = Protocol.Structured,
 ) {
+    /** The v1.0 full constructor: [protocol] takes its default. Kept for Java callers. */
+    public constructor(
+        name: String,
+        contextView: Set<ContextPart>,
+        noteScope: Set<String>,
+        skillFilter: Set<String>,
+        toolMask: ToolMask,
+        permission: Stage,
+        tierPrior: Tier,
+        duties: List<String>,
+        askBack: Boolean,
+        packetKind: PacketKind,
+        personaLines: List<String>,
+        policyTextVersion: String,
+        deniedNoteKinds: Set<String>,
+    ) : this(name, contextView, noteScope, skillFilter, toolMask, permission, tierPrior, duties, askBack, packetKind, personaLines, policyTextVersion, deniedNoteKinds, Protocol.Structured)
+
     init {
         require(name.isNotBlank()) { "a role needs a name" }
         require(personaLines.size <= MAX_PERSONA_LINES) { "at most $MAX_PERSONA_LINES persona lines, got ${personaLines.size}" }
-        require(toolMask.allowed.all { it in ToolOps.all }) { "unknown ops in the mask of '$name': ${toolMask.allowed - ToolOps.all}" }
+        require(toolMask.allowed.all { it in ToolOps.known }) { "unknown ops in the mask of '$name': ${toolMask.allowed - ToolOps.known}" }
     }
 
     /** [toolMask] with the ops it implies ([ToolOps.implied]): what the role may call, refusals and `[S]`/`[A]` lines read this. */
@@ -196,8 +233,43 @@ public object Roles {
         personaLines = RoleTexts.extractor,
     )
 
+    /**
+     * A-D.1: the direct protocol's main line in S0 and S1 (owner №2). The implementing role's view, scopes, permission and
+     * tier with the 23 direct operations of A-D.3; the S0 shape mask hides `task.propose`. No persona lines.
+     */
     @JvmField
-    public val defaults: Map<String, Role> = listOf(implementing, plan, probe, review, qa, writer, repair, extractor).associateBy { it.name }
+    public val direct: Role = implementing.copy(
+        name = "direct",
+        toolMask = ToolMask(
+            setOf(
+                "look.tree", "look.outline", "look.read", "look.find", "look.def", "look.refs", "look.recall",
+                "edit.anchored", "edit.create", "edit.delete", "edit.rename", "edit.revert",
+                "run.run", "run.wait", "run.cancel",
+                "verify.check", "verify.baseline",
+                "state.note", "state.blocked",
+                "task.ask", "task.answer", "task.finish", "task.propose",
+            ),
+        ),
+        duties = listOf("execute one increment to green acceptance", "keep notes with state(note)", "finish through task(finish)"),
+        protocol = Protocol.Direct,
+    )
+
+    @JvmField
+    public val defaults: Map<String, Role> = listOf(implementing, plan, probe, review, qa, writer, repair, extractor, direct).associateBy { it.name }
+
+    /**
+     * A-D.1: the role of a main-line cell for [protocol] in [shape] — the contract's shape at the cell's start. The one place
+     * a shape chooses a role: `Structured` is [implementing] in every shape; `Direct` is [direct] in S0 and S1 and, until the
+     * S2/S3 direct role exists (H1), [implementing] in S2 and S3.
+     */
+    @JvmStatic
+    public fun mainLine(protocol: Protocol, shape: Shape): Role = when (protocol) {
+        Protocol.Structured -> implementing
+        Protocol.Direct -> when (shape) {
+            Shape.S0, Shape.S1 -> direct
+            Shape.S2, Shape.S3 -> implementing
+        }
+    }
 
     /**
      * The roles whose duty is `read-only: R-class runs only`: their run executor refuses every W- and D-class
@@ -209,13 +281,18 @@ public object Roles {
      * What a shape enables (§3.5 collapsibility): S0 = one implementing cell without delegation, proposals or
      * reviews and note proposals (P4.1.3); S1 adds task proposals; S2 adds probes, reviews and collection; S3 everything. The
      * tools, transforms included, are active in every shape (§3.5 table; D-97): the role mask and the capability
-     * ceiling still bound them.
+     * ceiling still bound them. Every shape admits the direct-only operations (A-D.3 rule 3): no structured role lists them,
+     * so a structured cell's effective mask is unchanged.
      */
     @JvmStatic
     public fun shapeMask(shape: Shape): ToolMask = when (shape) {
-        Shape.S0 -> ToolOps.implementingS0
-        Shape.S1 -> ToolMask(ToolOps.implementingS0.allowed + setOf("task.propose"))
-        Shape.S2 -> ToolMask(all)
-        Shape.S3 -> ToolMask(all)
+        Shape.S0 -> S0_MASK
+        Shape.S1 -> S1_MASK
+        Shape.S2 -> ALL_MASK
+        Shape.S3 -> ALL_MASK
     }
+
+    private val S0_MASK: ToolMask = ToolMask(ToolOps.implementingS0.allowed + ToolOps.directOnly)
+    private val S1_MASK: ToolMask = ToolMask(S0_MASK.allowed + "task.propose")
+    private val ALL_MASK: ToolMask = ToolMask(ToolOps.known)
 }

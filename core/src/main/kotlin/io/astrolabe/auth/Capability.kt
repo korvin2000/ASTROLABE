@@ -124,7 +124,7 @@ public object OpCapabilities {
     /** `null` for an op outside the seven families (refused as unknown, never dispatched). */
     @JvmStatic
     public fun required(op: String): Set<Capability>? {
-        if (op !in ToolOps.all) return null
+        if (op !in ToolOps.known) return null
         val family = ToolFamily.byWire(op.substringBefore('.')) ?: return null
         return byFamily.getValue(family)
     }

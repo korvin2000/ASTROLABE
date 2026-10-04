@@ -127,6 +127,68 @@ class ToolContractsTest {
     }
 
     @Test
+    fun `a direct role sends six schemas narrowed to its mask and the fingerprint digests what it sends`() {
+        val roles = io.astrolabe.cell.Roles
+        val set = assertIs<SchemaSelection.Supported>(ToolSchemas.forLineage(adapter, FakeProfiles.main, roles.direct)).set
+        assertEquals(listOf("look", "edit", "run", "verify", "state", "task"), set.schemas.map { it.name })
+        fun schema(name: String) = set.schemas.single { it.name == name }
+        fun props(name: String) = schema(name).jsonSchema["properties"]!!.jsonObject
+        fun enum(name: String, key: String) = props(name)[key]!!.jsonObject["enum"]!!.toString()
+        assertEquals("""["tree","outline","read","find","def","refs","recall"]""", enum("look", "what"))
+        assertEquals("""["workspace","store"]""", enum("look", "in"))
+        assertEquals(listOf("what", "target", "budget", "near", "glob", "in", "id", "range"), props("look").keys.toList())
+        assertEquals(listOf("path", "expect", "hunks", "create", "content", "delete", "rename", "to", "revert", "if"),
+            props("edit")["ops"]!!.jsonObject["items"]!!.jsonObject["properties"]!!.jsonObject.keys.toList(), "no transform")
+        assertEquals("""["run","wait","cancel"]""", enum("run", "op"))
+        assertEquals("""["check","baseline"]""", enum("verify", "what"))
+        assertEquals(listOf("what", "paths"), props("verify").keys.toList())
+        assertEquals("""["note","blocked"]""", enum("state", "op"))
+        assertEquals(listOf("op", "note", "blocked"), props("state").keys.toList())
+        val note = props("state")["note"]!!.jsonObject
+        assertEquals("""["kind"]""", note["required"].toString())
+        assertEquals("false", note["additionalProperties"].toString())
+        assertEquals(listOf("kind", "text", "evidence", "closes", "refutes"), note["properties"]!!.jsonObject.keys.toList())
+        assertEquals("""["ask","answer","finish","propose"]""", enum("task", "op"))
+        assertEquals(listOf("op", "question", "options", "text", "after_checks", "kind", "proposal"), props("task").keys.toList())
+        assertEquals("""["plan","increment_split"]""", enum("task", "kind"))
+        val proposal = props("task")["proposal"]!!.jsonObject
+        assertEquals(setOf("type", "description"), proposal.keys, "an open object: the intake reads the fields its description names")
+        assertTrue("amendment" !in proposal["description"]!!.jsonPrimitive.content)
+        assertTrue(set.schemas.all { it.jsonSchema["additionalProperties"].toString() == "false" })
+        assertEquals(
+            "ask(question, options?) ends the turn blocked-with-question; answer(text) ends a task that needed no change; finish(text?, after_checks?) asks the harness to run the declared checks and decide — in a turn that also edits or runs it finishes only if those calls succeed; propose(kind, proposal) — see proposal: kind increment_split asks for the increment to be split (then end the cell with state(blocked): the harness re-plans); kind plan records a plan proposal and changes nothing by itself.",
+            schema("task").description,
+        )
+        assertEquals("check(paths?) runs the syntax and type checks of the touched files now; baseline() records the failures that exist before your changes. Tests and acceptance commands go through run.", schema("verify").description)
+
+        val sent = Digest.ofUtf8(kotlinx.serialization.json.Json.encodeToString(kotlinx.serialization.builtins.ListSerializer(io.astrolabe.provider.ToolSchema.serializer()), set.schemas))
+        assertEquals(sent, set.fingerprint, "the digest of the schemas the line sends")
+        assertEquals(set.fingerprint, ToolSchemas.fingerprint(roles.direct), "Fingerprint.schemas comes from the same function")
+        val structuredOfMask = assertIs<SchemaSelection.Supported>(ToolSchemas.forLineage(adapter, FakeProfiles.main, roles.direct.toolMask)).set
+        assertTrue(structuredOfMask.fingerprint != set.fingerprint, "the mask alone would digest the structured schemas")
+        val narrower = roles.direct.copy(toolMask = io.astrolabe.provider.ToolMask(roles.direct.toolMask.allowed - "task.propose"))
+        val narrowed = assertIs<SchemaSelection.Supported>(ToolSchemas.forLineage(adapter, FakeProfiles.main, narrower)).set
+        assertTrue(narrowed.fingerprint != set.fingerprint && ToolSchemas.fingerprint(narrower) == narrowed.fingerprint, "a different set, a different fingerprint")
+        assertEquals(set.schemas.filter { it.name != "task" }, narrowed.schemas.filter { it.name != "task" })
+        assertTrue("proposal" !in narrowed.schemas.single { it.name == "task" }.jsonSchema["properties"]!!.jsonObject)
+    }
+
+    @Test
+    fun `the direct-only operations are known names that parse, while the structured lists stay as they are`() {
+        assertEquals(listOf("state.note", "task.finish"), ToolOps.directOnly)
+        assertEquals(ToolOps.all + ToolOps.directOnly, ToolOps.known)
+        assertTrue("note" !in ToolOps.state && "finish" !in ToolOps.task, "the structured lists build structured masks and schemas")
+        val calls = assertIs<ParsedCalls.Valid>(ToolCalls.parse(listOf(
+            ProviderCall("c1", "state", """{"op":"note","note":{"kind":"hypothesis","text":"total() rounds"}}"""),
+            ProviderCall("c2", "task", """{"op":"finish","text":"done","after_checks":true}"""),
+        ))).calls
+        assertEquals(listOf("state.note", "task.finish"), calls.map { it.name })
+        assertEquals(true, (calls[1].args as Args.Task).args.afterChecks)
+        assertIs<ParsedCalls.Invalid>(ToolCalls.parse(listOf(ProviderCall("c1", "state", """{"op":"jot"}"""))))
+        assertEquals(emptySet(), io.astrolabe.auth.OpCapabilities.required("state.note"), "a known op needs no capability in the state family")
+    }
+
+    @Test
     fun `the state schema and description name every op form of the typed vocabulary`() {
         val serialNames = io.astrolabe.register.Op.serializer().descriptor.getElementDescriptor(1).elementDescriptors.map { it.serialName }.toSet()
         assertEquals(serialNames, io.astrolabe.tool.state.PatchParser.FORMS.keys)

@@ -10,8 +10,11 @@ public data class ImpactNudge(val definition: ChangedDefinition, val references:
 
     /** The `[A]` line (§5.6). */
     val line: String
-        get() = "impact: `${definition.symbol}` (${definition.path}) ${definition.change.wire}; " +
-            "$references reference${if (references == 1) "" else "s"} not inspected → look(refs) or scope the plan"
+        get() = line(Protocol.Structured)
+
+    /** The `[A]` line in [protocol]'s words (G9): a direct cell has no plan to scope. */
+    public fun line(protocol: Protocol): String = "impact: `${definition.symbol}` (${definition.path}) ${definition.change.wire}; " +
+        "$references reference${if (references == 1) "" else "s"} not inspected → look(refs)" + if (protocol == Protocol.Direct) "" else " or scope the plan"
 
     /** What the exit gate lists while a changed public definition is unresolved (§5.6, §7.4). */
     val missing: String
@@ -90,9 +93,14 @@ public class ImpactNudges {
 
         /** The one `[A]` line for [overflow]: how many more and where to look. */
         @JvmStatic
-        public fun summary(overflow: List<ImpactNudge>): String {
+        public fun summary(overflow: List<ImpactNudge>): String = summary(overflow, Protocol.Structured)
+
+        /** [summary] in [protocol]'s words (G9): `look(impact)` is hidden in a direct role, so the line points at `look(refs)`. */
+        @JvmStatic
+        public fun summary(overflow: List<ImpactNudge>, protocol: Protocol): String {
             val paths = overflow.map { it.definition.path }.distinct().sorted()
             val shown = paths.take(SUMMARY_PATHS).joinToString(", ") + if (paths.size > SUMMARY_PATHS) ", … +${paths.size - SUMMARY_PATHS}" else ""
+            if (protocol == Protocol.Direct) return "impact: … and ${overflow.size} more in $shown → look(refs)"
             return "impact: … and ${overflow.size} more: look(impact, $shown)"
         }
     }

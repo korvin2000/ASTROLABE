@@ -468,6 +468,44 @@ class GatesTest {
         assertEquals(emptyList(), ledger.overflow, "the overflow is the last batch's only")
     }
 
+    @Test
+    fun `the direct protocol changes gate wording only, never a predicate, and names no operation a shape can hide`() {
+        val notes = Register.empty(ContextId("cell-1"), "I1", "fix rounding")
+        val same = signature("def route(): ...")
+        val masked = RefusalSignature.of("run.run", """{"argv":["make"]}""", "run.run is masked")
+        val changes = DefinitionChanges.of("src/api.py", "def f(x):\n    return x\n".toByteArray(), "def f(x, y):\n    return x\n".toByteArray())
+        val ledger = ImpactNudges().also { it.changed(2, changes) { 4 } }
+        val cases = listOf(
+            state(4, notes).copy(signatures = listOf(same, same, same)),
+            state(1, notes).copy(increment = increment.copy(accept = listOf("AC-9")), calls = listOf(edit())),
+            state(1, notes).copy(contextTokens = 70_000, contextMaxTokens = 100_000),
+            state(1, notes).copy(contextTokens = 70_000, contextMaxTokens = 100_000, rebuilds = 1),
+            state(6, notes).copy(lastProgressTurn = 1),
+            state(2, notes).copy(refusals = listOf(masked, masked)),
+            state(1, notes).copy(outsideIncrement = listOf("tests/test_a.py")),
+            state(2, notes).copy(impactNudges = ledger.unresolved, impactOverflow = listOf(ledger.unresolved.single().copy(turn = 2))),
+        )
+        val structured = cases.map { gates.evaluate(it) }
+        val direct = cases.map { gates.evaluate(it.copy(protocol = Protocol.Direct)) }
+        for ((s, d) in structured.zip(direct)) {
+            assertEquals(s.outcomes.map { it.key }, d.outcomes.map { it.key }, "the same predicates fire")
+            assertEquals(s.rejections.map { it.endsTurn to it.requiredOp }, d.rejections.map { it.endsTurn to it.requiredOp }, "the same required op")
+        }
+        fun line(i: Int, gate: String) = direct[i].outcomes.single { it.key.gate == gate }.line
+        assertEquals("loop: look.read returned the same result 3 times — turn ended; a note is required: state(note) what you learned, or end with state(blocked) or task(ask)", direct[0].rejections.single().line)
+        assertEquals("entry: editing while acceptance AC-9 is not in contract v2 — name the command that will check the result and run it, or ask one question (task.ask)", line(1, Gates.ENTRY))
+        assertTrue(line(2, Gates.PRESSURE).endsWith(" — record what matters with state(note); the harness rebuilds"), line(2, Gates.PRESSURE))
+        assertTrue(line(3, Gates.PRESSURE).endsWith(" — second rebuild: the work continues in a fresh cell"), line(3, Gates.PRESSURE))
+        assertEquals("stall: 5 turns without progress — zoom out · run the check · record a dead end · or surface the blocker (task.ask, state(blocked))", line(4, Gates.STALL))
+        assertEquals("refusal loop: run.run was refused 2 times for the same reason — change the call or end with state(blocked) or task.ask", line(5, Gates.REFUSAL_LOOP))
+        assertEquals("scope: tests/test_a.py outside the increment's write scope — justify each path in `why`", line(6, Gates.SCOPE))
+        assertEquals(listOf("impact: `f` (src/api.py) signature changed; 4 references not inspected → look(refs)", "impact: … and 1 more in src/api.py → look(refs)"),
+            direct[7].nudges.filter { it.key.gate == Gates.IMPACT }.map { it.line })
+        val all = direct.flatMap { it.lines }
+        assertTrue(all.none { "task.propose" in it || "STATE" in it || "plan" in it }, all.toString())
+        assertEquals("loop: look.read returned the same result 3 times — turn ended; a state op is required", structured[0].rejections.single().line, "the structured bytes stay")
+    }
+
     private val greenAc1 = mapOf("CHK-accept-AC-1" to Currency("rcpt-1", Applicability.Current, eligible = true, green = true, reasons = emptyList()))
 
     private fun hints(report: GateReport): List<String> = report.nudges.filter { it.key.gate == Gates.SUFFICIENCY }.map { it.line }

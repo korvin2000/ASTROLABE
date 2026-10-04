@@ -120,6 +120,8 @@ public class TaskTool(
     override suspend fun execute(call: ToolCall, context: TurnContext): ToolOutcome {
         require(call.family == ToolFamily.Task) { "not a task call: ${call.name}" }
         val args = (call.args as Args.Task).args
+        // A-D.5: `finish` is declared (names, masks, schemas) before its executor; until then the call is refused, typed.
+        if (call.name in ToolOps.directOnly) return result("unsupported", ToolOps.notImplemented(call.name))
         if (!mask.allows(call.name)) return result("masked", "${call.name} is masked in this role")
         return when (args.op) {
             "ask" -> ask(args, context)

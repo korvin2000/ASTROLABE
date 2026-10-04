@@ -67,6 +67,33 @@ public object ToolOps {
     public val all: Set<String> = ToolFamily.entries.flatMap { f -> of(f).map { name(f, it) } }.toSet()
 
     /**
+     * Kernel contract A-D.3 rule 1: the operations only the direct protocol has. They are not appended to [state] and [task],
+     * whose lists build structured masks, schemas and `[S]` bytes.
+     */
+    public val directOnly: List<String> = listOf("state.note", "task.finish")
+
+    /** A-D.3 rule 2: the names of both protocols — what "is this an operation at all" reads; the mask decides the rest. */
+    public val known: Set<String> = all + directOnly
+
+    /**
+     * The direct protocol's operations of [family], in the order `[S]` and `[A]` list them (A-D.3 rule 4): the names any
+     * direct role may list. `kb` has none.
+     */
+    public fun directOf(family: ToolFamily): List<String> = when (family) {
+        ToolFamily.Look -> listOf("tree", "outline", "read", "find", "def", "refs", "recall")
+        ToolFamily.Edit -> listOf("anchored", "create", "delete", "rename", "revert")
+        ToolFamily.Run -> listOf("run", "wait", "cancel")
+        ToolFamily.Verify -> listOf("check", "baseline", "review")
+        ToolFamily.State -> listOf("note", "blocked")
+        ToolFamily.Task -> listOf("ask", "answer", "finish", "propose", "delegate", "collect")
+        ToolFamily.Kb -> emptyList()
+    }
+
+    /** The typed refusal of a direct-only operation whose executor has not arrived yet: the call has no effect. */
+    internal fun notImplemented(name: String): String =
+        "$name is declared by the direct protocol and not implemented in this harness version; the call had no effect"
+
+    /**
      * Everything an S0 implementing cell may call in Stage A (refs/importers/impact since P3.2.3, transform since P3.3.1;
      * kb.propose since P4.1.3; look.bmap since P4.3.2; propose is S1+, delegate/collect S2+ through the shape mask, P4.4.1). `verify.review` is the campaign-scope human review path (P3.5.2, D-23); the review cell is P4.4.3.
      */
