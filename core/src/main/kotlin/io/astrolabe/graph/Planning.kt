@@ -5,6 +5,8 @@ import io.astrolabe.id.AttemptId
 import io.astrolabe.id.ContextId
 import io.astrolabe.id.Digest
 import io.astrolabe.id.WorkId
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -38,9 +40,13 @@ public data class Sizing @JvmOverloads constructor(
     val rebuilds: Int = 0,
     val filesTouched: Int = 0,
     val touched: List<String> = emptyList(),
+    /** A-D.6: cells that continued a handoff — kept beside [continuations], never in it; not encoded at 0. */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val handoffs: Int = 0,
 ) {
     init {
-        require(turns >= 0 && continuations >= 0 && rebuilds >= 0 && filesTouched >= 0) {
+        require(turns >= 0 && continuations >= 0 && rebuilds >= 0 && filesTouched >= 0 && handoffs >= 0) {
             "sizing counts must be non-negative"
         }
         require(touched.isEmpty() || filesTouched == touched.size) { "filesTouched counts the touched paths" }

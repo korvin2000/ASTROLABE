@@ -20,6 +20,9 @@ public enum class BoundaryReason(public val wire: String) {
     @SerialName("replan") Replan("replan"),
     @SerialName("pressure") Pressure("pressure"),
     @SerialName("resume") Resume("resume"),
+
+    /** A-D.6: the cell continues a handoff — an epoch of the same increment. */
+    @SerialName("epoch") Epoch("epoch"),
 }
 
 @Serializable

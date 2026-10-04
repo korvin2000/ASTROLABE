@@ -24,6 +24,10 @@ import io.astrolabe.fixtures.FaultKind
 import io.astrolabe.fixtures.ScriptedModel
 import io.astrolabe.fixtures.Scripted
 import io.astrolabe.fixtures.StoreInspector
+import io.astrolabe.id.AttemptId
+import io.astrolabe.id.ContextId
+import io.astrolabe.id.Identities
+import io.astrolabe.id.WorkId
 import io.astrolabe.os.Os
 import io.astrolabe.os.Poll
 import io.astrolabe.os.Proc
@@ -33,6 +37,8 @@ import io.astrolabe.provider.Profile
 import io.astrolabe.provider.SegmentKind
 import io.astrolabe.provider.ToolResult
 import io.astrolabe.provider.Validation
+import io.astrolabe.register.Register
+import io.astrolabe.provider.ToolCall as NativeCall
 import io.astrolabe.verify.Check
 import io.astrolabe.verify.CheckKind
 import io.astrolabe.verify.Checks
@@ -643,12 +649,11 @@ class CellTest {
     }
 
     @Test
-    fun `a direct cell sends its own S and schemas and refuses the declared note and finish typed until they exist`() = runTest {
+    fun `a direct cell sends its own S and schemas, records a note and refuses propose in S0`() = runTest {
         CellFixture(stateRoot).use { f ->
             val model = ScriptedModel.of(
                 Scripted.Reply(listOf(
                     call("c1", "state", """{"op":"note","note":{"kind":"hypothesis","text":"a returns 1"}}"""),
-                    call("c2", "task", """{"op":"finish","after_checks":true}"""),
                     call("c3", "task", """{"op":"propose","kind":"plan","proposal":{"increments":[]}}"""),
                 )),
                 Scripted.Reply(listOf(call("c4", "state", """{"op":"blocked","blocked":{"reason":"stop here"}}"""))),
@@ -663,9 +668,162 @@ class CellTest {
             assertTrue(f.anchorText(1).contains("enabled this turn: all role tools except task.propose"), f.anchorText(1))
             val results = f.transcript(2).filterIsInstance<ToolResult>().associate { it.callId to resultText(it) }
             assertTrue(results.getValue("c1").contains("STATE v1 · note h1 recorded"), results.getValue("c1"))
-            assertTrue(results.getValue("c2").contains("task.finish is declared by the direct protocol and not implemented in this harness version"), results.getValue("c2"))
             assertTrue(results.getValue("c3").contains("task.propose is not enabled in shape S0"), results.getValue("c3"))
         }
+    }
+
+    /** A completion seam that refuses every proposal as the exit gate counts it, and records what the cell asked. */
+    private class Refusing(private val maxFinalizations: Int = 2) : RoleCompletion {
+        val seen = ArrayList<RoleOutput>()
+
+        override suspend fun assess(output: RoleOutput, gates: GateReport): CompletionDecision {
+            seen += output
+            val last = !output.conditional && output.refusals + 1 >= maxFinalizations
+            return if (last) CompletionDecision.CannotProgress(listOf("AC-1 not certified")) else CompletionDecision.Continue(listOf("AC-1 not certified"))
+        }
+    }
+
+    private fun finish(id: String, extra: String = ""): NativeCall = call(id, "task", """{"op":"finish"$extra}""")
+
+    /** The cell's end event; the recorder hears the bus asynchronously. */
+    private fun ended(f: CellFixture): AgentEvent.Cell.Ended {
+        repeat(250) {
+            f.recorder.ofType<AgentEvent.Cell.Ended>().singleOrNull()?.let { return it }
+            Thread.sleep(20)
+        }
+        return f.recorder.ofType<AgentEvent.Cell.Ended>().single()
+    }
+
+    @Test
+    fun `a direct finish alone is a counted plain proposal, progress resets the counter and the second refusal without progress stalls the cell`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val v = f.version("src/a.py")
+            val seam = Refusing()
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("first try"), read("c0", "src/a.py"), finish("c1", ""","text":"a returns 1 still""""))),
+                Scripted.Reply(listOf(say("editing"), anchored("c2", "src/a.py", v, "    return 1", "    return 10"))),
+                Scripted.Reply(listOf(say("second try"), finish("c3"))),
+                Scripted.Reply(listOf(say("third try"), finish("c4"))),
+                Scripted.Reply(listOf(say("never sent"))),
+            )
+
+            val exit = f.run(model, role = Roles.direct, completion = seam)
+
+            val stalled = assertIs<CellExit.Partial>(exit)
+            assertEquals(PartialReason.CompletionStalled, stalled.reason)
+            assertEquals(4, f.adapter.calls.size)
+            assertEquals(listOf(0, 0, 1), seam.seen.map { it.refusals }, "the edit between the first and second proposal reset the counter")
+            assertEquals(listOf(false, false, false), seam.seen.map { it.conditional })
+            assertEquals(listOf("a returns 1 still", "second try", "third try"), seam.seen.map { it.text }, "the finish text, else the turn's text")
+            val results = f.transcript(2).filterIsInstance<ToolResult>().associate { it.callId to resultText(it) }
+            assertTrue(results.getValue("c1").contains("finish requested: the harness decides after this turn"), results.getValue("c1"))
+            assertTrue(f.anchorText(2).contains("packet validation: AC-1 not certified"), f.anchorText(2))
+            assertEquals("partial", ended(f).status)
+            assertEquals("completion_stalled", ended(f).partialReason)
+        }
+    }
+
+    @Test
+    fun `a finish beside passing work is a conditional proposal that is never counted, and an unmet one is not attempted`() = runTest {
+        val pass = javaClass.getResourceAsStream("/shaper/pytest-pass.txt")!!.use { String(it.readAllBytes(), Charsets.UTF_8) }
+        CellFixture(stateRoot, files = CellFixture.DEFAULT_FILES + ("pytest_pass.txt" to pass)).use { f ->
+            // C1a: the model's run of a registered check's command is that check's receipt, so its outcome is green by a typed fact.
+            val printing = if (WINDOWS) Command(listOf("cmd.exe", "/d", "/s", "/c", "type pytest_pass.txt")) else Command(listOf("/bin/sh", "-c", "cat pytest_pass.txt"))
+            f.checks.register(Check("CHK-pass", CheckKind.Unit, Selector.Named(printing), Closure.Known(setOf("src/a.py")), CostClass.Fast, Trigger.StepBoundary, command = printing))
+            val passing = { id: String -> call(id, "run", """{"argv":[${printing.argv.joinToString(",") { CellFixture.quote(it) }}]}""") }
+            val v = f.version("src/a.py")
+            val seam = Refusing()
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("check and finish"), passing("c1"), finish("c2", ""","after_checks":true"""))),
+                Scripted.Reply(listOf(say("again"), passing("c3"), finish("c4"))),
+                Scripted.Reply(listOf(say("bad edit"), anchored("c5", "src/a.py", v, "    return 99", "    return 10"), finish("c6"))),
+                Scripted.Reply(listOf(say("plain"), finish("c7"))),
+                Scripted.Reply(listOf(call("c8", "state", """{"op":"blocked","blocked":{"reason":"stop here"}}"""))),
+            )
+
+            assertIs<CellExit.Blocked>(f.run(model, role = Roles.direct, completion = seam))
+
+            assertEquals(listOf(true, true, false), seam.seen.map { it.conditional }, "the failed edit's finish never reached the seam")
+            assertEquals(listOf(0, 0, 0), seam.seen.map { it.refusals }, "conditional refusals are not counted")
+            assertTrue(f.anchorText(2).contains("packet validation: AC-1 not certified"), f.anchorText(2))
+            assertTrue(f.anchorText(4).contains("finish not attempted: op 1 (edit) did not apply in full"), f.anchorText(4))
+            assertTrue(f.anchorText(4).lines().none { it.contains("packet validation") }, "nothing was proposed in turn 3: " + f.anchorText(4))
+        }
+    }
+
+    @Test
+    fun `a direct turn without a call only nudges, and the second such turn in a row proposes with its text`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val seam = Refusing()
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("I think it is done"))),
+                Scripted.Reply(listOf(say("done: a returns 10"))),
+                Scripted.Reply(listOf(call("c1", "state", """{"op":"blocked","blocked":{"reason":"stop here"}}"""))),
+            )
+
+            assertIs<CellExit.Blocked>(f.run(model, role = Roles.direct, completion = seam))
+
+            assertEquals(listOf("done: a returns 10"), seam.seen.map { it.text })
+            assertTrue(f.anchorText(2).contains("no tool call: to finish call task(finish); otherwise continue with a tool call"), f.anchorText(2))
+        }
+    }
+
+    @Test
+    fun `a conditional proposal never takes the exit gate's last round`() = runTest {
+        val gate = RoleCompletion.exitGate(1)
+        val cell = ContextId("cell-x")
+        val stamp = io.astrolabe.id.CandidateId(io.astrolabe.id.Digest.ofUtf8("s"))
+        val register = Register.empty(cell, "inc-1", "t")
+        val packet = ResultPacket(
+            Identities(WorkId("W-1"), AttemptId("a1"), stamp, cell), "inc-1", "direct", 1, io.astrolabe.id.ExecutionGeneration.INITIAL, null, emptyMap(),
+            PacketStatus.Done, null, null, register, emptyList(), emptyList(), emptyList(), emptyList(), stamp, null,
+            PacketCoverage(0, emptyList()), PacketFlags(emptyList(), emptyList()), PacketClaims(), null, emptyList(), emptyList(), PacketCost(),
+        )
+        val refused = GateReport(listOf(GateOutcome.Rejection(GateKey(Gates.EXIT, "exit"), "exit: AC-1 not certified", listOf("AC-1"))), emptySet())
+        assertIs<CompletionDecision.CannotProgress>(gate.assess(RoleOutput(1, "t", register, emptyList(), 0, packet), refused))
+        assertIs<CompletionDecision.Continue>(gate.assess(RoleOutput(1, "t", register, emptyList(), 0, packet, conditional = true), refused))
+    }
+
+    @Test
+    fun `a direct cell under pressure after one rebuild hands off with its typed cause where a structured one stops`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val exit = f.run(ScriptedModel.of(Scripted.Reply(listOf(say("look"), tree("c1")))), profile = FakeProfiles.tiny, role = Roles.direct)
+            val handoff = assertIs<CellExit.Partial>(exit)
+            assertEquals(PartialReason.Handoff, handoff.reason)
+            assertEquals(HandoffCause.Pressure, handoff.handoffCause)
+            assertEquals("handoff: context full after one rebuild — the work continues in a fresh cell from the carry-forward", handoff.hint)
+            assertEquals(1, handoff.checkpoint.rebuilds)
+            assertEquals("handoff", ended(f).partialReason)
+        }
+        CellFixture(stateRoot.resolve("structured")).use { f ->
+            val exit = f.run(ScriptedModel.of(Scripted.Reply(listOf(say("look"), tree("c1")))), profile = FakeProfiles.tiny)
+            assertEquals(PartialReason.Pressure, assertIs<CellExit.Partial>(exit).reason)
+            assertNull(exit.handoffCause)
+        }
+    }
+
+    @Test
+    fun `a spent turn budget hands off only where the loop allows it and only after work in the epoch`() = runTest {
+        suspend fun spent(root: String, work: Boolean, flag: Boolean, role: Role = Roles.direct): CellExit.Partial = CellFixture(stateRoot.resolve(root)).use { f ->
+            val v = f.version("src/a.py")
+            // Four turns: two working turns (an edit needs its range read first), then the two of the reserve.
+            val second = if (work) anchored("c2", "src/a.py", v, "    return 1", "    return 10") else read("c2", "src/b.py")
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("one"), read("c1", "src/a.py"))),
+                Scripted.Reply(listOf(say("two"), second)),
+                Scripted.Reply(listOf(say("three"), tree("c3"))),
+                Scripted.Reply(listOf(say("four"), read("c4", "README.md"))),
+                Scripted.Reply(listOf(say("never sent"))),
+            )
+            assertIs<CellExit.Partial>(f.run(model, turns = 4, role = role, turnBudgetHandoff = flag))
+        }
+        val handedOff = spent("flag-work", work = true, flag = true)
+        assertEquals(PartialReason.Handoff, handedOff.reason)
+        assertEquals(HandoffCause.TurnBudget, handedOff.handoffCause)
+        assertEquals("handoff: turn budget spent with work done — the work continues in a fresh cell", handedOff.hint)
+        assertEquals(PartialReason.TurnBudget, spent("no-flag", work = true, flag = false).reason, "the S1 loop continues it itself")
+        assertEquals(PartialReason.TurnBudget, spent("no-work", work = false, flag = true).reason, "no work event in the epoch")
+        assertEquals(PartialReason.TurnBudget, spent("structured", work = true, flag = true, role = Roles.implementing).reason)
     }
 
     @Test

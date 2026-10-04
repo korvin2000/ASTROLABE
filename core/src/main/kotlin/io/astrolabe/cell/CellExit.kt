@@ -2,23 +2,46 @@ package io.astrolabe.cell
 
 import io.astrolabe.register.Register
 import io.astrolabe.tool.state.BlockedRequest
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 
-/** Why a cell ended `partial` (§3.7, §5.9): each names the boundary it stopped at, so the controller can continue the same increment. */
-public enum class PartialReason {
+/**
+ * Why a cell ended `partial` (§3.7, §5.9): each names the boundary it stopped at, so the controller can continue the same
+ * increment. [wire] is the `partialReason` of the `cell.ended` event (A-D.6).
+ */
+public enum class PartialReason(public val wire: String) {
     /** The turn budget is spent (§5.9 turn budget). */
-    TurnBudget,
+    TurnBudget("turn_budget"),
 
     /** The working tokens are spent and the reserves are not spendable on generation (§8.1 reserve). */
-    TokenBudget,
+    TokenBudget("token_budget"),
 
     /** The reserve was reached with required checks outstanding (FX-43). */
-    Reserve,
+    Reserve("reserve"),
 
     /** `tokens > α·C_max`: a P1 cell never summarises or rebuilds, it checkpoints and stops with a replan hint. */
-    Pressure,
+    Pressure("pressure"),
 
     /** The completion seam refused past its limit: gaps the cell cannot close (§3.7 `cannot_progress`). */
-    CompletionStalled,
+    CompletionStalled("completion_stalled"),
+
+    /**
+     * A-D.6: a neutral end of a direct main-line cell — the same increment continues in a fresh cell, an epoch. Its
+     * cause is [CellExit.Partial.handoffCause], never read from the hint.
+     */
+    Handoff("handoff"),
+}
+
+/** What ended a cell with [PartialReason.Handoff] (A-D.6). */
+@Serializable
+public enum class HandoffCause(public val wire: String) {
+    /** Window pressure after one rebuild. */
+    @SerialName("pressure")
+    Pressure("pressure"),
+
+    /** The turn budget was spent with work done in the epoch, in a loop that has no continuation of its own (`runS0`). */
+    @SerialName("turn_budget")
+    TurnBudget("turn_budget"),
 }
 
 /**
@@ -73,7 +96,17 @@ public sealed interface CellExit {
         override val packet: ResultPacket,
         val reason: PartialReason,
         val hint: String,
-    ) : CellExit
+        /** A-D.6: why the cell handed off; set exactly when [reason] is [PartialReason.Handoff]. */
+        val handoffCause: HandoffCause? = null,
+    ) : CellExit {
+        /** The v1.0 constructor: no handoff cause. Kept for Java callers. */
+        public constructor(turns: Int, register: Register, checkpoint: CellCheckpoint, packet: ResultPacket, reason: PartialReason, hint: String) :
+            this(turns, register, checkpoint, packet, reason, hint, null)
+
+        init {
+            require((reason == PartialReason.Handoff) == (handoffCause != null)) { "a handoff cause is set exactly for a handoff" }
+        }
+    }
 
     /** The provider, the admission or the harness failed; effects up to the checkpoint are recorded, nothing is retried here. */
     public data class Failed(

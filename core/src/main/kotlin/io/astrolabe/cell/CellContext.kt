@@ -171,6 +171,11 @@ public class CellContext @JvmOverloads constructor(
     public val rework: Boolean = false,
     /** P8.C.10: red receipts accepted increments acknowledged with an `Open` item; the exit gate honours them as the verifier does. */
     public val acknowledged: List<String> = emptyList(),
+    /**
+     * A-D.6: the loop that runs this cell has no continuation of its own (`runS0`), so a direct cell whose turn budget is
+     * spent with work done in the epoch hands off instead of ending `TurnBudget`. The cell never reads the shape.
+     */
+    public val turnBudgetHandoff: Boolean = false,
 ) {
     init {
         require(ids.context != null) { "a cell runs under its own context id" }
@@ -209,7 +214,18 @@ public data class RoleOutput(
     val shownAliases: Set<String> = emptySet(),
     /** The implementing proposal's acceptance as the loop resolved it (D-337); `null` for other packet kinds. */
     val resolved: io.astrolabe.verify.Resolved? = null,
-)
+    /**
+     * A-D.5: a conditional proposal — a direct `task(finish)` in a turn whose edits, runs and verifies all passed. It is
+     * never counted: it never yields [CompletionDecision.CannotProgress] and never takes the last round of D-341.
+     */
+    val conditional: Boolean = false,
+) {
+    /** The v1.0 constructor: a plain proposal. Kept for Java callers. */
+    public constructor(
+        turn: Int, text: String, register: Register, certified: List<String>, refusals: Int, packet: ResultPacket,
+        shownAliases: Set<String>, resolved: io.astrolabe.verify.Resolved?,
+    ) : this(turn, text, register, certified, refusals, packet, shownAliases, resolved, false)
+}
 
 /** What the completion seam decided (§3.7 `assess_role_completion`). */
 public sealed interface CompletionDecision {
@@ -246,15 +262,16 @@ public fun interface RoleCompletion {
             require(maxFinalizations >= 1) { "maxFinalizations must be ≥ 1" }
             return RoleCompletion { output, gates ->
                 val resolved = output.resolved
+                // A-D.5 counter rule 1: a conditional proposal is never the last one.
+                val last = !output.conditional && output.refusals + 1 >= maxFinalizations
                 if (resolved == null) {
                     val exit = gates.rejections.firstOrNull { it.key.gate == Gates.EXIT }
                     return@RoleCompletion when {
                         exit == null -> CompletionDecision.Accepted(output.certified)
-                        output.refusals + 1 >= maxFinalizations -> CompletionDecision.CannotProgress(exit.details)
+                        last -> CompletionDecision.CannotProgress(exit.details)
                         else -> CompletionDecision.Continue(exit.details)
                     }
                 }
-                val last = output.refusals + 1 >= maxFinalizations
                 // I4: one rework round per cell; on the last one a reviewer's rejection goes to the authority (D-341).
                 val final = if (last && resolved.resolution == io.astrolabe.verify.Resolution.Rework) resolved.spent() else resolved
                 when (final.resolution) {

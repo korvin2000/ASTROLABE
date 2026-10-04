@@ -124,6 +124,8 @@ public object CarryForward {
         touched: Collection<String> = emptyList(),
         /** The latest receipt of each check: Seeds v2 re-serves the inputs of the red ones. */
         latestReceipts: List<Receipt> = emptyList(),
+        /** A-D.6: [packet] is a handoff's; its line reads `continued (handoff)` instead of `partial (…)`. */
+        handoff: Boolean = false,
     ): Carry {
         val unresolved = ArrayList<Int>()
         val facts = previous.facts.map { fact ->
@@ -139,7 +141,7 @@ public object CarryForward {
 
         val ledger = packet?.changes.orEmpty().groupBy { it.path }.map { (path, changes) -> CarriedTouch(path, changes.last().after) }.sortedBy { it.path }
         val packetLine = packet?.let { p ->
-            "${p.status.wire}" + (p.reason?.let { " ($it)" } ?: "") +
+            (if (handoff) "continued (handoff)" else "${p.status.wire}" + (p.reason?.let { " ($it)" } ?: "")) +
                 (if (p.gaps.isEmpty()) "" else " · gaps: ${p.gaps.joinToString("; ")}") +
                 (if (p.receipts.isEmpty()) "" else " · receipts: ${p.receipts.joinToString(", ")}")
         }

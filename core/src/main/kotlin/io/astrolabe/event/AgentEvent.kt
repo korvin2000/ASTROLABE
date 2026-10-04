@@ -7,6 +7,8 @@ import io.astrolabe.id.StringWrapperSerializer
 import io.astrolabe.provider.BillableUsage
 import io.astrolabe.provider.CallFacts
 import io.astrolabe.provider.StopReason
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.time.Instant
@@ -155,7 +157,20 @@ public sealed interface AgentEvent {
 
         @Serializable
         @SerialName("cell.ended")
-        public data class Ended(override val ids: Identities, val status: String, val packetRef: String?, val manifestRef: String? = null, override val phase: Phase = Phase.Verify, override val span: SpanId? = null, override val parent: SpanId? = null) : Cell
+        public data class Ended(
+            override val ids: Identities, val status: String, val packetRef: String?, val manifestRef: String? = null, override val phase: Phase = Phase.Verify, override val span: SpanId? = null, override val parent: SpanId? = null,
+            /**
+             * A-D.6: why a `partial` cell ended — `turn_budget` · `token_budget` · `reserve` · `pressure` · `completion_stalled` ·
+             * `handoff` (a host shows a handoff as continued); `null` unless [status] is `partial`. Not encoded when `null`.
+             */
+            @OptIn(ExperimentalSerializationApi::class)
+            @EncodeDefault(EncodeDefault.Mode.NEVER)
+            val partialReason: String? = null,
+        ) : Cell {
+            /** The v1.0 constructor: no partial reason. Kept for Java callers. */
+            public constructor(ids: Identities, status: String, packetRef: String?, manifestRef: String?, phase: Phase, span: SpanId?, parent: SpanId?) :
+                this(ids, status, packetRef, manifestRef, phase, span, parent, null)
+        }
     }
 
     @Serializable

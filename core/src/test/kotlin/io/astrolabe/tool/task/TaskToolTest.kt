@@ -149,6 +149,35 @@ class TaskToolTest {
         assertTrue(late.asked.none { it.answer?.text == "old answer" })
     }
 
+    @Test
+    fun `finish is a request the harness decides after the turn, once per turn, and masked outside the direct mask`() = runTest {
+        val direct = TaskTool(AutonomousAuthority(), contracts, Journal(store, clock), HeuristicEstimator(), FixedIdGen(), ids, clock, mask = io.astrolabe.cell.Roles.direct.toolMask)
+        val context = TurnContext(3, Workset().snapshot(), Reservations(Tokens(1_000)))
+        val first = direct.execute(call("""{"op":"finish","text":"  a returns 10  ","after_checks":true}"""), context)
+        assertEquals("requested", status(first))
+        assertEquals("finish requested: the harness decides after this turn", first.body)
+        val second = direct.execute(call("""{"op":"finish"}"""), context)
+        assertEquals("duplicate finish ignored", second.body)
+        assertNull(direct.takeFinish(4), "a request belongs to its own turn")
+        direct.execute(call("""{"op":"finish","text":"a returns 10"}"""), TurnContext(5, Workset().snapshot(), Reservations(Tokens(1_000))))
+        val taken = assertNotNull(direct.takeFinish(5))
+        assertEquals("a returns 10", taken.text)
+        assertNull(direct.takeFinish(5), "taken once")
+
+        val structured = tool(AutonomousAuthority()).execute(call("""{"op":"finish"}"""), context)
+        assertEquals("masked", status(structured), structured.body)
+    }
+
+    @Test
+    fun `a refused answer advises a direct cell to finish through the finish request`() = runTest {
+        val direct = TaskTool(AutonomousAuthority(), contracts, Journal(store, clock), HeuristicEstimator(), FixedIdGen(), ids, clock, mask = io.astrolabe.cell.Roles.direct.toolMask,
+            answerCheck = { "the tree moved since the task opened" })
+        direct.protocol = io.astrolabe.cell.Protocol.Direct
+        val refused = direct.execute(call("""{"op":"answer","text":"nothing to change"}"""), TurnContext(1, Workset().snapshot(), Reservations(Tokens(1_000))))
+        assertEquals("denied", status(refused))
+        assertTrue(refused.body.endsWith("finish the work, then call task(finish)"), refused.body)
+    }
+
     private val stamp = CandidateId(Digest.ofUtf8("s0"))
 
     /** A scripted probe child: it records the packet it got and answers with one finding over nothing it was shown. */
