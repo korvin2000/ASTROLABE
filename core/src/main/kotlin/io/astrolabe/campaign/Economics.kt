@@ -59,12 +59,19 @@ public data class EconomicsReport(
     val tokensByCacheClass: Map<BillingDimension, Long?>,
     val breakEven: List<BreakEven>,
     val liveGate: String = LIVE_GATE,
+    /** [money] split into paid and nominal spend (C16), and the calls without money accounting. */
+    val paidMoney: Money? = null,
+    val nominalMoney: Money? = null,
+    val unpricedCalls: Int = 0,
 ) {
     /** The report as Markdown, for `exports/<work>/economics.md`; shares and ratios are fixed-point in `Locale.ROOT`. */
     public fun render(): String = buildString {
         appendLine("# Economics — ${work.value}")
         appendLine()
         appendLine("- money: ${money(money)}")
+        if (paidMoney != null && nominalMoney != null) {
+            appendLine("- paid: ${money(paidMoney)}; nominal: ${money(nominalMoney)}; calls without money accounting: $unpricedCalls")
+        }
         appendLine("- boundary cost share: ${ratio(boundaryCostShare)}")
         appendLine("- rebuilds per cell: ${ratio(rebuildsPerCell)}")
         appendLine("- `[A]` share: ${ratio(anchorShare)}")
@@ -132,6 +139,7 @@ public object Economics {
             )
         }
         val total = sum(calls, currency)
+        val totals = Accounting.totals(calls, state.graph.increments.count { it.status == IncrementStatus.Verified }, currency)
         val boundary = cells.fold(Money.zero(currency)) { acc, cell -> acc + cell.boundaryMoney }
         val implementing = state.graph.increments.filter { it.cells.isNotEmpty() }
         val requested = records.map { it.event }.filterIsInstance<AgentEvent.Cell.ModelRequested>().filter { it.ids.work == work }
@@ -144,12 +152,15 @@ public object Economics {
             rebuildsPerCell = if (cells.isEmpty()) null else cells.sumOf { it.rebuilds }.toDouble() / cells.size,
             anchorShare = requested.takeIf { r -> r.isNotEmpty() && r.all { it.anchorTokens != null } && r.sumOf { it.estimatedTokens } > 0 }
                 ?.let { r -> r.sumOf { it.anchorTokens!! }.toDouble() / r.sumOf { it.estimatedTokens } },
-            tokensByCacheClass = Accounting.totals(calls, state.graph.increments.count { it.status == IncrementStatus.Verified }, currency).quantities,
+            tokensByCacheClass = totals.quantities,
             breakEven = cells.zipWithNext().mapNotNull { (previous, next) ->
                 val live = previous.liveTokens ?: return@mapNotNull null
                 val saving = rho * (live - next.kTokens)
                 BreakEven(next.cell, next.kTokens, live, rho, if (saving > 0) CACHE_WRITE * next.kTokens / saving else null)
             },
+            paidMoney = totals.paidMoney,
+            nominalMoney = totals.nominalMoney,
+            unpricedCalls = totals.unpricedCalls,
         )
     }
 

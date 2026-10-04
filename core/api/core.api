@@ -3162,6 +3162,7 @@ public final class io/astrolabe/budget/CostBasis : java/lang/Enum {
 	public static final field Companion Lio/astrolabe/budget/CostBasis$Companion;
 	public static final field Estimated Lio/astrolabe/budget/CostBasis;
 	public static final field Mixed Lio/astrolabe/budget/CostBasis;
+	public static final field Nominal Lio/astrolabe/budget/CostBasis;
 	public static final field None Lio/astrolabe/budget/CostBasis;
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;
 	public final fun getWire ()Ljava/lang/String;
@@ -3256,20 +3257,27 @@ public final class io/astrolabe/budget/LimitRule {
 
 public final class io/astrolabe/budget/LimitSpend {
 	public static final field Companion Lio/astrolabe/budget/LimitSpend$Companion;
-	public fun <init> (ILio/astrolabe/provider/Money;Lio/astrolabe/budget/CostBasis;JLio/astrolabe/provider/Money;)V
+	public fun <init> (ILio/astrolabe/provider/Money;Lio/astrolabe/budget/CostBasis;JLio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;I)V
+	public synthetic fun <init> (ILio/astrolabe/provider/Money;Lio/astrolabe/budget/CostBasis;JLio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;IILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()I
 	public final fun component2 ()Lio/astrolabe/provider/Money;
 	public final fun component3 ()Lio/astrolabe/budget/CostBasis;
 	public final fun component4 ()J
 	public final fun component5 ()Lio/astrolabe/provider/Money;
-	public final fun copy (ILio/astrolabe/provider/Money;Lio/astrolabe/budget/CostBasis;JLio/astrolabe/provider/Money;)Lio/astrolabe/budget/LimitSpend;
-	public static synthetic fun copy$default (Lio/astrolabe/budget/LimitSpend;ILio/astrolabe/provider/Money;Lio/astrolabe/budget/CostBasis;JLio/astrolabe/provider/Money;ILjava/lang/Object;)Lio/astrolabe/budget/LimitSpend;
+	public final fun component6 ()Lio/astrolabe/provider/Money;
+	public final fun component7 ()Lio/astrolabe/provider/Money;
+	public final fun component8 ()I
+	public final fun copy (ILio/astrolabe/provider/Money;Lio/astrolabe/budget/CostBasis;JLio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;I)Lio/astrolabe/budget/LimitSpend;
+	public static synthetic fun copy$default (Lio/astrolabe/budget/LimitSpend;ILio/astrolabe/provider/Money;Lio/astrolabe/budget/CostBasis;JLio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;IILjava/lang/Object;)Lio/astrolabe/budget/LimitSpend;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getCost ()Lio/astrolabe/provider/Money;
 	public final fun getCostBasis ()Lio/astrolabe/budget/CostBasis;
 	public final fun getElapsedMillis ()J
 	public final fun getLargestCallCost ()Lio/astrolabe/provider/Money;
+	public final fun getNominalCost ()Lio/astrolabe/provider/Money;
+	public final fun getPaidCost ()Lio/astrolabe/provider/Money;
 	public final fun getRequests ()I
+	public final fun getUnpricedRequests ()I
 	public fun hashCode ()I
 	public static final fun of (Ljava/util/List;JLjava/lang/String;)Lio/astrolabe/budget/LimitSpend;
 	public fun toString ()Ljava/lang/String;
@@ -3293,11 +3301,14 @@ public final class io/astrolabe/budget/LimitSpend$Companion {
 
 public final class io/astrolabe/budget/LimitStatus {
 	public static final field Companion Lio/astrolabe/budget/LimitStatus$Companion;
-	public fun <init> (ILjava/lang/Integer;Ljava/lang/Integer;Lio/astrolabe/provider/Money;Lio/astrolabe/budget/CostBasis;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;JLjava/lang/Long;Ljava/lang/Long;Lio/astrolabe/provider/Money;)V
-	public synthetic fun <init> (ILjava/lang/Integer;Ljava/lang/Integer;Lio/astrolabe/provider/Money;Lio/astrolabe/budget/CostBasis;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;JLjava/lang/Long;Ljava/lang/Long;Lio/astrolabe/provider/Money;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (ILjava/lang/Integer;Ljava/lang/Integer;Lio/astrolabe/provider/Money;Lio/astrolabe/budget/CostBasis;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;JLjava/lang/Long;Ljava/lang/Long;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;I)V
+	public synthetic fun <init> (ILjava/lang/Integer;Ljava/lang/Integer;Lio/astrolabe/provider/Money;Lio/astrolabe/budget/CostBasis;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;JLjava/lang/Long;Ljava/lang/Long;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;IILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()I
 	public final fun component10 ()Ljava/lang/Long;
 	public final fun component11 ()Lio/astrolabe/provider/Money;
+	public final fun component12 ()Lio/astrolabe/provider/Money;
+	public final fun component13 ()Lio/astrolabe/provider/Money;
+	public final fun component14 ()I
 	public final fun component2 ()Ljava/lang/Integer;
 	public final fun component3 ()Ljava/lang/Integer;
 	public final fun component4 ()Lio/astrolabe/provider/Money;
@@ -3306,8 +3317,8 @@ public final class io/astrolabe/budget/LimitStatus {
 	public final fun component7 ()Lio/astrolabe/provider/Money;
 	public final fun component8 ()J
 	public final fun component9 ()Ljava/lang/Long;
-	public final fun copy (ILjava/lang/Integer;Ljava/lang/Integer;Lio/astrolabe/provider/Money;Lio/astrolabe/budget/CostBasis;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;JLjava/lang/Long;Ljava/lang/Long;Lio/astrolabe/provider/Money;)Lio/astrolabe/budget/LimitStatus;
-	public static synthetic fun copy$default (Lio/astrolabe/budget/LimitStatus;ILjava/lang/Integer;Ljava/lang/Integer;Lio/astrolabe/provider/Money;Lio/astrolabe/budget/CostBasis;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;JLjava/lang/Long;Ljava/lang/Long;Lio/astrolabe/provider/Money;ILjava/lang/Object;)Lio/astrolabe/budget/LimitStatus;
+	public final fun copy (ILjava/lang/Integer;Ljava/lang/Integer;Lio/astrolabe/provider/Money;Lio/astrolabe/budget/CostBasis;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;JLjava/lang/Long;Ljava/lang/Long;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;I)Lio/astrolabe/budget/LimitStatus;
+	public static synthetic fun copy$default (Lio/astrolabe/budget/LimitStatus;ILjava/lang/Integer;Ljava/lang/Integer;Lio/astrolabe/provider/Money;Lio/astrolabe/budget/CostBasis;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;JLjava/lang/Long;Ljava/lang/Long;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;IILjava/lang/Object;)Lio/astrolabe/budget/LimitStatus;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getCost ()Lio/astrolabe/provider/Money;
 	public final fun getCostBasis ()Lio/astrolabe/budget/CostBasis;
@@ -3316,10 +3327,13 @@ public final class io/astrolabe/budget/LimitStatus {
 	public final fun getMaxMillis ()Ljava/lang/Long;
 	public final fun getMaxRequests ()Ljava/lang/Integer;
 	public final fun getNextCallCost ()Lio/astrolabe/provider/Money;
+	public final fun getNominalCost ()Lio/astrolabe/provider/Money;
+	public final fun getPaidCost ()Lio/astrolabe/provider/Money;
 	public final fun getRequests ()I
 	public final fun getReserveCost ()Lio/astrolabe/provider/Money;
 	public final fun getReserveMillis ()Ljava/lang/Long;
 	public final fun getReserveRequests ()Ljava/lang/Integer;
+	public final fun getUnpricedRequests ()I
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
 }
@@ -3656,16 +3670,23 @@ public final class io/astrolabe/campaign/BreakEven {
 
 public final class io/astrolabe/campaign/BudgetLine {
 	public static final field Companion Lio/astrolabe/campaign/BudgetLine$Companion;
-	public fun <init> (Ljava/util/Map;Lio/astrolabe/provider/Money;Ljava/lang/Double;)V
+	public fun <init> (Ljava/util/Map;Lio/astrolabe/provider/Money;Ljava/lang/Double;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;I)V
+	public synthetic fun <init> (Ljava/util/Map;Lio/astrolabe/provider/Money;Ljava/lang/Double;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;IILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Ljava/util/Map;
 	public final fun component2 ()Lio/astrolabe/provider/Money;
 	public final fun component3 ()Ljava/lang/Double;
-	public final fun copy (Ljava/util/Map;Lio/astrolabe/provider/Money;Ljava/lang/Double;)Lio/astrolabe/campaign/BudgetLine;
-	public static synthetic fun copy$default (Lio/astrolabe/campaign/BudgetLine;Ljava/util/Map;Lio/astrolabe/provider/Money;Ljava/lang/Double;ILjava/lang/Object;)Lio/astrolabe/campaign/BudgetLine;
+	public final fun component4 ()Lio/astrolabe/provider/Money;
+	public final fun component5 ()Lio/astrolabe/provider/Money;
+	public final fun component6 ()I
+	public final fun copy (Ljava/util/Map;Lio/astrolabe/provider/Money;Ljava/lang/Double;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;I)Lio/astrolabe/campaign/BudgetLine;
+	public static synthetic fun copy$default (Lio/astrolabe/campaign/BudgetLine;Ljava/util/Map;Lio/astrolabe/provider/Money;Ljava/lang/Double;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;IILjava/lang/Object;)Lio/astrolabe/campaign/BudgetLine;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getByCacheClass ()Ljava/util/Map;
 	public final fun getHelperShare ()Ljava/lang/Double;
 	public final fun getMoney ()Lio/astrolabe/provider/Money;
+	public final fun getNominalMoney ()Lio/astrolabe/provider/Money;
+	public final fun getPaidMoney ()Lio/astrolabe/provider/Money;
+	public final fun getUnpricedCalls ()I
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
 }
@@ -4195,10 +4216,13 @@ public final class io/astrolabe/campaign/Economics {
 public final class io/astrolabe/campaign/EconomicsReport {
 	public static final field Companion Lio/astrolabe/campaign/EconomicsReport$Companion;
 	public static final field LIVE_GATE Ljava/lang/String;
-	public fun <init> (Lio/astrolabe/id/WorkId;Ljava/util/List;Lio/astrolabe/provider/Money;Ljava/lang/Double;Ljava/util/Map;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/Map;Ljava/util/List;Ljava/lang/String;)V
-	public synthetic fun <init> (Lio/astrolabe/id/WorkId;Ljava/util/List;Lio/astrolabe/provider/Money;Ljava/lang/Double;Ljava/util/Map;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/Map;Ljava/util/List;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Lio/astrolabe/id/WorkId;Ljava/util/List;Lio/astrolabe/provider/Money;Ljava/lang/Double;Ljava/util/Map;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/Map;Ljava/util/List;Ljava/lang/String;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;I)V
+	public synthetic fun <init> (Lio/astrolabe/id/WorkId;Ljava/util/List;Lio/astrolabe/provider/Money;Ljava/lang/Double;Ljava/util/Map;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/Map;Ljava/util/List;Ljava/lang/String;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;IILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Lio/astrolabe/id/WorkId;
 	public final fun component10 ()Ljava/lang/String;
+	public final fun component11 ()Lio/astrolabe/provider/Money;
+	public final fun component12 ()Lio/astrolabe/provider/Money;
+	public final fun component13 ()I
 	public final fun component2 ()Ljava/util/List;
 	public final fun component3 ()Lio/astrolabe/provider/Money;
 	public final fun component4 ()Ljava/lang/Double;
@@ -4207,8 +4231,8 @@ public final class io/astrolabe/campaign/EconomicsReport {
 	public final fun component7 ()Ljava/lang/Double;
 	public final fun component8 ()Ljava/util/Map;
 	public final fun component9 ()Ljava/util/List;
-	public final fun copy (Lio/astrolabe/id/WorkId;Ljava/util/List;Lio/astrolabe/provider/Money;Ljava/lang/Double;Ljava/util/Map;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/Map;Ljava/util/List;Ljava/lang/String;)Lio/astrolabe/campaign/EconomicsReport;
-	public static synthetic fun copy$default (Lio/astrolabe/campaign/EconomicsReport;Lio/astrolabe/id/WorkId;Ljava/util/List;Lio/astrolabe/provider/Money;Ljava/lang/Double;Ljava/util/Map;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/Map;Ljava/util/List;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/campaign/EconomicsReport;
+	public final fun copy (Lio/astrolabe/id/WorkId;Ljava/util/List;Lio/astrolabe/provider/Money;Ljava/lang/Double;Ljava/util/Map;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/Map;Ljava/util/List;Ljava/lang/String;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;I)Lio/astrolabe/campaign/EconomicsReport;
+	public static synthetic fun copy$default (Lio/astrolabe/campaign/EconomicsReport;Lio/astrolabe/id/WorkId;Ljava/util/List;Lio/astrolabe/provider/Money;Ljava/lang/Double;Ljava/util/Map;Ljava/lang/Double;Ljava/lang/Double;Ljava/util/Map;Ljava/util/List;Ljava/lang/String;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;IILjava/lang/Object;)Lio/astrolabe/campaign/EconomicsReport;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getAnchorShare ()Ljava/lang/Double;
 	public final fun getBoundaryCostShare ()Ljava/lang/Double;
@@ -4217,8 +4241,11 @@ public final class io/astrolabe/campaign/EconomicsReport {
 	public final fun getContinuationsPerIncrement ()Ljava/util/Map;
 	public final fun getLiveGate ()Ljava/lang/String;
 	public final fun getMoney ()Lio/astrolabe/provider/Money;
+	public final fun getNominalMoney ()Lio/astrolabe/provider/Money;
+	public final fun getPaidMoney ()Lio/astrolabe/provider/Money;
 	public final fun getRebuildsPerCell ()Ljava/lang/Double;
 	public final fun getTokensByCacheClass ()Ljava/util/Map;
+	public final fun getUnpricedCalls ()I
 	public final fun getWork ()Lio/astrolabe/id/WorkId;
 	public fun hashCode ()I
 	public final fun render ()Ljava/lang/String;
@@ -21545,23 +21572,30 @@ public final class io/astrolabe/store/Tx {
 
 public final class io/astrolabe/telemetry/AccountTotals {
 	public static final field Companion Lio/astrolabe/telemetry/AccountTotals$Companion;
-	public fun <init> (IILio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Ljava/util/Map;Lio/astrolabe/provider/Money;)V
+	public fun <init> (IILio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Ljava/util/Map;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;I)V
+	public synthetic fun <init> (IILio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Ljava/util/Map;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;IILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()I
+	public final fun component10 ()I
 	public final fun component2 ()I
 	public final fun component3 ()Lio/astrolabe/provider/Money;
 	public final fun component4 ()Lio/astrolabe/provider/Money;
 	public final fun component5 ()Lio/astrolabe/provider/Money;
 	public final fun component6 ()Ljava/util/Map;
 	public final fun component7 ()Lio/astrolabe/provider/Money;
-	public final fun copy (IILio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Ljava/util/Map;Lio/astrolabe/provider/Money;)Lio/astrolabe/telemetry/AccountTotals;
-	public static synthetic fun copy$default (Lio/astrolabe/telemetry/AccountTotals;IILio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Ljava/util/Map;Lio/astrolabe/provider/Money;ILjava/lang/Object;)Lio/astrolabe/telemetry/AccountTotals;
+	public final fun component8 ()Lio/astrolabe/provider/Money;
+	public final fun component9 ()Lio/astrolabe/provider/Money;
+	public final fun copy (IILio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Ljava/util/Map;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;I)Lio/astrolabe/telemetry/AccountTotals;
+	public static synthetic fun copy$default (Lio/astrolabe/telemetry/AccountTotals;IILio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Ljava/util/Map;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Money;IILjava/lang/Object;)Lio/astrolabe/telemetry/AccountTotals;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getCalls ()I
 	public final fun getCallsWithoutUsage ()I
 	public final fun getColdMoney ()Lio/astrolabe/provider/Money;
 	public final fun getCostPerAcceptedTask ()Lio/astrolabe/provider/Money;
 	public final fun getMoney ()Lio/astrolabe/provider/Money;
+	public final fun getNominalMoney ()Lio/astrolabe/provider/Money;
+	public final fun getPaidMoney ()Lio/astrolabe/provider/Money;
 	public final fun getQuantities ()Ljava/util/Map;
+	public final fun getUnpricedCalls ()I
 	public final fun getWarmMoney ()Lio/astrolabe/provider/Money;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
@@ -21633,11 +21667,12 @@ public final class io/astrolabe/telemetry/AccountingExport$Companion {
 
 public final class io/astrolabe/telemetry/CallAccount {
 	public static final field Companion Lio/astrolabe/telemetry/CallAccount$Companion;
-	public fun <init> (Ljava/lang/String;Lio/astrolabe/id/Identities;Ljava/lang/String;Lio/astrolabe/provider/BillableUsage;Lio/astrolabe/provider/Money;Ljava/lang/String;Lio/astrolabe/telemetry/Quantities;Ljava/lang/Boolean;Ljava/time/Instant;Ljava/lang/Long;Lio/astrolabe/provider/Money;)V
-	public synthetic fun <init> (Ljava/lang/String;Lio/astrolabe/id/Identities;Ljava/lang/String;Lio/astrolabe/provider/BillableUsage;Lio/astrolabe/provider/Money;Ljava/lang/String;Lio/astrolabe/telemetry/Quantities;Ljava/lang/Boolean;Ljava/time/Instant;Ljava/lang/Long;Lio/astrolabe/provider/Money;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ljava/lang/String;Lio/astrolabe/id/Identities;Ljava/lang/String;Lio/astrolabe/provider/BillableUsage;Lio/astrolabe/provider/Money;Ljava/lang/String;Lio/astrolabe/telemetry/Quantities;Ljava/lang/Boolean;Ljava/time/Instant;Ljava/lang/Long;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Charge;)V
+	public synthetic fun <init> (Ljava/lang/String;Lio/astrolabe/id/Identities;Ljava/lang/String;Lio/astrolabe/provider/BillableUsage;Lio/astrolabe/provider/Money;Ljava/lang/String;Lio/astrolabe/telemetry/Quantities;Ljava/lang/Boolean;Ljava/time/Instant;Ljava/lang/Long;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Charge;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Ljava/lang/String;
 	public final fun component10 ()Ljava/lang/Long;
 	public final fun component11 ()Lio/astrolabe/provider/Money;
+	public final fun component12 ()Lio/astrolabe/provider/Charge;
 	public final fun component2 ()Lio/astrolabe/id/Identities;
 	public final fun component3 ()Ljava/lang/String;
 	public final fun component4 ()Lio/astrolabe/provider/BillableUsage;
@@ -21646,10 +21681,11 @@ public final class io/astrolabe/telemetry/CallAccount {
 	public final fun component7 ()Lio/astrolabe/telemetry/Quantities;
 	public final fun component8 ()Ljava/lang/Boolean;
 	public final fun component9 ()Ljava/time/Instant;
-	public final fun copy (Ljava/lang/String;Lio/astrolabe/id/Identities;Ljava/lang/String;Lio/astrolabe/provider/BillableUsage;Lio/astrolabe/provider/Money;Ljava/lang/String;Lio/astrolabe/telemetry/Quantities;Ljava/lang/Boolean;Ljava/time/Instant;Ljava/lang/Long;Lio/astrolabe/provider/Money;)Lio/astrolabe/telemetry/CallAccount;
-	public static synthetic fun copy$default (Lio/astrolabe/telemetry/CallAccount;Ljava/lang/String;Lio/astrolabe/id/Identities;Ljava/lang/String;Lio/astrolabe/provider/BillableUsage;Lio/astrolabe/provider/Money;Ljava/lang/String;Lio/astrolabe/telemetry/Quantities;Ljava/lang/Boolean;Ljava/time/Instant;Ljava/lang/Long;Lio/astrolabe/provider/Money;ILjava/lang/Object;)Lio/astrolabe/telemetry/CallAccount;
+	public final fun copy (Ljava/lang/String;Lio/astrolabe/id/Identities;Ljava/lang/String;Lio/astrolabe/provider/BillableUsage;Lio/astrolabe/provider/Money;Ljava/lang/String;Lio/astrolabe/telemetry/Quantities;Ljava/lang/Boolean;Ljava/time/Instant;Ljava/lang/Long;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Charge;)Lio/astrolabe/telemetry/CallAccount;
+	public static synthetic fun copy$default (Lio/astrolabe/telemetry/CallAccount;Ljava/lang/String;Lio/astrolabe/id/Identities;Ljava/lang/String;Lio/astrolabe/provider/BillableUsage;Lio/astrolabe/provider/Money;Ljava/lang/String;Lio/astrolabe/telemetry/Quantities;Ljava/lang/Boolean;Ljava/time/Instant;Ljava/lang/Long;Lio/astrolabe/provider/Money;Lio/astrolabe/provider/Charge;ILjava/lang/Object;)Lio/astrolabe/telemetry/CallAccount;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getAt ()Ljava/time/Instant;
+	public final fun getCharge ()Lio/astrolabe/provider/Charge;
 	public final fun getFundedMoney ()Lio/astrolabe/provider/Money;
 	public final fun getFundedTokens ()Ljava/lang/Long;
 	public final fun getIds ()Lio/astrolabe/id/Identities;

@@ -12,7 +12,9 @@ import io.astrolabe.id.ContextId
 import io.astrolabe.id.Identities
 import io.astrolabe.id.WorkId
 import io.astrolabe.provider.BillableUsage
+import io.astrolabe.provider.Billing
 import io.astrolabe.provider.BillingDimension
+import io.astrolabe.provider.Charge
 import io.astrolabe.provider.UsageProvenance
 import io.astrolabe.store.Store
 import org.junit.jupiter.api.io.TempDir
@@ -23,6 +25,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -85,11 +88,15 @@ class AccountingTest {
     }
 
     @Test
-    fun `a profile the host declared plan-billed costs a money limit nothing, missing prices alone stay unknown`() = withStore { store ->
+    fun `a plan-billed profile without a price is marked unpriced, costs a money limit nothing, and requests and minutes still bound it`() = withStore { store ->
         // Missing catalog prices are not a plan: a per-token table without them is an unknown charge (FX-59).
         assertTrue(Accounting.estimateCost(plain(table(emptyMap())), 1_000, 1_000).unknown)
-        assertFailsWith<IllegalArgumentException> { table(mapOf(BillingDimension.OUTPUT to "2")).copy(billing = io.astrolabe.provider.Billing.Plan) }
-        val plan = plain(table(emptyMap()).copy(billing = io.astrolabe.provider.Billing.Plan))
+        assertEquals(Charge.Paid, table(emptyMap()).charge)
+        // C16: a plan-billed table may state the model's official price (nominal); without a base price it has no tiers.
+        assertEquals(Charge.Nominal, table(mapOf(BillingDimension.OUTPUT to "2")).copy(billing = Billing.Plan).charge)
+        assertFailsWith<IllegalArgumentException> { table(emptyMap(), 10L to mapOf(BillingDimension.OUTPUT to "2")).copy(billing = Billing.Plan) }
+        val plan = plain(table(emptyMap()).copy(billing = Billing.Plan))
+        assertEquals(Charge.Unpriced, plan.priceTable.charge)
         val estimate = Accounting.estimateCost(plan, 600_000, 131_072)
         assertFalse(estimate.unknown)
         assertEquals(0, estimate.amount.signum())
@@ -98,9 +105,67 @@ class AccountingTest {
         assertTrue(accounting.reserve(ids, "first", plan, 10, estimate, 100, limit), "the hold of a plan-billed call fits any money limit")
         val call = accounting.record(ids, "first", plan, null, null)
         assertFalse(call.money.unknown)
+        assertEquals(Charge.Unpriced, call.charge, "the call says it has no money accounting")
+        assertEquals(1, Accounting.totals(accounting.calls(ids.work), 0, "USD").unpricedCalls)
         val spend = io.astrolabe.budget.LimitSpend.of(accounting.calls(ids.work), 1_000, "USD")
+        assertEquals(1, spend.unpricedRequests)
+        assertEquals(io.astrolabe.budget.CostBasis.None, spend.costBasis, "no priced call")
+        assertEquals(0, spend.cost!!.amount.signum())
         val limits = io.astrolabe.budget.TaskLimits(maxCost = limit, maxRequests = 3_000)
-        assertEquals(io.astrolabe.budget.LimitDecision.Within, io.astrolabe.budget.LimitRule.decide(limits, spend, io.astrolabe.budget.LimitRule.nextCost(spend, estimate)))
+        val next = io.astrolabe.budget.LimitRule.nextCost(spend, estimate)
+        assertEquals(io.astrolabe.budget.LimitDecision.Within, io.astrolabe.budget.LimitRule.decide(limits, spend, next))
+        val requests = io.astrolabe.budget.LimitRule.decide(io.astrolabe.budget.TaskLimits(maxCost = limit, maxRequests = 1), spend, next)
+        assertEquals(io.astrolabe.budget.LimitKind.Requests, assertIs<io.astrolabe.budget.LimitDecision.Exhausted>(requests).kind)
+        val late = io.astrolabe.budget.LimitSpend.of(accounting.calls(ids.work), 60_000, "USD")
+        val minutes = io.astrolabe.budget.LimitRule.decide(io.astrolabe.budget.TaskLimits(maxCost = limit, maxMinutes = 1), late, next)
+        assertEquals(io.astrolabe.budget.LimitKind.Minutes, assertIs<io.astrolabe.budget.LimitDecision.Exhausted>(minutes).kind)
+    }
+
+    @Test
+    fun `a subscription model is charged at its official price as nominal spend, counted as real and stopped by a money limit`() = withStore { store ->
+        val prices = mapOf(BillingDimension.UNCACHED_INPUT to "2", BillingDimension.OUTPUT to "10")
+        val paid = plain(table(prices))
+        val nominal = plain(table(prices).copy(billing = Billing.Plan))
+        // Admission and routing read one price: a subscription model never ranks as a free one.
+        assertEquals(Accounting.estimateCost(paid, 100_000, 10_000), Accounting.estimateCost(nominal, 100_000, 10_000))
+        val estimate = Accounting.estimateCost(nominal, 100_000, 10_000)
+        assertEquals(0, BigDecimal("0.30").compareTo(estimate.amount))
+        val accounting = Accounting(store, clock)
+        // A nominal call never counts a reported bill: what a subscription "billed" is not its official price.
+        val usage = BillableUsage(mapOf(BillingDimension.UNCACHED_INPUT to 100_000L, BillingDimension.OUTPUT to 10_000L), provenance,
+            billed = io.astrolabe.provider.Money.zero("USD"))
+        for (id in listOf("first", "second")) {
+            assertTrue(accounting.reserve(ids, id, nominal, 110_000, estimate, 1_000_000, null))
+            val call = accounting.record(ids, id, nominal, null, usage)
+            assertEquals(Charge.Nominal, call.charge)
+            assertEquals(0, BigDecimal("0.30").compareTo(call.money.amount))
+        }
+        val totals = Accounting.totals(accounting.calls(ids.work), 1, "USD")
+        assertEquals(0, BigDecimal("0.60").compareTo(totals.money.amount), "nominal spend is counted as real")
+        assertEquals(0, BigDecimal("0.60").compareTo(totals.nominalMoney!!.amount))
+        assertEquals(0, totals.paidMoney!!.amount.signum())
+        assertEquals(0, BigDecimal("0.60").compareTo(totals.costPerAcceptedTask!!.amount))
+        val spend = io.astrolabe.budget.LimitSpend.of(accounting.calls(ids.work), 0, "USD")
+        assertEquals(io.astrolabe.budget.CostBasis.Nominal, spend.costBasis)
+        assertEquals(0, BigDecimal("0.60").compareTo(spend.cost!!.amount))
+        assertEquals(0, BigDecimal("0.60").compareTo(spend.nominalCost!!.amount))
+        assertEquals(0, spend.paidCost!!.amount.signum())
+        val limits = io.astrolabe.budget.TaskLimits(maxCost = io.astrolabe.provider.Money("USD", BigDecimal("0.80")))
+        val stop = io.astrolabe.budget.LimitRule.decide(limits, spend, io.astrolabe.budget.LimitRule.nextCost(spend, estimate))
+        val exhausted = assertIs<io.astrolabe.budget.LimitDecision.Exhausted>(stop)
+        assertEquals(io.astrolabe.budget.LimitKind.Cost, exhausted.kind)
+        assertTrue("(nominal)" in exhausted.reason, exhausted.reason)
+        val status = io.astrolabe.budget.LimitRule.status(limits, spend)
+        assertEquals(spend.nominalCost, status.nominalCost)
+        // A positive bill on the subscription is real money: the call is paid at the bill, counted once.
+        val charged = accounting.record(ids, "third", nominal, null, usage.copy(billed = io.astrolabe.provider.Money("USD", BigDecimal("2"))))
+        assertEquals(Charge.Paid, charged.charge)
+        assertEquals(0, BigDecimal("2").compareTo(charged.money.amount))
+        val after = io.astrolabe.budget.LimitSpend.of(accounting.calls(ids.work), 0, "USD")
+        assertEquals(0, BigDecimal("2").compareTo(after.paidCost!!.amount))
+        assertEquals(0, BigDecimal("0.60").compareTo(after.nominalCost!!.amount))
+        assertEquals(0, BigDecimal("2.60").compareTo(after.cost!!.amount))
+        assertEquals(0, BigDecimal("2").compareTo(Accounting.totals(accounting.calls(ids.work), 0, "USD").paidMoney!!.amount))
     }
 
     @Test

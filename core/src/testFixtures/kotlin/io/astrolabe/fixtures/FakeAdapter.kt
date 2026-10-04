@@ -289,6 +289,7 @@ public class FakeAdapter(
                 FaultKind.RateLimit -> error(ProviderError.RateLimit("rate limited", fault.retryAfterSeconds))
                 FaultKind.ContextOverflow -> error(ProviderError.ContextOverflow("prompt is too long", reportedInputTokens = FakeTokenizer.count(request)))
                 FaultKind.Authentication -> error(ProviderError.Authentication("invalid API key"))
+                FaultKind.QuotaExhausted -> error(ProviderError.QuotaExhausted("usage limit reached", fault.retryAfterSeconds))
             }
         }
 
