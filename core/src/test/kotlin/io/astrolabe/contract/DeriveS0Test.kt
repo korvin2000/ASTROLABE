@@ -76,7 +76,7 @@ class DeriveS0Test {
             assertTrue(".git/" in contract.scope.protectedPaths)
             assertTrue("migrations/" in contract.scope.protectedPaths)
             assertTrue("package-lock.json" in contract.scope.protectedPaths, "lock files are protected by name, anywhere")
-            assertEquals(Authorization(Stage.LocalCommit, DClassPolicy.Deny, "workspace-local-test-only"), contract.authorization)
+            assertEquals(Authorization(Stage.LocalCommit, DClassPolicy.Deny, "workspace-local-dev"), contract.authorization, "D-412: the development set is the default")
             assertEquals(Tokens(500_000), contract.budget.tokens)
             assertEquals(config.defaults.turnsPerCell, contract.budget.turnsPerCell)
             assertNull(contract.risk, "risk is not assessed by derivation (D-16: unknown, never low)")

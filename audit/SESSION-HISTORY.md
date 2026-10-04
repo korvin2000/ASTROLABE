@@ -764,3 +764,14 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - CI: the Windows `rg: command not found` was choco exiting 0 on a 503 — fixed with a verified install and a pinned
   fallback. CI green at every S3 push; gate P8.C in `TODO.md`. Next: S4 (D1 → D2 ∥ D3).
 
+## 2026-10-04: live-run hotfix (D-407–D-413), no plan task
+- The owner's first live Studio run (one task, six runs, flash models and a subscription model) failed on basics; export
+  `../diags/tasks/W-uyorz7p4tivk7xvm7iaq`, independent diagnosis `../ASTROLABE-DIAGNOSTICS-2026-10-04.md`.
+- Proven in the logs and fixed: `Scheduler.export` crashed in a repository without a first commit; one response with 555
+  and 3 575 tool calls grew the context to 620 K (no bound on calls, pressure only at 65 % of a 1 M window); a
+  subscription profile was refused by the money limit; `node --test` had no parser; build output was flagged as weakened
+  tests; a mid-run user message was only pinned; `npm install` was refused by a hard-coded capability set.
+- Owner decisions in the session: the default permissions were "a paranoid minimum" — development set by default (D-412).
+- Reviews: Opus and Codex, two rounds each, on the diff; every round found real defects in the fixes (op renumbering,
+  missing prices read as free, an exemption that covered real tests, `curl` uploads, a status answer ending the cell).
+- Verified offline only: full build 2260 tests (4 old-default tests updated), Studio backend 88, frontend 150. No live run.

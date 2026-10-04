@@ -151,6 +151,44 @@ class GenericShaperTest {
     }
 
     @Test
+    fun `the node test runner's summary is recognised under the spec and TAP reporters`() {
+        val spec = "✔ creates a note (12.3ms)\n✔ lists notes (1.1ms)\nℹ tests 7\nℹ suites 0\nℹ pass 7\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 310.4\n"
+        val green = Shapers.shape(Recorded.capture(argv = listOf("npm", "test"), exitCode = 0, output = spec.toByteArray()))
+        assertEquals("generic/node", green.shaper)
+        assertEquals(Outcome.Passed, green.status)
+        assertEquals(7, assertNotNull(green.counts).passed)
+        assertEquals(7, green.counts.discovered)
+        assertTrue(green.limitations.none { it.contains("no shaped parser") }, "${green.limitations}")
+
+        val tap = "TAP version 13\nok 1 - a\nnot ok 2 - b\n1..3\n# tests 3\n# suites 0\n# pass 1\n# fail 1\n# cancelled 1\n# skipped 0\n# todo 0\n"
+        val red = Shapers.shape(Recorded.capture(argv = listOf("node", "--test"), exitCode = 1, output = tap.toByteArray()))
+        assertEquals("generic/node", red.shaper)
+        assertEquals(Outcome.Failed, red.status)
+        assertEquals(1, assertNotNull(red.counts).passed)
+        assertEquals(2, red.counts.failed, "a cancelled test did not pass")
+
+        val partial = Shapers.shape(Recorded.capture(argv = listOf("make", "check"), exitCode = 0, output = "# tests 3\n".toByteArray()))
+        assertNull(partial.counts, "one summary line alone is not a node summary")
+        val cut = "ℹ tests 2\nℹ pass 2\nℹ fail 0\nℹ tests 5\nℹ pass 5\n"
+        assertNull(Shapers.shape(Recorded.capture(argv = listOf("npm", "test"), exitCode = 0, output = cut.toByteArray())).counts, "a second summary without its fail line is a cut log")
+
+        // Node lines that do not add up are evidence present and not trusted: mocha's "1 passing" must not turn the run green.
+        val hidden = "# tests 2\n# pass 1\n# fail 1\n# tests 1\n  1 passing (3ms)\n"
+        val unsure = Shapers.shape(Recorded.capture(argv = listOf("npm", "test"), exitCode = 0, output = hidden.toByteArray()))
+        assertEquals("generic/node", unsure.shaper)
+        assertNull(unsure.counts)
+        assertEquals(Outcome.Inconclusive, unsure.status)
+
+        // A script that ran node's tests and then mocha: the green node summary must not hide mocha's failure behind an exit 0.
+        val mixed = spec + "\n  2 passing (12ms)\n  1 failing\n"
+        val both = Shapers.shape(Recorded.capture(argv = listOf("npm", "test"), exitCode = 0, output = mixed.toByteArray()))
+        assertEquals("generic/node+mocha", both.shaper)
+        assertEquals(1, assertNotNull(both.counts).failed)
+        assertEquals(9, both.counts.passed)
+        assertEquals(Outcome.Failed, both.status)
+    }
+
+    @Test
     fun `an unrecognised command yields no counts and never a green exit code (D-50)`() {
         val green = Shapers.shape(
             Recorded.capture(argv = listOf("make", "check"), exitCode = 0, output = "everything up to date\n".toByteArray()),

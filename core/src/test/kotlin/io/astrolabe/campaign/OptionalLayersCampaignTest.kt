@@ -89,7 +89,8 @@ class OptionalLayersCampaignTest {
         val request = request.copy(work = WorkId(id))
         Store.open(stateRoot, repo.git, clock).use { store ->
             val contracts = Contracts(SqliteContractRepository(store, clock), idGen, clock)
-            val derived = contracts.deriveS0(request.work, request.attempt, request.text, Atlas.build(repo.root), Config(), policy.tokens).contract
+            // FX-39 needs a caller without network: the set without it, not the development default (D-412).
+            val derived = contracts.deriveS0(request.work, request.attempt, request.text, Atlas.build(repo.root), Config(capabilitySet = io.astrolabe.auth.CapabilitySet.WORKSPACE_LOCAL_TEST_ONLY.name), policy.tokens).contract
             contracts.open(derived.copy(acceptance = listOf(Acceptance.Run("AC-1", printing, Origin.Harness, scope = Contracts.TOUCHED))))
         }
         return request

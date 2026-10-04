@@ -51,7 +51,15 @@ public fun interface ContainmentProbe {
 /**
  * Configurable command vocabularies for [EffectPolicy]. Every entry is a pattern `program [sub] [tokens…]`:
  * the first non-flag word after the program is matched positionally, flag-like words (`-x`, `/s`) must be
- * present anywhere in the arguments. Package installation is D-class by default and configurable (§4.6).
+ * present anywhere in the arguments.
+ *
+ * D-412 (owner): the defaults are those of a developer working in a project of their own. Installing the project's
+ * dependencies, downloading, and calling the project's own server are ordinary work — W-class, no approval: a harness
+ * that refuses `npm install` only sends the model to fetch the same packages through a script, at the cost of turns.
+ * What reaches beyond the project stays D-class and asks: installers that change the machine
+ * ([systemInstallCommands]), an HTTP client that sends a body or a file to a host other than this machine, a download
+ * piped into an interpreter, remote shells and file transfer ([networkCommands]), the user's git refs, privilege, and
+ * writes outside the workspace. A label on the command text, as before: a script can still do what its text does not show.
  */
 @Serializable
 public data class EffectPolicyConfig(
@@ -64,8 +72,8 @@ public data class EffectPolicyConfig(
     val scriptInterpreters: Set<String> = DEFAULT_SCRIPT_INTERPRETERS,
     /** Workspace-relative prefixes a destructive delete may target without becoming D-class, when a probe proves it contained. */
     val tmpPrefixes: Set<String> = setOf("tmp", ".astrolabe/tmp", "build/tmp", "target/tmp"),
-    /** D-class package installation (§4.6 "package installation (configurable)"). */
-    val packageInstallIsDClass: Boolean = true,
+    /** True makes every package installation D-class (§4.6 "package installation (configurable)"); a system-wide one always is. */
+    val packageInstallIsDClass: Boolean = false,
     /**
      * Case-insensitive path comparison. Off by default so the policy is identical on Windows and Linux;
      * real case/alias identity belongs to the `WorkspacePath` contract (D-47, P1.2.6).
@@ -76,14 +84,21 @@ public data class EffectPolicyConfig(
      * decides which switches are flags (`/s` only for `cmd.exe`) and which redirect target is the null device.
      */
     val os: OsFamily = OsFamily.of(System.getProperty("os.name").orEmpty()),
+    /** Installers that change the machine rather than the project: always D-class. Each also matches [packageInstallCommands]. */
+    val systemInstallCommands: Set<String> = DEFAULT_SYSTEM_INSTALL,
+    /** HTTP clients: W-class with the network capability — a request to the project's own server or a download into it. */
+    val httpCommands: Set<String> = DEFAULT_HTTP,
 ) {
     public companion object {
         @JvmField
         public val DEFAULT_PRIVILEGE: Set<String> = setOf("sudo", "doas", "runas", "su", "pkexec")
 
+        /** Remote shells and file transfer: they act on another machine with the user's keys. */
         @JvmField
-        public val DEFAULT_NETWORK: Set<String> =
-            setOf("curl", "wget", "ssh", "scp", "sftp", "rsync", "nc", "ncat", "telnet", "ftp", "Invoke-WebRequest")
+        public val DEFAULT_NETWORK: Set<String> = setOf("ssh", "scp", "sftp", "rsync", "nc", "ncat", "telnet", "ftp")
+
+        @JvmField
+        public val DEFAULT_HTTP: Set<String> = setOf("curl", "wget", "Invoke-WebRequest")
 
         @JvmField
         public val DEFAULT_PACKAGE_INSTALL: Set<String> = setOf(
@@ -91,6 +106,15 @@ public data class EffectPolicyConfig(
             "npm install", "npm i", "npm ci", "yarn add", "yarn install", "pnpm add", "pnpm install",
             "apt install", "apt-get install", "apk add", "dnf install", "yum install", "brew install",
             "cargo install", "go get", "gem install", "dotnet add", "choco install", "winget install",
+            "yarn global", "pipx install",
+        )
+
+        @JvmField
+        public val DEFAULT_SYSTEM_INSTALL: Set<String> = setOf(
+            "apt install", "apt-get install", "apk add", "dnf install", "yum install", "brew install", "choco install", "winget install",
+            "conda install", "cargo install", "gem install", "pipx install", "yarn global",
+            "npm install -g", "npm install --global", "npm i -g", "npm i --global", "pnpm add -g", "pnpm add --global",
+            "pip install --user", "pip3 install --user",
         )
 
         @JvmField
@@ -123,7 +147,8 @@ public data class EffectPolicyConfig(
 
 /**
  * Effect-class policy (§4.6, §14.1). `D` covers writes outside the workspace, writes under a protected path,
- * network egress, mutation of the user's git refs, package installation (configurable), privilege escalation
+ * remote shells and file transfer, mutation of the user's git refs, system-wide package installation (every
+ * installation when configured so), privilege escalation
  * and destructive git commands or deletes and moves not proven to stay inside the workspace clear of protected paths.
  * `W` covers known builders, formatters, test runners, scripts, deletes and moves of literal paths a [ContainmentProbe]
  * inspected inside the workspace (D-373, D-375; tmp prefixes included) and
@@ -169,8 +194,120 @@ public object EffectPolicy {
         val argv = args.argv
         if (argv != null && argv.isNotEmpty()) return classify(argv, args.cwd, workspaceRoot, protectedPaths, config, probe)
         val cmd = args.cmd.orEmpty()
-        val segments = shellSegments(cmd, config.os == OsFamily.Windows)
-        return classifySegments(segments, args.cwd, workspaceRoot, protectedPaths, config, probe, approximate = true, rendered = cmd)
+        val windows = config.os == OsFamily.Windows
+        val segments = shellSegments(cmd, windows)
+        val classification = classifySegments(segments, args.cwd, workspaceRoot, protectedPaths, config, probe, approximate = true, rendered = cmd)
+        if (!pipesDownloadIntoInterpreter(cmd, windows, config)) return classification
+        return classification.copy(effectClass = EffectClass.D, reasons = classification.reasons + "a download piped into an interpreter runs code the text cannot see")
+    }
+
+    /**
+     * D-412: `curl … | sh`, also through `cat` or `tee` — a download from another host that a later command of the same
+     * pipeline takes as its program. A request to this machine is the project's own server, and an interpreter given its
+     * program (`python -m json.tool`, `node parse.js`) reads the download as data.
+     */
+    private fun pipesDownloadIntoInterpreter(cmd: String, windows: Boolean, config: EffectPolicyConfig): Boolean {
+        val clients = config.httpCommands.map { programName(it.trim().substringBefore(' ')) }.toSet()
+        var downloaded = false
+        var current = ArrayList<String>()
+        fun close(): Boolean {
+            if (current.isEmpty()) return false
+            val program = programName(current.first())
+            val args = current.drop(1)
+            if (downloaded && program in config.scriptInterpreters && interpretsStdin(args)) return true
+            if (program in clients && !localOnly(program, args)) downloaded = true
+            return false
+        }
+        for (token in tokenizeShell(cmd, windows)) {
+            if (token !in OPERATORS) {
+                current += token
+                continue
+            }
+            if (close()) return true
+            current = ArrayList()
+            if (token != "|") downloaded = false
+        }
+        return close()
+    }
+
+    /** Flags with which `curl` or `wget` send a body or a file; a short flag may carry its value attached (`-d@f`) or sit in a cluster (`-sd`). */
+    private val HTTP_SEND_FLAGS = setOf(
+        "--data", "--data-raw", "--data-binary", "--data-urlencode", "--data-ascii", "--json", "--form", "--form-string", "--upload-file",
+        "--post-data", "--post-file", "--body-data", "--body-file",
+    )
+
+    /** The short forms are `curl`'s (`-d`, `-F`, `-T`); `wget` spells them long only — its `-T` is a timeout and its `-d` debug output. */
+    private fun sendsData(program: String, args: List<String>): Boolean = args.any { arg ->
+        when {
+            arg.startsWith("--") -> arg.substringBefore('=') in HTTP_SEND_FLAGS
+            program == "curl" && arg.length >= 2 && arg[0] == '-' -> arg.drop(1).takeWhile { it.isLetter() }.any { it == 'd' || it == 'F' || it == 'T' }
+            else -> false
+        }
+    }
+
+    /** True when an interpreter with these arguments takes its program from standard input: no script, module or inline code is named. */
+    private fun interpretsStdin(args: List<String>): Boolean {
+        if (args.any { it == "-c" || it == "-m" || it == "-e" || it == "-p" || it.equals("-Command", ignoreCase = true) || it.equals("-File", ignoreCase = true) }) return false
+        val operands = args.takeWhile { it != "--" }.filter { !it.startsWith("-") || it == "-" }
+        return operands.isEmpty() || operands.first() == "-"
+    }
+
+    private val LOCAL_HOST = Regex("""^(localhost|127(\.\d{1,3}){3}|0\.0\.0\.0|\[::1\]|host\.docker\.internal|[a-z0-9.-]+\.localhost)$""")
+
+    /** `curl` options whose value is the next token, by long name and by short letter; an option not listed makes its value look like an address, which fails closed. */
+    private val CURL_VALUE_FLAGS = setOf(
+        "--data", "--data-raw", "--data-binary", "--data-urlencode", "--data-ascii", "--json", "--form", "--form-string", "--upload-file", "--header", "--request",
+        "--output", "--output-dir", "--user", "--user-agent", "--referer", "--cookie", "--cookie-jar", "--write-out", "--max-time", "--connect-timeout", "--retry",
+        "--retry-delay", "--retry-max-time", "--dump-header", "--cacert", "--cert", "--key", "--limit-rate", "--range", "--oauth2-bearer",
+    )
+    private const val CURL_VALUE_LETTERS = "dFTHXouAebcwmDEry"
+
+    /** Options that send the request somewhere the text does not name: a config file, a proxy, a redirected connection. */
+    private val CURL_OPAQUE_FLAGS = setOf("--config", "--proxy", "--preproxy", "--connect-to", "--resolve", "--socks4", "--socks4a", "--socks5", "--socks5-hostname", "--unix-socket", "--abstract-unix-socket", "--interface")
+    private const val CURL_OPAQUE_LETTERS = "Kx"
+
+    /**
+     * True when the command names at least one address and every address it names is this machine: a request to the
+     * project's own server. `curl` takes every operand as an address, with or without a scheme, so its options are read
+     * to tell an operand from an option's value; what cannot be told is not local.
+     */
+    private fun localOnly(program: String, args: List<String>): Boolean {
+        val addresses = ArrayList<String>()
+        var index = 0
+        while (index < args.size) {
+            val arg = args[index++]
+            when {
+                arg == "--url" -> addresses += args.getOrNull(index++) ?: return false
+                arg.startsWith("--url=") -> addresses += arg.substringAfter('=')
+                arg.startsWith("--") -> {
+                    val name = arg.substringBefore('=')
+                    if (name in CURL_OPAQUE_FLAGS) return false
+                    if (program == "curl" && name in CURL_VALUE_FLAGS && '=' !in arg) index++
+                }
+                arg.length >= 2 && arg[0] == '-' && program == "curl" -> {
+                    val letters = arg.drop(1)
+                    val at = letters.indexOfFirst { it in CURL_VALUE_LETTERS || it in CURL_OPAQUE_LETTERS }
+                    if (at >= 0 && letters[at] in CURL_OPAQUE_LETTERS) return false
+                    if (at >= 0 && at == letters.lastIndex) index++
+                }
+                arg.startsWith("-") -> Unit
+                else -> addresses += arg
+            }
+        }
+        return addresses.isNotEmpty() && addresses.all { LOCAL_HOST.matches(hostOf(it)) }
+    }
+
+    private fun hostOf(address: String): String {
+        val bare = address.trim('"', '\'').lowercase()
+        val authority = bare.substringAfter("://", bare).substringBefore('/').substringBefore('?').substringBefore('#').substringAfterLast('@')
+        return if (authority.startsWith("[")) authority.substringBefore(']') + "]" else authority.substringBefore(':')
+    }
+
+    /** The value a short option carries attached (`-o../x` gives `../x`), for the options of [letters]; `null` when [arg] is not such a token. */
+    private fun attachedValue(arg: String, letters: String): String? {
+        if (arg.length < 3 || arg[0] != '-' || arg[1] == '-') return null
+        val at = arg.indexOfFirst { it in letters }
+        return if (at >= 1 && at < arg.lastIndex && arg.substring(1, at).all { it.isLetter() }) arg.substring(at + 1) else null
     }
 
     private fun classifySegments(
@@ -382,7 +519,7 @@ public object EffectPolicy {
         var provenRemoval = false
         val recognized = probe || removing || readOnlyProgram || program in config.scriptInterpreters ||
             listOf(
-                config.privilegeCommands, config.networkCommands, config.packageInstallCommands,
+                config.privilegeCommands, config.networkCommands, config.httpCommands, config.packageInstallCommands,
                 config.gitRefMutations, config.destructiveFileCommands, config.writingCommands,
             ).any { matchesAny(program, args, it) }
 
@@ -396,16 +533,31 @@ public object EffectPolicy {
             capabilities += Capability.Network
             reasons += "network egress: '$program'"
         }
-        matchedPattern(program, args, config.packageInstallCommands)?.let { pattern ->
-            capabilities += Capability.PackageInstall
-            if (config.packageInstallIsDClass) {
+        if (matchesAny(program, args, config.httpCommands)) {
+            capabilities += Capability.Network
+            // An output file given attached to its option (`-o../x`) is a write target like any other path token.
+            val outputs = args.mapNotNull { attachedValue(it, if (program == "curl") "oDc" else "OPoa") }
+            if (outputs.isNotEmpty()) checkPaths(outputs, probe = false, cwd, workspaceRoot, protectedPaths, config, reasons, capabilities)?.let { effect = maxOf(effect, it) }
+            if (sendsData(program, args) && !localOnly(program, args)) {
                 effect = EffectClass.D
-                capabilities += Capability.Network
-                reasons += "package installation: '$pattern'"
+                reasons += "http client sends data to a remote host: '$program'"
             } else {
                 effect = maxOf(effect, EffectClass.W)
                 capabilities += Capability.WorkspaceWrite
-                reasons += "package installation: '$pattern' (configured as non-D)"
+                reasons += "http client: '$program'"
+            }
+        }
+        matchedPattern(program, args, config.packageInstallCommands)?.let { pattern ->
+            capabilities += Capability.PackageInstall
+            val system = matchedPattern(program, args, config.systemInstallCommands)
+            if (config.packageInstallIsDClass || system != null) {
+                effect = EffectClass.D
+                capabilities += Capability.Network
+                reasons += if (config.packageInstallIsDClass) "package installation: '$pattern'" else "system-wide package installation: '$system'"
+            } else {
+                effect = maxOf(effect, EffectClass.W)
+                capabilities += Capability.WorkspaceWrite
+                reasons += "package installation into the project: '$pattern'"
             }
         }
         matchedPattern(program, args, config.gitRefMutations)?.let { pattern ->
@@ -783,7 +935,8 @@ public object EffectPolicy {
 
     private fun matchedPattern(program: String, args: List<String>, patterns: Set<String>): String? {
         val sub = subcommand(args)
-        val lowered = args.map { it.lowercase() }
+        // `--global=true` is `--global`: a long option with a value still names the option.
+        val lowered = args.map { it.lowercase() }.let { all -> all + all.filter { it.startsWith("--") && '=' in it }.map { it.substringBefore('=') } }
         return patterns.firstOrNull { pattern ->
             val words = pattern.trim().split(' ').filter { it.isNotEmpty() }
             if (words.isEmpty() || programName(words.first()) != program) return@firstOrNull false

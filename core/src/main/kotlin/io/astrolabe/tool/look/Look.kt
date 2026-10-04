@@ -199,7 +199,7 @@ public class Look(
         } catch (refusal: ReadRefusal) {
             return refused(args, "refused", refusal.message!!)
         } ?: return refused(args, "refused", "read needs a target: path | path:a-b | path::Symbol")
-        val content = readFile(target.path) ?: return refused(args, "refused", refusalFor(target.path))
+        val content = readFile(target.path) ?: return directoryInstead(args, target.path) ?: refused(args, "refused", refusalFor(target.path))
         val lines = decodeLines(content.bytes)
         if (lines.isEmpty() && target !is LookTarget.Symbol) return emptyRead(args, target.path, content.version, content.bytes, context)
         val outlineOf = { Outline.of(target.path, content.bytes) }
@@ -296,8 +296,42 @@ public class Look(
 
     // ------------------------------------------------------------------ find
 
+    /**
+     * D-413: a `read` aimed at a directory serves that directory's tree. The listing is what the call was after; a
+     * refusal only costs the turn that asks again.
+     */
+    private fun directoryInstead(args: LookArgs, path: String): ToolOutcome? {
+        val dir = path.trim().replace('\\', '/').trimEnd('/')
+        if (dir.isEmpty() || (atlas.filesUnder(dir) == 0 && atlas.children(dir).isEmpty())) return null
+        val note = "note: '$dir' is a directory; this is its tree. Read a file with target=\"$dir/<name>\"."
+        return textResult(args, listOf(note, Focus.render(atlas, Focus.Dir(dir), args.tokens)).joinToString(LINE), scope = "tree $dir")
+    }
+
+    /**
+     * D-413: `find` with a glob and no pattern lists the files the glob names — a search by file name, which a content
+     * pattern cannot express and which was refused before.
+     */
+    private fun filesMatching(args: LookArgs): ToolOutcome? {
+        val glob = args.glob?.takeIf { it.isNotBlank() } ?: return null
+        if (args.scope != "workspace") return null
+        val globs = braces(glob)
+        val paths = atlas.rows.map { it.path }.filter { path -> globs.any { io.astrolabe.workspace.PathPattern.matches(it, path) } }.sorted()
+        // The atlas is the index of source files: a file it does not hold is not proven absent.
+        val body = if (paths.isEmpty()) "no indexed file matches glob=$glob (the atlas lists source files; look(tree) shows a folder as it is; find with a pattern in target searches file contents)"
+        else (listOf("indexed files matching glob=$glob (${paths.size}; no pattern in target, so names are listed):") + paths).joinToString(LINE)
+        return textResult(args, body, scope = "files glob=$glob", complete = false)
+    }
+
+    /** `a.{kt,java}` as `a.kt` and `a.java`: the search backend's glob has the alternation, the path matcher does not. */
+    private fun braces(glob: String): List<String> {
+        val open = glob.indexOf('{')
+        val close = if (open < 0) -1 else glob.indexOf('}', open + 1)
+        if (close < 0) return listOf(glob)
+        return glob.substring(open + 1, close).split(',').flatMap { braces(glob.substring(0, open) + it + glob.substring(close + 1)) }
+    }
+
     private fun find(args: LookArgs, context: TurnContext): ToolOutcome {
-        val pattern = args.target?.takeIf { it.isNotEmpty() } ?: return refused(args, "refused", "find needs a pattern in target")
+        val pattern = args.target?.takeIf { it.isNotEmpty() } ?: return filesMatching(args) ?: refused(args, "refused", "find needs a pattern in target, or a glob to list files by name")
         return when (args.scope) {
             "workspace" -> findInWorkspace(args, pattern, context)
             "store" -> findInStore(args, pattern)
@@ -694,6 +728,7 @@ public class Look(
 
 /** Alias kind of a `find` result, whose body is not source-aligned. */
 private const val SEARCH_KIND = "search"
+private const val LINE = "\n"
 
 /** A `range` argument without a path: `a-b`. */
 private val RANGE = Regex("""^(\d+)-(\d+)$""")

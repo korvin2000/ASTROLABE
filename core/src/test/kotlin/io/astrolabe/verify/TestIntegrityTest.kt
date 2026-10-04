@@ -111,6 +111,24 @@ class TestIntegrityTest {
 
     }
 
+    /** The recorded run flagged a Gradle test report and a compiled test class as weakened tests (diags W-3hxa7xrytxjflluie2fa, turns 53 and 55). */
+    @Test
+    fun `what a build or a test run writes is not acceptance surface, a test file under a test folder still is`() {
+        val (contract, _) = s0()
+        for (output in listOf(
+            "build/reports/tests/test/index.html", "build/classes/java/test/notes/ApiTests.class", "build/test-results/test/TEST-notes.ApiTests.xml",
+            "app/build/reports/tests/test/css/style.css", "target/surefire-reports/TEST-FooTest.xml", "node_modules/pkg/test/a.test.js", ".gradle/9.7.1/test/x.bin",
+            "out/test/play5/notes/ApiTests.class", "app/build/intermediates/javac/debugUnitTest/classes/FooTest.class",
+        )) assertNull(TestIntegrity.surfaceOf(output, contract), output)
+        // A folder that only shares a build tool's name holds sources: its tests stay under the guard.
+        for (test in listOf(
+            "src/test/java/notes/ApiTests.java", "tests/build/test_total.py", "src/test/java/out/FooTest.java", "pkg/build/build_test.go",
+            "internal/coverage/coverage_test.go", "packages/build/src/a.test.ts", "dist/tests/test_x.py", "build/test_total.py",
+            // A package named like an output folder, under a test root.
+            "src/test/java/com/acme/build/reports/ReportTest.java", "tests/target/classes/test_x.py",
+        )) assertEquals(AcceptanceSurface.TestFile, TestIntegrity.surfaceOf(test, contract), test)
+    }
+
     @Test
     fun `a command's cwd alone does not make the files under it acceptance inputs`() {
         val (base, _) = s0()

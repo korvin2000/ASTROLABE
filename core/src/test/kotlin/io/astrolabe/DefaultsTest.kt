@@ -10,7 +10,7 @@ class DefaultsTest {
     private val table = mapOf(
         "Shape" to listOf("shapePolicy"),
         "Cell turn budget" to listOf("turnsPerCell", "turnNudgeFraction"),
-        "α pressure threshold" to listOf("alpha"),
+        "α pressure threshold" to listOf("alpha", "contextCeilingTokens"),
         "k eviction batch / m turns kept on rebuild" to listOf("k", "m"),
         "R_max total live results / [A] max" to listOf("rMaxTokens", "anchorMaxTokens"),
         "Immediate-stub threshold for stale reads" to listOf("immediateStubTokens"),
@@ -24,7 +24,7 @@ class DefaultsTest {
         "θ risk threshold for early slow checks" to listOf("theta"),
         "Full-suite cadence" to listOf("fullSuiteCadence"),
         "Reserves" to listOf("reserveVerification", "reserveRecoveryAndPersist", "campaignRecoveryReserve"),
-        "Stall / loop / repeated signature / doom-loop guard" to listOf("stallTurns", "loopIdentical", "repeatedSignatureRepairs", "doomLoopSameCalls"),
+        "Stall / loop / repeated signature / doom-loop guard" to listOf("stallTurns", "loopIdentical", "repeatedSignatureRepairs", "doomLoopSameCalls", "callsPerResponseMax"),
         "Probe cell" to listOf("probeTurns", "probeTokens", "probeTier"),
         "Review cell" to listOf("reviewLookMax", "reviewIncrementTokens", "reviewCampaignTokens", "reviewTier", "reviewRoutineTier"),
         "Repair helper / substantive attempts per increment / delegation depth / parallel cells" to
@@ -33,7 +33,7 @@ class DefaultsTest {
         "Flaky policy" to listOf("flakyIsolatedReruns"),
         "Memory admission" to listOf("admissionConfidenceMax"),
         "Profiles" to listOf("profileRoles"),
-        "Mode" to listOf("mode", "executionMode", "dClass", "integrityApproval", "unknownOutcomeReconciliation", "ceiling"),
+        "Mode" to listOf("mode", "executionMode", "dClass", "integrityApproval", "unknownOutcomeReconciliation", "ceiling", "capabilitySet"),
         "Timeouts" to listOf("runTimeoutSeconds", "gitDeadlineSeconds", "providerTerminalWaitSeconds"),
     )
 
@@ -61,6 +61,9 @@ class DefaultsTest {
         assertEquals(8, d.k)
         assertEquals(6, d.m)
         assertEquals(48_000, d.rMaxTokens)
+        assertEquals(128_000, d.contextCeilingTokens)
+        assertEquals(24, d.callsPerResponseMax)
+        assertEquals("workspace-local-dev", d.capabilitySet)
         assertEquals(5_000, d.anchorMaxTokens)
         assertEquals(2_400, d.immediateStubTokens)
         assertEquals(4_000, d.lookBudgetTokens)

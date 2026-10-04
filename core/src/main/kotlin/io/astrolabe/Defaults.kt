@@ -108,6 +108,12 @@ public data class Defaults(
     val runTimeoutSeconds: Int = 600,
     /** Deadline of one git command (D-303); at most one hour, the [io.astrolabe.os.Git] bound. */
     val gitDeadlineSeconds: Int = 600,
+    /** D-408: the pressure threshold is `α` of the window but never above this many tokens, whatever the window. */
+    val contextCeilingTokens: Int = 128_000,
+    /** D-407: the tool calls one response may run; the response is cut at the call past this, or at a call's [doomLoopSameCalls]-th repeat. */
+    val callsPerResponseMax: Int = 24,
+    /** D-412: the capability set a new contract authorizes, by name ([io.astrolabe.auth.CapabilitySet.BUILT_IN] or a host set). */
+    val capabilitySet: String = io.astrolabe.auth.CapabilitySet.WORKSPACE_LOCAL_DEV.name,
 ) {
     /** The v1.0 full constructor: [growthReserveFullWindowTokens] takes its default. Kept for Java callers. */
     public constructor(
@@ -219,6 +225,9 @@ public data class Defaults(
         positive("k", k)
         if (m < 0) v += ConfigViolation("m", "must be ≥ 0")
         positive("rMaxTokens", rMaxTokens)
+        positive("contextCeilingTokens", contextCeilingTokens)
+        positive("callsPerResponseMax", callsPerResponseMax)
+        if (capabilitySet.isBlank()) v += ConfigViolation("capabilitySet", "must name a capability set")
         positive("anchorMaxTokens", anchorMaxTokens)
         positive("immediateStubTokens", immediateStubTokens)
         positive("lookBudgetTokens", lookBudgetTokens)

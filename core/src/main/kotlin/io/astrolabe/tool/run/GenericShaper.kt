@@ -13,7 +13,7 @@ import io.astrolabe.evidence.Outcome
  */
 public class GenericShaper : Shaper {
     override val id: String = "generic"
-    override val version: String = "2"
+    override val version: String = "3"
 
     /** The registry's last entry: it accepts every capture. */
     override fun applies(capture: RunCapture): Boolean = true
@@ -29,7 +29,10 @@ public class GenericShaper : Shaper {
             limitations += "no shaped parser for '${runner ?: "this command"}': head+tail with error lines only; " +
                 "counts unavailable (§8.3)"
         }
-        if (summary.identityIncomplete) limitations += "some Go cases have no package summary; their identities cannot certify pre-existing failures"
+        if (summary.family != null && summary.counts == null) {
+            limitations += "the ${summary.family} summary in this output is incomplete (a cut log or mixed output): counts unavailable (§8.3)"
+        }
+        if (summary.identityIncomplete) limitations +="some Go cases have no package summary; their identities cannot certify pre-existing failures"
         val status = deriveStatus(
             StatusInputs(
                 capture = capture,
@@ -126,14 +129,50 @@ internal object GenericSummaries {
     private val MOCHA_FAILING = Regex("""^(\d+)\s+failing""")
     private val MOCHA_PENDING = Regex("""^(\d+)\s+pending""")
 
+    /** `node --test`: the spec reporter's `ℹ tests 7` lines and the TAP reporter's `# tests 7`; the mark may arrive in another code page. */
+    private val NODE_SUMMARY = Regex("""^[^\w\s]{1,3}\s+(tests|pass|fail|cancelled|skipped|todo)\s+(\d+)$""")
+
     fun parse(text: String, checkId: String?): GenericSummary {
         val lines = text.lines()
         cargo(lines, checkId)?.let { return it }
         go(lines, checkId)?.let { return it }
         unittest(lines, checkId)?.let { return it }
         dotnet(lines)?.let { return it }
-        mocha(lines)?.let { return it }
+        val node = node(lines)
+        val mocha = mocha(lines)
+        // Node summary lines that do not add up to complete summaries: no other reader may turn the same output green.
+        if (node != null && node.counts == null) return node
+        // One command that ran both runners: the counts add up, so a green summary of one never hides the other's failures.
+        if (node != null && mocha != null) {
+            val a = node.counts!!
+            val b = mocha.counts!!
+            return GenericSummary(Counts(a.passed + b.passed, a.failed + b.failed, a.errors + b.errors, a.skipped + b.skipped, a.discovered + b.discovered), emptyList(), "node+mocha")
+        }
+        (node ?: mocha)?.let { return it }
         return GenericSummary(null, emptyList(), null)
+    }
+
+    /**
+     * Counts only from complete summaries: every `tests` line has its `pass` and its `fail` line. Several summaries, one
+     * per command, add up. `null` when the output holds no `tests` line at all; a summary without counts when it holds
+     * some but they are incomplete (a cut log, mixed output) — evidence that is present and not trusted.
+     */
+    private fun node(lines: List<String>): GenericSummary? {
+        val incomplete = GenericSummary(null, emptyList(), "node")
+        val sums = HashMap<String, Int>()
+        val seen = HashMap<String, Int>()
+        for (line in lines) {
+            val m = NODE_SUMMARY.find(line.trim()) ?: continue
+            sums.merge(m.groupValues[1], m.groupValues[2].toIntOrNull() ?: return incomplete, Int::plus)
+            seen.merge(m.groupValues[1], 1, Int::plus)
+        }
+        val summaries = seen["tests"] ?: return null
+        if (seen["pass"] != summaries || seen["fail"] != summaries) return incomplete
+        if (listOf("cancelled", "skipped", "todo").any { key -> seen[key].let { it != null && it != summaries } }) return incomplete
+        val total = sums.getValue("tests")
+        val failed = sums.getValue("fail") + (sums["cancelled"] ?: 0)
+        val skipped = (sums["skipped"] ?: 0) + (sums["todo"] ?: 0)
+        return GenericSummary(Counts(sums.getValue("pass"), failed, 0, skipped, total), emptyList(), "node", nothingRan = total == 0)
     }
 
     private fun cargo(lines: List<String>, checkId: String?): GenericSummary? {

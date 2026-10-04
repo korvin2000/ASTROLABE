@@ -41,11 +41,21 @@ public data class CapabilitySet(val name: String, val capabilities: Set<Capabili
     override fun toString(): String = "$name{${capabilities.sortedBy { it.ordinal }.joinToString(",") { it.wire }}}"
 
     public companion object {
-        /** The S0 default: read, write and run inside the workspace, nothing else. */
+        /** Read, write and run inside the workspace, nothing else: for a host that runs untrusted work offline. */
         @JvmField
         public val WORKSPACE_LOCAL_TEST_ONLY: CapabilitySet = CapabilitySet(
             "workspace-local-test-only",
             setOf(Capability.WorkspaceRead, Capability.WorkspaceWrite, Capability.RunLocal),
+        )
+
+        /**
+         * The default (D-412, owner): what developing in a project takes — the workspace, its commands, its dependencies
+         * and the network they come from. Git refs, paths outside the workspace and privilege stay out of every built-in set.
+         */
+        @JvmField
+        public val WORKSPACE_LOCAL_DEV: CapabilitySet = CapabilitySet(
+            "workspace-local-dev",
+            setOf(Capability.WorkspaceRead, Capability.WorkspaceWrite, Capability.RunLocal, Capability.Network, Capability.PackageInstall),
         )
 
         /** Investigation-only cells (probe, review): look, never write, never run. */
@@ -54,7 +64,7 @@ public data class CapabilitySet(val name: String, val capabilities: Set<Capabili
 
         @JvmField
         public val BUILT_IN: Map<String, CapabilitySet> =
-            listOf(WORKSPACE_LOCAL_TEST_ONLY, WORKSPACE_READ_ONLY).associateBy { it.name }
+            listOf(WORKSPACE_LOCAL_DEV, WORKSPACE_LOCAL_TEST_ONLY, WORKSPACE_READ_ONLY).associateBy { it.name }
 
         /** Built-in sets first, then host-defined ones; `null` when the name is unknown (a configuration error). */
         @JvmStatic

@@ -206,7 +206,7 @@ public class Run(
         val args = if (left == null) requested
             else requested.copy(timeout = minOf(if (requested.op == "poll") requested.pollWaitSeconds else requested.timeoutSeconds.toLong(), left).toInt())
         return when (args.op) {
-            "run" -> run(if (!args.bg && !args.until().none) args.copy(bg = true) else args, context)
+            "run" -> run((if (!args.bg && !args.until().none) args.copy(bg = true) else args).let { it.copy(cwd = it.cwd?.let(::relativeToWorkspace)) }, context)
             // D-365 tolerance: a poll that names a readiness condition is a wait.
             "poll" -> if (args.until().none) poll(args, context) else wait(args)
             "wait" -> wait(args)
@@ -216,6 +216,17 @@ public class Run(
     }
 
     // ------------------------------------------------------------------- run
+
+    /**
+     * D-413: an absolute `cwd` at or under the workspace root is the directory its relative form names — models send
+     * both — so it is taken as that form (`null` for the root itself). Any other value is left for the resolver to judge.
+     */
+    private fun relativeToWorkspace(cwd: String): String? {
+        val given = runCatching { java.nio.file.Path.of(cwd.trim()) }.getOrNull()?.takeIf { it.isAbsolute }?.normalize() ?: return cwd
+        val root = workspace.root.toAbsolutePath().normalize()
+        if (!given.startsWith(root)) return cwd
+        return root.relativize(given).joinToString("/") { it.toString() }.ifEmpty { null }
+    }
 
     private sealed interface Launch {
         data class Unavailable(val reason: String) : Launch

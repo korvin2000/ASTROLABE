@@ -143,6 +143,19 @@ class GatesTest {
     }
 
     @Test
+    fun `pressure fires at the absolute ceiling under a window whose alpha share is far above it`() {
+        val window = 1_048_576L
+        val reports = turns(
+            state(1).copy(contextTokens = 120_000, contextMaxTokens = window),
+            state(2).copy(contextTokens = 395_000, contextMaxTokens = window),
+            state(3).copy(contextTokens = 607_000, contextMaxTokens = window, rebuilds = 1),
+        )
+        assertEquals(listOf(0, 1, 1), reports.map { it.nudges.size })
+        assertEquals("pressure: context 395000 tokens > the 128000-token ceiling — fold what matters into STATE; the harness rebuilds", reports[1].nudges.single().line)
+        assertEquals("pressure: context 607000 tokens > the 128000-token ceiling — second rebuild: partial with a replan hint", reports[2].nudges.single().line)
+    }
+
+    @Test
     fun `stall fires every five idle turns, resets on progress and yields to a live build`() {
         val reports = turns(
             state(5).copy(lastProgressTurn = 1),

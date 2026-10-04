@@ -19,7 +19,7 @@ All numbers are declared defaults for the first evaluation round, not derived op
 |---|---|---|
 | Shape | policy ([§3.5](../architecture/roles-shapes.md#sec-3-5)); S0 for small, low-risk work | logged with inputs |
 | Cell turn budget | 80 (soft; nudge at 80 %; D-366, was 40) | continuation cell on exhaustion; calibration prior may adjust per repo; a reserve reached by the turn count still admits edits to files the cell already changed (D-366) |
-| `α` pressure threshold | 0.65 of `C_profile` | gauge every result; second rebuild ⇒ `partial` + replan |
+| `α` pressure threshold | 0.65 of `C_profile`, never above the 128 K ceiling (D-408) | gauge every result; second rebuild ⇒ `partial` + replan; the ceiling holds whatever the window: a 1 M window is not a 650 K context |
 | `k` eviction batch / `m` turns kept on rebuild | 8 / 6 (0 for role switch, alternative attempt and cell end) | ablation: batched vs pressure-only within short cells |
 | `R_max` total live results / `[A]` max | 48K / 5K tokens (D-370) | explicit residency bound; also one turn's read budget |
 | Immediate-stub threshold for stale reads | 2,400 tokens (D-370) | [§5.3](../runtime/register-workset.md#sec-5-3) |
@@ -32,7 +32,7 @@ All numbers are declared defaults for the first evaluation round, not derived op
 | `θ` risk threshold for early slow checks | 40 | `Σ Δlines·(1+log2(1+fanin))` `[C1 §6]` |
 | Full-suite cadence | every 5 verified increments and at campaign end | |
 | Reserves | cell: verification 15 % + recovery/persist 5 % of tokens and turns; campaign: recovery 10 % | unspendable elsewhere; raised to known check costs before start `[B §11.6]` |
-| Stall / loop / repeated signature / doom-loop guard | 5 turns (D-366) / 2 identical / 2 repairs / 3 same calls | an applied edit batch or a new run result is progress (D-366) |
+| Stall / loop / repeated signature / doom-loop guard | 5 turns (D-366) / 2 identical / 2 repairs / 3 same calls / 24 calls per response (D-407) | an applied edit batch or a new run result is progress (D-366); a response is cut at its 25th call or at a call's third repeat, tail only (D-407) |
 | Probe cell | 15 turns / 40K tokens, medium tier | |
 | Review cell | ≤ 10 `look` / 30K tokens (increment), 60K (campaign); high tier for contract, design, campaign scope | |
 | Repair helper / substantive attempts per increment / delegation depth / parallel cells | 2 repair calls / 3 total (initial + two alternatives, D-370) / 1 writers, 2 probes / 3 (S3 off by default) | |
@@ -43,7 +43,7 @@ All numbers are declared defaults for the first evaluation round, not derived op
 | Flaky policy | one isolated rerun; disagreement ⇒ `inconclusive` + Open item | [§8.10](../verification/refactoring.md#sec-8-10) |
 | Memory admission | interactive: queue; autonomous: factual `LES`/conditional `PIT` with anchors, scoped, confidence ≤ 0.6 | [§4.5](../knowledge/records.md#sec-4-5) |
 | Profiles | main: one capable model, configured effort; helper: cheap, low effort; escalation: none | [§11](../operations/routing.md#sec-11) |
-| Mode | `interactive`, `trusted-local`, `d_class: ask`, `integrity_approval: autonomous` (D-320), unknown outcomes reconciled by the `host` (D-321), ceiling `patch` | autonomous commit off |
+| Mode | `interactive`, `trusted-local`, `d_class: ask`, `integrity_approval: autonomous` (D-320), unknown outcomes reconciled by the `host` (D-321), ceiling `patch`, capability set `workspace-local-dev` (D-412) | autonomous commit off; installing the project's dependencies and HTTP requests run without approval, system-wide installers and remote shells ask (D-412) |
 | Timeouts | `run` 600 s when the call names none, an explicit value clamped to 3,600 s (D-370); process-group kill; never replay; one git command 600 s (`gitDeadlineSeconds`, D-303); provider terminal wait 60 s (then usage unknown, conservative funding, D-314) | |
 
 ---

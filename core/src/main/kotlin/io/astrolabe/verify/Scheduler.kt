@@ -19,6 +19,7 @@ import io.astrolabe.id.Digest
 import io.astrolabe.id.FileVersion
 import io.astrolabe.id.IdGen
 import io.astrolabe.id.Identities
+import io.astrolabe.id.Stamp
 import io.astrolabe.os.FileMode
 import io.astrolabe.os.ObjectId
 import io.astrolabe.tool.run.announceMoved
@@ -347,7 +348,9 @@ public class Scheduler(
     /** Copies the stamped tree into [dir]; `null` when a member could not be read or a copy does not verify. */
     private fun export(report: StampReport, dir: Path): Map<String, Seen>? {
         if (report.unreadable.isNotEmpty() || stamper.stamp().id != report.candidateId) return null
-        val base = workspace.git.lsTree(ObjectId(report.baseCommit), recursive = true).associateBy { it.path }
+        // A repository without a first commit has no base tree: every member is a dirty one.
+        val base = if (report.baseCommit == Stamp.NO_COMMIT) emptyMap() else
+            workspace.git.lsTree(ObjectId(report.baseCommit), recursive = true).associateBy { it.path }
         val members = (base.keys + report.members.keys).filterNot { scratch.isScratch(it) }
         Files.createDirectories(dir)
         val exportedPaths = WorkspacePath.of(dir)

@@ -246,7 +246,7 @@ public class Contracts(
             contractsTouched = emptyList(),
             scope = Scope.repositoryMinus(protected),
             budget = Budget.of(config.defaults, tokens, cost),
-            authorization = Authorization(config.ceiling, config.dClass, CapabilitySet.WORKSPACE_LOCAL_TEST_ONLY.name),
+            authorization = Authorization(config.ceiling, config.dClass, config.capabilitySet),
             // Risk is not assessed here: incomplete discovery is unknown, never low (D-16); the pre-scan is P3.2.6.
             risk = null,
         )

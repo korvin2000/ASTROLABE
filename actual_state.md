@@ -5,7 +5,7 @@ Snapshot: TODO owns task status; CONTINUE-TASK.md owns next work; audit/SESSION-
 ## Counts (2026-10-03, from `#### P… · STATUS` headings)
 **P0–P6 185/185 DONE.** P8 (ASTROLABE 2.0, plan `../ASTROLABE-2-PLAN.md`): **27 DONE** — wave A 9/9, wave B 4/4,
 wave C 14/14 (C1a, C1b, C2, C3, C4, Dp1, Dp2, C8–C14); **14 TODO** (D1–D5, E1–E4, F1–F2, R1, reserve G1–G2).
-Recount: `rg -c '^#### P8\..*· DONE' TODO.md`. P7 out of scope except the AI Gate transport.
+Recount: `rg -c '^#### P8\..*· DONE' TODO.md`. P7 out of scope except the AI Gate transport. **Live (2026-10-04):** the first live Studio run failed on basics; hotfix D-407–D-413 is in, verified offline only.
 
 ## Completion levels
 - **P0–P6:** `FIXTURE_VALIDATED` on Windows + Linux CI (JDK 26). Every live gate is `UNMEASURED` (P7).

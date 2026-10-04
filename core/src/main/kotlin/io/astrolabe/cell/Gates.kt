@@ -235,11 +235,16 @@ public data class GateState @JvmOverloads constructor(
     val implementing: Boolean = false,
     /** The cell continues a `rework` decision (D-340): the sufficiency hint does not apply. */
     val reworked: Boolean = false,
+    /**
+     * D-408: the ceiling the cell can enforce — `Defaults.contextCeilingTokens`, raised when `[S][R][K]` and the pinned
+     * messages, which no rebuild removes, leave less than a turn's working room under it. `0`: the declared default.
+     */
+    val contextCeilingTokens: Long = 0,
 ) {
     init {
         require(turn >= 1) { "turn is 1-based, got $turn" }
         require(lastProgressTurn in 0..turn) { "lastProgressTurn $lastProgressTurn is outside 0..$turn" }
-        require(rebuilds >= 0 && contextTokens >= 0 && contextMaxTokens >= 0 && turnsMax >= 0) { "counts are never negative" }
+        require(rebuilds >= 0 && contextTokens >= 0 && contextMaxTokens >= 0 && turnsMax >= 0 && contextCeilingTokens >= 0) { "counts are never negative" }
     }
 }
 
@@ -432,10 +437,16 @@ public class Gates(gates: List<Gate>) {
         override val name: String get() = PRESSURE
 
         override fun evaluate(state: GateState): List<GateOutcome> {
-            if (state.contextMaxTokens <= 0 || state.contextTokens <= state.defaults.alpha * state.contextMaxTokens) return emptyList()
+            if (state.contextMaxTokens <= 0) return emptyList()
+            val overAlpha = state.contextTokens > state.defaults.alpha * state.contextMaxTokens
+            // D-408: a large window does not license a large context; the ceiling holds whatever the window is.
+            val ceiling = if (state.contextCeilingTokens > 0) state.contextCeilingTokens else state.defaults.contextCeilingTokens.toLong()
+            if (!overAlpha && state.contextTokens <= ceiling) return emptyList()
             val percent = state.contextTokens * 100 / state.contextMaxTokens
             val action = if (state.rebuilds == 0) "fold what matters into STATE; the harness rebuilds" else "second rebuild: partial with a replan hint"
-            return listOf(GateOutcome.Nudge(GateKey(name, "rebuild-${state.rebuilds}"), "pressure: context $percent% > α ${(state.defaults.alpha * 100).toInt()}% — $action"))
+            val line = if (overAlpha) "pressure: context $percent% > α ${(state.defaults.alpha * 100).toInt()}% — $action"
+            else "pressure: context ${state.contextTokens} tokens > the $ceiling-token ceiling — $action"
+            return listOf(GateOutcome.Nudge(GateKey(name, "rebuild-${state.rebuilds}"), line))
         }
     }
 

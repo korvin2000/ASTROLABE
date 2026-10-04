@@ -122,7 +122,7 @@ class MountTest {
         stamper = Stamper(workspace, EnvFingerprint.compute(EnvInputs(osName = "test-os", osArch = "test-arch", runnerPolicyId = "trusted-local/v1")))
         os = LocalOs(clock, OwnerToken.random())
         contracts = Contracts(InMemoryContractRepository(), idGen, clock)
-        contracts.open(contracts.deriveS0(ids.work, ids.attempt, "answer from docs", Atlas.build(repo.root), Config(), Tokens(10_000)).contract)
+        contracts.open(contracts.deriveS0(ids.work, ids.attempt, "answer from docs", Atlas.build(repo.root), Config(capabilitySet = io.astrolabe.auth.CapabilitySet.WORKSPACE_LOCAL_TEST_ONLY.name), Tokens(10_000)).contract)
     }
 
     @AfterTest

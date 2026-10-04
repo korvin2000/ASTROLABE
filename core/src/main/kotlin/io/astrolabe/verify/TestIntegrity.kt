@@ -203,6 +203,36 @@ public object TestIntegrity {
     private val TOLERANCE = Regex("""\bapprox\(|\b(rel|abs|rtol|atol|places|delta|tolerance|epsilon)\s*=|toBeCloseTo\(|assertAlmostEqual|isCloseTo\(|\bwithin\(|offset\(""")
     private val TEST_NAME = Regex("""(?m)^\s*(?:async\s+)?def\s+(test\w*)\s*\(|\b(?:it|test)\s*\(\s*['"`]([^'"`]+)['"`]|@Test[^\n]*\n\s*(?:public\s+|internal\s+|private\s+)?(?:fun|void)\s+(`[^`]+`|\w+)|^\s*func\s+(Test\w+)\(|#\[test\]\s*\n\s*(?:pub\s+)?fn\s+(\w+)""")
 
+    /**
+     * D-410: what a build or a test run writes and the test-file convention alone would call a test:
+     * `build/reports/tests/test/index.html` and `app/build/classes/java/test/ApiTests.class` are the report and the class
+     * file of a test run, never the tests. Only output trees no source lives in are named — a cache or dependency folder
+     * anywhere, and the known subfolders of a Gradle `build`, a Maven `target` and an IDE's `out` that are not under a
+     * source or test root. A folder merely called `build` or `coverage` is not one: `pkg/build/build_test.go` stays a
+     * test file, and CI files, check definitions and acceptance commands are judged before this rule.
+     */
+    private fun generatedOutput(relative: String): Boolean {
+        val folders = relative.split('/').dropLast(1)
+        for (i in folders.indices) {
+            val folder = folders[i]
+            if (folder in GENERATED_ANYWHERE) return true
+            // Under a source or test root nothing is build output: `src/test/java/com/acme/build/reports/` is a package.
+            if (folder.lowercase(java.util.Locale.ROOT) in SOURCE_ROOTS) return false
+            if (GENERATED_UNDER[folder]?.contains(folders.getOrNull(i + 1)) == true) return true
+        }
+        return false
+    }
+
+    private val SOURCE_ROOTS = setOf("src", "test", "tests", "__tests__", "spec", "specs")
+
+    private val GENERATED_ANYWHERE = setOf(".gradle", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".tox", ".nox", ".hypothesis")
+    private val GENERATED_UNDER = mapOf(
+        "build" to setOf("classes", "reports", "test-results", "tmp", "generated", "kotlin", "libs", "resources", "distributions", "jacoco", "intermediates", "outputs", "processedResources"),
+        // IntelliJ's own compiler output: out/production/<module>, out/test/<module>.
+        "out" to setOf("production", "test"),
+        "target" to setOf("classes", "test-classes", "surefire-reports", "failsafe-reports", "site", "generated-sources", "generated-test-sources", "maven-status"),
+    )
+
     /** The surface [path] belongs to, or `null` when it is ordinary source. CI and check definitions outrank the test-file convention. */
     @JvmStatic
     public fun surfaceOf(path: String, contract: Contract): AcceptanceSurface? = surfaceOf(path, contract) { null }
@@ -214,7 +244,7 @@ public object TestIntegrity {
         return when {
             first in CI_PREFIXES || name in CI_NAMES -> AcceptanceSurface.CiConfig
             name in CHECK_DEFINITION_NAMES || CHECK_DEFINITION_PREFIXES.any { name.startsWith(it) } -> AcceptanceSurface.CheckDefinition
-            isTestPath(relative) -> AcceptanceSurface.TestFile
+            isTestPath(relative) && !generatedOutput(relative) -> AcceptanceSurface.TestFile
             contract.acceptance.filterIsInstance<Acceptance.Run>().any { names(it.command.argv, it.command.cwd, relative, manifest) } ->
                 AcceptanceSurface.AcceptanceCommand
             else -> null

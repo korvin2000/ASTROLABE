@@ -294,7 +294,7 @@ class RunTest {
     fun `a D-class command needs an intent and an approval, and confinement without a backend is refused (D-11)`() = runTest {
         val ceiling = run("""{"argv":["git","push","origin","main"],"intent":"publish"}""")
         assertEquals("denied", status(ceiling))
-        assertTrue(ceiling.body.contains("denied by the capability ceiling: needs git-refs, outside capability set 'workspace-local-test-only'"), ceiling.body)
+        assertTrue(ceiling.body.contains("denied by the capability ceiling: needs git-refs, outside capability set 'workspace-local-dev'"), ceiling.body)
         val confined = run("""{"cmd":"echo x"}""", runner(config = Config(executionMode = ExecutionMode.Confined)))
         assertEquals("denied", status(confined))
         assertTrue(confined.body.contains("confined execution required; no backend"), confined.body)

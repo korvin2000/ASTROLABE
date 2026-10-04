@@ -212,6 +212,9 @@ public class Cell @JvmOverloads constructor(
         private var lastReport: StampReport? = null
         private var reconciledTurn = 0
         private var occupancy: Occupancy? = null
+
+        /** D-411: the user requests the contract held at the last turn's start; `0` before the first turn. */
+        private var seenRequests = 0
         private var atlas = ws.atlas
         /** D-366: the files the atlas listed at cell start; with the base stamp's members, what existed before the cell. */
         private val baseFiles: Set<String> = ws.atlas.rows.mapTo(HashSet()) { it.path }
@@ -315,6 +318,13 @@ public class Cell @JvmOverloads constructor(
             rebuildGap?.let { return partial(PartialReason.Pressure, it) }
             // Render: [A] first (rebuilt every turn), then the cached regions, then admission.
             val contract = contract()
+            // D-411: a message the user sent while the cell worked is named in [A] ahead of every other nudge. Its text is
+            // pinned, but far up the transcript, where a model in the middle of its own plan passes it by.
+            if (seenRequests in 1 until contract.requests.size) {
+                val latest = contract.requests.last().text.replace('\r', ' ').replace('\n', ' ').take(USER_MESSAGE_CHARS)
+                nudges = (listOf("user: a new message arrived while you worked — \"${Boundary.escape(latest)}\" — act on it before anything else; if it asks a question, answer it in the text of this reply and go on with the task") + nudges).take(MAX_NUDGES)
+            }
+            seenRequests = contract.requests.size
             if (contract.version != refusedUnder) { refused.clear(); refusedFirst.clear(); refusedUnder = contract.version }
             ws.checks.synchronizeAcceptance(contract)
             contractVersion = contract.version
@@ -493,7 +503,10 @@ public class Cell @JvmOverloads constructor(
                     else -> throw error
                 }
             }
-            val response = checkNotNull(received)
+            // D-407: a runaway batch is cut before it is journaled, appended or dispatched; usage stays what the provider billed.
+            val bound = CallBound.of(checkNotNull(received), defaults.callsPerResponseMax, maxOf(2, defaults.doomLoopSameCalls))
+            val response = bound.response
+            bound.line?.let { events?.emit(AgentEvent.Cell.GateFired(ids, CALL_BOUND, it)) }
             val usage = terminal?.usage ?: response.usage
             if (terminal?.cancelled == true) return cancelled("provider terminal reconciliation confirmed cancellation")
             contextAdmission.observed(estimate, usage?.takeIf { it.isComplete }?.totalInput)
@@ -501,7 +514,7 @@ public class Cell @JvmOverloads constructor(
             if (response.toolCalls.isNotEmpty()) authority.check(turn)?.let { return if (it.cancelled) cancelled(it.reason) else failed(it.reason) }
 
             // §3.7: the native output is durable before any result exists, then appended (calls before results).
-            journalOutput(response)
+            journalOutput(response, bound)
             val responseTokens = appendNative(response)
             when (response.stop) {
                 StopReason.Cancelled -> return cancelled("the provider cancelled the invocation")
@@ -513,7 +526,7 @@ public class Cell @JvmOverloads constructor(
             val certifiedBefore = certified(currencies(before.candidateId))
             val native = response.toolCalls
             val validated = if (native.isEmpty()) null else validateCalls(native, reserveTurn, mask, contract, repairable,
-                truncated = response.stop == StopReason.OutputLimit || response.stop == StopReason.Truncated)
+                truncated = response.stop == StopReason.OutputLimit || response.stop == StopReason.Truncated, received = bound.received, cutEdit = bound.droppedEdit)
             val calls = validated?.calls.orEmpty()
 
             // Partition and dispatch what validation left — nothing when the whole turn is refused.
@@ -522,8 +535,12 @@ public class Cell @JvmOverloads constructor(
             // D-374: this turn's results are exempt from eviction, so they must fit α of the window beside what the next
             // request already holds (this turn's response included), its output reserve and the anchor's growth. D-375:
             // a spent window grants only the dispatcher's read floor; the reads past it wait for the next turn.
-            val headroom = (capabilities.contextLimitTokens * defaults.alpha).toLong() - estimate.upperBoundTokens - responseTokens -
-                ctx.model.maxOutputTokens - maxOf(0L, defaults.anchorMaxTokens - anchor.tokens)
+            // D-408: the same results must also leave the request under the ceiling, which reserves no output.
+            val anchorGrowth = maxOf(0L, defaults.anchorMaxTokens - anchor.tokens)
+            val headroom = minOf(
+                (capabilities.contextLimitTokens * defaults.alpha).toLong() - estimate.upperBoundTokens - responseTokens - ctx.model.maxOutputTokens - anchorGrowth,
+                ceilingTokens(prefix(layout).total + pinnedTokens(contract)) - estimate.upperBoundTokens - responseTokens - anchorGrowth,
+            )
             val readBudget = minOf(defaults.rMaxTokens.toLong(), maxOf(Dispatcher.READ_FLOOR_TOKENS, headroom))
             val result = if (calls.isNotEmpty()) dispatcher.dispatch(turn, calls, Tokens(readBudget)) else null
             cost = cost.plusToolSeconds((clock.millis() - dispatchedAt) / MILLIS_PER_SECOND)
@@ -688,6 +705,7 @@ public class Cell @JvmOverloads constructor(
                 patchRejection = if (calls.any { it.family == ToolFamily.State && it.op == "patch" }) tools.state.lastRejection else null,
                 lastProgressTurn = lastProgressTurn, liveRunOutput = liveRunOutput,
                 contextTokens = current.totalTokens, contextMaxTokens = capabilities.contextLimitTokens.toLong(), rebuilds = rebuilds,
+                contextCeilingTokens = ceilingTokens(current.prefix.total + pinnedTokens(contract)),
                 reserve = budget.verdict(outstanding(currenciesNow)), turnsMax = budget.turns, completionProposed = proposal,
                 currencies = currenciesNow, verdicts = validEvidence?.verdicts.orEmpty(), unavailable = validEvidence?.unavailable.orEmpty(), flags = gateFlags, fired = fired, defaults = defaults,
                 impactNudges = impact.unresolved, unresolvedImpactNudges = impact.unresolvedPublic.map { it.missing },
@@ -708,7 +726,7 @@ public class Cell @JvmOverloads constructor(
             val (impactLines, softer) = report.nudges.partition { it.key.gate == Gates.IMPACT }
             val (budgetLines, otherLines) = softer.partition { it.key.gate in PRIORITY_NUDGES }
             nudges = (report.rejections.map { it.line + it.details.take(DETAILS_IN_LINE).joinToString("") { d -> " · $d" } } +
-                (budgetLines + otherLines).map { it.line } + truncationLine(response) + impactLines.map { it.line }).take(MAX_NUDGES)
+                budgetLines.map { it.line } + listOfNotNull(bound.line) + otherLines.map { it.line } + truncationLine(response) + impactLines.map { it.line }).take(MAX_NUDGES)
 
             // Checkpoint: the turn's boundary is durable before any exit is decided.
             persist(checkpoint(CellStatus.Running, stampNow.candidateId, null))
@@ -782,6 +800,28 @@ public class Cell @JvmOverloads constructor(
 
         private fun pinnedTokens(contract: Contract): Long = pinned(contract).sumOf { estimator.estimate(it).tokens }
 
+        /**
+         * D-408: the ceiling this cell can enforce. [fixed] is what no rebuild removes — `[S][R][K]` and the pinned
+         * messages; when it leaves less than two turns' results and `[A]` under the declared ceiling, the ceiling moves up
+         * to leave that room: the turn a rebuild must keep (its results are unread) and the turn after it, by whose end the
+         * kept results are stubbed. A large contract then slows the cell down instead of ending it on a second pressure.
+         */
+        private fun ceilingTokens(fixed: Long): Long = maxOf(defaults.contextCeilingTokens.toLong(), fixed + 2L * defaults.rMaxTokens + defaults.anchorMaxTokens)
+
+        /**
+         * D-408: the tail a pressure rebuild keeps — the last `m` complete turns, fewer while they exceed what the ceiling
+         * leaves beside [fixed], `[A]` and one more turn's results; never fewer than the last one, whose results the model
+         * has not read yet. A tail sized against the ceiling alone would meet it again on the next turn.
+         */
+        private fun fittingTail(fixed: Long): List<Resident> {
+            val budget = (ceilingTokens(fixed) - fixed - defaults.anchorMaxTokens - defaults.rMaxTokens).coerceAtLeast(0)
+            for (turns in RebuildReason.Pressure.tailTurns downTo 2) {
+                val tail = residency.tail(residents, turns)
+                if (tail.sumOf { it.tokens } <= budget) return tail
+            }
+            return residency.tail(residents, 1)
+        }
+
         private fun prefix(layout: List<Segment>): PrefixTokens {
             fun tokens(kind: SegmentKind): Long = layout.firstOrNull { it.kind == kind }?.items?.sumOf { it.estimate(estimator).tokens } ?: 0L
             return PrefixTokens(tokens(SegmentKind.S), tokens(SegmentKind.R), tokens(SegmentKind.K))
@@ -828,7 +868,7 @@ public class Cell @JvmOverloads constructor(
          * did not apply does. Only a dependency violation among the valid calls or a `state` op the loop gate requires
          * refuses the whole turn — and even then one valid terminal call runs alone (F2b).
          */
-        private fun validateCalls(native: List<NativeCall>, reserveTurn: Boolean, mask: ToolMask, contract: Contract, repairable: Set<String> = emptySet(), truncated: Boolean = false): Validated {
+        private fun validateCalls(native: List<NativeCall>, reserveTurn: Boolean, mask: ToolMask, contract: Contract, repairable: Set<String> = emptySet(), truncated: Boolean = false, received: Int = native.size, cutEdit: Boolean = false): Validated {
             val alone = LinkedHashMap<Int, Pair<String, String>>()
             val valid = ArrayList<ToolCall>()
             native.forEachIndexed { index, call ->
@@ -847,8 +887,13 @@ public class Cell @JvmOverloads constructor(
                 val held = remaining.mapNotNull { call ->
                     val target = call.condition?.let(Condition::parse)?.opId
                     when {
+                        // D-407: a condition may name a later op; one the response's cut removed holds this call alone, not the turn.
+                        target != null && target > native.size && target <= received -> "depends on op $target, which was dropped unrun when the response was cut"
                         target != null && target - 1 in alone -> "depends on op $target, which was refused"
                         target != null && target - 1 in dependents -> "depends on op $target, which was not executed"
+                        // D-407: an edit among the dropped calls leaves the batch incomplete, as a refused edit does.
+                        cutEdit && (call.family == ToolFamily.Run || call.family == ToolFamily.Verify) ->
+                            "the edit batch is not whole: an edit was dropped when the response was cut; runs execute only after a fully applied batch or none"
                         refusedEdit != null && (call.family == ToolFamily.Run || call.family == ToolFamily.Verify) ->
                             "the edit batch did not apply fully: op ${refusedEdit + 1} was refused; runs execute only after a fully applied batch or none"
                         else -> null
@@ -983,14 +1028,15 @@ public class Cell @JvmOverloads constructor(
             }
         }
 
-        private fun journalOutput(response: Response) {
+        private fun journalOutput(response: Response, bound: BoundedResponse) {
             val items = response.items.filter { it !is UsageItem }
             val payload = JSON.encodeToJsonElement(ITEMS, items)
             val head = response.text.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty()
+            val cut = if (bound.cut == null) "" else " (${bound.received} received, the other ${bound.dropped} dropped unrun: ${bound.cut}; dropped: ${bound.droppedSummary})"
             ev.journal.append(
                 JournalEvent(
                     idGen.next("ev"), ids, turn, JournalKind.Call, argsDigest = Digest.ofUtf8(payload.toString()),
-                    text = "turn $turn model output · stop ${response.stop.name.lowercase()} · ${response.toolCalls.size} calls" + (if (head.isEmpty()) "" else " · $head"),
+                    text = "turn $turn model output · stop ${response.stop.name.lowercase()} · ${response.toolCalls.size} calls$cut" + (if (head.isEmpty()) "" else " · $head"),
                     payload = payload, at = clock.instant(),
                 ),
             )
@@ -1161,7 +1207,7 @@ public class Cell @JvmOverloads constructor(
             if (record.lost.isNotEmpty()) return
             rebuilds = next.generation
             sections = next.k.sections
-            residents = residency.tail(residents, RebuildReason.Pressure.tailTurns)
+            residents = fittingTail((occupancy?.prefix?.total ?: 0L) + pinnedTokens(contract))
             ws.workset.rebuild(seeds.shown)
             tools.state.validated(carried.register)
             val note = "rebuilt: pressure (generation $rebuilds) - $why - ${carried.known}"
@@ -1478,6 +1524,12 @@ public class Cell @JvmOverloads constructor(
 
         /** §5.1 `[A]`: at most four nudge lines per turn (D-372; [Anchor] applies the same cap). */
         const val MAX_NUDGES = 4
+
+        /** D-407: the gate name the event stream carries when a response's calls were cut. */
+        const val CALL_BOUND = "call-bound"
+
+        /** D-411: how much of a new user message the anchor quotes; the whole text is pinned in the transcript. */
+        const val USER_MESSAGE_CHARS = 400
 
         /** The nudges that say how much of the cell is left: shown before the other nudges (D-372). */
         val PRIORITY_NUDGES = setOf(Gates.STALL, Gates.RESERVE, Gates.TURNS)

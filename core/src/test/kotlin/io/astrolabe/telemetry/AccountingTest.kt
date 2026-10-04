@@ -21,6 +21,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -81,6 +82,25 @@ class AccountingTest {
         val tiered = plain(table(mapOf(BillingDimension.UNCACHED_INPUT to "1", BillingDimension.OUTPUT to "2"), 10L to mapOf(BillingDimension.OUTPUT to "3")))
         assertFalse(Accounting.estimateCost(tiered, 1_000, 1_000).unknown)
         assertFalse(Accounting.estimateCost(FakeProfiles.main, 1_000, 1_000).unknown)
+    }
+
+    @Test
+    fun `a profile the host declared plan-billed costs a money limit nothing, missing prices alone stay unknown`() = withStore { store ->
+        // Missing catalog prices are not a plan: a per-token table without them is an unknown charge (FX-59).
+        assertTrue(Accounting.estimateCost(plain(table(emptyMap())), 1_000, 1_000).unknown)
+        assertFailsWith<IllegalArgumentException> { table(mapOf(BillingDimension.OUTPUT to "2")).copy(billing = io.astrolabe.provider.Billing.Plan) }
+        val plan = plain(table(emptyMap()).copy(billing = io.astrolabe.provider.Billing.Plan))
+        val estimate = Accounting.estimateCost(plan, 600_000, 131_072)
+        assertFalse(estimate.unknown)
+        assertEquals(0, estimate.amount.signum())
+        val accounting = Accounting(store, clock)
+        val limit = io.astrolabe.provider.Money("USD", BigDecimal("50"))
+        assertTrue(accounting.reserve(ids, "first", plan, 10, estimate, 100, limit), "the hold of a plan-billed call fits any money limit")
+        val call = accounting.record(ids, "first", plan, null, null)
+        assertFalse(call.money.unknown)
+        val spend = io.astrolabe.budget.LimitSpend.of(accounting.calls(ids.work), 1_000, "USD")
+        val limits = io.astrolabe.budget.TaskLimits(maxCost = limit, maxRequests = 3_000)
+        assertEquals(io.astrolabe.budget.LimitDecision.Within, io.astrolabe.budget.LimitRule.decide(limits, spend, io.astrolabe.budget.LimitRule.nextCost(spend, estimate)))
     }
 
     @Test

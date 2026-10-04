@@ -34,7 +34,8 @@ import java.util.Optional
 public object AiGateProfiles {
     /**
      * A profile [id] for [modelId] of [providerId], its prices dated [priceDate]. A model the catalog has no token
-     * prices for (a subscription plan such as Codex) gets an empty table: every charge is unknown, never zero.
+     * prices for (a subscription plan such as Codex) gets an empty table: every charge is unknown, never zero. A host
+     * that knows the account is billed by a plan says so with `priceTable.copy(billing = Billing.Plan)` (D-409).
      * @throws IllegalArgumentException when the catalog lacks the context window or output limit
      */
     @JvmStatic

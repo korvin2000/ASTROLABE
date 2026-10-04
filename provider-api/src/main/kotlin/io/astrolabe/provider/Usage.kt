@@ -2,6 +2,7 @@ package io.astrolabe.provider
 
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import java.math.BigDecimal
@@ -36,11 +37,27 @@ public data class BillingDimension(val id: String) {
     }
 }
 
+/** How a profile's calls are charged. The host that knows the account states it; nothing infers it from missing prices. */
+@Serializable
+public enum class Billing {
+    /** Per token at the table's prices: a dimension without a price is an unknown charge, never zero. */
+    @SerialName("per_token")
+    PerToken,
+
+    /**
+     * By a plan the account already pays for — a subscription with its own hourly or monthly quotas — or by nobody (a
+     * local server): the table states no token price and a call charges a money limit nothing.
+     */
+    @SerialName("plan")
+    Plan,
+}
+
 /**
  * Dated price per million tokens (or per unit for hosted tools) per billable dimension. [tiers] are the provider's
  * request-size prices (a long-context tier): the highest tier whose [PriceTier.inputTokensAbove] a request's total
  * input exceeds replaces, for that whole request, the base prices of the dimensions it states ([at]). An empty
- * [tiers] is not serialized, so a table without tiers keeps its bytes and its attempt fingerprint.
+ * [tiers] and the default [billing] are not serialized, so a table without them keeps its bytes and its attempt
+ * fingerprint.
  */
 @Serializable
 public data class PriceTable @JvmOverloads constructor(
@@ -50,11 +67,15 @@ public data class PriceTable @JvmOverloads constructor(
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val tiers: List<PriceTier> = emptyList(),
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val billing: Billing = Billing.PerToken,
 ) {
     init {
         require(currency.length == 3 && currency.all { it in 'A'..'Z' }) { "currency must be an ISO code, got '$currency'" }
         require(perMillion.values.all { it.signum() >= 0 }) { "prices must be ≥ 0" }
         require(tiers.map { it.inputTokensAbove }.toSet().size == tiers.size) { "price tier thresholds must be distinct" }
+        require(billing == Billing.PerToken || (perMillion.isEmpty() && tiers.isEmpty())) { "a plan-billed table states no token price" }
     }
 
     /** Price of [quantity] units of [dimension] at base prices, or `null` when the dimension is not in this table. */

@@ -832,6 +832,51 @@ class CellTest {
         }
     }
 
+    /** The recorded failure (diags W-wzzpswxif6dzrqdxkoiq): one response with hundreds of repeated calls became hundreds of units in `[T]`. */
+    @Test
+    fun `a response that repeats a call is cut at the third repeat, the dropped calls never enter the transcript, and the next anchor says so`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val runaway = listOf<io.astrolabe.provider.Item>(say("looping")) + (1..40).map { tree("t$it") }
+            f.run(ScriptedModel.of(Scripted.Reply(runaway), Scripted.Reply(listOf(say("done")))))
+
+            val second = f.transcript(2)
+            assertEquals(listOf("t1", "t2"), second.filterIsInstance<io.astrolabe.provider.ToolCall>().map { it.id }, "the first two stand: positions are kept, only the tail goes")
+            assertEquals(listOf("t1", "t2"), second.filterIsInstance<ToolResult>().map { it.callId })
+            assertTrue(f.anchorText(2).contains("calls: the response held 40 tool calls; the first 2 were kept and the other 38 were dropped unrun"), f.anchorText(2))
+            val journaled = f.journal.events(JournalScope(f.ids.work, kinds = setOf(JournalKind.Call))).first()
+            assertTrue(journaled.text.contains("2 calls (40 received, the other 38 dropped unrun"), journaled.text)
+        }
+        // Distinct calls past the limit: the first `callsPerResponseMax` run in their positions.
+        CellFixture(stateRoot.resolve("limit"), defaults = Defaults(callsPerResponseMax = 3)).use { f ->
+            val targets = listOf("src/a.py", "src/b.py", "README.md", "tests/test_a.py")
+            val many = listOf<io.astrolabe.provider.Item>(say("reading")) + targets.mapIndexed { i, t -> read("r${i + 1}", t) } +
+                listOf(tree("r5"), call("r6", "look", """{"what":"tree","target":"src"}"""), call("r7", "look", """{"what":"tree","target":"tests"}"""))
+            f.run(ScriptedModel.of(Scripted.Reply(many), Scripted.Reply(listOf(say("done")))))
+            assertEquals(listOf("r1", "r2", "r3"), f.transcript(2).filterIsInstance<ToolResult>().map { it.callId })
+            assertTrue(f.anchorText(2).contains("a response runs at most 3 calls"), f.anchorText(2))
+        }
+        // A kept call whose condition names a dropped op is held alone: the rest of the turn still runs.
+        CellFixture(stateRoot.resolve("forward"), defaults = Defaults(callsPerResponseMax = 2)).use { f ->
+            val calls = listOf<io.astrolabe.provider.Item>(say("go"), runCmd("d1", "x", ""","if":"applied(op:3)""""), read("d2", "src/a.py"), tree("d3"))
+            f.run(ScriptedModel.of(Scripted.Reply(calls), Scripted.Reply(listOf(say("done")))))
+            val results = f.transcript(2).filterIsInstance<ToolResult>().associate { it.callId to resultText(it) }
+            assertEquals(setOf("d1", "d2"), results.keys)
+            assertTrue(results.getValue("d1").contains("depends on op 3, which was dropped unrun when the response was cut"), results.getValue("d1"))
+            assertTrue(results.getValue("d2").contains("def a"), results.getValue("d2"))
+        }
+        // An edit among the dropped calls leaves the batch incomplete: the kept run waits, as it does after a refused edit.
+        CellFixture(stateRoot.resolve("cut-edit"), defaults = Defaults(callsPerResponseMax = 2)).use { f ->
+            val calls = listOf<io.astrolabe.provider.Item>(
+                say("edit and run"), anchored("e1", "src/a.py", f.version("src/a.py"), "    return 1", "    return 10"), runCmd("x1", "x"),
+                anchored("e2", "src/b.py", f.version("src/b.py"), "x = 1", "x = 2"),
+            )
+            f.run(ScriptedModel.of(Scripted.Reply(calls), Scripted.Reply(listOf(say("done")))))
+            val results = f.transcript(2).filterIsInstance<ToolResult>().associate { it.callId to resultText(it) }
+            assertEquals(setOf("e1", "x1"), results.keys)
+            assertTrue(results.getValue("x1").contains("the edit batch is not whole"), results.getValue("x1"))
+        }
+    }
+
     @Test
     fun `the first pressure rebuilds the projection, a second one ends the cell partial, at admission or from the gate`() = runTest {
         CellFixture(stateRoot).use { f ->

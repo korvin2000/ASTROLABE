@@ -4,6 +4,7 @@ import io.astrolabe.id.Identities
 import io.astrolabe.id.InstantSerializer
 import io.astrolabe.id.WorkId
 import io.astrolabe.provider.BillableUsage
+import io.astrolabe.provider.Billing
 import io.astrolabe.provider.BillingDimension
 import io.astrolabe.provider.Money
 import io.astrolabe.provider.Profile
@@ -89,7 +90,7 @@ public class Accounting internal constructor(
     /** Records one call; a `null` [usage] is a call whose usage never arrived. */
     public fun record(ids: Identities, invocationId: String, profile: Profile, request: Request?, usage: BillableUsage?, fundedTokens: Long? = null): CallAccount {
         val table = profile.priceTable
-        val money = usage?.price(table) ?: Money.unknown(table.currency)
+        val money = if (planBilled(profile)) Money.zero(table.currency) else usage?.price(table) ?: Money.unknown(table.currency)
         val prior = calls(ids.work).firstOrNull { it.invocationId == invocationId }
         val account = CallAccount(
             invocationId = invocationId,
@@ -201,10 +202,12 @@ public class Accounting internal constructor(
          * The conservative charge of a call of at most [input] input and [output] output tokens: every input token at the
          * dearest input rate, under every price table the call can be billed at — the base and each tier whose threshold
          * is below [input] (tiers do not accumulate, so effective rates can fall as input grows). Unknown, never zero,
-         * when a table lacks the output price or a price for an input dimension the route can bill.
+         * when a table lacks the output price or a price for an input dimension the route can bill; zero for a
+         * [planBilled] profile.
          */
         internal fun estimateCost(profile: Profile, input: Long, output: Long): Money {
             val prices = profile.priceTable
+            if (planBilled(profile)) return Money.zero(prices.currency)
             val billable = billableInput(profile)
             val reachable = listOf(prices.at(0)) + prices.tiers.filter { it.inputTokensAbove < input }.map { prices.at(it.inputTokensAbove + 1) }
             var worst = Money.zero(prices.currency)
@@ -217,6 +220,13 @@ public class Accounting internal constructor(
             }
             return worst
         }
+
+        /**
+         * D-409: a profile the host declared plan-billed ([Billing.Plan]: a subscription with hourly or monthly quotas, a
+         * local server) charges the task's money limit nothing; the request and minute limits bound it. Missing prices
+         * alone never mean this: a per-token table without a price stays an unknown charge and fails closed.
+         */
+        internal fun planBilled(profile: Profile): Boolean = profile.priceTable.billing == Billing.Plan
 
         /** Input dimensions a call on [profile] can be billed in: uncached input, the declared input usage fields and the cache-write classes. */
         private fun billableInput(profile: Profile): Set<BillingDimension> =

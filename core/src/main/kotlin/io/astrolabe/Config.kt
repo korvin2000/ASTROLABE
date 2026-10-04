@@ -80,6 +80,12 @@ public data class Config(
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val balance: BalanceProfile = BalanceProfile.Balanced,
+    /**
+     * D-412: the capability set a new contract authorizes, by name — a built-in one ([io.astrolabe.auth.CapabilitySet.BUILT_IN])
+     * or one the host defines. The default is the development set; `workspace-local-test-only` is the set without
+     * network and package installation.
+     */
+    val capabilitySet: String = defaults.capabilitySet,
 ) {
     init {
         // C11: S3 writers resolve no test-integrity flag on the host's path, so they cannot keep IntegrityApproval.Human.

@@ -266,6 +266,24 @@ class SchedulerTest {
     }
 
     @Test
+    fun `an isolated check exports a repository that has no first commit`() = runTest {
+        TempRepo.create().use { fresh ->
+            fresh.write("src/a.py", "def a():\n    return 1\n")
+            fresh.write("tests/test_a.py", "def test_a():\n    assert True\n")
+            val ws = Workspace(WorkspaceId("ws-fresh"), fresh.root, fresh.git)
+            val freshStamper = Stamper(ws, EnvFingerprint.compute(EnvInputs(osName = "test-os", osArch = "test-arch", runnerPolicyId = "trusted-local/v1")))
+            assertEquals(io.astrolabe.id.Stamp.NO_COMMIT, freshStamper.report().baseCommit)
+            val isolated = Scheduler(checks, ws, VersionRegistry(ws), freshStamper, receipts, InMemoryAliases(), idGen, ids, clock, candidates = stateRoot.resolve("candidates-fresh"))
+            val receipt = isolated.runCheck(accept(), 1) { dir ->
+                assertEquals("def a():\n    return 1\n", Files.readString(dir.resolve("src/a.py")))
+                passed()
+            }
+            assertEquals(InputStability.Isolated, receipt.testedInputs.stability)
+            assertEquals(Outcome.Passed, receipt.outcome)
+        }
+    }
+
+    @Test
     fun `a write inside the isolated candidate, even restored to the old bytes, cannot certify it`() = runTest {
         val receipt = isolated().runCheck(accept(), 1) { dir ->
             val file = dir.resolve("src/a.py")
