@@ -63,7 +63,7 @@ public sealed interface Validation {
  * evidence does not resolve is kept as `h`; a cursor on a done or unknown step is ignored. Whole-patch rules (caps, one
  * Next, one `[>]`, red recorded) still reject the patch.
  */
-public class Validator(
+public class Validator @JvmOverloads constructor(
     private val estimator: TokenEstimator,
     private val registerCapTokens: Int = Defaults().registerCapTokens,
     private val patchCapTokens: Int = 1_200,

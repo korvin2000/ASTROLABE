@@ -314,7 +314,7 @@ public data class RetrievalMissArgs(val need: String, val why: String)
 
 /** `state(patch: [...])` carries raw patch ops (one key per op, optional `if`), parsed by the state tool (P1.6.8). */
 @Serializable
-public data class StateArgs(
+public data class StateArgs @JvmOverloads constructor(
     val op: String,
     val patch: List<JsonElement>? = null,
     val blocked: BlockedArgs? = null,
@@ -333,7 +333,7 @@ public data class StateArgs(
 }
 
 @Serializable
-public data class TaskArgs(
+public data class TaskArgs @JvmOverloads constructor(
     val op: String,
     val question: String? = null,
     val options: List<String>? = null,
