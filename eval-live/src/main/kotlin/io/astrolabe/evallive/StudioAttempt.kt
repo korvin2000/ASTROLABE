@@ -1,20 +1,15 @@
 package io.astrolabe.evallive
 
 import io.astrolabe.Astrolabe
-import io.astrolabe.Config
-import io.astrolabe.DClassPolicy
 import io.astrolabe.InvalidConfig
-import io.astrolabe.Mode
-import io.astrolabe.ProfileRoles
-import io.astrolabe.UnknownOutcomeReconciliation
+import io.astrolabe.RunSpec
 import io.astrolabe.atlas.PackageCommands
 import io.astrolabe.atlas.Sniffed
-import io.astrolabe.budget.Tokens
-import io.astrolabe.campaign.CampaignPolicy
 import io.astrolabe.campaign.CampaignRequest
 import io.astrolabe.campaign.Controller
 import io.astrolabe.campaign.OpenedCampaign
-import io.astrolabe.cell.CellModel
+import io.astrolabe.campaign.S0Run
+import io.astrolabe.campaign.ShapeDecision
 import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Command
 import io.astrolabe.contract.Contract
@@ -32,7 +27,6 @@ import io.astrolabe.event.ResolutionOutcome
 import io.astrolabe.id.AttemptId
 import io.astrolabe.id.IdGen
 import io.astrolabe.id.WorkId
-import io.astrolabe.provider.Effort
 import io.astrolabe.provider.EstimatorFactory
 import io.astrolabe.provider.Profile
 import io.astrolabe.provider.ProviderAdapter
@@ -44,9 +38,14 @@ import io.astrolabe.verify.DecisionKind
 import io.astrolabe.verify.ResultStatus
 import io.astrolabe.verify.ReviewRequest
 import io.astrolabe.verify.Verdict
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -55,21 +54,16 @@ import java.nio.file.Path
 import java.time.Clock
 import java.time.Duration
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * What a Studio task in `auto` mode runs with, reproduced minimally so the baseline reflects the product (ASTROUI
- * `TaskService.config`/`spec`, bridge `StudioHost.launch`, `AutoProfiles`, `Guidance`, `Verification`,
- * `DecisionService`). The Studio is not a dependency: these values are copied, and a change there is a change here.
+ * The Studio host behaviour around a run that is not part of its [RunSpec], reproduced minimally so the baseline
+ * reflects the product (ASTROUI `AutoProfiles`, `Guidance`, `Verification`, `DecisionService`, `TaskService.recap`).
+ * The launch itself — configuration, policy, cell cap, lease, effort, headroom — is [RunSpec.defaults] of the core,
+ * which the Studio reads too; the texts below are copied, and a change there is a change here.
  */
 internal object StudioPolicy {
-    /** `SettingsService.RUNTIME_DEFAULTS`: `maxCells` 12, `leaseMinutes` 480. */
-    const val MAX_CELLS: Int = 12
-    const val LEASE_MINUTES: Long = 480
-
-    /** `TaskService.spec`: the automatic limit is twelve context windows of the bound model, no money limit. */
-    const val BUDGET_WINDOWS: Long = 12
-
     /** `AutoProfiles.OPENROUTER_UPSTREAM_IGNORES`: upstreams whose tool-call parser corrupts nested arguments. */
     val OPENROUTER_UPSTREAM_IGNORES: Map<String, List<String>> = mapOf("z-ai/" to listOf("Together"))
 
@@ -98,25 +92,6 @@ internal object StudioPolicy {
 
     /** `Verification.REVIEW_TEXT`: the `check:` item of a project without a test command. */
     const val REVIEW_TEXT: String = "The change fulfils the request"
-
-    /** `TaskService.config` over the library defaults: one model for every function, `auto` mode, D-class asks. */
-    fun config(profile: Profile, stateRoot: Path): Config = Config(
-        profiles = mapOf(profile.id to profile),
-        profileRoles = ProfileRoles(main = profile.id, helper = null, escalation = null),
-        mode = Mode.Autonomous,
-        dClass = DClassPolicy.Ask,
-        unknownOutcomeReconciliation = UnknownOutcomeReconciliation.Automatic,
-        rulesFile = null,
-        stateRoot = stateRoot.toString(),
-    )
-
-    fun budget(profile: Profile): Tokens = Tokens(profile.capabilities.contextLimitTokens.toLong() * BUDGET_WINDOWS)
-
-    /** `AutoProfiles.outputHeadroom` without a user narrowing: a request reserves a quarter of the window at most. */
-    fun outputHeadroom(profile: Profile): Int {
-        val share = maxOf(profile.capabilities.contextLimitTokens / 4, 1)
-        return minOf(profile.capabilities.outputLimitTokens, share).coerceAtLeast(1)
-    }
 
     /** `AutoProfiles.idOf`. */
     fun profileId(providerId: String, modelId: String): String = ("auto.$providerId." + modelId.replace(Regex("[^A-Za-z0-9._-]"), "_")).take(128)
@@ -300,6 +275,14 @@ internal data class AttemptOutcome(
     val decisions: List<PolicyDecision>,
     /** The response count after which the runner stopped the attempt (WP-B2 `interrupt`), or null when it did not. */
     val interruptedAt: Int? = null,
+    /** The response count after which the runner closed the session (`reopen`), or null when it did not. */
+    val closedAt: Int? = null,
+    /** The response count after which the user's message reached the contract (`message`), or null when it did not. */
+    val messageAt: Int? = null,
+    /** The contract version the user's message made, or null when it was not delivered. */
+    val messageContractVersion: Int? = null,
+    /** The contract version this session's first open found: 1 for a new work, the stored one for a reopened work. */
+    val openedContractVersion: Int? = null,
 )
 
 /**
@@ -316,40 +299,48 @@ internal class Interrupter(events: Events, private val afterResponses: Int, priv
     override fun close(): Unit = subscription.close()
 }
 
-/** Runs one attempt the way a Studio task does: open, verification setup, host notes, reopen, run through the [Controller]. */
+/** What the runner does to one session of an attempt, each after a count of `ModelResponded` of that session. */
+internal data class SessionScript(
+    /** Cancel through the attempt's token, as the Studio's stop button does (WP-B2 `interrupt`). */
+    val interruptAfterResponses: Int? = null,
+    /** Close the session as the Studio backend does when it stops: the run job is cancelled and stays resumable. */
+    val closeAfterResponses: Int? = null,
+    /** Deliver the user's message to the running campaign, as the Studio does for a message sent while it works. */
+    val message: MessageSpec? = null,
+)
+
+/**
+ * Runs one attempt the way a Studio task does: open, verification setup, host notes, reopen, run through the
+ * [Controller], all as the [RunSpec] says. A [work] given reopens that work in the same state root (the Studio's resume).
+ */
 internal class StudioAttempt(private val clock: Clock, private val idGen: IdGen, private val osName: String = System.getProperty("os.name")) {
-    /**
-     * One attempt of a Studio task; with [interruptAfterResponses] the attempt is cancelled through its token once the
-     * bus carried that many `ModelResponded` of this attempt, as the Studio's stop button does (WP-B2 `interrupt`).
-     */
     suspend fun run(
         workspace: Path,
-        stateRoot: Path,
         prompt: String,
         binding: ModelBinding,
         events: Events,
-        effort: Effort,
-        maxCells: Int,
+        spec: RunSpec,
         deadline: Duration,
-        interruptAfterResponses: Int? = null,
+        script: SessionScript = SessionScript(),
+        work: WorkId = WorkId(idGen.next("W")),
     ): AttemptOutcome {
-        val config = StudioPolicy.config(binding.profile, stateRoot)
+        val config = spec.config
         val violations = config.violations()
         if (violations.isNotEmpty()) throw InvalidConfig(violations)
         val authority = StudioAutoAuthority()
-        val work = WorkId(idGen.next("W"))
         // `Astrolabe.open` is the only way to a `Project`; the facade's own controller is not used (as in the Studio).
         Astrolabe(config, binding.adapter, authority, clock, idGen).use { sdk ->
             sdk.open(workspace).use { project ->
                 val controller = Controller(
                     config, clock, idGen, events,
                     spans = Spans(idGen, events),
-                    leaseDuration = Duration.ofMinutes(StudioPolicy.LEASE_MINUTES),
+                    leaseDuration = spec.leaseDuration,
                     estimators = binding.estimators,
                 )
-                val policy = CampaignPolicy(StudioPolicy.budget(binding.profile), null, false)
+                val policy = spec.policy
                 val request = CampaignRequest(work, AttemptId(Astrolabe.FIRST_ATTEMPT), prompt)
                 var opened = controller.open(project, request, policy)
+                val openedVersion = opened.contract.version
                 val verification = if (opened.state == null) {
                     // Studio 2 §7.3: the core refuses a plan with nothing executable to accept against; supply it and open again.
                     StudioPolicy.choose(opened.sniffed).also { setup -> opened.contracts.amendByHost(work, "verification setup (${setup.kind})") { StudioPolicy.apply(it, setup) } }
@@ -357,45 +348,68 @@ internal class StudioAttempt(private val clock: Clock, private val idGen: IdGen,
                     StudioPolicy.verificationOf(opened)
                 }
                 val notes = listOf(StudioPolicy.WORKING_NOTES, StudioPolicy.platform(osName), StudioPolicy.verificationText(verification))
-                opened = controller.open(project, request, policy.copy(hostNotes = notes))
+                // As `StudioHost.launch`: a campaign this open could not free from a limit stays stopped, one open per action.
+                if (opened.limitHold == null) opened = controller.open(project, request, policy.copy(hostNotes = notes))
                 val frozen = opened.attempt.config
                 val main = config.profiles[frozen.profileRoles.main] ?: frozen.profiles[frozen.profileRoles.main] ?: binding.profile
-                val model = CellModel(binding.adapter, main, binding.estimators.estimatorFor(main), effort, StudioPolicy.outputHeadroom(main))
+                val model = spec.cellModel(binding.adapter, main, binding.estimators.estimatorFor(main))
                 val campaign = opened
-                val interrupter = interruptAfterResponses?.let { k -> Interrupter(events, k) { campaign.cancellation.cancel(INTERRUPTED) } }
+                val interrupter = script.interruptAfterResponses?.let { k -> Interrupter(events, k) { campaign.cancellation.cancel(INTERRUPTED) } }
+                val closed = AtomicBoolean()
+                val delivered = AtomicInteger()
+                fun outcome(failure: String?, run: S0Run?): AttemptOutcome {
+                    val ended = failure == null && !closed.get()
+                    return AttemptOutcome(
+                        workId = work.value,
+                        fingerprint = campaign.attempt.fingerprint.hex,
+                        shape = (campaign.shape as? ShapeDecision.Selected)?.shape?.name.takeIf { failure == null },
+                        verification = verification,
+                        outcome = if (ended) run?.outcome?.wire ?: campaign.stop?.outcome?.wire else null,
+                        stopCode = if (ended) (run?.state?.stopCode ?: campaign.stop?.code)?.wire else null,
+                        reason = if (ended) run?.state?.reason ?: campaign.stop?.reason else if (failure == null) CLOSED else null,
+                        failure = failure,
+                        cells = (run?.state ?: campaign.state)?.cells?.size,
+                        decisions = authority.decisions.toList(),
+                        interruptedAt = script.interruptAfterResponses.takeIf { campaign.cancellation.reason == INTERRUPTED },
+                        closedAt = script.closeAfterResponses.takeIf { closed.get() },
+                        messageAt = script.message?.afterResponses.takeIf { delivered.get() > 0 },
+                        messageContractVersion = delivered.get().takeIf { it > 0 },
+                        openedContractVersion = openedVersion,
+                    )
+                }
                 return try {
                     val run = coroutineScope {
+                        val job = async { controller.run(campaign, model, authority, maxCells = spec.maxCells) }
                         val watchdog = launch {
                             delay(deadline.toMillis())
                             campaign.cancellation.cancel("eval-live: the attempt passed its deadline of ${deadline.toMinutes()} minutes")
                         }
+                        val closer = script.closeAfterResponses?.let { k -> Interrupter(events, k) { closed.set(true); job.cancel(CancellationException(CLOSED)) } }
+                        val due = CompletableDeferred<Unit>()
+                        val messenger = script.message?.let { m -> Interrupter(events, m.afterResponses) { due.complete(Unit) } }
+                        val delivery = script.message?.let { m ->
+                            launch {
+                                due.await()
+                                // `StudioHost.amend` of a live campaign: the user's words become a contract request at once.
+                                delivered.set(withContext(Dispatchers.IO) { campaign.contracts.amendByUser(work, m.text).version })
+                            }
+                        }
                         try {
-                            controller.run(campaign, model, authority, maxCells = maxCells)
+                            job.await()
+                        } catch (cancelled: CancellationException) {
+                            if (closed.get() && job.isCancelled) null else throw cancelled
                         } finally {
                             watchdog.cancel()
+                            delivery?.cancel()
                             interrupter?.close()
+                            closer?.close()
+                            messenger?.close()
                         }
                     }
-                    AttemptOutcome(
-                        workId = work.value,
-                        fingerprint = campaign.attempt.fingerprint.hex,
-                        shape = (campaign.shape as? io.astrolabe.campaign.ShapeDecision.Selected)?.shape?.name,
-                        verification = verification,
-                        outcome = run.outcome?.wire ?: campaign.stop?.outcome?.wire,
-                        stopCode = (run.state?.stopCode ?: campaign.stop?.code)?.wire,
-                        reason = run.state?.reason ?: campaign.stop?.reason,
-                        failure = null,
-                        cells = run.state?.cells?.size,
-                        decisions = authority.decisions.toList(),
-                        interruptedAt = interruptAfterResponses.takeIf { campaign.cancellation.reason == INTERRUPTED },
-                    )
+                    outcome(null, run)
                 } catch (failure: Exception) {
-                    if (failure is kotlinx.coroutines.CancellationException) throw failure
-                    AttemptOutcome(
-                        work.value, campaign.attempt.fingerprint.hex, null, verification, null, null, null,
-                        "${failure::class.java.simpleName}: ${failure.message}", campaign.state?.cells?.size, authority.decisions.toList(),
-                        interruptAfterResponses.takeIf { campaign.cancellation.reason == INTERRUPTED },
-                    )
+                    if (failure is CancellationException) throw failure
+                    outcome("${failure::class.java.simpleName}: ${failure.message}", null)
                 }
             }
         }
@@ -404,5 +418,8 @@ internal class StudioAttempt(private val clock: Clock, private val idGen: IdGen,
     companion object {
         /** The Studio's stop reason (`TaskService.stop`); the interruption stands in for the user's stop. */
         const val INTERRUPTED: String = "stopped by the user"
+
+        /** Why a closed session has no outcome: the Studio backend stopped, and the work stays resumable. */
+        const val CLOSED: String = "eval-live: the session was closed (the Studio backend stopping); the work is resumable"
     }
 }

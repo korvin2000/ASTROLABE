@@ -1,5 +1,6 @@
 package io.astrolabe.evallive
 
+import io.astrolabe.RunSpec
 import io.astrolabe.fixtures.FakeProfiles
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Path
@@ -18,7 +19,7 @@ class EnvironmentTest {
 
     @Test
     fun `no variable of the start scripts reaches the agent's processes`() {
-        val allowlist = StudioPolicy.config(FakeProfiles.main, state).redaction.envAllowlist.map { it.uppercase() }.toSet()
+        val allowlist = RunSpec.defaults(FakeProfiles.main, state.toString()).config.redaction.envAllowlist.map { it.uppercase() }.toSet()
         val launcher = setOf("APP_HOME", "APP_BASE_NAME", "DIRNAME", "CLASSPATH", "JAVA_OPTS", "EVAL_LIVE_OPTS", "DEFAULT_JVM_OPTS", "JAVA_EXE", "CMD_LINE_ARGS")
         assertTrue(allowlist.intersect(launcher).isEmpty(), "launcher variables on the allowlist: ${allowlist.intersect(launcher)}")
     }

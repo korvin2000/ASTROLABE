@@ -33,6 +33,30 @@ internal data class InterruptSpec(val afterResponses: Int, val constraint: Strin
     }
 }
 
+/**
+ * A message the user sends while the agent works (WP-B7): after [afterResponses] model responses the runner delivers
+ * [text] to the running campaign, as the Studio does for a message sent to a live task (`StudioHost.amend`).
+ */
+@Serializable
+internal data class MessageSpec(val afterResponses: Int, val text: String) {
+    init {
+        require(afterResponses >= 1) { "a message comes after at least one response" }
+        require(text.isNotBlank()) { "a message needs the user's text" }
+    }
+}
+
+/**
+ * A task in two sessions (WP-B7): after [afterResponses] model responses the runner closes the session — the run job
+ * is cancelled as when the Studio backend stops, the project and its store are closed — then opens the same work in
+ * the same state root again and runs it on, as the Studio's resume does.
+ */
+@Serializable
+internal data class ReopenSpec(val afterResponses: Int) {
+    init {
+        require(afterResponses >= 1) { "a session is closed after at least one response" }
+    }
+}
+
 @Serializable
 internal data class TaskFile(
     val id: String,
@@ -40,6 +64,10 @@ internal data class TaskFile(
     val title: String,
     val acceptance: AcceptanceSpec,
     val interrupt: InterruptSpec? = null,
+    /** False: the workspace is a git repository without a commit, the base content left untracked (WP-B7). */
+    val baseCommit: Boolean = true,
+    val message: MessageSpec? = null,
+    val reopen: ReopenSpec? = null,
 )
 
 /**
@@ -60,7 +88,14 @@ internal class BenchTask(
     val reference: HiddenFiles,
     val wrong: HiddenFiles,
     val interrupt: InterruptSpec? = null,
+    val baseCommit: Boolean = true,
+    val message: MessageSpec? = null,
+    val reopen: ReopenSpec? = null,
 ) {
+    init {
+        require(interrupt == null || reopen == null) { "task $id: an interruption and a second session do not combine" }
+    }
+
     val base: Path get() = dir.resolve("base")
 
     companion object {
@@ -93,6 +128,7 @@ internal class BenchTask(
             return BenchTask(
                 file.id, file.kind, file.title, prompt, dir, file.acceptance,
                 parts.getValue("acceptance"), parts.getValue("reference"), parts.getValue("wrong"), file.interrupt,
+                file.baseCommit, file.message, file.reopen,
             )
         }
 
