@@ -211,7 +211,8 @@ public class Cell @JvmOverloads constructor(
         private var sections = ctx.sections
         private var rebuildGap: String? = null
         private var fired: Set<GateKey> = emptySet()
-        private val impact = ImpactNudges()
+        /** A-D.6: an epoch continues its predecessor's ledger, whose unresolved public nudges are still exit obligations. */
+        private val impact = ctx.impact ?: ImpactNudges()
         private val signatures = ArrayList<CallSignature>()
         /** F1a: calls refused since a call last executed, and each signature's first turn and reason. */
         private val refused = ArrayList<RefusalSignature>()
@@ -235,7 +236,8 @@ public class Cell @JvmOverloads constructor(
         /** D-366: paths named by edits whose dispatch failed (effects unknown); ownership needs the ledger to show them moved. */
         private val failedEditPaths = LinkedHashSet<String>()
         private val touchedLedger = ArrayList<Touched>()
-        private val flags = LinkedHashMap<String, TestIntegrityFlag>()
+        /** A-D.6: an epoch starts with the test-integrity flags of the cell it continues; they bind its completion as they bound that cell's. */
+        private val flags = ctx.carriedFlags.associateByTo(LinkedHashMap()) { it.path }
         private var drops: List<StaleDrop> = emptyList()
         private var nudges: List<String> = emptyList()
         private var lastReport: StampReport? = null

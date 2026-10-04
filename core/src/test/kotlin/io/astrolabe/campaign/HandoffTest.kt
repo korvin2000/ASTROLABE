@@ -4,9 +4,12 @@ import io.astrolabe.Config
 import io.astrolabe.atlas.Atlas
 import io.astrolabe.budget.HeuristicEstimator
 import io.astrolabe.budget.Tokens
+import io.astrolabe.cell.CellFixture.Companion.anchored
 import io.astrolabe.cell.CellFixture.Companion.call
+import io.astrolabe.cell.CellFixture.Companion.read
 import io.astrolabe.cell.CellFixture.Companion.say
 import io.astrolabe.cell.CellModel
+import io.astrolabe.cell.CellStatus
 import io.astrolabe.cell.HandoffCause
 import io.astrolabe.cell.Protocol
 import io.astrolabe.cell.WINDOWS
@@ -45,7 +48,9 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFails
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -78,13 +83,14 @@ class HandoffTest {
         repo.close()
     }
 
-    private fun seed(request: CampaignRequest, shape: Shape, turnsPerCell: Int = 80) {
+    private fun seed(request: CampaignRequest, shape: Shape, turnsPerCell: Int = 80, writePaths: List<String>? = null) {
         Store.open(stateRoot, repo.git, clock).use { store ->
             val contracts = Contracts(SqliteContractRepository(store, clock), idGen, clock)
             val derived = contracts.deriveS0(request.work, request.attempt, request.text, Atlas.build(repo.root), Config(), policy.tokens).contract
             contracts.open(
                 derived.copy(
                     shape = shape,
+                    scope = writePaths?.let { derived.scope.copy(writePaths = it) } ?: derived.scope,
                     requirements = listOf(
                         Requirement("R1", "a returns 10", listOf("AC-1"), authorityRef = derived.requests.single().id),
                         Requirement("R2", "a stays a function", listOf("AC-2"), authorityRef = derived.requests.single().id),
@@ -265,5 +271,121 @@ class HandoffTest {
             assertTrue(handoffs.spends(renewed.id).isEmpty())
             assertEquals(1, handoffs.spends(first.id).size)
         }
+    }
+
+    private val testPath = "tests/test_a.py"
+
+    /** A weakening seed: a required test on disk and a scope the cell may edit it in. */
+    private fun seedWithTest(request: CampaignRequest) {
+        repo.write(testPath, "def test_a():\n    assert 1 == 1\n")
+        repo.commit("a test")
+        seed(request, Shape.S0, writePaths = listOf("src/", "tests/"))
+    }
+
+    /** Epoch A reads the test and weakens its assertion, then hands off under pressure. */
+    private fun weakening(c: OpenedCampaign): List<Scripted> = listOf(
+        Scripted.Reply(listOf(read("read-test", testPath))),
+        Scripted.Reply(listOf(anchored("weaken", testPath, c.registry.version(testPath)!!, "    assert 1 == 1", "    assert 1"))),
+        Scripted.Fault(FaultKind.ContextOverflow),
+        Scripted.Fault(FaultKind.ContextOverflow),
+    )
+
+    /** Epoch B claims completion; the review its completion owes approves. */
+    private val finishing: List<Scripted> = listOf(
+        Scripted.Reply(listOf(call("f", "task", """{"op":"finish","text":"a returns 10"}"""))),
+        Scripted.Reply(listOf(say("""{"verdict":"approve","confidence":0.9,"findings":[]}"""))),
+    )
+
+    /** [script] request by request, then `done`; [each] sees the request number first. */
+    private fun scripted(script: List<Scripted>, each: (Int) -> Unit = {}): CellModel =
+        model { n -> each(n); script.getOrElse(n - 1) { Scripted.Reply(listOf(say("done"))) } }
+
+    /** Epoch B's completion is bound by epoch A's weakening as one cell's would be: only an approving review resolves it. */
+    private fun assertBoundByEpochA(c: OpenedCampaign, run: S0Run) {
+        val increment = c.state!!.graph.increments.single()
+        assertEquals(2, increment.cells.size, run.state?.reason)
+        val kept = ReturnedHandoffs(c.store, clock).all(c.ids.work, c.ids.attempt).single()
+        assertEquals(listOf(testPath), kept.testIntegrity().map { it.path }, "the handoff keeps the flag")
+        val flag = assertNotNull(run.exit, run.state?.reason).packet.flags.testIntegrity.single { it.path == testPath }
+        assertTrue(flag.requiredChecks.isNotEmpty() && "weakened" in flag.kind, flag.line)
+        assertTrue(flag.verdict?.approved == true, "epoch B resolved it only through the review: ${flag.line}")
+        val review = assertNotNull(io.astrolabe.delegate.ReviewCell.latest(c.store, c.ids), "epoch B's completion asked for the review")
+        assertEquals(increment.id, review.incrementId)
+        assertTrue(review.integrity.any { testPath in it }, "the reviewer saw epoch A's change: ${review.integrity}")
+        assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+    }
+
+    @Test
+    fun `a test weakened before a handoff binds the completion of the epoch that continues it`() = runBlocking<Unit> {
+        val request = CampaignRequest(WorkId("W-handoff-weaken"), AttemptId("a1"), "make a return 10")
+        seedWithTest(request)
+        controller().open(repo.root, request, policy).use { c ->
+            assertBoundByEpochA(c, controller().runS0(c, scripted(weakening(c) + finishing)))
+        }
+    }
+
+    @Test
+    fun `a test weakened before a handoff binds the epoch's completion after a reopen too`() = runBlocking<Unit> {
+        val request = CampaignRequest(WorkId("W-handoff-weaken-reopen"), AttemptId("a1"), "make a return 10")
+        seedWithTest(request)
+        controller().open(repo.root, request, policy).use { c ->
+            // The lease runs out during the handed-off cell's last call: the run stops before the epoch.
+            val first = controller().runS0(c, scripted(weakening(c)) { n -> if (n == 4) clock.advance(Duration.ofHours(2)) })
+            assertEquals(CampaignOutcome.BlockedExternal, first.outcome, first.state?.reason)
+        }
+        controller().open(repo.root, request, policy).use { c ->
+            assertBoundByEpochA(c, controller().runS0(c, scripted(finishing)))
+        }
+    }
+
+    @Test
+    fun `a handoff kept before its row was written is applied at the reopen, so its increment continues as a paid epoch`() = runBlocking<Unit> {
+        val request = CampaignRequest(WorkId("W-handoff-orphan"), AttemptId("a1"), "make a return 10")
+        seed(request, Shape.S0)
+        controller().open(repo.root, request, policy).use { c ->
+            // The process dies between the kept record and the `Returned` row that refers to it.
+            c.store.db.tx { it.execute("CREATE TRIGGER die BEFORE INSERT ON campaigns WHEN EXISTS (SELECT 1 FROM packets WHERE kind = 'returned_handoff') BEGIN SELECT RAISE(ABORT, 'simulated process death'); END") }
+            assertFails { controller().runS0(c, overflowing(), maxHandoffs = 1) }
+            c.store.db.tx { it.execute("DROP TRIGGER die") }
+            assertEquals(1, ReturnedHandoffs(c.store, clock).all(c.ids.work, c.ids.attempt).size)
+            assertTrue(spends(c).isEmpty())
+        }
+        controller().open(repo.root, request, policy).use { c ->
+            val handedOff = c.state!!.cells.single()
+            assertEquals(CellStatus.Partial, handedOff.status, "the kept return is applied as its row, not as a lost cell")
+            val run = controller().runS0(c, overflowing(), maxHandoffs = 1)
+
+            assertEquals("the campaign's 1 handoffs are spent with 2 requirements unverified", run.state?.reason)
+            val increment = c.state!!.graph.increments.single()
+            assertEquals(2, increment.cells.size, "the epoch continued the handed-off cell")
+            assertEquals(listOf(handedOff.cell.value), spends(c).map { it.text("from") }, "the epoch was paid from the grant")
+            assertEquals(1, increment.sizing.handoffs)
+            assertEquals(0, increment.sizing.continuations)
+        }
+    }
+
+    @Test
+    fun `an unresolved public impact nudge is kept with the handoff and stays pending in the epoch's ledger`() {
+        val definition = io.astrolabe.atlas.ChangedDefinition("src/a.py", "a", io.astrolabe.atlas.DeclarationKind.entries.first(), io.astrolabe.atlas.DefinitionChange.Signature, public = true)
+        val nudge = io.astrolabe.cell.ImpactNudge(definition, references = 3, turn = 2)
+        val kept = KeptImpact.of(nudge)
+        assertEquals(nudge, kept.nudge())
+        val ledger = io.astrolabe.cell.ImpactNudges().also { it.carry(listOf(kept.nudge())) }
+        assertEquals(listOf(nudge.missing), ledger.unresolvedPublic.map { it.missing }, "the epoch's exit gate lists it as the cell's did")
+        ledger.inspected("a")
+        assertTrue(ledger.unresolvedPublic.isEmpty(), "look(refs) in the epoch resolves it")
+    }
+
+    @Test
+    fun `a review finding carried into an epoch is numbered after the archived open items and never revives a closed one`() {
+        val closed = io.astrolabe.register.OpenItem(1, "review major: total() rounds at src/a.py:2", closed = true, closedEvidence = "#4")
+        val register = io.astrolabe.register.Register.empty(ContextId("cell-a"), "I1", "a returns 10")
+            .copy(archive = io.astrolabe.register.RegisterArchive(open = listOf(closed)))
+        fun finding(issue: String) = io.astrolabe.verify.Finding(io.astrolabe.verify.Severity.Major, "src/a.py:2", issue, kind = io.astrolabe.verify.FindingKind.Correctness)
+        // Findings are numbered in order before the known ones are dropped, so the new finding goes first.
+        val carried = Controller.withOpenItems(register, listOf(finding("a() ignores its input"), finding("total() rounds")))
+        assertEquals(listOf(2), carried.open.map { it.n }, "o1 is archived: the new item is o2, and the closed finding stays closed")
+        assertEquals("review major: a() ignores its input at src/a.py:2", carried.open.single().text)
+        assertEquals(register.archive, carried.archive)
     }
 }

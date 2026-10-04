@@ -31,8 +31,9 @@ class InputToleranceTest {
         assertTrue(refusal("state", """{"patch":[{"next":"go"}],"blocked":{"reason":"r"}}""").contains("op"))
         assertTrue(refusal("state", """{}""").contains("'op'"))
         assertEquals("patch", state("""{"op":"patch","patch":[{"next":"go"}],"blocked":{"reason":"r"}}""").op)
-        // A-D.4: `note` names the op only alone; beside a structured form the form is inferred as before D2
-        assertEquals("patch", state("""{"patch":[{"next":"go"}],"note":{"kind":"open","text":"x"}}""").op)
+        // A-D.4: `note` names the op only alone; beside a structured form that form is inferred and the stray `note` is
+        // the unknown key it was before the direct protocol (A-D.3)
+        assertTrue(refusal("state", """{"patch":[{"next":"go"}],"note":{"kind":"open","text":"x"}}""").contains("unknown key 'note'"))
         assertEquals("note", state("""{"note":{"kind":"open","text":"x"}}""").op)
     }
 

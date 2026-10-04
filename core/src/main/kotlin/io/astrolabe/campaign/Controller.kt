@@ -694,6 +694,17 @@ public class Controller @JvmOverloads public constructor(
         // A cell still running in the stored state belonged to a controller that stopped mid-cell: it is lost.
         state?.running?.takeIf { state.phase == CampaignPhase.Running }?.let { running ->
             val checkpoint = SqliteCheckpoints(store, clock).latest(running.cell)
+            // A-D.6: a handoff kept for the very row its process died before writing is that return, never a lost cell, so
+            // its increment continues as an epoch paid from the grant.
+            val stored = checkNotNull(state)
+            val kept = checkpoint?.let { ReturnedHandoffs(store, clock).all(request.work, request.attempt).lastOrNull { it.cell == running.cell && it.seq == stored.seq + 1 } }
+            if (kept != null) {
+                val register = SqliteRegisterVersions(store, clock).latest(running.cell)
+                    ?: Register.empty(running.cell, running.increment, stored.graph.increments.first { it.id == running.increment }.title)
+                journal.append(JournalEvent(idGen.next("ev"), ids, checkpoint.turn, JournalKind.Reconcile, refs = listOf(running.cell.value, kept.id), text = "open: cell ${running.cell.value} handed off before its controller stopped · its kept return ${kept.id} applied", at = clock.instant()))
+                state = Lifecycle.apply(stored, contract, Transition.Returned(kept.exit(ids, register, checkpoint))).also(campaigns::save)
+                return@let
+            }
             journal.append(JournalEvent(idGen.next("ev"), ids, checkpoint?.turn, JournalKind.Reconcile, refs = listOf(running.cell.value), text = "open: cell ${running.cell.value} was running when its controller stopped; last checkpoint turn ${checkpoint?.turn ?: "none"} · lost", at = clock.instant()))
             state = Lifecycle.apply(state, contract, Transition.Lost(running.cell, checkpoint)).also(campaigns::save)
         }
@@ -1086,7 +1097,7 @@ public class Controller @JvmOverloads public constructor(
             // The pre-compile job lives in this scope: joined at cell close, cancelled with the cell (§6.6).
             val run = coroutineScope {
                 val trigger = precompile?.let { p -> trigger(c, this, p, cellId, increment, cellModel) }
-                runCell(c, cellId, increment, role, cellModel, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = pinned, boundary = boundaryReason, inputs = inputs, precompile = trigger, rework = reworkLines.isNotEmpty()).also { run ->
+                runCell(c, cellId, increment, role, cellModel, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = pinned, boundary = boundaryReason, inputs = inputs, precompile = trigger, rework = reworkLines.isNotEmpty(), continues = epoch?.kept).also { run ->
                     if (run.exit !is CellExit.Completed) precompile?.discard("cell ${cellId.value} ended ${run.exit?.let { it::class.simpleName!!.lowercase() } ?: "cancelled"}: never a continuation of a red increment")
                 }
             }
@@ -1101,7 +1112,7 @@ public class Controller @JvmOverloads public constructor(
             }
             packets += exit.packet
             snapshot(c)
-            val kept = returned(c, run.ids, exit, routing.selected, compiled.k.ledger, function)
+            val kept = returned(c, run.ids, exit, routing.selected, compiled.k.ledger, function, run.impact)
             refreshPrescan(c, run.ids, exit.checkpoint.touched, exit.turns)?.let { return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, it)), exit, null, compiled) }
             boundary(c, cellId, RebuildReason.CellEnd(if (exit is CellExit.Completed) RebuildReason.CellEnd.Next.NextIncrement else RebuildReason.CellEnd.Next.Continuation))
             val stampNow = c.stamper.report(fresh = true).candidateId
@@ -1544,7 +1555,7 @@ public class Controller @JvmOverloads public constructor(
             { id ->
                 val canonical = Aliases.parse(id)?.let { aliases.resolve(c.ids.work, it)?.canonicalId } ?: id
                 observations.get(canonical) != null || receipts.get(canonical) != null || c.journal.get(canonical) != null
-            }, HeuristicEstimator(), c.attempt.config.defaults.registerCapTokens, clock)
+            }, HeuristicEstimator(), c.attempt.config.defaults.registerCapTokens, clock, c.attempt.config.protocol)
     }
 
     /**
@@ -1637,13 +1648,8 @@ public class Controller @JvmOverloads public constructor(
     ) { Json.decodeFromString(CampaignReviewRecord.serializer(), it.string("body")) }.firstOrNull()?.verdict?.findings.orEmpty() +
         ReviewCell.latest(c.store, c.ids)?.verdict?.findings.orEmpty()
 
-    /** §8.8 (P4.2.2): findings at or above major not yet in [register] become its `Open` items, numbered after its last. */
-    private fun withReviewOpenItems(c: OpenedCampaign, register: Register): Register {
-        val findings = reviewFindings(c)
-        if (findings.isEmpty()) return register
-        val fresh = Derived.openItems(findings, (register.open.maxOfOrNull { it.n } ?: 0) + 1).filter { item -> register.open.none { it.text == item.text } }
-        return if (fresh.isEmpty()) register else register.copy(open = register.open + fresh)
-    }
+    /** §8.8 (P4.2.2): the review findings as [register]'s `Open` items ([withOpenItems]). */
+    private fun withReviewOpenItems(c: OpenedCampaign, register: Register): Register = withOpenItems(register, reviewFindings(c))
 
     /**
      * The S0 loop body. It re-enters itself for a rework or a void (D-340) and, for a direct cell, after a handoff (A-D.6):
@@ -1709,7 +1715,7 @@ public class Controller @JvmOverloads public constructor(
         val register = carry?.register?.copy(cell = cellId, increment = increment.id, incrementTitle = increment.title)
         // A-D.6: S0 has no continuation of its own, so its cell may hand off on a spent turn budget.
         val run = runCell(c, cellId, increment, role, cellModel, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = listOfNotNull(resume) + hostAnswers(c, ready) + reworkLines,
-            boundary = if (epoch != null) BoundaryReason.Epoch else null, inputs = inputs, rework = reworkLines.isNotEmpty(), turnBudgetHandoff = true)
+            boundary = if (epoch != null) BoundaryReason.Epoch else null, inputs = inputs, rework = reworkLines.isNotEmpty(), turnBudgetHandoff = true, continues = epoch?.kept)
         val ids = run.ids
         val scheduler = run.scheduler
         val exit = run.exit
@@ -1722,7 +1728,7 @@ public class Controller @JvmOverloads public constructor(
         }
         // The tree after the cell is the base the next open reconciles against: only moves after this are external.
         snapshot(c)
-        val kept = returned(c, ids, exit, routing.selected, compiled.k.ledger, function)
+        val kept = returned(c, ids, exit, routing.selected, compiled.k.ledger, function, run.impact)
         refreshPrescan(c, ids, exit.checkpoint.touched, exit.turns)?.let {
             if (!exit.handoff) routing.selected?.let { selected -> router.record(selected, outcomeOf(exit)) }
             return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, it)), exit, null, compiled)
@@ -2043,12 +2049,15 @@ public class Controller @JvmOverloads public constructor(
      * Returns [exit]; a completed one is kept first (P8.C.8), with the sequence number of the row that says it returned.
      * [preexisting] is the compiled context's pre-existing ledger, which an owed increment review shows (§8.8).
      */
-    private fun returned(c: OpenedCampaign, ids: Identities, exit: CellExit, selected: Routed.Selected?, preexisting: io.astrolabe.verify.PreexistingLedger?, function: RoutingFunction): ReturnedCompletion? {
+    private fun returned(
+        c: OpenedCampaign, ids: Identities, exit: CellExit, selected: Routed.Selected?, preexisting: io.astrolabe.verify.PreexistingLedger?, function: RoutingFunction,
+        impact: io.astrolabe.cell.ImpactNudges,
+    ): ReturnedCompletion? {
         if (exit is CellExit.Partial && exit.handoff) {
-            // A-D.6: the handoff's kept record precedes its row, as a returned completion's does.
+            // A-D.6: the handoff's kept record precedes its row, as a returned completion's does; it carries the obligations.
             val grant = Handoffs(c.journal, idGen, clock, c.ids).current()?.id
             c.advance(Transition.Returned(exit)) { next ->
-                ReturnedHandoffs(c.store, clock).save(ids, ReturnedHandoff.of(idGen.next("returned"), next.seq, exit, grant, function, selected?.tier, selected?.profile?.id))
+                ReturnedHandoffs(c.store, clock).save(ids, ReturnedHandoff.of(idGen.next("returned"), next.seq, exit, grant, function, selected?.tier, selected?.profile?.id, impact.unresolvedPublic))
             }
             return null
         }
@@ -2266,8 +2275,8 @@ public class Controller @JvmOverloads public constructor(
         is CellExit.Blocked, is CellExit.Partial, is CellExit.Cancelled, null -> RoutingOutcome.Unverified
     }
 
-    /** A cell's outcome as [runCell] hands it back: `null` [exit] when a cancellation interrupted it. */
-    private class CellRun(val exit: CellExit?, val ids: Identities, val scheduler: Scheduler, val checkpoints: SqliteCheckpoints)
+    /** A cell's outcome as [runCell] hands it back: `null` [exit] when a cancellation interrupted it; [impact] is its nudge ledger. */
+    private class CellRun(val exit: CellExit?, val ids: Identities, val scheduler: Scheduler, val checkpoints: SqliteCheckpoints, val impact: io.astrolabe.cell.ImpactNudges)
 
     /**
      * Builds the tools and context of one cell over [increment] under [role] and runs it (§3.6): shared by the S0 path,
@@ -2331,6 +2340,8 @@ public class Controller @JvmOverloads public constructor(
         rework: Boolean = false,
         /** A-D.6: the loop has no continuation of its own (`runS0`); the cell reads it as `CellContext.turnBudgetHandoff`. */
         turnBudgetHandoff: Boolean = false,
+        /** A-D.6: the handed-off cell this epoch continues; its completion obligations bind this cell's. */
+        continues: ReturnedHandoff? = null,
     ): CellRun {
         val ids = c.ids.copy(context = cellId)
         val cancellation = child?.cancellation ?: c.cancellation
@@ -2434,6 +2445,7 @@ public class Controller @JvmOverloads public constructor(
         val manifest = Manifest.of(idGen.next("manifest"), compiled, increment, contract, ids, model.profile, inputs, register?.version, boundary, model.effort.name.lowercase()).also { manifests.save(ids, it) }
         // D-345: the host's notes come first, marked as the host's; a child cell's brief is its parent's business.
         val hostBlock = if (child == null && c.hostNotes.isNotEmpty()) listOf(HOST_NOTES + c.hostNotes.joinToString("\n") { "- $it" }) else emptyList()
+        val impact = io.astrolabe.cell.ImpactNudges().also { it.carry(continues?.impactNudges().orEmpty()) }
         val ctx = CellContext(
             ids = ids, role = RoleTexts.worded(role, config.role(role.name)), contracts = c.contracts, model = model, tools = tools,
             workspace = CellWorkspace(tree.workspace, tree.registry, coherence, tree.stamper, workset, tree.checks, scheduler, tree.atlas, checker),
@@ -2448,6 +2460,8 @@ public class Controller @JvmOverloads public constructor(
             precompile = precompile,
             rework = rework,
             turnBudgetHandoff = turnBudgetHandoff,
+            carriedFlags = continues?.testIntegrity().orEmpty(),
+            impact = impact,
             acknowledged = acknowledged(c),
             knowledge = knowledge,
             completionEvidence = if (child == null && role.packetKind == io.astrolabe.cell.PacketKind.Result) { raised ->
@@ -2495,14 +2509,14 @@ public class Controller @JvmOverloads public constructor(
         accounting.calls(c.ids.work).firstOrNull { it.ids.context == cellId }?.usage?.takeIf { it.isComplete }?.let { manifests.recordFirstUsage(ids, manifest.id, it.totalInput) }
         if (exit == null) {
             cellSpan?.let { spans?.end(it, status = TraceSpanStatus.Cancelled) }
-            return CellRun(null, ids, scheduler, checkpoints)
+            return CellRun(null, ids, scheduler, checkpoints, impact)
         }
         if (cellSpan != null && spans != null) {
             // The cell's exclusive cost is its own model calls, priced once here and never again by a parent.
             val cost = Accounting.totals(accounting.calls(c.ids.work).filter { it.ids.context == cellId }, 0, spans.currency).money
             spans.end(cellSpan, cost)
         }
-        return CellRun(exit, ids, scheduler, checkpoints)
+        return CellRun(exit, ids, scheduler, checkpoints, impact)
     }
 
     /**
@@ -3011,6 +3025,17 @@ public class Controller @JvmOverloads public constructor(
 
         /** A-D.6: the exit is a direct cell's handoff. */
         private val CellExit?.handoff: Boolean get() = this is CellExit.Partial && reason == PartialReason.Handoff
+
+        /**
+         * §8.8 (P4.2.2): [findings] at or above major not yet in [register] become its `Open` items, numbered after its
+         * last. A-D.4: a direct register's archived open items count as its own — no number is reused, no closed one returns.
+         */
+        internal fun withOpenItems(register: Register, findings: List<Finding>): Register {
+            if (findings.isEmpty()) return register
+            val known = register.open + register.archive.open
+            val fresh = Derived.openItems(findings, (known.maxOfOrNull { it.n } ?: 0) + 1).filter { item -> known.none { it.text == item.text } }
+            return if (fresh.isEmpty()) register else register.copy(open = register.open + fresh)
+        }
 
         /** The pseudo-increment the plan cell runs under; never part of the graph. */
         public const val PLAN: String = "plan"

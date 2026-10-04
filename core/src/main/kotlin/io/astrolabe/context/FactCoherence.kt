@@ -1,5 +1,6 @@
 package io.astrolabe.context
 
+import io.astrolabe.cell.Protocol
 import io.astrolabe.evidence.ClaimKind
 import io.astrolabe.id.ContextId
 import io.astrolabe.id.FileVersion
@@ -35,6 +36,9 @@ public data class Retention(
  * and not in [Retention] `referenced` ⇒ archived and dropped. Over the register cap, `x` facts leave the projection
  * first (oldest first, archived verbatim); dead ends, open items, decisions and live facts are required
  * carry-forward, so what still does not fit is reported as a capacity gap.
+ *
+ * A-D.4: a direct register ([protocol]) keeps every verified note, stale or not — its staleness is still counted and
+ * rendered — and a refuted note leaving the projection moves into [Register.archive], so no note number is ever reused.
  */
 public object FactCoherence {
     @JvmStatic
@@ -47,7 +51,9 @@ public object FactCoherence {
         evidenceExists: (String) -> Boolean,
         estimator: TokenEstimator,
         capTokens: Int = 1_200,
+        protocol: Protocol = Protocol.Structured,
     ): Retention {
+        val direct = protocol == Protocol.Direct
         val archived = ArrayList<ArchivedRecord>()
         val streak = HashMap<Int, Int>()
         val kept = ArrayList<Fact>()
@@ -62,7 +68,7 @@ public object FactCoherence {
             }
             if (f.kind == ClaimKind.Verified && f.staleAt != null) {
                 val cells = maxOf(previousStreak[f.n] ?: 0, f.staleCells) + 1
-                if (cells >= 2 && f.n !in referenced) {
+                if (cells >= 2 && f.n !in referenced && !direct) {
                     archived += archive(register.cell, f, "stale for $cells consecutive cells, unreferenced")
                     continue
                 }
@@ -77,7 +83,10 @@ public object FactCoherence {
         for (fact in refuted) {
             if (RegisterRender.tokens(projected, estimator) <= capTokens) break
             archived += archive(register.cell, fact, "inactive: refuted, over the ${capTokens}-token register cap")
-            projected = projected.copy(facts = projected.facts.filter { it.n != fact.n })
+            projected = projected.copy(
+                facts = projected.facts.filter { it.n != fact.n },
+                archive = if (direct) projected.archive.copy(facts = projected.archive.facts + fact) else projected.archive,
+            )
         }
         val tokens = RegisterRender.tokens(projected, estimator)
         val gap = if (tokens > capTokens) "required carry-forward is $tokens tokens > the $capTokens-token register cap after archiving inactive records" else null

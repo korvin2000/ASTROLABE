@@ -1,9 +1,15 @@
 package io.astrolabe.campaign
 
+import io.astrolabe.atlas.ChangedDefinition
+import io.astrolabe.atlas.DeclarationKind
+import io.astrolabe.atlas.DefinitionChange
+import io.astrolabe.cell.CellCheckpoint
 import io.astrolabe.cell.Change
 import io.astrolabe.cell.ChangeOrigin
 import io.astrolabe.cell.CellExit
 import io.astrolabe.cell.HandoffCause
+import io.astrolabe.cell.ImpactNudge
+import io.astrolabe.cell.PartialReason
 import io.astrolabe.cell.PacketClaims
 import io.astrolabe.cell.PacketCost
 import io.astrolabe.cell.PacketCoverage
@@ -29,6 +35,7 @@ import io.astrolabe.route.RoutingFunction
 import io.astrolabe.route.Tier
 import io.astrolabe.store.Migrations
 import io.astrolabe.store.Store
+import io.astrolabe.verify.TestIntegrityFlag
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -71,27 +78,63 @@ internal data class ReturnedHandoff(
     val function: RoutingFunction,
     val tier: Tier?,
     val profile: String?,
+    /**
+     * The completion obligations the epoch inherits: the cell's test-integrity flags, without a verdict — the epoch's
+     * completion obtains its own — and its unresolved changed public definitions. Empty in a record kept before them.
+     */
+    val flags: List<KeptFlag> = emptyList(),
+    val impact: List<KeptImpact> = emptyList(),
 ) {
     /** The packet as the carry-forward and the final report read it; what the record does not keep is empty. */
     fun packet(ids: Identities, register: Register): ResultPacket = ResultPacket(
         ids = ids.copy(context = cell, candidate = stamp), increment = incrementId, role = role, contractVersion = contractVersion,
         executionGeneration = ExecutionGeneration.INITIAL, base = null, readVersions = emptyMap(), status = PacketStatus.Partial, reason = reason,
         waiting = null, register = register, worksetExport = emptyList(), changes = changes.map { it.change() }, transforms = emptyList(),
-        receipts = receipts, stamp = stamp, envId = envId, coverage = PacketCoverage(0, emptyList()), flags = PacketFlags(emptyList(), emptyList()),
+        receipts = receipts, stamp = stamp, envId = envId, coverage = PacketCoverage(0, emptyList()), flags = PacketFlags(emptyList(), testIntegrity()),
         claims = PacketClaims(), blocked = null, gaps = gaps, evidenceRefs = emptyList(), cost = PacketCost(),
     )
+
+    fun testIntegrity(): List<TestIntegrityFlag> = flags.map { it.flag() }
+
+    fun impactNudges(): List<ImpactNudge> = impact.map { it.nudge() }
+
+    /**
+     * The exit this record kept, for a `Returned` row its process died before writing: the register at [registerVersion]
+     * and the cell's last [checkpoint].
+     */
+    fun exit(ids: Identities, register: Register, checkpoint: CellCheckpoint): CellExit.Partial =
+        CellExit.Partial(turns, register, checkpoint, packet(ids, register), PartialReason.Handoff, hint, cause)
 
     companion object {
         const val KIND: String = "returned_handoff"
 
-        fun of(id: String, seq: Long, exit: CellExit.Partial, grant: String?, function: RoutingFunction, tier: Tier?, profile: String?): ReturnedHandoff {
+        fun of(id: String, seq: Long, exit: CellExit.Partial, grant: String?, function: RoutingFunction, tier: Tier?, profile: String?, impact: List<ImpactNudge>): ReturnedHandoff {
             val packet = exit.packet
             return ReturnedHandoff(
                 id, seq, checkNotNull(packet.ids.context), packet.increment, packet.role, exit.turns, exit.register.version, packet.contractVersion,
                 packet.stamp, packet.envId, packet.changes.map(KeptChange::of), packet.gaps, packet.receipts, exit.checkpoint.touched, packet.reason,
                 exit.hint, checkNotNull(exit.handoffCause) { "a handoff exit names its cause" }, grant, function, tier, profile,
+                packet.flags.testIntegrity.map { KeptFlag.of(it.copy(verdict = null)) }, impact.filter { it.definition.public }.map(KeptImpact::of),
             )
         }
+    }
+}
+
+/** An unresolved [ImpactNudge] as kept with a returned handoff (A-D.6). */
+@Serializable
+internal data class KeptImpact(
+    val path: String,
+    val symbol: String,
+    val kind: DeclarationKind,
+    val change: DefinitionChange,
+    val public: Boolean,
+    val references: Int,
+    val turn: Int,
+) {
+    fun nudge(): ImpactNudge = ImpactNudge(ChangedDefinition(path, symbol, kind, change, public), references, turn)
+
+    companion object {
+        fun of(nudge: ImpactNudge): KeptImpact = nudge.definition.let { d -> KeptImpact(d.path, d.symbol, d.kind, d.change, d.public, nudge.references, nudge.turn) }
     }
 }
 

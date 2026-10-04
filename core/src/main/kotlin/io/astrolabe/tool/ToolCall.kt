@@ -1,6 +1,8 @@
 package io.astrolabe.tool
 
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.descriptors.elementNames
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -100,6 +102,7 @@ public object ToolCalls {
 
     private fun decode(family: ToolFamily, received: JsonObject, notes: MutableList<String>, truncated: Boolean): Args {
         val raw = InputTolerance.normalise(family, received, notes, truncated)
+        refuseForeignDirectField(family, raw)
         return when (family) {
             ToolFamily.Look -> Args.Look(json.decodeFromJsonElement(LookArgs.serializer(), raw))
             ToolFamily.Edit -> Args.Edit(json.decodeFromJsonElement(EditArgs.serializer(), raw))
@@ -110,6 +113,27 @@ public object ToolCalls {
             ToolFamily.Kb -> Args.Kb(json.decodeFromJsonElement(KbArgs.serializer(), raw))
         }
     }
+
+    /**
+     * A-D.3: `note` belongs to `state(note)` and `after_checks` to `task(finish)` alone. On every other op they stay the
+     * unknown keys they were before the direct protocol: the first key that op's form does not know is refused, before
+     * dispatch, by the decoder's own unknown-key error, so a structured call is refused as it was.
+     */
+    private fun refuseForeignDirectField(family: ToolFamily, raw: JsonObject) {
+        val (field, owner, names) = when (family) {
+            ToolFamily.State -> Triple("note", "note", StateArgs.serializer().descriptor.elementNames)
+            ToolFamily.Task -> Triple("after_checks", "finish", TaskArgs.serializer().descriptor.elementNames)
+            else -> return
+        }
+        if (field !in raw || (raw["op"] as? JsonPrimitive)?.content == owner) return
+        val known = names.toSet() - field
+        val first = raw.keys.first { it !in known }
+        json.decodeFromJsonElement(NoFields.serializer(), JsonObject(mapOf(first to raw.getValue(first))))
+    }
+
+    /** No field at all: decoding any key into it raises the decoder's unknown-key error. */
+    @Serializable
+    private class NoFields
 
     private fun opName(family: ToolFamily, args: Args, raw: JsonObject): String = when (args) {
         is Args.Look -> args.args.what
