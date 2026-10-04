@@ -129,7 +129,7 @@ class HandoffTest {
 
             assertEquals(CampaignOutcome.BudgetExhausted, run.outcome, run.state?.reason)
             assertEquals("the campaign's 8 handoffs are spent with 2 requirements unverified", run.state?.reason, "not the cell cap: an epoch is not counted there")
-            assertNull(run.budgetStop)
+            assertEquals(BudgetStop.CellCap, run.budgetStop, "the host continues it as it continues the cell cap")
             val increment = c.state!!.graph.increments.single()
             assertEquals(9, increment.cells.size, "one counted cell and eight epochs")
             assertEquals(listOf(8), grants(c))
@@ -218,6 +218,30 @@ class HandoffTest {
             assertTrue(paid in c.state!!.graph.increments.single().cells, "the epoch ran under the id its spend names")
             assertEquals(1, spends(c).size, "the replay charged nothing")
             assertEquals("the campaign's 0 handoffs are spent with 2 requirements unverified", run.state?.reason)
+        }
+    }
+
+    @Test
+    fun `a reopen after the handoff limit renews the grant and the work goes on, each epoch charged once`() = runBlocking<Unit> {
+        val request = CampaignRequest(WorkId("W-handoff-reopen"), AttemptId("a1"), "make a return 10")
+        seed(request, Shape.S0)
+        controller().open(repo.root, request, policy).use { c ->
+            val run = controller().runS0(c, overflowing(), maxHandoffs = 1)
+            assertEquals("the campaign's 1 handoffs are spent with 2 requirements unverified", run.state?.reason)
+            assertEquals(BudgetStop.CellCap, run.budgetStop)
+            assertEquals(2, c.state!!.graph.increments.single().cells.size)
+        }
+        controller().open(repo.root, request, policy).use { c ->
+            val run = controller().runS0(c, overflowing(), maxHandoffs = 1)
+
+            assertEquals(listOf(1, 1), grants(c), "the reopen renewed the grant")
+            val cells = c.state!!.graph.increments.single().cells
+            assertEquals(3, cells.size, "the handed-off cell continued in a new epoch")
+            val spent = spends(c)
+            assertEquals(cells.dropLast(1).map { it.value }, spent.map { it.text("from") }, "one spend for each continued cell")
+            assertEquals(cells.drop(1).map { it.value }, spent.map { it.text("to") })
+            assertEquals(2, spent.map { it.text("grant") }.distinct().size, "each spend under its own grant")
+            assertEquals(BudgetStop.CellCap, run.budgetStop)
         }
     }
 

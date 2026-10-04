@@ -595,11 +595,15 @@ public class Controller @JvmOverloads public constructor(
         if (state?.phase == CampaignPhase.Finishing) {
             state = Lifecycle.apply(state, contract, Transition.Resumed("finalization interrupted; revalidate acceptance before completing")).also(campaigns::save)
         }
+        // A-D.6: an explicit reopen — a resumable outcome or a limit stop that may continue — renews the handoff grant at the
+        // next run, so a spent grant never reads as a dead end; only a direct line ever hands off.
+        fun renewGrant(reason: String) {
+            if (effective.protocol == Protocol.Direct) Handoffs(journal, idGen, clock, ids).resumed(reason)
+        }
         if (state?.phase == CampaignPhase.Ended && state.outcome?.resumable == true) {
             val reason = "reopened after ${state.outcome?.wire}"
             state = Lifecycle.apply(state, contract, Transition.Resumed(reason)).also(campaigns::save)
-            // A-D.6: an explicit resume renews the handoff grant at the next run; only a direct line ever hands off.
-            if (effective.protocol == Protocol.Direct) Handoffs(journal, idGen, clock, ids).resumed(reason)
+            renewGrant(reason)
         }
         // C3 (K): the limits in force — the host's when it names them, else the ones kept with the campaign.
         val limits = TaskLimitControl.atOpen(journal, ids, idGen, clock, policy.limits)
@@ -611,7 +615,9 @@ public class Controller @JvmOverloads public constructor(
         // C14: what still holds a budget stop this open cannot continue, typed for the host.
         var limitHold: LimitHold? = null
         if (budgetStop == BudgetStop.CellCap) {
-            state = Lifecycle.apply(checkNotNull(state), contract, Transition.LimitRaised("reopened after the run's cell cap: the cap counts per run")).also(campaigns::save)
+            val reason = "reopened after the run's cell cap: the cap counts per run"
+            state = Lifecycle.apply(checkNotNull(state), contract, Transition.LimitRaised(reason)).also(campaigns::save)
+            renewGrant(reason)
         }
         // C3: a task limit's stop continues the same attempt only once the host's limits leave room again — priced at the
         // call it was refused at — and says which limit still holds it otherwise.
@@ -624,6 +630,7 @@ public class Controller @JvmOverloads public constructor(
                     (spend.cost?.let { ", ${it.amount.toPlainString()} ${it.currency} (${spend.costBasis.wire})" } ?: "")
                 state = Lifecycle.apply(checkNotNull(state), contract, Transition.LimitRaised(raised)).also(campaigns::save)
                 journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Reconcile, text = raised, at = clock.instant()))
+                renewGrant(raised)
             } else {
                 val (kind, why) = when (decision) {
                     is LimitDecision.Reserve -> decision.kind to decision.reason
@@ -706,7 +713,9 @@ public class Controller @JvmOverloads public constructor(
             val current = checkNotNull(contracts.current(request.work))
             val held = ContractTokens.held(store, clock, current, state?.contractStop)
             if (held == null) {
-                state = Lifecycle.apply(checkNotNull(state), current, Transition.LimitRaised("${ContractTokens.CONTINUED} (${state?.contractStop?.cause?.wire}) at ${current.budget.tokens.value} tokens")).also(campaigns::save)
+                val reason = "${ContractTokens.CONTINUED} (${state?.contractStop?.cause?.wire}) at ${current.budget.tokens.value} tokens"
+                state = Lifecycle.apply(checkNotNull(state), current, Transition.LimitRaised(reason)).also(campaigns::save)
+                renewGrant(reason)
                 state = Lifecycle.apply(checkNotNull(state), current, Transition.Reconciled(reconciliation.unknownOutcomes)).also(campaigns::save)
             } else {
                 journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Reconcile, text = "${ContractTokens.STILL}: ${held.second}", at = clock.instant()))
@@ -880,7 +889,8 @@ public class Controller @JvmOverloads public constructor(
         val spent = handoffs.spends(grant.id).size
         if (spent >= grant.limit) {
             val unverified = checkNotNull(c.state).ledger.unfinished().size
-            return null to Transition.Stopped(CampaignOutcome.BudgetExhausted, "the campaign's ${grant.limit} handoffs are spent with $unverified requirements unverified")
+            // The host sees the per-run cap it already continues (`cell_cap`): a reopen renews the grant, never a dead end.
+            return null to Transition.Stopped(CampaignOutcome.BudgetExhausted, "the campaign's ${grant.limit} handoffs are spent with $unverified requirements unverified", budget = BudgetStop.CellCap)
         }
         val to = ContextId(idGen.next("cell"))
         handoffs.spend(grant, spent + 1, epoch.kept.cell, to, epoch.kept.incrementId, epoch.kept.cause)

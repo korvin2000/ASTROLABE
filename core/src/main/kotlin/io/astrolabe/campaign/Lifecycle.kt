@@ -55,7 +55,7 @@ public enum class BudgetStop(public val wire: String) {
     @SerialName("task_limit_requests") @JsonNames("TaskLimitRequests")
     TaskLimitRequests("task_limit_requests"),
 
-    /** `Controller.run(maxCells)`: counted per run, so a reopen runs with a fresh cap. */
+    /** `Controller.run(maxCells)`: counted per run, so a reopen runs with a fresh cap; also a spent handoff grant (A-D.6), renewed by the reopen. */
     @SerialName("cell_cap") @JsonNames("CellCap")
     CellCap("cell_cap"),
 
