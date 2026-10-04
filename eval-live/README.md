@@ -132,16 +132,22 @@ the core arm except the agent's own machinery. These rules were written before t
 
 ## Results
 
-`<out>/runs/<task>/<model>/r<n>/`:
+`<out>/runs/<arm>/<task>/<model>/r<n>/`:
 
-- `result.json` — task, model, repetition, seeded order, attempt outcome, stop code and reason, failure, cells,
+- `result.json` — arm, task, model, repetition, seeded order, attempt outcome, stop code and reason, failure, cells,
   policy decisions, acceptance (passed, exit code, timeout, output tail) and its digest, attempt wall time, totals
   (model requests and responses — every dispatched call ends in one `ModelResponded`, answered, failed or cancelled,
-  with its reconciled usage — failed calls, cells, turns, tool calls, tokens uncached/cache read/cache write/output, cost from
-  the profile's price table, span costs, provider models, stop reasons, any other numeric `ModelResponded` field as
+  with its reconciled usage — failed calls, cells, turns, tool calls, tokens uncached/cache read/cache write/output, cost
+  with each call priced by the table of the profile its `ModelRequested` named, `costBasis` (`paid`, `nominal`,
+  `unpriced`, `unknown`, `mixed`) and `profiles` (responses per profile), span costs, provider models, stop reasons, any other numeric `ModelResponded` field as
   `responded.<path>` = `{sum, known, calls}` — the sum over the `known` of `calls` responses that reported it, partial
   when they differ — and `priceTiers`, the responses per price-tier threshold, `none` when a response named no tier),
   dropped events, changed files, and `interrupt` for a task that has one (below). Anything not observed is `null`, never 0.
+  `key` is what the result stands for: the arm and the SHA-256 fingerprints of the configuration (the arm's fields,
+  provider, model, effort, cell cap, deadline and the core's launch constants), the code (the classes or jars of
+  `eval-live`, the core, `provider-api`, the AI Gate adapter and the SDK) and the task (request, task file fields, base
+  tree, hidden acceptance). A later bench keeps a result only for the same key; any other — or none — is moved aside to
+  `r<n>.stale-<k>` and the run is made again.
 - `events.jsonl` — every `EventRecord` of the run's bus, whole: fields the events gain later are kept without a change.
 - `acceptance.log` — the acceptance output; `workspace.diff` — the agent's changes against the base commit.
 

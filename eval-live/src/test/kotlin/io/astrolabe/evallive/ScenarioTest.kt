@@ -12,6 +12,9 @@ import io.astrolabe.provider.Request
 import io.astrolabe.provider.Role
 import io.astrolabe.provider.ToolCall
 import io.astrolabe.provider.ToolResult
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
@@ -23,6 +26,8 @@ import kotlin.io.path.readText
 import kotlin.io.path.writeText
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -108,9 +113,11 @@ class ScenarioTest {
         assertNull(result.failure, result.failure)
         assertNotNull(result.outcome)
         val delivered = assertNotNull(result.message)
-        assertEquals(2, delivered.deliveredAt, "$delivered")
+        // B5 (B7 review P2-2): the measured count when the message reached the contract, not the script's number.
+        val at = assertNotNull(delivered.deliveredAt, "$delivered")
+        assertTrue(at >= 2, "$delivered")
         assertTrue(assertNotNull(delivered.contractVersion) > 1, "$delivered")
-        assertTrue(seen.none { it <= 2 }, "the model never had the message before it was due: $seen")
+        assertTrue(seen.isNotEmpty() && seen.none { it <= at }, "the model had the message only after it was delivered at $at: $seen")
         assertTrue(assertNotNull(result.totals).modelResponses > 2)
     }
 
@@ -125,9 +132,11 @@ class ScenarioTest {
 
         assertNull(result.failure, result.failure)
         val reopen = assertNotNull(result.reopen)
-        assertEquals(2, reopen.closedAt, "$reopen")
         assertEquals(2, reopen.segments.size, "$reopen")
         val (first, second) = reopen.segments
+        // B5 (B7 review P2-2): the measured responses of the first session when the close ended it, the cancelled call included.
+        assertTrue(assertNotNull(reopen.closedAt) >= 2, "$reopen")
+        assertEquals(assertNotNull(first.totals).modelResponses, reopen.closedAt, "$reopen")
         assertNull(first.outcome, "a closed session has no outcome: $first")
         assertEquals(StudioAttempt.CLOSED, first.reason)
         assertTrue(first.workId != null && first.workId == second.workId, "one work across both sessions: $reopen")
@@ -138,6 +147,26 @@ class ScenarioTest {
         assertEquals(second.workId, result.workId)
         assertEquals(second.outcome, result.outcome)
         assertEquals(reopen.segments.sumOf { it.totals!!.modelResponses }, assertNotNull(result.totals).modelResponses)
+    }
+
+    @Test
+    fun `a close that comes after the run ended on its own keeps the outcome`() = runBlocking {
+        // B5 (B7 review P2-1): the close reaches a run that has already ended.
+        val ended = CompletableDeferred("completed")
+        val late = SessionClose()
+        late.request(ended)
+        assertEquals("completed", late.await(ended))
+        assertFalse(late.closed, "a run that ended first was not closed")
+
+        val running = CompletableDeferred<String>()
+        val close = SessionClose()
+        close.request(running)
+        assertNull(close.await(running))
+        assertTrue(close.closed)
+
+        val stopped = CompletableDeferred<String>().also { it.cancel() }
+        assertFailsWith<CancellationException> { SessionClose().await(stopped) }
+        Unit
     }
 
     private companion object {
