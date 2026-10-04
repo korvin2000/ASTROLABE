@@ -2213,7 +2213,7 @@ Goal: the model decides; the runtime executes, waits, records and finishes. Plan
 - Done: the slowdown is attributed to A3 (then keep/rework A3 by a D-nn) or ruled out with an interval; the result recorded in D-393's successor.
 - Log: 2026-10-03 — arm `waveA-noA3` (`v2/B4a3`: mask line back in `[S]`, every schema family in the request; bench only, not for `main`), 32 deepseek runs, Relace in all 352 responses: decode speed waveA/noA3 0.97 [0.89; 1.05], wall 1.01 [0.85; 1.20], billed 0.94 [0.80; 1.11] — A3 ruled out (> ≈ 11 % slowdown excluded); A3 kept. D-395. [report](../plan2/reports/WP-B4a3.md).
 - [x] **Gate P8.B:** L2 → push `main` → CI green on Ubuntu + Windows. — L2 at every merge; [CI run 37078198525](https://github.com/korvin2000/ASTROLABE/actions/runs/37078198525) green at `c592289` (wave B: B1, B1r, B2, B4, B4 follow-up; with C1a, C8, C9), Ubuntu + Windows (2026-10-03); C2 (`a742095`) in the S2 push run 37081214729.
-#### P8.B.5 [V] B5 Arms as configuration; reference arm `loop` · TODO
+#### P8.B.5 [V] B5 Arms as configuration; reference arm `loop` · IN_PROGRESS
 - Deps: P8.B.7. Pkg: `eval-live/`. Spec: plan §6 B5, §9.1, §11 №20.
 - Build: `--arm` (protocol, forced shape, model tables) instead of branch comparison; `loop` — a plain single-transcript tool loop over `provider-api` with the same model, tasks, acceptance, limits and accounting, its overflow, retry, output-cap and cache-breakpoint rules written down first; the result key carries the arm and the config, code and task digests (a kept `result.json` is checked, `Bench.kt`); price per invocation profile (`Recorder.kt`). S2 arms arrive with P8.D.1, P8.H.4, P8.H.5.
 - Done: `--arm loop` passes the screening set; accounting comparable with the core arms; a stale or foreign result is never reused.
@@ -2221,10 +2221,11 @@ Goal: the model decides; the runtime executes, waits, records and finishes. Plan
 - Deps: P8.B.2, P8.B.7, P8.C.15. Pkg: `eval-live/tasks/`. Spec: plan §6 B6, §9.2.
 - Build: 3 debugging tasks and 4–6 closed confirmation tasks (owner №21 bounds the size; ≥ 2 packages or ≥ 10 files each; at least one on Node): port to another framework, work in a large tree, a two-session task, the 2026-10-04 scenario, an API change with callers across packages, independent edits with a merge conflict.
 - Done: every acceptance fails on the base and on the wrong patch and passes on the reference; the confirmation set is never used for debugging or threshold tuning.
-#### P8.B.7 [M] B7 One `RunSpec` for Studio and `eval-live`; runner support for long scenarios · IN_PROGRESS
+#### P8.B.7 [M] B7 One `RunSpec` for Studio and `eval-live`; runner support for long scenarios · DONE
 - Repo: ASTROLABE + root (Studio bridge). Pkg: core (`RunSpec`), `eval-live/`. Spec: plan §6 B7.
 - Build: `Config`, campaign policy, cell model, cells, budget, limits, flags and shape thresholds from one source in the core (today `StudioAttempt.kt` copies the policy: 12 cells and a 12-window budget against Studio's 48 cells); the runner gains a repository without a base commit, a message sent mid-run, and close / reopen of the same work and store.
 - Done: the default arm and a default Studio launch produce the same `RunSpec` (test); a two-session scenario runs in the runner.
+- Log: 2026-10-04 — core `RunSpec` (`core/.../RunSpec.kt`: `Config`, campaign policy, cells 48, lease 480 min, effort, output headroom; one `defaults` factory, task limits 50 USD / 480 min / 3000 requests); `eval-live` reads it (`StudioPolicy` no longer copies cells, budget, lease, `Config`); runner fields `baseCommit:false`, `message`, `reopen` (same `WorkId`, same store). `Defaults.campaignCells` (12) untouched: 48 is the Studio run default. `:eval-live:test` 17/17, L2 green, merge `3b6d2a0`; Opus review, no P1. Tails: Studio bridge still builds its own launch (Studio step, root repo); close race and unmeasured `deliveredAt`/`closedAt` → P8.B.5; the default arm now carries the 50 USD limit (unpriced model may hold on it). [report](../plan2/reports/WP-B7.md).
 
 ### P8.C Wave C — completion (C1 before D; C2 parallel to D)
 #### P8.C.1 [M] C1a Declared acceptance recognised in `run` · DONE
