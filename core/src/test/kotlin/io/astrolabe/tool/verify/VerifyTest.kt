@@ -159,6 +159,53 @@ class VerifyTest {
     }
 
     @Test
+    fun `a gradle check with no gradle on PATH runs through the repository's wrapper, and without one is unavailable with the reason`() = runTest {
+        val launched = ArrayList<List<String>>()
+        val recording = object : io.astrolabe.tool.run.Runner {
+            override val mode = io.astrolabe.auth.ExecutionMode.TrustedLocal
+            override fun start(spec: io.astrolabe.os.SpawnSpec): io.astrolabe.os.Proc {
+                val argv = (spec.command as io.astrolabe.os.Command.Argv).argv
+                launched += argv
+                if (argv.first() == "gradle") throw java.io.IOException("'gradle' was not found")
+                return os.spawn(spec)
+            }
+        }
+        verify = Verify(checks, scheduler, null, null, null, workspace, recording, os, stamper, store.blobs, Redaction(), HeuristicEstimator(), idGen, ids, contracts, stateRoot.resolve("logs"))
+        verify.hostProbe = object : io.astrolabe.atlas.HostProbe {
+            override val os = if (windows) io.astrolabe.atlas.OsFamily.Windows else io.astrolabe.atlas.OsFamily.Linux
+            override fun onPath(program: String) = program != "gradle"
+            override fun env(name: String): String? = System.getenv(name)
+        }
+        checks.register(Check("CHK-jvm", CheckKind.Full, Selector.All, Closure.Known(setOf("src/a.py")), CostClass.Fast, Trigger.OnDemand, command = Command(listOf("gradle", "test"))))
+        val receipts = SqliteReceipts(store, clock)
+
+        // Neither gradle nor a wrapper: unavailable, and the typed reason reaches the receipt, the view and the currency.
+        val missing = run("""{"what":"tests","selection":"ids","ids":["CHK-jvm"]}""")
+        assertEquals("unavailable", status(missing))
+        val unavailable = receipts.forCheck("CHK-jvm").last()
+        assertEquals(Outcome.Unavailable, unavailable.outcome)
+        val wrapperName = if (windows) "gradlew.bat" else "gradlew"
+        assertTrue(unavailable.limits.first { it.kind == Scheduler.UNAVAILABLE }.detail.startsWith("gradle is not on PATH and the workspace root has no $wrapperName wrapper"), "${unavailable.limits}")
+        assertTrue(missing.body.contains("has no $wrapperName wrapper"), missing.body)
+        assertTrue(scheduler.currency(checks["CHK-jvm"]!!, stamper.stamp().id).reasons.any { it.contains("gradle is not on PATH") })
+
+        // With the repository's wrapper in the check's directory: it runs instead, and the receipt says so.
+        if (windows) {
+            repo.write("gradlew.bat", "@echo off\r\necho wrapper ran %*\r\n")
+        } else {
+            repo.write("gradlew", "#!/bin/sh\necho wrapper ran \"$@\"\n")
+            assertTrue(repo.root.resolve("gradlew").toFile().setExecutable(true))
+        }
+        run("""{"what":"tests","selection":"ids","ids":["CHK-jvm"]}""")
+        assertTrue(launched.last().first().replace('\\', '/').endsWith("/$wrapperName") && launched.last().drop(1) == listOf("test"), "$launched")
+        val wrapped = receipts.forCheck("CHK-jvm").last()
+        assertEquals(listOf("gradle", "test"), wrapped.command, "the receipt keeps the declared command")
+        assertTrue(wrapped.outcome != Outcome.Unavailable, "${wrapped.outcome}: ${wrapped.limits}")
+        assertTrue(wrapped.limits.any { it.detail == "gradle is not on PATH: ran the repository's wrapper $wrapperName instead" }, "${wrapped.limits}")
+        assertTrue(String(store.blobs.get(wrapped.raw!!)).contains("wrapper ran"))
+    }
+
+    @Test
     fun `model acceptance commands and escaping working directories are denied before launch`() = runTest {
         var launches = 0
         val recording = object : io.astrolabe.tool.run.Runner {
