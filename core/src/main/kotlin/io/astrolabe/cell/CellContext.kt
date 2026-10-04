@@ -176,6 +176,16 @@ public class CellContext @JvmOverloads constructor(
      * spent with work done in the epoch hands off instead of ending `TurnBudget`. The cell never reads the shape.
      */
     public val turnBudgetHandoff: Boolean = false,
+    /**
+     * A-D.6: the test-integrity flags of the cell this epoch continues; the cell starts its flag set with them, so a test
+     * weakened before the handoff binds the completion after it. Empty for every other cell.
+     */
+    public val carriedFlags: List<io.astrolabe.verify.TestIntegrityFlag> = emptyList(),
+    /**
+     * A-D.6: the impact-nudge ledger the cell keeps — an epoch's starts with its predecessor's unresolved public nudges, and
+     * the controller reads it back at a handoff. `null`: a fresh ledger of the cell's own.
+     */
+    public val impact: ImpactNudges? = null,
 ) {
     init {
         require(ids.context != null) { "a cell runs under its own context id" }

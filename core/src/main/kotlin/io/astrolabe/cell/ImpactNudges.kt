@@ -68,6 +68,11 @@ public class ImpactNudges {
         overflow = fresh.filter { it !in kept }
     }
 
+    /** A-D.6: the nudges an epoch inherits stay pending as they were; a later change of the same symbol keeps their turn. */
+    internal fun carry(nudges: List<ImpactNudge>) {
+        nudges.forEach { pending.putIfAbsent(it.definition.path to it.definition.symbol, it) }
+    }
+
     /** An executed `look(refs)` whose target names the symbol (`name`, `Owner.name`, `path::name`). */
     public fun inspected(target: String) {
         pending.keys.removeIf { (_, symbol) -> names(target, symbol) }
