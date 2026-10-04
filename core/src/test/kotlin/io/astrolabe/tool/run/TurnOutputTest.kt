@@ -81,18 +81,49 @@ class TurnOutputTest {
     }
 
     @Test
-    fun `verify results count in the same budget and say their output is not recallable`() {
+    fun `green verify results count in the same budget and say their output is not recallable`() {
         val checks = (1..200).joinToString("\n") { "  CHK-$it: pytest 8.1 · passed · exit 0" }
-        val verify = outcome("verify", "failed", "#9", "checks @ab12cd34: tests ✗ 1 fail (#9)\n$checks")
+        val verify = outcome("verify", "ok", "#9", "checks @ab12cd34: tests ✓ (#9)\n$checks", green = true)
         val runs = (1..2).map { it to run("#$it", "passed", 150) }
         val budget = 2_000L
 
         val shown = TurnOutput.fit(runs + (3 to verify), budget, estimator)
 
         val shownVerify = shown.getValue(3)
-        assertEquals("checks @ab12cd34: tests ✗ 1 fail (#9)", shownVerify.body.lines().first())
+        assertEquals("checks @ab12cd34: tests ✓ (#9)", shownVerify.body.lines().first())
         assertTrue(shownVerify.body.contains("the full check output is not recallable"), shownVerify.body)
         assertTrue((runs.map { (op, o) -> shown[op] ?: o } + shownVerify).sumOf { tokens(it) } <= budget)
+    }
+
+    @Test
+    fun `a failing verify reads ok in its header yet keeps every diagnostic while the other results share what it leaves`() {
+        // 20 checks: receipt summaries first, the failing check's diagnostics deep after another check's green output.
+        val receipts = (1..20).joinToString("\n") { "receipt CHK-$it: tests ${if (it == 20) "✗ 1 fail" else "✓ 3 pass"} (#$it)" }
+        val green = (1..300).joinToString("\n") { "    CHK-1 output line $it" }
+        val verify = outcome("verify", "ok", "#20", "$receipts\n  CHK-1: pytest · passed\n$green\n  CHK-20: pytest · failed\n    E   AssertionError: the flaky diagnostic", green = false)
+        val runs = (1..39).map { it to run("#$it", "passed", 200) }
+        val budget = 12_000L
+
+        val shown = TurnOutput.fit(runs + (40 to verify), budget, estimator)
+
+        assertFalse(40 in shown, "the failing verify is shown whole")
+        assertTrue((shown[40] ?: verify).body.contains("E   AssertionError: the flaky diagnostic"))
+        assertTrue(runs.sumOf { (op, o) -> tokens(shown[op] ?: o) } <= budget - tokens(verify))
+    }
+
+    @Test
+    fun `the shown bodies never pass the budget, whatever the punctuation, the number of results or one long line`() {
+        val dense = (listOf("run #1 passed · class R · exit 0 · make") + List(650) { "aaa!!!aaaaaaaaaaa" }).joinToString("\n")
+        val four = (1..4).map { it to outcome("run", "passed", "#$it", dense) }
+        val many = (1..1_000).map { it to run("#$it", "passed", 40) }
+        val long = listOf(1 to outcome("run", "passed", "#1", "x!".repeat(25_000)))
+        for (results in listOf(four, many, long)) {
+            val shown = TurnOutput.fit(results, 12_000L, estimator)
+            val total = results.sumOf { (op, o) -> tokens(shown[op] ?: o) }
+            assertTrue(total <= 12_000L, "${results.size} results shown in $total tokens")
+        }
+        val one = TurnOutput.fit(long, 12_000L, estimator).getValue(1).body
+        assertTrue(one.startsWith("x!x!") && one.contains("output budget of 12000 tokens; full output: look(recall, id=#1)"), one.takeLast(200))
     }
 
     @Test
