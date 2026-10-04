@@ -97,6 +97,20 @@ class LookTest {
     private fun status(outcome: ToolOutcome) = outcome.header!!.runtime.status
 
     @Test
+    fun `a truncated archive recall continues over the archive, never over the active notes`() = runTest {
+        val archived = (1..40).map { "x$it archived note number $it" }
+        look.notes = { archive -> if (archive) archived else (1..40).map { "h$it active note number $it" } }
+        val first = look("""{"what":"recall","id":"notes","range":"archive","budget":80}""")
+        val range = assertNotNull(Regex("""… recall notes range (archive \d+-40)$""").find(first.body), first.body).groupValues[1]
+        val next = look("""{"what":"recall","id":"notes","range":"$range"}""")
+        assertTrue(next.body.startsWith("archived notes ${range.removePrefix("archive ")} of 40\n"), next.body)
+        assertTrue(next.body.lines().drop(1).all { it.startsWith("x") }, next.body)
+        assertTrue(next.body.contains(archived.last()), next.body)
+        // The active notes page as before.
+        assertTrue(look("""{"what":"recall","id":"notes","range":"3-4"}""").body.startsWith("active notes 3-4 of 40\nh3 "))
+    }
+
+    @Test
     fun `recalling a narrowed recall keeps source line coordinates`() = runTest {
         look("""{"what":"read","target":"src/a.py:1-10"}""")
         val narrow = look("""{"what":"recall","id":"#1","range":"5-6"}""")
