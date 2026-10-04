@@ -167,6 +167,18 @@ class LimitsTest {
         assertEquals(0, BigDecimal("0.50").compareTo(totals.nominalMoney!!.amount))
         assertEquals(0, BigDecimal("0.80").compareTo(totals.money.amount))
         assertEquals(1, totals.unpricedCalls)
+        // A positive bill on a plan-billed call is paid money, counted once; a zero bill leaves the nominal price.
+        val bills = LimitSpend.of(listOf(
+            call("n2", usd("0.10"), Charge.Nominal, billed = usd("2")),
+            call("n3", usd("0.10"), Charge.Nominal, billed = usd("0")),
+            call("u2", Money.zero("USD"), Charge.Unpriced, billed = usd("0.40")),
+        ), 0, "USD")
+        assertEquals(0, BigDecimal("2.40").compareTo(bills.paidCost!!.amount))
+        assertEquals(0, BigDecimal("0.10").compareTo(bills.nominalCost!!.amount))
+        assertEquals(0, BigDecimal("2.50").compareTo(bills.cost!!.amount))
+        assertEquals(0, bills.unpricedRequests)
+        assertEquals(CostBasis.Mixed, bills.costBasis)
+        assertEquals(LimitKind.Cost, assertIs<LimitDecision.Exhausted>(LimitRule.decide(TaskLimits(maxCost = usd("1")), bills, usd("0.10"))).kind)
     }
 
     @Test

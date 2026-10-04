@@ -136,8 +136,8 @@ public data class LimitSpend(
          * The spend of [calls] in [currency] after [elapsedMillis] of active work. A call counts what the provider billed
          * (D-378), else its price-table estimate, else the conservative hold a call keeps until it settles; a call in
          * another currency, or with none of these known, makes the cost unknown — never zero (FX-59). A nominal call
-         * (C16) counts its price at the model's official price the same way, never a reported bill; an unpriced one
-         * counts a request and no money.
+         * (C16) counts the model's official price the same way; an unpriced one counts a request and no money. A positive
+         * reported bill is paid money on any profile and is counted once, as paid.
          */
         @JvmStatic
         public fun of(calls: List<CallAccount>, elapsedMillis: Long, currency: String): LimitSpend {
@@ -149,8 +149,9 @@ public data class LimitSpend(
             var nominalCalls = 0
             var unpriced = 0
             for (call in calls) {
-                if (call.charge == Charge.Unpriced) { unpriced++; continue }
-                val reported = call.usage?.billed?.takeIf { call.charge == Charge.Paid }
+                // A positive bill is paid money on any profile; a nominal or unpriced call's zero bill is not a price.
+                val reported = call.usage?.billed?.takeIf { call.charge == Charge.Paid || it.amount.signum() > 0 }
+                if (reported == null && call.charge == Charge.Unpriced) { unpriced++; continue }
                 val amount = when {
                     reported != null -> reported.also { billed++ }
                     !call.money.unknown -> call.money
@@ -158,7 +159,7 @@ public data class LimitSpend(
                     else -> Money.unknown(currency)
                 }
                 val counted = if (amount.currency == currency) amount else Money.unknown(currency)
-                if (call.charge == Charge.Nominal) { nominal += counted; nominalCalls++ } else paid += counted
+                if (reported == null && call.charge == Charge.Nominal) { nominal += counted; nominalCalls++ } else paid += counted
                 if (counted.unknown) largest = largest.copy(unknown = true)
                 else if (counted.amount > largest.amount) largest = counted.copy(unknown = largest.unknown)
             }

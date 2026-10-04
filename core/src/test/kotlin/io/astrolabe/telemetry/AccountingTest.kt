@@ -157,6 +157,15 @@ class AccountingTest {
         assertTrue("(nominal)" in exhausted.reason, exhausted.reason)
         val status = io.astrolabe.budget.LimitRule.status(limits, spend)
         assertEquals(spend.nominalCost, status.nominalCost)
+        // A positive bill on the subscription is real money: the call is paid at the bill, counted once.
+        val charged = accounting.record(ids, "third", nominal, null, usage.copy(billed = io.astrolabe.provider.Money("USD", BigDecimal("2"))))
+        assertEquals(Charge.Paid, charged.charge)
+        assertEquals(0, BigDecimal("2").compareTo(charged.money.amount))
+        val after = io.astrolabe.budget.LimitSpend.of(accounting.calls(ids.work), 0, "USD")
+        assertEquals(0, BigDecimal("2").compareTo(after.paidCost!!.amount))
+        assertEquals(0, BigDecimal("0.60").compareTo(after.nominalCost!!.amount))
+        assertEquals(0, BigDecimal("2.60").compareTo(after.cost!!.amount))
+        assertEquals(0, BigDecimal("2").compareTo(Accounting.totals(accounting.calls(ids.work), 0, "USD").paidMoney!!.amount))
     }
 
     @Test

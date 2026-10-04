@@ -823,7 +823,15 @@ public class Controller @JvmOverloads public constructor(
     private suspend fun reassessBlocked(c: OpenedCampaign, authority: Authority) {
         for (increment in c.state?.graph?.increments.orEmpty().filter { it.status == IncrementStatus.Blocked }) {
             val checkpoint = increment.cells.lastOrNull()?.let { SqliteCheckpoints(c.store, clock).latest(it) }
-            val question = io.astrolabe.event.Question(idGen.next("unblock"), c.contract.version, c.ids,
+            // C16: a spent plan quota is lifted by the host's reopen; the next call tells whether it refilled.
+            if (checkpoint?.reason?.startsWith(io.astrolabe.cell.PLAN_QUOTA_EXHAUSTED) == true) {
+                val ref = idGen.next("unblock")
+                c.journal.append(JournalEvent(idGen.next("ev"), c.ids, null, JournalKind.Reconcile, refs = listOf(ref, increment.id),
+                    text = "plan quota stop of ${increment.id} lifted by the host's reopen", at = clock.instant()))
+                c.advance(Transition.Unblocked(increment.id, ref))
+                continue
+            }
+            val question =io.astrolabe.event.Question(idGen.next("unblock"), c.contract.version, c.ids,
                 "May ${increment.id} resume? Resolve its prerequisite and provide the answer or evidence: ${checkpoint?.reason.orEmpty()}")
             val answer = authority.ask(question) ?: continue
             if (answer.questionId != question.id || answer.contractRevision != c.contract.version || answer.text.isBlank()) continue

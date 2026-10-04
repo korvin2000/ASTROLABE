@@ -114,6 +114,12 @@ import java.util.concurrent.ConcurrentHashMap
 import io.astrolabe.provider.ToolCall as NativeCall
 
 /**
+ * C16: how the reason of a cell blocked by [ProviderError.QuotaExhausted] begins. The controller reads it from the cell's
+ * checkpoint and lifts that block on the host's next run, without asking the authority.
+ */
+internal const val PLAN_QUOTA_EXHAUSTED: String = "provider plan quota exhausted"
+
+/**
  * The cell turn loop (§3.7 `cell()` with the F03 corrections; §5.5 transactional turns). It wires the
  * completed components — `Layout`, `Anchor`, `Gauges`, `Gates`, `Residency`, `Partition`, `Dispatcher`,
  * the check registry and checker, the coherence horizons, the budget — into one run and adds no policy of
@@ -500,7 +506,7 @@ public class Cell @JvmOverloads constructor(
                     is ProviderError.Authentication -> return blocked(BlockedRequest("provider authentication failed for profile ${ctx.model.profile.id}: ${error.message}",
                         listOf("invocation ${invocationId.value}"), null, turn))
                     // C16: a spent plan quota (a subscription's 5-hour or weekly window) refills only with time; the host resumes.
-                    is ProviderError.QuotaExhausted -> return blocked(BlockedRequest("provider plan quota exhausted for profile ${ctx.model.profile.id}" +
+                    is ProviderError.QuotaExhausted -> return blocked(BlockedRequest("$PLAN_QUOTA_EXHAUSTED for profile ${ctx.model.profile.id}" +
                         (error.retryAfterSeconds?.let { " (refills in about $it s)" } ?: "") + "; reopen the campaign once it refills: ${error.message}",
                         listOf("invocation ${invocationId.value}"), null, turn))
                     is ProviderError -> return failed("provider ${error::class.simpleName}: ${error.message}")

@@ -31,6 +31,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
@@ -89,6 +90,18 @@ class TranslationTest {
         assertNull(AiGateProfiles.officialPrices(strangers, "openai-codex", "gpt-5.5"), "two strangers: the user enters it")
         val table = AiGateProfiles.priceTable(official, LocalDate.of(2026, 9, 1)).copy(billing = io.astrolabe.provider.Billing.Plan)
         assertEquals(io.astrolabe.provider.Charge.Nominal, table.charge)
+    }
+
+    @Test
+    fun `a runtime with only the subscription still prices it at the paying provider's bundled price`() {
+        Llm.builder().provider(net.ai.gate.providers.Providers.openAiCodex()).environment(Environment.none())
+            .credentials(net.ai.gate.auth.CredentialStore.inMemory()).catalog { it.offline() }.build().use { codex ->
+            assertTrue(codex.models().all().none { it.providerId() == "openai" }, "the paying provider is not registered")
+            val table = assertNotNull(AiGateProfiles.planPriceTable(codex, "openai-codex", "gpt-5.5", LocalDate.of(2026, 9, 1)))
+            assertEquals(io.astrolabe.provider.Charge.Nominal, table.charge)
+            assertEquals(0, BigDecimal("5").compareTo(table.perMillion.getValue(BillingDimension.UNCACHED_INPUT)))
+            assertEquals(0, BigDecimal("30").compareTo(table.perMillion.getValue(BillingDimension.OUTPUT)))
+        }
     }
 
     @Test

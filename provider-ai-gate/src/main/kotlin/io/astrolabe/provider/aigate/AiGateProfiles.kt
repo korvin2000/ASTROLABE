@@ -19,6 +19,8 @@ import net.ai.gate.diagnostics.ConnectionReport
 import net.ai.gate.metadata.Usage
 import net.ai.gate.model.Capability
 import net.ai.gate.model.Model
+import net.ai.gate.spi.provider.ProviderBundle
+import java.util.ServiceLoader
 import net.ai.gate.model.Prices
 import net.ai.gate.model.SupportLevel
 import net.ai.gate.spi.protocol.ApiFeatures
@@ -93,9 +95,19 @@ public object AiGateProfiles {
      * the profile goes without money accounting (`PriceTable(date, "USD", emptyMap(), billing = Billing.Plan)`).
      */
     @JvmStatic
-    public fun planPriceTable(llm: Llm, providerId: String, modelId: String, priceDate: LocalDate): PriceTable? =
-        officialPrices(llm.models().all(), providerId, modelId)?.let { priceTable(it, priceDate) }
+    public fun planPriceTable(llm: Llm, providerId: String, modelId: String, priceDate: LocalDate): PriceTable? {
+        // A host with only the subscription registered still sees the paying provider's bundled prices; the runtime's
+        // own entries (host overrides, feeds) come first and win for the same model.
+        val runtime = llm.models().all()
+        val known = runtime.mapTo(HashSet()) { it.ref() }
+        val models = runtime + bundledModels().filter { it.ref() !in known }
+        return officialPrices(models, providerId, modelId)?.let { priceTable(it, priceDate) }
             ?.takeIf { it.perMillion.isNotEmpty() }?.copy(billing = Billing.Plan)
+    }
+
+    /** The model data every SDK bundle ships ([ProviderBundle.catalogModels]), whatever providers a runtime registers. */
+    private fun bundledModels(): List<Model> =
+        ServiceLoader.load(ProviderBundle::class.java, ProviderBundle::class.java.classLoader).flatMap { it.catalogModels() }
 
     /**
      * The official price of [modelId] of [providerId] among [models] (step 0 of C16): its own catalog price, else the same

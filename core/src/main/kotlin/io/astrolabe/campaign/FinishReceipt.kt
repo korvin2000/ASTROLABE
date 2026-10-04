@@ -125,6 +125,10 @@ public data class BudgetLine(
     val money: Money,
     /** Helper tokens over billed tokens; `null` while the total is unknown. */
     val helperShare: Double?,
+    /** [money] split as [io.astrolabe.telemetry.AccountTotals] keeps it (C16); `null` in a receipt written before C16. */
+    val paidMoney: Money? = null,
+    val nominalMoney: Money? = null,
+    val unpricedCalls: Int = 0,
 )
 
 /**
@@ -379,7 +383,8 @@ public object FinishReceipts {
                 holds.flatMap { (id, hold) -> Obligations.disclosure(id, hold) },
             pendingAmendments = contract.amendmentsPending.map { it.change },
             routingDecisions = emptyList(),
-            budget = BudgetLine(totals.quantities.mapKeys { it.key.id }, totals.money, billed?.takeIf { it > 0 }?.let { helper.toDouble() / it }),
+            budget = BudgetLine(totals.quantities.mapKeys { it.key.id }, totals.money, billed?.takeIf { it > 0 }?.let { helper.toDouble() / it },
+                totals.paidMoney, totals.nominalMoney, totals.unpricedCalls),
             memoryCandidates = emptyList(),
             highestAuthorizedStage = Stage.Patch,
             equivalence = review?.equivalence,

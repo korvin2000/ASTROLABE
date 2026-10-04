@@ -99,8 +99,14 @@ public class Accounting internal constructor(
     /** Records one call; a `null` [usage] is a call whose usage never arrived. */
     public fun record(ids: Identities, invocationId: String, profile: Profile, request: Request?, usage: BillableUsage?, fundedTokens: Long? = null): CallAccount {
         val table = profile.priceTable
-        val charge = table.charge
-        val money = if (charge == Charge.Unpriced) Money.zero(table.currency) else usage?.price(table) ?: Money.unknown(table.currency)
+        // C16: a positive bill is real money whatever the plan says — the call is paid, at the bill, counted once.
+        val bill = usage?.billed?.takeIf { it.amount.signum() > 0 }
+        val charge = if (bill != null) Charge.Paid else table.charge
+        val money = when {
+            bill != null && table.charge != Charge.Paid -> bill.takeIf { it.currency == table.currency } ?: Money.unknown(table.currency)
+            charge == Charge.Unpriced -> Money.zero(table.currency)
+            else -> usage?.price(table) ?: Money.unknown(table.currency)
+        }
         val prior = calls(ids.work).firstOrNull { it.invocationId == invocationId }
         val account = CallAccount(
             invocationId = invocationId,
