@@ -76,6 +76,7 @@ import io.astrolabe.tool.ToolFamily
 import io.astrolabe.tool.ToolOutcome
 import io.astrolabe.tool.ToolSchemas
 import io.astrolabe.tool.TurnResult
+import io.astrolabe.tool.run.TurnOutput
 import io.astrolabe.tool.run.announceMoved
 import io.astrolabe.tool.kb.KbTool
 import io.astrolabe.tool.state.BlockedRequest
@@ -602,12 +603,19 @@ public class Cell @JvmOverloads constructor(
                 appendResult(call.id, "${Boundary.RESULT_OPEN}not executed: $reason${Boundary.RESULT_CLOSE}\n${gauge.line()}", isError = true, label = call.name, resultClass = ResultClass.Verdict, alias = null)
                 journalResult(call.id, reason, emptyList())
             }
+            // P8.C.15: the turn's run and verify results share one output budget in [T]. Only the shown body is cut; the
+            // outcome signatures, gates and the claim read is the executor's.
+            val shortForms = result?.let { r ->
+                val executes = calls.filter { it.family == ToolFamily.Run || it.family == ToolFamily.Verify }
+                    .mapNotNull { c -> (r.of(c.opId) as? Disposition.Executed)?.let { c.opId to it.outcome } }
+                TurnOutput.fit(executes, maxOf(defaults.runTurnBudgetTokens, defaults.runBudgetTokens).toLong(), estimator)
+            }.orEmpty()
             fun executed(call: ToolCall) {
                 val disposition = result!!.of(call.opId)
                 val outcome = (disposition as? Disposition.Executed)?.outcome
                 val text = when (disposition) {
                     is Disposition.Executed -> Gauges.result(
-                        if (call.notes.isEmpty()) disposition.outcome else disposition.outcome.copy(body = call.notes.joinToString("") { "note: $it\n" } + disposition.outcome.body),
+                        (shortForms[call.opId] ?: disposition.outcome).let { shown -> if (call.notes.isEmpty()) shown else shown.copy(body = call.notes.joinToString("") { "note: $it\n" } + shown.body) },
                         gauge,
                     )
                     is Disposition.NotExecuted -> "${Boundary.RESULT_OPEN}not executed: ${disposition.reason}${Boundary.RESULT_CLOSE}\n${gauge.line()}"

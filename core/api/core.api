@@ -313,7 +313,8 @@ public final class io/astrolabe/Defaults {
 	public fun <init> (Lio/astrolabe/ShapePolicy;IDIDIIIIIIIIIIIIIIIIIIIIIIIIIDDDIIIIIILio/astrolabe/route/Tier;IIILio/astrolabe/route/Tier;Lio/astrolabe/route/Tier;IIIIIIIDLio/astrolabe/ProfileRoles;Lio/astrolabe/Mode;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/DClassPolicy;Lio/astrolabe/IntegrityApproval;Lio/astrolabe/UnknownOutcomeReconciliation;Lio/astrolabe/auth/Stage;II)V
 	public fun <init> (Lio/astrolabe/ShapePolicy;IDIDIIIIIIIIIIIIIIIIILio/astrolabe/context/SeedRule;IIIIIIIIIDDDIIIIIILio/astrolabe/route/Tier;IIILio/astrolabe/route/Tier;Lio/astrolabe/route/Tier;IIIIIIIDLio/astrolabe/ProfileRoles;Lio/astrolabe/Mode;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/DClassPolicy;Lio/astrolabe/IntegrityApproval;Lio/astrolabe/UnknownOutcomeReconciliation;Lio/astrolabe/auth/Stage;IIIILjava/lang/String;)V
 	public fun <init> (Lio/astrolabe/ShapePolicy;IDIDIIIIIIIIIIIIIIIIILio/astrolabe/context/SeedRule;IIIIIIIIIDDDIIIIIILio/astrolabe/route/Tier;IIILio/astrolabe/route/Tier;Lio/astrolabe/route/Tier;IIIIIIIDLio/astrolabe/ProfileRoles;Lio/astrolabe/Mode;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/DClassPolicy;Lio/astrolabe/IntegrityApproval;Lio/astrolabe/UnknownOutcomeReconciliation;Lio/astrolabe/auth/Stage;IIIILjava/lang/String;III)V
-	public synthetic fun <init> (Lio/astrolabe/ShapePolicy;IDIDIIIIIIIIIIIIIIIIILio/astrolabe/context/SeedRule;IIIIIIIIIDDDIIIIIILio/astrolabe/route/Tier;IIILio/astrolabe/route/Tier;Lio/astrolabe/route/Tier;IIIIIIIDLio/astrolabe/ProfileRoles;Lio/astrolabe/Mode;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/DClassPolicy;Lio/astrolabe/IntegrityApproval;Lio/astrolabe/UnknownOutcomeReconciliation;Lio/astrolabe/auth/Stage;IIIILjava/lang/String;IIIIIILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Lio/astrolabe/ShapePolicy;IDIDIIIIIIIIIIIIIIIIILio/astrolabe/context/SeedRule;IIIIIIIIIDDDIIIIIILio/astrolabe/route/Tier;IIILio/astrolabe/route/Tier;Lio/astrolabe/route/Tier;IIIIIIIDLio/astrolabe/ProfileRoles;Lio/astrolabe/Mode;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/DClassPolicy;Lio/astrolabe/IntegrityApproval;Lio/astrolabe/UnknownOutcomeReconciliation;Lio/astrolabe/auth/Stage;IIIILjava/lang/String;IIII)V
+	public synthetic fun <init> (Lio/astrolabe/ShapePolicy;IDIDIIIIIIIIIIIIIIIIILio/astrolabe/context/SeedRule;IIIIIIIIIDDDIIIIIILio/astrolabe/route/Tier;IIILio/astrolabe/route/Tier;Lio/astrolabe/route/Tier;IIIIIIIDLio/astrolabe/ProfileRoles;Lio/astrolabe/Mode;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/DClassPolicy;Lio/astrolabe/IntegrityApproval;Lio/astrolabe/UnknownOutcomeReconciliation;Lio/astrolabe/auth/Stage;IIIILjava/lang/String;IIIIIIILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Lio/astrolabe/ShapePolicy;
 	public final fun component10 ()I
 	public final fun component11 ()I
@@ -382,10 +383,11 @@ public final class io/astrolabe/Defaults {
 	public final fun component69 ()I
 	public final fun component7 ()I
 	public final fun component70 ()I
+	public final fun component71 ()I
 	public final fun component8 ()I
 	public final fun component9 ()I
-	public final fun copy (Lio/astrolabe/ShapePolicy;IDIDIIIIIIIIIIIIIIIIILio/astrolabe/context/SeedRule;IIIIIIIIIDDDIIIIIILio/astrolabe/route/Tier;IIILio/astrolabe/route/Tier;Lio/astrolabe/route/Tier;IIIIIIIDLio/astrolabe/ProfileRoles;Lio/astrolabe/Mode;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/DClassPolicy;Lio/astrolabe/IntegrityApproval;Lio/astrolabe/UnknownOutcomeReconciliation;Lio/astrolabe/auth/Stage;IIIILjava/lang/String;III)Lio/astrolabe/Defaults;
-	public static synthetic fun copy$default (Lio/astrolabe/Defaults;Lio/astrolabe/ShapePolicy;IDIDIIIIIIIIIIIIIIIIILio/astrolabe/context/SeedRule;IIIIIIIIIDDDIIIIIILio/astrolabe/route/Tier;IIILio/astrolabe/route/Tier;Lio/astrolabe/route/Tier;IIIIIIIDLio/astrolabe/ProfileRoles;Lio/astrolabe/Mode;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/DClassPolicy;Lio/astrolabe/IntegrityApproval;Lio/astrolabe/UnknownOutcomeReconciliation;Lio/astrolabe/auth/Stage;IIIILjava/lang/String;IIIIIILjava/lang/Object;)Lio/astrolabe/Defaults;
+	public final fun copy (Lio/astrolabe/ShapePolicy;IDIDIIIIIIIIIIIIIIIIILio/astrolabe/context/SeedRule;IIIIIIIIIDDDIIIIIILio/astrolabe/route/Tier;IIILio/astrolabe/route/Tier;Lio/astrolabe/route/Tier;IIIIIIIDLio/astrolabe/ProfileRoles;Lio/astrolabe/Mode;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/DClassPolicy;Lio/astrolabe/IntegrityApproval;Lio/astrolabe/UnknownOutcomeReconciliation;Lio/astrolabe/auth/Stage;IIIILjava/lang/String;IIII)Lio/astrolabe/Defaults;
+	public static synthetic fun copy$default (Lio/astrolabe/Defaults;Lio/astrolabe/ShapePolicy;IDIDIIIIIIIIIIIIIIIIILio/astrolabe/context/SeedRule;IIIIIIIIIDDDIIIIIILio/astrolabe/route/Tier;IIILio/astrolabe/route/Tier;Lio/astrolabe/route/Tier;IIIIIIIDLio/astrolabe/ProfileRoles;Lio/astrolabe/Mode;Lio/astrolabe/auth/ExecutionMode;Lio/astrolabe/DClassPolicy;Lio/astrolabe/IntegrityApproval;Lio/astrolabe/UnknownOutcomeReconciliation;Lio/astrolabe/auth/Stage;IIIILjava/lang/String;IIIIIIILjava/lang/Object;)Lio/astrolabe/Defaults;
 	public final fun effectiveDigestCapTokens (I)I
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getAdmissionConfidenceMax ()D
@@ -448,6 +450,7 @@ public final class io/astrolabe/Defaults {
 	public final fun getReviewTier ()Lio/astrolabe/route/Tier;
 	public final fun getRunBudgetTokens ()I
 	public final fun getRunTimeoutSeconds ()I
+	public final fun getRunTurnBudgetTokens ()I
 	public final fun getSeedRule ()Lio/astrolabe/context/SeedRule;
 	public final fun getSeedsMaxTokens ()I
 	public final fun getShapePolicy ()Lio/astrolabe/ShapePolicy;

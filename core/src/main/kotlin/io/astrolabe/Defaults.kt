@@ -126,7 +126,46 @@ public data class Defaults(
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val directAnchorTargetTokens: Int = 800,
+    /**
+     * P8.C.15: the tokens one turn's `run` and `verify` result bodies take in `[T]` together, never below [runBudgetTokens];
+     * past it a result is shown short (head, tail, a recall pointer). Not encoded at its default.
+     */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val runTurnBudgetTokens: Int = 12_000,
 ) {
+    /** The full constructor before [runTurnBudgetTokens]: it takes its default. Kept for Java callers. */
+    public constructor(
+        shapePolicy: ShapePolicy, turnsPerCell: Int, turnNudgeFraction: Double, providerTerminalWaitSeconds: Int, alpha: Double, k: Int, m: Int,
+        rMaxTokens: Int, anchorMaxTokens: Int, immediateStubTokens: Int, lookBudgetTokens: Int, runBudgetTokens: Int, growthReserveFullWindowTokens: Int,
+        registerCapTokens: Int, digestCapTokens: Int, digestTokensPerRequirement: Int, digestCapCeilingTokens: Int, patchCapTokens: Int,
+        factLineMaxChars: Int, noteBodyMaxTokens: Int, noteSummaryMaxChars: Int, seedsMaxTokens: Int, seedRule: io.astrolabe.context.SeedRule,
+        injectionMaxNotes: Int, injectionMaxTokens: Int, focusNotesMaxTokens: Int, focusZoomMaxTokens: Int, touchedInAnchor: Int,
+        checkerTimeBoxSeconds: Int, checkerFallbackTimeBoxSeconds: Int, theta: Int, fullSuiteCadence: Int, reserveVerification: Double,
+        reserveRecoveryAndPersist: Double, campaignRecoveryReserve: Double, stallTurns: Int, loopIdentical: Int, repeatedSignatureRepairs: Int,
+        doomLoopSameCalls: Int, probeTurns: Int, probeTokens: Int, probeTier: Tier, reviewLookMax: Int, reviewIncrementTokens: Int,
+        reviewCampaignTokens: Int, reviewTier: Tier, reviewRoutineTier: Tier, repairCalls: Int, attemptsPerIncrement: Int, writerDepth: Int,
+        probeDepth: Int, parallelCells: Int, campaignCells: Int, flakyIsolatedReruns: Int, admissionConfidenceMax: Double, profileRoles: ProfileRoles,
+        mode: Mode, executionMode: ExecutionMode, dClass: DClassPolicy, integrityApproval: IntegrityApproval,
+        unknownOutcomeReconciliation: UnknownOutcomeReconciliation, ceiling: Stage, runTimeoutSeconds: Int, gitDeadlineSeconds: Int,
+        contextCeilingTokens: Int, callsPerResponseMax: Int, capabilitySet: String,
+        directRunsMaxLines: Int, directNotesMaxTokens: Int, directAnchorTargetTokens: Int,
+    ) : this(
+        shapePolicy, turnsPerCell, turnNudgeFraction, providerTerminalWaitSeconds, alpha, k, m,
+        rMaxTokens, anchorMaxTokens, immediateStubTokens, lookBudgetTokens, runBudgetTokens, growthReserveFullWindowTokens,
+        registerCapTokens, digestCapTokens, digestTokensPerRequirement, digestCapCeilingTokens, patchCapTokens,
+        factLineMaxChars, noteBodyMaxTokens, noteSummaryMaxChars, seedsMaxTokens, seedRule,
+        injectionMaxNotes, injectionMaxTokens, focusNotesMaxTokens, focusZoomMaxTokens, touchedInAnchor,
+        checkerTimeBoxSeconds, checkerFallbackTimeBoxSeconds, theta, fullSuiteCadence, reserveVerification,
+        reserveRecoveryAndPersist, campaignRecoveryReserve, stallTurns, loopIdentical, repeatedSignatureRepairs,
+        doomLoopSameCalls, probeTurns, probeTokens, probeTier, reviewLookMax, reviewIncrementTokens,
+        reviewCampaignTokens, reviewTier, reviewRoutineTier, repairCalls, attemptsPerIncrement, writerDepth,
+        probeDepth, parallelCells, campaignCells, flakyIsolatedReruns, admissionConfidenceMax, profileRoles,
+        mode, executionMode, dClass, integrityApproval,
+        unknownOutcomeReconciliation, ceiling, runTimeoutSeconds, gitDeadlineSeconds,
+        contextCeilingTokens, callsPerResponseMax, capabilitySet, directRunsMaxLines, directNotesMaxTokens, directAnchorTargetTokens, 12_000,
+    )
+
     /** The full constructor before the §5.10-D numbers: those take their defaults. Kept for Java callers. */
     public constructor(
         shapePolicy: ShapePolicy, turnsPerCell: Int, turnNudgeFraction: Double, providerTerminalWaitSeconds: Int, alpha: Double, k: Int, m: Int,
@@ -275,6 +314,7 @@ public data class Defaults(
         positive("immediateStubTokens", immediateStubTokens)
         positive("lookBudgetTokens", lookBudgetTokens)
         positive("runBudgetTokens", runBudgetTokens)
+        positive("runTurnBudgetTokens", runTurnBudgetTokens)
         positive("growthReserveFullWindowTokens", growthReserveFullWindowTokens)
         positive("registerCapTokens", registerCapTokens)
         positive("digestCapTokens", digestCapTokens)
