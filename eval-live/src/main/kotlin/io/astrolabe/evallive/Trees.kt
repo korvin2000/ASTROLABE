@@ -95,6 +95,15 @@ internal object Proc {
     }
 }
 
+/** What a run's diff is taken against: the base commit, or the base tree with the runner's own [index] when there is no commit. */
+internal data class GitBase(val rev: String, val index: Path?) {
+    val env: Map<String, String> get() = index?.let { mapOf(INDEX_FILE to it.toString()) } ?: emptyMap()
+
+    companion object {
+        const val INDEX_FILE: String = "GIT_INDEX_FILE"
+    }
+}
+
 /** The git repository a run's workspace becomes: the core works on a repository, and the base commit is what the diff is taken against. */
 internal object GitRepo {
     private val settings = listOf(
@@ -103,28 +112,46 @@ internal object GitRepo {
     )
 
     /** Initialises [dir] and commits its whole content as the base; returns the base commit. */
-    fun initWithBase(dir: Path): String {
+    fun initWithBase(dir: Path): GitBase {
         git(dir, "init", "-q")
         git(dir, "add", "-A")
         git(dir, "commit", "-q", "--no-verify", "-m", "base")
-        return git(dir, "rev-parse", "HEAD").trim()
+        return GitBase(git(dir, "rev-parse", "HEAD").trim(), null)
+    }
+
+    /**
+     * Initialises [dir] as a repository without a commit, its content untracked (WP-B7). The base is the tree of that
+     * content, written through the runner's own [index] outside the workspace: the repository's index stays empty.
+     */
+    fun initWithoutCommit(dir: Path, index: Path): GitBase {
+        git(dir, "init", "-q")
+        val env = mapOf(GitBase.INDEX_FILE to index.toAbsolutePath().toString())
+        git(dir, "add", "-A", env = env)
+        return GitBase(git(dir, "write-tree", env = env).trim(), index.toAbsolutePath())
     }
 
     /** Every change of [dir] against [base], untracked files included, as a binary-safe patch. */
-    fun diff(dir: Path, base: String): String {
-        git(dir, "add", "-A")
-        return git(dir, "diff", "--cached", "--binary", base)
+    fun diff(dir: Path, base: GitBase): String {
+        git(dir, "add", "-A", env = base.env)
+        return git(dir, "diff", "--cached", "--binary", base.rev, env = base.env)
     }
 
-    /** The paths of [dir] changed against [base], untracked ones included, without touching the index. */
-    fun changedFiles(dir: Path, base: String): List<String> {
-        val tracked = git(dir, "diff", "--name-only", base).lines()
+    /** The paths of [dir] changed against [base], untracked ones included, without touching the repository's index. */
+    fun changedFiles(dir: Path, base: GitBase): List<String> {
+        if (base.index != null) {
+            git(dir, "add", "-A", env = base.env)
+            return git(dir, "diff", "--cached", "--name-only", base.rev, env = base.env).lines().map { it.trim() }.filter { it.isNotEmpty() }.sorted()
+        }
+        val tracked = git(dir, "diff", "--name-only", base.rev).lines()
         val untracked = git(dir, "ls-files", "--others", "--exclude-standard").lines()
         return (tracked + untracked).map { it.trim() }.filter { it.isNotEmpty() }.distinct().sorted()
     }
 
-    private fun git(dir: Path, vararg args: String): String {
-        val result = Proc.run(listOf("git") + settings + args, dir, Duration.ofMinutes(2))
+    /** Whether [dir]'s repository has a commit. */
+    fun hasCommit(dir: Path): Boolean = Proc.run(listOf("git") + settings + listOf("rev-parse", "--verify", "-q", "HEAD"), dir, Duration.ofMinutes(2)).exitCode == 0
+
+    private fun git(dir: Path, vararg args: String, env: Map<String, String> = emptyMap()): String {
+        val result = Proc.run(listOf("git") + settings + args, dir, Duration.ofMinutes(2), env)
         check(result.exitCode == 0) { "git ${args.first()} failed in $dir (exit ${result.exitCode}): ${result.output.take(2000)}" }
         return result.output
     }
