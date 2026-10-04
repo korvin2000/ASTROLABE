@@ -1,5 +1,6 @@
 package io.astrolabe.context
 
+import io.astrolabe.cell.Protocol
 import io.astrolabe.id.Digest
 import io.astrolabe.id.FileVersion
 import io.astrolabe.id.Identities
@@ -14,7 +15,7 @@ import java.time.Clock
 internal object FactRetention {
     fun capture(
         store: Store, ids: Identities, register: Register, current: (String) -> FileVersion?,
-        evidence: (String) -> Boolean, estimator: TokenEstimator, cap: Int, clock: Clock,
+        evidence: (String) -> Boolean, estimator: TokenEstimator, cap: Int, clock: Clock, protocol: Protocol = Protocol.Structured,
     ): Retention = store.db.tx { tx ->
         val key = "retention-" + Digest.ofUtf8("${ids.work.value}\n${register.cell.value}").hex
         val saved = tx.query("SELECT body FROM packets WHERE id = ?", key) { it.string("body") }.firstOrNull()
@@ -27,7 +28,7 @@ internal object FactRetention {
             val focused = path != null && register.focus?.let { path == it || path.startsWith(it.trimEnd('/') + "/") } == true
             fact.evidenceId in refs || fact.text in text || (path != null && path in text) || focused
         }.map { it.n }.toSet()
-        val result = FactCoherence.retain(register, emptyMap(), referenced, current, evidence, estimator, cap)
+        val result = FactCoherence.retain(register, emptyMap(), referenced, current, evidence, estimator, cap, protocol)
         tx.execute("INSERT INTO packets (id, work_id, attempt_id, candidate_id, context_id, kind, schema_version, created_at, body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             key, ids.work, ids.attempt, ids.candidate, register.cell, "fact-retention", Migrations.SCHEMA_VERSION, clock.instant(), Json.encodeToString(Retention.serializer(), result))
         result

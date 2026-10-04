@@ -63,6 +63,41 @@ class FactCoherenceTest {
     }
 
     @Test
+    fun `a direct register keeps its stale verified notes and archives a refuted one, so no note number is reused`(@org.junit.jupiter.api.io.TempDir state: java.nio.file.Path) {
+        io.astrolabe.workspace.WorkspaceFixture.create(state).use { f ->
+            val direct = io.astrolabe.cell.Protocol.Direct
+            fun capture(register: Register, cap: Int = 1200) = FactRetention.capture(f.store, f.ids, register, { v("moved") }, { it in evidence }, estimator, cap, f.clock, direct)
+            val only = Register.empty(cell, "I1", "fix the checkout race").copy(
+                facts = listOf(Fact(1, ClaimKind.Verified, "lock is taken per request", Anchor("src/checkout.py", v("c-1")), "#5")),
+            )
+            val first = capture(only)
+            val second = capture(first.register.copy(cell = ContextId("cell-2")))
+            val third = capture(second.register.copy(cell = ContextId("cell-3")))
+            assertEquals(listOf(1), third.register.facts.map { it.n }, "the one v note survives every stale boundary")
+            assertEquals(3, third.register.fact(1)!!.staleCells, "its staleness is still counted")
+            assertTrue(third.archived.isEmpty())
+            // The next hypothesis is h2, so `refutes:1` still names the note the model meant.
+            val context = object : ValidationContext {
+                override fun evidenceExists(id: String): Boolean = false
+                override fun currentVersion(path: String): FileVersion? = v("moved")
+                override fun acceptGreen(accept: String): Boolean = false
+                override val redChecks: Set<String> = emptySet()
+                override val greenOps: Set<Int> = emptySet()
+                override val appliedOps: Set<Int> = emptySet()
+            }
+            val ops = Json.parseToJsonElement("""[{"fact.add":{"kind":"h","text":"the pool leaks"}}]""").jsonArray
+            val parsed = assertIs<ParsedPatch.Valid>(PatchParser.parse(ops, emptyMap(), context))
+            val note = Validator(estimator, protocol = direct).check(third.register, parsed.patch, context)
+            assertEquals(listOf(1, 2), assertIs<Validation.Applied>(note).register.facts.map { it.n })
+            // Over the cap a refuted note leaves the projection into the register's own archive, its number with it.
+            val refuted = only.copy(cell = ContextId("cell-4"), facts = only.facts + Fact(2, ClaimKind.Refuted, "the cache causes the race", refutedBy = "#6"))
+            val capped = capture(refuted, cap = 1)
+            assertEquals(listOf(2), capped.register.archive.facts.map { it.n })
+            assertEquals(listOf(1), capped.register.facts.map { it.n })
+        }
+    }
+
+    @Test
     fun `repeated rebuilds keep the race evidence reachable through dead ends and the archive (FX-20)`() {
         val moved = mapOf("tests/test_checkout.py" to v("t-2"), "src/checkout.py" to v("c-2"))
         var register = raceReport

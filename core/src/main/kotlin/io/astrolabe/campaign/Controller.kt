@@ -1544,7 +1544,7 @@ public class Controller @JvmOverloads public constructor(
             { id ->
                 val canonical = Aliases.parse(id)?.let { aliases.resolve(c.ids.work, it)?.canonicalId } ?: id
                 observations.get(canonical) != null || receipts.get(canonical) != null || c.journal.get(canonical) != null
-            }, HeuristicEstimator(), c.attempt.config.defaults.registerCapTokens, clock)
+            }, HeuristicEstimator(), c.attempt.config.defaults.registerCapTokens, clock, c.attempt.config.protocol)
     }
 
     /**
