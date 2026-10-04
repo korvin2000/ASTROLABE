@@ -240,7 +240,9 @@ internal object InputTolerance {
     /** D-347 style: a `state` call without `op` that carries exactly one form names that form. */
     private fun withInferredOp(raw: JsonObject): JsonObject {
         if ("op" in raw) return raw
-        val op = STATE_FORMS.filter { it in raw }.singleOrNull() ?: return raw
+        // A-D.4: `note` names the op only alone, so a structured form beside a stray `note` key infers as before.
+        val forms = STATE_FORMS.filter { it in raw }
+        val op = (if (forms.size > 1) forms - "note" else forms).singleOrNull() ?: return raw
         return JsonObject(raw + ("op" to JsonPrimitive(op)))
     }
 

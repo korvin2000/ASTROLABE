@@ -205,4 +205,44 @@ class NoteTest {
         assertTrue(block.reason.startsWith("register capacity: ") && block.reason.endsWith("tokens of active notes after archiving; the note the loop gate requires cannot be recorded"), block.reason)
         assertEquals(2, block.turn)
     }
+
+    private fun capOneDecision(): Int {
+        val start = Register.empty(ids.context!!, "I1", "fix rounding")
+        return RegisterRender.tokens(start.copy(version = 1, decisions = listOf(io.astrolabe.register.Decision(1, "x", "", null))), estimator).toInt()
+    }
+
+    @Test
+    fun `a required note recorded first keeps a later capacity refusal of the turn from ending the cell`() = runTest {
+        val tool = direct(registerCapTokens = capOneDecision())
+        tool.noteRequired = true
+        assertTrue(tool.run(note(""""kind":"decision","text":"x"""")).applied)
+        val later = tool.run(note(""""kind":"decision","text":"a second decision that cannot fit""""))
+        assertTrue(later.body.contains("rejected: register cap"), later.body)
+        assertNull(tool.pendingBlock, "the loop gate's note is recorded: the cell continues")
+    }
+
+    @Test
+    fun `the model's own block survives a note applied after a capacity refusal`() = runTest {
+        val tool = direct(registerCapTokens = capOneDecision())
+        tool.noteRequired = true
+        tool.run(note(""""kind":"decision","text":"a decision that cannot fit""""))
+        assertNotNull(tool.pendingBlock)
+        tool.run("""{"op":"blocked","blocked":{"reason":"the model stops here"}}""")
+        assertTrue(tool.run(note(""""kind":"decision","text":"x"""")).applied)
+        assertEquals("the model stops here", tool.pendingBlock?.reason)
+    }
+
+    @Test
+    fun `a refutation whose dead end breaks a line rule records nothing`() = runTest {
+        val tool = direct()
+        tool.run(note(""""kind":"hypothesis","text":"the cache is stale""""))
+        val before = tool.register
+        val long = "x".repeat(700)
+        val out = tool.run(note(""""kind":"deadend","text":"$long","refutes":1,"evidence":"#20""""))
+        assertEquals("rejected", out.header!!.runtime.status, out.body)
+        assertTrue(out.body.startsWith("STATE v1 unchanged · rejected: line ≤ 600 chars — "), out.body)
+        assertEquals(before, tool.register, "no refutation without its dead end")
+        assertEquals(ClaimKind.Hypothesis, tool.register.fact(1)!!.kind)
+        assertEquals("line ≤ 600 chars", tool.lastRejection?.rule)
+    }
 }

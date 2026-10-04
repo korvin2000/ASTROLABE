@@ -12,8 +12,7 @@ class DefaultsTest {
         "Cell turn budget" to listOf("turnsPerCell", "turnNudgeFraction"),
         "α pressure threshold" to listOf("alpha", "contextCeilingTokens"),
         "k eviction batch / m turns kept on rebuild" to listOf("k", "m"),
-        // §5.10-D: the direct anchor's three numbers join the [A] row until defaults.md gives them their own.
-        "R_max total live results / [A] max" to listOf("rMaxTokens", "anchorMaxTokens", "directRunsMaxLines", "directNotesMaxTokens", "directAnchorTargetTokens"),
+        "R_max total live results / [A] max" to listOf("rMaxTokens", "anchorMaxTokens"),
         "Immediate-stub threshold for stale reads" to listOf("immediateStubTokens"),
         "look.budget / run.budget" to listOf("lookBudgetTokens", "runBudgetTokens", "growthReserveFullWindowTokens"),
         "Register cap / contract digest cap / patch cap" to listOf("registerCapTokens", "digestCapTokens", "digestTokensPerRequirement", "digestCapCeilingTokens", "patchCapTokens"),
@@ -21,6 +20,7 @@ class DefaultsTest {
         "Workset seeds per cell / KB injection / focus notes / focus zoom" to
             listOf("seedsMaxTokens", "seedRule", "injectionMaxNotes", "injectionMaxTokens", "focusNotesMaxTokens", "focusZoomMaxTokens"),
         "Touched ledger in [A]" to listOf("touchedInAnchor"),
+        "Direct [A] journal: Runs / Notes / target" to listOf("directRunsMaxLines", "directNotesMaxTokens", "directAnchorTargetTokens"),
         "Checker time box" to listOf("checkerTimeBoxSeconds", "checkerFallbackTimeBoxSeconds"),
         "θ risk threshold for early slow checks" to listOf("theta"),
         "Full-suite cadence" to listOf("fullSuiteCadence"),
@@ -51,7 +51,7 @@ class DefaultsTest {
         assertTrue(missing.isEmpty(), "rows name fields that do not exist: $missing")
         val unowned = fields - mapped.toSet()
         assertTrue(unowned.isEmpty(), "fields without a §17 row: $unowned")
-        assertEquals(25, table.size)
+        assertEquals(26, table.size)
     }
 
     @Test
@@ -89,6 +89,7 @@ class DefaultsTest {
         assertEquals(60, d.providerTerminalWaitSeconds)
         assertEquals(3, d.attemptsPerIncrement)
         assertEquals(600, d.factLineMaxChars)
+        assertEquals(Triple(5, 200, 800), Triple(d.directRunsMaxLines, d.directNotesMaxTokens, d.directAnchorTargetTokens))
         assertTrue(d.violations().isEmpty())
     }
 

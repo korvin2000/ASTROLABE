@@ -211,6 +211,13 @@ public class StateTool(
         return when (val checked = validator.check(register, Patch(op.map { PatchOp(it) }), validation, ::decided)) {
             is Validation.Rejected -> noteRejected(checked, notes, context)
             is Validation.Applied -> {
+                // A-D.4: one note is one whole patch — an op the validator skipped (a line rule on the dead end of a
+                // refutation, say) refuses the whole note, and nothing is recorded.
+                if (checked.appliedOps.size < op.size) {
+                    val skipped = checked.notes.filter { "skipped: " in it }
+                    val rule = skipped.firstNotNullOfOrNull { Regex("""skipped: (.+?) — """).find(it)?.groupValues?.get(1) } ?: "note"
+                    return noteRejected(Validation.Rejected(rule, skipped.joinToString("; "), checked.sizes.copy(registerTokens = RegisterRender.tokens(register, estimator))), notes, context)
+                }
                 var next = if (checked.register.version > register.version) checked.register else checked.register.copy(version = register.version + 1)
                 if (kind == "amend") {
                     val work = contracts ?: return result("denied", "no contract repository is attached to this cell; the note had no effect")
@@ -224,6 +231,8 @@ public class StateTool(
                 val before = register
                 register = next
                 lastRejection = null
+                // A-D.4: the note the loop gate required is recorded; a later refusal of the turn no longer ends the cell.
+                noteRequired = false
                 if (capacityBlock) {
                     pendingBlock = null
                     capacityBlock = false
@@ -339,6 +348,8 @@ public class StateTool(
     private fun blocked(args: StateArgs, context: TurnContext): ToolOutcome {
         val b = args.blocked!!
         pendingBlock = BlockedRequest(b.reason, b.evidence, b.question, context.turn)
+        // The model's own block replaces a capacity exit: a later applied note must not withdraw it.
+        capacityBlock = false
         events?.emit(AgentEvent.Blocked(ids, b.reason))
         val body = "blocked: ${b.reason}" + (if (b.evidence.isEmpty()) "" else " · evidence: ${b.evidence.joinToString(", ")}") + (b.question?.let { " · question: $it" } ?: "") +
             "\nthe cell ends blocked after reconciliation; a question is a success path, not a failure"
