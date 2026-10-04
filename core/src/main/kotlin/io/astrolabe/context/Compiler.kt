@@ -165,7 +165,7 @@ public class Compiler(
         }
         val anchored = anchored(increment, inputs.notes)
         for (note in anchored) add("note.${note.id}", "${note.kind.name} ${note.id}", note.line + "\n" + note.body, mandatory = true, ContextPriority.AffectedContracts)
-        inputs.carry?.let { add("carry-forward", "Carry-forward", it.render(), mandatory = true, ContextPriority.CarryForward) }
+        inputs.carry?.let { add("carry-forward", "Carry-forward", it.render(role.protocol), mandatory = true, ContextPriority.CarryForward) }
         inputs.seeds?.let { seeds ->
             seeds.shown.zip(seeds.blocks).forEachIndexed { i, (entry, block) ->
                 val current = inputs.currentVersion?.invoke(entry.path)

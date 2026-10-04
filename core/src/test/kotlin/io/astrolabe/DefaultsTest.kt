@@ -12,7 +12,8 @@ class DefaultsTest {
         "Cell turn budget" to listOf("turnsPerCell", "turnNudgeFraction"),
         "α pressure threshold" to listOf("alpha", "contextCeilingTokens"),
         "k eviction batch / m turns kept on rebuild" to listOf("k", "m"),
-        "R_max total live results / [A] max" to listOf("rMaxTokens", "anchorMaxTokens"),
+        // §5.10-D: the direct anchor's three numbers join the [A] row until defaults.md gives them their own.
+        "R_max total live results / [A] max" to listOf("rMaxTokens", "anchorMaxTokens", "directRunsMaxLines", "directNotesMaxTokens", "directAnchorTargetTokens"),
         "Immediate-stub threshold for stale reads" to listOf("immediateStubTokens"),
         "look.budget / run.budget" to listOf("lookBudgetTokens", "runBudgetTokens", "growthReserveFullWindowTokens"),
         "Register cap / contract digest cap / patch cap" to listOf("registerCapTokens", "digestCapTokens", "digestTokensPerRequirement", "digestCapCeilingTokens", "patchCapTokens"),

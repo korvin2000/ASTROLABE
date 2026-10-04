@@ -3,6 +3,8 @@ package io.astrolabe
 import io.astrolabe.auth.ExecutionMode
 import io.astrolabe.auth.Stage
 import io.astrolabe.route.Tier
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 
 private const val GROWTH_RESERVE_FULL_WINDOW_TOKENS: Int = 65_536
@@ -114,6 +116,16 @@ public data class Defaults(
     val callsPerResponseMax: Int = 24,
     /** D-412: the capability set a new contract authorizes, by name ([io.astrolabe.auth.CapabilitySet.BUILT_IN] or a host set). */
     val capabilitySet: String = io.astrolabe.auth.CapabilitySet.WORKSPACE_LOCAL_DEV.name,
+    // §5.10-D: the direct anchor's Runs lines, Notes tokens and size target; not encoded at their defaults (A-D.4).
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val directRunsMaxLines: Int = 5,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val directNotesMaxTokens: Int = 200,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val directAnchorTargetTokens: Int = 800,
 ) {
     /** The v1.0 full constructor: [growthReserveFullWindowTokens] takes its default. Kept for Java callers. */
     public constructor(

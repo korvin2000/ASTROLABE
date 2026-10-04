@@ -30,7 +30,13 @@ public data class ToolOutcome(
     val tokens: Long = 0,
     /** Why the runs of this turn stay not executed when the call applied only in part (D-371); null keeps the generic reason. */
     val notAppliedReason: String? = null,
+    /** A-D.7 T8: the readiness condition a `run` wait met on a live handle (the matched line, or `port N`); null otherwise. */
+    val ready: String? = null,
 ) {
+    /** The constructor before [ready]. Kept for Java callers. */
+    public constructor(body: String, header: EnvelopeHeader?, applied: Boolean, green: Boolean, tokens: Long, notAppliedReason: String?) :
+        this(body, header, applied, green, tokens, notAppliedReason, null)
+
     init {
         require(tokens >= 0) { "tokens must be ≥ 0" }
     }
