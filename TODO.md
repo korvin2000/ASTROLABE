@@ -2139,7 +2139,7 @@ Listed so the contracts above stay clean; none of these tasks start under this p
 ---
 
 ## P8 ASTROLABE 2.0
-Goal: the model decides; the runtime executes, waits, records and finishes. Plan, design and order: [`../ASTROLABE-2-PLAN.md`](../ASTROLABE-2-PLAN.md) (changes only through its §17); one task per work package (WP) of plan §6, `Done` = the plan's "done when" column. Task cards `../plan2/WP-<id>.md`, line reports `../plan2/reports/WP-<id>.md`; branches `v2/<id>`, merged `--no-ff` into `main` by the orchestrator (plan §8.7). Verification: plan §8.4 (L1 focused, L2 touched packages at merge, L3 = CI on push to `main`). `Repo:` names the repository when not `ASTROLABE`. Counts: `rg -c '^#### P8\..*· DONE' TODO.md`. Frozen in 2.0 (plan §12): S2/S3, review judge, KB curation, QA cell, generated tools, MCP, recovery ladder, learned routing — their debts stay as they are. The KB itself is not frozen but off by default and configurable (`Flags.kbInjection`; plan §11 №12): keep its code and the `kb` family in the structured protocol; its measurement and the small project memory are the reserve group P8.G (not a release criterion).
+Goal: the model decides; the runtime executes, waits, records and finishes. Plan, design and order: [`../ASTROLABE-2-PLAN.md`](../ASTROLABE-2-PLAN.md) (changes only through its §17); one task per work package (WP) of plan §6, `Done` = the plan's "done when" column. Task cards `../plan2/WP-<id>.md`, line reports `../plan2/reports/WP-<id>.md`; branches `v2/<id>`, merged `--no-ff` into `main` by the orchestrator (plan §8.7). Verification: plan §8.4 (L1 focused, L2 touched packages at merge, L3 = CI on push to `main`). `Repo:` names the repository when not `ASTROLABE`. Counts: `rg -c '^#### P8\..*· DONE' TODO.md`. **Amendment 2026-10-04 (plan §0 item 10, §4.3a, §11 №14–25):** the role contour — direct for every shape, shape S2 live (group P8.H), then S3; order D → H → E → F → release. In this file `S0`–`S3` name execution shapes only; plan sessions are "session N". Frozen in 2.0 (plan §12, as amended): KB curation, QA cell, generated tools, MCP, the recovery ladder above capsule repair, learned routing — their debts stay as they are; S2, delegation to a probe, the review cell and function routing are unfrozen by P8.H, S3 by P8.H.9. The KB itself is not frozen but off by default and configurable (`Flags.kbInjection`; plan §11 №12): keep its code and the `kb` family in the structured protocol; its measurement and the small project memory are the reserve group P8.G (not a release criterion).
 **Rollback point:** tag `v1.0.1-final` in all three repositories (2026-10-02).
 
 ### P8.A Wave A — foundation: free and visible
@@ -2213,6 +2213,18 @@ Goal: the model decides; the runtime executes, waits, records and finishes. Plan
 - Done: the slowdown is attributed to A3 (then keep/rework A3 by a D-nn) or ruled out with an interval; the result recorded in D-393's successor.
 - Log: 2026-10-03 — arm `waveA-noA3` (`v2/B4a3`: mask line back in `[S]`, every schema family in the request; bench only, not for `main`), 32 deepseek runs, Relace in all 352 responses: decode speed waveA/noA3 0.97 [0.89; 1.05], wall 1.01 [0.85; 1.20], billed 0.94 [0.80; 1.11] — A3 ruled out (> ≈ 11 % slowdown excluded); A3 kept. D-395. [report](../plan2/reports/WP-B4a3.md).
 - [x] **Gate P8.B:** L2 → push `main` → CI green on Ubuntu + Windows. — L2 at every merge; [CI run 37078198525](https://github.com/korvin2000/ASTROLABE/actions/runs/37078198525) green at `c592289` (wave B: B1, B1r, B2, B4, B4 follow-up; with C1a, C8, C9), Ubuntu + Windows (2026-10-03); C2 (`a742095`) in the S2 push run 37081214729.
+#### P8.B.5 [V] B5 Arms as configuration; reference arm `loop` · TODO
+- Deps: P8.B.7. Pkg: `eval-live/`. Spec: plan §6 B5, §9.1, §11 №20.
+- Build: `--arm` (protocol, forced shape, model tables) instead of branch comparison; `loop` — a plain single-transcript tool loop over `provider-api` with the same model, tasks, acceptance, limits and accounting, its overflow, retry, output-cap and cache-breakpoint rules written down first; the result key carries the arm and the config, code and task digests (a kept `result.json` is checked, `Bench.kt`); price per invocation profile (`Recorder.kt`). S2 arms arrive with P8.D.1, P8.H.4, P8.H.5.
+- Done: `--arm loop` passes the screening set; accounting comparable with the core arms; a stale or foreign result is never reused.
+#### P8.B.6 [V] B6 Long tasks: a debugging set and a closed confirmation set · TODO
+- Deps: P8.B.2, P8.B.7, P8.C.15. Pkg: `eval-live/tasks/`. Spec: plan §6 B6, §9.2.
+- Build: 3 debugging tasks and 4–6 closed confirmation tasks (owner №21 bounds the size; ≥ 2 packages or ≥ 10 files each; at least one on Node): port to another framework, work in a large tree, a two-session task, the 2026-10-04 scenario, an API change with callers across packages, independent edits with a merge conflict.
+- Done: every acceptance fails on the base and on the wrong patch and passes on the reference; the confirmation set is never used for debugging or threshold tuning.
+#### P8.B.7 [M] B7 One `RunSpec` for Studio and `eval-live`; runner support for long scenarios · TODO
+- Repo: ASTROLABE + root (Studio bridge). Pkg: core (`RunSpec`), `eval-live/`. Spec: plan §6 B7.
+- Build: `Config`, campaign policy, cell model, cells, budget, limits, flags and shape thresholds from one source in the core (today `StudioAttempt.kt` copies the policy: 12 cells and a 12-window budget against Studio's 48 cells); the runner gains a repository without a base commit, a message sent mid-run, and close / reopen of the same work and store.
+- Done: the default arm and a default Studio launch produce the same `RunSpec` (test); a two-session scenario runs in the runner.
 
 ### P8.C Wave C — completion (C1 before D; C2 parallel to D)
 #### P8.C.1 [M] C1a Declared acceptance recognised in `run` · DONE
@@ -2273,9 +2285,20 @@ Goal: the model decides; the runtime executes, waits, records and finishes. Plan
 - Log: 2026-10-03 — sub-agent line `v2/C14`: `campaign/Limits.kt` (`ContractTokens.atOpen`), `contract/Contracts.kt` + `SqliteContractRepository` (`raiseTokens`, one transaction with the journal line), `campaign/Controller.kt` (contract-budget stops through one helper, continuation after the lease), `Lifecycle.kt` (`CampaignState.contractStop`, `ContractBudgetCause`), `OpenedCampaign.limitHold` / `LimitHold`, `@SerialName` + `@JsonNames` on `BudgetStop`, `LimitKind`, `CostBasis`, `CellModel.effortExplicit`, `Astrolabe.resume` / `AstrolabeJava.resume` / `resumeBlocking`; docs `lifecycle.md`, `defaults.md`. Fable review: 1 P1 (a reopen lowered the budget to the host's placeholder) + 3 P2 fixed. L2 (`budget.*`, `campaign.*`, `java.*`, `event.*`): 299/0; `:eval` and `:provider-ai-gate` test compile; ABI regenerated. D-405. Open: the contract's money cap does not follow the policy on a reopen; a call with unknown usage still counts as the whole budget; `StopCode`, `CampaignOutcome`, `BalanceProfile`, `VerificationDepth` still serialise constant names; the cause of a `TokenBudget`/`Reserve` stop under both a token and a money cap is a heuristic. Studio step: root branch `v2/C14s`. Merge `693dfb2`; [report](../plan2/reports/WP-C14.md).
 - [x] **Gate P8.C:** L2 → push `main` → CI green on Ubuntu + Windows; Codex review. — L2 by every line on main merged into its branch; [CI run 37154760649](https://github.com/korvin2000/ASTROLABE/actions/runs/37154760649) green at `b3eae38` (wave C complete: Dp1, Dp2, C1b, C3, C3r, C11, C14, C10 with C12), Ubuntu + Windows (2026-10-04); earlier S3 runs green at `6daabfc` (37106433219), `13cea02` (37114317380), `611dbad` (37117594197), `878d5fe`; Codex and Fable reviews per line (D-398–D-406); tag `v2-wave-C` at `b3eae38`.
 
+#### P8.C.15 [M] C15 Hotfix tails the role contour will hit (amendment 2026-10-04; after the gate) · TODO
+- Repo: ASTROLABE + root (Studio). Pkg: `tool/run/`, `tool/verify/`, `auth/EffectPolicy.kt`. Spec: plan §6 C15; `CONTINUE-TASK.md` "Hotfix tails".
+- Build: a per-turn output budget for `run` and `verify` (after P8.D.1: shared `Cell.kt`); per-test results of `node --test`; a `gradle` that is not on PATH; Studio's `auto` mode denying D-class commands such as dependency installation.
+#### P8.C.16 [M] C16 Nominal price of subscription models (owner №22, №25) · TODO
+- Deps: P8.C.4, P8.C.14. Repo: ASTROLABE + root (Studio). Pkg: `telemetry/Accounting.kt`, `budget/Limits.kt` (`CostBasis`), `provider-api` (`PriceTable`), `eval-live/Recorder.kt`; Studio `AutoProfiles.kt`, `ModelService.java`, `StatsService`. Spec: plan §4.3a item 5 (money), §6 C16, §9.1.
+- Build: a `Billing.Plan` profile carries the official price of its model (from the AI Gate catalog for the same model at a priced provider, else entered by the user); accounting prices its calls at that price with a `nominal` basis instead of zero (today `Accounting.planBilled` → `Money.zero`, D-409); limits, statistics, model selection and `eval-live` read "billed + nominal"; Studio shows the price and the spend of a subscription model marked as nominal; an exhausted subscription quota is a typed, resumable stop. First step: find out whether the catalog has an official price for each subscription model and whether the SDK reports the remaining quota. Codex review of the accounting.
+- Done: a subscription-only task shows a nominal spend and stops at the money limit on it; a mixed task shows both sums apart; a model without any price runs with an explicit "no money accounting" label.
+
 ### P8.D Wave D — direct protocol
+#### P8.D.6 [V] Dp3 Direct specification amended for every shape — **before P8.D.1** (amendment 2026-10-04) · TODO
+- Deps: P8.C.7. Pkg: `docs/reference/kernel-contract.md` (A-D.1, A-D.3, A-D.7). Spec: plan §4.3a item 1, §6 Dp3, §11 №18.
+- Build: the role × protocol × shape matrix; `state.note` and `task.finish` in the masks of all four shapes; a separate direct variant of the S2/S3 main line (own kernel line, `task` schema with the delegate kinds, own golden `[S]`); `task.propose` stays in direct S1; owner №7 (kb, impact, bmap) for S2; the handoff of a direct writer; schema fingerprint over the actual schemas. Codex review.
 #### P8.D.1 [M] D1 `Roles.direct`, `kernel-direct/1`, schema subset, `protocol` switch · TODO
-- Deps: P8.A.6, P8.C.6, P8.C.7. Pkg: `cell/`, `register/Validator.kt`, `cell/Gates.kt`, `tool/ToolSchemas.kt`. Spec: plan §4.3, §6 D1.
+- Deps: P8.A.6, P8.C.6, P8.C.7, P8.D.6. Pkg: `cell/`, `register/Validator.kt`, `cell/Gates.kt`, `tool/ToolSchemas.kt`. Spec: plan §4.3, §6 D1 and the note under the wave-D table (the shape condition lives only in `Roles.mainLine`).
 #### P8.D.2 [M] D2 Direct anchor: no STATE, Runs block, notes; `note` op · TODO
 - Deps: P8.D.1. Pkg: `cell/Anchor.kt`, `tool/state/`. Spec: plan §4.3, §6 D2.
 #### P8.D.3 [M] D3 `finish` / `finish(after_checks)`, `PartialReason.Handoff`, handoff limit · TODO
@@ -2283,9 +2306,38 @@ Goal: the model decides; the runtime executes, waits, records and finishes. Plan
 #### P8.D.4 [V] D4 Golden `[S]` per protocol, ≤ 15 direct fixtures; protocol choice in Studio · TODO
 - Deps: P8.D.1–P8.D.3. Repo: ASTROLABE + root (Studio). Spec: plan §6 D4.
 #### P8.D.5 [V] D5 Paired benchmark direct vs structured; default protocol per model class · TODO
-- Deps: P8.D.1–P8.D.4, P8.B.2. Spec: plan §6 D5, §9, appendix A.6.
+- Deps: P8.D.1–P8.D.4, P8.B.2, P8.B.5–P8.B.7. Spec: plan §6 D5, §9, appendix A.6. Amendment 2026-10-04: a third arm `loop` and a separate stratum of long tasks (confirmation set of P8.B.6).
 - Build: the confirmation set (plan §9.2) includes the class "second task in the same project" (pairs on one base, one working directory and one store per pair; the runner gains a pair mode) so P8.G.1–G.2 reuse it; in D5 the pairs count as ordinary tasks.
 - [ ] **Gate P8.D:** L2 → push `main` → CI green on Ubuntu + Windows; Fable review of D5.
+
+### P8.H Wave H — role contour: shape S2 live, then S3 (amendment 2026-10-04; plan §4.3a, §6, owner №15–18; before E)
+#### P8.H.1 [V] H0 Role-contour specification · TODO
+- Deps: P8.D.1–P8.D.3. Pkg: `docs/` (`kernel-contract.md`, `architecture/roles-shapes.md`). Spec: plan §4.3a items 2–6, §6 H0.
+- Build: shape selection, forcing and upgrade with default numbers and the transition protocol; the tier table and the function policy with their rules; the extended plan schema and the question increment; the frozen debts of S2/S3 decided one by one; the switch-point table against the code after wave D. Codex review (shape transition, downgrade formula, money).
+#### P8.H.2 [M] H4 Plan schema and splitting · TODO
+- Deps: P8.H.1. Pkg: `campaign/Proposals.kt`, `cell/Role.kt`, `context/Compiler.kt`, `context/CarryForward.kt`, `graph/`. Spec: plan §4.3a item 6, §6 H4.
+- Done: a two-package task yields ≥ 2 increments with an assessed risk, no requirement lost, a question increment runs as a probe cell.
+#### P8.H.3 [M] H1 Direct for the S2 main line and the writer · TODO
+- Deps: P8.D.6, P8.D.4, P8.H.1. Pkg: `cell/Role.kt`, `cell/Cell.kt`, `cell/Gates.kt`, `campaign/Controller.kt`, `delegate/`, `tool/ToolSchemas.kt`. Spec: plan §4.3a item 1, §6 H1.
+- Done: fixtures — S2 on direct passes plan, delegation and a review with rework; the bytes of the structured roles and of direct S0/S1 are unchanged.
+#### P8.H.4 [M] H2 Shape selection and the shape transition · TODO
+- Deps: P8.H.1, P8.H.2, P8.H.3. Pkg: `campaign/ShapeSelector.kt`, `campaign/Controller.kt`, `campaign/PlanNeed.kt`, `contract/`, `graph/`, `Defaults.kt`, `eval-live/`. Spec: plan §4.3a items 2–4, §6 H2.
+- Done: fixtures for every condition; a crash before and after the transition; a reopen after the tree grew does not block; a forced lower shape with a required review answers `unavailable`. Codex review.
+#### P8.H.5 [M] H3 Models by role · TODO
+- Deps: P8.H.1, P8.H.2, P8.E.1, P8.H.4, P8.C.16. Pkg: `route/`, `campaign/Controller.kt`, `campaign/Escalations.kt`, `Config.kt`, `budget/`, `telemetry/Accounting.kt`, `recover/`, `eval-live/`. Spec: plan §4.3a item 5, §6 H3, §11 №25.
+- Done: ≥ 2 profiles in one task's routing log; a resume keeps the escalation tier; fixtures — an unavailable and an unaffordable repair, an unknown price, subscription together with paid calls. Codex: the downgrade formula and the money rules.
+#### P8.H.6 [M] H5 Studio "Laboratory" · TODO
+- Deps: P8.H.4, P8.H.5, P8.D.4. Repo: root (Studio). Spec: plan §4.3a item 7, §6 H5, §11 №15.
+- Done: every setting of the section reaches the core `Config` (test); two models in one task; a one-file run report the owner can send for analysis (owner №21); a browser pass on a live model.
+#### P8.H.7 [V] H6 Live debugging of the contour (its own session) · TODO
+- Deps: P8.H.2–P8.H.6, P8.C.15, P8.B.6 (debugging set). Spec: plan §6 H6; limit: one session and one fix round, else plan §14. Owner №21: automation runs cheap models only; runs with a strong lead model are made by the owner through Studio, the session analyses the exported reports (auditor P8.B.1).
+- Done: a long task runs S2 from request to outcome without manual intervention — ≥ 2 increments, ≥ 1 probe cell, ≥ 2 different models in the log, the paths "review → rework" and "repair or an honest refusal" confirmed; the protocol tax of the auxiliary roles measured (for H1b).
+#### P8.H.8 [V] H7 Gate S2 on the closed confirmation set · TODO
+- Deps: P8.H.7, P8.B.5–P8.B.7. Spec: plan §6 H7, §9.1, §9.2, §9.4, §11 №21, №22.
+- Done: the policy frozen by a tag before the runs; a report with per-task intervals from the automated part (4–6 closed long tasks, cheap models) and a summary of the owner's Studio runs (observations, not a paired comparison); the owner's decision on the "Auto" thresholds and on the combination of mechanisms; "not proven" leaves S2 a manual option.
+#### P8.H.9 [M] H8 Shape S3 live (reserve, after P8.H.8) · TODO
+- Deps: P8.H.8, P8.H.2. Pkg: `campaign/S3Run.kt`, `campaign/Controller.kt`, Studio. Spec: plan §4.3a item 8, §6 H8.
+- [ ] **Gate P8.H:** L2 → push `main` → CI green on Ubuntu + Windows; Java ABI; resume of attempts created before the amendment; old config snapshots read without the new policies; Codex statistics of H7.
 
 ### P8.E Wave E — balance (owner goal)
 #### P8.E.1 [M] E1 Binding key and binding-physics table (store v6), estimators, `routing_log` · TODO
@@ -2305,7 +2357,7 @@ Goal: the model decides; the runtime executes, waits, records and finishes. Plan
 - Spec: plan §6 F2, §10.3.
 - [ ] **Gate P8.F:** L2 → push `main` → CI green on Ubuntu + Windows.
 
-### P8.G Reserve — memory between tasks (S8–S9, after D and E; owner decisions plan §11 №12–13; not a release criterion)
+### P8.G Reserve — memory between tasks (reserve sessions 11–12, after D and E; owner decisions plan §11 №12–13; not a release criterion)
 #### P8.G.1 [V] G1 KB measurement: pipeline behind flags + paired run off/live · TODO
 - Deps: P8.D.5 (pairs in the confirmation set), P8.E.1. Repo: ASTROLABE + root (Studio settings). Pkg: `campaign/Controller.kt` (finish: `extraction`, curator call), `kb/`, `Config.kt` (`Flags`), Studio `SettingsSchema`; `eval-live/` (pair mode, pair tasks). Spec: plan §6 G1, §9.2, §11 №12, §12 (KB note).
 - Build: (a) model extraction (`Controller.extraction`, now `NONE`, not passed by Studio) and the curator at finish (`AdmissionPolicy`; today called only from tests) switchable by flags, off by default; the `KnowledgeInjection` arm in `eval/Arms.kt` already exists; (b) paired runs on "second task in the same project" pairs × 2 models, off vs live, non-inferiority per №9a; extraction and injection cost reported apart.

@@ -4,16 +4,16 @@ Rewritten every session (≤40 lines). Workflow: `CLAUDE.md` § Workflow. State 
 **Active program: ASTROLABE 2.0** — plan `../ASTROLABE-2-PLAN.md` (changes only via its §17), status = phase P8 in
 `TODO.md` (`rg -n '^#### P8' TODO.md`), cards/reports `../plan2/`.
 
-**Checkpoint (2026-10-04, live-run hotfix after S3):** P8 unchanged, **27 DONE / 14 TODO**. The owner's first live Studio
-run failed on basics (`../diags/tasks/W-uyorz7p4tivk7xvm7iaq`, report `../ASTROLABE-DIAGNOSTICS-2026-10-04.md`). The hotfix
-D-407–D-413 (TODO §3) is committed here locally, not pushed; its Studio half is uncommitted in the root repository.
-**No live run has confirmed any of it**, and the owner has not decided whether the project continues.
+**Checkpoint (2026-10-04):** the first live Studio run failed on basics (`../ASTROLABE-DIAGNOSTICS-2026-10-04.md`); hotfix
+D-407–D-413 is committed locally, not pushed, its Studio half uncommitted in the root; no live run has confirmed it and
+the owner decided not to wait for one (plan §11 №26: assume it works; a failure seen later is fixed out of turn).
+**Owner: continue in place with the plan amended** (plan §0 item 10, §4.3a, §11 №14–25, §13, §17): direct for every
+shape, S2 live (P8.H), then S3; D → H → E → F → release. P8: **27 DONE / 29 TODO**.
 
-## Next
-1. Owner: a live Studio run of the recorded scenario (new repository without a commit, a flash model, a subscription
-   model, `npm install`, a message sent mid-run) against the criteria in the report's last section. Then push / S4 or stop.
-2. If it continues: S4 per plan §7 — D1 → D2 ∥ D3 (`docs/reference/kernel-contract.md` appendix A-D; re-check the
-   path:line table A-D.7, the hotfix moved `Cell.kt`, `Gates.kt`, `EffectPolicy.kt`).
+## Next — session 4 (plan §7)
+1. P8.D.6 (Dp3) amends the direct spec **before D1** (t6, then Codex review). Session prompt: plan appendix A.9.
+2. D1 → D2 ∥ D3 (appendix A-D as amended; re-check table A-D.7: the hotfix moved `Cell.kt`, `Gates.kt`,
+   `EffectPolicy.kt`); in parallel P8.B.7 → P8.B.5, P8.C.15, P8.C.16. Owner №21: no long runs with a strong lead model.
 
 ## Hotfix tails (found in the logs or by review, not done)
 - Context: runs and verifies have no per-turn output budget (24 calls × 4 K worst case); call arguments are never stubbed,
@@ -28,7 +28,7 @@ D-407–D-413 (TODO §3) is committed here locally, not pushed; its Studio half 
   number in the stored reason and `raise_limit` is offered for an unknown price; an attempt frozen before D-409 keeps its
   per-token profile on resume; `StatsService` shows plan calls as unpriced; the Changes panel counts build output.
 
-## Tails from S3
+## Tails from session 3
 C10: an `Open` note moves `[>]` past a held red. C11: a test change approved in I1 is asked again for I2. C14: the money
 cap does not follow the policy on a reopen. C3: no deadline on a model call. Details: TODO `Log:` lines of P8.C.
 
