@@ -1,5 +1,6 @@
 package io.astrolabe.budget
 
+import io.astrolabe.provider.Charge
 import io.astrolabe.provider.Money
 import io.astrolabe.telemetry.CallAccount
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -15,7 +16,7 @@ internal const val NO_ACTIVE_TIME: String = "task limit (minutes): no active tim
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
 public enum class LimitKind(public val wire: String) {
-    /** Money for model calls: the provider's billed amount, else the price-table estimate (D-378). */
+    /** Money for model calls: the provider's billed amount, else the price-table estimate (D-378), nominal spend included (C16). */
     @SerialName("money") @JsonNames("Cost")
     Cost("money"),
 
@@ -28,7 +29,11 @@ public enum class LimitKind(public val wire: String) {
     Requests("requests"),
 }
 
-/** Which amounts a money spend was summed from (C3, D-378). JSON carries [wire] (C14); the constant's name still reads back. */
+/**
+ * Which amounts a money spend was summed from (C3, D-378, C16). Calls without money accounting ([Charge.Unpriced]) are
+ * not counted in it. JSON carries [wire] (C14); the constant's name still reads back, and a record written before C16
+ * never names [Nominal].
+ */
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
 public enum class CostBasis(public val wire: String) {
@@ -40,13 +45,17 @@ public enum class CostBasis(public val wire: String) {
     @SerialName("estimated") @JsonNames("Estimated")
     Estimated("estimated"),
 
-    /** Some calls billed, the others estimated. */
+    /** Calls of different bases: billed, estimated or nominal. */
     @SerialName("mixed") @JsonNames("Mixed")
     Mixed("mixed"),
 
-    /** No call yet. */
+    /** No priced call yet: no call, or only calls without money accounting. */
     @SerialName("none") @JsonNames("None")
     None("none"),
+
+    /** Every call is a plan-billed model's at its official price (C16): counted as real, not paid. */
+    @SerialName("nominal") @JsonNames("Nominal")
+    Nominal("nominal"),
 }
 
 /**
@@ -54,7 +63,7 @@ public enum class CostBasis(public val wire: String) {
  * (`CampaignPolicy.limits`, kept with the campaign across reopens); neither the model nor a regulator raises them.
  * What each guarantees ([LimitRule]):
  * - [maxRequests]: hard — no model call is dispatched past it; the check and the call's durable hold are one transaction.
- * - [maxCost]: bounds the **accounted** spend — billed amounts, else estimates, else holds — under conservative
+ * - [maxCost]: bounds the **accounted** spend — billed amounts, else estimates, else holds; paid plus nominal (C16) — under conservative
  *   admission (a call is dispatched only when its conservative price fits). A provider that bills above the hold can
  *   exceed the limit by (billed − held); that overrun is recorded, never hidden. [CostBasis] says where a sum came from,
  *   not that it is an upper bound.
@@ -99,6 +108,8 @@ public data class TaskLimits @JvmOverloads constructor(
 /**
  * What a task has spent against its limits, derived from durable records only — the `usage` rows (one per
  * invocation id) and the journal's run sessions — so a reopen never counts a call or a minute twice (D-392).
+ * [cost] is what the money limit counts: [paidCost] plus [nominalCost] (C16); both are `null` before the first call and
+ * in a spend recorded before C16.
  */
 @Serializable
 public data class LimitSpend(
@@ -107,27 +118,40 @@ public data class LimitSpend(
     val cost: Money?,
     val costBasis: CostBasis,
     val elapsedMillis: Long,
-    /** The dearest single call so far — billed, estimated or held: the per-call unit of the money reserve. */
+    /** The dearest single call so far — billed, estimated, nominal or held: the per-call unit of the money reserve. */
     val largestCallCost: Money?,
+    /** The part of [cost] on per-token profiles: billed, estimated or held. */
+    val paidCost: Money? = null,
+    /** The part of [cost] on plan-billed profiles at their models' official prices ([Charge.Nominal]). */
+    val nominalCost: Money? = null,
+    /** Requests on profiles without money accounting ([Charge.Unpriced]): counted in [requests], never in [cost]. */
+    val unpricedRequests: Int = 0,
 ) {
     init {
-        require(requests >= 0 && elapsedMillis >= 0) { "a spend is never negative" }
+        require(requests >= 0 && elapsedMillis >= 0 && unpricedRequests in 0..requests) { "a spend is never negative" }
     }
 
     public companion object {
         /**
          * The spend of [calls] in [currency] after [elapsedMillis] of active work. A call counts what the provider billed
          * (D-378), else its price-table estimate, else the conservative hold a call keeps until it settles; a call in
-         * another currency, or with none of these known, makes the cost unknown — never zero (FX-59).
+         * another currency, or with none of these known, makes the cost unknown — never zero (FX-59). A nominal call
+         * (C16) counts the model's official price the same way; an unpriced one counts a request and no money. A positive
+         * reported bill is paid money on any profile and is counted once, as paid.
          */
         @JvmStatic
         public fun of(calls: List<CallAccount>, elapsedMillis: Long, currency: String): LimitSpend {
             if (calls.isEmpty()) return LimitSpend(0, null, CostBasis.None, elapsedMillis, null)
-            var total = Money.zero(currency)
+            var paid = Money.zero(currency)
+            var nominal = Money.zero(currency)
             var largest = Money.zero(currency)
             var billed = 0
+            var nominalCalls = 0
+            var unpriced = 0
             for (call in calls) {
-                val reported = call.usage?.billed
+                // A positive bill is paid money on any profile; a nominal or unpriced call's zero bill is not a price.
+                val reported = call.usage?.billed?.takeIf { call.charge == Charge.Paid || it.amount.signum() > 0 }
+                if (reported == null && call.charge == Charge.Unpriced) { unpriced++; continue }
                 val amount = when {
                     reported != null -> reported.also { billed++ }
                     !call.money.unknown -> call.money
@@ -135,16 +159,19 @@ public data class LimitSpend(
                     else -> Money.unknown(currency)
                 }
                 val counted = if (amount.currency == currency) amount else Money.unknown(currency)
-                total += counted
+                if (reported == null && call.charge == Charge.Nominal) { nominal += counted; nominalCalls++ } else paid += counted
                 if (counted.unknown) largest = largest.copy(unknown = true)
                 else if (counted.amount > largest.amount) largest = counted.copy(unknown = largest.unknown)
             }
-            val basis = when (billed) {
-                calls.size -> CostBasis.Billed
-                0 -> CostBasis.Estimated
+            val priced = calls.size - unpriced
+            val basis = when {
+                priced == 0 -> CostBasis.None
+                billed == priced -> CostBasis.Billed
+                nominalCalls == priced -> CostBasis.Nominal
+                billed == 0 && nominalCalls == 0 -> CostBasis.Estimated
                 else -> CostBasis.Mixed
             }
-            return LimitSpend(calls.size, total, basis, elapsedMillis, largest)
+            return LimitSpend(calls.size, paid + nominal, basis, elapsedMillis, largest, paid, nominal, unpriced)
         }
     }
 }
@@ -164,6 +191,10 @@ public data class LimitStatus(
     val reserveMillis: Long?,
     /** `C_next`: the price the decision charged the next call, `null` while none is known. */
     val nextCallCost: Money? = null,
+    /** [cost] split as in [LimitSpend] (C16): paid and nominal apart, and the requests without money accounting. */
+    val paidCost: Money? = null,
+    val nominalCost: Money? = null,
+    val unpricedRequests: Int = 0,
 )
 
 /** The task limits' answer before a model call (C3). */
@@ -250,6 +281,9 @@ public object LimitRule {
             maxMillis = maxMillis,
             reserveMillis = maxMillis?.let { reserveAmount(BigDecimal.valueOf(it), BigDecimal.valueOf(meanCallMillis(spend))).toLong() },
             nextCallCost = nextCost,
+            paidCost = spend.paidCost,
+            nominalCost = spend.nominalCost,
+            unpricedRequests = spend.unpricedRequests,
         )
     }
 

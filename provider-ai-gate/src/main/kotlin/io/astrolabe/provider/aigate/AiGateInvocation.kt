@@ -34,8 +34,10 @@ internal object ErrorMapper {
             if (e.outcomeUnknown()) append(" (outcome unknown: the provider may have processed and billed it)")
         }
         return when (e.code()) {
-            ErrorCode.RATE_LIMITED, ErrorCode.QUOTA_EXHAUSTED, ErrorCode.OVERLOADED ->
+            ErrorCode.RATE_LIMITED, ErrorCode.OVERLOADED ->
                 ProviderError.RateLimit(message, e.details().retryAfter().map { it.toSeconds() }.orElse(null))
+            // C16: a spent plan quota (402, `usage_limit_reached`, `insufficient_quota`); the SDK never retries it.
+            ErrorCode.QUOTA_EXHAUSTED -> ProviderError.QuotaExhausted(message, e.details().retryAfter().map { it.toSeconds() }.orElse(null))
             ErrorCode.CONTEXT_OVERFLOW, ErrorCode.REQUEST_TOO_LARGE -> ProviderError.ContextOverflow(message)
             in AUTHENTICATION -> ProviderError.Authentication(message, e)
             ErrorCode.DEADLINE_EXCEEDED, ErrorCode.STREAM_IDLE_TIMEOUT -> ProviderError.Timeout(message, e.outcomeUnknown())

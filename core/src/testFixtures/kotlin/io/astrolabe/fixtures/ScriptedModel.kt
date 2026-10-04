@@ -44,6 +44,9 @@ public enum class FaultKind {
 
     /** Credentials refused: `await` throws ProviderError.Authentication. */
     Authentication,
+
+    /** The account's plan quota is spent: `await` throws ProviderError.QuotaExhausted (C16). */
+    QuotaExhausted,
 }
 
 /**

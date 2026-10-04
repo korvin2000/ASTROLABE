@@ -139,6 +139,13 @@ public sealed class ProviderError(message: String, cause: Throwable? = null) : R
 
     public class RateLimit(message: String, public val retryAfterSeconds: Long? = null) : ProviderError(message)
 
+    /**
+     * The account's plan quota is spent — a subscription's 5-hour or weekly window, a prepaid budget (C16): waiting out
+     * the turn does not refill it, so the campaign stops on the host and resumes on a reopen. [retryAfterSeconds] when the
+     * provider said when it refills.
+     */
+    public class QuotaExhausted(message: String, public val retryAfterSeconds: Long? = null) : ProviderError(message)
+
     public class OutputLimit(message: String) : ProviderError(message)
 
     public class Refusal(message: String) : ProviderError(message)

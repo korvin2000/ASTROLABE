@@ -180,6 +180,110 @@ class TaskLimitsTest {
     }
 
     @Test
+    fun `a task only on a subscription shows nominal spend and stops on its money limit`() = runBlocking<Unit> {
+        // C16: the plan-billed profile states its model's official price, so a call is priced as a per-token one would be.
+        // Input only: the spend of a call is close to its conservative price, so the spend accumulates against the limit.
+        val subscription = FakeProfiles.main.copy(priceTable = FakeProfiles.prices("10", "10", "10", "10", "0").copy(billing = io.astrolabe.provider.Billing.Plan))
+        val needed = controller().open(repo.root, request, policy(TaskLimits(maxCost = usd("0.0001")))).use { c ->
+            val fake = FakeAdapter(ScriptedModel.of(*planning().toTypedArray()))
+            val run = controller().run(c, CellModel(fake, subscription, HeuristicEstimator()))
+            assertEquals(CampaignOutcome.BudgetExhausted, run.outcome, run.state?.reason)
+            assertEquals(BudgetStop.TaskLimitMoney, run.budgetStop)
+            assertTrue(fake.calls.isEmpty(), "a subscription call is not free: its nominal price does not fit")
+            assertNotNull(run.limit!!.status.nextCallCost).amount
+        }
+        // Room for a few calls: the accumulated nominal spend, not the first price, stops the task.
+        controller().open(repo.root, request, policy(TaskLimits(maxCost = usd(needed.multiply(BigDecimal(5)).toPlainString())))).use { c ->
+            val fake = FakeAdapter(ScriptedModel.of(*(planning() + implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"") +
+                implement(c, "src/b.py", "    return 2", "    return 20", "\"AC-1\",\"AC-2\"")).toTypedArray()))
+            val run = controller().run(c, CellModel(fake, subscription, HeuristicEstimator()))
+            assertEquals(CampaignOutcome.BudgetExhausted, run.outcome, run.state?.reason)
+            assertEquals(BudgetStop.TaskLimitMoney, run.budgetStop)
+            assertTrue(fake.calls.isNotEmpty(), "calls ran before the limit")
+            val spend = TaskLimitControl(idGen, clock, null).spend(c)
+            assertEquals(CostBasis.Nominal, spend.costBasis)
+            assertTrue(spend.nominalCost!!.amount.signum() > 0, "the stop rests on accumulated nominal spend")
+            assertEquals(0, spend.paidCost!!.amount.signum())
+        }
+        // The host raises it: the same attempt continues on the subscription and completes.
+        controller().open(repo.root, request, policy(TaskLimits(maxCost = usd("50")))).use { c ->
+            val fake = FakeAdapter(ScriptedModel.of(*(planning() + implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"") +
+                implement(c, "src/b.py", "    return 2", "    return 20", "\"AC-1\",\"AC-2\"")).toTypedArray()))
+            val run = controller().run(c, CellModel(fake, subscription, HeuristicEstimator()))
+            assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+            assertEquals(request.attempt, c.state!!.attempt)
+            val spend = TaskLimitControl(idGen, clock, null).spend(c)
+            assertEquals(CostBasis.Nominal, spend.costBasis)
+            val cost = assertNotNull(spend.cost)
+            assertFalse(cost.unknown)
+            assertEquals(0, cost.amount.compareTo(spend.nominalCost!!.amount))
+            // The finish receipt and the economics report keep the split.
+            val budget = assertNotNull(run.finish).budget
+            assertTrue(budget.nominalMoney!!.amount.signum() > 0)
+            assertEquals(0, budget.paidMoney!!.amount.signum())
+            val economics = Economics.report(c, clock)
+            assertEquals(budget.nominalMoney, economics.nominalMoney)
+            assertTrue("nominal: " in economics.render(), economics.render())
+        }
+    }
+
+    @Test
+    fun `a spent subscription quota stops on an external block that a reopen without the authority's answer keeps`() = runBlocking<Unit> {
+        val subscription = FakeProfiles.main.copy(priceTable = FakeProfiles.main.priceTable.copy(billing = io.astrolabe.provider.Billing.Plan))
+        controller().open(repo.root, request, policy(TaskLimits.NONE)).use { c ->
+            val fake = FakeAdapter(ScriptedModel.of(*(planning() + Scripted.Fault(io.astrolabe.fixtures.FaultKind.QuotaExhausted, retryAfterSeconds = 60)).toTypedArray()))
+            val run = controller().run(c, CellModel(fake, subscription, HeuristicEstimator()))
+            assertEquals(CampaignOutcome.BlockedExternal, run.outcome, run.state?.reason)
+            assertTrue(run.state!!.reason!!.contains(io.astrolabe.cell.PLAN_QUOTA_EXHAUSTED), run.state!!.reason)
+            val calls = Accounting(c.store, clock).calls(c.ids.work)
+            assertEquals(fake.calls.size, calls.size, "every dispatched call, the failed one included, is recorded once")
+            assertEquals(calls.size, calls.map { it.invocationId }.distinct().size)
+        }
+        assertReopenKeepsBlock(subscription)
+    }
+
+    @Test
+    fun `a model's own block in the quota's words is not lifted by a reopen either`() = runBlocking<Unit> {
+        controller().open(repo.root, request, policy(TaskLimits.NONE)).use { c ->
+            val reason = "${io.astrolabe.cell.PLAN_QUOTA_EXHAUSTED} previously; awaiting approval to switch to the paid API"
+            val fake = FakeAdapter(ScriptedModel.of(*(planning() +
+                Scripted.Reply(listOf(call("b1", "state", """{"op":"blocked","blocked":{"reason":"$reason","evidence":[]}}""")))).toTypedArray()))
+            val run = controller().run(c, CellModel(fake, FakeProfiles.main, HeuristicEstimator()))
+            assertEquals(CampaignOutcome.BlockedExternal, run.outcome, run.state?.reason)
+            assertEquals(IncrementStatus.Blocked, c.state!!.graph.increments.single { it.id == "I1" }.status)
+        }
+        assertReopenKeepsBlock(FakeProfiles.main)
+    }
+
+    /** A reopen whose authority answers nothing leaves I1 blocked and dispatches nothing (I2 depends on I1). */
+    private suspend fun assertReopenKeepsBlock(profile: io.astrolabe.provider.Profile) {
+        controller().open(repo.root, request, policy(TaskLimits.NONE)).use { c ->
+            val fake = FakeAdapter(ScriptedModel.of())
+            val run = controller().run(c, CellModel(fake, profile, HeuristicEstimator()))
+            assertTrue(fake.calls.isEmpty(), "no call without the authority's answer")
+            assertEquals(IncrementStatus.Blocked, c.state!!.graph.increments.single { it.id == "I1" }.status, run.state?.reason)
+            assertFalse(run.outcome == CampaignOutcome.Completed)
+        }
+    }
+
+    @Test
+    fun `a model without a price runs without money accounting, marked, and its request limit still stops it`() = runBlocking<Unit> {
+        val local = FakeProfiles.main.copy(priceTable = io.astrolabe.provider.PriceTable(FakeProfiles.main.priceTable.date, "USD", emptyMap(),
+            billing = io.astrolabe.provider.Billing.Plan))
+        controller().open(repo.root, request, policy(TaskLimits(maxCost = usd("0.20"), maxRequests = 8))).use { c ->
+            val adapter = FakeAdapter(ScriptedModel.of(*(planning() + implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"") +
+                implement(c, "src/b.py", "    return 2", "    return 20", "\"AC-1\",\"AC-2\"")).toTypedArray()))
+            val run = controller().run(c, CellModel(adapter, local, HeuristicEstimator()))
+            assertEquals(CampaignOutcome.BudgetExhausted, run.outcome, run.state?.reason)
+            assertEquals(BudgetStop.TaskLimitRequests, run.budgetStop, "the money limit does not hold it; the request limit does")
+            val spend = TaskLimitControl(idGen, clock, null).spend(c)
+            assertEquals(spend.requests, spend.unpricedRequests, "every call is marked as without money accounting")
+            assertEquals(CostBasis.None, spend.costBasis)
+            assertEquals(0, spend.cost!!.amount.signum())
+        }
+    }
+
+    @Test
     fun `a minutes limit runs on the injected clock and never counts the time a task stood stopped`() = runBlocking<Unit> {
         controller().open(repo.root, request, policy(TaskLimits(maxMinutes = 7))).use { c ->
             // Every model call takes one minute: R = min(3, 7 − 1) = 3 min, so the reserve begins after 3 min.

@@ -31,7 +31,9 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /** Pure translation and usage rules, over a binding to the SDK's fake model. */
@@ -70,6 +72,45 @@ class TranslationTest {
             assertEquals(prices.tier(usage).map { it.inputTokensAbove() }.orElse(null), table.tier(input + read + short + long)?.inputTokensAbove)
         }
         assertEquals(PriceTable(LocalDate.of(2026, 9, 1), "USD", emptyMap()), AiGateProfiles.priceTable(null, LocalDate.of(2026, 9, 1)))
+    }
+
+    @Test
+    fun `a subscription model takes the official price of the same model at its paying provider, never a guess`() {
+        val official = Prices.usd().input("5").output("30").cacheRead("0.5").build()
+        val other = Prices.usd().input("6").output("31").build()
+        fun model(provider: String, id: String, prices: Prices? = null) = net.ai.gate.model.Model.builder(provider, id).prices(prices).build()
+        val catalog = listOf(model("openai-codex", "gpt-5.5"), model("openai", "gpt-5.5", official), model("azure", "gpt-5.5", other),
+            model("openai-codex", "own", other), model("openai-codex", "lonely"), model("vendor", "lonely", official),
+            model("openai-codex", "orphan"))
+        assertSame(official, AiGateProfiles.officialPrices(catalog, "openai-codex", "gpt-5.5"), "the paying provider whose id prefixes the plan's")
+        assertSame(other, AiGateProfiles.officialPrices(catalog, "openai-codex", "own"), "the model's own price wins")
+        assertSame(official, AiGateProfiles.officialPrices(catalog, "openai-codex", "lonely"), "the only priced entry")
+        assertNull(AiGateProfiles.officialPrices(catalog, "openai-codex", "orphan"))
+        val strangers = catalog.filter { it.providerId() != "openai" } + model("bedrock", "gpt-5.5", official)
+        assertNull(AiGateProfiles.officialPrices(strangers, "openai-codex", "gpt-5.5"), "two strangers: the user enters it")
+        val table = AiGateProfiles.priceTable(official, LocalDate.of(2026, 9, 1)).copy(billing = io.astrolabe.provider.Billing.Plan)
+        assertEquals(io.astrolabe.provider.Charge.Nominal, table.charge)
+    }
+
+    @Test
+    fun `a runtime with only the subscription still prices it at the paying provider's bundled price`() {
+        Llm.builder().provider(net.ai.gate.providers.Providers.openAiCodex()).environment(Environment.none())
+            .credentials(net.ai.gate.auth.CredentialStore.inMemory()).catalog { it.offline() }.build().use { codex ->
+            assertTrue(codex.models().all().none { it.providerId() == "openai" }, "the paying provider is not registered")
+            val table = assertNotNull(AiGateProfiles.planPriceTable(codex, "openai-codex", "gpt-5.5", LocalDate.of(2026, 9, 1)))
+            assertEquals(io.astrolabe.provider.Charge.Nominal, table.charge)
+            assertEquals(0, BigDecimal("5").compareTo(table.perMillion.getValue(BillingDimension.UNCACHED_INPUT)))
+            assertEquals(0, BigDecimal("30").compareTo(table.perMillion.getValue(BillingDimension.OUTPUT)))
+        }
+    }
+
+    @Test
+    fun `a spent plan quota is its own provider error, a rate limit stays a rate limit`() {
+        fun failure(code: net.ai.gate.error.ErrorCode) = net.ai.gate.error.RateLimitedException(
+            net.ai.gate.error.LlmException.Details.builder(code, "limit").retryAfter(Duration.ofHours(2)).build())
+        val quota = ErrorMapper.error(failure(net.ai.gate.error.ErrorCode.QUOTA_EXHAUSTED))
+        assertEquals(7_200L, (quota as io.astrolabe.provider.ProviderError.QuotaExhausted).retryAfterSeconds)
+        assertTrue(ErrorMapper.error(failure(net.ai.gate.error.ErrorCode.RATE_LIMITED)) is io.astrolabe.provider.ProviderError.RateLimit)
     }
 
     @Test

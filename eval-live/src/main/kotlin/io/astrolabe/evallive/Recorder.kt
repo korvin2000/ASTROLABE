@@ -77,7 +77,8 @@ internal data class Quantity(val sum: String, val known: Int, val calls: Int)
  * profile's table and is `null` when any part is unknown or unpriced; [costPricedPart] is what could be priced.
  * [responded] aggregates every other numeric field of `ModelResponded` as a [Quantity], so fields the events gain later
  * are aggregated without a change and a partial sum is never mistaken for a whole one. A price tier is a threshold, not
- * a quantity: [priceTiers] counts the responses per tier threshold (`none` when a response named none).
+ * a quantity: [priceTiers] counts the responses per tier threshold (`none` when a response named none). [costBasis] is
+ * the table's charge (C16): `paid`, `nominal` (a subscription model at its official price, counted as real) or `unpriced`.
  */
 @Serializable
 internal data class Totals(
@@ -99,6 +100,7 @@ internal data class Totals(
     val stops: Map<String, Int>,
     val responded: Map<String, Quantity>,
     val priceTiers: Map<String, Int>,
+    val costBasis: String = "paid",
 ) {
     companion object {
         /** Fields of `ModelResponded` read above or that are identities, not quantities. */
@@ -138,6 +140,7 @@ internal data class Totals(
                 stops = responded.groupingBy { it.stop.name }.eachCount(),
                 responded = extra(facts),
                 priceTiers = tiers(facts),
+                costBasis = prices.charge.wire,
             )
         }
 

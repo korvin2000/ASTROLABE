@@ -4,7 +4,7 @@ import io.astrolabe.id.Identities
 import io.astrolabe.id.InstantSerializer
 import io.astrolabe.id.WorkId
 import io.astrolabe.provider.BillableUsage
-import io.astrolabe.provider.Billing
+import io.astrolabe.provider.Charge
 import io.astrolabe.provider.BillingDimension
 import io.astrolabe.provider.Money
 import io.astrolabe.provider.Profile
@@ -41,7 +41,8 @@ public data class Quantities(
  * One priced model call (§15.2): the native usage retained, the normalized categories, and money from the
  * profile's dated price table. [money] is [Money.unknown] when usage is missing, incomplete or unpriced — a
  * missing usage is recorded as missing, never as zero spend (FX-59). [warm] says whether the call read the
- * provider cache; cold and warm calls are reported separately.
+ * provider cache; cold and warm calls are reported separately. [charge] says whether [money] was paid, is a plan-billed
+ * model's nominal price or is no money accounting at all (C16); a row written before C16 reads as [Charge.Paid].
  */
 @Serializable
 public data class CallAccount(
@@ -56,9 +57,14 @@ public data class CallAccount(
     @Serializable(with = InstantSerializer::class) val at: Instant,
     val fundedTokens: Long? = null,
     val fundedMoney: Money? = null,
+    val charge: Charge = Charge.Paid,
 )
 
-/** Totals over calls, cold and warm apart; each money sum is unknown as soon as one call's is. */
+/**
+ * Totals over calls, cold and warm apart; each money sum is unknown as soon as one call's is. [money] is paid plus nominal
+ * (C16: a plan-billed model's nominal spend counts as real); [paidMoney] and [nominalMoney] keep them apart and
+ * [unpricedCalls] counts calls without money accounting. The three are `null` in totals stored before C16.
+ */
 @Serializable
 public data class AccountTotals(
     val calls: Int,
@@ -69,6 +75,9 @@ public data class AccountTotals(
     val quantities: Map<BillingDimension, Long?>,
     /** Undefined (`null`) at zero accepted tasks and when [money] is unknown. */
     val costPerAcceptedTask: Money?,
+    val paidMoney: Money? = null,
+    val nominalMoney: Money? = null,
+    val unpricedCalls: Int = 0,
 )
 
 /**
@@ -90,7 +99,14 @@ public class Accounting internal constructor(
     /** Records one call; a `null` [usage] is a call whose usage never arrived. */
     public fun record(ids: Identities, invocationId: String, profile: Profile, request: Request?, usage: BillableUsage?, fundedTokens: Long? = null): CallAccount {
         val table = profile.priceTable
-        val money = if (planBilled(profile)) Money.zero(table.currency) else usage?.price(table) ?: Money.unknown(table.currency)
+        // C16: a positive bill is real money whatever the plan says — the call is paid, at the bill, counted once.
+        val bill = usage?.billed?.takeIf { it.amount.signum() > 0 }
+        val charge = if (bill != null) Charge.Paid else table.charge
+        val money = when {
+            bill != null && table.charge != Charge.Paid -> bill.takeIf { it.currency == table.currency } ?: Money.unknown(table.currency)
+            charge == Charge.Unpriced -> Money.zero(table.currency)
+            else -> usage?.price(table) ?: Money.unknown(table.currency)
+        }
         val prior = calls(ids.work).firstOrNull { it.invocationId == invocationId }
         val account = CallAccount(
             invocationId = invocationId,
@@ -110,6 +126,7 @@ public class Accounting internal constructor(
             fundedTokens = fundedTokens ?: usage?.takeIf { it.isComplete }?.quantities?.values?.fold(0L, ::add) ?: prior?.fundedTokens,
             // An unsettled call keeps its conservative reservation as known funding, so later calls stay affordable.
             fundedMoney = if (!money.unknown) money else prior?.fundedMoney?.let { it.copy(amount = maxOf(it.amount, money.amount)) },
+            charge = charge,
         )
         store.db.tx { tx -> save(tx, account) }
         return account
@@ -121,7 +138,7 @@ public class Accounting internal constructor(
         if (!affordable(ids.work, tokens, money, tokenLimit, costLimit)) return@tx false
         if (admission != null && !admission.invoke(calls(ids.work), money)) return@tx false
         val account = CallAccount(invocationId, ids, profile.id, null, Money.unknown(profile.priceTable.currency),
-            profile.priceTable.date.toString(), Quantities(null, null, null, null), null, clock.instant(), tokens, money)
+            profile.priceTable.date.toString(), Quantities(null, null, null, null), null, clock.instant(), tokens, money, profile.priceTable.charge)
         save(tx, account)
         true
     }
@@ -202,12 +219,13 @@ public class Accounting internal constructor(
          * The conservative charge of a call of at most [input] input and [output] output tokens: every input token at the
          * dearest input rate, under every price table the call can be billed at — the base and each tier whose threshold
          * is below [input] (tiers do not accumulate, so effective rates can fall as input grows). Unknown, never zero,
-         * when a table lacks the output price or a price for an input dimension the route can bill; zero for a
-         * [planBilled] profile.
+         * when a table lacks the output price or a price for an input dimension the route can bill; zero for an
+         * [unpriced] profile. A plan-billed profile with a nominal price is estimated at it like a per-token one (C16), so
+         * routing and admission never take a subscription model for a free one.
          */
         internal fun estimateCost(profile: Profile, input: Long, output: Long): Money {
             val prices = profile.priceTable
-            if (planBilled(profile)) return Money.zero(prices.currency)
+            if (unpriced(profile)) return Money.zero(prices.currency)
             val billable = billableInput(profile)
             val reachable = listOf(prices.at(0)) + prices.tiers.filter { it.inputTokensAbove < input }.map { prices.at(it.inputTokensAbove + 1) }
             var worst = Money.zero(prices.currency)
@@ -222,11 +240,12 @@ public class Accounting internal constructor(
         }
 
         /**
-         * D-409: a profile the host declared plan-billed ([Billing.Plan]: a subscription with hourly or monthly quotas, a
-         * local server) charges the task's money limit nothing; the request and minute limits bound it. Missing prices
-         * alone never mean this: a per-token table without a price stays an unknown charge and fails closed.
+         * D-409, C16: a profile the host declared plan-billed with no price stated ([Charge.Unpriced]) charges the task's
+         * money limit nothing; the request and minute limits bound it. With the model's official price it is
+         * [Charge.Nominal] and charged at that price. Missing prices alone never mean either: a per-token table without
+         * a price stays an unknown charge and fails closed.
          */
-        internal fun planBilled(profile: Profile): Boolean = profile.priceTable.billing == Billing.Plan
+        internal fun unpriced(profile: Profile): Boolean = profile.priceTable.charge == Charge.Unpriced
 
         /** Input dimensions a call on [profile] can be billed in: uncached input, the declared input usage fields and the cache-write classes. */
         private fun billableInput(profile: Profile): Set<BillingDimension> =
@@ -237,7 +256,9 @@ public class Accounting internal constructor(
         @JvmStatic
         public fun totals(calls: List<CallAccount>, accepted: Int, currency: String): AccountTotals {
             fun sum(selected: List<CallAccount>) = selected.fold(Money.zero(currency)) { total, call -> total + call.money }
-            val money = sum(calls)
+            val paid = sum(calls.filter { it.charge == Charge.Paid })
+            val nominal = sum(calls.filter { it.charge == Charge.Nominal })
+            val money = paid + nominal
             val dimensions = calls.mapNotNull { it.usage }.flatMap { it.quantities.keys + it.unknown }.distinct()
             return AccountTotals(
                 calls = calls.size,
@@ -252,6 +273,9 @@ public class Accounting internal constructor(
                     else selected.fold(0L) { total, call -> add(total, call.usage!!.quantities.getValue(d)) }
                 },
                 costPerAcceptedTask = if (accepted == 0 || money.unknown) null else Money(currency, money.amount.divide(BigDecimal.valueOf(accepted.toLong()), 10, RoundingMode.HALF_EVEN)),
+                paidMoney = paid,
+                nominalMoney = nominal,
+                unpricedCalls = calls.count { it.charge == Charge.Unpriced },
             )
         }
 
