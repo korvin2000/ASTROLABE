@@ -13,13 +13,13 @@ private val USAGE = """eval-live — the ASTROLABE headless live runner
 
   eval-live run --models <id,...> --out <dir> [--tasks <id,...|all>] [--provider openrouter] [--repeats 1] [--seed 0]
                 [--effort Low|Medium|High] [--max-cells ${RunSpec.MAX_CELLS}] [--deadline-minutes 60] [--tasks-dir <dir>] [--python <program>]
-                [--catalog <file>] [--credentials <file>] [--temp <dir>] [--keep-workspaces]
+                [--catalog <file>] [--credentials <file>] [--temp <dir>] [--keep-workspaces] [--arm default|loop]
   eval-live tasks [--tasks-dir <dir>]
   eval-live check [--tasks <id,...|all>] [--tasks-dir <dir>] [--python <program>] [--temp <dir>]
 
 Keys come from the SDK's resolution: the provider's environment variable (OPENROUTER_API_KEY for openrouter), or the
-SDK credential store file given with --credentials. Results: <out>/runs/<task>/<model>/r<n>/{result.json, events.jsonl,
-acceptance.log, workspace.diff} and <out>/summary.{csv,json}."""
+SDK credential store file given with --credentials. Results: <out>/runs/<arm>/<task>/<model>/r<n>/{result.json,
+events.jsonl, acceptance.log, workspace.diff} and <out>/summary.{csv,json}."""
 
 /** A usage error: printed with the usage, exit status 2. */
 internal class UsageError(message: String) : IllegalArgumentException(message)
@@ -94,7 +94,7 @@ internal object Cli {
             repeats = options.int("repeats", 1), seed = options.long("seed", 0), out = out,
             temp = temp(options), effort = named ?: RunSpec.EFFORT, maxCells = options.int("max-cells", RunSpec.MAX_CELLS),
             deadline = Duration.ofMinutes(options.long("deadline-minutes", 60)), keepWorkspaces = options.flag("keep-workspaces"),
-            effortExplicit = named != null,
+            effortExplicit = named != null, arm = Arms.named(options.get("arm") ?: Arms.DEFAULT.name),
         )
         val interpreters = Interpreters.detect(options.get("python"))
         val catalog = options.get("catalog")?.let(Path::of) ?: out.resolve("catalog-snapshot.json")

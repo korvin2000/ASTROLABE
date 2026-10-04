@@ -9,8 +9,8 @@ import kotlin.io.path.readText
 import kotlin.io.path.writeText
 
 /**
- * The result of one run (`runs/<task>/<model>/r<n>/result.json`). Every quantity the run could not observe is `null`,
- * never 0; the events behind [totals] are in `events.jsonl` next to it.
+ * The result of one run (`runs/<arm>/<task>/<model>/r<n>/result.json`). Every quantity the run could not observe is
+ * `null`, never 0; the events behind [totals] are in `events.jsonl` next to it.
  */
 @Serializable
 internal data class RunResult(
@@ -64,6 +64,10 @@ internal data class RunResult(
      * run as a whole and the outcome is the last session's.
      */
     val reopen: ReopenResult? = null,
+    /** The arm that ran it (B5); a result written before arms existed reads back as the default arm's. */
+    val arm: String = Arms.DEFAULT.name,
+    /** What this result stands for (B5): a kept result is reused only for the same key; `null` before B5, never reused. */
+    val key: ResultKey? = null,
 ) {
     companion object {
         const val SCHEMA: Int = 1
@@ -123,9 +127,9 @@ internal object Summary {
     private val compact = Json { ignoreUnknownKeys = true }
 
     val COLUMNS: List<String> = listOf(
-        "order", "task", "class", "provider", "model", "repeat", "outcome", "stop_code", "accepted", "acceptance_exit",
+        "order", "task", "class", "provider", "model", "arm", "repeat", "outcome", "stop_code", "accepted", "acceptance_exit",
         "attempt_wall_s", "model_requests", "uncached_input", "cache_read", "cache_write", "output", "cost", "cost_priced_part",
-        "currency", "cells", "turns", "tool_calls", "changed_files", "failure", "interrupt_mode",
+        "currency", "cost_basis", "cells", "turns", "tool_calls", "changed_files", "failure", "interrupt_mode",
     )
 
     fun write(out: Path, results: List<RunResult>) {
@@ -138,11 +142,11 @@ internal object Summary {
     }
 
     fun row(r: RunResult): List<String?> = listOf(
-        r.order.toString(), r.task, r.taskClass, r.provider, r.model, r.repeat.toString(), r.outcome, r.stopCode,
+        r.order.toString(), r.task, r.taskClass, r.provider, r.model, r.arm, r.repeat.toString(), r.outcome, r.stopCode,
         r.acceptance?.passed?.toString(), r.acceptance?.exitCode?.toString(),
         r.attemptWallMillis?.let { "%.1f".format(java.util.Locale.ROOT, it / 1000.0) }, r.totals?.modelRequests?.toString(),
         r.totals?.uncachedInputTokens?.toString(), r.totals?.cacheReadTokens?.toString(), r.totals?.cacheWriteTokens?.toString(),
-        r.totals?.outputTokens?.toString(), r.totals?.cost, r.totals?.costPricedPart, r.totals?.currency, r.cells?.toString(),
+        r.totals?.outputTokens?.toString(), r.totals?.cost, r.totals?.costPricedPart, r.totals?.currency, r.totals?.costBasis, r.cells?.toString(),
         r.totals?.turns?.toString(), r.totals?.toolCalls?.toString(), r.changedFiles?.toString(), r.failure, r.interrupt?.mode?.let(::wire),
     )
 

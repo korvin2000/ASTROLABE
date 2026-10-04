@@ -72,9 +72,13 @@ internal object Trees {
 internal data class ProcResult(val exitCode: Int?, val timedOut: Boolean, val output: String, val durationMillis: Long)
 
 internal object Proc {
-    /** Runs [argv] in [cwd] with stdin closed and stderr merged into stdout; past [timeout] the process tree is killed. */
-    fun run(argv: List<String>, cwd: Path, timeout: Duration, env: Map<String, String> = emptyMap(), nanos: LongSupplier = LongSupplier(System::nanoTime)): ProcResult {
+    /**
+     * Runs [argv] in [cwd] with stdin closed and stderr merged into stdout; past [timeout] the process tree is killed.
+     * Without [inherit] the child gets [env] only.
+     */
+    fun run(argv: List<String>, cwd: Path, timeout: Duration, env: Map<String, String> = emptyMap(), nanos: LongSupplier = LongSupplier(System::nanoTime), inherit: Boolean = true): ProcResult {
         val builder = ProcessBuilder(argv).directory(cwd.toFile()).redirectErrorStream(true)
+        if (!inherit) builder.environment().clear()
         builder.environment().putAll(env)
         val start = nanos.asLong
         val process = builder.start()
