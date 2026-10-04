@@ -775,3 +775,16 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - Reviews: Opus and Codex, two rounds each, on the diff; every round found real defects in the fixes (op renumbering,
   missing prices read as free, an exemption that covered real tests, `curl` uploads, a status answer ending the cell).
 - Verified offline only: full build 2260 tests (4 old-default tests updated), Studio backend 88, frontend 150. No live run.
+
+## 2026-10-04: ASTROLABE 2.0 session 4 — direct protocol in the core, measuring arm, hotfix tails (D-414–D-425)
+- Lines ran as background sub-agents in worktrees under the economy rules of plan §8.8: one reviewer per line, L1 once,
+  at most three edit → test cycles, one fix round; estimates in the cards were 3–5× above the real spend.
+- Merged: Dp3 (specification for S0–S3), D1, D2, D3, D3r (direct in the core, off by default), B7 (`RunSpec`), B5 (arms,
+  reference arm `loop`), C16 (nominal price), C15 (node per-test, turn output budget, Studio `auto` mode), Studio steps.
+- Reviews found real defects in every line; two second rounds found a new P1 made by the fix (a wrapper written by the
+  model run as a host check; an unblock keyed on text the model can write) — both removed by narrowing, not a third fix.
+- Owner: remaining reviews go to Codex. Its integration review of D1 + D2 + D3 found 3 P1 + 3 P2 that no single-line
+  review saw (obligations lost over a handoff, reused note numbers, a changed structured argument check); fixed in D3r.
+- First live screening of both arms (16 runs, deepseek flash, ≈ 0.19 USD): 8/8 each; the loop is cheaper on short tasks.
+  Owner: the loop is a yardstick, the core is kept and made cheaper; money is judged over price profiles (D-421).
+- Left: P8.D.7 (crash-window residue, before `Direct` is switched on), P8.C.17 (verify cap, Gradle wrapper, node tails).

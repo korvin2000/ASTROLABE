@@ -2,39 +2,39 @@
 
 Rewritten every session (≤40 lines). Workflow: `CLAUDE.md` § Workflow. State snapshot: `actual_state.md`.
 **Active program: ASTROLABE 2.0** — plan `../ASTROLABE-2-PLAN.md` (changes only via its §17), status = phase P8 in
-`TODO.md` (`rg -n '^#### P8' TODO.md`), cards/reports `../plan2/`.
+`TODO.md` (`rg -n '^#### P8' TODO.md`), cards/reports `../plan2/`, session 4 findings `../session_4_results.md`.
 
-**Checkpoint (2026-10-04):** the first live Studio run failed on basics (`../ASTROLABE-DIAGNOSTICS-2026-10-04.md`); hotfix
-D-407–D-413 is pushed (core `7b402d3`, Studio half root `bd3a4ca`; CI status unchecked); no live run has confirmed it and
-the owner decided not to wait for one (plan §11 №26: assume it works; a failure seen later is fixed out of turn).
-**Owner: continue in place with the plan amended** (plan §0 item 10, §4.3a, §11 №14–25, §13, §17): direct for every
-shape, S2 live (P8.H), then S3; D → H → E → F → release. P8: **27 DONE / 29 TODO**.
+**Checkpoint (2026-10-04, session 4 closed):** the direct protocol is in the core, off by default
+(`Config.protocol = Structured`): Dp3 specification for S0–S3 (D-414), D1 role / kernel / schemas / switch (D-419),
+D2 anchor and `state(note)` (D-422), D3 `finish` and epoch handoff (D-423), D3r integration fixes (D-425). Also merged:
+B7 one `RunSpec` (D-415), B5 arms and the reference arm `loop` (D-418), C16 nominal price of subscription models
+(D-417), C15 hotfix tails (D-416, D-420, D-424), Studio steps (root repo). P8: **35 DONE / 23 TODO**.
 
-## Next — session 4 (plan §7)
-1. P8.D.6 (Dp3) amends the direct spec **before D1** (t6, then Codex review). Session prompt: plan appendix A.9; economy rules: plan §8.8 (owner №27).
-2. D1 → D2 ∥ D3 (appendix A-D as amended; re-check table A-D.7: the hotfix moved `Cell.kt`, `Gates.kt`,
-   `EffectPolicy.kt`); in parallel P8.B.7 → P8.B.5, P8.C.15, P8.C.16. Owner №21: no long runs with a strong lead model.
+## Next — session 5 (plan §7)
+1. **P8.D.7 first** — before `Direct` is switched on anywhere: orphan handoff recovery before sequence-changing
+   transitions, fact retention by the cell's protocol. Codex review (owner: remaining reviews go to Codex).
+2. D4 (golden `[S]` per protocol, ≤ 15 direct fixtures, protocol choice in Studio), then D5 (structured / direct / loop);
+   E1; B6. Before D5: P8.C.17 item 1 (cap of one `verify`), the `summary.csv` overwrite, a re-pricing what-if in the auditor.
+3. Read the fast CI result of the session-4 push first (compile + ABI); the full suite runs only on a wave tag.
 
-## Hotfix tails (found in the logs or by review, not done)
-- Context: runs and verifies have no per-turn output budget (24 calls × 4 K worst case); call arguments are never stubbed,
-  only a rebuild drops them; a second pressure still ends the cell `partial`; the gauge shows the window's percent.
-- Permissions (D-412): a label on the command text, no sandbox; vocabularies are not on `Config` (OD-09); `pip install`
-  outside a venv is W-class; Studio's `auto` mode denies every D-class effect that is not allow-listed.
-- Verification: node per-test names are not parsed (a failing node run is an `unknown` hold); cargo or go output mixed
-  with node keeps the old precedence; a `gradle` that is not on PATH leaves the check `unavailable`.
-- State tool and loop gate: 58 rejected patches in the recorded runs (patch DSL, `red-not-recorded`, register cap); a
-  material register change clears every loop signature; a signature holds the result body. Untouched.
-- Studio: scrolling and the model-list refresh are unit-tested, never seen in a browser; a raised limit keeps the old
-  number in the stored reason and `raise_limit` is offered for an unknown price; an attempt frozen before D-409 keeps its
-  per-token profile on resume; `StatsService` shows plan calls as unpriced; the Changes panel counts build output.
-
-## Tails from session 3
-C10: an `Open` note moves `[>]` past a held red. C11: a test change approved in I1 is asked again for I2. C14: the money
-cap does not follow the policy on a reopen. C3: no deadline on a model call. Details: TODO `Log:` lines of P8.C.
+## Owner positions and rules from session 4
+- The `loop` arm is a yardstick only; the core is kept and made cheaper, not replaced.
+- D-421: money is judged over price profiles with output/input ratios of about 2, 3, 5 and "tens", decisions rest first
+  on flows (requests, uncached input, cache read, output). First screening (8 tasks, deepseek flash, one repeat): both
+  arms 8/8; the core loses on uncached input (cache-prefix misses), on turns after green (22 of 75) and on
+  `state.patch`-only turns (13 of 75).
+- Push to `main` is allowed after the checks pass. Economy rules: plan §8.8; line estimates were 3–5× too high.
+## Tails (owners in `../session_4_results.md` §4)
+- D4: golden `[S]` of the other structured roles; an S0 run with `Direct`; "poll the handle" text; the ninth role in
+  Studio settings; fixture "`state(blocked)` after a split replans"; no rollback across D1 on a live `stateRoot`.
+- H1: `kind=probe` check, typed review approval for both scopes. H3: resume after a quota refill needs a runtime-owned
+  block cause; `maxHandoffs` is not in the facade or `RunSpec`. H8: writer packet per dispatch, integrity flags per epoch.
+- Studio: no price input for an unpriced subscription model; `StatsService` vs the core on a billed subscription call;
+  nothing of session 4 was checked in a browser.
 
 ## Debts, branches, last gate
-Frozen debts (plan §12): D-254, D-70/D-71/D-241, D-252, D-113/D-120, D-124/D-244, D-200; D-66, D-28, D-92. Kept branches:
-`v2/BL`, `v2/B4`, `v2/B4a3` (never merge), `v2/C10x` (`e157dc7`, do not merge as is). Transient: `StamperTest`
-`git exited -1`; Windows `ProcOwnershipTest`; FX-22. Gate P8.C: CI 37154760649 green at `b3eae38`, tag `v2-wave-C`.
-Hotfix: local `./gradlew build`, 2260 tests; the 4 failures were tests of the old permission default, updated and green
-in a focused rerun; no CI run (nothing pushed). `.llm-memory` is stale on the default capability set and pressure.
+Frozen debts (plan §12): D-254, D-70/D-71/D-241, D-252, D-113/D-120, D-124/D-244, D-200; D-66, D-28, D-92. Older tails of
+sessions 3 (C10, C11, C14, C3) and of the hotfix (state tool, loop gate) are untouched. Kept branches: `v2/BL`, `v2/B4`,
+`v2/B4a3` (never merge), `v2/C10x` (`e157dc7`, do not merge as is). Transient: `StamperTest`, Windows `ProcOwnershipTest`,
+FX-22. Gate P8.D is open (D7, D4, D5). Session 4 was verified by targeted tests per line and L2 on every merged state, no
+full suite; CI fast job green at `b0901dc`, the session-4 push is unread. `.llm-memory` cards lag behind sessions 3–4.
