@@ -13,7 +13,7 @@ import io.astrolabe.evidence.Outcome
  */
 public class GenericShaper : Shaper {
     override val id: String = "generic"
-    override val version: String = "3"
+    override val version: String = "4"
 
     /** The registry's last entry: it accepts every capture. */
     override fun applies(capture: RunCapture): Boolean = true
@@ -33,6 +33,7 @@ public class GenericShaper : Shaper {
             limitations += "the ${summary.family} summary in this output is incomplete (a cut log or mixed output): counts unavailable (§8.3)"
         }
         if (summary.identityIncomplete) limitations +="some Go cases have no package summary; their identities cannot certify pre-existing failures"
+        summary.note?.let { limitations += it }
         val status = deriveStatus(
             StatusInputs(
                 capture = capture,
@@ -40,6 +41,7 @@ public class GenericShaper : Shaper {
                 wrapper = wrapper,
                 runnerName = runner,
                 nothingCollected = summary.nothingRan,
+                evidenceIncomplete = summary.evidenceIncomplete,
                 infraExitCodes = emptySet(),
             ),
             limitations,
@@ -67,6 +69,7 @@ public class GenericShaper : Shaper {
             wrapper = wrapper,
             shaper = shaperId,
             limitations = limitations,
+            evidenceIncomplete = summary.evidenceIncomplete,
         )
     }
 
@@ -112,7 +115,167 @@ internal data class GenericSummary(
     val family: String?,
     val nothingRan: Boolean = false,
     val identityIncomplete: Boolean = false,
+    /** [tests] is a cut record: no complete summary followed the results read (P8.C.15). */
+    val evidenceIncomplete: Boolean = false,
+    /** A limitation of the per-test record, rendered in the view. */
+    val note: String? = null,
 )
+
+/**
+ * P8.C.15: the per-test lines of `node --test` — the spec reporter's `✔` / `✖` / `﹣` results nested two spaces a level
+ * under `▶` groups, and the TAP reporter's `ok` / `not ok` nested four spaces a level under `# Subtest:` lines. Read once,
+ * up to the spec reporter's `✖ failing tests:` section, which repeats failures. A result with children is a suite or a
+ * parent test: TAP's `type:` says which, the spec reporter only for an older suite (`▶ name (…)`); the summary's count
+ * settles the rest, or no identity is recorded at all.
+ */
+internal object NodeTests {
+    enum class Kind { Test, Suite, Parent }
+
+    class Entry(val path: List<String>, val name: String, val outcome: TestOutcome, var kind: Kind, var message: String? = null) {
+        fun result(checkId: String?): TestResult =
+            TestResult(TestIdentity(check = checkId, suite = path.joinToString(" > ").ifEmpty { null }, name = name), outcome, message)
+    }
+
+    /** What the lines report, in order; [consistent] false when a nesting did not close as it opened. */
+    class Read(val entries: List<Entry>, val consistent: Boolean)
+
+    private val SPEC_GROUP = Regex("""^( *)▶ (.+?)(?: \(\d+(?:\.\d+)?m?s\))?$""")
+    private val SPEC_GROUP_END = Regex("""^ *▶ .+ \(\d+(?:\.\d+)?m?s\)$""")
+    private val SPEC_RESULT = Regex("""^( *)([✔✖﹣]) (.+) \(\d+(?:\.\d+)?m?s\)(?: # (SKIP|TODO)\b.*)?$""")
+    private const val SPEC_FAILING = "✖ failing tests:"
+    private val TAP_SUBTEST = Regex("""^( *)# Subtest: (.+)$""")
+    private val TAP_RESULT = Regex("""^( *)(ok|not ok) \d+ - (.*?)(?: # (SKIP|TODO)\b.*)?$""")
+    private val TAP_TYPE = Regex("""^type: '(suite|test)'$""")
+
+    fun read(lines: List<String>): Read {
+        val spec = spec(lines)
+        val tap = tap(lines)
+        return Read(spec.entries + tap.entries, spec.consistent && tap.consistent)
+    }
+
+    /**
+     * The tests of [read] when they add up to [counts] — every unsettled parent a suite, or every one a test — and agree
+     * on passed, failed (cancelled included) and skipped (todo included); `null` otherwise.
+     */
+    fun reconciled(read: Read, counts: Counts, checkId: String?): List<TestResult>? {
+        if (!read.consistent) return null
+        val tests = read.entries.count { it.kind == Kind.Test }
+        val parents = read.entries.count { it.kind == Kind.Parent }
+        val chosen = when (counts.discovered) {
+            tests -> read.entries.filter { it.kind == Kind.Test }
+            tests + parents -> read.entries.filter { it.kind != Kind.Suite }
+            else -> return null
+        }
+        val results = chosen.map { it.result(checkId) }
+        val listed = TestResults.counts(results)
+        return results.takeIf { listed.passed == counts.passed && listed.failed == counts.failed && listed.skipped == counts.skipped }
+    }
+
+    private fun outcomeOf(passed: Boolean, directive: String): TestOutcome = when {
+        directive.isNotEmpty() -> TestOutcome.Skipped
+        passed -> TestOutcome.Passed
+        else -> TestOutcome.Failed
+    }
+
+    private fun spec(lines: List<String>): Read {
+        val entries = ArrayList<Entry>()
+        val open = ArrayList<String>()
+        var consistent = true
+        fun level(indent: String, step: Int): Int? = if (indent.length % step == 0) indent.length / step else null
+        for (raw in lines) {
+            val line = raw.trimEnd()
+            if (line == SPEC_FAILING) break
+            SPEC_RESULT.matchEntire(line)?.let { m ->
+                val at = level(m.groupValues[1], 2) ?: run { consistent = false; null } ?: return@let
+                val name = m.groupValues[3]
+                val outcome = if (m.groupValues[2] == "﹣") TestOutcome.Skipped else outcomeOf(m.groupValues[2] == "✔", m.groupValues[4])
+                val closes = open.size > at && open[at] == name
+                if (!closes && open.size != at) consistent = false
+                if (open.size < at || name.isBlank()) return@let
+                entries += Entry(open.take(at), name, outcome, if (closes) Kind.Parent else Kind.Test)
+                open.subList(at, open.size).clear()
+            } ?: SPEC_GROUP.matchEntire(line)?.let { m ->
+                val at = level(m.groupValues[1], 2) ?: run { consistent = false; null } ?: return@let
+                val name = m.groupValues[2]
+                if (SPEC_GROUP_END.matches(line)) {
+                    // An older reporter's suite end: no test of its own.
+                    if (open.size > at && open[at] == name) open.subList(at, open.size).clear() else consistent = false
+                } else {
+                    if (open.size != at) consistent = false
+                    if (open.size < at) return@let
+                    open.subList(at, open.size).clear()
+                    open += name
+                }
+            }
+        }
+        return Read(entries, consistent)
+    }
+
+    private fun tap(lines: List<String>): Read {
+        val entries = ArrayList<Entry>()
+        val open = ArrayList<String>()
+        var consistent = true
+        var lastLevel = -1
+        var target: Entry? = null
+        var inYaml = false
+        var errorNext = false
+        for (raw in lines) {
+            val line = raw.trimEnd()
+            val trimmed = line.trim()
+            if (inYaml) {
+                val entry = target
+                when {
+                    trimmed == "..." -> { inYaml = false; target = null }
+                    entry == null -> Unit
+                    errorNext -> { entry.message = trimmed; errorNext = false }
+                    TAP_TYPE.matches(trimmed) -> entry.kind = if (trimmed.contains("suite")) Kind.Suite else Kind.Test
+                    trimmed.startsWith("error: ") -> {
+                        val value = trimmed.removePrefix("error: ")
+                        if (value.startsWith("|") || value.startsWith(">")) errorNext = true else entry.message = value.removeSurrounding("'").removeSurrounding("\"")
+                    }
+                }
+                continue
+            }
+            if (trimmed == "---" && target != null) { inYaml = true; continue }
+            target = null
+            TAP_SUBTEST.matchEntire(line)?.let { m ->
+                val indent = m.groupValues[1].length
+                if (indent % 4 != 0 || open.size < indent / 4) { consistent = false; return@let }
+                open.subList(indent / 4, open.size).clear()
+                open += unescape(m.groupValues[2])
+            } ?: TAP_RESULT.matchEntire(line)?.let { m ->
+                val indent = m.groupValues[1].length
+                val at = indent / 4
+                val name = unescape(m.groupValues[3])
+                if (indent % 4 != 0 || open.size < at || name.isBlank()) { consistent = false; return@let }
+                val entry = Entry(open.take(at), name, outcomeOf(m.groupValues[2] == "ok", m.groupValues[4]), if (lastLevel == at + 1) Kind.Parent else Kind.Test)
+                entries += entry
+                open.subList(at, open.size).clear()
+                lastLevel = at
+                target = entry
+            }
+        }
+        return Read(entries, consistent)
+    }
+
+    /** TAP's escapes in a test name: `\#` and `\\`. */
+    private fun unescape(name: String): String {
+        if ('\\' !in name) return name
+        val out = StringBuilder()
+        var i = 0
+        while (i < name.length) {
+            val c = name[i]
+            if (c == '\\' && i + 1 < name.length && (name[i + 1] == '#' || name[i + 1] == '\\')) {
+                out.append(name[i + 1])
+                i += 2
+            } else {
+                out.append(c)
+                i++
+            }
+        }
+        return out.toString()
+    }
+}
 
 /** Cheap summary recognisers for the runners P3.1.4 will parse properly (D-09). */
 internal object GenericSummaries {
@@ -138,8 +301,8 @@ internal object GenericSummaries {
         go(lines, checkId)?.let { return it }
         unittest(lines, checkId)?.let { return it }
         dotnet(lines)?.let { return it }
-        val node = node(lines)
         val mocha = mocha(lines)
+        val node = node(lines, checkId, mochaSummary = mocha != null)
         // Node summary lines that do not add up to complete summaries: no other reader may turn the same output green.
         if (node != null && node.counts == null) return node
         // One command that ran both runners: the counts add up, so a green summary of one never hides the other's failures.
@@ -157,8 +320,12 @@ internal object GenericSummaries {
      * per command, add up. `null` when the output holds no `tests` line at all; a summary without counts when it holds
      * some but they are incomplete (a cut log, mixed output) — evidence that is present and not trusted.
      */
-    private fun node(lines: List<String>): GenericSummary? {
-        val incomplete = GenericSummary(null, emptyList(), "node")
+    private fun node(lines: List<String>, checkId: String?, mochaSummary: Boolean): GenericSummary? {
+        val read = NodeTests.read(lines)
+        // P8.C.15: without a complete summary the results read so far are a cut record: only certain tests, never complete.
+        val partial = read.entries.filter { it.kind == NodeTests.Kind.Test }.map { it.result(checkId) }
+        val cut = "the node test output has no complete summary: ${partial.size} test results read, the record is incomplete"
+        val incomplete = GenericSummary(null, partial, "node", evidenceIncomplete = partial.isNotEmpty(), note = cut.takeIf { partial.isNotEmpty() })
         val sums = HashMap<String, Int>()
         val seen = HashMap<String, Int>()
         for (line in lines) {
@@ -166,13 +333,20 @@ internal object GenericSummaries {
             sums.merge(m.groupValues[1], m.groupValues[2].toIntOrNull() ?: return incomplete, Int::plus)
             seen.merge(m.groupValues[1], 1, Int::plus)
         }
-        val summaries = seen["tests"] ?: return null
+        val summaries = seen["tests"] ?: return incomplete.takeIf { partial.isNotEmpty() && !mochaSummary }
         if (seen["pass"] != summaries || seen["fail"] != summaries) return incomplete
         if (listOf("cancelled", "skipped", "todo").any { key -> seen[key].let { it != null && it != summaries } }) return incomplete
         val total = sums.getValue("tests")
         val failed = sums.getValue("fail") + (sums["cancelled"] ?: 0)
         val skipped = (sums["skipped"] ?: 0) + (sums["todo"] ?: 0)
-        return GenericSummary(Counts(sums.getValue("pass"), failed, 0, skipped, total), emptyList(), "node", nothingRan = total == 0)
+        val counts = Counts(sums.getValue("pass"), failed, 0, skipped, total)
+        val tests = NodeTests.reconciled(read, counts, checkId)
+        val note = if (tests == null && read.entries.isNotEmpty()) {
+            "the node test lines (${read.entries.size} results) do not add up to the summary's $total tests: no test identities recorded"
+        } else {
+            null
+        }
+        return GenericSummary(counts, tests.orEmpty(), "node", nothingRan = total == 0, note = note)
     }
 
     private fun cargo(lines: List<String>, checkId: String?): GenericSummary? {

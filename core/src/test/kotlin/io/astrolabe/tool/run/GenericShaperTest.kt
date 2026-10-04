@@ -4,6 +4,7 @@ import io.astrolabe.budget.HeuristicEstimator
 import io.astrolabe.evidence.Outcome
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
@@ -186,6 +187,47 @@ class GenericShaperTest {
         assertEquals(1, assertNotNull(both.counts).failed)
         assertEquals(9, both.counts.passed)
         assertEquals(Outcome.Failed, both.status)
+    }
+
+    @Test
+    fun `node test results are read one by one under the spec and TAP reporters with nested suites`() {
+        fun outcomes(shaped: Shaped) = shaped.tests.associate { it.identity.display to it.outcome }
+        val spec = Shapers.shape(Recorded.capture("node-spec-fail.txt", argv = listOf("node", "--test"), exitCode = 1))
+        assertEquals(Outcome.Failed, spec.status)
+        assertFalse(spec.evidenceIncomplete)
+        assertEquals(7, spec.tests.size, "suites are no tests; the failing-tests section repeats, never adds: ${spec.tests}")
+        assertEquals(
+            mapOf(
+                "math::adds" to TestOutcome.Passed, "math::subtracts" to TestOutcome.Failed, "math > inner::deep pass" to TestOutcome.Passed,
+                "math > inner::skipped one" to TestOutcome.Skipped, "math > inner::todo one" to TestOutcome.Skipped,
+                "top level" to TestOutcome.Passed, "name (with parens)" to TestOutcome.Passed,
+            ),
+            outcomes(spec),
+        )
+
+        val tap = Shapers.shape(Recorded.capture("node-tap-fail.txt", argv = listOf("node", "--test", "--test-reporter=tap"), exitCode = 1))
+        assertEquals(13, tap.tests.size, "a parent test is a test, a suite is not: ${tap.tests}")
+        val failing = tap.tests.filter { it.failing }
+        assertEquals(listOf("math::subtracts", "parent::child bad", "parent", "b fails"), failing.map { it.identity.display })
+        assertEquals("1 == 2", failing.first().message)
+        assertEquals(setOf(TestIdentity(name = "dup").canonical), tap.ambiguousIdentities, "one name in two files stays ambiguous")
+
+        // The spec reporter cannot tell a parent test from a suite: the summary's count settles it, or nothing is recorded.
+        val parents = "▶ parent\n  ✔ child ok (0.1ms)\n  ✖ child bad (0.2ms)\n✖ parent (0.8ms)\nℹ tests 3\nℹ pass 1\nℹ fail 2\n"
+        assertEquals(listOf("parent::child bad", "parent"), Shapers.shape(Recorded.capture(argv = listOf("node", "--test"), exitCode = 1, output = parents.toByteArray())).tests.filter { it.failing }.map { it.identity.display })
+        val unsettled = Shapers.shape(Recorded.capture(argv = listOf("node", "--test"), exitCode = 1, output = parents.replace("ℹ tests 3", "ℹ tests 4").replace("ℹ pass 1", "ℹ pass 2").toByteArray()))
+        assertEquals(emptyList(), unsettled.tests)
+        assertEquals(4, assertNotNull(unsettled.counts).discovered)
+        assertTrue(unsettled.limitations.any { it.contains("do not add up") }, "${unsettled.limitations}")
+
+        // A cut output: the results read so far, no summary — an incomplete record, never a pass.
+        val cut = Recorded.text("node-spec-fail.txt").substringBefore("ℹ tests").replace("✖ subtracts", "✔ subtracts")
+        val partial = Shapers.shape(Recorded.capture(argv = listOf("node", "--test"), exitCode = 0, output = cut.toByteArray()))
+        assertTrue(partial.evidenceIncomplete)
+        assertNull(partial.counts)
+        assertEquals(Outcome.Inconclusive, partial.status)
+        assertEquals(TestOutcome.Passed, outcomes(partial)["math::subtracts"])
+        assertTrue(partial.limitations.any { it.contains("no complete summary") }, "${partial.limitations}")
     }
 
     @Test

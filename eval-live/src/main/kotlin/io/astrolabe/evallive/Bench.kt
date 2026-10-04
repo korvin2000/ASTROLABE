@@ -1,9 +1,12 @@
 package io.astrolabe.evallive
 
 import io.astrolabe.Astrolabe
+import io.astrolabe.RunSpec
 import io.astrolabe.event.Events
 import io.astrolabe.id.IdGen
+import io.astrolabe.id.WorkId
 import io.astrolabe.provider.Effort
+import io.astrolabe.provider.Profile
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
 import java.nio.file.Path
@@ -30,15 +33,21 @@ internal data class BenchPlan(
     val seed: Long,
     val out: Path,
     val temp: Path,
-    val effort: Effort = Effort.Medium,
-    val maxCells: Int = StudioPolicy.MAX_CELLS,
+    val effort: Effort = RunSpec.EFFORT,
+    val maxCells: Int = RunSpec.MAX_CELLS,
     val deadline: Duration = Duration.ofMinutes(60),
     val keepWorkspaces: Boolean = false,
+    /** The bench named [effort] itself, as a user who picks one in the Studio's composer: the approach never steps it. */
+    val effortExplicit: Boolean = false,
 ) {
     init {
         require(tasks.isNotEmpty() && models.isNotEmpty()) { "a bench needs at least one task and one model" }
         require(repeats >= 1 && maxCells >= 1) { "repeats and max cells must be at least 1" }
     }
+
+    /** The default arm: the core's default launch — the Studio's — on [profile], with this bench's cell cap and effort. */
+    fun spec(profile: Profile, stateRoot: Path): RunSpec =
+        RunSpec.defaults(profile, stateRoot.toString()).copy(maxCells = maxCells, effort = effort, effortExplicit = effortExplicit)
 
     /** Every task × model × repetition, shuffled by [seed] so order effects do not line up with tasks (plan §9.3). */
     fun runs(): List<PlannedRun> {
@@ -49,7 +58,8 @@ internal data class BenchPlan(
 
 /**
  * Runs a [BenchPlan] one run after another. Each run gets a fresh temporary directory: the task's base copied in and
- * committed (the core works on a git repository), the state root beside it, outside the workspace. After the attempt
+ * committed (the core works on a git repository; a task with `baseCommit: false` gets a repository without a commit),
+ * the state root beside it, outside the workspace. After the attempt
  * the hidden acceptance runs on a copy of the result. A run whose `result.json` exists is kept, so a stopped bench
  * resumes where it stopped.
  */
@@ -95,8 +105,9 @@ internal class Bench(
         val workspace = temp.resolve("workspace")
         try {
             Trees.copy(run.task.base, workspace)
-            val base = GitRepo.initWithBase(workspace)
+            val base = if (run.task.baseCommit) GitRepo.initWithBase(workspace) else GitRepo.initWithoutCommit(workspace, temp.resolve("base.index"))
             val interrupt = run.task.interrupt
+            val reopen = run.task.reopen
             val segments = ArrayList<Segment>()
             var failure: String? = null
             var totals: Totals? = null
@@ -105,16 +116,22 @@ internal class Bench(
             try {
                 val bound = models.bind(run.model)
                 binding = bound
+                val spec = plan.spec(bound.profile, temp.resolve("state"))
                 val events = Events(clock)
                 try {
                     Recorder(events, dir.resolve("events.jsonl")).use { recorder ->
                         try {
-                            val first = segment(run.task.prompt, bound, events, temp, interrupt?.afterResponses)
+                            val script = SessionScript(interrupt?.afterResponses, reopen?.afterResponses, run.task.message)
+                            val first = segment(run.task.prompt, bound, events, temp, spec, script, null)
                             segments += first
                             // WP-B2: the user's constraint arrives as the Studio delivers a message after the run stopped or ended.
                             if (interrupt != null && first.attempt != null && first.attempt.failure == null) {
                                 val request = StudioPolicy.recap(run.task.prompt, first.attempt, GitRepo.changedFiles(workspace, base)) + interrupt.constraint
-                                segments += segment(request, bound, events, temp, null)
+                                segments += segment(request, bound, events, temp, spec, SessionScript(), null)
+                            }
+                            // WP-B7: the second session opens the same work in the same state root, as the Studio's resume does.
+                            if (reopen != null && first.attempt?.closedAt != null) {
+                                segments += segment(run.task.prompt, bound, events, temp, spec, SessionScript(), WorkId(first.attempt.workId))
                             }
                         } finally {
                             recorder.drain()
@@ -151,7 +168,7 @@ internal class Bench(
                 maxCells = plan.maxCells,
                 profileId = binding?.profile?.id,
                 contextLimitTokens = binding?.profile?.capabilities?.contextLimitTokens,
-                outputHeadroomTokens = binding?.profile?.let(StudioPolicy::outputHeadroom),
+                outputHeadroomTokens = binding?.profile?.let { plan.spec(it, temp.resolve("state")).outputHeadroom(it) },
                 workId = attempt?.workId,
                 attemptFingerprint = attempt?.fingerprint,
                 shape = attempt?.shape,
@@ -177,14 +194,15 @@ internal class Bench(
                         constraint = spec.constraint,
                         mode = if (segments.size < 2) null else if (first?.interruptedAt != null) InterruptMode.CancelResume else InterruptMode.FollowUp,
                         atResponse = first?.interruptedAt,
-                        segments = segments.map { s ->
-                            SegmentResult(
-                                s.attempt?.workId, s.attempt?.outcome, s.attempt?.stopCode, s.attempt?.reason, s.failure ?: s.attempt?.failure,
-                                s.attempt?.cells, s.wallMillis, s.totals,
-                            )
-                        },
+                        segments = segments.map(::segmentResult),
                     )
                 },
+                baseCommit = run.task.baseCommit,
+                message = run.task.message?.let { m ->
+                    val first = segments.firstOrNull()?.attempt
+                    MessageResult(m.afterResponses, m.text, first?.messageAt, first?.messageContractVersion)
+                },
+                reopen = reopen?.let { spec -> ReopenResult(spec.afterResponses, segments.firstOrNull()?.attempt?.closedAt, segments.map(::segmentResult)) },
             )
             dir.resolve("result.json").writeText(Summary.encode(result))
             return result
@@ -196,16 +214,25 @@ internal class Bench(
     /** One attempt of a run: events with a sequence number in ([fromSeq], [toSeq]] are its own. */
     private data class Segment(val attempt: AttemptOutcome?, val failure: String?, val wallMillis: Long, val fromSeq: Long, val toSeq: Long, val totals: Totals? = null)
 
-    private fun segment(prompt: String, bound: ModelBinding, events: Events, temp: Path, interruptAfterResponses: Int?): Segment {
+    private fun segmentResult(s: Segment): SegmentResult = SegmentResult(
+        s.attempt?.workId, s.attempt?.outcome, s.attempt?.stopCode, s.attempt?.reason, s.failure ?: s.attempt?.failure,
+        s.attempt?.cells, s.wallMillis, s.totals, s.attempt?.openedContractVersion,
+    )
+
+    private fun segment(prompt: String, bound: ModelBinding, events: Events, temp: Path, spec: RunSpec, script: SessionScript, work: WorkId?): Segment {
         val from = events.lastSeq
         val start = nanos.asLong
         var attempt: AttemptOutcome? = null
         var failure: String? = null
         try {
             attempt = runBlocking {
-                StudioAttempt(clock, idGen, osName).run(
-                    temp.resolve("workspace"), temp.resolve("state"), prompt, bound, events, plan.effort, plan.maxCells, plan.deadline, interruptAfterResponses,
-                )
+                val attempts = StudioAttempt(clock, idGen, osName)
+                val workspace = temp.resolve("workspace")
+                if (work == null) {
+                    attempts.run(workspace, prompt, bound, events, spec, plan.deadline, script)
+                } else {
+                    attempts.run(workspace, prompt, bound, events, spec, plan.deadline, script, work)
+                }
             }
         } catch (e: Exception) {
             failure = describe(e)

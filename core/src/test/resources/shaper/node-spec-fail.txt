@@ -1,0 +1,29 @@
+▶ math
+  ✔ adds (1.1509ms)
+  ✖ subtracts (0.7353ms)
+  ▶ inner
+    ✔ deep pass (0.1965ms)
+    ﹣ skipped one (1.1898ms) # SKIP
+    ✔ todo one (0.1221ms) # TODO
+  ✔ inner (1.8812ms)
+✖ math (5.1359ms)
+✔ top level (0.1198ms)
+✔ name (with parens) (0.1228ms)
+ℹ tests 7
+ℹ suites 2
+ℹ pass 4
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 1
+ℹ duration_ms 96.5703
+
+✖ failing tests:
+
+test at a.test.js:5:3
+✖ subtracts (0.7353ms)
+  AssertionError [ERR_ASSERTION]: 1 == 2
+      at TestContext.<anonymous> (a.test.js:5:32)
+    generatedMessage: true,
+    code: 'ERR_ASSERTION'
+  }

@@ -55,11 +55,28 @@ internal data class RunResult(
      * run as a whole: outcome, stop and ids of the last segment, cells, policy decisions, wall time and totals of both.
      */
     val interrupt: InterruptResult? = null,
+    /** False when the workspace was a repository without a commit (WP-B7). */
+    val baseCommit: Boolean = true,
+    /** The user's message sent while the agent worked (WP-B7 `message`), else `null`. */
+    val message: MessageResult? = null,
+    /**
+     * The two sessions of a task with `reopen` (WP-B7), else `null`; as with [interrupt], the fields above describe the
+     * run as a whole and the outcome is the last session's.
+     */
+    val reopen: ReopenResult? = null,
 ) {
     companion object {
         const val SCHEMA: Int = 1
     }
 }
+
+/** The user's message: due after [afterResponses], delivered after [deliveredAt] responses as contract version [contractVersion]; both `null` when the run ended first. */
+@Serializable
+internal data class MessageResult(val afterResponses: Int, val text: String, val deliveredAt: Int?, val contractVersion: Int?)
+
+/** A task in two sessions: the first closed after [closedAt] responses (`null` when it ended first and no second ran), both of the same work. */
+@Serializable
+internal data class ReopenResult(val afterResponses: Int, val closedAt: Int?, val segments: List<SegmentResult>)
 
 /** How the user's constraint reached the agent: after a stop (`cancelResume`), or after the agent ended first (`followUp`). */
 @Serializable
@@ -85,7 +102,7 @@ internal data class InterruptResult(
     val segments: List<SegmentResult>,
 )
 
-/** One attempt of an interrupted run; [totals] count only its own events. */
+/** One attempt (or session) of an interrupted or reopened run; [totals] count only its own events. */
 @Serializable
 internal data class SegmentResult(
     val workId: String?,
@@ -96,6 +113,8 @@ internal data class SegmentResult(
     val cells: Int?,
     val attemptWallMillis: Long?,
     val totals: Totals?,
+    /** The contract version the segment's first open found: 1 for a new work, the stored one for a reopened work. */
+    val openedContractVersion: Int? = null,
 )
 
 /** `summary.json` (every result) and `summary.csv` (one flat row per run), rewritten after each run. */

@@ -1,5 +1,6 @@
 package io.astrolabe.evallive
 
+import io.astrolabe.RunSpec
 import io.astrolabe.id.RandomIdGen
 import io.astrolabe.provider.Effort
 import java.nio.file.Path
@@ -8,10 +9,10 @@ import java.time.Duration
 import java.time.LocalDate
 import kotlin.system.exitProcess
 
-private const val USAGE = """eval-live — the ASTROLABE headless live runner
+private val USAGE = """eval-live — the ASTROLABE headless live runner
 
   eval-live run --models <id,...> --out <dir> [--tasks <id,...|all>] [--provider openrouter] [--repeats 1] [--seed 0]
-                [--effort Low|Medium|High] [--max-cells 12] [--deadline-minutes 60] [--tasks-dir <dir>] [--python <program>]
+                [--effort Low|Medium|High] [--max-cells ${RunSpec.MAX_CELLS}] [--deadline-minutes 60] [--tasks-dir <dir>] [--python <program>]
                 [--catalog <file>] [--credentials <file>] [--temp <dir>] [--keep-workspaces]
   eval-live tasks [--tasks-dir <dir>]
   eval-live check [--tasks <id,...|all>] [--tasks-dir <dir>] [--python <program>] [--temp <dir>]
@@ -87,12 +88,13 @@ internal object Cli {
         val models = options.list("models")?.takeIf { it.isNotEmpty() } ?: throw UsageError("--models is required")
         val provider = options.get("provider") ?: "openrouter"
         val tasks = BenchTask.select(tasksDir(options), options.list("tasks") ?: listOf("all"))
-        val effort = options.get("effort")?.let { e -> Effort.entries.firstOrNull { it.name.equals(e, ignoreCase = true) } ?: throw UsageError("unknown effort '$e'") } ?: Effort.Medium
+        val named = options.get("effort")?.let { e -> Effort.entries.firstOrNull { it.name.equals(e, ignoreCase = true) } ?: throw UsageError("unknown effort '$e'") }
         val plan = BenchPlan(
             tasks = tasks, models = models, provider = provider,
             repeats = options.int("repeats", 1), seed = options.long("seed", 0), out = out,
-            temp = temp(options), effort = effort, maxCells = options.int("max-cells", StudioPolicy.MAX_CELLS),
+            temp = temp(options), effort = named ?: RunSpec.EFFORT, maxCells = options.int("max-cells", RunSpec.MAX_CELLS),
             deadline = Duration.ofMinutes(options.long("deadline-minutes", 60)), keepWorkspaces = options.flag("keep-workspaces"),
+            effortExplicit = named != null,
         )
         val interpreters = Interpreters.detect(options.get("python"))
         val catalog = options.get("catalog")?.let(Path::of) ?: out.resolve("catalog-snapshot.json")
