@@ -315,10 +315,13 @@ public object Regressions {
         val regressions = ArrayList<String>()
         val failedBefore = ArrayList<String>()
         val unknown = ArrayList<String>()
+        // P8.C.15: an identity a red run reported more than once may name another test too (one name in two files): the
+        // failing one removed, a pass of the other is no fix.
+        val repeated = reds.flatMapTo(HashSet()) { it.tests?.ambiguous.orEmpty() }
         for ((key, earlier) in failures) {
             val (failure, red) = earlier
             // P8.C.10 1: shown fixed — reported once, passed, by a finished eligible run on this tree, failing in none there.
-            if (failingNow[key] == null && finishedNow.any { passedOnce(it, key) }) continue
+            if (key !in repeated && failingNow[key] == null && finishedNow.any { passedOnce(it, key) }) continue
             val eligible = failingEligible[key]
             val source = eligible?.second ?: failingNow[key]?.second ?: red
             from += source
@@ -328,7 +331,7 @@ public object Regressions {
                 s0 != null && s0.failed.any { it.key == key } -> failedBefore += "failed before the change too: ${failure.name}"
                 eligible != null && key !in eligible.second.tests!!.ambiguous && usable != null && passedOnce(usable, key) ->
                     regressions += "${failure.name} — ${failure.signature} (passed on s0 in baseline ${usable.receiptId})"
-                else -> unknown += "${failure.name}: " + why(key, eligible, failingNow[key], red, fresh, finishedNow, baseline, s0)
+                else -> unknown += "${failure.name}: " + why(key, eligible, failingNow[key], red, fresh, finishedNow, baseline, s0, key in repeated)
             }
         }
         // Failures a run counted but did not identify (or cut from its record) stay: nothing shows them fixed one by one —
@@ -348,7 +351,7 @@ public object Regressions {
     /** Why a held failure is unknown: what is missing of the evidence a fix or a regression would need. */
     private fun why(
         key: String, eligible: Pair<FailedTest, Receipt>?, any: Pair<FailedTest, Receipt>?, red: Receipt, fresh: List<Receipt>, finishedNow: List<Receipt>,
-        baseline: Receipt?, s0: TestOutcomes?,
+        baseline: Receipt?, s0: TestOutcomes?, repeated: Boolean,
     ): String = when {
         any != null && eligible == null -> "failed on this tree only in a run that cannot certify it"
         eligible != null && key in eligible.second.tests!!.ambiguous -> "reported more than once on this tree: ambiguous"
@@ -361,6 +364,7 @@ public object Regressions {
         finishedNow.isEmpty() && fresh.any { it.testedInputs.eligible && it.tests?.truncated == true && (it.outcome == Outcome.Passed || it.outcome == Outcome.Failed) } ->
             "failed in ${red.receiptId}; the run on this tree passed more tests than the record keeps ($MAX_PASSED)"
         finishedNow.isEmpty() -> "failed in ${red.receiptId}; the run on this tree did not finish with a complete record"
+        repeated && finishedNow.any { key in it.tests!!.passed } -> "failed in ${red.receiptId}; a red run reported it more than once: ambiguous, a pass on this tree shows no fix"
         finishedNow.any { key in it.tests!!.passed } -> "failed in ${red.receiptId}; reported more than once on this tree: ambiguous"
         finishedNow.all { it.tests!!.passed.isEmpty() && (it.parsed?.passed ?: 0) > 0 } -> "failed in ${red.receiptId}; the runner lists no passed tests"
         else -> "failed in ${red.receiptId}, not executed on this tree (removed, skipped or renamed)"
@@ -430,6 +434,10 @@ public class Baseline(
 
     /** C3r: the whole seconds of active time a minutes limit leaves, read just before the process starts; `null` without one. */
     internal var timeLeft: () -> Long? = { null }
+
+    /** Where the check's `gradle` is looked up to name why it cannot run (P8.C.15). */
+    internal var hostProbe: io.astrolabe.atlas.HostProbe = io.astrolabe.atlas.HostProbe.system()
+
     public suspend fun run(check: Check, contractVersion: Int, s0: CandidateId, timeoutSeconds: Long = 600): BaselineResult {
         require(timeoutSeconds > 0) { "timeoutSeconds must be positive" }
         val command = requireNotNull(check.command) { "check ${check.id} declares no command" }
@@ -462,12 +470,15 @@ public class Baseline(
             return BaselineResult(receipt, null, dir, materialized)
         }
         val deadline = if (left == null) timeoutSeconds else minOf(timeoutSeconds, left)
+        // P8.C.15: `gradle` off PATH runs through the candidate's own wrapper, as the check does in the workspace.
+        val missing = GradleWrapper.missing(command.argv, dir, cwd, hostProbe)
         val spec = SpawnSpec(Command.Argv(command.argv), cwd, logsDir.resolve("baseline-${check.id}-$actionId.log"), EnvPolicy(inheritedNames = envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")), deadline)
         var proc = try {
             beforeDispatch()
             runner.start(spec)
         } catch (failure: IOException) {
-            limits += Limit("runner", "cannot start ${command.argv.first()}: ${failure.message}")
+            missing?.let { limits += Limit(Scheduler.UNAVAILABLE, it) }
+            limits += Limit(Scheduler.UNAVAILABLE, "cannot start ${command.argv.first()}: ${failure.message}")
             val receipt = receipt(receiptId, check, contractVersion, s0, command.argv, command.cwd, null, Outcome.Unavailable, null, TestedInputs(inputs, InputStability.Isolated), null, limits)
             return BaselineResult(receipt, null, dir, materialized)
         }
@@ -500,6 +511,7 @@ public class Baseline(
             shaped.status == Outcome.Passed && (shaped.counts == null || (shaped.counts.executed == 0 && shaped.counts.discovered == 0)) -> Outcome.Inconclusive
             else -> shaped.status
         }
+        if (missing != null && outcome == Outcome.Unavailable) limits += Limit(Scheduler.UNAVAILABLE, missing)
         val tests = Regressions.outcomes(shaped.tests, { redaction.apply(it, ContentClass.ReusableEvidence).text }, complete = capture.captureComplete && !shaped.captureTruncated && !shaped.evidenceIncomplete, cwd = command.cwd)
         val receipt = receipt(receiptId, check, contractVersion, s0, command.argv, command.cwd, capture.exitCode, outcome, shaped.counts, TestedInputs(inputs, InputStability.Isolated, mutated), blob, limits, tests)
         val ledger = if (receipt.testedInputs.eligible && (outcome == Outcome.Passed || outcome == Outcome.Failed || outcome == Outcome.Inconclusive)) {
