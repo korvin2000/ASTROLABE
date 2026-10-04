@@ -4,6 +4,7 @@ import io.astrolabe.event.AgentEvent
 import io.astrolabe.event.EventRecord
 import io.astrolabe.event.Events
 import io.astrolabe.event.Subscription
+import io.astrolabe.provider.Billing
 import io.astrolabe.provider.BillingDimension
 import io.astrolabe.provider.Money
 import io.astrolabe.provider.PriceTable
@@ -73,8 +74,11 @@ internal data class Quantity(val sum: String, val known: Int, val calls: Int)
 /**
  * What one run's events add up to. Every dispatched model call ends in one `ModelResponded` — answered, failed or
  * cancelled — so its usage counts here; [modelFailures] counts the failed ones. A quantity no response reported is
- * `null`, never 0: a dimension counts only when every response reported it. [cost] prices the usage with the
- * profile's table and is `null` when any part is unknown or unpriced; [costPricedPart] is what could be priced.
+ * `null`, never 0: a dimension counts only when every response reported it. [cost] prices each call's usage with the
+ * table of the profile its `ModelRequested` named (B5) and is `null` when any part is unknown or unpriced;
+ * [costPricedPart] is what could be priced. [costBasis] is how the calls were charged — `paid` (per token), `nominal`
+ * (a plan-billed model at its official price, C16), `unpriced` (plan-billed without a price), `unknown` (no table for
+ * the call's profile), `mixed` when calls differ, `null` without calls; [profiles] counts the responses per profile.
  * [responded] aggregates every other numeric field of `ModelResponded` as a [Quantity], so fields the events gain later
  * are aggregated without a change and a partial sum is never mistaken for a whole one. A price tier is a threshold, not
  * a quantity: [priceTiers] counts the responses per tier threshold (`none` when a response named none).
@@ -99,12 +103,25 @@ internal data class Totals(
     val stops: Map<String, Int>,
     val responded: Map<String, Quantity>,
     val priceTiers: Map<String, Int>,
+    val costBasis: String? = null,
+    val profiles: Map<String, Int> = emptyMap(),
 ) {
     companion object {
         /** Fields of `ModelResponded` read above or that are identities, not quantities. */
         private val KNOWN = setOf("type", "ids", "invocationId", "stop", "usage", "phase", "span", "parent", "failure")
 
-        fun of(events: List<AgentEvent>, prices: PriceTable): Totals {
+        /** Prices every call with [prices], whatever its profile: the totals of a run on one table. */
+        fun of(events: List<AgentEvent>, prices: PriceTable): Totals = of(events, prices.currency) { prices }
+
+        /**
+         * Prices every call with the table of the profile its `ModelRequested` named, from [tables] by profile id, in
+         * [currency] (B5). A call whose request, profile or currency is not known is priced unknown, never at another
+         * profile's prices.
+         */
+        fun of(events: List<AgentEvent>, tables: Map<String, PriceTable>, currency: String): Totals = of(events, currency) { id -> id?.let(tables::get) }
+
+        private fun of(events: List<AgentEvent>, currency: String, table: (String?) -> PriceTable?): Totals {
+            val requested = events.filterIsInstance<AgentEvent.Cell.ModelRequested>().associate { it.invocationId to it.profileId }
             val responded = events.filterIsInstance<AgentEvent.Cell.ModelResponded>()
             val usages = responded.map { it.usage }
             val facts = facts(responded)
@@ -113,9 +130,12 @@ internal data class Totals(
                 return usages.sumOf { u -> u!!.quantities.filterKeys(match).values.sum() }
             }
             var priced: Money? = null
-            for (usage in usages) {
-                val money = usage?.price(prices) ?: Money.unknown(prices.currency)
+            val bases = LinkedHashSet<String>()
+            for (event in responded) {
+                val prices = table(requested[event.invocationId])?.takeIf { it.currency == currency }
+                val money = prices?.let { event.usage?.price(it) } ?: Money.unknown(currency)
                 priced = priced?.plus(money) ?: money
+                bases += basis(prices)
             }
             val spanCosts = events.filterIsInstance<AgentEvent.Telemetry.SpanEnded>().mapNotNull { it.cost }
             val spanTotal = spanCosts.map { BigDecimal(it.substringAfter(' ')) }.takeIf { it.isNotEmpty() }?.reduce(BigDecimal::add)
@@ -130,7 +150,7 @@ internal data class Totals(
                 cacheReadTokens = dimension { it == BillingDimension.CACHE_READ },
                 cacheWriteTokens = dimension { it.isCacheWrite },
                 outputTokens = dimension { it == BillingDimension.OUTPUT },
-                currency = prices.currency,
+                currency = currency,
                 cost = priced?.takeIf { !it.unknown }?.amount?.toPlainString(),
                 costPricedPart = priced?.amount?.toPlainString(),
                 spanCost = spanTotal?.toPlainString(),
@@ -138,7 +158,20 @@ internal data class Totals(
                 stops = responded.groupingBy { it.stop.name }.eachCount(),
                 responded = extra(facts),
                 priceTiers = tiers(facts),
+                costBasis = bases.singleOrNull() ?: if (bases.isEmpty()) null else MIXED,
+                profiles = responded.groupingBy { requested[it.invocationId] ?: UNKNOWN }.eachCount().toSortedMap(),
             )
+        }
+
+        /**
+         * How a call priced by [table] is charged, in C16's words: per token `paid`; plan-billed at a stated price
+         * `nominal`, without one `unpriced`; no table `unknown`.
+         */
+        fun basis(table: PriceTable?): String = when {
+            table == null -> UNKNOWN
+            table.billing == Billing.PerToken -> "paid"
+            table.perMillion.isEmpty() -> "unpriced"
+            else -> "nominal"
         }
 
         /** The numeric fields of every response, by path; a response that did not report a path has no entry for it. */
@@ -174,6 +207,12 @@ internal data class Totals(
 
         /** The [Totals.priceTiers] bucket of a response that named no price tier: base prices, no prices, or no facts. */
         const val NO_TIER: String = "none"
+
+        /** [Totals.costBasis] of calls charged in different ways. */
+        const val MIXED: String = "mixed"
+
+        /** A call whose profile or price table is not known. */
+        const val UNKNOWN: String = "unknown"
 
         private val DECIMAL = Regex("""-?\d+(\.\d+)?""")
     }
