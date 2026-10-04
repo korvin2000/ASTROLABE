@@ -1038,6 +1038,52 @@ class CellTest {
 
     /** The recorded failure (diags W-wzzpswxif6dzrqdxkoiq): one response with hundreds of repeated calls became hundreds of units in `[T]`. */
     @Test
+    fun `the run results of one turn share an output budget that cuts only their shown text, in both protocols`() = runTest {
+        val files = CellFixture.DEFAULT_FILES + (1..4).associate { n -> "long$n.txt" to (1..120).joinToString("\n", postfix = "\n") { "f$n output line $it of the long fixture" } }
+        val printing = { n: Int -> if (WINDOWS) Command(listOf("cmd.exe", "/d", "/s", "/c", "type long$n.txt")) else Command(listOf("/bin/sh", "-c", "cat long$n.txt")) }
+        val printCall = { id: String, n: Int -> call(id, "run", """{"argv":[${printing(n).argv.joinToString(",") { CellFixture.quote(it) }}]}""") }
+        fun body(text: String): String =
+            text.lines().drop(1).takeWhile { !it.startsWith(io.astrolabe.auth.Boundary.RESULT_OPEN + "/result") }.joinToString("\n") { it.removePrefix("  ") }
+        class Seen(val results: Map<String, String>, val receipts: List<Pair<Outcome, io.astrolabe.evidence.Counts?>>, val recalled: Map<String, String>)
+        suspend fun cell(root: String, role: Role, budget: Int): Seen = CellFixture(stateRoot.resolve(root), defaults = Defaults(runBudgetTokens = 500, runTurnBudgetTokens = budget), files = files).use { f ->
+            f.checks.register(Check("CHK-long", CheckKind.Unit, Selector.Named(printing(1)), Closure.Known(setOf("src/a.py")), CostClass.Fast, Trigger.StepBoundary, command = printing(1)))
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("one print"), printCall("r4", 4))),
+                Scripted.Reply(listOf(say("three prints"), printCall("r1", 1), printCall("r2", 2), printCall("r3", 3))),
+                Scripted.Reply(listOf(call("b1", "state", """{"op":"blocked","blocked":{"reason":"stop here"}}"""))),
+            )
+            assertIs<CellExit.Blocked>(f.run(model, role = role))
+            // Each fixture's repository has its own commit, so the candidate stamp is the one byte run that differs between them.
+            val results = f.transcript(3).filterIsInstance<ToolResult>().associate { it.callId to resultText(it).replace(Regex("stamp=[0-9a-f]+"), "stamp=*") }
+            val recalled = listOf("r1", "r2", "r3").associateWith { id ->
+                val alias = Regex("""result (#\d+) tool=run""").find(results.getValue(id))!!.groupValues[1]
+                val recall = (io.astrolabe.tool.ToolCalls.parse(listOf(call("x-$id", "look", """{"what":"recall","id":"$alias"}"""))) as io.astrolabe.tool.ParsedCalls.Valid).calls.single()
+                f.look.execute(recall, io.astrolabe.tool.TurnContext(9, f.workset.snapshot(), io.astrolabe.budget.Reservations(io.astrolabe.budget.Tokens(100_000)))).body
+            }
+            Seen(results, f.receipts.forCheck("CHK-long").map { it.outcome to it.parsed }, recalled)
+        }
+        val estimator = io.astrolabe.budget.HeuristicEstimator()
+        for (role in listOf(Roles.implementing, Roles.direct)) {
+            val whole = cell("${role.name}-whole", role, Int.MAX_VALUE)
+            val cut = cell("${role.name}-cut", role, 1_500)
+
+            assertEquals(whole.results.getValue("r4"), cut.results.getValue("r4"), "${role.name}: a turn within the budget keeps its bytes")
+            assertTrue(listOf("r1", "r2", "r3").sumOf { estimator.estimate(body(whole.results.getValue(it))).tokens } > 1_500, "the fixture passes the budget")
+            assertTrue(listOf("r1", "r2", "r3").sumOf { estimator.estimate(body(cut.results.getValue(it))).tokens } <= 1_500, "${role.name}: " + cut.results)
+            for (id in listOf("r1", "r2", "r3")) {
+                val shown = cut.results.getValue(id)
+                assertEquals(whole.results.getValue(id).lines().first(), shown.lines().first(), "${role.name}: the header is the executor's")
+                val alias = Regex("""result (#\d+) tool=run""").find(shown)!!.groupValues[1]
+                assertTrue(body(shown).lines().first().startsWith("run $alias "), shown)
+                assertTrue(shown.contains("passed their output budget of 1500 tokens; full output: look(recall, id=$alias)"), shown)
+                val n = id.removePrefix("r")
+                assertTrue(cut.recalled.getValue(id).contains("f$n output line 120 of the long fixture"), cut.recalled.getValue(id))
+            }
+            assertEquals(whole.receipts, cut.receipts, "${role.name}: receipts and outcomes do not depend on what the transcript shows")
+        }
+    }
+
+    @Test
     fun `a response that repeats a call is cut at the third repeat, the dropped calls never enter the transcript, and the next anchor says so`() = runTest {
         CellFixture(stateRoot).use { f ->
             val runaway = listOf<io.astrolabe.provider.Item>(say("looping")) + (1..40).map { tree("t$it") }
