@@ -258,6 +258,44 @@ class BaselineTest {
         assertNull(Regressions.baselineDue(listOf(now), listOf(begun), stampA))
     }
 
+    /** A blast receipt of a recorded `node --test` output, its tests read one by one as the shaper reads them (P8.C.15). */
+    private fun nodeRun(output: String, exit: Int?, stamp: io.astrolabe.id.CandidateId, s0: Boolean = false): io.astrolabe.evidence.Receipt {
+        val shaped = io.astrolabe.tool.run.Shapers.shape(io.astrolabe.tool.run.RunCapture("act-node", listOf("node", "--test"), exitCode = exit, output = output.toByteArray(), checkId = Checks.TESTS_BLAST))
+        return blast(shaped.status, stamp, command = listOf("node", "--test"), s0 = s0, counts = shaped.counts ?: Counts())
+            .copy(parsed = shaped.counts, tests = Regressions.outcomes(shaped.tests, { it }, complete = !shaped.evidenceIncomplete))
+    }
+
+    private fun node(name: String) = javaClass.getResourceAsStream("/shaper/$name")!!.use { String(it.readAllBytes(), Charsets.UTF_8) }
+
+    @Test
+    fun `a failed node test run is held test by test as fixed, new or failed before, and a cut one shows nothing fixed`() {
+        val specRed = node("node-spec-fail.txt")
+        val specGreen = specRed.substringBefore("\n✖ failing tests:").replace("✖ subtracts", "✔ subtracts").replace("✖ math", "✔ math")
+            .replace("ℹ pass 4", "ℹ pass 5").replace("ℹ fail 1", "ℹ fail 0")
+        val red = nodeRun(specRed, 1, stampA)
+        assertEquals(Outcome.Failed, red.outcome)
+        assertEquals(listOf("math::subtracts"), red.tests!!.failed.map { it.name })
+        // New: s0 passed it once; failed before: s0 failed it too; fixed: a finished run on the next tree passed it.
+        val regression = assertNotNull(hold(listOf(red), stampA, nodeRun(specGreen, 0, stampA, s0 = true)))
+        assertEquals(RedClass.New to emptyList<String>(), regression.kind to regression.unknown)
+        assertTrue(regression.regressions.single().startsWith("math::subtracts"), regression.toString())
+        assertEquals(RedClass.FailedBefore, hold(listOf(red), stampA, nodeRun(specRed, 1, stampA, s0 = true))?.kind)
+        assertNull(hold(listOf(red, nodeRun(specGreen, 0, stampB)), stampB))
+
+        val tapRed = node("node-tap-fail.txt")
+        val tapGreen = tapRed.replace("not ok", "ok").replace("# pass 7", "# pass 11").replace("# fail 4", "# fail 0")
+        val tap = assertNotNull(hold(listOf(nodeRun(tapRed, 1, stampA)), stampA, nodeRun(tapGreen, 0, stampA, s0 = true)))
+        assertEquals(RedClass.New to emptyList<String>(), tap.kind to tap.unknown)
+        assertEquals(4, tap.regressions.size, tap.toString())
+        assertNull(hold(listOf(nodeRun(tapRed, 1, stampA), nodeRun(tapGreen, 0, stampB)), stampB))
+
+        // Cut before its summary, a run that read the test as passed is no complete record: the failure stays held.
+        val cut = nodeRun(specGreen.substringBefore("ℹ tests"), 0, stampB)
+        assertTrue(cut.tests!!.incomplete)
+        val held = assertNotNull(hold(listOf(red, cut), stampB))
+        assertTrue(held.unknown.single().contains("did not finish with a complete record"), held.toString())
+    }
+
     @Test
     fun `round 4 - a key is bound to the run's directory, a typecheck is its own trace, and an unlisting runner says so`() {
         // 3: one-named tests of two packages: a pass in pkgP never clears a failure in pkgA.
