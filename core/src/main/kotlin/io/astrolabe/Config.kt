@@ -90,7 +90,8 @@ public data class Config(
     /**
      * Kernel contract A-D.1: the protocol of the main line, an optional layer — `Structured` (Appendix A) unless the host
      * chooses `Direct`. Frozen with the attempt; every shape accepts either value and no shape chooses it
-     * ([Roles.mainLine]). The default is not encoded, so a structured attempt keeps its fingerprint.
+     * ([Roles.mainLine]). The default is not encoded, so the field itself adds no bytes to a structured configuration; the
+     * attempt fingerprint still differs from one frozen before the direct role, which `Roles.defaults` now lists.
      */
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
