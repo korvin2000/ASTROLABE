@@ -20,6 +20,7 @@ class DefaultsTest {
         "Workset seeds per cell / KB injection / focus notes / focus zoom" to
             listOf("seedsMaxTokens", "seedRule", "injectionMaxNotes", "injectionMaxTokens", "focusNotesMaxTokens", "focusZoomMaxTokens"),
         "Touched ledger in [A]" to listOf("touchedInAnchor"),
+        "Direct [A] journal: Runs / Notes / target" to listOf("directRunsMaxLines", "directNotesMaxTokens", "directAnchorTargetTokens"),
         "Checker time box" to listOf("checkerTimeBoxSeconds", "checkerFallbackTimeBoxSeconds"),
         "θ risk threshold for early slow checks" to listOf("theta"),
         "Full-suite cadence" to listOf("fullSuiteCadence"),
@@ -50,7 +51,7 @@ class DefaultsTest {
         assertTrue(missing.isEmpty(), "rows name fields that do not exist: $missing")
         val unowned = fields - mapped.toSet()
         assertTrue(unowned.isEmpty(), "fields without a §17 row: $unowned")
-        assertEquals(25, table.size)
+        assertEquals(26, table.size)
     }
 
     @Test
@@ -88,6 +89,7 @@ class DefaultsTest {
         assertEquals(60, d.providerTerminalWaitSeconds)
         assertEquals(3, d.attemptsPerIncrement)
         assertEquals(600, d.factLineMaxChars)
+        assertEquals(Triple(5, 200, 800), Triple(d.directRunsMaxLines, d.directNotesMaxTokens, d.directAnchorTargetTokens))
         assertTrue(d.violations().isEmpty())
     }
 

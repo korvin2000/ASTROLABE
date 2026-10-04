@@ -275,6 +275,9 @@ class GatesTest {
         val cap = gates.evaluate(state(2).copy(patchRejection = Validation.Rejected("patch cap", "patch is 500 tokens > 400", sizes))).rejections.single()
         assertEquals("register: patch rejected — patch cap: patch is 500 tokens > 400", cap.line)
         assertEquals(emptyList(), gates.evaluate(state(2)).outcomes, "an applied patch is not a gate")
+        // G6: a direct cell's refusal names the note; the key is the same.
+        val note = gates.evaluate(state(2).copy(protocol = Protocol.Direct, patchRejection = Validation.Rejected("unknown open item", "open.close(4)", sizes))).rejections.single()
+        assertEquals("register: note rejected — unknown open item: open.close(4)", note.line)
     }
 
     @Test

@@ -122,7 +122,7 @@ public data class Fingerprint(
             ).hex,
             registerVersion = registerVersion,
             carry = inputs.carry?.let { carry ->
-                Digest.ofUtf8(carry.render() + "\u0000" + inputs.seeds?.shown.orEmpty().joinToString("\u0000") { "${it.path}:${it.range}@${it.version.digest.hex}" }).hex
+                Digest.ofUtf8(carry.render(role.protocol) + "\u0000" + inputs.seeds?.shown.orEmpty().joinToString("\u0000") { "${it.path}:${it.range}@${it.version.digest.hex}" }).hex
             },
             notes = inputs.notes.map { "${it.id}@${it.status.wire}:${Digest.ofUtf8(it.summary + "\n" + it.body).hex}" }.sorted(),
             contractsIndex = inputs.contractsIndex?.let { Digest.ofUtf8(it).hex },

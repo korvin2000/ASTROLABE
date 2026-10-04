@@ -550,7 +550,9 @@ public class Gates(gates: List<Gate>) {
                 "red not recorded" -> RED_NOT_RECORDED
                 else -> REGISTER
             }
-            return listOf(GateOutcome.Rejection(GateKey(name, "v${state.register.version}:${rejected.rule}"), "$gate: patch rejected — ${rejected.rule}: ${rejected.detail}"))
+            // G6: a direct cell's register changes only through notes.
+            val what = if (state.protocol == Protocol.Direct) "note" else "patch"
+            return listOf(GateOutcome.Rejection(GateKey(name, "v${state.register.version}:${rejected.rule}"), "$gate: $what rejected — ${rejected.rule}: ${rejected.detail}"))
         }
     }
 

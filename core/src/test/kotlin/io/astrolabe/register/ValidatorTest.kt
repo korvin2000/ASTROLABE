@@ -221,4 +221,63 @@ class ValidatorTest {
         val result = assertIs<Validation.Applied>(validator.check(ready, Patch.of(Op.Next("edit handlers now")), Ctx()))
         assertTrue(result.flags.any { it.contains("h fact 1") }, result.flags.toString())
     }
+
+    private fun direct(cap: Int) = Validator(HeuristicEstimator(), registerCapTokens = cap, protocol = io.astrolabe.cell.Protocol.Direct)
+
+    private fun tokens(r: Register) = RegisterRender.tokens(r, HeuristicEstimator()).toInt()
+
+    @Test
+    fun `a direct register archives before the cap in the fixed order and never reuses a number`() {
+        val r = base.copy(
+            version = 4,
+            facts = listOf(Fact(1, ClaimKind.Refuted, "the cache is stale, the refund path rounds twice and the key is ignored", refutedBy = "#12"), Fact(2, ClaimKind.Hypothesis, "rounding happens in total()")),
+            open = listOf(OpenItem(1, "which caller passes ctx?"), OpenItem(2, "is the refund path in scope?", closed = true, closedEvidence = "#17")),
+            amendments = listOf(AmendmentLine("drop the retry path", "stated in the change", status = "rejected")),
+        )
+        val note = Patch.of(Op.OpenAdd("does the CLI build handlers?"))
+        val full = r.copy(version = 5, open = r.open + OpenItem(3, "does the CLI build handlers?"))
+        val afterRefuted = full.copy(facts = full.facts.drop(1))
+        assertTrue(tokens(afterRefuted) < tokens(full))
+
+        val fitted = assertIs<Validation.Applied>(direct(tokens(afterRefuted)).check(r, note, Ctx()))
+        assertEquals(listOf(2), fitted.register.archive.open.map { it.n }, "closed items go first")
+        assertEquals(listOf(1), fitted.register.archive.facts.map { it.n }, "then refuted facts, until the note fits")
+        assertTrue(fitted.register.archive.amendments.isEmpty() && fitted.register.amendments.size == 1, "nothing beyond what fits is archived")
+        assertEquals(listOf(1, 3), fitted.register.open.map { it.n })
+        assertTrue(fitted.notes.any { it.startsWith("archived o2 x1") }, fitted.notes.toString())
+        assertEquals(full.copy(archive = RegisterArchive()), fitted.register.restored(), "archiving moves notes, it changes none")
+
+        val again = applied(direct(3_000).check(fitted.register.copy(open = fitted.register.open.filter { it.n == 1 }), note, Ctx()))
+        assertEquals(3, again.open.last().n, "o2 is archived: the new item is 3, not 2")
+        val factNumber = applied(direct(3_000).check(fitted.register.copy(facts = emptyList()), Patch.of(Op.FactAdd(ClaimKind.Hypothesis, "x")), Ctx()))
+        assertEquals(2, factNumber.facts.single().n, "x1 is archived: the new fact is 2, not 1")
+
+        val afterAll = afterRefuted.copy(amendments = emptyList())
+        val last = applied(direct(tokens(afterAll)).check(r, note, Ctx()))
+        assertEquals(listOf(ArchivedAmendment(1, r.amendments.single())), last.archive.amendments, "decided amendments go last, keeping their position")
+        val tight = direct(tokens(afterAll) - 1).check(r, note, Ctx())
+        val refusal = assertIs<Validation.Rejected>(tight)
+        assertEquals("register cap", refusal.rule)
+        assertTrue(refusal.detail.endsWith("tokens of active notes after archiving; retire notes first: closes: n ends an open note, refutes: n refutes a hypothesis"), refusal.detail)
+    }
+
+    @Test
+    fun `closes and refutes at a full register are judged after the note and the archive order`() {
+        val r = base.copy(
+            version = 2,
+            facts = listOf(Fact(1, ClaimKind.Hypothesis, "the cache is stale")),
+            open = listOf(OpenItem(1, "which caller passes ctx into the handlers of the CLI path?")),
+        )
+        val close = Patch.of(Op.OpenClose(1, "#12"))
+        val closedTokens = tokens(r.copy(version = 3, open = r.open.map { it.copy(closed = true, closedEvidence = "#12") }))
+        assertTrue(closedTokens < tokens(r), "a close frees room")
+        assertTrue(applied(direct(closedTokens).check(r, close, Ctx())).openItem(1)!!.closed, "accepted at a register that was over the cap")
+
+        val refute = Patch.of(Op.FactRefute(1, "#12"), Op.DeadendAdd("clearing the cache", "#12", "task", "new evidence"))
+        val withDeadEnd = r.copy(version = 3, facts = emptyList(), deadEnds = listOf(DeadEnd(1, "clearing the cache", "#12", "task", "new evidence")))
+        val accepted = applied(direct(tokens(withDeadEnd)).check(r, refute, Ctx()))
+        assertEquals(listOf(1), accepted.archive.facts.map { it.n }, "the refuted fact is archived to make room")
+        assertEquals(1, accepted.deadEnds.size)
+        assertEquals("register cap", rejected(direct(tokens(withDeadEnd) - 1).check(r, refute, Ctx())), "a refutation that leaves the register over the cap is refused")
+    }
 }

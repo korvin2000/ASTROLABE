@@ -1,6 +1,7 @@
 package io.astrolabe.context
 
 import io.astrolabe.cell.CompiledK
+import io.astrolabe.cell.Protocol
 import io.astrolabe.cell.Role
 import io.astrolabe.cell.Transcript
 import io.astrolabe.id.Digest
@@ -12,6 +13,7 @@ import io.astrolabe.provider.Role as ItemRole
 import io.astrolabe.provider.ToolCall
 import io.astrolabe.provider.ToolResult
 import io.astrolabe.provider.UsageItem
+import io.astrolabe.register.NotesRender
 import io.astrolabe.register.RegisterRender
 
 /** The five uses of the one rebuild mechanism (§5.8). */
@@ -129,7 +131,9 @@ public object Rebuild {
         } else {
             ""
         }
-        val anchor = digest.trimEnd() + "\n" + deadEnds + RegisterRender.markdown(carry.register) + carry.known
+        // A-D.7 A3: a direct line's notes, never the STATE block.
+        val notes = if (role.protocol == Protocol.Direct) NotesRender.text(carry.register) else RegisterRender.markdown(carry.register)
+        val anchor = digest.trimEnd() + "\n" + deadEnds + notes + carry.known
         val next = Projection(
             generation = current.generation + 1,
             role = role,

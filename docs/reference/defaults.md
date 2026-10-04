@@ -28,6 +28,7 @@ All numbers are declared defaults for the first evaluation round, not derived op
 | Fact line / note body / note summary | ≤ 600 chars (D-370) / ≤ 120 tokens / ≤ 200 chars | no code in facts |
 | Workset seeds per cell / KB injection / focus notes / focus zoom | ≤ 4K / ≤ 8 notes 1.5K (CON uncapped) / ≤ 300 / ≤ 300 tokens | |
 | Touched ledger in `[A]` | ≤ 10 files | rest via recall |
+| Direct `[A]` journal: Runs / Notes / target | ≤ 5 lines / ≤ 200 tokens / 800 tokens (`directRunsMaxLines`, `directNotesMaxTokens`, `directAnchorTargetTokens`; P8.D.2) | direct protocol only ([§5.10-D](rendered-turn.md#sec-5-10-direct)); over the target, Runs keeps live handles and red receipts, then Notes halve; the hard cap stays `[A]` max |
 | Checker time box | 20 s; 120 s for a touched-selector check that fell back to project-wide scope (D-322) | deferred ⇒ `not_run`; started then timed out ⇒ `timeout`; scheduled at step boundary |
 | `θ` risk threshold for early slow checks | 40 | `Σ Δlines·(1+log2(1+fanin))` `[C1 §6]` |
 | Full-suite cadence | every 5 verified increments and at campaign end | |

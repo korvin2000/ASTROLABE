@@ -1,9 +1,11 @@
 package io.astrolabe.context
 
+import io.astrolabe.cell.Protocol
 import io.astrolabe.cell.ResultPacket
 import io.astrolabe.evidence.ClaimKind
 import io.astrolabe.evidence.Receipt
 import io.astrolabe.id.FileVersion
+import io.astrolabe.register.NotesRender
 import io.astrolabe.register.Register
 import io.astrolabe.workset.Entry
 import io.astrolabe.workspace.Ranges
@@ -44,13 +46,24 @@ public data class Carry(
         get() = "KNOWN: seeds only (${seeds.size}) · NOT SEEN: everything else" + notSeen.joinToString("") { "; ${it.text}" }
 
     /** The `[K]` carry-forward block: deterministic, verbatim records only. */
-    public fun render(): String = buildString {
+    public fun render(): String = render(Protocol.Structured)
+
+    /**
+     * The `[K]` carry-forward block in [protocol]'s terms. A-D.7 A4: a direct line carries the whole active register with
+     * ids — every note `look(recall, id="notes")` lists — instead of the structured selection without ids.
+     */
+    public fun render(protocol: Protocol): String = buildString {
         append("CARRY-FORWARD from ").append(register.cell.value).append(" (STATE v").append(register.version).append(")\n")
         if (pinned.isNotEmpty()) {
             append("Pinned user messages:\n")
             pinned.forEach { append("  - ").append(it).append('\n') }
         }
         packetLine?.let { append("Previous packet: ").append(it).append('\n') }
+        if (protocol == Protocol.Direct) {
+            append(NotesRender.carry(register))
+            tail()
+            return@buildString
+        }
         val refuted = register.facts.filter { it.kind == ClaimKind.Refuted }
         if (refuted.isNotEmpty()) {
             append("Refuted:\n")
@@ -76,6 +89,10 @@ public data class Carry(
             append("Amendments proposed:\n")
             register.amendments.forEach { append("  - ").append(it.change).append(" (").append(it.status).append(")\n") }
         }
+        tail()
+    }
+
+    private fun StringBuilder.tail() {
         if (receipts.isNotEmpty()) append("Verification: ").append(receipts.joinToString(" · ") { "${it.checkId} ${it.receiptId} (${it.validity})" }).append('\n')
         if (touched.isNotEmpty()) append("Touched: ").append(touched.joinToString(" · ") { "${it.path}@${it.version?.hash8 ?: "gone"}" }).append('\n')
         append(known)

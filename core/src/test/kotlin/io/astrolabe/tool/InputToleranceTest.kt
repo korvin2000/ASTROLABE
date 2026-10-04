@@ -31,6 +31,9 @@ class InputToleranceTest {
         assertTrue(refusal("state", """{"patch":[{"next":"go"}],"blocked":{"reason":"r"}}""").contains("op"))
         assertTrue(refusal("state", """{}""").contains("'op'"))
         assertEquals("patch", state("""{"op":"patch","patch":[{"next":"go"}],"blocked":{"reason":"r"}}""").op)
+        // A-D.4: `note` names the op only alone; beside a structured form the form is inferred as before D2
+        assertEquals("patch", state("""{"patch":[{"next":"go"}],"note":{"kind":"open","text":"x"}}""").op)
+        assertEquals("note", state("""{"note":{"kind":"open","text":"x"}}""").op)
     }
 
     @Test

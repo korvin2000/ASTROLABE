@@ -173,6 +173,11 @@ internal class CellFixture(
     val recorder = EventRecorder().also { events.subscribe(it) }
 
     val state = StateTool(Validator(estimator), registerVersions, journal, estimator, idGen, ids, clock, Register.empty(ids.context!!, increment.id, increment.title), events)
+
+    /** A direct role's state tool: its validator speaks the role's protocol, as the controller builds it (A-D.7 V3). */
+    val directState by lazy {
+        StateTool(Validator(estimator, protocol = Protocol.Direct), registerVersions, journal, estimator, idGen, ids, clock, Register.empty(ids.context!!, increment.id, increment.title), events)
+    }
     val look = Look(workspace, registry, workset, atlas, Searches.jvm(), journal, observations, aliases, store.blobs, Redaction(), estimator, idGen, ids)
     val edit = Edit(
         workspace, registry, workset, os, preimages, ScopeGuard(workspace), contracts, checks, observations, aliases, store.blobs, Redaction(), estimator, idGen, ids, SyntaxCheck { _, _, _ -> SyntaxResult.Ok },
@@ -196,7 +201,7 @@ internal class CellFixture(
             role = role,
             contracts = contracts,
             model = CellModel(adapter, profile, estimator),
-            tools = CellTools(state, look, edit, if (Roles.readOnlyRuns(role)) newRun(role.name) else run, verify, task, kb),
+            tools = CellTools(if (role.protocol == Protocol.Direct) directState else state, look, edit, if (Roles.readOnlyRuns(role)) newRun(role.name) else run, verify, task, kb),
             workspace = CellWorkspace(workspace, registry, coherence, stamper, workset, checks, scheduler, atlas, checker),
             evidence = CellEvidence(journal, observations, aliases, receipts, intents, registerVersions, checkpoints, preimages),
             prime = Prime.render(atlas, Sniff.commands(atlas)),
