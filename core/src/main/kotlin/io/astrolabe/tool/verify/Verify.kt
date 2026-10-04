@@ -521,7 +521,11 @@ public class Verify(
             return Invocation(Executed(command.argv, command.cwd, false, null, Outcome.NotRun, null, null, listOf(io.astrolabe.budget.NO_ACTIVE_TIME)), "not run — ${io.astrolabe.budget.NO_ACTIVE_TIME}")
         }
         val deadline = cut(timeoutSeconds, left)
-        val plan = GradleWrapper.plan(argv, root, cwd, hostProbe)
+        val plan = GradleWrapper.plan(argv, root, cwd, hostProbe) { relative, real ->
+            // P8.C.15: only the base tree's wrapper runs on the check's authority; without a captured s0 none does.
+            val initial = (regressionBaseline ?: baseline)?.initial()
+            initial != null && GradleWrapper.atS0(workspace, initial, relative, Files.readAllBytes(real))
+        }
         val launched = plan.argv
         val reports = JUnitReports.forCommand(cwd, launched, actionId)
         val proc = try {
@@ -529,7 +533,7 @@ public class Verify(
             reports?.prepare(logsDir.resolve("reports-$actionId"))
             runner.start(SpawnSpec(Command.Argv(launched), cwd, logPath(check.id, actionId), EnvPolicy(inheritedNames = envAllowlist, extra = mapOf("CI" to "1", "NO_COLOR" to "1")), deadline))
         } catch (failure: IOException) {
-            val reason = "cannot start ${command.argv.first()}: ${failure.message}"
+            val reason = "cannot start ${launched.first()}: ${failure.message}"
             val unavailable = withPlan(plan, Executed(command.argv, command.cwd, false, null, Outcome.Unavailable, null, null, listOf(reason)))
             return Invocation(unavailable, "unavailable — ${unavailable.limits.joinToString("; ")}")
         }

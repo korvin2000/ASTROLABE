@@ -294,6 +294,11 @@ class BaselineTest {
         assertTrue(cut.tests!!.incomplete)
         val held = assertNotNull(hold(listOf(red, cut), stampB))
         assertTrue(held.unknown.single().contains("did not finish with a complete record"), held.toString())
+
+        // One name in two files, one failing: the failing one removed, the other's single pass shows no fix.
+        val twice = blast(Outcome.Failed, stampA, listOf(failure("dup")), listOf(key("dup")), ambiguous = listOf(key("dup")))
+        val removed = assertNotNull(hold(listOf(twice, blast(Outcome.Passed, stampB, passed = listOf(key("dup")))), stampB))
+        assertTrue(removed.unknown.single().contains("reported it more than once"), removed.toString())
     }
 
     @Test
