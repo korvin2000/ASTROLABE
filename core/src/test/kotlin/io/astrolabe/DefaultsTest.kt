@@ -14,7 +14,7 @@ class DefaultsTest {
         "k eviction batch / m turns kept on rebuild" to listOf("k", "m"),
         "R_max total live results / [A] max" to listOf("rMaxTokens", "anchorMaxTokens"),
         "Immediate-stub threshold for stale reads" to listOf("immediateStubTokens"),
-        "look.budget / run.budget" to listOf("lookBudgetTokens", "runBudgetTokens", "growthReserveFullWindowTokens"),
+        "look.budget / run.budget" to listOf("lookBudgetTokens", "runBudgetTokens", "growthReserveFullWindowTokens", "runTurnBudgetTokens"),
         "Register cap / contract digest cap / patch cap" to listOf("registerCapTokens", "digestCapTokens", "digestTokensPerRequirement", "digestCapCeilingTokens", "patchCapTokens"),
         "Fact line / note body / note summary" to listOf("factLineMaxChars", "noteBodyMaxTokens", "noteSummaryMaxChars"),
         "Workset seeds per cell / KB injection / focus notes / focus zoom" to
@@ -69,6 +69,7 @@ class DefaultsTest {
         assertEquals(2_400, d.immediateStubTokens)
         assertEquals(4_000, d.lookBudgetTokens)
         assertEquals(4_000, d.runBudgetTokens)
+        assertEquals(12_000, d.runTurnBudgetTokens)
         assertEquals(3_000, d.registerCapTokens)
         assertEquals(150, d.digestCapTokens)
         assertEquals(8, d.digestTokensPerRequirement)
