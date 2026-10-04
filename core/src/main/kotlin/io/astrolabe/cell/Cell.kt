@@ -114,8 +114,8 @@ import java.util.concurrent.ConcurrentHashMap
 import io.astrolabe.provider.ToolCall as NativeCall
 
 /**
- * C16: how the reason of a cell blocked by [ProviderError.QuotaExhausted] begins. The controller reads it from the cell's
- * checkpoint and lifts that block on the host's next run, without asking the authority.
+ * C16: how the reason of a cell blocked by [ProviderError.QuotaExhausted] begins. Text for the host only: a model can
+ * write the same words with `state(blocked)`, so no decision is built on it; the block lifts like any external one.
  */
 internal const val PLAN_QUOTA_EXHAUSTED: String = "provider plan quota exhausted"
 

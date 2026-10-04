@@ -228,24 +228,41 @@ class TaskLimitsTest {
     }
 
     @Test
-    fun `a reopen after a spent subscription quota dispatches again and the failed call is recorded once`() = runBlocking<Unit> {
+    fun `a spent subscription quota stops on an external block that a reopen without the authority's answer keeps`() = runBlocking<Unit> {
         val subscription = FakeProfiles.main.copy(priceTable = FakeProfiles.main.priceTable.copy(billing = io.astrolabe.provider.Billing.Plan))
-        val first = controller().open(repo.root, request, policy(TaskLimits.NONE)).use { c ->
+        controller().open(repo.root, request, policy(TaskLimits.NONE)).use { c ->
             val fake = FakeAdapter(ScriptedModel.of(*(planning() + Scripted.Fault(io.astrolabe.fixtures.FaultKind.QuotaExhausted, retryAfterSeconds = 60)).toTypedArray()))
             val run = controller().run(c, CellModel(fake, subscription, HeuristicEstimator()))
             assertEquals(CampaignOutcome.BlockedExternal, run.outcome, run.state?.reason)
-            assertTrue(run.state!!.reason!!.contains("plan quota exhausted"), run.state!!.reason)
-            fake.calls.size
-        }
-        controller().open(repo.root, request, policy(TaskLimits.NONE)).use { c ->
-            val fake = FakeAdapter(ScriptedModel.of(*(implement(c, "src/a.py", "    return 1", "    return 10", "\"AC-1\"") +
-                implement(c, "src/b.py", "    return 2", "    return 20", "\"AC-1\",\"AC-2\"")).toTypedArray()))
-            val run = controller().run(c, CellModel(fake, subscription, HeuristicEstimator()))
-            assertTrue(fake.calls.isNotEmpty(), "the reopen dispatches again without the authority's answer")
-            assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+            assertTrue(run.state!!.reason!!.contains(io.astrolabe.cell.PLAN_QUOTA_EXHAUSTED), run.state!!.reason)
             val calls = Accounting(c.store, clock).calls(c.ids.work)
-            assertEquals(calls.size, calls.map { it.invocationId }.distinct().size, "one record per invocation")
-            assertEquals(first + fake.calls.size, calls.size, "the failed call is recorded once, every dispatched call once")
+            assertEquals(fake.calls.size, calls.size, "every dispatched call, the failed one included, is recorded once")
+            assertEquals(calls.size, calls.map { it.invocationId }.distinct().size)
+        }
+        assertReopenKeepsBlock(subscription)
+    }
+
+    @Test
+    fun `a model's own block in the quota's words is not lifted by a reopen either`() = runBlocking<Unit> {
+        controller().open(repo.root, request, policy(TaskLimits.NONE)).use { c ->
+            val reason = "${io.astrolabe.cell.PLAN_QUOTA_EXHAUSTED} previously; awaiting approval to switch to the paid API"
+            val fake = FakeAdapter(ScriptedModel.of(*(planning() +
+                Scripted.Reply(listOf(call("b1", "state", """{"op":"blocked","blocked":{"reason":"$reason","evidence":[]}}""")))).toTypedArray()))
+            val run = controller().run(c, CellModel(fake, FakeProfiles.main, HeuristicEstimator()))
+            assertEquals(CampaignOutcome.BlockedExternal, run.outcome, run.state?.reason)
+            assertEquals(IncrementStatus.Blocked, c.state!!.graph.increments.single { it.id == "I1" }.status)
+        }
+        assertReopenKeepsBlock(FakeProfiles.main)
+    }
+
+    /** A reopen whose authority answers nothing leaves I1 blocked and dispatches nothing (I2 depends on I1). */
+    private suspend fun assertReopenKeepsBlock(profile: io.astrolabe.provider.Profile) {
+        controller().open(repo.root, request, policy(TaskLimits.NONE)).use { c ->
+            val fake = FakeAdapter(ScriptedModel.of())
+            val run = controller().run(c, CellModel(fake, profile, HeuristicEstimator()))
+            assertTrue(fake.calls.isEmpty(), "no call without the authority's answer")
+            assertEquals(IncrementStatus.Blocked, c.state!!.graph.increments.single { it.id == "I1" }.status, run.state?.reason)
+            assertFalse(run.outcome == CampaignOutcome.Completed)
         }
     }
 
