@@ -18,6 +18,9 @@ public interface ValidationContext {
     /** Versions of [path] the model may have been shown; a short anchor hash resolves against them (D-365). */
     public fun knownVersions(path: String): Collection<io.astrolabe.id.FileVersion> = listOfNotNull(currentVersion(path))
 
+    /** A-D.4: the one file and displayed version [id] observed, when it names a stored observation of exactly one file. */
+    public fun observedFile(id: String): io.astrolabe.evidence.Anchor? = null
+
     /** True when the step's `accept:` is green at the current version. */
     public fun acceptGreen(accept: String): Boolean
 
@@ -75,7 +78,12 @@ public class Validator @JvmOverloads constructor(
     internal fun schemaRejection(register: Register, rawPatch: String, reason: String): Validation.Rejected =
         Validation.Rejected("schema", reason, Sizes(RegisterRender.tokens(register, estimator), registerCapTokens, estimator.estimate(rawPatch).tokens, patchCapTokens))
 
-    public fun check(register: Register, patch: Patch, context: ValidationContext): Validation {
+    /**
+     * [decided] tells a decided amendment line from a pending one; a direct register archives decided lines when a note
+     * would exceed the cap (A-D.4).
+     */
+    @JvmOverloads
+    public fun check(register: Register, patch: Patch, context: ValidationContext, decided: (AmendmentLine) -> Boolean = { it.status != "pending" }): Validation {
         val patchTokens = estimator.estimate(Json.encodeToString(Patch.serializer(), patch)).tokens
         var sizes = Sizes(RegisterRender.tokens(register, estimator), registerCapTokens, patchTokens, patchCapTokens)
         fun reject(rule: String, detail: String) = Validation.Rejected(rule, detail, sizes)
@@ -180,7 +188,7 @@ public class Validator @JvmOverloads constructor(
                         val current = context.currentVersion(anchor.path)
                         if (current == anchor.version) null else current ?: anchor.version
                     }
-                    next.copy(facts = next.facts + Fact(nextN(next.facts.map { it.n }), kind, op.text, op.anchor, evidence, staleAt))
+                    next.copy(facts = next.facts + Fact(nextN(numbers(next, "fact")), kind, op.text, op.anchor, evidence, staleAt))
                 }
                 is Op.FactRefute -> {
                     val fact = next.fact(op.n) ?: run { skip("unknown fact", "fact.refute(${op.n})"); null } ?: continue
@@ -192,7 +200,7 @@ public class Validator @JvmOverloads constructor(
                     next.copy(deadEnds = next.deadEnds + DeadEnd(nextN(next.deadEnds.map { it.n }), op.text, op.evidence?.takeIf { it.isNotBlank() }, op.scope, op.reopen))
                 }
                 is Op.DecisionAdd -> next.copy(decisions = next.decisions + Decision(nextN(next.decisions.map { it.n }), op.text, op.because, op.rejected?.takeIf { it.isNotBlank() }, op.probe, op.adrCandidate))
-                is Op.OpenAdd -> next.copy(open = next.open + OpenItem(nextN(next.open.map { it.n }), op.text, op.trip, op.needs))
+                is Op.OpenAdd -> next.copy(open = next.open + OpenItem(nextN(numbers(next, "open item")), op.text, op.trip, op.needs))
                 is Op.OpenClose -> {
                     val item = next.openItem(op.n) ?: run { skip("unknown open item", "open.close(${op.n})"); null } ?: continue
                     if (!context.evidenceExists(op.evidence)) { skip("close needs an existing evidence id", "open.close(${op.n}): ${op.evidence}"); continue }
@@ -229,14 +237,58 @@ public class Validator @JvmOverloads constructor(
             }
         }
         next = next.copy(version = register.version + 1)
-        val registerTokens = RegisterRender.tokens(next, estimator)
+        var registerTokens = RegisterRender.tokens(next, estimator)
+        // A-D.7 V4: a direct register archives first — closed open items, refuted facts, decided amendments — then refuses.
+        if (registerTokens > registerCapTokens && protocol == Protocol.Direct) {
+            val (archived, moved) = archive(next, decided)
+            next = archived
+            registerTokens = RegisterRender.tokens(next, estimator)
+            if (moved.isNotEmpty() && registerTokens <= registerCapTokens) notes += "archived ${moved.joinToString(" ")} — look(recall, id=notes, range=archive)"
+        }
         sizes = sizes.copy(registerTokens = registerTokens)
-        if (registerTokens > registerCapTokens) return reject("register cap", "register would be $registerTokens tokens > $registerCapTokens")
+        if (registerTokens > registerCapTokens) {
+            return if (protocol == Protocol.Direct) {
+                reject("register cap", "$registerTokens/$registerCapTokens tokens of active notes after archiving; retire notes first: closes: n ends an open note, refutes: n refutes a hypothesis")
+            } else {
+                reject("register cap", "register would be $registerTokens tokens > $registerCapTokens")
+            }
+        }
         flags += riskFlags(next)
         return Validation.Applied(next, done, dropped, flags, sizes, notes, unbacked)
     }
 
     private fun nextN(existing: List<Int>): Int = (existing.maxOrNull() ?: 0) + 1
+
+    /**
+     * A-D.4 register capacity: moves archivable notes out of the active register, one at a time and in the fixed order —
+     * closed open items, refuted facts (lowest number first), decided amendments (first position first) — until it fits
+     * the cap. Nothing else is ever archived. Returns the register and the ids it archived.
+     */
+    private fun archive(register: Register, decided: (AmendmentLine) -> Boolean): Pair<Register, List<String>> {
+        var next = register
+        val moved = ArrayList<String>()
+        fun fits() = RegisterRender.tokens(next, estimator) <= registerCapTokens
+        for (item in register.open.filter { it.closed }.sortedBy { it.n }) {
+            if (fits()) return next to moved
+            next = next.copy(open = next.open - item, archive = next.archive.copy(open = next.archive.open + item))
+            moved += "o${item.n}"
+        }
+        for (fact in register.facts.filter { it.kind == ClaimKind.Refuted }.sortedBy { it.n }) {
+            if (fits()) return next to moved
+            next = next.copy(facts = next.facts - fact, archive = next.archive.copy(facts = next.archive.facts + fact))
+            moved += "x${fact.n}"
+        }
+        while (!fits()) {
+            val positions = next.amendmentPositions()
+            val index = next.amendments.indexOfFirst(decided).takeIf { it >= 0 } ?: break
+            next = next.copy(
+                amendments = next.amendments.filterIndexed { i, _ -> i != index },
+                archive = next.archive.copy(amendments = next.archive.amendments + ArchivedAmendment(positions[index], next.amendments[index])),
+            )
+            moved += "a${positions[index]}"
+        }
+        return next to moved
+    }
 
     /** The `kind.add` wire name of an op ([Op] serial names). */
     private fun wire(op: Op): String = when (op) {
@@ -275,8 +327,9 @@ public class Validator @JvmOverloads constructor(
 
     private fun numbers(register: Register, kind: String): List<Int> = when (kind) {
         "step" -> register.plan.map { it.n }
-        "fact" -> register.facts.map { it.n }
-        else -> register.open.map { it.n }
+        // A-D.4: numbers are never reused — archived notes count (a structured register archives nothing).
+        "fact" -> register.facts.map { it.n } + register.archive.facts.map { it.n }
+        else -> register.open.map { it.n } + register.archive.open.map { it.n }
     }
 
     /** Why an evidence value cannot back a tick or a `v` fact (D-373 notes). */

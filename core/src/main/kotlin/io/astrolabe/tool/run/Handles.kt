@@ -6,6 +6,8 @@ import io.astrolabe.tool.EffectClass
 import io.astrolabe.workspace.StampEntry
 import io.astrolabe.store.Migrations
 import io.astrolabe.store.Store
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.time.Clock
@@ -35,7 +37,30 @@ public data class Handle(
     val effectsUnknown: Boolean = true,
     val membersBefore: Map<String, StampEntry>? = null,
     val baseCommitBefore: String? = null,
+    /** A-D.7 T8: the readiness condition a wait met (the matched line, or `port N`); not encoded while null. */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val ready: String? = null,
 ) {
+    /** The constructor before [ready]. Kept for Java callers. */
+    public constructor(
+        handleId: String,
+        ids: Identities,
+        actionId: String,
+        alias: String,
+        argv: List<String>,
+        shell: Boolean,
+        cwd: String?,
+        proc: Proc,
+        status: String,
+        cursor: Long,
+        stampBefore: String,
+        effectClass: EffectClass,
+        effectsUnknown: Boolean,
+        membersBefore: Map<String, StampEntry>?,
+        baseCommitBefore: String?,
+    ) : this(handleId, ids, actionId, alias, argv, shell, cwd, proc, status, cursor, stampBefore, effectClass, effectsUnknown, membersBefore, baseCommitBefore, null)
+
     init {
         require(handleId.isNotBlank() && actionId.isNotBlank()) { "handle needs ids" }
         require(cursor >= 0) { "cursor must be ≥ 0" }

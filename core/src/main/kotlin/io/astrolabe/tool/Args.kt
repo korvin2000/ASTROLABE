@@ -132,6 +132,8 @@ internal object InputTolerance {
     private val STATE_NESTED: Map<String, Set<String>> = mapOf(
         "blocked" to setOf("reason", "evidence", "question"),
         "retrieval_miss" to setOf("need", "why"),
+        // A-D.4: the direct protocol's note; its executor reads the object raw.
+        "note" to setOf("kind", "text", "evidence", "closes", "refutes"),
     )
 
     private val STATE_FORMS: List<String> = listOf("patch") + STATE_NESTED.keys
@@ -145,7 +147,7 @@ internal object InputTolerance {
     fun normalise(family: ToolFamily, raw: JsonObject, notes: MutableList<String> = ArrayList(), truncated: Boolean = false): JsonObject = when (family) {
         ToolFamily.Edit -> lifted(raw.mapValue("ops") { parsedArray("ops", it, notes, truncated) })
             .mapValue("ops") { ops -> if (ops is JsonArray) JsonArray(ops.map { editOp(it, notes, truncated) }) else ops }
-        ToolFamily.State -> withInferredOp(unglued(raw.mapValue("patch") { parsedArray("patch", it, notes, truncated) }))
+        ToolFamily.State -> noteLifted(withInferredOp(unglued(raw.mapValue("patch") { parsedArray("patch", it, notes, truncated) })))
         ToolFamily.Look -> raw.mapValue("id") { id -> if (id is JsonPrimitive && !id.isString && id.content.toIntOrNull() != null) JsonPrimitive(id.content) else id }
         else -> raw
     }
@@ -226,10 +228,21 @@ internal object InputTolerance {
         return JsonObject(kept + rebuilt.mapValues { (_, nested) -> JsonObject(nested) })
     }
 
+    /** A-D.4: the flat `state(op=note, kind=…, text=…)` is the nested `note` object; the note's fields move into it. */
+    private fun noteLifted(raw: JsonObject): JsonObject {
+        if ((raw["op"] as? JsonPrimitive)?.content != "note" || "note" in raw) return raw
+        val fields = STATE_NESTED.getValue("note")
+        val loose = raw.filterKeys { it in fields }
+        if (loose.isEmpty()) return raw
+        return JsonObject(raw.filterKeys { it !in fields } + ("note" to JsonObject(loose)))
+    }
+
     /** D-347 style: a `state` call without `op` that carries exactly one form names that form. */
     private fun withInferredOp(raw: JsonObject): JsonObject {
         if ("op" in raw) return raw
-        val op = STATE_FORMS.filter { it in raw }.singleOrNull() ?: return raw
+        // A-D.4: `note` names the op only alone, so a structured form beside a stray `note` key infers as before.
+        val forms = STATE_FORMS.filter { it in raw }
+        val op = (if (forms.size > 1) forms - "note" else forms).singleOrNull() ?: return raw
         return JsonObject(raw + ("op" to JsonPrimitive(op)))
     }
 

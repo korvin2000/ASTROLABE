@@ -649,7 +649,7 @@ class CellTest {
     }
 
     @Test
-    fun `a direct cell sends its own S and schemas and refuses the declared note typed until it exists`() = runTest {
+    fun `a direct cell sends its own S and schemas, records a note and refuses propose in S0`() = runTest {
         CellFixture(stateRoot).use { f ->
             val model = ScriptedModel.of(
                 Scripted.Reply(listOf(
@@ -667,7 +667,7 @@ class CellTest {
             assertTrue(system.startsWith("astrolabe · role direct · kernel-direct/1 · ") && KernelDirect.render() in system, system)
             assertTrue(f.anchorText(1).contains("enabled this turn: all role tools except task.propose"), f.anchorText(1))
             val results = f.transcript(2).filterIsInstance<ToolResult>().associate { it.callId to resultText(it) }
-            assertTrue(results.getValue("c1").contains("state.note is declared by the direct protocol and not implemented in this harness version"), results.getValue("c1"))
+            assertTrue(results.getValue("c1").contains("STATE v1 · note h1 recorded"), results.getValue("c1"))
             assertTrue(results.getValue("c3").contains("task.propose is not enabled in shape S0"), results.getValue("c3"))
         }
     }
@@ -824,6 +824,26 @@ class CellTest {
         assertEquals(PartialReason.TurnBudget, spent("no-flag", work = true, flag = false).reason, "the S1 loop continues it itself")
         assertEquals(PartialReason.TurnBudget, spent("no-work", work = false, flag = true).reason, "no work event in the epoch")
         assertEquals(PartialReason.TurnBudget, spent("structured", work = true, flag = true, role = Roles.implementing).reason)
+    }
+
+    @Test
+    fun `a direct cell journals its notes in place of STATE and recalls them by id`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(call("c1", "state", """{"op":"note","note":{"kind":"open","text":"the CLI path builds handlers without ctx"}}"""))),
+                Scripted.Reply(listOf(call("c2", "look", """{"what":"recall","id":"notes"}"""))),
+                Scripted.Reply(listOf(call("c3", "state", """{"op":"blocked","blocked":{"reason":"stop here"}}"""))),
+            )
+
+            assertIs<CellExit.Blocked>(f.run(model, role = Roles.direct))
+
+            val anchor = f.anchorText(2)
+            assertTrue(anchor.contains("── Notes (STATE v1)\n            o1 the CLI path builds handlers without ctx\n"), anchor)
+            assertFalse(anchor.contains("# STATE") || anchor.contains("## Next") || anchor.contains("⟨trip"), anchor)
+            val results = f.transcript(3).filterIsInstance<ToolResult>().associate { it.callId to resultText(it) }
+            assertTrue(results.getValue("c1").contains("STATE v1 · note o1 recorded"), results.getValue("c1"))
+            assertTrue(results.getValue("c2").contains("active notes 1-1 of 1\n  o1 the CLI path builds handlers without ctx"), results.getValue("c2"))
+        }
     }
 
     @Test

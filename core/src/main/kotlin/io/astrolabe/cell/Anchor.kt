@@ -70,6 +70,53 @@ public data class Touched @JvmOverloads constructor(
     }
 }
 
+/** One line of a direct anchor's `── Runs` block (§5.10-D); an [essential] line — a live handle, a red receipt — survives reduction. */
+public data class RunLine(val text: String, val essential: Boolean)
+
+/** The last receipt of one registered check with a command, as `── Runs` lists it (§5.10-D). */
+public data class RunReceipt @JvmOverloads constructor(
+    /** The receipt's alias (`#42`). */
+    val alias: String,
+    val argv: List<String>,
+    /** `green`, `red: <n> failed`, `timeout`, `unavailable` or `inconclusive`. */
+    val result: String,
+    val red: Boolean,
+    /** The receipt's stamp, four hex characters. */
+    val stamp: String,
+    val stale: Boolean = false,
+    /** P8.C.2: a red check that is not required, recorded by the runtime from its receipt. */
+    val knownRed: Boolean = false,
+)
+
+/** The lines of `── Runs` (§5.10-D): a pure function of the run handles and the check receipts; no clock, no elapsed time. */
+public object RunsRender {
+    /** `<handle> <command> → running`, with ` · ready (<line or port>)` once a readiness condition was met (T8). */
+    @JvmStatic
+    public fun live(handle: String, argv: List<String>, ready: String?): RunLine =
+        RunLine("$handle ${command(argv)} → running" + (ready?.let { " · ready ($it)" } ?: ""), essential = true)
+
+    /** Live handles in handle order, then receipts — red first, then the others, each group by the higher alias first. */
+    @JvmStatic
+    public fun lines(live: List<RunLine>, receipts: List<RunReceipt>): List<RunLine> =
+        live + receipts.sortedWith(compareBy<RunReceipt> { !it.red }.thenByDescending { aliasNumber(it.alias) }).map { r ->
+            RunLine(
+                "${r.alias} ${command(r.argv)} → ${r.result} @${r.stamp}" + (if (r.stale) " (stale)" else "") + (if (r.knownRed) " · known red, not required" else ""),
+                essential = r.red,
+            )
+        }
+
+    /** The canonical argv joined by spaces, cut at 60 characters with `…`. */
+    @JvmStatic
+    public fun command(argv: List<String>): String {
+        val text = argv.joinToString(" ")
+        return if (text.length <= COMMAND_MAX_CHARS) text else text.take(COMMAND_MAX_CHARS - 1) + "…"
+    }
+
+    private fun aliasNumber(alias: String): Long = alias.filter { it.isDigit() }.toLongOrNull() ?: -1
+
+    private const val COMMAND_MAX_CHARS: Int = 60
+}
+
 /** What [Anchor.render] produced, with the `[A]` size metric §6.8 treats as first class. */
 public data class AnchorRender(
     val text: String,
@@ -207,8 +254,108 @@ public object Anchor {
         return out
     }
 
+    /**
+     * The direct protocol's `[A]` (rendered turn §5.10-D, A-D.7 A1–A2): the harness journal in place of STATE. Blocks in
+     * order — contract digest, Workset, Touched (the last three), Checks, Runs, Notes, the turn's enabled tools, gauge,
+     * nudges, the repair helper's diagnosis lines — an empty block omitted. No focus notes, no focus zoom, no fired trips.
+     *
+     * Over [Defaults.directAnchorTargetTokens] the render reduces in a fixed order — Runs to live handles and red
+     * receipts, then Notes to half their cap — and names each step; still over, it is sent as it is and the reductions
+     * say by how much. [AnchorRender.overBudget] keeps its meaning against [Defaults.anchorMaxTokens].
+     */
+    @JvmStatic
+    @JvmOverloads
+    public fun renderDirect(
+        estimator: TokenEstimator,
+        digest: String,
+        register: io.astrolabe.register.Register,
+        workset: String,
+        touched: List<Touched> = emptyList(),
+        checks: String = "",
+        runs: List<RunLine> = emptyList(),
+        gauge: String? = null,
+        nudges: List<String> = emptyList(),
+        diagnoses: List<String> = emptyList(),
+        defaults: Defaults = Defaults(),
+        enabled: String? = null,
+    ): AnchorRender {
+        val reductions = ArrayList<String>()
+        val worksetText = cap(estimator, workset, WORKSET_CAP_TOKENS, "Workset", reductions)
+        val touchedLines = touched.takeLast(MIN_TOUCHED)
+        if (touchedLines.size < touched.size) reductions += "Touched: showed the last ${touchedLines.size} of ${touched.size}"
+        val nudgeLines = nudges.take(MAX_NUDGES)
+        if (nudgeLines.size < nudges.size) reductions += "nudges: showed ${nudgeLines.size} of ${nudges.size}"
+        val notes = io.astrolabe.register.NotesRender.anchorLines(register)
+        val target = defaults.directAnchorTargetTokens
+
+        var runLines = runs
+        var notesCap = defaults.directNotesMaxTokens
+        fun compose(): String {
+            val out = StringBuilder()
+            appendBlock(out, digest)
+            if (worksetText.isNotBlank()) appendBlock(out, "── Workset  $worksetText")
+            if (touchedLines.isNotEmpty()) appendBlock(out, "── Touched  " + touchedLines.joinToString(INDENT) { it.render() })
+            appendBlock(out, checks)
+            runsBlock(runLines, defaults.directRunsMaxLines)?.let { appendBlock(out, it) }
+            notesBlock(estimator, register.version, notes, notesCap)?.let { appendBlock(out, it) }
+            appendBlock(out, enabled)
+            appendBlock(out, gauge)
+            nudgeLines.forEach { appendBlock(out, it) }
+            diagnoses.forEach { appendBlock(out, it) }
+            return out.toString()
+        }
+
+        var text = compose()
+        if (estimator.estimate(text).tokens > target && runLines.any { !it.essential }) {
+            runLines = runLines.filter { it.essential }
+            reductions += "Runs: live handles and red receipts only, the anchor was over $target tokens"
+            text = compose()
+        }
+        if (estimator.estimate(text).tokens > target && notes.isNotEmpty()) {
+            notesCap = defaults.directNotesMaxTokens / 2
+            reductions += "Notes: capped at $notesCap tokens, the anchor was over $target tokens"
+            text = compose()
+        }
+        val tokens = estimator.estimate(text).tokens
+        if (tokens > target) reductions += "over the $target-token target: $tokens tokens"
+        return AnchorRender(text, tokens, tokens > defaults.anchorMaxTokens, reductions)
+    }
+
+    /** `── Runs`: at most [maxLines] lines; the lines beyond collapse into a last `+<n> more`. */
+    private fun runsBlock(lines: List<RunLine>, maxLines: Int): String? {
+        if (lines.isEmpty()) return null
+        val max = maxLines.coerceAtLeast(1)
+        val shown = if (lines.size <= max) lines.map { it.text } else lines.take(max - 1).map { it.text } + "+${lines.size - (max - 1)} more"
+        return "── Runs     " + shown.joinToString(INDENT)
+    }
+
+    /**
+     * `── Notes (STATE v<N>)`: whole lines while they fit [capTokens]; the ids that did not fit are named on one last line
+     * outside the cap, so every note stays addressable (§5.10-D).
+     */
+    private fun notesBlock(estimator: TokenEstimator, version: Int, notes: List<io.astrolabe.register.NoteLine>, capTokens: Int): String? {
+        if (notes.isEmpty()) return null
+        val shown = ArrayList<String>()
+        for (note in notes) {
+            val next = (shown + note.toString()).joinToString("\n")
+            if (estimator.estimate(next).tokens > capTokens) break
+            shown += note.toString()
+        }
+        val rest = notes.drop(shown.size).map { it.id }
+        val overflow = if (rest.isEmpty()) emptyList() else listOf(
+            "… +${rest.size} not shown: " + rest.take(MAX_HIDDEN_IDS).joinToString(" ") + (if (rest.size > MAX_HIDDEN_IDS) " …" else "") + " — look(recall, id=notes)",
+        )
+        return "── Notes (STATE v$version)" + INDENT + (shown + overflow).joinToString(INDENT)
+    }
+
     /** `[A]` Workset line: `KNOWN … NOT SEEN …` is a hint; the registry holds the authoritative coverage. */
     private const val WORKSET_CAP_TOKENS: Int = 60
+
+    /** The continuation indent of a multi-line `[A]` block. */
+    private const val INDENT: String = "\n            "
+
+    /** §5.10-D: the notes line names at most this many ids it did not show. */
+    private const val MAX_HIDDEN_IDS: Int = 30
 
     /** §5.1 `[A]`: at most four nudges per turn (D-372). */
     private const val MAX_NUDGES: Int = 4

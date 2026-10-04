@@ -419,7 +419,35 @@ public class Look(
 
     // ---------------------------------------------------------------- recall
 
+    /**
+     * A-D.4 "Reading notes" (A-D.7 A5): a direct cell's notes for `recall(id="notes")` — the active ones, or the archived
+     * ones with `archive = true`, each `<id> <text>`. `null` in every other cell, where `notes` is no result id.
+     */
+    internal var notes: ((archive: Boolean) -> List<String>)? = null
+
+    /** `recall(id="notes")`: data, never coverage — not aliased and not stored (a state result is not recallable either). */
+    private fun recallNotes(args: LookArgs, read: (Boolean) -> List<String>): ToolOutcome {
+        val range = args.range?.trim()
+        val archive = range == "archive"
+        val all = read(archive)
+        val label = if (archive) "archived notes" else "active notes"
+        if (all.isEmpty()) return refused(args, "ok", "no $label", scope = "notes")
+        val span = if (archive || range == null) 1..all.size else {
+            val m = RANGE.matchEntire(range) ?: return refused(args, "refused", "range is archive or a-b over the notes, e.g. \"1-20\"", scope = "notes")
+            m.groupValues[1].toInt()..minOf(m.groupValues[2].toInt(), all.size)
+        }
+        if (span.first < 1 || span.first > span.last) return refused(args, "refused", "there are ${all.size} $label; ${args.range} is outside them", scope = "notes")
+        val selected = all.subList(span.first - 1, span.last)
+        val view = fit(selected, args.tokens, prefix = "$label ${span.first}-${span.last} of ${all.size}\n") { kept ->
+            "\n… recall notes range ${span.first + kept}-${span.last}"
+        }
+        if (view.lines.isEmpty()) return refused(args, "refused", "notes exceed budget ${args.tokens}; raise budget", complete = false, scope = "notes")
+        return outcome("#-", idGen.next("act"), "ok", view.body, view.tokens, scope = "notes", complete = !view.truncated, captureComplete = true,
+            displayTruncated = view.truncated, redacted = false, artifact = null)
+    }
+
     private fun recall(args: LookArgs, context: TurnContext): ToolOutcome {
+        notes?.takeIf { args.id?.trim()?.lowercase() == "notes" }?.let { return recallNotes(args, it) }
         // D-365: "#14", "14" and 14 name the same result.
         val number = args.id?.trim()?.let { Aliases.parse(it) ?: it.toIntOrNull()?.takeIf { n -> n >= 1 } }
             ?: return refused(args, "refused", "recall needs id=#n, e.g. \"#14\"")

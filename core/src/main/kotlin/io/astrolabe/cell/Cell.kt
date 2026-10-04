@@ -293,6 +293,13 @@ public class Cell @JvmOverloads constructor(
             tools.edit?.increment = increment
             tools.edit?.protocol = ctx.role.protocol
             tools.task?.protocol = ctx.role.protocol
+            // A-D.4: a direct cell executes notes under its role's mask, and reads them back through look(recall, id=notes).
+            if (ctx.role.protocol == Protocol.Direct) {
+                tools.state.direct(ctx.role.toolMask, ctx.contracts)
+                tools.look?.notes = { archive ->
+                    (if (archive) io.astrolabe.register.NotesRender.archiveLines(register) else io.astrolabe.register.NotesRender.activeLines(register)).map { it.toString() }
+                }
+            }
             tools.verify?.inputs = atlas.rows.map { it.path }
             tools.verify?.atlas = atlas
             // C1a (plan §4.4): `run` recognises this cell's registered checks; the model's own checks strengthen its increment.
@@ -719,9 +726,10 @@ public class Cell @JvmOverloads constructor(
 
             // Gates on records. D-278: only a patch that materially changes the register acknowledges prior loop
             // signatures; a repeated identical `next` bumps only the version and must not reset the loop gate.
-            if (calls.any { it.family == ToolFamily.State && it.op == "patch" &&
+            // A-D.7 T7: an applied note acknowledges them as an applied patch does; archiving is no change.
+            if (calls.any { it.family == ToolFamily.State && (it.op == "patch" || it.op == "note") &&
                     (result?.of(it.opId) as? Disposition.Executed)?.outcome?.applied == true
-                } && register.copy(version = registerBefore.version) != registerBefore) signatures.clear()
+                } && register.restored().copy(version = registerBefore.version) != registerBefore.restored()) signatures.clear()
             val currenciesNow = currencies(stampNow.candidateId)
             uncertified = outstanding(currenciesNow)
             val certifiedAfter = certified(currenciesNow)
@@ -748,7 +756,7 @@ public class Cell @JvmOverloads constructor(
             val editedByEdit = editedPaths.filter { origins[it] == ChangeOrigin.Edit }
             val state = GateState(
                 turn = turn, register = register, contract = contract, increment = increment, calls = calls, signatures = signatures.toList(),
-                patchRejection = if (calls.any { it.family == ToolFamily.State && it.op == "patch" }) tools.state.lastRejection else null,
+                patchRejection = if (calls.any { it.family == ToolFamily.State && (it.op == "patch" || it.op == "note") }) tools.state.lastRejection else null,
                 lastProgressTurn = lastProgressTurn, liveRunOutput = liveRunOutput,
                 contextTokens = current.totalTokens, contextMaxTokens = capabilities.contextLimitTokens.toLong(), rebuilds = rebuilds,
                 contextCeilingTokens = ceilingTokens(current.prefix.total + pinnedTokens(contract)),
@@ -844,6 +852,14 @@ public class Cell @JvmOverloads constructor(
             val currencies = currencies(stampNow)
             val digest = ContractDigest.render(contract, ctx.ledger ?: Ledger.initial(contract), obligations(contract, currencies), estimator, defaults.effectiveDigestCapTokens(contract.requirements.size))
             val worksetLine = ws.workset.render(estimator) + drops.joinToString("") { "; ${it.text}" }
+            val nudgeLines = if (repair) nudges.map { if (it == CellBudget.GATE) REPAIR_GATE else it } else nudges
+            // A-D.7 A1: the direct journal — Runs and Notes, no STATE, no focus notes, no fired trips (§5.10-D).
+            if (ctx.role.protocol == Protocol.Direct) {
+                return Anchor.renderDirect(
+                    estimator, digest, register, worksetLine, touchedLedger.toList(), ChecksRender.render(stampNow, checkLines(currencies)),
+                    runLines(currencies), gauge(currencies).line(), nudgeLines, ctx.diagnoses?.lines().orEmpty(), defaults, Layout.enabled(ctx.role, mask, repair),
+                )
+            }
             val focusNotes = ctx.knowledge?.focusNotes(register.focus, editedThisTurn)
             return Anchor.render(
                 estimator, digest, RegisterRender.markdown(register), worksetLine, touchedLedger.toList(),
@@ -969,6 +985,8 @@ public class Cell @JvmOverloads constructor(
             (Partition.of(remaining) as? Partition.Rejected)?.let { rejected ->
                 return wholeTurn(native, remaining, alone, rejected.reason, culprits = setOf(rejected.opId - 1))
             }
+            // A-D.4: a note refused for capacity in a turn that answers the loop gate ends the cell blocked.
+            tools.state.noteRequired = requiredOp != null
             requiredOp?.let { op ->
                 if (remaining.none { it.family.wire == op }) {
                     val required = if (ctx.role.protocol == Protocol.Direct) Gates.loopRequirement(Protocol.Direct) else "a $op op is required before anything else runs"
@@ -1058,7 +1076,7 @@ public class Cell @JvmOverloads constructor(
         /**
          * A-D.5 step 2: the first reason the emitted [work] calls do not meet a conditional finish's condition, or `null`.
          * Each must have stayed in the response, parsed, been admitted and executed; an edit must have applied in full and
-         * a run or verify must have passed by a typed fact.
+         * a run or verify must have passed by a typed fact: `green`, or the readiness of `ToolOutcome.ready`.
          */
         private fun unmet(work: List<IndexedValue<NativeCall>>, kept: Int, validated: Validated?, result: TurnResult?): String? {
             val dispatched = validated?.calls.orEmpty().associateBy { it.opId - 1 }
@@ -1073,7 +1091,8 @@ public class Cell @JvmOverloads constructor(
                 }
                 when (parsed.family) {
                     ToolFamily.Edit -> if (!outcome.applied) return "$op did not apply in full"
-                    else -> if (!outcome.green) return "$op is not passing: neither green nor ready"
+                    // A run whose readiness condition was met (a launch's, or a wait's) passes as a green one does.
+                    else -> if (!outcome.green && outcome.ready == null) return "$op is not passing: neither green nor ready"
                 }
             }
             return null
@@ -1305,7 +1324,7 @@ public class Cell @JvmOverloads constructor(
             val seeds = io.astrolabe.context.Seeds.render(carry.seeds, ws.registry::read)
             val carried = carry.copy(seeds = seeds.shown, notSeen = carry.notSeen + seeds.notSeen)
             val nextSections = sections.filterNot { it.id.startsWith("seed-") || it.id == "carry-forward" } +
-                KSection("carry-forward", "Carry-forward", carried.render()) +
+                KSection("carry-forward", "Carry-forward", carried.render(ctx.role.protocol)) +
                 seeds.blocks.mapIndexed { index, text -> KSection("seed-$index", "Seed", text) }
             val current = io.astrolabe.context.Projection(rebuilds, ctx.role, ctx.model.profile, ctx.prime,
                 CompiledK(ContractSlice.forIncrement(contract, increment), ctx.preexisting, sections), transcript(contract), "")
@@ -1538,6 +1557,28 @@ public class Cell @JvmOverloads constructor(
             ObligationStatus(id, text)
         }
 
+        /** §5.10-D `── Runs`: this cell's live handles, then the last receipt of every registered check with a command. */
+        private fun runLines(currencies: Map<String, Currency>): List<RunLine> {
+            val live = (tools.run as? io.astrolabe.tool.run.Run)?.liveHandles().orEmpty().map { RunsRender.live(it.handleId, it.argv, it.ready) }
+            val receipts = ws.checks.all().mapNotNull { check ->
+                val command = check.command ?: return@mapNotNull null
+                val last = check.last ?: return@mapNotNull null
+                val currency = currencies[check.id]
+                val result = when (last.outcome) {
+                    Outcome.Passed -> "green"
+                    Outcome.Failed -> "red: ${(last.counts?.failed ?: 0) + (last.counts?.errors ?: 0)} failed"
+                    Outcome.Timeout -> "timeout"
+                    Outcome.Unavailable -> "unavailable"
+                    else -> "inconclusive"
+                }
+                RunReceipt(
+                    ws.scheduler.aliasOf(last.receiptId) ?: last.receiptId, command.argv, result, last.outcome == Outcome.Failed, last.stamp.hash8.take(4),
+                    stale = (currency?.applicability ?: last.applicability) != Applicability.Current, knownRed = currency?.knownRed != null,
+                )
+            }
+            return RunsRender.lines(live, receipts)
+        }
+
         private fun checkLines(currencies: Map<String, Currency>): List<CheckLine> = ws.checks.all().mapNotNull { check ->
             val last = check.last ?: return@mapNotNull null
             val currency = currencies[check.id]
@@ -1634,6 +1675,14 @@ public class Cell @JvmOverloads constructor(
             }
 
             override fun currentVersion(path: String): io.astrolabe.id.FileVersion? = ws.registry.version(path)
+
+            // A-D.4: a hypothesis note's anchor — the one file and displayed version of a stored observation.
+            override fun observedFile(id: String): io.astrolabe.evidence.Anchor? {
+                val canonical = Aliases.parse(id)?.let { ev.aliases.resolve(ids.work, it)?.canonicalId } ?: id
+                val observation = ev.observations.get(canonical) ?: return null
+                val path = observation.paths.singleOrNull() ?: return null
+                return observation.sourceVersions[path]?.let { io.astrolabe.evidence.Anchor(path, it) }
+            }
 
             override fun knownVersions(path: String): Collection<io.astrolabe.id.FileVersion> =
                 listOfNotNull(currentVersion(path)) + ws.workset.entries.filter { it.path == path }.map { it.version } + ws.workset.history(path)

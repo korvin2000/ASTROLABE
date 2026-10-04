@@ -774,7 +774,9 @@ public class Run(
                 waited.tail, waited.dropped,
             )
         }
-        handles.save(handle.copy(proc = proc.copy(status = ProcStatus.Running), status = wire(ProcStatus.Running), cursor = waited.cursor))
+        // A-D.7 T8: readiness is a typed fact of the handle and the outcome, not only the text of this result.
+        val ready = (waited as? Waited.Ready)?.reason?.let { if (it.startsWith(LINE_MATCHED)) it.removePrefix(LINE_MATCHED) else "port ${until.port}" }
+        handles.save(handle.copy(proc = proc.copy(status = ProcStatus.Running), status = wire(ProcStatus.Running), cursor = waited.cursor, ready = ready ?: handle.ready))
         // D-387: the tail is redacted with the log before it, like a poll slice; an unreadable prefix hides it.
         val before = if (tail.isEmpty()) "" else logBefore(proc, waited.cursor - tail.size)
         val safe = redaction.applyLive(tail, ContentClass.ModelFacing, open || before == null, before.orEmpty())
@@ -785,7 +787,11 @@ public class Run(
             (if (elided) "\n… earlier output elided; the log holds it" else "") + (if (shown.isBlank()) "" else "\n$shown")
         val result = RunResult(handle.alias, handle.actionId, null, Outcome.NotRun, view, elided, null, handle.effectClass, CandidateId(Digest(handle.stampBefore)), null, false, emptyList(), handle.handleId, null, null, emptyList())
         return render(args, result, handle.argv, handle.shell, null, null, effectsUnknown = handle.effectsUnknown, statusWire = "running", captureMask = safe.mask)
+            .let { if (ready == null) it else it.copy(ready = ready) }
     }
+
+    /** The live background runs of this cell, in handle order: the `── Runs` block of a direct anchor (§5.10-D). */
+    internal fun liveHandles(): List<Handle> = handles.open().filter { it.ids.context == ids.context && owned(it) }
 
     private suspend fun listeningOffThread(port: Int): Boolean =
         kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) { os.listening(port) }
@@ -826,7 +832,7 @@ public class Run(
             partial = pending.copyOfRange(cut, pending.size)
             val matched = scan.feed(pending.copyOfRange(0, cut).toString(Charsets.UTF_8))
             if (terminal) return Waited.Ended(proc.status, cursor, tail.bytes(), matched)
-            if (matched != null) return Waited.Ready("line matched: $matched", cursor, tail.bytes(), tail.dropped, scan.open)
+            if (matched != null) return Waited.Ready("$LINE_MATCHED$matched", cursor, tail.bytes(), tail.dropped, scan.open)
             if (watchedPort != null && portAtStart == PortAtStart.OpenOnArrival) {
                 return Waited.Ready("port $watchedPort already accepted connections when the wait began (it may belong to another process)", cursor, tail.bytes(), tail.dropped, scan.open)
             }
@@ -1076,6 +1082,9 @@ private const val WAIT_TAIL_BYTES: Int = 256 * 1024
 
 /** A line longer than this without a newline is matched as it stands. */
 private const val WAIT_LINE_BYTES: Int = 64 * 1024
+
+/** How a wait's readiness by line is worded; the text after it is the matched line (T8 `Handle.ready`). */
+private const val LINE_MATCHED: String = "line matched: "
 
 /** How long a poll waits for the line break that completes a slice made of one unfinished line. */
 private const val LINE_COMPLETION_SECONDS: Long = 1

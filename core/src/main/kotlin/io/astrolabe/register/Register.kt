@@ -5,6 +5,8 @@ import io.astrolabe.evidence.ClaimKind
 import io.astrolabe.id.ContextId
 import io.astrolabe.id.FileVersion
 import io.astrolabe.workspace.VersionChange
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -83,9 +85,40 @@ public data class OpenItem(
     val fired: Boolean = false,
 )
 
-/** A pending amendment proposal as the model phrased it (the only place it may touch acceptance). */
+/**
+ * A pending amendment proposal as the model phrased it (the only place it may touch acceptance). [id] is the contract
+ * amendment a direct `state(note, kind=amend)` recorded (A-D.4); a structured line has none and keeps its bytes.
+ */
 @Serializable
-public data class AmendmentLine(val change: String, val reason: String, val status: String = "pending")
+public data class AmendmentLine(
+    val change: String,
+    val reason: String,
+    val status: String = "pending",
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val id: String? = null,
+) {
+    /** The v1.0 constructor: [id] takes its default. Kept for Java callers. */
+    public constructor(change: String, reason: String, status: String) : this(change, reason, status, null)
+}
+
+/** An amendment line the direct protocol archived, with the position its `a<n>` id keeps (A-D.4). */
+@Serializable
+public data class ArchivedAmendment(val position: Int, val line: AmendmentLine)
+
+/**
+ * A-D.4: the notes a direct register archived to keep its active part under the register cap — closed open items,
+ * refuted facts and decided amendments. Durable and readable (`look(recall, id="notes", range="archive")`), never
+ * rendered in STATE and never counted in its tokens; numbers are never reused, so a new note counts these too.
+ */
+@Serializable
+public data class RegisterArchive(
+    val facts: List<Fact> = emptyList(),
+    val open: List<OpenItem> = emptyList(),
+    val amendments: List<ArchivedAmendment> = emptyList(),
+) {
+    val isEmpty: Boolean get() = facts.isEmpty() && open.isEmpty() && amendments.isEmpty()
+}
 
 /**
  * The Working Register (STATE, §5.2): model-owned through typed ops, harness-validated, rendered by the
@@ -106,9 +139,47 @@ public data class Register(
     val focus: String? = null,
     val amendments: List<AmendmentLine> = emptyList(),
     val next: String? = null,
+    /** A-D.4: what a direct register archived; empty, and not encoded, for every structured register. */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val archive: RegisterArchive = RegisterArchive(),
 ) {
+    /** The v1.0 full constructor: [archive] takes its default. Kept for Java callers. */
+    public constructor(
+        version: Int,
+        cell: ContextId,
+        increment: String,
+        incrementTitle: String,
+        constraints: List<String>,
+        plan: List<Step>,
+        facts: List<Fact>,
+        deadEnds: List<DeadEnd>,
+        decisions: List<Decision>,
+        open: List<OpenItem>,
+        focus: String?,
+        amendments: List<AmendmentLine>,
+        next: String?,
+    ) : this(version, cell, increment, incrementTitle, constraints, plan, facts, deadEnds, decisions, open, focus, amendments, next, RegisterArchive())
+
     init {
         require(version >= 0) { "register version must be ≥ 0" }
+    }
+
+    /**
+     * The `a<n>` position of every active amendment line (A-D.4): positions run over the archived lines too, so an
+     * archived amendment never hands its number to another.
+     */
+    public fun amendmentPositions(): List<Int> {
+        val taken = archive.amendments.map { it.position }.toSet()
+        return generateSequence(1) { it + 1 }.filter { it !in taken }.take(amendments.size).toList()
+    }
+
+    /** This register with its archive merged back, in number and position order: what the T7 change test compares. */
+    internal fun restored(): Register {
+        if (archive.isEmpty) return this
+        val positions = amendmentPositions()
+        val lines = (amendments.mapIndexed { i, a -> positions[i] to a } + archive.amendments.map { it.position to it.line }).sortedBy { it.first }.map { it.second }
+        return copy(facts = (facts + archive.facts).sortedBy { it.n }, open = (open + archive.open).sortedBy { it.n }, amendments = lines, archive = RegisterArchive())
     }
 
     val cursor: Step? get() = plan.firstOrNull { it.mark == Mark.Cursor }
