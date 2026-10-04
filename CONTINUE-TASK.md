@@ -11,7 +11,7 @@ the owner decided not to wait for one (plan §11 №26: assume it works; a failu
 shape, S2 live (P8.H), then S3; D → H → E → F → release. P8: **27 DONE / 29 TODO**.
 
 ## Next — session 4 (plan §7)
-1. P8.D.6 (Dp3) amends the direct spec **before D1** (t6, then Codex review). Session prompt: plan appendix A.9.
+1. P8.D.6 (Dp3) amends the direct spec **before D1** (t6, then Codex review). Session prompt: plan appendix A.9; economy rules: plan §8.8 (owner №27).
 2. D1 → D2 ∥ D3 (appendix A-D as amended; re-check table A-D.7: the hotfix moved `Cell.kt`, `Gates.kt`,
    `EffectPolicy.kt`); in parallel P8.B.7 → P8.B.5, P8.C.15, P8.C.16. Owner №21: no long runs with a strong lead model.
 
