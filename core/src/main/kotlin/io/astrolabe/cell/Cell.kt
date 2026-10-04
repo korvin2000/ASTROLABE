@@ -178,7 +178,7 @@ public class Cell @JvmOverloads constructor(
         private val contextAdmission = ctx.admission ?: ContextAdmission()
         private val capabilities = ctx.model.adapter.capabilities(ctx.model.profile)
         // Invariant 12: the schema set is the role's, chosen once for the line; a turn's mask lives in [A].
-        private val schemaSelection = ToolSchemas.forLineage(ctx.model.adapter, ctx.model.profile, ctx.role.toolMask)
+        private val schemaSelection = ToolSchemas.forLineage(ctx.model.adapter, ctx.model.profile, ctx.role)
         private val residency = Residency.of(defaults, estimator)
         private val record = TurnRecord()
         private val dispatcher = Dispatcher(executors(), ws.workset, ids, events, ctx.turnCheckpoint)
@@ -263,6 +263,7 @@ public class Cell @JvmOverloads constructor(
             ctx.noteHorizon?.let { subscriptions += ws.coherence.register(it) }
             subscriptions += ws.coherence.register(ChangeListener { touchedLedger += Touched.of(it) })
             tools.edit?.increment = increment
+            tools.edit?.protocol = ctx.role.protocol
             tools.verify?.inputs = atlas.rows.map { it.path }
             tools.verify?.atlas = atlas
             // C1a (plan §4.4): `run` recognises this cell's registered checks; the model's own checks strengthen its increment.
@@ -716,6 +717,7 @@ public class Cell @JvmOverloads constructor(
                 refusals = refused.toList(), implementing = implementingCompletion,
                 // D-340: the controller pins a `rework` decision's text as "rework requested by …" (`Controller.reworkNotes`).
                 reworked = ctx.rework || ctx.pinned.any { it.startsWith("rework requested by ") },
+                protocol = ctx.role.protocol,
             )
             val report = gates.evaluate(state)
             fired = report.fired
@@ -907,7 +909,10 @@ public class Cell @JvmOverloads constructor(
                 return wholeTurn(native, remaining, alone, rejected.reason, culprits = setOf(rejected.opId - 1))
             }
             requiredOp?.let { op ->
-                if (remaining.none { it.family.wire == op }) return wholeTurn(native, remaining, alone, "the loop gate ended the last turn: a $op op is required before anything else runs")
+                if (remaining.none { it.family.wire == op }) {
+                    val required = if (ctx.role.protocol == Protocol.Direct) Gates.loopRequirement(Protocol.Direct) else "a $op op is required before anything else runs"
+                    return wholeTurn(native, remaining, alone, "the loop gate ended the last turn: $required")
+                }
                 requiredOp = null
             }
             return validated(native, remaining, alone, dependents)
@@ -1171,14 +1176,14 @@ public class Cell @JvmOverloads constructor(
          * `Rebuild(Pressure)` inside the cell (§5.8, P2.5.2): the whole projection is replaced — `[T]` keeps the last
          * m = 6 complete protocol turns, the Workset becomes the carried seeds (KNOWN = seeds only), STATE is validated
          * and a pinned `rebuilt:` note names the generation. Nothing is summarised by a model. The seeds come from the
-         * attempt's `Defaults.seedRule`, the rule a cell boundary uses.
+         * attempt's `Defaults.seedRule`, the rule a cell boundary uses; a direct cell always takes Seeds v2 (A-D.7 K1).
          */
         private fun rebuild(why: String) {
             val contract = contract()
             val carry = CarryForward.carry(
                 register, ws.workset.export(), null, ws.registry::version,
                 { id -> Aliases.parse(id)?.let { ev.aliases.resolve(ids.work, it) } != null }, emptyList(), pinned(contract),
-                selector = defaults.seedRule.selector, touched = changes().map { it.path },
+                selector = io.astrolabe.context.SeedRule.of(ctx.role.protocol, defaults.seedRule).selector, touched = changes().map { it.path },
                 latestReceipts = ws.checks.all().mapNotNull { check -> check.last?.receiptId?.let { ev.receipts.get(it) } },
             )
             val seeds = io.astrolabe.context.Seeds.render(carry.seeds, ws.registry::read)

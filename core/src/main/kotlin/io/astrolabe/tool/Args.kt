@@ -319,9 +319,11 @@ public data class StateArgs(
     val patch: List<JsonElement>? = null,
     val blocked: BlockedArgs? = null,
     @SerialName("retrieval_miss") val retrievalMiss: RetrievalMissArgs? = null,
+    /** `state(note)` of the direct protocol (kernel contract A-D.4), kept raw: its executor reads it. */
+    val note: JsonElement? = null,
 ) {
     init {
-        require(op in ToolOps.state) { "unknown state op '$op'" }
+        require(ToolOps.name(ToolFamily.State, op) in ToolOps.known) { "unknown state op '$op'" }
         when (op) {
             "patch" -> require(!patch.isNullOrEmpty()) { "state(patch) needs ops" }
             "blocked" -> require(blocked != null) { "state(blocked) needs reason and evidence" }
@@ -342,9 +344,11 @@ public data class TaskArgs(
     val proposal: JsonElement? = null,
     /** `answer` (D-344): the reply to a request that needs no change to the files. */
     val text: String? = null,
+    /** `finish(after_checks)` of the direct protocol (kernel contract A-D.5). */
+    @SerialName("after_checks") val afterChecks: Boolean? = null,
 ) {
     init {
-        require(op in ToolOps.task) { "unknown task op '$op'" }
+        require(ToolOps.name(ToolFamily.Task, op) in ToolOps.known) { "unknown task op '$op'" }
         if (op == "ask") require(!question.isNullOrBlank()) { "task(ask) needs a question" }
         if (op == "answer") require(!text.isNullOrBlank()) { "task(answer) needs the answer as text" }
         if (op == "propose") {

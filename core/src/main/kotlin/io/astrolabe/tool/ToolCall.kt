@@ -119,7 +119,7 @@ public object ToolCalls {
         is Args.State -> args.args.op
         is Args.Task -> args.args.op
         is Args.Kb -> args.args.op
-    }.also { require(it in ToolOps.of(family)) { "unknown ${family.wire} op '$it' in ${raw.keys}" } }
+    }.also { require(ToolOps.name(family, it) in ToolOps.known) { "unknown ${family.wire} op '$it' in ${raw.keys}" } }
 
     /** Convenience for tests and fixtures: the `family.op` names present in a raw call. */
     @JvmStatic

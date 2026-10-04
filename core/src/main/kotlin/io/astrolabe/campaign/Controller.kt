@@ -927,8 +927,10 @@ public class Controller @JvmOverloads public constructor(
                     }
                 }
             }
+            // A-D.1: the main line's role, read once at the cell's start from the attempt's protocol and the contract's shape.
+            val role = mainLine(c, contract)
             // §11.4 ordering hint (P4.5.3): among ready increments, the one sharing the last cell's prefix goes first.
-            val ready = CellOrder.next(state.graph.readyFrontier(contract, state.graph.increments.size), lastKey) { inc ->
+            val ready = CellOrder.next(state.graph.readyFrontier(contract, state.graph.increments.size), lastKey, role) { inc ->
                 listOfNotNull(tiers[inc.id], attempts.tier(inc.id), FunctionTable.DEFAULT.row(RoutingFunction.Implementing).defaultTier, Router.riskFloor(inc.risk ?: contract.risk, null)).max()
             }
             if (ready == null) {
@@ -949,10 +951,10 @@ public class Controller @JvmOverloads public constructor(
             }
             cells += 1
             // §6.2: a continuation starts from the previous cell's validated register, seeds and packet — never its transcript.
-            val carry = ready.cells.lastOrNull()?.let { previous -> carryFrom(c, previous, packets.lastOrNull { it.ids.context == previous }) }
+            val carry = ready.cells.lastOrNull()?.let { previous -> carryFrom(c, previous, packets.lastOrNull { it.ids.context == previous }, role) }
             val seeds = carry?.let { Seeds.render(it.seeds, c.registry::read) }
             val resume = resumeNote(c, ready, carry)
-            val knowledge = knowledge(c, ready, Roles.implementing, model, touched = carry?.seeds.orEmpty().map { it.path }.toSet())
+            val knowledge = knowledge(c, ready, role, model, touched = carry?.seeds.orEmpty().map { it.path }.toSet())
             val inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) }, notes = knowledge.notes, contractsIndex = knowledge.contractsIndex, skills = knowledge.skills, skillConflicts = knowledge.skillConflicts)
             val (reworkLines, reworkRecords) = reworkNotes(c, ready)
             val pinned = listOfNotNull(resume, attempts.line(ready.id)) + recovery.lines(ready.id) + hostAnswers(c, ready) + reworkLines
@@ -969,7 +971,7 @@ public class Controller @JvmOverloads public constructor(
                 }
             }
             val routing = route(c, if (ready.cells.isEmpty()) RoutingFunction.Implementing else RoutingFunction.Continuation, ready, model, listOfNotNull(tiers[ready.id], attempts.tier(ready.id)).maxOrNull(), take?.compiled) { bound ->
-                Compiler(bound.estimator, c.attempt.config).compile(ready, contract, bound.profile, Roles.implementing, c.prime, maxOutputTokens = bound.maxOutputTokens, inputs = inputs)
+                Compiler(bound.estimator, c.attempt.config).compile(ready, contract, bound.profile, role, c.prime, maxOutputTokens = bound.maxOutputTokens, inputs = inputs)
             }
             val compiled = routing.compiled
             val cellModel = routing.model
@@ -989,7 +991,7 @@ public class Controller @JvmOverloads public constructor(
             // FX-32: an unaffordable tier is refused, never clamped; the campaign stops on the router's options.
             routing.refused?.let { return last.copy(state = c.advance(contractBudget(c, it.reason, null)), compiled = compiled) }
             routing.selected?.let { tiers[ready.id] = it.tier }
-            lastKey = routing.selected?.let { CellOrder.key(it.tier) }
+            lastKey = routing.selected?.let { CellOrder.key(role, it.tier) }
             val cellId = ContextId(idGen.next("cell"))
             events?.emit(AgentEvent.Campaign.IncrementSelected(c.ids, ready.id))
             val dispatched = c.advance(Transition.Dispatched(ready.id, cellId))
@@ -999,7 +1001,7 @@ public class Controller @JvmOverloads public constructor(
             // The pre-compile job lives in this scope: joined at cell close, cancelled with the cell (§6.6).
             val run = coroutineScope {
                 val trigger = precompile?.let { p -> trigger(c, this, p, cellId, increment, cellModel) }
-                runCell(c, cellId, increment, Roles.implementing, cellModel, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = pinned, boundary = boundaryReason, inputs = inputs, precompile = trigger, rework = reworkLines.isNotEmpty()).also { run ->
+                runCell(c, cellId, increment, role, cellModel, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = pinned, boundary = boundaryReason, inputs = inputs, precompile = trigger, rework = reworkLines.isNotEmpty()).also { run ->
                     if (run.exit !is CellExit.Completed) precompile?.discard("cell ${cellId.value} ended ${run.exit?.let { it::class.simpleName!!.lowercase() } ?: "cancelled"}: never a continuation of a red increment")
                 }
             }
@@ -1226,9 +1228,12 @@ public class Controller @JvmOverloads public constructor(
         return "impact pre-scan refresh: contract ${refreshed.contractsTouched.joinToString(", ")} touched — S2 with an ADR in the main line is required before this lands (I-23)"
     }
 
-    /** The full compile-input fingerprint (§6.6, F06) of an implementing compile of [increment] at [stamp]. */
+    /** The full compile-input fingerprint (§6.6, F06) of a main-line compile of [increment] at [stamp]. */
     private fun fingerprint(c: OpenedCampaign, contract: Contract, increment: Increment, stamp: CandidateId, model: CellModel, inputs: CompileInputs, registerVersion: Int?, pinned: List<String>): Fingerprint =
-        Fingerprint.of(stamp, contract, increment, Roles.implementing, model.profile, c.attempt, c.prime, model.estimator, model.maxOutputTokens, inputs, registerVersion, pinned)
+        Fingerprint.of(stamp, contract, increment, mainLine(c, contract), model.profile, c.attempt, c.prime, model.estimator, model.maxOutputTokens, inputs, registerVersion, pinned)
+
+    /** A-D.1 (row R): the main line's role from the attempt's protocol and [contract]'s shape — never the campaign's shape decision. */
+    private fun mainLine(c: OpenedCampaign, contract: Contract = c.contract): Role = Roles.mainLine(c.attempt.config.protocol, contract.shape)
 
     /**
      * §6.6: at a completion proposal of [increment]'s cell that leaves only slow or expensive checks to run, pre-build
@@ -1250,11 +1255,12 @@ public class Controller @JvmOverloads public constructor(
                 return@PrecompileTrigger
             }
             // The next increment has no previous cell: no carry-forward, no seeds, no resume note (§6.2).
-            val knowledge = knowledge(c, next, Roles.implementing, model)
+            val role = mainLine(c, contract)
+            val knowledge = knowledge(c, next, role, model)
             val inputs = CompileInputs(currentVersion = { c.registry.version(it) }, notes = knowledge.notes, contractsIndex = knowledge.contractsIndex, skills = knowledge.skills, skillConflicts = knowledge.skillConflicts)
             val compiler = Compiler(model.estimator, c.attempt.config)
             precompile.start(scope, ids, fingerprint(c, contract, next, stamp, model, inputs, null, emptyList()), next.id, remaining) {
-                compiler.compile(next, contract, model.profile, Roles.implementing, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = inputs)
+                compiler.compile(next, contract, model.profile, role, c.prime, maxOutputTokens = model.maxOutputTokens, inputs = inputs)
             }
         }
 
@@ -1407,7 +1413,7 @@ public class Controller @JvmOverloads public constructor(
                         c.journal.append(JournalEvent(idGen.next("ev"), c.ids.copy(context = cellId), null, JournalKind.Boundary, refs = listOf(stored.id), text = gap, at = clock.instant()))
                     }
                 }
-                boundary(c, cellId, RebuildReason.RoleSwitch(Roles.implementing))
+                boundary(c, cellId, RebuildReason.RoleSwitch(mainLine(c)))
                 null
             }
             is PlanAdmission.Refused -> blocked("plan ${stored.id} refused: ${admission.gaps.joinToString("; ")}")
@@ -1456,8 +1462,8 @@ public class Controller @JvmOverloads public constructor(
             }, HeuristicEstimator(), c.attempt.config.defaults.registerCapTokens, clock)
     }
 
-    /** The carry-forward of [cell] (§6.2): its latest register, its end export and its packet, re-validated now. */
-    private fun carryFrom(c: OpenedCampaign, cell: ContextId, packet: ResultPacket?): Carry? {
+    /** The carry-forward of [cell] (§6.2) for the next cell of [role]: its latest register, its end export and its packet, re-validated now. */
+    private fun carryFrom(c: OpenedCampaign, cell: ContextId, packet: ResultPacket?, role: Role): Carry? {
         val retained = retainedFacts(c, cell) ?: return null
         if (retained.archived.isNotEmpty()) {
             val status = StatusNotes(KbWriter(c.store, HeuristicEstimator(), clock), Notes(c.store), c.store.layout.kb)
@@ -1471,10 +1477,11 @@ public class Controller @JvmOverloads public constructor(
         val aliases = SqliteAliases(c.store, clock)
         val receipts = SqliteReceipts(c.store, clock)
         // D-398: the cell boundary selects seeds by the attempt's seed rule, as the pressure rebuild does; v1 keeps its bytes.
+        // A-D.7 K1: a direct cell always takes Seeds v2.
         return CarryForward.carry(
             register, Seeds.cellEnd(SqliteCheckpoints(c.store, clock), cell), packet, { c.registry.version(it) },
             { id -> Aliases.parse(id)?.let { aliases.resolve(c.ids.work, it) } != null }, emptyList(), emptyList(),
-            selector = c.attempt.config.defaults.seedRule.selector,
+            selector = io.astrolabe.context.SeedRule.of(role.protocol, c.attempt.config.defaults.seedRule).selector,
             latestReceipts = c.checks.all().mapNotNull { it.last?.receiptId?.let(receipts::get) },
         ).copy(capacityGap = retained.capacityGap)
     }
@@ -1571,9 +1578,9 @@ public class Controller @JvmOverloads public constructor(
             }
         // C3 (plan §4.6): the cell starts only within the task limits' working part.
         limitStop(c, authority)?.let { return S0Run(it, null, null, null) }
-        val role = Roles.implementing
+        val role = mainLine(c, contract)
         // §13.4 rebuild(resume): a cell that continues a lost or interrupted one starts from its validated carry-forward.
-        val carry = ready.cells.lastOrNull()?.let { previous -> carryFrom(c, previous, null) }
+        val carry = ready.cells.lastOrNull()?.let { previous -> carryFrom(c, previous, null, role) }
         val seeds = carry?.let { Seeds.render(it.seeds, c.registry::read) }
         val resume = resumeNote(c, ready, carry)
         val knowledge = knowledge(c, ready, role, model, touched = carry?.seeds.orEmpty().map { it.path }.toSet())
@@ -1597,7 +1604,7 @@ public class Controller @JvmOverloads public constructor(
         spendReworks(c, cellId, reworkRecords)
         val increment = dispatched.graph.increments.first { it.id == ready.id }
         val register = carry?.register?.copy(cell = cellId, increment = increment.id, incrementTitle = increment.title)
-        val run = runCell(c, cellId, increment, Roles.implementing, cellModel, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = listOfNotNull(resume) + hostAnswers(c, ready) + reworkLines, inputs = inputs, rework = reworkLines.isNotEmpty())
+        val run = runCell(c, cellId, increment, role, cellModel, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = listOfNotNull(resume) + hostAnswers(c, ready) + reworkLines, inputs = inputs, rework = reworkLines.isNotEmpty())
         val ids = run.ids
         val scheduler = run.scheduler
         val exit = run.exit
@@ -2258,7 +2265,7 @@ public class Controller @JvmOverloads public constructor(
             Delegator(CellChildRunner(childCell(c, increment, model, authority, syntax, span), evidence = reviews), PublicationAuthority { c.refusal() }, c.cancellation, DelegationLimits.of(config.defaults, contract.budget.tokens), contract.shape, scope, idGen, clock, events, worth = worth)
         }
         val tools = CellTools(
-            state = StateTool(Validator(estimator, registerCapTokens = config.defaults.registerCapTokens, patchCapTokens = config.defaults.patchCapTokens, factLineMaxChars = config.defaults.factLineMaxChars), registerVersions, c.journal, estimator, idGen, ids, clock, register ?: Register.empty(cellId, increment.id, increment.title), events),
+            state = StateTool(Validator(estimator, registerCapTokens = config.defaults.registerCapTokens, patchCapTokens = config.defaults.patchCapTokens, factLineMaxChars = config.defaults.factLineMaxChars, protocol = role.protocol), registerVersions, c.journal, estimator, idGen, ids, clock, register ?: Register.empty(cellId, increment.id, increment.title), events),
             look = Look(tree.workspace, tree.registry, workset, tree.atlas, Searches.jvm(), c.journal, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, checks = tree.checks, mounts = layered.mounts, bmaps = BmapStore(c.store), tools = layered.tools, tiers = layered.tiers, budgetTokens = config.defaults.lookBudgetTokens),
             edit = Edit(
                 tree.workspace, tree.registry, workset, c.os, preimages, ScopeGuard(tree.workspace), c.contracts, tree.checks, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, syntax,
@@ -2449,7 +2456,7 @@ public class Controller @JvmOverloads public constructor(
         val prescan = c.impactPrescan
         val impact = RiskFloorInput(prescan.contractsTouched.size, prescan.complete, prescan.prescan.fanIn, prescan.complete)
         val flags = acceptanceFlags(c, kept.testIntegrity())
-        val triggers = ReviewTriggers.increment(IncrementReviewInput(c.contract, increment, Roles.implementing, kept.tier, flags, kept.changed, c.kb.contractAnchors(), impact))
+        val triggers = ReviewTriggers.increment(IncrementReviewInput(c.contract, increment, mainLine(c), kept.tier, flags, kept.changed, c.kb.contractAnchors(), impact))
         if (triggers.isEmpty()) return null
         val row = FunctionTable.DEFAULT.row(ReviewTriggers.function(triggers))
         val packet = { evidence(c, increment, triggers, flags, kept.preexisting, authority) }

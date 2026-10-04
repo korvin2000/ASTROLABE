@@ -107,6 +107,8 @@ public class StateTool(
     override suspend fun execute(call: ToolCall, context: TurnContext): ToolOutcome {
         require(call.family == ToolFamily.State) { "not a state call: ${call.name}" }
         val args = (call.args as Args.State).args
+        // A-D.4: `note` is declared (names, masks, schemas) before its executor; until then the call is refused, typed.
+        if (call.name in ToolOps.directOnly) return result("unsupported", ToolOps.notImplemented(call.name))
         if (!mask.allows(call.name)) return result("masked", "${call.name} is masked in this role")
         return when (args.op) {
             "patch" -> patch(args, context)

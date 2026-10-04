@@ -240,6 +240,8 @@ public data class GateState @JvmOverloads constructor(
      * messages, which no rebuild removes, leave less than a turn's working room under it. `0`: the declared default.
      */
     val contextCeilingTokens: Long = 0,
+    /** The cell's protocol (A-D.7): it switches gate wording only, never a predicate; no gate reads the shape. */
+    val protocol: Protocol = Protocol.Structured,
 ) {
     init {
         require(turn >= 1) { "turn is 1-based, got $turn" }
@@ -323,6 +325,11 @@ public class Gates(gates: List<Gate>) {
          */
         @JvmStatic
         public fun s0(): Gates = Gates(listOf(Entry, Exit, Sufficiency, Pressure, Stall, Loop, RefusalLoop, RegisterInvariants, StaleFact, Impact, ContractTouch, RepeatedFailure, Scope, AcceptanceSurfaceGate, Reserve, Turns))
+
+        /** G1 (A-D.7): the loop gate's required `state` call in [protocol]'s words; a direct cell answers with a note. */
+        internal fun loopRequirement(protocol: Protocol): String =
+            if (protocol == Protocol.Direct) "a note is required: state(note) what you learned, or end with state(blocked) or task(ask)"
+            else "a state op is required"
     }
 
     // Plan §4.4 (C1b): once per cell, when every `run:` item of the increment is green on this tree and the D-337
@@ -351,8 +358,8 @@ public class Gates(gates: List<Gate>) {
         override val name: String get() = IMPACT
 
         override fun evaluate(state: GateState): List<GateOutcome> = state.impactNudges.map {
-            GateOutcome.Nudge(GateKey(name, "${it.definition.path}::${it.definition.symbol}@${it.turn}"), it.line)
-        } + listOfNotNull(state.impactOverflow.takeIf { it.isNotEmpty() }?.let { GateOutcome.Nudge(GateKey(name, "overflow@${state.turn}"), ImpactNudges.summary(it)) })
+            GateOutcome.Nudge(GateKey(name, "${it.definition.path}::${it.definition.symbol}@${it.turn}"), it.line(state.protocol))
+        } + listOfNotNull(state.impactOverflow.takeIf { it.isNotEmpty() }?.let { GateOutcome.Nudge(GateKey(name, "overflow@${state.turn}"), ImpactNudges.summary(it, state.protocol)) })
     }
 
     // §5.6 Contract touch: an edit set touches anchors of a CON note; active once any CON note exists.
@@ -381,10 +388,13 @@ public class Gates(gates: List<Gate>) {
 
         override fun evaluate(state: GateState): List<GateOutcome> {
             if (state.outsideIncrement.isEmpty()) return emptyList()
+            // G8: the direct text names no operation a shape can hide (task.propose is masked in S0).
+            val next = if (state.protocol == Protocol.Direct) "justify each path in `why`"
+                else "the next crossing needs task.propose(increment_split) or the path justified in why"
             return listOf(
                 GateOutcome.Nudge(
                     GateKey(name, "outside-increment"),
-                    "scope: ${state.outsideIncrement.sorted().joinToString(", ")} outside the increment's write scope — the next crossing needs task.propose(increment_split) or the path justified in why",
+                    "scope: ${state.outsideIncrement.sorted().joinToString(", ")} outside the increment's write scope — $next",
                 ),
             )
         }
@@ -407,9 +417,12 @@ public class Gates(gates: List<Gate>) {
         override fun evaluate(state: GateState): List<GateOutcome> {
             if (state.calls.none { it.family == ToolFamily.Edit }) return emptyList()
             if (state.register.plan.any { it.accept != null } || state.increment.accept.any { state.contract.acceptance(it) != null }) return emptyList()
+            // G2: a direct register has no plan, so its clause never holds and is not named; the direct text asks for the check itself.
+            val direct = state.protocol == Protocol.Direct
             val why = if (state.increment.accept.isEmpty()) "the increment declares no acceptance"
-                else "acceptance ${state.increment.accept.joinToString(", ")} is not in contract v${state.contract.version} and no plan step carries an accept:"
-            return listOf(GateOutcome.Nudge(GateKey(name, "first-edit"), "entry: editing while $why — write the acceptance crisply, or ask one question (task.ask)"))
+                else "acceptance ${state.increment.accept.joinToString(", ")} is not in contract v${state.contract.version}" + if (direct) "" else " and no plan step carries an accept:"
+            val ask = if (direct) "name the command that will check the result and run it" else "write the acceptance crisply"
+            return listOf(GateOutcome.Nudge(GateKey(name, "first-edit"), "entry: editing while $why — $ask, or ask one question (task.ask)"))
         }
     }
 
@@ -443,7 +456,11 @@ public class Gates(gates: List<Gate>) {
             val ceiling = if (state.contextCeilingTokens > 0) state.contextCeilingTokens else state.defaults.contextCeilingTokens.toLong()
             if (!overAlpha && state.contextTokens <= ceiling) return emptyList()
             val percent = state.contextTokens * 100 / state.contextMaxTokens
-            val action = if (state.rebuilds == 0) "fold what matters into STATE; the harness rebuilds" else "second rebuild: partial with a replan hint"
+            val action = when {
+                state.protocol == Protocol.Direct -> if (state.rebuilds == 0) "record what matters with state(note); the harness rebuilds" else "second rebuild: the work continues in a fresh cell"
+                state.rebuilds == 0 -> "fold what matters into STATE; the harness rebuilds"
+                else -> "second rebuild: partial with a replan hint"
+            }
             val line = if (overAlpha) "pressure: context $percent% > α ${(state.defaults.alpha * 100).toInt()}% — $action"
             else "pressure: context ${state.contextTokens} tokens > the $ceiling-token ceiling — $action"
             return listOf(GateOutcome.Nudge(GateKey(name, "rebuild-${state.rebuilds}"), line))
@@ -459,10 +476,12 @@ public class Gates(gates: List<Gate>) {
             if (state.liveRunOutput || idle < state.defaults.stallTurns) return emptyList()
             // §4.2 decision packets: the latest decision that names a cheap falsifying check is suggested by name.
             val probe = state.register.decisions.lastOrNull { !it.probe.isNullOrBlank() }?.let { " (decision ${it.n}: ${it.probe})" }.orEmpty()
+            val options = if (state.protocol == Protocol.Direct) "zoom out · run the check · record a dead end · or surface the blocker (task.ask, state(blocked))"
+                else "re-read the plan · zoom out · run the pending decision probe$probe · surface the blocker · or request a probe cell"
             return listOf(
                 GateOutcome.Nudge(
                     GateKey(name, "since-${state.lastProgressTurn}/${idle / state.defaults.stallTurns}"),
-                    "stall: $idle turns without progress — re-read the plan · zoom out · run the pending decision probe$probe · surface the blocker · or request a probe cell",
+                    "stall: $idle turns without progress — $options",
                 ),
             )
         }
@@ -484,9 +503,10 @@ public class Gates(gates: List<Gate>) {
                         GateKey(name, "${signature.tool}:$id:$n"),
                         "loop: ${signature.tool} returned the same result $n times — change the question or record what you learned",
                     )
+                    // G1: the same predicate and required family in both protocols; only the wording names the direct note.
                     n > state.defaults.loopIdentical -> out += GateOutcome.Rejection(
                         GateKey(name, "${signature.tool}:$id:$n"),
-                        "loop: ${signature.tool} returned the same result $n times — turn ended; a state op is required",
+                        "loop: ${signature.tool} returned the same result $n times — turn ended; " + loopRequirement(state.protocol),
                         endsTurn = true,
                         requiredOp = "state",
                     )
@@ -506,9 +526,11 @@ public class Gates(gates: List<Gate>) {
             return counts.mapNotNull { (signature, n) ->
                 val key = GateKey(name, "${signature.tool}:${signature.argsDigest.hash8}/${signature.reasonDigest.hash8}:$n")
                 when {
+                    // G5: the direct text names no operation a shape can hide.
                     n == state.defaults.loopIdentical -> GateOutcome.Nudge(
                         key,
-                        "refusal loop: ${signature.tool} was refused $n times for the same reason — change the call or end with state(blocked), task.ask or task.propose",
+                        "refusal loop: ${signature.tool} was refused $n times for the same reason — change the call or end with " +
+                            if (state.protocol == Protocol.Direct) "state(blocked) or task.ask" else "state(blocked), task.ask or task.propose",
                     )
                     n > state.defaults.loopIdentical -> GateOutcome.Rejection(key, "refusal loop: ${signature.tool} refused $n times — the cell ends blocked", endsTurn = true)
                     else -> null

@@ -131,7 +131,7 @@ public data class Fingerprint(
             // The compiled role's own wording: the frozen attempt map already enters through `policy`.
             roleTextVersion = RoleTexts.version(role),
             system = Digest.ofUtf8(Layout.system(role, attempt.config.executionMode)).hex,
-            schemas = ToolSchemas.fingerprint(role.toolMask).hex,
+            schemas = ToolSchemas.fingerprint(role).hex,
             profile = profile.id,
             policy = attempt.fingerprint.hex,
             prime = Digest.ofUtf8(prime).hex,

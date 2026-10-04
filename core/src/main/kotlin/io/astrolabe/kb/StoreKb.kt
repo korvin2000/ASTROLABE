@@ -20,7 +20,10 @@ public class StoreKb @JvmOverloads constructor(
     private val store: Store,
     private val work: WorkId,
     private val currentVersion: (String) -> FileVersion?,
-    /** The role whose skill view `kb.skill` renders (P4.3.1). */
+    /**
+     * The role whose skill view `kb.skill` renders (P4.3.1). Only a structured role can call it — every direct role hides
+     * `kb` (kernel contract A-D.3) — and `Roles.mainLine` is the implementing role for `Structured` in every shape.
+     */
     private val role: String = Roles.implementing.name,
     private val skillViews: SkillViews = SkillViews(HeuristicEstimator()),
     private val onSearch: (KbSearchLog) -> Unit = {},

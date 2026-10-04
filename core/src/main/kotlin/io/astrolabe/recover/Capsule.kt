@@ -24,7 +24,7 @@ public data class Capsule(
     val remainingBudget: Tokens,
 ) {
     init {
-        require(intendedOperation in ToolOps.all) { "the intended operation is a known family.op, got '$intendedOperation'" }
+        require(intendedOperation in ToolOps.known) { "the intended operation is a known family.op, got '$intendedOperation'" }
         require(acceptanceCriterion.isNotBlank()) { "a capsule names the acceptance criterion the repair must re-verify" }
         require(errorOrExit.isNotBlank()) { "a capsule carries the error or exit status" }
     }

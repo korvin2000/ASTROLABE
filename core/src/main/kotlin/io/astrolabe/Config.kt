@@ -3,6 +3,7 @@ package io.astrolabe
 import io.astrolabe.auth.ExecutionMode
 import io.astrolabe.auth.RedactionConfig
 import io.astrolabe.auth.Stage
+import io.astrolabe.cell.Protocol
 import io.astrolabe.cell.Role
 import io.astrolabe.cell.RoleTexts
 import io.astrolabe.cell.Roles
@@ -86,6 +87,14 @@ public data class Config(
      * network and package installation.
      */
     val capabilitySet: String = defaults.capabilitySet,
+    /**
+     * Kernel contract A-D.1: the protocol of the main line, an optional layer — `Structured` (Appendix A) unless the host
+     * chooses `Direct`. Frozen with the attempt; every shape accepts either value and no shape chooses it
+     * ([Roles.mainLine]). The default is not encoded, so a structured attempt keeps its fingerprint.
+     */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val protocol: Protocol = Protocol.Structured,
 ) {
     init {
         // C11: S3 writers resolve no test-integrity flag on the host's path, so they cannot keep IntegrityApproval.Human.
@@ -93,6 +102,32 @@ public data class Config(
             "integrityApproval = Human cannot run with flags.s3Writers: S3 writers do not ask a person about test-integrity changes — choose Autonomous or turn s3Writers off"
         }
     }
+
+    /** The v2.0 full constructor before the direct protocol: [protocol] takes its default. Kept for Java callers. */
+    public constructor(
+        defaults: Defaults,
+        profiles: Map<String, Profile>,
+        profileRoles: ProfileRoles,
+        mode: Mode,
+        executionMode: ExecutionMode,
+        dClass: DClassPolicy,
+        integrityApproval: IntegrityApproval,
+        unknownOutcomeReconciliation: UnknownOutcomeReconciliation,
+        ceiling: Stage,
+        rulesFile: RulesBinding?,
+        redaction: RedactionConfig,
+        stateRoot: String?,
+        flags: Flags,
+        roles: Map<String, Role>,
+        qualityGates: List<io.astrolabe.contract.Command>,
+        tierTable: TierTable,
+        modelChecks: Boolean,
+        balance: BalanceProfile,
+        capabilitySet: String,
+    ) : this(
+        defaults, profiles, profileRoles, mode, executionMode, dClass, integrityApproval, unknownOutcomeReconciliation, ceiling,
+        rulesFile, redaction, stateRoot, flags, roles, qualityGates, tierTable, modelChecks, balance, capabilitySet, Protocol.Structured,
+    )
 
     /** The v2.0 C1a constructor: [balance] takes its default. Kept for Java callers. */
     public constructor(
@@ -153,6 +188,8 @@ public data class Config(
     public fun withModelChecks(modelChecks: Boolean): Config = copy(modelChecks = modelChecks)
 
     public fun withBalance(balance: BalanceProfile): Config = copy(balance = balance)
+
+    public fun withProtocol(protocol: Protocol): Config = copy(protocol = protocol)
 
     /** The role [name] as configured, else the SDK default; `null` for a name neither declares. */
     public fun role(name: String): Role? = roles[name] ?: Roles.defaults[name]

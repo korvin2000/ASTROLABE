@@ -1,6 +1,7 @@
 package io.astrolabe.register
 
 import io.astrolabe.Defaults
+import io.astrolabe.cell.Protocol
 import io.astrolabe.evidence.ClaimKind
 import io.astrolabe.provider.TokenEstimator
 import kotlinx.serialization.Serializable
@@ -68,6 +69,8 @@ public class Validator(
     private val patchCapTokens: Int = 1_200,
     private val factLineMaxChars: Int = Defaults().factLineMaxChars,
     private val referenceMaxChars: Int = 1_000,
+    /** The cell's protocol (A-D.4): the direct protocol turns the Next rule off; every other rule is the same. */
+    private val protocol: Protocol = Protocol.Structured,
 ) {
     internal fun schemaRejection(register: Register, rawPatch: String, reason: String): Validation.Rejected =
         Validation.Rejected("schema", reason, Sizes(RegisterRender.tokens(register, estimator), registerCapTokens, estimator.estimate(rawPatch).tokens, patchCapTokens))
@@ -211,7 +214,8 @@ public class Validator(
             cursorMoved = true
         }
         // D-356: STATE has no Next yet and the patch names none — Next is the [>] step; with no open step there is nothing to name.
-        if (next.next == null) {
+        // A-D.7 V1: a direct register has neither Next nor [>], so the rule is off there.
+        if (next.next == null && protocol == Protocol.Structured) {
             val active = next.cursor ?: return reject("exactly one Next", "patch carries 0 next ops, STATE has no Next yet and no open step to take it from: add {\"next\": \"…\"}")
             next = next.copy(next = active.text)
         }

@@ -82,6 +82,44 @@ public object Kernel {
 }
 
 /**
+ * The direct protocol's kernel (kernel contract Appendix A-D.2): eight lines for `Roles.direct`. Frozen text, like
+ * [Kernel]: [VERSION] heads `[S]`, so a changed line takes effect at an attempt boundary (invariant 12).
+ */
+public object KernelDirect {
+    public const val VERSION: String = "kernel-direct/1"
+
+    public val lines: List<String> = listOf(
+        "You operate a coding harness. `look` observes, `edit` mutates, `run` and `verify` execute, `state` keeps your " +
+            "notes, `task` asks or finishes. The world (exit codes, diffs, checker output) is the only oracle.",
+        "You know a file's bytes only if they appear in a live, version-matched read listed under KNOWN. Everything else " +
+            "is NOT SEEN: read before an anchored edit; never anchor a hunk in an undisplayed region; a seed in [K] counts as " +
+            "displayed at its hash.",
+        "The Contract is not yours to edit. Propose a change with `state(note, kind=amend)` or ask with `task(ask)`. " +
+            "Changing tests, skips, snapshots or check configuration to reach green without an approved amendment will be " +
+            "surfaced and reviewed against the original obligation.",
+        Kernel.lines[10],
+        "Batch what is decided; turn on what is discovered. In one turn reads run first, then one edit batch, then runs " +
+            "and checks, then notes and `task`. With no edit, a run may execute; otherwise all edits must have applied. " +
+            "Same-batch new reads do not authorize an already-generated edit. `run` argv starts a program directly, without " +
+            "a shell; a non-zero exit is information; never wrap tests in `|| true` or `|| echo`.",
+        "`task(finish)` asks the harness to run the declared checks and decide; done is never yours to declare. Sent in a " +
+            "turn that also edits or runs, it finishes only if those calls succeed and the checks pass; otherwise the " +
+            "harness lists what is missing and you continue. \"Not verified\" is an honest outcome: name what was not " +
+            "checked instead of looping to manufacture green; `task(ask)` or `state(blocked)` with evidence is a valid end.",
+        "Keep what must survive the context as notes — `state(note)`: hypothesis, decision, dead end, open question; one " +
+            "line each, no code. The anchor's journal (Touched, Checks, Runs, Notes) is rendered for you: never re-emit it. " +
+            "Be terse: one intent line per turn; do not restate results.",
+        "Write everything the user reads — the final summary, questions, blockers — in the language of the user's " +
+            "request; tool arguments and notes stay as they are.",
+    )
+
+    /** The numbered contract, one line per rule. */
+    @JvmStatic
+    public fun render(): String =
+        lines.withIndex().joinToString("\n") { (index, line) -> "${index + 1}. $line" }
+}
+
+/**
  * The normative tool error policy (§5.4) as `[S]` text. It tells the model what the harness already
  * did, so it does not retry, salvage or reinterpret a refusal — the enforcement itself lives in the
  * tool layer, never in this text.
@@ -113,8 +151,28 @@ public object ErrorPolicy {
         "transform outside its scope" to "publication is refused or a guarded inverse applied; actual restoration, partial state or unknown effects are reported",
     )
 
+    /**
+     * The direct protocol's rows (A-D.2): the structured table without the delegated-result and transform rows, the STATE
+     * row replaced in place by the refused note.
+     */
+    public val directRows: List<Pair<String, String>> = rows.mapNotNull { row ->
+        when (row.first) {
+            "delegated result with a moved base", "transform outside its scope" -> null
+            "STATE invariant violated" -> "note refused" to "a note that breaks its rule (one line, at most 600 characters, no code fence, " +
+                "a field its kind does not take, a target that does not exist, caps) is refused and named; a v note whose evidence " +
+                "does not resolve is kept as h; prior world effects remain recorded"
+            else -> row
+        }
+    }
+
     @JvmStatic
-    public fun render(): String = rows.joinToString("\n") { (event, policy) -> "  $event → $policy" }
+    public fun render(): String = render(rows)
+
+    /** The rows [protocol] speaks, rendered. */
+    @JvmStatic
+    public fun render(protocol: Protocol): String = render(if (protocol == Protocol.Direct) directRows else rows)
+
+    private fun render(rows: List<Pair<String, String>>): String = rows.joinToString("\n") { (event, policy) -> "  $event → $policy" }
 }
 
 /**
@@ -172,24 +230,25 @@ public object Layout {
     public fun system(role: Role, mode: ExecutionMode): String {
         val out = StringBuilder()
         out.append("astrolabe · role ").append(role.name)
-            .append(" · ").append(Kernel.VERSION)
+            .append(" · ").append(kernelVersion(role))
             .append(" · ").append(role.policyTextVersion)
             .append(" · ").append(ErrorPolicy.VERSION).append('\n')
         for (line in role.personaLines) out.append(line).append('\n')
         // Kernel contract scope note: Appendix A is implementing/writer policy only; every other role gets its own
         // text (the persona lines above), the shared kernel lines and the shared evidence/error/data lines below.
-        if (role.packetKind == PacketKind.Result) out.append(Kernel.render()).append('\n')
+        if (role.protocol == Protocol.Direct) out.append(KernelDirect.render()).append('\n')
+        else if (role.packetKind == PacketKind.Result) out.append(Kernel.render()).append('\n')
         else out.append(RoleTexts.shared.withIndex().joinToString("\n") { (index, line) -> "${index + 1}. $line" }).append('\n')
         if (role.duties.isNotEmpty()) out.append("duties: ").append(role.duties.joinToString(" · ")).append('\n')
         out.append("ask-back: ").append(if (role.askBack) "ask the parent" else "no parent to ask").append('\n')
         out.append("packet: ").append(role.packetKind.name).append('\n')
-        out.append("tools: ").append(grouped(role.ops.allowed))
+        out.append("tools: ").append(grouped(role, role.ops.allowed))
             .append(" (the role's tools, masked, never removed; [A] names those enabled this turn)\n")
         // §4.3 requires these three verbatim in [S]; kernel line 3 states the same rule, and the
         // restatement is deliberate — they are the assertions cells get wrong most often.
         out.append("evidence:\n")
         for (line in Kernel.evidenceLines) out.append("  ").append(line).append('\n')
-        out.append("error policy:\n").append(ErrorPolicy.render()).append('\n')
+        out.append("error policy:\n").append(ErrorPolicy.render(role.protocol)).append('\n')
         out.append("data: ").append(Boundary.DATA_RULE).append('\n')
         out.append(ExecutionModeLabel.render(mode)).append('\n')
         return out.toString()
@@ -206,23 +265,30 @@ public object Layout {
         val excluded = roleOps - mask.allowed
         val text = when {
             mask.allowed.isEmpty() -> "none"
-            !roleOps.containsAll(mask.allowed) || excluded.size >= mask.allowed.size -> grouped(mask.allowed)
+            !roleOps.containsAll(mask.allowed) || excluded.size >= mask.allowed.size -> grouped(role, mask.allowed)
             excluded.isEmpty() -> "all role tools"
-            else -> "all role tools except " + ordered(excluded).joinToString(", ")
+            else -> "all role tools except " + ordered(role, excluded).joinToString(", ")
         }
         val edit = ToolFamily.Edit.wire + "."
         val repair = if (ownFilesOnly && mask.allowed.any { it.startsWith(edit) }) " (edits: own files only)" else ""
         return "enabled this turn: $text$repair"
     }
 
+    /** A-D.2: the kernel version [role] speaks — chosen by the role (its protocol), never by the shape. */
+    private fun kernelVersion(role: Role): String = if (role.protocol == Protocol.Direct) KernelDirect.VERSION else Kernel.VERSION
+
+    /** The names [role]'s protocol lists for [family], in its order (A-D.3 rule 4). */
+    private fun names(role: Role, family: ToolFamily): List<String> =
+        if (role.protocol == Protocol.Direct) ToolOps.directOf(family) else ToolOps.of(family)
+
     /** `look(tree, read) · run(run, wait)`: families and operations in declaration order, so the bytes are stable. */
-    private fun grouped(ops: Set<String>): String = ToolFamily.entries.mapNotNull { family ->
-        val names = ToolOps.of(family).filter { ToolOps.name(family, it) in ops }
+    private fun grouped(role: Role, ops: Set<String>): String = ToolFamily.entries.mapNotNull { family ->
+        val names = names(role, family).filter { ToolOps.name(family, it) in ops }
         if (names.isEmpty()) null else "${family.wire}(${names.joinToString(", ")})"
     }.joinToString(" · ")
 
-    private fun ordered(ops: Set<String>): List<String> =
-        ToolFamily.entries.flatMap { family -> ToolOps.of(family).map { ToolOps.name(family, it) } }.filter { it in ops }
+    private fun ordered(role: Role, ops: Set<String>): List<String> =
+        ToolFamily.entries.flatMap { family -> names(role, family).map { ToolOps.name(family, it) } }.filter { it in ops }
 
     /** The `[K]` text: the contract slice verbatim, then the pre-existing-failure ledger. */
     @JvmStatic
