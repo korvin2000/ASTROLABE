@@ -1637,13 +1637,8 @@ public class Controller @JvmOverloads public constructor(
     ) { Json.decodeFromString(CampaignReviewRecord.serializer(), it.string("body")) }.firstOrNull()?.verdict?.findings.orEmpty() +
         ReviewCell.latest(c.store, c.ids)?.verdict?.findings.orEmpty()
 
-    /** §8.8 (P4.2.2): findings at or above major not yet in [register] become its `Open` items, numbered after its last. */
-    private fun withReviewOpenItems(c: OpenedCampaign, register: Register): Register {
-        val findings = reviewFindings(c)
-        if (findings.isEmpty()) return register
-        val fresh = Derived.openItems(findings, (register.open.maxOfOrNull { it.n } ?: 0) + 1).filter { item -> register.open.none { it.text == item.text } }
-        return if (fresh.isEmpty()) register else register.copy(open = register.open + fresh)
-    }
+    /** §8.8 (P4.2.2): the review findings as [register]'s `Open` items ([withOpenItems]). */
+    private fun withReviewOpenItems(c: OpenedCampaign, register: Register): Register = withOpenItems(register, reviewFindings(c))
 
     /**
      * The S0 loop body. It re-enters itself for a rework or a void (D-340) and, for a direct cell, after a handoff (A-D.6):
@@ -3011,6 +3006,17 @@ public class Controller @JvmOverloads public constructor(
 
         /** A-D.6: the exit is a direct cell's handoff. */
         private val CellExit?.handoff: Boolean get() = this is CellExit.Partial && reason == PartialReason.Handoff
+
+        /**
+         * §8.8 (P4.2.2): [findings] at or above major not yet in [register] become its `Open` items, numbered after its
+         * last. A-D.4: a direct register's archived open items count as its own — no number is reused, no closed one returns.
+         */
+        internal fun withOpenItems(register: Register, findings: List<Finding>): Register {
+            if (findings.isEmpty()) return register
+            val known = register.open + register.archive.open
+            val fresh = Derived.openItems(findings, (known.maxOfOrNull { it.n } ?: 0) + 1).filter { item -> known.none { it.text == item.text } }
+            return if (fresh.isEmpty()) register else register.copy(open = register.open + fresh)
+        }
 
         /** The pseudo-increment the plan cell runs under; never part of the graph. */
         public const val PLAN: String = "plan"

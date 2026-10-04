@@ -266,4 +266,16 @@ class HandoffTest {
             assertEquals(1, handoffs.spends(first.id).size)
         }
     }
+
+    @Test
+    fun `a review finding carried into an epoch is numbered after the archived open items and never revives a closed one`() {
+        val closed = io.astrolabe.register.OpenItem(1, "review major: total() rounds at src/a.py:2", closed = true, closedEvidence = "#4")
+        val register = io.astrolabe.register.Register.empty(ContextId("cell-a"), "I1", "a returns 10")
+            .copy(archive = io.astrolabe.register.RegisterArchive(open = listOf(closed)))
+        fun finding(issue: String) = io.astrolabe.verify.Finding(io.astrolabe.verify.Severity.Major, "src/a.py:2", issue, kind = io.astrolabe.verify.FindingKind.Correctness)
+        val carried = Controller.withOpenItems(register, listOf(finding("total() rounds"), finding("a() ignores its input")))
+        assertEquals(listOf(2), carried.open.map { it.n }, "o1 is archived: the new item is o2, and the closed finding stays closed")
+        assertEquals("review major: a() ignores its input at src/a.py:2", carried.open.single().text)
+        assertEquals(register.archive, carried.archive)
+    }
 }
