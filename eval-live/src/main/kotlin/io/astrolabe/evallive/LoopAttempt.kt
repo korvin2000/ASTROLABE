@@ -5,8 +5,16 @@ import io.astrolabe.Defaults
 import io.astrolabe.RunSpec
 import io.astrolabe.atlas.PackageCommands
 import io.astrolabe.atlas.Sniff
+import io.astrolabe.auth.ContainmentProbe
 import io.astrolabe.auth.EffectPolicy
-import io.astrolabe.budget.CostBasis
+import io.astrolabe.auth.EffectPolicyConfig
+import io.astrolabe.contract.Scope
+import io.astrolabe.telemetry.CallAccount
+import io.astrolabe.workspace.Intent
+import io.astrolabe.workspace.PathKind
+import io.astrolabe.workspace.PathResolution
+import io.astrolabe.workspace.ProtectedPaths
+import io.astrolabe.workspace.WorkspacePath
 import io.astrolabe.budget.LimitDecision
 import io.astrolabe.budget.LimitKind
 import io.astrolabe.budget.LimitRule
@@ -22,7 +30,8 @@ import io.astrolabe.id.AttemptId
 import io.astrolabe.id.IdGen
 import io.astrolabe.id.Identities
 import io.astrolabe.id.WorkId
-import io.astrolabe.provider.Billing
+import io.astrolabe.provider.Charge
+import io.astrolabe.provider.Profile
 import io.astrolabe.provider.BillingDimension
 import io.astrolabe.provider.Invocation
 import io.astrolabe.provider.InvocationId
@@ -30,7 +39,6 @@ import io.astrolabe.provider.Item
 import io.astrolabe.provider.Message
 import io.astrolabe.provider.Money
 import io.astrolabe.provider.OpaqueContinuation
-import io.astrolabe.provider.PriceTable
 import io.astrolabe.provider.ProblemKind
 import io.astrolabe.provider.ProviderError
 import io.astrolabe.provider.Request
@@ -87,8 +95,9 @@ internal class LoopAttempt(private val clock: Clock, private val idGen: IdGen, p
         deadline: Duration,
         script: SessionScript = SessionScript(),
         work: WorkId = WorkId(idGen.next("W")),
+        budget: LoopBudget = LoopBudget(),
     ): AttemptOutcome = coroutineScope {
-        val session = Session(workspace.toAbsolutePath().normalize(), prompt, binding, events, spec, script, work)
+        val session = Session(workspace.toAbsolutePath().normalize(), prompt, binding, events, spec, script, work, budget)
         val watchdog = launch {
             delay(deadline.toMillis())
             session.halt(Halt.Deadline, "eval-live: the attempt passed its deadline of ${deadline.toMinutes()} minutes")
@@ -99,6 +108,7 @@ internal class LoopAttempt(private val clock: Clock, private val idGen: IdGen, p
         try {
             session.run()
         } finally {
+            session.closeTime()
             watchdog.cancel()
             interrupter?.close()
             closer?.close()
@@ -108,9 +118,6 @@ internal class LoopAttempt(private val clock: Clock, private val idGen: IdGen, p
 
     private enum class Halt { Interrupted, Closed, Deadline }
 
-    /** What one call counts against the money limit: billed, else priced, else its conservative hold. */
-    private data class CallSpend(val money: Money, val billed: Boolean)
-
     private inner class Session(
         private val workspace: Path,
         private val prompt: String,
@@ -119,6 +126,7 @@ internal class LoopAttempt(private val clock: Clock, private val idGen: IdGen, p
         private val spec: RunSpec,
         private val script: SessionScript,
         private val work: WorkId,
+        private val budget: LoopBudget,
     ) {
         private val profile = binding.profile
         private val adapter = binding.adapter
@@ -134,9 +142,16 @@ internal class LoopAttempt(private val clock: Clock, private val idGen: IdGen, p
         private val schemas = LoopTools.schemas(dialect())
         private val transcript = ArrayList<Item>(listOf(Message.text(Role.User, prompt)))
         private val halted = AtomicReference<Pair<Halt, String>?>()
-        private val spent = ArrayList<CallSpend>()
         private val decisions = ArrayList<PolicyDecision>()
         private val started = clock.millis()
+        private var timeClosed = false
+
+        /** Adds this session's active time to the work's budget, once. */
+        fun closeTime() {
+            if (timeClosed) return
+            timeClosed = true
+            budget.elapsedMillis += (clock.millis() - started).coerceAtLeast(0)
+        }
 
         @Volatile
         private var current: Invocation? = null
@@ -185,7 +200,7 @@ internal class LoopAttempt(private val clock: Clock, private val idGen: IdGen, p
                         return finished(CampaignOutcome.Failed, null, "request refused by ${adapter.id}: $problems")
                     }
                 }
-                val hold = conservative(profile.priceTable, estimate.upperBoundTokens, headroom.toLong())
+                val hold = conservative(profile, estimate.upperBoundTokens, headroom.toLong())
                 val spend = spend()
                 when (val decision = LimitRule.decide(limits, spend, LimitRule.nextCost(spend, hold))) {
                     is LimitDecision.Exhausted -> return finished(CampaignOutcome.BudgetExhausted, BudgetStop.entries.first { it.limit == decision.kind }.wire, decision.reason)
@@ -196,7 +211,7 @@ internal class LoopAttempt(private val clock: Clock, private val idGen: IdGen, p
                     LimitDecision.Within -> Unit
                 }
 
-                events.emit(AgentEvent.Cell.TurnStarted(ids, spent.size + 1, limits.maxRequests ?: Int.MAX_VALUE))
+                events.emit(AgentEvent.Cell.TurnStarted(ids, budget.calls.size + 1, limits.maxRequests ?: Int.MAX_VALUE))
                 val id = InvocationId(idGen.next("inv"))
                 events.emit(AgentEvent.Cell.ModelRequested(ids, id.value, estimate.tokens, profile.id))
                 var invocation: Invocation? = null
@@ -231,9 +246,8 @@ internal class LoopAttempt(private val clock: Clock, private val idGen: IdGen, p
                 val failed = failure?.takeUnless { it is CancellationException }?.let { it::class.simpleName ?: "error" }
                 events.emit(AgentEvent.Cell.ModelResponded(ids, id.value, stop, usage, facts = (terminal?.response ?: received)?.facts, failure = failed))
                 responses++
-                val billed = usage?.billed
-                val priced = usage?.price(profile.priceTable)?.takeUnless { it.unknown }
-                spent += CallSpend(billed ?: priced ?: hold, billed != null)
+                // README rule 3: the call's money is chosen as `Totals` chooses it (CallPrice), the hold standing in for an unknown amount.
+                budget.calls += CallPrice.account(id.value, ids, profile.id, usage, profile.priceTable, profile.priceTable.currency, hold)
                 if (failure is CancellationException) throw failure
 
                 if (failure != null) {
@@ -267,7 +281,11 @@ internal class LoopAttempt(private val clock: Clock, private val idGen: IdGen, p
                     }
                     // README rule 10: the final check runs the setup's commands; a red one goes back, at most twice.
                     if (setup.commands.isNotEmpty() && checks < FINAL_CHECKS) {
-                        val red = withContext(Dispatchers.IO) { tools.check(setup.commands) }
+                        val red = try {
+                            withContext(Dispatchers.IO) { tools.check(setup.commands) }
+                        } catch (e: java.io.IOException) {
+                            return finished(CampaignOutcome.Completed, null, "the model finished; check unavailable: ${e.message}")
+                        }
                         if (red != null) {
                             checks++
                             transcript += Message.text(Role.User, red)
@@ -298,25 +316,9 @@ internal class LoopAttempt(private val clock: Clock, private val idGen: IdGen, p
             return changed
         }
 
-        /** The spend so far against the task limits, by the rule of `LimitSpend.of`: billed, else priced, else held. */
-        private fun spend(): LimitSpend {
-            val elapsed = (clock.millis() - started).coerceAtLeast(0)
-            if (spent.isEmpty()) return LimitSpend(0, null, CostBasis.None, elapsed, null)
-            val currency = profile.priceTable.currency
-            var total = Money.zero(currency)
-            var largest = Money.zero(currency)
-            for (call in spent) {
-                total += call.money
-                if (call.money.unknown) largest = largest.copy(unknown = true) else if (call.money.amount > largest.amount) largest = call.money.copy(unknown = largest.unknown)
-            }
-            val billed = spent.count { it.billed }
-            val basis = when (billed) {
-                spent.size -> CostBasis.Billed
-                0 -> CostBasis.Estimated
-                else -> CostBasis.Mixed
-            }
-            return LimitSpend(spent.size, total, basis, elapsed, largest)
-        }
+        /** The work's spend so far — earlier sessions included — by the core's own `LimitSpend.of`. */
+        private fun spend(): LimitSpend =
+            LimitSpend.of(budget.calls, budget.elapsedMillis + (clock.millis() - started).coerceAtLeast(0), profile.priceTable.currency)
 
         private fun end(halt: Pair<Halt, String>): AttemptOutcome = when (halt.first) {
             Halt.Closed -> outcome(null, null, halt.second).copy(closedAt = responses)
@@ -359,17 +361,20 @@ internal class LoopAttempt(private val clock: Clock, private val idGen: IdGen, p
         const val RESERVE_NOTE: String = "A task limit is nearly spent: start nothing new, check your work and finish with a short summary. "
 
         /**
-         * The conservative price of one call (README rule 3, as the core's estimate): every input token at the dearest
-         * input rate of any tier it may reach plus the full output headroom; zero for a plan-billed table without a
-         * price, unknown when a needed price is missing.
+         * The conservative price of one call (README rule 3): the rule of the core's internal `Accounting.estimateCost`,
+         * repeated — every input token at the dearest input rate of any tier it may reach plus the full output headroom;
+         * zero for an unpriced profile; unknown when a tier lacks the price of an input dimension the profile can be
+         * billed in (uncached input, its declared input usage fields, its cache-write classes) or of output.
          */
-        fun conservative(table: PriceTable, inputTokens: Long, outputTokens: Long): Money {
+        fun conservative(profile: Profile, inputTokens: Long, outputTokens: Long): Money {
+            val table = profile.priceTable
             val currency = table.currency
-            if (table.billing == Billing.Plan && table.perMillion.isEmpty()) return Money.zero(currency)
+            if (table.charge == Charge.Unpriced) return Money.zero(currency)
+            val billable = setOf(BillingDimension.UNCACHED_INPUT) + profile.capabilities.usageFields.filter { it.isInput } + profile.capabilities.caching.writeClasses
             val reachable = listOf(table.at(0)) + table.tiers.filter { it.inputTokensAbove < inputTokens }.map { table.at(it.inputTokensAbove + 1) }
             var worst = Money.zero(currency)
             for (flat in reachable) {
-                if (BillingDimension.UNCACHED_INPUT !in flat.perMillion) return Money.unknown(currency)
+                if (billable.any { it !in flat.perMillion }) return Money.unknown(currency)
                 val rate = flat.perMillion.filterKeys { it.isInput }.values.max()
                 val output = flat.price(BillingDimension.OUTPUT, outputTokens) ?: return Money.unknown(currency)
                 val cost = Money(currency, rate.multiply(BigDecimal.valueOf(inputTokens)).divide(MILLION, MathContext.DECIMAL64)) + output
@@ -380,6 +385,77 @@ internal class LoopAttempt(private val clock: Clock, private val idGen: IdGen, p
 
         private val MILLION = BigDecimal.valueOf(1_000_000)
     }
+}
+
+/**
+ * What one work has spent under the loop's task limits (README rule 3): its calls, accounted as `Totals` accounts them,
+ * and the active time of its sessions. A second session of the same work continues it, as the core's limits do.
+ */
+internal class LoopBudget {
+    val calls: MutableList<CallAccount> = ArrayList()
+    var elapsedMillis: Long = 0
+}
+
+/**
+ * The containment probe of the core's `run` (`DiskContainment`, internal to the core), repeated over [paths]: a
+ * workspace-relative path is contained only when it was inspected, lies strictly inside the root by its real path,
+ * passes through no link and holds nothing protected ([protects]) or linked below it; whatever was not inspected answers false.
+ */
+internal class LoopContainment(private val paths: WorkspacePath, private val protects: (String) -> Boolean, private val limit: Int = 20_000) : ContainmentProbe {
+    override fun contained(relative: String): Boolean = guarded { inspect(relative, innerLinks = false) }
+
+    override fun containedWithInnerLinks(relative: String): Boolean = guarded { inspect(relative, innerLinks = true) }
+
+    private inline fun guarded(answer: () -> Boolean): Boolean = try {
+        answer()
+    } catch (e: java.io.IOException) {
+        false
+    } catch (e: java.nio.file.InvalidPathException) {
+        false
+    } catch (e: java.nio.file.DirectoryIteratorException) {
+        false
+    } catch (e: SecurityException) {
+        false
+    }
+
+    private fun inspect(relative: String, innerLinks: Boolean): Boolean {
+        val segments = relative.split('/')
+        if (segments.any { it.isEmpty() || it == "." || it == ".." }) return false
+        var path = paths.root
+        for ((index, segment) in segments.withIndex()) {
+            path = path.resolve(segment)
+            when (WorkspacePath.kindOf(path)) {
+                PathKind.Missing -> return !protects(relative)
+                PathKind.Directory -> Unit
+                PathKind.Regular -> if (index < segments.lastIndex) return false
+                else -> return false
+            }
+        }
+        val real = path.toRealPath()
+        if (real == paths.root || !real.startsWith(paths.root) || protects(relativeOf(real))) return false
+        if (WorkspacePath.kindOf(real) != PathKind.Directory) return true
+        val pending = ArrayDeque(listOf(real))
+        var seen = 0
+        while (pending.isNotEmpty()) {
+            Files.newDirectoryStream(pending.removeLast()).use { entries ->
+                for (entry in entries) {
+                    if (++seen > limit) return false
+                    when (WorkspacePath.kindOf(entry)) {
+                        PathKind.Directory -> pending.addLast(entry)
+                        PathKind.Regular -> Unit
+                        PathKind.Symlink, PathKind.Junction -> if (!innerLinks || !inside(entry.toRealPath())) return false
+                        else -> return false
+                    }
+                    if (protects(relativeOf(entry))) return false
+                }
+            }
+        }
+        return true
+    }
+
+    private fun inside(real: Path): Boolean = real != paths.root && real.startsWith(paths.root) && !protects(relativeOf(real))
+
+    private fun relativeOf(real: Path): String = paths.root.relativize(real).joinToString("/") { it.toString() }
 }
 
 /** What a loop tool answered: [text] for the model, [error] marking a failure, [refused] the command a permission refused. */
@@ -407,18 +483,28 @@ internal class LoopTools(private val workspace: Path, private val defaults: Defa
     private fun JsonObject.text(name: String): String =
         (this[name] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull ?: throw IllegalArgumentException("'$name' must be a string")
 
-    /** A workspace path the model named; never outside the workspace and never in `.git`. */
-    private fun resolve(path: String): Path {
-        val target = workspace.resolve(path).normalize()
-        require(target.startsWith(workspace)) { "'$path' is outside the workspace" }
-        require(workspace.relativize(target).none { it.toString() == ".git" }) { "'$path' is in .git" }
-        return target
+    /** The core's path contract (D-47): real paths, links, protected paths and case, as the core's own tools resolve them. */
+    private val paths: WorkspacePath = WorkspacePath.of(workspace)
+
+    /** The default contract's scope (`Contracts`: the repository minus the protected defaults), as the core's `run` gets it. */
+    private val scope: Scope = Scope.repositoryMinus(ProtectedPaths())
+
+    /**
+     * A workspace path the model named, resolved by [WorkspacePath]: never outside the workspace through `..` or a link,
+     * never `.git` in any case, and for a write never through a link or into a protected path.
+     */
+    private fun resolve(path: String, intent: Intent): Path {
+        if (intent == Intent.Read && path.trim().trimEnd('/', '\\') in setOf("", ".")) return paths.root
+        return when (val resolved = paths.resolve(path, intent)) {
+            is PathResolution.Resolved -> resolved.real
+            is PathResolution.Rejected -> throw IllegalArgumentException("'$path' refused: ${resolved.detail}")
+        }
     }
 
     private fun read(path: String): ToolAnswer {
-        val target = resolve(path)
+        val target = resolve(path, Intent.Read)
         if (Files.isDirectory(target)) {
-            val entries = Files.list(target).use { list -> list.toList() }.filter { it.fileName.toString() != ".git" }
+            val entries = Files.list(target).use { list -> list.toList() }.filterNot { it.fileName.toString().equals(".git", ignoreCase = true) }
                 .map { if (Files.isDirectory(it)) "${it.fileName}/" else it.fileName.toString() }.sorted()
             return ToolAnswer(cut(entries.joinToString("\n").ifEmpty { "(empty directory)" }, defaults.lookBudgetTokens))
         }
@@ -428,7 +514,7 @@ internal class LoopTools(private val workspace: Path, private val defaults: Defa
     }
 
     private fun write(path: String, content: String): ToolAnswer {
-        val target = resolve(path)
+        val target = resolve(path, Intent.Mutate)
         target.parent?.let(Files::createDirectories)
         val bytes = content.toByteArray(StandardCharsets.UTF_8)
         Files.write(target, bytes)
@@ -436,7 +522,7 @@ internal class LoopTools(private val workspace: Path, private val defaults: Defa
     }
 
     private fun edit(path: String, old: String, new: String): ToolAnswer {
-        val target = resolve(path)
+        val target = resolve(path, Intent.Mutate)
         if (!Files.isRegularFile(target)) return ToolAnswer("no file '$path'", error = true)
         require(old.isNotEmpty()) { "'old' must not be empty" }
         val text = Files.readString(target, StandardCharsets.UTF_8)
@@ -450,7 +536,9 @@ internal class LoopTools(private val workspace: Path, private val defaults: Defa
     // README rule 2: the core's command classification; a D-class line is refused as the Studio's auto mode refuses it.
     private fun shell(command: String): ToolAnswer {
         require(command.isNotBlank()) { "'command' must not be blank" }
-        val classification = EffectPolicy.classify(RunArgs(cmd = command), workspace.toString())
+        // As the core's `run` (Run.kt): the default scope's protected paths and a containment probe over the real disk.
+        val probe = LoopContainment(paths, protects = { relative -> scope.protects(relative, ignoreCase = true) || paths.isProtected(relative, Intent.Mutate) })
+        val classification = EffectPolicy.classify(RunArgs(cmd = command), paths.root.toString(), scope.protectedPaths, EffectPolicyConfig(), probe)
         if (classification.effectClass == EffectClass.D) {
             return ToolAnswer("refused: this command needs the user's approval (${classification.reasons.joinToString("; ")})", error = true, refused = command.take(DETAIL_CHARS))
         }

@@ -4,10 +4,16 @@ import io.astrolabe.event.AgentEvent
 import io.astrolabe.event.EventRecord
 import io.astrolabe.event.Events
 import io.astrolabe.event.Subscription
-import io.astrolabe.provider.Billing
+import io.astrolabe.budget.LimitSpend
+import io.astrolabe.id.Identities
+import io.astrolabe.provider.BillableUsage
 import io.astrolabe.provider.BillingDimension
+import io.astrolabe.provider.Charge
 import io.astrolabe.provider.Money
 import io.astrolabe.provider.PriceTable
+import io.astrolabe.telemetry.CallAccount
+import io.astrolabe.telemetry.Quantities
+import java.time.Instant
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -74,11 +80,14 @@ internal data class Quantity(val sum: String, val known: Int, val calls: Int)
 /**
  * What one run's events add up to. Every dispatched model call ends in one `ModelResponded` — answered, failed or
  * cancelled — so its usage counts here; [modelFailures] counts the failed ones. A quantity no response reported is
- * `null`, never 0: a dimension counts only when every response reported it. [cost] prices each call's usage with the
- * table of the profile its `ModelRequested` named (B5) and is `null` when any part is unknown or unpriced;
- * [costPricedPart] is what could be priced. [costBasis] is how the calls were charged — `paid` (per token), `nominal`
- * (a plan-billed model at its official price, C16), `unpriced` (plan-billed without a price), `unknown` (no table for
- * the call's profile), `mixed` when calls differ, `null` without calls; [profiles] counts the responses per profile.
+ * `null`, never 0: a dimension counts only when every response reported it. [modelRequests] is the calls made — one
+ * `ModelResponded` each — and [requestEvents] the `ModelRequested` seen, which the core emits before its funding check.
+ * Money (B5, by [CallPrice] — the one choice both arms and their limits use): a call counts the bill the provider
+ * reported, else its usage at the table of the profile its `ModelRequested` named, paid or nominal by the profile's
+ * charge (C16); a call of an unpriced profile counts in [unpricedCalls] and no money. [cost] is that sum (`null` when a
+ * part is unknown), [costPricedPart] its known part, [costNominal] the nominal part, [costByTable] every priced call at
+ * its table whatever was billed; [costBasis] is the core's `CostBasis` of the choices (`billed`, `estimated`,
+ * `nominal`, `mixed`, `none`); [profiles] counts the responses per profile.
  * [responded] aggregates every other numeric field of `ModelResponded` as a [Quantity], so fields the events gain later
  * are aggregated without a change and a partial sum is never mistaken for a whole one. A price tier is a threshold, not
  * a quantity: [priceTiers] counts the responses per tier threshold (`none` when a response named none).
@@ -105,6 +114,10 @@ internal data class Totals(
     val priceTiers: Map<String, Int>,
     val costBasis: String? = null,
     val profiles: Map<String, Int> = emptyMap(),
+    val costNominal: String? = null,
+    val costByTable: String? = null,
+    val unpricedCalls: Int = 0,
+    val requestEvents: Int? = null,
 ) {
     companion object {
         /** Fields of `ModelResponded` read above or that are identities, not quantities. */
@@ -129,18 +142,23 @@ internal data class Totals(
                 if (usages.isEmpty() || usages.any { u -> u == null || u.quantities.keys.none(match) || u.unknown.any(match) }) return null
                 return usages.sumOf { u -> u!!.quantities.filterKeys(match).values.sum() }
             }
-            var priced: Money? = null
-            val bases = LinkedHashSet<String>()
-            for (event in responded) {
+            val accounts = responded.map { event ->
+                val profile = requested[event.invocationId]
+                CallPrice.account(event.invocationId, event.ids, profile ?: UNKNOWN, event.usage, table(profile), currency)
+            }
+            val spend = LimitSpend.of(accounts, 0, currency)
+            val priced = spend.cost
+            var byTable: Money? = null
+            for ((event, account) in responded.zip(accounts)) {
+                if (account.charge == Charge.Unpriced) continue
                 val prices = table(requested[event.invocationId])?.takeIf { it.currency == currency }
                 val money = prices?.let { event.usage?.price(it) } ?: Money.unknown(currency)
-                priced = priced?.plus(money) ?: money
-                bases += basis(prices)
+                byTable = byTable?.plus(money) ?: money
             }
             val spanCosts = events.filterIsInstance<AgentEvent.Telemetry.SpanEnded>().mapNotNull { it.cost }
             val spanTotal = spanCosts.map { BigDecimal(it.substringAfter(' ')) }.takeIf { it.isNotEmpty() }?.reduce(BigDecimal::add)
             return Totals(
-                modelRequests = events.count { it is AgentEvent.Cell.ModelRequested },
+                modelRequests = responded.size,
                 modelResponses = responded.size,
                 modelFailures = responded.count { it.failure != null },
                 cellsStarted = events.count { it is AgentEvent.Cell.Started },
@@ -158,20 +176,13 @@ internal data class Totals(
                 stops = responded.groupingBy { it.stop.name }.eachCount(),
                 responded = extra(facts),
                 priceTiers = tiers(facts),
-                costBasis = bases.singleOrNull() ?: if (bases.isEmpty()) null else MIXED,
+                costBasis = spend.costBasis.wire,
                 profiles = responded.groupingBy { requested[it.invocationId] ?: UNKNOWN }.eachCount().toSortedMap(),
+                costNominal = spend.nominalCost?.takeIf { !it.unknown }?.amount?.toPlainString(),
+                costByTable = byTable?.takeIf { !it.unknown }?.amount?.toPlainString(),
+                unpricedCalls = spend.unpricedRequests,
+                requestEvents = events.count { it is AgentEvent.Cell.ModelRequested },
             )
-        }
-
-        /**
-         * How a call priced by [table] is charged, in C16's words: per token `paid`; plan-billed at a stated price
-         * `nominal`, without one `unpriced`; no table `unknown`.
-         */
-        fun basis(table: PriceTable?): String = when {
-            table == null -> UNKNOWN
-            table.billing == Billing.PerToken -> "paid"
-            table.perMillion.isEmpty() -> "unpriced"
-            else -> "nominal"
         }
 
         /** The numeric fields of every response, by path; a response that did not report a path has no entry for it. */
@@ -208,12 +219,30 @@ internal data class Totals(
         /** The [Totals.priceTiers] bucket of a response that named no price tier: base prices, no prices, or no facts. */
         const val NO_TIER: String = "none"
 
-        /** [Totals.costBasis] of calls charged in different ways. */
-        const val MIXED: String = "mixed"
-
-        /** A call whose profile or price table is not known. */
+        /** The profile of a call whose `ModelRequested` is not known. */
         const val UNKNOWN: String = "unknown"
 
         private val DECIMAL = Regex("""-?\d+(\.\d+)?""")
+    }
+}
+
+/**
+ * The money of one call as the core accounts it (`Accounting.record`, C16), for `Totals` and for the loop's limits
+ * alike, so the two never choose different amounts: a positive bill is paid money on any profile; otherwise the usage
+ * at [table] — paid or nominal by the table's charge — and an unpriced profile counts no money. Summed by the core's
+ * `LimitSpend.of`, which takes the bill of a per-token call even at zero, else this amount, else [hold].
+ */
+internal object CallPrice {
+    fun account(invocationId: String, ids: Identities, profileId: String, usage: BillableUsage?, table: PriceTable?, currency: String, hold: Money? = null): CallAccount {
+        val bill = usage?.billed?.takeIf { it.amount.signum() > 0 }
+        val prices = table?.takeIf { it.currency == currency }
+        val charge = if (bill != null || prices == null) Charge.Paid else prices.charge
+        val money = when {
+            prices == null -> Money.unknown(currency)
+            bill != null && prices.charge != Charge.Paid -> bill.takeIf { it.currency == currency } ?: Money.unknown(currency)
+            charge == Charge.Unpriced -> Money.zero(currency)
+            else -> usage?.price(prices) ?: Money.unknown(currency)
+        }
+        return CallAccount(invocationId, ids, profileId, usage, money, prices?.date?.toString() ?: "", Quantities(null, null, null, null), null, Instant.EPOCH, fundedMoney = hold, charge = charge)
     }
 }

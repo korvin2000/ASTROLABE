@@ -40,12 +40,12 @@
 
 > **Status: SPEC — implemented in P8.D.1–D.3** (the anchor is P8.D.2). No code renders this yet. *code:* cites the current code as `path:line` under `K = core/src/main/kotlin/io/astrolabe` at `main` `e28133a`. The protocol itself is specified in [Appendix A-D](kernel-contract.md#sec-appendix-a-direct).
 
-The same turn as §5.10, in a direct cell (S0). The harness journal replaces the STATE block; nothing else in the layout moves.
+The same turn as §5.10, in a direct cell: `Roles.direct` in S0. The harness journal replaces the STATE block; nothing else in the layout moves. The direct roles of S2 and S3 and the direct writer ([A-D.1](kernel-contract.md#sec-appendix-a-direct-1)) differ from this turn in `[S]` and in the schema set only; their `[A]` journal is the same.
 
 ```text
 [S]  astrolabe · role direct · kernel-direct/1 · roles/5 · error-policy/5 · eight kernel lines · duties · tools: look(tree, outline, read, find, def,
      refs, recall) · edit(anchored, create, delete, rename, revert) · run(run, wait, cancel) · verify(check, baseline) · state(note, blocked) ·
-     task(ask, answer, finish) · evidence lines · error policy · data rule · execution mode
+     task(ask, answer, finish, propose) · evidence lines · error policy · data rule · execution mode
 [K]  R2 "thread ctx through handlers" · accept: AC-4 run: pytest -q -k ctx · C1 do not change refund flow ·
      seed src/router.py:80-96 @a9f1 · pre-existing: 2 failing (test_legacy_x, test_flaky_y) @s0
 …[T]…
@@ -64,7 +64,7 @@ state → STATE v3 · note o1 recorded · register 212/3000 tokens
                  o1 the CLI path builds handlers without ctx
                  d1 pass ctx as a keyword argument; keep the positional order
                  h2 handle_cli is the only caller outside src/handlers
-     enabled this turn: all role tools
+     enabled this turn: all role tools except task.propose
      ⟨ctx 38% · reserve ok · checks types ✓ · tests ✗1 · known 5/2.6K · STATE v3 · turn 14/80⟩
      impact: `handle_user` (src/handlers/user.py) signature changed; 3 references not inspected → look(refs)
 ```
@@ -84,7 +84,7 @@ state → STATE v3 · note o1 recorded · register 212/3000 tokens
 | 9 | nudges | 4 lines, hard refusals first (*code:* `Anchor.kt:214`, `K/cell/Cell.kt:673-678`) | gates, completion seam | never reduced |
 | 10 | diagnosis lines of the repair helper | as produced | `ctx.diagnoses` | never reduced |
 
-Size. The target is `directAnchorTargetTokens` = 800 tokens. A typical S0 turn: digest 160, Workset 60, Touched 90, Checks 60, Runs 125, Notes 200, enabled 8, gauge 25 — about 730 tokens — plus about 45 per nudge. When the composed text is over the target, step 1 and then step 2 apply, each named in `AnchorRender.reductions`; if it is still over, the anchor is sent as it is and the reductions say `over the 800-token target: <n> tokens`. The hard cap stays `anchorMaxTokens` = 5 000, and `overBudget` keeps its meaning (*code:* `K/cell/Anchor.kt:74-85, 158-159`). The compile's growth reserve keeps reserving `anchorMaxTokens` (D-384). The three new numbers are §17 defaults that D2 adds to [defaults](defaults.md#sec-17).
+Size. The target is `directAnchorTargetTokens` = 800 tokens. A typical S0 turn: digest 160, Workset 60, Touched 90, Checks 60, Runs 125, Notes 200, enabled 12, gauge 25 — about 730 tokens — plus about 45 per nudge. When the composed text is over the target, step 1 and then step 2 apply, each named in `AnchorRender.reductions`; if it is still over, the anchor is sent as it is and the reductions say `over the 800-token target: <n> tokens`. The hard cap stays `anchorMaxTokens` = 5 000, and `overBudget` keeps its meaning (*code:* `K/cell/Anchor.kt:74-85, 158-159`). The compile's growth reserve keeps reserving `anchorMaxTokens` (D-384). The three new numbers are §17 defaults that D2 adds to [defaults](defaults.md#sec-17).
 
 `── Runs`. The lines, in this order:
 
@@ -99,8 +99,8 @@ Absent in a direct anchor: the STATE block with its plan, `Focus` and `Next`; th
 
 **What stays byte-stable.**
 
-- `[S]` is a pure function of the role and the execution mode (*code:* `K/cell/Layout.kt:154-159, 172-196`): every direct cell of an attempt sends the same bytes, and the turn's mask is not an input.
-- The tool schemas are the direct set of six, fixed for the line; the turn's narrower mask is named in `[A]` and enforced by the executor.
+- `[S]` is a pure function of the role and the execution mode (*code:* `K/cell/Layout.kt:154-159, 172-196`): every cell of one direct role sends the same bytes in an attempt, and neither the turn's mask nor the shape is an input — in S0 the shape hides `task.propose`, which `[A]` names.
+- The tool schemas are the role's direct set of six, fixed for the line; the turn's narrower mask is named in `[A]` and enforced by the executor.
 - `[R]` and `[K]` are unchanged in kind: `[K]` is stable within the cell between rebuilds.
 - `[T]` is append-only between eviction batches. Every tool result carries its header and the gauge, so the step-by-step deltas — the result of a note, a check line, the gauge — stay in cached results, as they do today.
 - `[A]` is volatile: rebuilt every turn, never cached, never stored in `[T]` (*code:* `K/cell/Anchor.kt:82-85`). It is the only place the journal lives.

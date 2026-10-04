@@ -24,6 +24,7 @@ public final class io/astrolabe/provider/aigate/AiGateAdapter$Companion {
 public final class io/astrolabe/provider/aigate/AiGateProfiles {
 	public static final field INSTANCE Lio/astrolabe/provider/aigate/AiGateProfiles;
 	public static final fun draft (Lnet/ai/gate/Llm;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/time/LocalDate;)Lio/astrolabe/provider/Profile;
+	public static final fun planPriceTable (Lnet/ai/gate/Llm;Ljava/lang/String;Ljava/lang/String;Ljava/time/LocalDate;)Lio/astrolabe/provider/PriceTable;
 	public static final fun qualify (Lnet/ai/gate/Llm;Lio/astrolabe/provider/Profile;)Lio/astrolabe/provider/aigate/Qualification;
 	public static final fun qualify (Lnet/ai/gate/Llm;Lio/astrolabe/provider/Profile;Z)Lio/astrolabe/provider/aigate/Qualification;
 	public static final fun qualify (Lnet/ai/gate/Llm;Lio/astrolabe/provider/Profile;ZLjava/time/Duration;)Lio/astrolabe/provider/aigate/Qualification;

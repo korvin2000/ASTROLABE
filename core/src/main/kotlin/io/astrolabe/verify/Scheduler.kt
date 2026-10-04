@@ -248,6 +248,13 @@ public class Scheduler(
 
         /** The limit kind of a receipt recorded while a background run the stop could not cancel was live (P8.C.12). */
         const val CONCURRENT: String = "concurrent"
+
+        /** The limit kind of why a check's runner could not run: an `unavailable` receipt's runner limits (P8.C.15). */
+        const val UNAVAILABLE: String = "unavailable"
+
+        /** What a not-green [receipt] names as its cause: an unavailable one's first typed reason, else its first limit. */
+        fun cause(receipt: Receipt): String? =
+            (receipt.limits.firstOrNull { receipt.outcome == Outcome.Unavailable && it.kind == UNAVAILABLE } ?: receipt.limits.firstOrNull())?.detail
     }
 
     /** The receipts of one recognised `run` and the paths it moved (announced by the scheduler). */
@@ -320,7 +327,9 @@ public class Scheduler(
         }
         val concurrent = unquiet.isNotEmpty()
         if (concurrent) limits += Limit(CONCURRENT, "${unquiet.joinToString(", ")} live during the check after its cancellation: the tree was not quiet, so the receipt cannot certify it")
-        executed.limits.forEach { limits += Limit("runner", it) }
+        // P8.C.15: why a check could not run is a typed limit, found by [cause] behind any stability limit recorded first.
+        val runnerKind = if (executed.outcome == Outcome.Unavailable) UNAVAILABLE else "runner"
+        executed.limits.forEach { limits += Limit(runnerKind, it) }
         val kind = check.evidenceKind
         // Plan §4.4 (D-50 relaxed by the owner): a declared host or user build or typecheck passes on its expected exit, uncounted.
         val passesOnExit = check.evidence?.exitSuffices == true && check.origin !is Origin.Model && executed.counts == null && executed.exit == executed.expectedExitCode
@@ -474,7 +483,7 @@ public class Scheduler(
         }
         val green = receipt?.outcome?.green ?: false
         // D-338: an unverified result names its cause for the decider — "cannot start python3", not just "unavailable".
-        if (receipt != null && !green) reasons += "outcome ${receipt.outcome.name.lowercase()}" + (receipt.limits.firstOrNull()?.detail?.let { ": $it" } ?: "")
+        if (receipt != null && !green) reasons += "outcome ${receipt.outcome.name.lowercase()}" + (cause(receipt)?.let { ": $it" } ?: "")
         return Currency(last.receiptId, refreshed.applicability, eligible, green, reasons, red = receipt?.outcome == Outcome.Failed, mandatory = mandatory,
             knownRed = if (mandatory) null else knownRedSince(check.id), hold = if (Regressions.of(registered)) hold(check.id, stampNow) else null)
     }

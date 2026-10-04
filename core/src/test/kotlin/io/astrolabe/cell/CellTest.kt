@@ -1160,6 +1160,21 @@ class CellTest {
     }
 
     @Test
+    fun `a spent subscription quota is a typed resumable stop on the host, not a failed increment`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val exit = f.run(ScriptedModel.of(Scripted.Fault(FaultKind.QuotaExhausted, retryAfterSeconds = 3_600)))
+
+            val blocked = assertIs<CellExit.Blocked>(exit)
+            assertTrue(blocked.request.reason.contains("plan quota exhausted") && blocked.request.reason.contains("3600 s"), blocked.request.reason)
+            assertNull(blocked.request.question, "an external blocker, not a question for the user")
+            assertEquals(CellStatus.Blocked, f.checkpoints.latest(f.ids.context!!)!!.status)
+            val stop = assertIs<io.astrolabe.campaign.Disposition.Stop>(io.astrolabe.campaign.Lifecycle.disposition(exit, null))
+            assertEquals(io.astrolabe.campaign.CampaignOutcome.BlockedExternal, stop.outcome)
+            assertTrue(stop.outcome.resumable, "a reopen resumes once the quota refills")
+        }
+    }
+
+    @Test
     fun `cancellation persists a cancelled checkpoint before it propagates`() = runTest {
         CellFixture(stateRoot).use { f ->
             val context = f.context(ScriptedModel.of(Scripted.Reply(listOf(say("look"), tree("c1")))), holdResponses = true)

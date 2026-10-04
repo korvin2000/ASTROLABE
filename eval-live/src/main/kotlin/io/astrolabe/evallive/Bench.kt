@@ -147,16 +147,18 @@ internal class Bench(
                     Recorder(events, dir.resolve("events.jsonl")).use { recorder ->
                         try {
                             val script = SessionScript(interrupt?.afterResponses, reopen?.afterResponses, run.task.message)
-                            val first = segment(run.task.prompt, bound, events, temp, spec, script, null)
+                            // The loop's limits are per work: a second session of the same work continues its spend; a follow-up is a new work.
+                            val budget = LoopBudget()
+                            val first = segment(run.task.prompt, bound, events, temp, spec, script, null, budget)
                             segments += first
                             // WP-B2: the user's constraint arrives as the Studio delivers a message after the run stopped or ended.
                             if (interrupt != null && first.attempt != null && first.attempt.failure == null) {
                                 val request = StudioPolicy.recap(run.task.prompt, first.attempt, GitRepo.changedFiles(workspace, base)) + interrupt.constraint
-                                segments += segment(request, bound, events, temp, spec, SessionScript(), null)
+                                segments += segment(request, bound, events, temp, spec, SessionScript(), null, LoopBudget())
                             }
                             // WP-B7: the second session opens the same work in the same state root, as the Studio's resume does.
                             if (reopen != null && first.attempt?.closedAt != null) {
-                                segments += segment(run.task.prompt, bound, events, temp, spec, SessionScript(), WorkId(first.attempt.workId))
+                                segments += segment(run.task.prompt, bound, events, temp, spec, SessionScript(), WorkId(first.attempt.workId), budget)
                             }
                         } finally {
                             recorder.drain()
@@ -246,7 +248,7 @@ internal class Bench(
         s.attempt?.cells, s.wallMillis, s.totals, s.attempt?.openedContractVersion,
     )
 
-    private fun segment(prompt: String, bound: ModelBinding, events: Events, temp: Path, spec: RunSpec, script: SessionScript, work: WorkId?): Segment {
+    private fun segment(prompt: String, bound: ModelBinding, events: Events, temp: Path, spec: RunSpec, script: SessionScript, work: WorkId?, budget: LoopBudget): Segment {
         val from = events.lastSeq
         val start = nanos.asLong
         var attempt: AttemptOutcome? = null
@@ -263,7 +265,7 @@ internal class Bench(
                             attempts.run(workspace, prompt, bound, events, spec, plan.deadline, script, work)
                         }
                     }
-                    ArmRunner.Loop -> LoopAttempt(clock, idGen, osName).run(workspace, prompt, bound, events, spec, plan.deadline, script, work ?: WorkId(idGen.next("W")))
+                    ArmRunner.Loop -> LoopAttempt(clock, idGen, osName).run(workspace, prompt, bound, events, spec, plan.deadline, script, work ?: WorkId(idGen.next("W")), budget)
                 }
             }
         } catch (e: Exception) {
