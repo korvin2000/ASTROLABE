@@ -382,7 +382,8 @@ class HandoffTest {
         val register = io.astrolabe.register.Register.empty(ContextId("cell-a"), "I1", "a returns 10")
             .copy(archive = io.astrolabe.register.RegisterArchive(open = listOf(closed)))
         fun finding(issue: String) = io.astrolabe.verify.Finding(io.astrolabe.verify.Severity.Major, "src/a.py:2", issue, kind = io.astrolabe.verify.FindingKind.Correctness)
-        val carried = Controller.withOpenItems(register, listOf(finding("total() rounds"), finding("a() ignores its input")))
+        // Findings are numbered in order before the known ones are dropped, so the new finding goes first.
+        val carried = Controller.withOpenItems(register, listOf(finding("a() ignores its input"), finding("total() rounds")))
         assertEquals(listOf(2), carried.open.map { it.n }, "o1 is archived: the new item is o2, and the closed finding stays closed")
         assertEquals("review major: a() ignores its input at src/a.py:2", carried.open.single().text)
         assertEquals(register.archive, carried.archive)
