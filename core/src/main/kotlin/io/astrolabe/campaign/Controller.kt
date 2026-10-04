@@ -48,6 +48,7 @@ import io.astrolabe.cell.DispatchAuthority
 import io.astrolabe.cell.DispatchRefusal
 import io.astrolabe.cell.Gates
 import io.astrolabe.cell.PacketStatus
+import io.astrolabe.cell.Protocol
 import io.astrolabe.cell.ResultPacket
 import io.astrolabe.cell.Role
 import io.astrolabe.cell.RoleTexts
@@ -595,7 +596,10 @@ public class Controller @JvmOverloads public constructor(
             state = Lifecycle.apply(state, contract, Transition.Resumed("finalization interrupted; revalidate acceptance before completing")).also(campaigns::save)
         }
         if (state?.phase == CampaignPhase.Ended && state.outcome?.resumable == true) {
-            state = Lifecycle.apply(state, contract, Transition.Resumed("reopened after ${state.outcome?.wire}")).also(campaigns::save)
+            val reason = "reopened after ${state.outcome?.wire}"
+            state = Lifecycle.apply(state, contract, Transition.Resumed(reason)).also(campaigns::save)
+            // A-D.6: an explicit resume renews the handoff grant at the next run; only a direct line ever hands off.
+            if (effective.protocol == Protocol.Direct) Handoffs(journal, idGen, clock, ids).resumed(reason)
         }
         // C3 (K): the limits in force — the host's when it names them, else the ones kept with the campaign.
         val limits = TaskLimitControl.atOpen(journal, ids, idGen, clock, policy.limits)
@@ -752,7 +756,8 @@ public class Controller @JvmOverloads public constructor(
      * cell, reconcile and persist its return, verify the completion against current receipts (never the model's
      * word), commit it if the tree is still the one it is about, and finish at the final stamp — or stop with the
      * honest outcome `dispatch_outcome` gives (S0 has no continuation cell or replan, D-64). The ledger moves only
-     * through [Transition.Committed] on a verifier-accepted completion.
+     * through [Transition.Committed] on a verifier-accepted completion. A direct cell's handoff is the one exception
+     * (A-D.6): the same increment continues in an epoch, at most [maxHandoffs] times per grant.
      */
     @JvmOverloads
     public suspend fun runS0(
@@ -760,15 +765,20 @@ public class Controller @JvmOverloads public constructor(
         model: CellModel,
         authority: Authority = AutonomousAuthority(),
         syntax: SyntaxCheck = CliSyntax(campaign.os, campaign.workspace.root, campaign.store.layout.root.resolve("logs"), python = null, node = null),
+        maxHandoffs: Int = DEFAULT_MAX_HANDOFFS,
     ): S0Run {
+        require(maxHandoffs >= 0) { "maxHandoffs must be ≥ 0" }
+        grant(campaign, maxHandoffs)
         val session = limitControl.begin(campaign)
         // C3: the host's answers are a person's wait, not active time.
         val host = limitControl.pausing(campaign, authority)
         try {
             behaviourSnapshot(campaign)
-            val result = spans?.span(Phase.Plan, campaign.ids) { span -> runS0(campaign, model, host, syntax, span) }
-                ?: runS0(campaign, model, host, syntax, null)
-            return finish(campaign, result)
+            val epochs = ArrayList<ResultPacket>()
+            val result = spans?.span(Phase.Plan, campaign.ids) { span -> runS0(campaign, model, host, syntax, span, maxHandoffs = maxHandoffs, epochs = epochs) }
+                ?: runS0(campaign, model, host, syntax, null, maxHandoffs = maxHandoffs, epochs = epochs)
+            // A-D.6: the final report covers every epoch of this run, then the last exit.
+            return finish(campaign, result, epochs + listOfNotNull(result.exit?.packet))
         } finally {
             limitControl.end(campaign, session)
         }
@@ -793,7 +803,8 @@ public class Controller @JvmOverloads public constructor(
      * proposal is admitted by [PlanIntake] and installed by [Transition.Planned] — then loops: the next ready
      * increment is compiled with the carry-forward and seeds of its previous cell, run, verified against current
      * receipts and committed; a partial continues the same increment, a stop is the honest outcome, and an empty
-     * frontier with unverified requirements never ends `completed`. [maxCells] bounds the campaign's cells.
+     * frontier with unverified requirements never ends `completed`. [maxCells] bounds the campaign's cells; a cell that
+     * continues a direct cell's handoff is not counted there but in the grant of [maxHandoffs] (A-D.6, owner №4).
      */
     @JvmOverloads
     public suspend fun run(
@@ -802,22 +813,78 @@ public class Controller @JvmOverloads public constructor(
         authority: Authority = AutonomousAuthority(),
         syntax: SyntaxCheck = CliSyntax(campaign.os, campaign.workspace.root, campaign.store.layout.root.resolve("logs"), python = null, node = null),
         maxCells: Int = DEFAULT_MAX_CELLS,
+        maxHandoffs: Int = DEFAULT_MAX_HANDOFFS,
     ): S0Run {
         require(maxCells >= 1) { "maxCells must be ≥ 1" }
+        require(maxHandoffs >= 0) { "maxHandoffs must be ≥ 0" }
         // D-170: S2 is the S1 loop with the S2+ paths (increment review, delegation, campaign judge) switched on by the contract's shape.
         val shape = (campaign.shape as? ShapeDecision.Selected)?.shape
-        if (shape != Shape.S1 && shape != Shape.S2 && shape != Shape.S3) return runS0(campaign, model, authority, syntax)
+        if (shape != Shape.S1 && shape != Shape.S2 && shape != Shape.S3) return runS0(campaign, model, authority, syntax, maxHandoffs)
+        grant(campaign, maxHandoffs)
         val session = limitControl.begin(campaign)
         val host = limitControl.pausing(campaign, authority)
         try {
             behaviourSnapshot(campaign)
             val packets = ArrayList<ResultPacket>()
-            val result = spans?.span(Phase.Plan, campaign.ids) { span -> runS1(campaign, model, host, syntax, span, maxCells, packets) }
-                ?: runS1(campaign, model, host, syntax, null, maxCells, packets)
+            val result = spans?.span(Phase.Plan, campaign.ids) { span -> runS1(campaign, model, host, syntax, span, maxCells, packets, maxHandoffs) }
+                ?: runS1(campaign, model, host, syntax, null, maxCells, packets, maxHandoffs)
             return finish(campaign, result, packets)
         } finally {
             limitControl.end(campaign, session)
         }
+    }
+
+    /**
+     * A-D.6: the handoff grant of this run — journaled when the attempt has none or an explicit resume is newer than its
+     * latest — for a campaign that may still dispatch. Only a direct main line hands off, so a structured one journals none.
+     */
+    private fun grant(c: OpenedCampaign, maxHandoffs: Int) {
+        if (c.stop != null || c.attempt.config.protocol != Protocol.Direct) return
+        Handoffs(c.journal, idGen, clock, c.ids).grant(maxHandoffs)
+    }
+
+    /** A handed-off cell whose increment waits for its epoch (A-D.6): the kept record and the packet the epoch carries from. */
+    private class Epoch(val kept: ReturnedHandoff, val packet: ResultPacket)
+
+    /**
+     * The epoch the campaign owes, or `null`: a returned handoff whose cell is still its increment's last, that increment
+     * in progress and no split requested by the cell — a split replans first and is never continued as an epoch.
+     * [memory] holds this run's packets; after a reopen the packet comes from the kept record.
+     */
+    private fun pendingEpoch(c: OpenedCampaign, memory: List<ResultPacket>): Epoch? {
+        val state = checkNotNull(c.state)
+        val kept = ReturnedHandoffs(c.store, clock).all(c.ids.work, c.ids.attempt).lastOrNull { kept ->
+            val increment = state.graph.increments.firstOrNull { it.id == kept.incrementId }
+            increment?.status == IncrementStatus.InProgress && increment.cells.lastOrNull() == kept.cell &&
+                state.cells.firstOrNull { it.cell == kept.cell }?.status == CellStatus.Partial
+        } ?: return null
+        if (SqliteSplitRequests(c.store, idGen, clock).forPlanRole(c.ids.work).any { it.cell == kept.cell }) return null
+        return Epoch(kept, memory.lastOrNull { it.ids.context == kept.cell } ?: keptPacket(c, kept))
+    }
+
+    private fun keptPacket(c: OpenedCampaign, kept: ReturnedHandoff): ResultPacket {
+        val increment = checkNotNull(c.state).graph.increments.first { it.id == kept.incrementId }
+        val register = SqliteRegisterVersions(c.store, clock).latest(kept.cell) ?: Register.empty(kept.cell, increment.id, increment.title)
+        return kept.packet(c.ids, register)
+    }
+
+    /**
+     * The successor of [epoch]'s cell (A-D.6): the id its spend already names — a crash between the spend and the
+     * `Dispatched` row is replayed without a second charge and without asking the remainder — or a new spend from the grant
+     * in force. With no remainder, the stop the campaign takes instead.
+     */
+    private fun successor(c: OpenedCampaign, epoch: Epoch, maxHandoffs: Int): Pair<ContextId?, Transition.Stopped?> {
+        val handoffs = Handoffs(c.journal, idGen, clock, c.ids)
+        handoffs.spendOf(epoch.kept.cell)?.let { return it.to to null }
+        val grant = handoffs.grant(maxHandoffs)
+        val spent = handoffs.spends(grant.id).size
+        if (spent >= grant.limit) {
+            val unverified = checkNotNull(c.state).ledger.unfinished().size
+            return null to Transition.Stopped(CampaignOutcome.BudgetExhausted, "the campaign's ${grant.limit} handoffs are spent with $unverified requirements unverified")
+        }
+        val to = ContextId(idGen.next("cell"))
+        handoffs.spend(grant, spent + 1, epoch.kept.cell, to, epoch.kept.incrementId, epoch.kept.cause)
+        return to to null
     }
 
     private suspend fun reassessBlocked(c: OpenedCampaign, authority: Authority) {
@@ -844,7 +911,7 @@ public class Controller @JvmOverloads public constructor(
         c.journal.events(JournalScope(c.ids.work, kinds = setOf(JournalKind.Reconcile)))
             .filter { increment.id in it.refs && it.text.startsWith(HOST_ANSWER) }.map { it.text }
 
-    private suspend fun runS1(c: OpenedCampaign, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?, maxCells: Int, packets: MutableList<ResultPacket>): S0Run {
+    private suspend fun runS1(c: OpenedCampaign, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?, maxCells: Int, packets: MutableList<ResultPacket>, maxHandoffs: Int): S0Run {
         c.stop?.let { return S0Run(c.state, null, null, null) }
         c.refusal()?.let { return S0Run(c.advance(Transition.Stopped(stopOutcome(c), "nothing dispatched: $it")), null, null, null) }
         // D-340: a completion waiting for a decision is settled first — no cell, no budget check, no model call.
@@ -929,8 +996,11 @@ public class Controller @JvmOverloads public constructor(
             }
             // A-D.1: the main line's role, read once at the cell's start from the attempt's protocol and the contract's shape.
             val role = mainLine(c, contract)
+            val frontier = state.graph.readyFrontier(contract, state.graph.increments.size)
+            // A-D.6: a handed-off increment continues in its epoch before any other ready increment.
+            val epoch = pendingEpoch(c, packets)?.takeIf { e -> frontier.any { it.id == e.kept.incrementId } }
             // §11.4 ordering hint (P4.5.3): among ready increments, the one sharing the last cell's prefix goes first.
-            val ready = CellOrder.next(state.graph.readyFrontier(contract, state.graph.increments.size), lastKey, role) { inc ->
+            val ready = epoch?.let { e -> frontier.first { it.id == e.kept.incrementId } } ?: CellOrder.next(frontier, lastKey, role) { inc ->
                 listOfNotNull(tiers[inc.id], attempts.tier(inc.id), FunctionTable.DEFAULT.row(RoutingFunction.Implementing).defaultTier, Router.riskFloor(inc.risk ?: contract.risk, null)).max()
             }
             if (ready == null) {
@@ -942,16 +1012,17 @@ public class Controller @JvmOverloads public constructor(
             // C3 (plan §4.6): no cell starts once the task limits' working part is spent; the rest is held for verifying and
             // reporting. Regression refresh and the final acceptance above are the harness's own work and still run.
             limitStop(c, authority)?.let { return last.copy(state = it) }
-            if (cells >= maxCells) {
+            // A-D.6: an epoch is paid from the handoff grant, never from the cell cap.
+            if (epoch == null && cells >= maxCells) {
                 return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.BudgetExhausted,
                     "the run's $maxCells cells are spent with ${unverified.size} requirements unverified; reopen the task to continue with a fresh cap", budget = BudgetStop.CellCap)))
             }
             attempts.exhausted(c.ids.work, ready.id, contract.budget.attempts)?.let {
                 return last.copy(state = c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, it)))
             }
-            cells += 1
+            if (epoch == null) cells += 1
             // §6.2: a continuation starts from the previous cell's validated register, seeds and packet — never its transcript.
-            val carry = ready.cells.lastOrNull()?.let { previous -> carryFrom(c, previous, packets.lastOrNull { it.ids.context == previous }, role) }
+            val carry = ready.cells.lastOrNull()?.let { previous -> carryFrom(c, previous, epoch?.packet ?: packets.lastOrNull { it.ids.context == previous }, role, handoff = epoch != null) }
             val seeds = carry?.let { Seeds.render(it.seeds, c.registry::read) }
             val resume = resumeNote(c, ready, carry)
             val knowledge = knowledge(c, ready, role, model, touched = carry?.seeds.orEmpty().map { it.path }.toSet())
@@ -970,7 +1041,9 @@ public class Controller @JvmOverloads public constructor(
                     }
                 }
             }
-            val routing = route(c, if (ready.cells.isEmpty()) RoutingFunction.Implementing else RoutingFunction.Continuation, ready, model, listOfNotNull(tiers[ready.id], attempts.tier(ready.id)).maxOrNull(), take?.compiled) { bound ->
+            // A-D.6: an epoch is routed with the function recorded for the cell it continues.
+            val function = epoch?.kept?.function ?: if (ready.cells.isEmpty()) RoutingFunction.Implementing else RoutingFunction.Continuation
+            val routing = route(c, function, ready, model, listOfNotNull(tiers[ready.id], attempts.tier(ready.id)).maxOrNull(), take?.compiled) { bound ->
                 Compiler(bound.estimator, c.attempt.config).compile(ready, contract, bound.profile, role, c.prime, maxOutputTokens = bound.maxOutputTokens, inputs = inputs)
             }
             val compiled = routing.compiled
@@ -978,7 +1051,7 @@ public class Controller @JvmOverloads public constructor(
             closed?.let { (cell, at) -> precompiles.record(PrecompileSample(cell, ready.id, take?.outcome ?: PrecompileOutcome.None, take?.reason, (precompiles.now() - at).coerceAtLeast(0))) }
             closed = null
             // §6.5: why this context is built — a new increment after a closed one, a partial's continuation, or a resume.
-            val boundaryReason = when (ready.cells.lastOrNull()?.let { previous -> state.cells.firstOrNull { it.cell == previous }?.status }) {
+            val boundaryReason = if (epoch != null) BoundaryReason.Epoch else when (ready.cells.lastOrNull()?.let { previous -> state.cells.firstOrNull { it.cell == previous }?.status }) {
                 null, CellStatus.Completed -> BoundaryReason.Done
                 CellStatus.Partial, CellStatus.Blocked -> BoundaryReason.Partial
                 CellStatus.Running, CellStatus.Failed, CellStatus.Cancelled -> BoundaryReason.Resume
@@ -992,9 +1065,11 @@ public class Controller @JvmOverloads public constructor(
             routing.refused?.let { return last.copy(state = c.advance(contractBudget(c, it.reason, null)), compiled = compiled) }
             routing.selected?.let { tiers[ready.id] = it.tier }
             lastKey = routing.selected?.let { CellOrder.key(role, it.tier) }
-            val cellId = ContextId(idGen.next("cell"))
+            val cellId = if (epoch == null) ContextId(idGen.next("cell")) else successor(c, epoch, maxHandoffs).let { (to, stop) ->
+                to ?: return last.copy(state = c.advance(checkNotNull(stop)), compiled = compiled)
+            }
             events?.emit(AgentEvent.Campaign.IncrementSelected(c.ids, ready.id))
-            val dispatched = c.advance(Transition.Dispatched(ready.id, cellId))
+            val dispatched = c.advance(Transition.Dispatched(ready.id, cellId, epoch = epoch != null))
             spendReworks(c, cellId, reworkRecords)
             val increment = dispatched.graph.increments.first { it.id == ready.id }
             val register = carry?.register?.copy(cell = cellId, increment = increment.id, incrementTitle = increment.title)
@@ -1007,8 +1082,8 @@ public class Controller @JvmOverloads public constructor(
             }
             if (precompile != null) closed = cellId to precompiles.now()
             val exit = run.exit
-            // A completed cell's outcome is recorded once the verifier resolved it (A3).
-            if (exit !is CellExit.Completed) routing.selected?.let { router.record(it, outcomeOf(exit)) }
+            // A completed cell's outcome is recorded once the verifier resolved it (A3); a handoff is never recorded (A-D.6).
+            if (exit !is CellExit.Completed && !exit.handoff) routing.selected?.let { router.record(it, outcomeOf(exit)) }
             if (exit == null) {
                 snapshot(c)
                 c.advance(Transition.Interrupted(checkNotNull(run.checkpoints.latest(cellId)) { "a cancelled cell settles its checkpoint" }))
@@ -1016,7 +1091,7 @@ public class Controller @JvmOverloads public constructor(
             }
             packets += exit.packet
             snapshot(c)
-            val kept = returned(c, run.ids, exit, routing.selected, compiled.k.ledger)
+            val kept = returned(c, run.ids, exit, routing.selected, compiled.k.ledger, function)
             refreshPrescan(c, run.ids, exit.checkpoint.touched, exit.turns)?.let { return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, it)), exit, null, compiled) }
             boundary(c, cellId, RebuildReason.CellEnd(if (exit is CellExit.Completed) RebuildReason.CellEnd.Next.NextIncrement else RebuildReason.CellEnd.Next.Continuation))
             val stampNow = c.stamper.report(fresh = true).candidateId
@@ -1462,8 +1537,11 @@ public class Controller @JvmOverloads public constructor(
             }, HeuristicEstimator(), c.attempt.config.defaults.registerCapTokens, clock)
     }
 
-    /** The carry-forward of [cell] (§6.2) for the next cell of [role]: its latest register, its end export and its packet, re-validated now. */
-    private fun carryFrom(c: OpenedCampaign, cell: ContextId, packet: ResultPacket?, role: Role): Carry? {
+    /**
+     * The carry-forward of [cell] (§6.2) for the next cell of [role]: its latest register, its end export and its packet,
+     * re-validated now. [handoff]: the next cell is [cell]'s epoch (A-D.6).
+     */
+    private fun carryFrom(c: OpenedCampaign, cell: ContextId, packet: ResultPacket?, role: Role, handoff: Boolean = false): Carry? {
         val retained = retainedFacts(c, cell) ?: return null
         if (retained.archived.isNotEmpty()) {
             val status = StatusNotes(KbWriter(c.store, HeuristicEstimator(), clock), Notes(c.store), c.store.layout.kb)
@@ -1482,13 +1560,16 @@ public class Controller @JvmOverloads public constructor(
             register, Seeds.cellEnd(SqliteCheckpoints(c.store, clock), cell), packet, { c.registry.version(it) },
             { id -> Aliases.parse(id)?.let { aliases.resolve(c.ids.work, it) } != null }, emptyList(), emptyList(),
             selector = io.astrolabe.context.SeedRule.of(role.protocol, c.attempt.config.defaults.seedRule).selector,
-            latestReceipts = c.checks.all().mapNotNull { it.last?.receiptId?.let(receipts::get) },
+            latestReceipts = c.checks.all().mapNotNull { it.last?.receiptId?.let(receipts::get) }, handoff = handoff,
         ).copy(capacityGap = retained.capacityGap)
     }
 
     /** Every ended campaign leaves a finish receipt, stored and exported, and says so on the bus (§5.9). */
-    private fun finish(c: OpenedCampaign, result: S0Run, packets: List<ResultPacket> = listOfNotNull(result.exit?.packet)): S0Run {
+    private fun finish(c: OpenedCampaign, result: S0Run, current: List<ResultPacket> = listOfNotNull(result.exit?.packet)): S0Run {
         val outcome = result.state?.outcome ?: return result
+        // A-D.6: the report covers every epoch; those of an earlier run come from their kept records.
+        val reported = current.mapNotNullTo(HashSet()) { it.ids.context }
+        val packets = ReturnedHandoffs(c.store, clock).all(c.ids.work, c.ids.attempt).filter { it.cell !in reported }.map { keptPacket(c, it) } + current
         val receipts = SqliteReceipts(c.store, clock)
         val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, receipts, SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = candidates(c), retryCandidates = c.store.layout.candidates)
         extract(c, packets)
@@ -1554,7 +1635,14 @@ public class Controller @JvmOverloads public constructor(
         return if (fresh.isEmpty()) register else register.copy(open = register.open + fresh)
     }
 
-    private suspend fun runS0(campaign: OpenedCampaign, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?, reworks: Int = 0): S0Run {
+    /**
+     * The S0 loop body. It re-enters itself for a rework or a void (D-340) and, for a direct cell, after a handoff (A-D.6):
+     * the handoff's epoch runs on re-entry, its packets collected in [epochs] for the final report.
+     */
+    private suspend fun runS0(
+        campaign: OpenedCampaign, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?, reworks: Int = 0,
+        maxHandoffs: Int = DEFAULT_MAX_HANDOFFS, epochs: MutableList<ResultPacket> = ArrayList(),
+    ): S0Run {
         val c = campaign
         c.stop?.let { return S0Run(c.state, null, null, null) }
         // Every later use reads the attempt's frozen configuration, never the controller's live one (invariant 12).
@@ -1579,13 +1667,16 @@ public class Controller @JvmOverloads public constructor(
         // C3 (plan §4.6): the cell starts only within the task limits' working part.
         limitStop(c, authority)?.let { return S0Run(it, null, null, null) }
         val role = mainLine(c, contract)
+        // A-D.6: the epoch a handoff left; it continues from the predecessor's packet.
+        val epoch = pendingEpoch(c, epochs)?.takeIf { it.kept.incrementId == ready.id }
         // §13.4 rebuild(resume): a cell that continues a lost or interrupted one starts from its validated carry-forward.
-        val carry = ready.cells.lastOrNull()?.let { previous -> carryFrom(c, previous, null, role) }
+        val carry = ready.cells.lastOrNull()?.let { previous -> carryFrom(c, previous, epoch?.packet, role, handoff = epoch != null) }
         val seeds = carry?.let { Seeds.render(it.seeds, c.registry::read) }
         val resume = resumeNote(c, ready, carry)
         val knowledge = knowledge(c, ready, role, model, touched = carry?.seeds.orEmpty().map { it.path }.toSet())
         val inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) }, notes = knowledge.notes, contractsIndex = knowledge.contractsIndex, skills = knowledge.skills, skillConflicts = knowledge.skillConflicts)
-        val routing = route(c, if (ready.cells.isEmpty()) RoutingFunction.Implementing else RoutingFunction.Continuation, ready, model, null, null) { bound ->
+        val function = epoch?.kept?.function ?: if (ready.cells.isEmpty()) RoutingFunction.Implementing else RoutingFunction.Continuation
+        val routing = route(c, function, ready, model, null, null) { bound ->
             Compiler(bound.estimator, config).compile(ready, contract, bound.profile, role, c.prime, maxOutputTokens = bound.maxOutputTokens, inputs = inputs)
         }
         val compiled = routing.compiled
@@ -1597,14 +1688,18 @@ public class Controller @JvmOverloads public constructor(
         }
         routing.refused?.let { return S0Run(c.advance(contractBudget(c, it.reason, null)), null, null, compiled) }
 
-        val cellId = ContextId(idGen.next("cell"))
+        val cellId = if (epoch == null) ContextId(idGen.next("cell")) else successor(c, epoch, maxHandoffs).let { (to, stop) ->
+            to ?: return S0Run(c.advance(checkNotNull(stop)), null, null, compiled)
+        }
         events?.emit(AgentEvent.Campaign.IncrementSelected(c.ids, ready.id))
         val (reworkLines, reworkRecords) = reworkNotes(c, ready)
-        val dispatched = c.advance(Transition.Dispatched(ready.id, cellId))
+        val dispatched = c.advance(Transition.Dispatched(ready.id, cellId, epoch = epoch != null))
         spendReworks(c, cellId, reworkRecords)
         val increment = dispatched.graph.increments.first { it.id == ready.id }
         val register = carry?.register?.copy(cell = cellId, increment = increment.id, incrementTitle = increment.title)
-        val run = runCell(c, cellId, increment, role, cellModel, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = listOfNotNull(resume) + hostAnswers(c, ready) + reworkLines, inputs = inputs, rework = reworkLines.isNotEmpty())
+        // A-D.6: S0 has no continuation of its own, so its cell may hand off on a spent turn budget.
+        val run = runCell(c, cellId, increment, role, cellModel, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = listOfNotNull(resume) + hostAnswers(c, ready) + reworkLines,
+            boundary = if (epoch != null) BoundaryReason.Epoch else null, inputs = inputs, rework = reworkLines.isNotEmpty(), turnBudgetHandoff = true)
         val ids = run.ids
         val scheduler = run.scheduler
         val exit = run.exit
@@ -1617,9 +1712,9 @@ public class Controller @JvmOverloads public constructor(
         }
         // The tree after the cell is the base the next open reconciles against: only moves after this are external.
         snapshot(c)
-        val kept = returned(c, ids, exit, routing.selected, compiled.k.ledger)
+        val kept = returned(c, ids, exit, routing.selected, compiled.k.ledger, function)
         refreshPrescan(c, ids, exit.checkpoint.touched, exit.turns)?.let {
-            routing.selected?.let { selected -> router.record(selected, outcomeOf(exit)) }
+            if (!exit.handoff) routing.selected?.let { selected -> router.record(selected, outcomeOf(exit)) }
             return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, it)), exit, null, compiled)
         }
 
@@ -1634,10 +1729,15 @@ public class Controller @JvmOverloads public constructor(
             verify(c, kept, returned, stampNow, currencies(c, scheduler, stampNow))
         }
         // The router learns the verified outcome, never the cell's own word (A3): an unverified completion is not an acceptance.
-        routing.selected?.let { router.record(it, outcomeOf(exit, completion)) }
+        if (!exit.handoff) routing.selected?.let { router.record(it, outcomeOf(exit, completion)) }
         val state = when (val disposition = Lifecycle.disposition(exit, completion)) {
             is Disposition.Close -> commit(c, ids, exit.turns, increment, disposition.accepted, stampNow)
                 ?: stopOrFinish(c, "requirements remain unverified after ${increment.id}", scheduler, authority = authority)
+            // A-D.6: a handoff continues the increment in an epoch — the user's limits still stop it first.
+            is Disposition.Continue if exit.handoff -> onLimit(c, authority) ?: run {
+                epochs += exit.packet
+                return runS0(c, model, authority, syntax, span, reworks, maxHandoffs, epochs)
+            }
             // S0 has no continuation cell of its own: the fallback is the honest outcome (D-64) — the limit's own when a task limit ended the cell (C3).
             is Disposition.Continue -> onLimit(c, authority) ?: c.advance(
                 if (disposition.fallback == CampaignOutcome.BudgetExhausted) contractBudget(c, disposition.reason, (exit as? CellExit.Partial)?.reason ?: PartialReason.TokenBudget)
@@ -1653,13 +1753,13 @@ public class Controller @JvmOverloads public constructor(
                     // D-340: a `rework` answer runs one continuation cell with the decider's text pinned.
                     is Settled.Rework -> {
                         closePending(c, ids, settled.pending, PendingStatus.Void, "rework requested by ${settled.record.decision.by}")
-                        if (reworks < MAX_REWORKS_PER_RUN) return runS0(c, model, authority, syntax, span, reworks + 1)
+                        if (reworks < MAX_REWORKS_PER_RUN) return runS0(c, model, authority, syntax, span, reworks + 1, maxHandoffs, epochs)
                         c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, "rework requested again (${settled.record.decision.reason}); resume to continue"))
                     }
                     is Settled.Wait -> c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, settled.reason, settled.code))
                     is Settled.Void -> {
                         closePending(c, ids, settled.pending, PendingStatus.Void, settled.reason)
-                        if (reworks < MAX_REWORKS_PER_RUN) return runS0(c, model, authority, syntax, span, reworks + 1)
+                        if (reworks < MAX_REWORKS_PER_RUN) return runS0(c, model, authority, syntax, span, reworks + 1, maxHandoffs, epochs)
                         c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, "${settled.reason}; resume to continue"))
                     }
                 }
@@ -1933,7 +2033,15 @@ public class Controller @JvmOverloads public constructor(
      * Returns [exit]; a completed one is kept first (P8.C.8), with the sequence number of the row that says it returned.
      * [preexisting] is the compiled context's pre-existing ledger, which an owed increment review shows (§8.8).
      */
-    private fun returned(c: OpenedCampaign, ids: Identities, exit: CellExit, selected: Routed.Selected?, preexisting: io.astrolabe.verify.PreexistingLedger?): ReturnedCompletion? {
+    private fun returned(c: OpenedCampaign, ids: Identities, exit: CellExit, selected: Routed.Selected?, preexisting: io.astrolabe.verify.PreexistingLedger?, function: RoutingFunction): ReturnedCompletion? {
+        if (exit is CellExit.Partial && exit.handoff) {
+            // A-D.6: the handoff's kept record precedes its row, as a returned completion's does.
+            val grant = Handoffs(c.journal, idGen, clock, c.ids).current()?.id
+            c.advance(Transition.Returned(exit)) { next ->
+                ReturnedHandoffs(c.store, clock).save(ids, ReturnedHandoff.of(idGen.next("returned"), next.seq, exit, grant, function, selected?.tier, selected?.profile?.id))
+            }
+            return null
+        }
         if (exit !is CellExit.Completed) {
             c.advance(Transition.Returned(exit))
             return null
@@ -2211,6 +2319,8 @@ public class Controller @JvmOverloads public constructor(
         tree: CellTree = CellTree.main(c),
         /** D-340: the controller dispatches this cell on a decider's `rework` answer (C1b reads it as `GateState.reworked`). */
         rework: Boolean = false,
+        /** A-D.6: the loop has no continuation of its own (`runS0`); the cell reads it as `CellContext.turnBudgetHandoff`. */
+        turnBudgetHandoff: Boolean = false,
     ): CellRun {
         val ids = c.ids.copy(context = cellId)
         val cancellation = child?.cancellation ?: c.cancellation
@@ -2327,6 +2437,7 @@ public class Controller @JvmOverloads public constructor(
             pinned = hostBlock + pinned,
             precompile = precompile,
             rework = rework,
+            turnBudgetHandoff = turnBudgetHandoff,
             acknowledged = acknowledged(c),
             knowledge = knowledge,
             completionEvidence = if (child == null && role.packetKind == io.astrolabe.cell.PacketKind.Result) { raised ->
@@ -2884,6 +2995,12 @@ public class Controller @JvmOverloads public constructor(
 
         /** Default cap on an S1 campaign's cells, plan cell excluded (D-70). */
         public const val DEFAULT_MAX_CELLS: Int = 12
+
+        /** A-D.6 (owner №4): the default handoff grant — epochs of direct cells, counted apart from [DEFAULT_MAX_CELLS]. */
+        public const val DEFAULT_MAX_HANDOFFS: Int = 8
+
+        /** A-D.6: the exit is a direct cell's handoff. */
+        private val CellExit?.handoff: Boolean get() = this is CellExit.Partial && reason == PartialReason.Handoff
 
         /** The pseudo-increment the plan cell runs under; never part of the graph. */
         public const val PLAN: String = "plan"

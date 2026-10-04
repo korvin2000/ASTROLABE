@@ -148,7 +148,10 @@ public class RequirementGraph(
     }
 
     /** Opens/continues one increment without resetting counters; repeating the current cell is idempotent. */
-    public fun continueIncrement(contract: Contract, id: String, cell: ContextId): RequirementGraph {
+    public fun continueIncrement(contract: Contract, id: String, cell: ContextId): RequirementGraph = continueIncrement(contract, id, cell, false)
+
+    /** [continueIncrement] for a cell that continues a handoff when [epoch] (A-D.6): it counts in `handoffs`, never in `continuations`. */
+    public fun continueIncrement(contract: Contract, id: String, cell: ContextId, epoch: Boolean): RequirementGraph {
         val increment = increments.single { it.id == id }
         check(increment.status == IncrementStatus.Pending || increment.status == IncrementStatus.InProgress) {
             "$id is ${increment.status}; verified work is regression-only (FX-42)"
@@ -156,7 +159,11 @@ public class RequirementGraph(
         check(readyFrontier(contract, increments.size).any { it.id == id }) { "$id has unfinished prerequisites" }
         if (increment.cells.lastOrNull() == cell) return this
         check(increments.none { cell in it.cells }) { "cell $cell was already used" }
-        val sizing = if (increment.cells.isEmpty()) increment.sizing else increment.sizing.copy(continuations = increment.sizing.continuations + 1)
+        val sizing = when {
+            increment.cells.isEmpty() -> increment.sizing
+            epoch -> increment.sizing.copy(handoffs = increment.sizing.handoffs + 1)
+            else -> increment.sizing.copy(continuations = increment.sizing.continuations + 1)
+        }
         return replace(increment.copy(status = IncrementStatus.InProgress, cells = increment.cells + cell, sizing = sizing))
     }
 

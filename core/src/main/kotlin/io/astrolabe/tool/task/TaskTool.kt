@@ -1,6 +1,7 @@
 package io.astrolabe.tool.task
 
 import io.astrolabe.auth.InstructionShape
+import io.astrolabe.cell.Protocol
 import io.astrolabe.contract.Contracts
 import io.astrolabe.delegate.Assembled
 import io.astrolabe.delegate.ChildPacket
@@ -44,6 +45,9 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import java.time.Clock
+
+/** A `task(finish)` of the direct protocol (A-D.5): the turn it ran in and its summary, `null` when blank. */
+internal class FinishRequest(val turn: Int, val text: String?)
 
 /** One asked question with what came back: pinned for the rest of the cell (§5.1 "user messages pinned"). */
 public data class Asked(
@@ -120,8 +124,6 @@ public class TaskTool(
     override suspend fun execute(call: ToolCall, context: TurnContext): ToolOutcome {
         require(call.family == ToolFamily.Task) { "not a task call: ${call.name}" }
         val args = (call.args as Args.Task).args
-        // A-D.5: `finish` is declared (names, masks, schemas) before its executor; until then the call is refused, typed.
-        if (call.name in ToolOps.directOnly) return result("unsupported", ToolOps.notImplemented(call.name))
         if (!mask.allows(call.name)) return result("masked", "${call.name} is masked in this role")
         return when (args.op) {
             "ask" -> ask(args, context)
@@ -129,8 +131,34 @@ public class TaskTool(
             "delegate" -> delegate(args)
             "collect" -> collect(args)
             "answer" -> answer(args)
+            "finish" -> finish(args, context)
             else -> result("masked", "${call.name} is masked in this role")
         }
+    }
+
+    /** The cell's protocol, for the wording of its advice (A-D.7 T6, C4); the cell sets it. */
+    internal var protocol: Protocol = Protocol.Structured
+
+    /** A-D.5: the `finish` this cell requested and in which turn; the cell takes it once the turn is dispatched. */
+    private var finishRequest: FinishRequest? = null
+
+    /** Whether an `answer` waits for [takeAnswer]: A-D.5 row 1 suppresses a `finish` of the same turn. */
+    internal val answerPending: Boolean get() = answered != null
+
+    /** The `finish` requested in [turn], or `null`; an older request is dropped. */
+    internal fun takeFinish(turn: Int): FinishRequest? = finishRequest.also { finishRequest = null }?.takeIf { it.turn == turn }
+
+    /** A-D.5 row 2: a question of [turn] got an answer synchronously. */
+    internal fun askedAndAnswered(turn: Int): Boolean = exchanges.any { it.turn == turn && it.answer != null }
+
+    /**
+     * `finish(text?, after_checks?)` (A-D.5): a completion request the harness decides after the turn — never here, and
+     * never by `after_checks`, which is the model's advice only. A second one in the same turn is ignored.
+     */
+    private fun finish(args: TaskArgs, context: TurnContext): ToolOutcome {
+        if (finishRequest?.turn == context.turn) return result("ignored", "duplicate finish ignored")
+        finishRequest = FinishRequest(context.turn, args.text?.trim()?.takeIf { it.isNotEmpty() })
+        return result("requested", "finish requested: the harness decides after this turn")
     }
 
     /**
@@ -140,7 +168,10 @@ public class TaskTool(
      */
     private fun answer(args: TaskArgs): ToolOutcome {
         val check = answerCheck ?: return result("denied", "task.answer ends a task of the main line; this cell cannot end with an answer")
-        check()?.let { why -> return result("denied", "an answer ends a task that changed nothing, and this one did: $why. Finish the work, then reply with a summary and no tool call: that proposes completion.") }
+        check()?.let { why ->
+            val advice = if (protocol == Protocol.Direct) "finish the work, then call task(finish)" else "Finish the work, then reply with a summary and no tool call: that proposes completion."
+            return result("denied", "an answer ends a task that changed nothing, and this one did: $why. $advice")
+        }
         answered = args.text!!.trim()
         return result("answered", "answer recorded: the task ends with it and nothing is verified, since nothing changed")
     }
@@ -189,7 +220,8 @@ public class TaskTool(
             is ProposalOutcome.Recorded -> result(
                 "proposed",
                 "${args.kind} proposal ${outcome.id} recorded: ${outcome.summary}; the controller validates it — the contract and the graph are unchanged" +
-                    if (args.kind == "plan" && "gap" !in outcome.summary) "; end the turn now with a one-line summary and no tool call" else "",
+                    // A-D.7 T6: a direct turn without a call is not a completion request, so it gets no such advice.
+                    if (args.kind == "plan" && "gap" !in outcome.summary && protocol != Protocol.Direct) "; end the turn now with a one-line summary and no tool call" else "",
             )
             is ProposalOutcome.Refused -> result("rejected", "${args.kind} proposal refused: ${outcome.reason}")
         }

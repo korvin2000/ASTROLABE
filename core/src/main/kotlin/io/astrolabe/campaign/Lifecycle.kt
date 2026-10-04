@@ -212,8 +212,14 @@ public sealed interface Transition {
     /** Open-time reconciliation finished (§13.1): [unknownOutcomes] are intents a retry must not duplicate. */
     public data class Reconciled(val unknownOutcomes: List<String> = emptyList()) : Transition
 
-    /** A cell was dispatched on a ready increment. */
-    public data class Dispatched(val increment: String, val cell: ContextId) : Transition
+    /**
+     * A cell was dispatched on a ready increment. [epoch]: it continues a handoff (A-D.6), counted in `Sizing.handoffs`
+     * instead of `Sizing.continuations`.
+     */
+    public data class Dispatched(val increment: String, val cell: ContextId, val epoch: Boolean = false) : Transition {
+        /** The v1.0 constructor: not an epoch. Kept for Java callers. */
+        public constructor(increment: String, cell: ContextId) : this(increment, cell, false)
+    }
 
     /** The running cell handed back its Result Packet (§5.9). */
     public data class Returned(val exit: CellExit) : Transition
@@ -357,7 +363,7 @@ public object Lifecycle {
             is Transition.Dispatched -> {
                 expect(s, CampaignPhase.Running)
                 check(s.running == null) { "cell ${s.running?.cell} is still running" }
-                val graph = s.graph.continueIncrement(contract, transition.increment, transition.cell)
+                val graph = s.graph.continueIncrement(contract, transition.increment, transition.cell, transition.epoch)
                 s.next(graph = graph, cells = s.cells + CellState(transition.cell, transition.increment, CellStatus.Running), contractVersion = v)
             }
             is Transition.Returned -> {
@@ -480,7 +486,8 @@ public object Lifecycle {
             is CellExit.Partial -> Disposition.Continue(
                 "${exit.reason}: ${exit.hint}",
                 when (exit.reason) {
-                    PartialReason.TurnBudget, PartialReason.TokenBudget, PartialReason.Reserve -> CampaignOutcome.BudgetExhausted
+                    // A-D.6: a handoff continues in an epoch; its fallback is the stop when the handoffs are spent.
+                    PartialReason.TurnBudget, PartialReason.TokenBudget, PartialReason.Reserve, PartialReason.Handoff -> CampaignOutcome.BudgetExhausted
                     PartialReason.Pressure, PartialReason.CompletionStalled -> CampaignOutcome.Failed
                 },
             )

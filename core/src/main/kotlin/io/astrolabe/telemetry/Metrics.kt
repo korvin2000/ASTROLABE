@@ -1,5 +1,6 @@
 package io.astrolabe.telemetry
 
+import io.astrolabe.cell.PartialReason
 import io.astrolabe.event.AgentEvent
 import io.astrolabe.event.EventRecord
 import io.astrolabe.id.ContextId
@@ -111,16 +112,19 @@ public data class CampaignMetrics(
             val last = cellsByIncrement.filterKeys { it !in verified }.mapValues { (_, cells) -> ended[cells.last()] }
             val cellCount = cellsByIncrement.values.sumOf { it.size }
             val accepted = verified.size
+            // A-D.6: a cell that handed off is an epoch boundary, not a continuation or a failed first attempt.
+            val handedOff = events.filterIsInstance<AgentEvent.Cell.Ended>().filter { it.partialReason == PartialReason.Handoff.wire }.mapTo(HashSet()) { it.ids.context }
+            val attempts = cellsByIncrement.mapValues { (_, cells) -> cells.count { it !in handedOff } }
             return CampaignMetrics(
                 work = work,
                 costPerAcceptedTask = cost?.takeIf { accepted > 0 && !it.unknown }?.let {
                     Money(it.currency, it.amount.divide(BigDecimal.valueOf(accepted.toLong()), 10, RoundingMode.HALF_EVEN))
                 },
-                firstAttemptPassRate = if (accepted == 0) null else verified.count { cellsByIncrement[it]?.size == 1 }.toDouble() / accepted,
+                firstAttemptPassRate = if (accepted == 0) null else verified.count { attempts[it] == 1 }.toDouble() / accepted,
                 verified = accepted,
                 blocked = last.values.count { it == "blocked" },
                 cancelled = last.values.count { it == "cancelled" },
-                continuationsPerIncrement = cellsByIncrement.mapValues { (_, cells) -> cells.size - 1 },
+                continuationsPerIncrement = cellsByIncrement.mapValues { (_, cells) -> cells.size - 1 - cells.dropLast(1).count { it in handedOff } },
                 rebuildsPerCell = if (cellCount == 0) null else events.count { it is AgentEvent.Cell.Rebuilt }.toDouble() / cellCount,
                 interventions = events.filterIsInstance<AgentEvent.Ask.Question>().map { Intervention(it.questionId, null) },
             )

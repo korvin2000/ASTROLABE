@@ -148,7 +148,8 @@ public object Economics {
             cells = cells,
             money = total,
             boundaryCostShare = share(boundary, total),
-            continuationsPerIncrement = implementing.associate { it.id to it.cells.size - 1 },
+            // A-D.6: a cell that continues a handoff is an epoch, not a continuation.
+            continuationsPerIncrement = implementing.associate { it.id to it.cells.size - 1 - it.sizing.handoffs },
             rebuildsPerCell = if (cells.isEmpty()) null else cells.sumOf { it.rebuilds }.toDouble() / cells.size,
             anchorShare = requested.takeIf { r -> r.isNotEmpty() && r.all { it.anchorTokens != null } && r.sumOf { it.estimatedTokens } > 0 }
                 ?.let { r -> r.sumOf { it.anchorTokens!! }.toDouble() / r.sumOf { it.estimatedTokens } },

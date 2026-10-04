@@ -162,8 +162,22 @@ public class Cell @JvmOverloads constructor(
         val reason: String?,
         val blocked: BlockedRequest? = null,
         val evidenceRefs: List<String> = emptyList(),
+        /** The typed reason of a partial exit, for the `cell.ended` event (A-D.6). */
+        val partialReason: PartialReason? = null,
         val make: (Int, Register, CellCheckpoint, ResultPacket) -> CellExit,
     )
+
+    /** What a direct turn proposes (A-D.5 step 1): nothing, a plain or a conditional proposal, or nothing with the reason why. */
+    private sealed interface Claim {
+        object None : Claim
+
+        class Plain(val summary: String) : Claim
+
+        class Conditional(val summary: String) : Claim
+
+        /** Nothing is proposed; [line] tells the model why in the next `[A]`. */
+        class Withheld(val line: String) : Claim
+    }
 
     /**
      * The turn after validation (D-372): [calls] dispatch under their op ids, the position in the model's output; every
@@ -208,6 +222,14 @@ public class Cell @JvmOverloads constructor(
         private val seenResults = HashSet<CallSignature>()
         private var requiredOp: String? = null
         private var refusals = 0
+        /** A-D.5: the direct protocol proposes completion through `task(finish)`; a structured cell by a turn without a call. */
+        private val direct = ctx.role.protocol == Protocol.Direct
+        /** A-D.5 row 6: the previous turn had no call and only got the nudge; a second such turn in a row proposes. */
+        private var nudgedNoCall = false
+        /** A-D.5 counter rule 2: the candidate and the checks' last receipt ids at the last counted refusal. */
+        private var refusedAt: Pair<CandidateId?, Set<String>>? = null
+        /** A-D.6: the cell recorded a work event of D-366 — an applied edit, or a run or verify with a new result. */
+        private var epochWork = false
         private val touched = LinkedHashSet<String>()
         /** D-366: paths named by edits whose dispatch failed (effects unknown); ownership needs the ledger to show them moved. */
         private val failedEditPaths = LinkedHashSet<String>()
@@ -270,6 +292,7 @@ public class Cell @JvmOverloads constructor(
             subscriptions += ws.coherence.register(ChangeListener { touchedLedger += Touched.of(it) })
             tools.edit?.increment = increment
             tools.edit?.protocol = ctx.role.protocol
+            tools.task?.protocol = ctx.role.protocol
             tools.verify?.inputs = atlas.rows.map { it.path }
             tools.verify?.atlas = atlas
             // C1a (plan §4.4): `run` recognises this cell's registered checks; the model's own checks strengthen its increment.
@@ -313,7 +336,10 @@ public class Cell @JvmOverloads constructor(
             var reserveTurn = when (val generation = budget.startTurn(Spend.Generation)) {
                 is Admission.Admitted -> false
                 is Admission.Refused -> {
-                    if (budget.turnsLeft <= 0) return partial(PartialReason.TurnBudget, generation.reason)
+                    if (budget.turnsLeft <= 0) {
+                        // A-D.6: only where the loop says it has no continuation of its own, and only with work done.
+                        return if (direct && ctx.turnBudgetHandoff && epochWork) handoff(HandoffCause.TurnBudget) else partial(PartialReason.TurnBudget, generation.reason)
+                    }
                     // §5.9 reserve gate: the turns held back are for verifying and reporting, never for new edits.
                     when (val verify = budget.startTurn(Spend.Check)) {
                         is Admission.Admitted -> true
@@ -380,7 +406,7 @@ public class Cell @JvmOverloads constructor(
                         if (validation.problems.any { it.kind == ProblemKind.ContextOverflow }) contextAdmission.rejected(estimate)
                         // next_request_exceeds_usable_context: a P1 cell checkpoints and stops rather than rebuilds.
                         if (validation.problems.any { it.kind == ProblemKind.ContextOverflow }) {
-                            if (rebuilds >= 1) return partial(PartialReason.Pressure, "replan: the next request does not fit the window after a rebuild ($problems) — split the increment")
+                            if (rebuilds >= 1) return pressure("replan: the next request does not fit the window after a rebuild ($problems) — split the increment")
                             rebuild("the next request does not fit the window ($problems)")
                             return null
                         }
@@ -391,9 +417,9 @@ public class Cell @JvmOverloads constructor(
                 when (val decision = contextAdmission.check(request, estimate)) {
                     is AdmissionDecision.Admitted -> Unit
                     is AdmissionDecision.Capacity -> {
-                        if (decision.condition != CapacityCondition.OverWindow || rebuilds >= 1) {
-                            return partial(PartialReason.Pressure, "replan: capacity ${decision.condition.name.lowercase()} — ${decision.detail}")
-                        }
+                        val replan = "replan: capacity ${decision.condition.name.lowercase()} — ${decision.detail}"
+                        if (decision.condition != CapacityCondition.OverWindow) return partial(PartialReason.Pressure, replan)
+                        if (rebuilds >= 1) return pressure(replan)
                         rebuild("capacity: ${decision.detail}")
                         return null
                     }
@@ -499,7 +525,7 @@ public class Cell @JvmOverloads constructor(
                     // I-17, D-331: the provider's own count refused the request; an estimation miss rebuilds like a validation overflow.
                     is ProviderError.ContextOverflow -> {
                         contextAdmission.rejected(estimate)
-                        if (rebuilds >= 1) return partial(PartialReason.Pressure, "replan: the provider refused the request for size after a rebuild (${error.message}) — split the increment")
+                        if (rebuilds >= 1) return pressure("replan: the provider refused the request for size after a rebuild (${error.message}) — split the increment")
                         rebuild("the provider refused the request for size (${error.message})")
                         return null
                     }
@@ -593,7 +619,8 @@ public class Cell @JvmOverloads constructor(
                     val signature = RefusalSignature.of(call.name, call.raw.toString(), reason)
                     refused += signature
                     refusedFirst.putIfAbsent(signature, turn to reason)
-                } else signatures += CallSignature.of(call, outcome)
+                // A-D.5 rule 1: a finish never enters the loop gate; the counter and the turn budget bound its repeats.
+                } else if (!(call.family == ToolFamily.Task && call.op == "finish")) signatures += CallSignature.of(call, outcome)
                 if (call.family == ToolFamily.Run && outcome.header?.runtime?.status == "running") liveRunOutput = true
                 val mutated = mutatedPaths(call, outcome)
                 if (mutated.isNotEmpty()) {
@@ -636,7 +663,10 @@ public class Cell @JvmOverloads constructor(
             observeWorkset()
 
             // End-of-turn checker on the paths the horizons scheduled; the atlas follows the same set.
-            val proposal = native.isEmpty() && (response.stop == StopReason.EndTurn || response.stop == StopReason.ToolUse)
+            val noCall = native.isEmpty() && (response.stop == StopReason.EndTurn || response.stop == StopReason.ToolUse)
+            // A-D.5: a direct cell proposes through task(finish); a structured one by a turn without a call.
+            val claim = if (direct) claim(response, checkNotNull(received).toolCalls, native, validated, result, noCall) else null
+            val proposal = if (claim == null) noCall else claim is Claim.Plain || claim is Claim.Conditional
             val dispatchRefusal = authority.check(turn)
             if (dispatchRefusal != null && !proposal) return if (dispatchRefusal.cancelled) cancelled(dispatchRefusal.reason) else failed(dispatchRefusal.reason)
             // Late completion may be archived from existing evidence; revoked authority never launches another check.
@@ -666,7 +696,11 @@ public class Cell @JvmOverloads constructor(
             // §7.4: an edit batch whose impact risk exceeds θ runs the blast layer now (P4.5.2, D-152).
             val riskRun = if (dispatchRefusal == null && stepRun == null && batchBefore.isNotEmpty()) tools.verify?.riskAboveTheta(EditHunks.of(batchBefore) { ws.registry.read(it)?.bytes }) else null
             val implementingCompletion = ctx.role.packetKind == PacketKind.Result
-            val layerRuns = listOfNotNull(stepRun, riskRun, if (proposal && implementingCompletion && dispatchRefusal == null) tools.verify?.onStop(increment.accept) else null)
+            // A-D.5 counter rule 2: progress since the last counted refusal, judged before this proposal's verify-on-stop.
+            val progressed = proposal && claim is Claim.Plain && refusedAt?.let { (stamp, receipts) ->
+                turnEnd.candidateId != stamp || !receipts.containsAll(lastReceipts())
+            } == true
+            val layerRuns =listOfNotNull(stepRun, riskRun, if (proposal && implementingCompletion && dispatchRefusal == null) tools.verify?.onStop(increment.accept) else null)
             for (layerRun in layerRuns) {
                 notTested += layerRun.notTested
                 reviewNotes += layerRun.notes
@@ -692,6 +726,7 @@ public class Cell @JvmOverloads constructor(
             uncertified = outstanding(currenciesNow)
             val certifiedAfter = certified(currenciesNow)
             val work = Progress.work(turn, worked, seenResults)
+            if (work.isNotEmpty()) epochWork = true
             worked.filter { (call, outcome) -> (call.family == ToolFamily.Run || call.family == ToolFamily.Verify) && Progress.finished(outcome) }
                 .forEach { (call, outcome) -> seenResults += CallSignature.of(call, outcome) }
             if (work.isNotEmpty() || Progress.events(registerBefore, register, turn, certifiedBefore, certifiedAfter, tools.state.unbackedTicks).isNotEmpty()) lastProgressTurn = turn
@@ -749,15 +784,27 @@ public class Cell @JvmOverloads constructor(
             (tools.state.pendingBlock ?: tools.task?.pendingBlock)?.let { return blocked(it) }
             // D-344: an answer to a request that needed no change ends the cell before any acceptance is attempted.
             tools.task?.takeAnswer()?.let { return answered(it) }
+            (claim as? Claim.Withheld)?.let { withheld ->
+                // A-D.5: the reason nothing was proposed reaches the next [A] after this turn's hard rejections.
+                val rejected = nudges.take(report.rejections.size)
+                nudges = (rejected + withheld.line + nudges.drop(rejected.size)).take(MAX_NUDGES)
+            }
             if (proposal) {
+                val conditional = claim is Claim.Conditional
+                val summary = (claim as? Claim.Plain)?.summary ?: (claim as? Claim.Conditional)?.summary ?: response.text
+                if (progressed) refusals = 0
                 // D-338: an unavailable runner is an unverified result like any other (FX-13 no longer blocks).
-                val output = RoleOutput(turn, response.text, register, certifiedAfter.mapNotNull { currenciesNow.certifiedReceipt(it) }, refusals, packet(PacketStatus.Done, null), shownAliases.toSet(), acceptance)
-                when (val decision = completion.assess(output, report)) {
-                    is CompletionDecision.Accepted -> return completed(response.text, decision.evidenceRefs)
+                val output = RoleOutput(turn, summary, register, certifiedAfter.mapNotNull { currenciesNow.certifiedReceipt(it) }, refusals, packet(PacketStatus.Done, null), shownAliases.toSet(), acceptance, conditional)
+                val decision = completion.assess(output, report).let {
+                    // A-D.5 counter rule 1: a conditional proposal never ends the cell, whatever the seam answers.
+                    if (conditional && it is CompletionDecision.CannotProgress) CompletionDecision.Continue(it.gaps) else it
+                }
+                when (decision) {
+                    is CompletionDecision.Accepted -> return completed(summary, decision.evidenceRefs)
                     is CompletionDecision.Defer -> {
                         // D-339: the work is done; its acceptance is decided outside the cell, so no further turn is spent.
                         recordGaps(decision.gaps, "completion awaits ${decision.code.wire} at turn $turn")
-                        return completed(response.text, acceptance?.evidenceRefs.orEmpty(), PendingAcceptance(decision.code, decision.gaps))
+                        return completed(summary, acceptance?.evidenceRefs.orEmpty(), PendingAcceptance(decision.code, decision.gaps))
                     }
                     is CompletionDecision.CannotProgress -> {
                         recordGaps(decision.gaps)
@@ -773,13 +820,17 @@ public class Cell @JvmOverloads constructor(
                         // §5.1 order: this turn's hard rejections stay first; the gaps precede the softer nudges.
                         val rejected = nudges.take(report.rejections.size)
                         nudges = (rejected + gapLines + nudges.drop(rejected.size)).take(MAX_NUDGES)
-                        refusals += 1
+                        // A-D.5 counter rule 1: only a refused plain proposal is counted.
+                        if (!conditional) {
+                            refusals += 1
+                            if (direct) refusedAt = stampNow.candidateId to lastReceipts()
+                        }
                     }
                 }
             }
             report.nudges.firstOrNull { it.key.gate == Gates.PRESSURE }?.let {
                 // §5.8: the first pressure rebuilds the projection; a second means the increment was mis-sized.
-                if (rebuilds >= 1) return partial(PartialReason.Pressure, "replan: ${it.line}; a second pressure in one cell — split the increment")
+                if (rebuilds >= 1) return pressure("replan: ${it.line}; a second pressure in one cell — split the increment")
                 rebuild(it.line)
             }
             return null
@@ -975,6 +1026,61 @@ public class Cell @JvmOverloads constructor(
 
         private val ToolCall.terminal: Boolean
             get() = (family == ToolFamily.Task && (op == "ask" || op == "answer")) || (family == ToolFamily.State && op == "blocked")
+
+        /**
+         * A-D.5 step 1 for a direct turn, decided after dispatch: [emitted] is every call the model sent, the cut ones
+         * included; [native] what stayed after the cut. The finish request is taken here every turn, so none outlives it.
+         */
+        private fun claim(response: Response, emitted: List<NativeCall>, native: List<NativeCall>, validated: Validated?, result: TurnResult?, noCall: Boolean): Claim {
+            val requested = tools.task?.takeFinish(turn)
+            val wasNudged = nudgedNoCall
+            nudgedNoCall = false
+            return when {
+                // Row 1: the cell ends as today; a finish of the turn is never verified or counted.
+                tools.state.pendingBlock != null || tools.task?.pendingBlock != null || tools.task?.answerPending == true -> Claim.None
+                // Row 2.
+                requested != null && tools.task?.askedAndAnswered(turn) == true -> Claim.Withheld("$FINISH_NOT_ATTEMPTED: a question was asked this turn")
+                requested != null -> {
+                    val summary = requested.text ?: response.text
+                    val work = emitted.withIndex().filter { (_, call) -> ToolFamily.byWire(call.name).let { it == ToolFamily.Edit || it == ToolFamily.Run || it == ToolFamily.Verify } }
+                    // Rows 4–5: counted by the calls' names, before their arguments are parsed.
+                    if (work.isEmpty()) Claim.Plain(summary)
+                    else unmet(work, native.size, validated, result)?.let { Claim.Withheld("$FINISH_NOT_ATTEMPTED: $it") } ?: Claim.Conditional(summary)
+                }
+                // Rows 6–7: the first turn without a call nudges, the second in a row proposes.
+                noCall && wasNudged -> Claim.Plain(response.text)
+                noCall -> Claim.Withheld(NO_CALL_NUDGE).also { nudgedNoCall = true }
+                // Rows 3 and 8.
+                else -> Claim.None
+            }
+        }
+
+        /**
+         * A-D.5 step 2: the first reason the emitted [work] calls do not meet a conditional finish's condition, or `null`.
+         * Each must have stayed in the response, parsed, been admitted and executed; an edit must have applied in full and
+         * a run or verify must have passed by a typed fact.
+         */
+        private fun unmet(work: List<IndexedValue<NativeCall>>, kept: Int, validated: Validated?, result: TurnResult?): String? {
+            val dispatched = validated?.calls.orEmpty().associateBy { it.opId - 1 }
+            for ((index, call) in work) {
+                val op = "op ${index + 1} (${call.name})"
+                if (index >= kept) return "$op was dropped unrun when the response was cut"
+                val parsed = dispatched[index] ?: return "$op was refused or not executed"
+                val outcome = when (val disposition = result?.of(parsed.opId)) {
+                    is Disposition.Executed -> disposition.outcome
+                    is Disposition.Failed -> return "$op failed: effects unknown"
+                    is Disposition.NotExecuted, null -> return "$op was not executed"
+                }
+                when (parsed.family) {
+                    ToolFamily.Edit -> if (!outcome.applied) return "$op did not apply in full"
+                    else -> if (!outcome.green) return "$op did not pass"
+                }
+            }
+            return null
+        }
+
+        /** The last receipt id of each registered check: what counter rule 2 of A-D.5 compares. */
+        private fun lastReceipts(): Set<String> = ws.checks.all().mapNotNullTo(HashSet()) { it.last?.receiptId }
 
         /** F1a: the signature the refusal loop counted past `loopIdentical`, as the request the cell ends blocked with. */
         private fun refusalLoop(): BlockedRequest? {
@@ -1244,24 +1350,38 @@ public class Cell @JvmOverloads constructor(
         }
 
         /** Every exit path: the tree is reconciled if this turn has not done it, then the final checkpoint is persisted. */
-        private fun settle(status: CellStatus, reason: String?): CellCheckpoint {
+        private fun settle(status: CellStatus, reason: String?, partialReason: PartialReason? = null): CellCheckpoint {
             if (reconciledTurn != turn) runCatching { reconcile("exit at turn $turn") }
             val checkpoint = checkpoint(status, lastReport?.candidateId, reason)
             persist(checkpoint)
-            events?.emit(AgentEvent.Cell.Ended(ids, status.name.lowercase(), null, ctx.manifest))
+            events?.emit(AgentEvent.Cell.Ended(ids, status.name.lowercase(), null, ctx.manifest, partialReason = partialReason?.wire))
             return checkpoint
         }
 
         /** The exit reports the turns the budget actually admitted; a turn refused before dispatch was never taken. */
         private fun finish(exit: Exit): CellExit {
-            val checkpoint = settle(exit.status, exit.reason)
+            val checkpoint = settle(exit.status, exit.reason, exit.partialReason)
             val packet = persistPacket(packet(PacketStatus.of(exit.status), exit.reason, exit.blocked, exit.evidenceRefs))
             return exit.make(budget.turnsTaken, register, checkpoint, packet)
         }
 
         private fun failed(error: String) = Exit(CellStatus.Failed, error) { t, r, cp, p -> CellExit.Failed(t, r, cp, p, error) }
         private fun cancelled(reason: String) = Exit(CellStatus.Cancelled, reason) { t, r, cp, p -> CellExit.Cancelled(t, r, cp, p, reason) }
-        private fun partial(reason: PartialReason, hint: String) = Exit(CellStatus.Partial, "${reason.name}: $hint") { t, r, cp, p -> CellExit.Partial(t, r, cp, p, reason, hint) }
+        private fun partial(reason: PartialReason, hint: String) = Exit(CellStatus.Partial, "${reason.name}: $hint", partialReason = reason) { t, r, cp, p -> CellExit.Partial(t, r, cp, p, reason, hint) }
+
+        /** A-D.6: the same increment continues in a fresh cell; the cause is typed, the hint is for the reader. */
+        private fun handoff(cause: HandoffCause): Exit {
+            val hint = when (cause) {
+                HandoffCause.Pressure -> "handoff: context full after one rebuild — the work continues in a fresh cell from the carry-forward"
+                HandoffCause.TurnBudget -> "handoff: turn budget spent with work done — the work continues in a fresh cell"
+            }
+            return Exit(CellStatus.Partial, "${PartialReason.Handoff.name}: $hint", partialReason = PartialReason.Handoff) { t, r, cp, p ->
+                CellExit.Partial(t, r, cp, p, PartialReason.Handoff, hint, cause)
+            }
+        }
+
+        /** Window pressure after one rebuild (§5.8): a structured cell stops with a replan [hint]; a direct cell hands off (A-D.6). */
+        private fun pressure(hint: String): Exit = if (direct) handoff(HandoffCause.Pressure) else partial(PartialReason.Pressure, hint)
         private fun blocked(request: BlockedRequest) = Exit(CellStatus.Blocked, request.reason, blocked = request) { t, r, cp, p -> CellExit.Blocked(t, r, cp, p, request) }
         private fun answered(text: String) = Exit(CellStatus.Completed, null) { t, r, cp, p -> CellExit.Completed(t, r, cp, p, text, emptyList(), answer = text) }
 
@@ -1542,6 +1662,12 @@ public class Cell @JvmOverloads constructor(
 
         /** D-407: the gate name the event stream carries when a response's calls were cut. */
         const val CALL_BOUND = "call-bound"
+
+        /** A-D.5: the next `[A]` line of a finish that was not proposed. */
+        const val FINISH_NOT_ATTEMPTED = "finish not attempted"
+
+        /** A-D.5 row 6: the next `[A]` line after a direct turn without a call. */
+        const val NO_CALL_NUDGE = "no tool call: to finish call task(finish); otherwise continue with a tool call"
 
         /** D-411: how much of a new user message the anchor quotes; the whole text is pinned in the transcript. */
         const val USER_MESSAGE_CHARS = 400
