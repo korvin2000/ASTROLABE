@@ -135,8 +135,9 @@ public data class AcceptanceDecisionRequest(
 
 /**
  * The key of an acceptance decision request (WD-10): its scope — the increment, or the campaign gate — the candidate, the
- * contract revision and the obligations put to the decider, in no particular order. A host finds a decision it kept for
- * a repeated request by it; the controller reuses a pending completion and its request id under it.
+ * contract revision and the obligations put to the decider, in no particular order, each length-delimited (encoding v2).
+ * A host finds a decision it kept for a repeated request by it; the controller reuses a pending completion and its
+ * request id under it.
  */
 public object DecisionKey {
     @JvmStatic
@@ -145,10 +146,13 @@ public object DecisionKey {
             "scope" to (incrementId?.let { "increment:$it" } ?: "campaign"),
             "candidate" to candidate.digest.hex,
             "contract" to contractRevision.toString(),
-            "obligations" to obligations.distinct().sorted().joinToString("\n"),
+            "obligations" to delimited(obligations.distinct().sorted()),
         )
-        return "dk-" + Digest.ofUtf8(CanonicalEncoding.encode("decision-key", 1, fields)).hex
+        return "dk-" + Digest.ofUtf8(CanonicalEncoding.encode("decision-key", 2, fields)).hex
     }
+
+    /** Each value prefixed by its length, so no list of values encodes like another (`["a","b"]` is not `["a\nb"]`). */
+    internal fun delimited(values: List<String>): String = values.joinToString("") { "${it.length}:$it" }
 }
 
 /**

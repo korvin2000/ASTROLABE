@@ -59,14 +59,28 @@ public data class PendingCompletion(
     val closedReason: String? = null,
     /** P8.C.10: the red receipts the proposal's `Open` items acknowledged ([Resolved.acknowledged]); a commit keeps them. */
     val acknowledged: List<String> = emptyList(),
+    /**
+     * W1: the campaign gate's obligation set the [results] answer — the contract's acceptance items and the end checks'
+     * definitions, digested — so the results are reused only for the same set; `null` for an increment, or a record before W1.
+     */
+    val obligationSet: String? = null,
 ) {
+    /** The constructor before [obligationSet] (W1). Kept for Java callers. */
+    public constructor(
+        id: String, work: WorkId, attempt: AttemptId, incrementId: String?, cell: ContextId?, contractVersion: Int, baseStamp: CandidateId,
+        resultingStamp: CandidateId, patchHash: Digest?, envId: Digest, registerVersion: Int?, flags: List<String>, results: List<ObligationResult>,
+        other: List<String>, gaps: List<Gap>, code: StopCode, evidence: List<String>, summary: String?, requestId: String, status: PendingStatus, closedReason: String?,
+        acknowledged: List<String>,
+    ) : this(id, work, attempt, incrementId, cell, contractVersion, baseStamp, resultingStamp, patchHash, envId, registerVersion, flags, results, other, gaps, code,
+        evidence, summary, requestId, status, closedReason, acknowledged, null)
+
     /** The constructor before [acknowledged] (P8.C.10). Kept for Java callers. */
     public constructor(
         id: String, work: WorkId, attempt: AttemptId, incrementId: String?, cell: ContextId?, contractVersion: Int, baseStamp: CandidateId,
         resultingStamp: CandidateId, patchHash: Digest?, envId: Digest, registerVersion: Int?, flags: List<String>, results: List<ObligationResult>,
         other: List<String>, gaps: List<Gap>, code: StopCode, evidence: List<String>, summary: String?, requestId: String, status: PendingStatus, closedReason: String?,
     ) : this(id, work, attempt, incrementId, cell, contractVersion, baseStamp, resultingStamp, patchHash, envId, registerVersion, flags, results, other, gaps, code,
-        evidence, summary, requestId, status, closedReason, emptyList())
+        evidence, summary, requestId, status, closedReason, emptyList(), null)
 
     init {
         require(id.isNotBlank() && requestId.isNotBlank()) { "a pending completion has an id and a request id" }

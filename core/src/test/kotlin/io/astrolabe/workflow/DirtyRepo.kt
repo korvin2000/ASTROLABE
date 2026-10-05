@@ -83,7 +83,11 @@ internal class DirtyRepo private constructor(val repo: TempRepo, val untrackedFi
         /** Past the content cache's racy window of 2 s (`ContentCache.RACY_WINDOW_NANOS`). */
         private val SETTLE: Duration = Duration.ofMillis(2_200)
 
-        fun create(untrackedFiles: Int = 1500, variant: Variant = Variant.Plain): DirtyRepo {
+        /**
+         * A scenario whose guards count no reads (W1's: checks, requests, stops) may drop the big file ([bigBytes] 0) and
+         * not wait out the racy window ([settle] false); both only cost time there.
+         */
+        fun create(untrackedFiles: Int = 1500, variant: Variant = Variant.Plain, bigBytes: Int = BIG_BYTES, settle: Boolean = true): DirtyRepo {
             require(untrackedFiles >= 1) { "the tool directory holds at least one file" }
             val repo = TempRepo.create()
             try {
@@ -103,12 +107,12 @@ internal class DirtyRepo private constructor(val repo: TempRepo, val untrackedFi
                     write(repo.root, "$UNTRACKED_DIR/pkg-${n / PER_DIRECTORY}/file-$n.txt", "tool file $n\n".toByteArray())
                 }
                 write(repo.root, LOCKED, "locked by a tool\n".toByteArray())
-                write(repo.root, BIG, ByteArray(BIG_BYTES) { (it * 31 + (it ushr 11)).toByte() })
+                if (bigBytes > 0) write(repo.root, BIG, ByteArray(bigBytes) { (it * 31 + (it ushr 11)).toByte() })
                 // A real tool directory is old. A file changed within the racy window (D-364) is read again by every
                 // non-fresh stamp and by a capture's recheck — rightly, its change time proves nothing yet — so the read
                 // counters would measure how fast the scenario follows the generation. The fixture lets the window pass
                 // instead of back-dating times: restoring a modification time moves the change time (ctime, NTFS ChangeTime).
-                Thread.sleep(SETTLE.toMillis())
+                if (settle) Thread.sleep(SETTLE.toMillis())
                 return DirtyRepo(repo, untrackedFiles, variant)
             } catch (failure: Throwable) {
                 repo.close()
