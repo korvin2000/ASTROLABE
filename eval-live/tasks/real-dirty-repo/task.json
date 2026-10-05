@@ -1,0 +1,14 @@
+{
+  "id": "real-dirty-repo",
+  "class": "dirty-repo",
+  "title": "Account balance counts refunds twice, in a working tree full of untracked tool files",
+  "acceptance": {
+    "argv": ["{python}", "_acceptance/accept.py"],
+    "timeoutSeconds": 120
+  },
+  "dirt": {
+    "dir": "devtools",
+    "files": 1500,
+    "bigMegabytes": 20
+  }
+}

@@ -128,6 +128,7 @@ internal class Bench(
         try {
             Trees.copy(run.task.base, workspace)
             val base = if (run.task.baseCommit) GitRepo.initWithBase(workspace) else GitRepo.initWithoutCommit(workspace, temp.resolve("base.index"))
+            run.task.dirt?.write(workspace)
             val interrupt = run.task.interrupt
             val reopen = run.task.reopen
             val segments = ArrayList<Segment>()
