@@ -130,11 +130,7 @@ public class CellBudget @JvmOverloads constructor(
     public fun admit(spend: Spend, estimate: Tokens): Admission {
         require(estimate.value >= 0) { "an estimate is never negative" }
         limitRefusal(spend, estimate)?.let { return it }
-        val order = when (spend) {
-            Spend.Generation, Spend.Edit -> listOf(Partition.Working)
-            Spend.Check, Spend.RegisterPatch -> listOf(Partition.Working, Partition.Verification)
-            Spend.ResultPacket, Spend.Receipt, Spend.StatusNote -> listOf(Partition.Working, Partition.Recovery)
-        }
+        val order = order(spend)
         val available = order.sumOf { of(it).available.value }
         if (estimate.value > available) {
             val reason = when {
@@ -225,6 +221,15 @@ public class CellBudget @JvmOverloads constructor(
     }
 
     private val exhaustedReported: MutableSet<LimitKind> = java.util.Collections.synchronizedSet(HashSet())
+
+    /** The tokens [spend] may take now: the available tokens of the partitions [admit] draws it from. */
+    internal fun available(spend: Spend): Long = order(spend).sumOf { of(it).available.value }
+
+    private fun order(spend: Spend): List<Partition> = when (spend) {
+        Spend.Generation, Spend.Edit -> listOf(Partition.Working)
+        Spend.Check, Spend.RegisterPatch -> listOf(Partition.Working, Partition.Verification)
+        Spend.ResultPacket, Spend.Receipt, Spend.StatusNote -> listOf(Partition.Working, Partition.Recovery)
+    }
 
     private fun of(partition: Partition): Reservations = when (partition) {
         Partition.Working -> working

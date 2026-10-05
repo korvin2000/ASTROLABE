@@ -251,6 +251,7 @@ import io.astrolabe.delegate.EvidencePacket
 import io.astrolabe.delegate.Excerpt
 import io.astrolabe.delegate.IncrementReview
 import io.astrolabe.delegate.IncrementReviewInput
+import io.astrolabe.delegate.ReviewBudget
 import io.astrolabe.delegate.ReviewCell
 import io.astrolabe.delegate.ReviewCellAuthority
 import io.astrolabe.delegate.ReviewCriterion
@@ -537,6 +538,19 @@ public class Controller @JvmOverloads public constructor(
         val workspace = Workspace(WORKSPACE, repo, git, protected)
         val counting = PhaseMark.of(workspace, gitBaseline, objectsBaseline)
         val opened = opens.incrementAndGet()
+        try {
+            return opening(repo, git, store, os, request, policy, owned, ids, protected, workspace, counting, opened)
+        } catch (failure: Throwable) {
+            // §7.2: an open that fails or stops still reports what it cost.
+            events?.emit(counting.counted(ids, CountedPhase.Open, opened, 0))
+            throw failure
+        }
+    }
+
+    private fun opening(
+        repo: Path, git: Git, store: Store, os: LocalOs, request: CampaignRequest, policy: CampaignPolicy, owned: Boolean,
+        ids: Identities, protected: ProtectedPaths, workspace: Workspace, counting: PhaseMark, opened: Int,
+    ): OpenedCampaign {
         val registry = VersionRegistry(workspace)
         val stamper = Stamper(workspace, EnvFingerprint.compute(env))
         val journal = Journal(store, clock)
@@ -2448,7 +2462,7 @@ public class Controller @JvmOverloads public constructor(
             val worth = { kind: io.astrolabe.delegate.ChildKind, packet: io.astrolabe.delegate.TaskPacket ->
                 WorthTest.estimate(kind, packet, estimator.estimate(ChildBrief.render(packet, Probe.OUTPUT)).upperBoundTokens, fixed, config.defaults)
             }
-            Delegator(CellChildRunner(childCell(c, increment, model, authority, syntax, span), evidence = reviews), PublicationAuthority { c.refusal() }, c.cancellation, DelegationLimits.of(config.defaults, contract.budget.tokens), contract.shape, scope, idGen, clock, events, worth = worth)
+            Delegator(CellChildRunner(childCell(c, increment, model, authority, syntax, span), reviewBudget = reviewBudget(c), evidence = reviews), PublicationAuthority { c.refusal() }, c.cancellation, DelegationLimits.of(config.defaults, contract.budget.tokens), contract.shape, scope, idGen, clock, events, worth = worth)
         }
         val tools = CellTools(
             state = StateTool(Validator(estimator, registerCapTokens = config.defaults.registerCapTokens, patchCapTokens = config.defaults.patchCapTokens, factLineMaxChars = config.defaults.factLineMaxChars, protocol = role.protocol), registerVersions, c.journal, estimator, idGen, ids, clock, register ?: Register.empty(cellId, increment.id, increment.title), events),
@@ -2517,6 +2531,8 @@ public class Controller @JvmOverloads public constructor(
             turnBudgetHandoff = turnBudgetHandoff,
             carriedFlags = continues?.testIntegrity().orEmpty(),
             impact = impact,
+            // WD-16: a child is admitted on its own budget, its output bounded by what that budget leaves.
+            boundedOutput = child != null,
             acknowledged = acknowledged(c),
             knowledge = knowledge,
             completionEvidence = if (child == null && role.packetKind == io.astrolabe.cell.PacketKind.Result) { raised ->
@@ -2636,7 +2652,12 @@ public class Controller @JvmOverloads public constructor(
     }
 
     private fun reviewCell(c: OpenedCampaign, increment: Increment, model: CellModel, authority: Authority, syntax: SyntaxCheck, span: SpanId?): ReviewCell =
-        ReviewCell(CellReviewJudge(childCell(c, increment, model, authority, syntax, span), idGen, c.cancellation), authority, c.store, idGen, clock, c.journal)
+        ReviewCell(CellReviewJudge(childCell(c, increment, model, authority, syntax, span), idGen, c.cancellation, reviewBudget(c)), authority, c.store, idGen, clock, c.journal)
+
+    /** The §8.8 review budgets the attempt's settings carry (`reviewLookMax`, `reviewIncrementTokens`, `reviewCampaignTokens`). */
+    private fun reviewBudget(c: OpenedCampaign): ReviewBudget = c.attempt.config.defaults.let {
+        ReviewBudget(it.reviewLookMax, Tokens(it.reviewIncrementTokens.toLong()), Tokens(it.reviewCampaignTokens.toLong()))
+    }
 
     /**
      * The increment-scope review of a completed cell (§8.8), when a trigger owes one: the review cell at its row's tier,
@@ -2712,7 +2733,7 @@ public class Controller @JvmOverloads public constructor(
         val contract = c.contract
         if (contract.shape < Shape.S2) return host
         val whole = Increment(CAMPAIGN_REVIEW, contract.requirements.map { it.id }, contract.acceptance.map { it.id }, emptyList(), 0, title = "campaign review ${c.ids.work.value}")
-        val judge = CellReviewJudge(childCell(c, whole, model, host, syntax, span), idGen, c.cancellation)
+        val judge = CellReviewJudge(childCell(c, whole, model, host, syntax, span), idGen, c.cancellation, reviewBudget(c))
         val receipts = SqliteReceipts(c.store, clock)
         return ReviewCellAuthority(host, judge, FunctionTable.DEFAULT.row(io.astrolabe.route.RoutingFunction.ReviewCritical).defaultTier) { request ->
             val text = request.diffRef?.let { ref -> String(c.store.blobs.get(io.astrolabe.id.Digest(ref)), Charsets.UTF_8) } ?: "no diff was published"
