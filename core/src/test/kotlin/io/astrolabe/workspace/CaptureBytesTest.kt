@@ -63,6 +63,13 @@ class CaptureBytesTest {
         fixture.rawGit("rev-parse", "${shadow.record(turn)!!.commit}^{tree}").trim()
 
     private companion object {
-        val EXPECTED: List<String> = listOf()
+        val EXPECTED: List<String> = listOf(
+            "s0 manifest fd1acf5ae178df7c1cb01a288f36a31dd2fccc14bac58399477d574b1312fbcf",
+            "s0 tree 6a8c3147266e9f2272dff018c2fb7c4ec16664df",
+            "s1 manifest 85221582e140cfc0ff09371a2025e68579700c108194870d635d96d304ec5ac9",
+            "s1 tree 4b97e7568e0d68d46f9a086e21396510265ff8c3",
+            "stamp tracked 68c703dac2bcc6b634b34db71b237accbf9f9c25aba20eaceb014ceb43ec051c",
+            "stamp untracked 93a15db6c06736240cec12e73658e19cf284e8a6e41c4c6368528be16cef00f2",
+        )
     }
 }

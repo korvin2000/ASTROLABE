@@ -61,7 +61,10 @@ internal class ContentCache(private val clock: Clock = Clock.systemUTC()) {
 
     /**
      * The reads of one capture (WD-02), by real path: what each file looked like just before it was read and what the
-     * read held. A capture's manifest, stamp and integrity recheck share these instead of reading the file again.
+     * read held. A capture's manifest, stamp and integrity recheck share these instead of reading the file again, so the
+     * manifest and the stamp always describe the same bytes. Unlike the shared cache this holds racy reads too: a
+     * rewrite within one timestamp tick after the read is not seen by the recheck, but nothing reads from here after the
+     * capture, and the shared cache never keeps such a read, so the next capture reads the file again.
      */
     internal class Reads {
         internal val taken = HashMap<Path, Entry>()
