@@ -18,7 +18,7 @@ import kotlin.test.assertTrue
 /**
  * Plan §7.2: one task on the dirty repository through the real composition — open, one edit-verify-done cell, reopen,
  * then a second work opened over the same project store — at 300 and at 1500 untracked files, each played once for the
- * whole class. The counters are printed as `WF-counters` lines (the W2 report's before and after numbers).
+ * whole class, both at once ([Scenario.concurrently]). The counters are printed as `WF-counters` lines (the W2 report's before and after numbers).
  *
  * Guards: WF-2 (the git processes of every open and every snapshot are the same at 300 and 1500 files, and a capture
  * reads each file at most once) and WF-3 (the snapshot after one edited file writes one object; a new work publishes
@@ -29,12 +29,11 @@ class DirtyRepoScenarioTest {
     @TempDir
     lateinit var stateRoot: Path
 
-    private val played300 by lazy { runCatching { scenario(300) } }
-    private val played1500 by lazy { runCatching { scenario(1500) } }
+    // Both sizes play at once on first use; a failed scenario fails every guard once instead of playing again for each.
+    private val played by lazy { Scenario.concurrently(listOf(300, 1500), ::scenario) }
 
-    // A failed scenario fails every guard once instead of playing again for each.
-    private val at300: Played get() = played300.getOrThrow()
-    private val at1500: Played get() = played1500.getOrThrow()
+    private val at300: Played get() = played.getValue(300).getOrThrow()
+    private val at1500: Played get() = played.getValue(1500).getOrThrow()
 
     @Test
     fun `a task on the dirty repository reaches a terminal outcome and its events carry the phase counters`() {
