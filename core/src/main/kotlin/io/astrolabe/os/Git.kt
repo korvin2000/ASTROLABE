@@ -33,6 +33,15 @@ public class Git @JvmOverloads constructor(
     /** The working-tree root every command runs in. */
     public val repo: Path = repo.toAbsolutePath().normalize()
 
+    private val started = java.util.concurrent.atomic.AtomicLong()
+    private val written = java.util.concurrent.atomic.AtomicLong()
+
+    /** §7.2 phase counter: git processes this instance started, ever (monotonic; callers take differences). */
+    internal val processesStarted: Long get() = started.get()
+
+    /** §7.2 phase counter: objects this instance wrote with `hash-object -w`, ever (monotonic). */
+    internal val objectsWritten: Long get() = written.get()
+
     private val gitDir: Path by lazy {
         val printed = decode(run(listOf("rev-parse", "--absolute-git-dir"))).trim()
         Path.of(printed).toAbsolutePath().normalize()
@@ -278,7 +287,7 @@ public class Git @JvmOverloads constructor(
         if (noFilters) argv.add("--no-filters")
         if (write) argv.add("-w")
         argv.add("--stdin")
-        return ObjectId.parse(decode(run(argv, stdin = bytes)))
+        return ObjectId.parse(decode(run(argv, stdin = bytes))).also { if (write) written.incrementAndGet() }
     }
 
     /**
@@ -495,7 +504,7 @@ public class Git @JvmOverloads constructor(
         val builder = ProcessBuilder(command).directory(repo.toFile())
         applyEnvironment(builder, indexFile, extraEnv)
         val process = try {
-            builder.start()
+            builder.start().also { started.incrementAndGet() }
         } catch (failure: IOException) {
             throw GitError(command, START_FAILED, "cannot start '$executable': ${failure.message}")
         }

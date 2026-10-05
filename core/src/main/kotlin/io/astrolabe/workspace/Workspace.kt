@@ -49,6 +49,15 @@ public class Workspace @JvmOverloads public constructor(
      */
     internal val fileModeTrusted: Boolean by lazy { git.configBool("core.fileMode") != false }
 
+    private val filesReadCount = java.util.concurrent.atomic.AtomicLong()
+    private val bytesReadCount = java.util.concurrent.atomic.AtomicLong()
+
+    /** §7.2 phase counter: files [bytes] read from this tree, ever (monotonic; callers take differences). */
+    internal val filesRead: Long get() = filesReadCount.get()
+
+    /** §7.2 phase counter: bytes [bytes] read from this tree, ever (monotonic). */
+    internal val bytesRead: Long get() = bytesReadCount.get()
+
     /** Content digests every [Stamper] of this workspace shares for the workspace's lifetime (D-364). */
     internal val contents: ContentCache = ContentCache()
 
@@ -70,7 +79,10 @@ public class Workspace @JvmOverloads public constructor(
      * file is not there.
      */
     public fun bytes(resolved: PathResolution.Resolved): ByteArray? = try {
-        if (Files.isDirectory(resolved.real)) null else Files.readAllBytes(resolved.real)
+        if (Files.isDirectory(resolved.real)) null else Files.readAllBytes(resolved.real).also { read ->
+            filesReadCount.incrementAndGet()
+            bytesReadCount.addAndGet(read.size.toLong())
+        }
     } catch (missing: java.nio.file.NoSuchFileException) {
         null
     }

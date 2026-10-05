@@ -367,6 +367,28 @@ public sealed interface AgentEvent {
         @Serializable
         @SerialName("span.ended")
         public data class SpanEnded(override val ids: Identities, val status: String, val cost: String?, val durationNanos: Long?, override val phase: Phase, override val span: SpanId?, override val parent: SpanId? = null) : Telemetry
+
+        /**
+         * Phase counters of §7.2 (workflow invariants): what one [counted] phase — `open`, `snapshot` or `finish`
+         * (`io.astrolabe.telemetry.CountedPhase`) — cost the tree it ran on. [gitProcesses], [filesRead], [bytesRead]
+         * and [objectsWritten] (`hash-object -w`) are differences over the phase; [opens] is the controller's opens so far
+         * and [finishAttempts] this open's finalization attempts so far. Counts, never durations: no wall-clock here.
+         */
+        @Serializable
+        @SerialName("phase.counted")
+        public data class PhaseCounted(
+            override val ids: Identities,
+            val counted: String,
+            val gitProcesses: Long,
+            val filesRead: Long,
+            val bytesRead: Long,
+            val objectsWritten: Long,
+            val opens: Int,
+            val finishAttempts: Int,
+            override val phase: Phase = Phase.Understand,
+            override val span: SpanId? = null,
+            override val parent: SpanId? = null,
+        ) : Telemetry
     }
 }
 

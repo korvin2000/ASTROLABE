@@ -133,10 +133,12 @@ internal object Fingerprints {
 
     /** What the agent is given and judged by: the request, the task file's fields, the base tree and the hidden acceptance. */
     fun task(task: BenchTask): String = sha256(
-        listOf(
+        listOfNotNull(
             "id=${task.id}", "class=${task.kind}", "title=${task.title}", "prompt=${task.prompt}", "acceptance=${task.acceptance}",
             "interrupt=${task.interrupt}", "baseCommit=${task.baseCommit}", "message=${task.message}", "reopen=${task.reopen}",
             "base=${HiddenFiles.read(task.base).digest}", "hidden=${task.hidden.digest}",
+            // Only a dirty task names its dirt: the other tasks keep their fingerprints.
+            task.dirt?.let { "dirt=$it" },
         ).joinToString("\n"),
     )
 }

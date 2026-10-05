@@ -57,6 +57,33 @@ internal data class ReopenSpec(val afterResponses: Int) {
     }
 }
 
+/**
+ * A dirty working tree (WP-W0, plan §7.2): after the base is committed the runner adds an untracked [dir] of [files]
+ * small files, one of them [bigMegabytes] MB, never committed and never ignored — the `devtools/` of the 5 October runs.
+ * The base itself carries no `.gitignore`, so what its checks write stays in the tree.
+ */
+@Serializable
+internal data class DirtSpec(val dir: String = "devtools", val files: Int = 1500, val bigMegabytes: Int = 20) {
+    init {
+        require(dir.isNotBlank() && !dir.contains("..") && !dir.startsWith("/") && !dir.startsWith(".git")) { "a dirt directory is a plain relative name" }
+        require(files >= 1) { "a dirt directory holds at least one file" }
+        require(bigMegabytes >= 0) { "the big file's size is not negative" }
+    }
+
+    /** Writes the untracked files under [root]: `files - 1` small ones in sub-directories of 100, then `bundle.bin`. */
+    fun write(root: Path) {
+        val base = root.resolve(dir)
+        for (n in 0 until files - 1) {
+            val file = base.resolve("pkg-${n / 100}").resolve("file-$n.txt")
+            Files.createDirectories(file.parent)
+            Files.write(file, "tool file $n\n".toByteArray(StandardCharsets.UTF_8))
+        }
+        Files.createDirectories(base)
+        val bytes = bigMegabytes * 1024 * 1024
+        Files.write(base.resolve("bundle.bin"), ByteArray(bytes) { (it * 31 + (it ushr 11)).toByte() })
+    }
+}
+
 @Serializable
 internal data class TaskFile(
     val id: String,
@@ -68,6 +95,7 @@ internal data class TaskFile(
     val baseCommit: Boolean = true,
     val message: MessageSpec? = null,
     val reopen: ReopenSpec? = null,
+    val dirt: DirtSpec? = null,
 )
 
 /**
@@ -91,9 +119,12 @@ internal class BenchTask(
     val baseCommit: Boolean = true,
     val message: MessageSpec? = null,
     val reopen: ReopenSpec? = null,
+    /** The untracked tool tree laid into the workspace after the base commit (WP-W0); needs a base commit. */
+    val dirt: DirtSpec? = null,
 ) {
     init {
         require(interrupt == null || reopen == null) { "task $id: an interruption and a second session do not combine" }
+        require(dirt == null || baseCommit) { "task $id: a dirty tree is laid over a committed base" }
     }
 
     val base: Path get() = dir.resolve("base")
@@ -128,7 +159,7 @@ internal class BenchTask(
             return BenchTask(
                 file.id, file.kind, file.title, prompt, dir, file.acceptance,
                 parts.getValue("acceptance"), parts.getValue("reference"), parts.getValue("wrong"), file.interrupt,
-                file.baseCommit, file.message, file.reopen,
+                file.baseCommit, file.message, file.reopen, file.dirt,
             )
         }
 
