@@ -2,6 +2,7 @@ package io.astrolabe.evallive
 
 import io.astrolabe.Astrolabe
 import io.astrolabe.RunSpec
+import io.astrolabe.campaign.CampaignOutcome
 import io.astrolabe.event.Events
 import io.astrolabe.id.IdGen
 import io.astrolabe.id.WorkId
@@ -25,6 +26,20 @@ internal data class PlannedRun(val order: Int, val task: BenchTask, val model: S
     }
 }
 
+/**
+ * The Studio task mode the host plays (WP-WG): `auto` accepts unverified work on the policy's word; `ask` leaves every
+ * acceptance request to the [ScriptedUser], whose answer reaches the campaign when the run reopens the same work.
+ */
+internal enum class HostMode(val wire: String) {
+    Auto("auto"),
+    Ask("ask"),
+    ;
+
+    companion object {
+        fun named(name: String): HostMode = entries.firstOrNull { it.wire == name } ?: throw UsageError("unknown mode '$name' (known: auto, ask)")
+    }
+}
+
 internal data class BenchPlan(
     val tasks: List<BenchTask>,
     val models: List<String>,
@@ -41,11 +56,14 @@ internal data class BenchPlan(
     val effortExplicit: Boolean = false,
     /** The arm every run of this bench is made by (B5). */
     val arm: Arm = Arms.DEFAULT,
+    /** The Studio task mode the host plays (WP-WG). */
+    val mode: HostMode = HostMode.Auto,
 ) {
     init {
         require(tasks.isNotEmpty() && models.isNotEmpty()) { "a bench needs at least one task and one model" }
         require(repeats >= 1 && maxCells >= 1) { "repeats and max cells must be at least 1" }
         require(arm.unsupported().isEmpty()) { "arm ${arm.name} cannot run: ${arm.unsupported().joinToString("; ")}" }
+        require(mode == HostMode.Auto || arm.runner == ArmRunner.Core) { "mode ${mode.wire} needs an arm of the core runner, not ${arm.name}" }
     }
 
     /** The default arm: the core's default launch — the Studio's — on [profile], with this bench's cell cap and effort. */
@@ -107,7 +125,8 @@ internal class Bench(
             Summary.write(plan.out, results)
             log("$label: ${result.outcome ?: "no outcome"}, " +
                 "acceptance ${if (result.acceptance?.passed == true) "passed" else "failed"}" +
-                    (result.interrupt?.let { ", interrupt ${it.mode?.let(Summary::wire) ?: "not continued"}" } ?: "") + (result.failure?.let { " ($it)" } ?: ""))
+                    (result.interrupt?.let { ", interrupt ${it.mode?.let(Summary::wire) ?: "not continued"}" } ?: "") +
+                    (result.ask?.let { ", ask ${it.outcome ?: "no outcome"} after ${it.answers} answer(s)" } ?: "") + (result.failure?.let { " ($it)" } ?: ""))
         }
         Summary.write(plan.out, results)
         return results
@@ -136,6 +155,10 @@ internal class Bench(
             var totals: Totals? = null
             var dropped: Long? = null
             var binding: ModelBinding? = null
+            var phases: PhaseSummary? = null
+            val user = if (plan.mode == HostMode.Ask) ScriptedUser() else null
+            var askFrom = 0
+            var exhausted = false
             try {
                 val bound = models.bind(run.model)
                 binding = bound
@@ -150,7 +173,7 @@ internal class Bench(
                             val script = SessionScript(interrupt?.afterResponses, reopen?.afterResponses, run.task.message)
                             // The loop's limits are per work: a second session of the same work continues its spend; a follow-up is a new work.
                             val budget = LoopBudget()
-                            val first = segment(run.task.prompt, bound, events, temp, spec, script, null, budget)
+                            val first = segment(run.task.prompt, bound, events, temp, spec, script, null, budget, user)
                             segments += first
                             // WP-B2: the user's constraint arrives as the Studio delivers a message after the run stopped or ended.
                             if (interrupt != null && first.attempt != null && first.attempt.failure == null) {
@@ -159,11 +182,26 @@ internal class Bench(
                             }
                             // WP-B7: the second session opens the same work in the same state root, as the Studio's resume does.
                             if (reopen != null && first.attempt?.closedAt != null) {
-                                segments += segment(run.task.prompt, bound, events, temp, spec, SessionScript(), WorkId(first.attempt.workId), budget)
+                                segments += segment(run.task.prompt, bound, events, temp, spec, SessionScript(), WorkId(first.attempt.workId), budget, user)
+                            }
+                            // WP-WG: the user answers the open request and the run resumes the same work, as the Studio's card does.
+                            if (user != null) {
+                                askFrom = segments.size - 1
+                                while (true) {
+                                    val last = segments.last().attempt
+                                    if (last == null || last.failure != null || last.outcome != WAITING || user.open == null) break
+                                    if (user.answers >= ScriptedUser.MAX_ANSWERS) {
+                                        exhausted = true
+                                        break
+                                    }
+                                    user.accept()
+                                    segments += segment(run.task.prompt, bound, events, temp, spec, SessionScript(), WorkId(last.workId), budget, user)
+                                }
                             }
                         } finally {
                             recorder.drain()
                             totals = totalsOf(recorder.events())
+                            phases = PhaseSummary.of(recorder.events())
                             dropped = recorder.dropped
                             segments.replaceAll { it.copy(totals = totalsOf(recorder.events(it.fromSeq, it.toSeq))) }
                         }
@@ -233,6 +271,12 @@ internal class Bench(
                 reopen = reopen?.let { spec -> ReopenResult(spec.afterResponses, segments.firstOrNull()?.attempt?.closedAt, segments.map(::segmentResult)) },
                 arm = plan.arm.name,
                 key = key,
+                mode = plan.mode.wire,
+                ask = user?.let { u ->
+                    val asked = segments.drop(askFrom)
+                    AskResult(u.answers, if (exhausted) ScriptedUser.EXHAUSTED else asked.lastOrNull()?.attempt?.outcome, asked.map(::segmentResult))
+                },
+                phases = phases,
             )
             dir.resolve("result.json").writeText(Summary.encode(result))
             return result
@@ -249,7 +293,7 @@ internal class Bench(
         s.attempt?.cells, s.wallMillis, s.totals, s.attempt?.openedContractVersion,
     )
 
-    private fun segment(prompt: String, bound: ModelBinding, events: Events, temp: Path, spec: RunSpec, script: SessionScript, work: WorkId?, budget: LoopBudget): Segment {
+    private fun segment(prompt: String, bound: ModelBinding, events: Events, temp: Path, spec: RunSpec, script: SessionScript, work: WorkId?, budget: LoopBudget, user: ScriptedUser? = null): Segment {
         val from = events.lastSeq
         val start = nanos.asLong
         var attempt: AttemptOutcome? = null
@@ -261,9 +305,9 @@ internal class Bench(
                     ArmRunner.Core -> {
                         val attempts = StudioAttempt(clock, idGen, osName)
                         if (work == null) {
-                            attempts.run(workspace, prompt, bound, events, spec, plan.deadline, script)
+                            attempts.run(workspace, prompt, bound, events, spec, plan.deadline, script, user = user)
                         } else {
-                            attempts.run(workspace, prompt, bound, events, spec, plan.deadline, script, work)
+                            attempts.run(workspace, prompt, bound, events, spec, plan.deadline, script, work, user)
                         }
                     }
                     ArmRunner.Loop -> LoopAttempt(clock, idGen, osName).run(workspace, prompt, bound, events, spec, plan.deadline, script, work ?: WorkId(idGen.next("W")), budget)
@@ -279,5 +323,6 @@ internal class Bench(
 
     companion object {
         private val DIFF_FILE = Regex("(?m)^diff --git ")
+        private val WAITING = CampaignOutcome.WaitingForInput.wire
     }
 }

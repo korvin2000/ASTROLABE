@@ -55,6 +55,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import java.nio.file.Path
 import java.time.Clock
 import java.time.Duration
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -207,9 +208,10 @@ internal data class PolicyDecision(val kind: String, val outcome: String, val de
  * The Studio's `auto` host policy (`DecisionService` with `HostPolicy.auto()`): questions get the standard assumption;
  * effects run only when the contract allowlists them; plan and contract changes are accepted unless they weaken the
  * task; knowledge stays queued; unverified work is accepted on the policy's word, a review rejection never is. The
- * Studio's model review pass is not reproduced: [review] has no reviewer.
+ * Studio's model review pass is not reproduced: [review] has no reviewer. With a [user] it plays the `ask` mode's
+ * acceptance (`DecisionService.decide` without `auto`): the policy settles no acceptance request, [user] answers it.
  */
-internal class StudioAutoAuthority : Authority {
+internal class StudioAuthority(private val user: ScriptedUser? = null) : Authority {
     val decisions: MutableList<PolicyDecision> = CopyOnWriteArrayList()
 
     override suspend fun ask(question: Question): Answer {
@@ -245,6 +247,11 @@ internal class StudioAutoAuthority : Authority {
     override suspend fun decide(request: AcceptanceDecisionRequest): AcceptanceDecision? {
         val why = request.items.joinToString("; ") { it.reason.ifBlank { it.obligation } }
         val detail = request.items.joinToString("; ") { "${it.obligation} ${it.kind} ${it.status}: ${it.reason}" }.take(DETAIL_CHARS)
+        if (user != null) {
+            val answer = user.decide(request)
+            decisions += PolicyDecision("acceptance", if (answer == null) "waiting" else "answered", detail)
+            return answer
+        }
         if (request.items.any { it.status == ResultStatus.Failed }) {
             decisions += PolicyDecision("acceptance", "waiting", detail)
             return null
@@ -255,6 +262,56 @@ internal class StudioAutoAuthority : Authority {
 
     private companion object {
         const val DETAIL_CHARS = 2_000
+    }
+}
+
+/**
+ * The user of the Studio's `ask` mode, scripted (WP-WG): an acceptance request stays open and the campaign stops
+ * waiting; [accept] answers the open request as the user does on its card, and the request the reopened campaign
+ * issues again is matched by its [AcceptanceDecisionRequest.key] (D-428: the same key is the same question).
+ */
+internal class ScriptedUser {
+    private val accepted = ConcurrentHashMap.newKeySet<String>()
+
+    /** The request the last session left waiting for the user, or `null`. */
+    @Volatile
+    var open: AcceptanceDecisionRequest? = null
+        private set
+
+    /** How many requests [accept] answered. */
+    @Volatile
+    var answers: Int = 0
+        private set
+
+    /** The user's answer to [request] if they gave one, else `null`: the request is kept [open]. */
+    fun decide(request: AcceptanceDecisionRequest): AcceptanceDecision? {
+        if (request.key !in accepted) {
+            open = request
+            return null
+        }
+        open = null
+        return AcceptanceDecision(request.id, request.contractRevision, request.candidate, DecisionKind.Accept, Decider.User, BY, REASON)
+    }
+
+    /** Accepts the [open] request (`TaskService.decideAcceptance` with `accept`); false when none is open. */
+    fun accept(): Boolean {
+        val request = open ?: return false
+        accepted += request.key
+        answers++
+        open = null
+        return true
+    }
+
+    companion object {
+        /** Answers one attempt may give; a request still open after them ends the run as [EXHAUSTED]. */
+        const val MAX_ANSWERS: Int = 3
+
+        /** The `ask` outcome of a run whose requests outlasted [MAX_ANSWERS]. */
+        const val EXHAUSTED: String = "ask-exhausted"
+
+        /** `TaskService.decideAcceptance`: the local user, and the reason of an `accept` without text. */
+        const val BY: String = "user:local"
+        const val REASON: String = "the user confirmed the task is done"
     }
 }
 
@@ -380,11 +437,12 @@ internal class StudioAttempt(private val clock: Clock, private val idGen: IdGen,
         deadline: Duration,
         script: SessionScript = SessionScript(),
         work: WorkId = WorkId(idGen.next("W")),
+        user: ScriptedUser? = null,
     ): AttemptOutcome {
         val config = spec.config
         val violations = config.violations()
         if (violations.isNotEmpty()) throw InvalidConfig(violations)
-        val authority = StudioAutoAuthority()
+        val authority = StudioAuthority(user)
         // `Astrolabe.open` is the only way to a `Project`; the facade's own controller is not used (as in the Studio).
         Astrolabe(config, binding.adapter, authority, clock, idGen).use { sdk ->
             sdk.open(workspace).use { project ->

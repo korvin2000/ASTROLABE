@@ -46,6 +46,7 @@ C:/work.astrolab/bench/<tag>/bin/eval-live run --models deepseek/deepseek-v4.1-f
 | `--temp <dir>` | `<java.io.tmpdir>/eval-live` | parent of the per-run directories |
 | `--keep-workspaces` | off | keep each run's temporary directory for inspection |
 | `--arm <name>` | `default` | the arm: a named configuration over the core's `RunSpec` (below) |
+| `--mode auto\|ask` | `auto` | the Studio task mode: `auto` accepts unverified work by policy; `ask` leaves an acceptance request open, the scripted user accepts it (by its `key`) and the run reopens the same work, at most 3 answers, else `ask.outcome` = `ask-exhausted` (core arms only) |
 
 Keys are resolved by the SDK: the provider's environment variable (`OPENROUTER_API_KEY`) or the credential store given
 with `--credentials`. The runner never reads or prints a key; without one it stops before the first run and names the
