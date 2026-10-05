@@ -85,6 +85,12 @@ public class Git @JvmOverloads constructor(
         return if (result.exitCode == 0) decode(result.stdout).trim() == "true" else null
     }
 
+    /** The hash of this repository's object names as a JDK algorithm: `SHA-256` under `extensions.objectFormat=sha256`, else `SHA-1`. */
+    internal fun objectAlgorithm(): String {
+        val result = exec(listOf("config", "--get", "extensions.objectformat"))
+        return if (result.exitCode == 0 && decode(result.stdout).trim().equals("sha256", ignoreCase = true)) "SHA-256" else "SHA-1"
+    }
+
     private fun requireSupportedForm(operation: String) {
         unsupportedForms().firstOrNull()?.let { throw UnsupportedRepositoryForm(it, operation) }
     }
@@ -129,6 +135,13 @@ public class Git @JvmOverloads constructor(
     }
 
     internal fun searchFiles(): ByteArray = run(listOf("ls-files", "-z", "--cached", "--others", "--exclude-standard"))
+
+    /** `git ls-files -z <selection>` for the atlas (§7.2: counted here), or `null` when git refuses or cannot run. */
+    internal fun listFiles(selection: List<String>): ByteArray? = try {
+        exec(listOf("ls-files", "-z") + selection).takeIf { it.exitCode == 0 }?.stdout
+    } catch (failed: GitError) {
+        null
+    }
 
     /** `git ls-files -s -z`, optionally narrowed by pathspec. */
     public fun lsFiles(pathspec: List<String> = emptyList()): List<LsFilesEntry> {
@@ -288,6 +301,39 @@ public class Git @JvmOverloads constructor(
         if (write) argv.add("-w")
         argv.add("--stdin")
         return ObjectId.parse(decode(run(argv, stdin = bytes))).also { if (write) written.incrementAndGet() }
+    }
+
+    /**
+     * The ids among [ids] the object database already holds, by one `git cat-file --batch-check` (WD-01: what git
+     * stores is never written again).
+     */
+    internal fun presentObjects(ids: Collection<ObjectId>): Set<ObjectId> {
+        if (ids.isEmpty()) return emptySet()
+        val input = ids.joinToString("") { it.hex + "\n" }.toByteArray(StandardCharsets.US_ASCII)
+        val out = decode(run(listOf("cat-file", "--batch-check"), stdin = input))
+        // One line per request: `<id> <type> <size>`, or `<id> missing`.
+        return out.lineSequence().map { it.split(' ') }
+            .filter { it.size == 3 && it[1] == "blob" }
+            .mapNotNullTo(HashSet()) { ObjectId.parseOrNull(it[0]) }
+    }
+
+    /**
+     * Stores the exact bytes of every file in [files] as a blob, in one `git hash-object -w --no-filters --stdin-paths`
+     * (WD-01), and returns the ids in [files] order. No clean filter and no end-of-line conversion runs (D-53).
+     */
+    internal fun hashObjects(files: List<Path>): List<ObjectId> {
+        if (files.isEmpty()) return emptyList()
+        val input = StringBuilder()
+        for (file in files) {
+            val spelled = file.toAbsolutePath().normalize().toString().replace('\\', '/')
+            require('\n' !in spelled && '\r' !in spelled) { "a stdin path cannot contain a line break: '$spelled'" }
+            input.append(spelled).append('\n')
+        }
+        val out = decode(run(listOf("hash-object", "-w", "--no-filters", "--stdin-paths"), stdin = input.toString().toByteArray(StandardCharsets.UTF_8)))
+        val ids = out.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.map(ObjectId::parse).toList()
+        written.addAndGet(files.size.toLong())
+        if (ids.size != files.size) throw GitError(listOf(executable, "hash-object", "--stdin-paths"), 0, "expected ${files.size} ids, got ${ids.size}")
+        return ids
     }
 
     /**

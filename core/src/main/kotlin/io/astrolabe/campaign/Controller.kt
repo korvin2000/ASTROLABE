@@ -229,6 +229,7 @@ import io.astrolabe.workspace.ShadowRef
 import io.astrolabe.workspace.Snapshot
 import io.astrolabe.workspace.SnapshotEntryKind
 import io.astrolabe.workspace.Stamper
+import io.astrolabe.workspace.UnreadableInput
 import io.astrolabe.workspace.movedPathsHint
 import io.astrolabe.workspace.VersionRegistry
 import io.astrolabe.workspace.Workspace
@@ -816,9 +817,23 @@ public class Controller @JvmOverloads public constructor(
                 ?: runS0(campaign, model, host, syntax, null, maxHandoffs = maxHandoffs, epochs = epochs)
             // A-D.6: the final report covers every epoch of this run, then the last exit.
             return finish(campaign, result, epochs + listOfNotNull(result.exit?.packet))
+        } catch (input: UnreadableInput) {
+            return unreadable(campaign, input)
         } finally {
             limitControl.end(campaign, session)
         }
+    }
+
+    /**
+     * WD-05 (WF-4): a file of the tree another process holds stops the run where it was met — a fresh stamp after a
+     * cell, a snapshot, a finalization — resumably and by its path, never as a failed run; the running cell, if any, is
+     * reconciled first as an interruption. A campaign that already ended keeps its outcome.
+     */
+    private fun unreadable(c: OpenedCampaign, input: UnreadableInput): S0Run {
+        val state = c.state
+        if (state == null || state.phase == CampaignPhase.Ended) return S0Run(state, null, null, null)
+        state.running?.let { running -> SqliteCheckpoints(c.store, clock).latest(running.cell)?.let { c.advance(Transition.Interrupted(it)) } }
+        return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "unreadable input ${input.path}: ${input.message}")), null, null, null)
     }
 
     /**
@@ -866,6 +881,8 @@ public class Controller @JvmOverloads public constructor(
             val result = spans?.span(Phase.Plan, campaign.ids) { span -> runS1(campaign, model, host, syntax, span, maxCells, packets, maxHandoffs) }
                 ?: runS1(campaign, model, host, syntax, null, maxCells, packets, maxHandoffs)
             return finish(campaign, result, packets)
+        } catch (input: UnreadableInput) {
+            return unreadable(campaign, input)
         } finally {
             limitControl.end(campaign, session)
         }

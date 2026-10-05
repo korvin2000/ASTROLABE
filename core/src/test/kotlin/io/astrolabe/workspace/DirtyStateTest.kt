@@ -239,6 +239,31 @@ class DirtyStateTest {
         }
     }
 
+    @Test
+    fun `a same-size rewrite with a restored modification time before the recheck is never captured stale`(@TempDir state: Path) {
+        WorkspaceFixture.create(state).use { fixture ->
+            fixture.repo.untracked("notes/n.txt", "first version\n")
+            // Outside the racy window, so only the change time (ctime, NTFS ChangeTime) or a second read can see the rewrite.
+            Thread.sleep(2_200)
+            val file = fixture.repo.resolve("notes/n.txt")
+            val attempts = ArrayList<Int>()
+            fixture.dirtyState.beforeRecheck = { attempt ->
+                attempts += attempt
+                if (attempt == 1) {
+                    val modified = Files.getLastModifiedTime(file)
+                    Files.write(file, "other version\n".toByteArray())
+                    Files.setLastModifiedTime(file, modified)
+                }
+            }
+
+            val snapshot = fixture.dirtyState.capture(fresh = true)
+
+            assertEquals(listOf(1, 2), attempts, "the recheck saw the rewrite and the capture was taken again")
+            assertContentEquals("other version\n".toByteArray(), fixture.dirtyState.bytesOf(assertNotNull(snapshot.entry("notes/n.txt"))))
+            assertEquals(fixture.stamper.stamp(fresh = true).id, snapshot.stampId)
+        }
+    }
+
     // ---------------------------------------------------------- content reuse (D-364)
 
     @Test

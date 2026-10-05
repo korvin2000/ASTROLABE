@@ -371,8 +371,9 @@ public sealed interface AgentEvent {
         /**
          * Phase counters of §7.2 (workflow invariants): what one [counted] phase — `open`, `snapshot` or `finish`
          * (`io.astrolabe.telemetry.CountedPhase`) — cost the tree it ran on. [gitProcesses], [filesRead], [bytesRead]
-         * and [objectsWritten] (`hash-object -w`) are differences over the phase; [opens] is the controller's opens so far
-         * and [finishAttempts] this open's finalization attempts so far. Counts, never durations: no wall-clock here.
+         * and [objectsWritten] (objects git was asked to write) are differences over the phase, as are [blobsRead] and
+         * [blobBytesRead] (store blobs read back for the tree); [opens] is the controller's opens so far and
+         * [finishAttempts] this open's finalization attempts so far. Counts, never durations: no wall-clock here.
          */
         @Serializable
         @SerialName("phase.counted")
@@ -385,6 +386,8 @@ public sealed interface AgentEvent {
             val objectsWritten: Long,
             val opens: Int,
             val finishAttempts: Int,
+            val blobsRead: Long = 0,
+            val blobBytesRead: Long = 0,
             override val phase: Phase = Phase.Understand,
             override val span: SpanId? = null,
             override val parent: SpanId? = null,
