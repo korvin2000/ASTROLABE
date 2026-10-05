@@ -206,6 +206,7 @@ import io.astrolabe.verify.ScopeGuard
 import io.astrolabe.verify.Verifier
 import io.astrolabe.verify.AcceptanceDecisionRequest
 import io.astrolabe.verify.DecisionItem
+import io.astrolabe.verify.DecisionKey
 import io.astrolabe.verify.DecisionKind
 import io.astrolabe.verify.DecisionRecord
 import io.astrolabe.verify.ObligationKind
@@ -673,6 +674,7 @@ public class Controller @JvmOverloads public constructor(
             events?.emit(AgentEvent.Run.Reconciled(ids, intent.actionId, "unknown_outcome"))
         }
         val stamp = stamper.report().candidateId
+        restoreReceipts(checks, SqliteReceipts(store, clock), ids, stamp)
         if (external.isNotEmpty()) {
             journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Reconcile, refs = external.map { it.path }, text = "open: ${external.size} paths moved while closed (external) · reconciled @${stamp.hash8}", at = clock.instant()))
         }
@@ -1982,7 +1984,28 @@ public class Controller @JvmOverloads public constructor(
         if (increment == null) return Resumed.Continue
         // A commit goes on to final acceptance, which reads the green receipts this tree already has (C11 resume).
         heldReceipts(c)
-        return resumed(c, ids, increment, decide(c, ids, personReviewed(c, increment, pending, authority), authority))
+        // WF-5 (c4): nothing moved since this completion was asked about, so a wait it comes to again says what lifts it.
+        val settled = decide(c, ids, personReviewed(c, increment, pending, authority), authority)
+        return resumed(c, ids, increment, if (settled is Settled.Wait) Settled.Wait(settled.pending, unchanged(settled.pending, settled.reason), settled.code) else settled)
+    }
+
+    /**
+     * WD-09: a reopened attempt gets back every check's last receipt of the attempt — not only the regression checks'
+     * (P8.C.10 F) — before any resume, reacceptance or finish: one about the candidate at [stamp] certifies it again, any
+     * other is stale with its reason (§8.4: currency is still computed at use). Baselines and rerun markers are no result.
+     */
+    private fun restoreReceipts(checks: Checks, receipts: SqliteReceipts, ids: Identities, stamp: CandidateId) {
+        for (check in checks.all().filter { it.last == null }) {
+            val receipt = receipts.forCheck(check.id).lastOrNull {
+                it.ids.work == ids.work && it.ids.attempt == ids.attempt && !io.astrolabe.verify.Regressions.isBaseline(it) && !io.astrolabe.verify.Regressions.isMarker(it)
+            } ?: continue
+            val last = io.astrolabe.verify.LastResult(receipt.receiptId, receipt.stampAfter, receipt.checkDefinitionVersion, receipt.outcome, receipt.parsed, io.astrolabe.verify.Applicability.Current)
+            checks.record(check.id, when {
+                receipt.checkDefinitionVersion != check.definitionVersion -> last.applied(io.astrolabe.verify.ApplicabilityVerdict(io.astrolabe.verify.Applicability.Stale, "check definition changed since ${receipt.receiptId}"))
+                receipt.stampAfter != stamp -> last.applied(io.astrolabe.verify.ApplicabilityVerdict(io.astrolabe.verify.Applicability.Stale, "candidate moved @${receipt.stampAfter.hash8} → @${stamp.hash8} since ${receipt.receiptId}"))
+                else -> last
+            })
+        }
     }
 
     /** A fresh registry knows no result: each check's last receipt is the one the stopped controller held, re-assessed now. */
@@ -2781,30 +2804,47 @@ public class Controller @JvmOverloads public constructor(
         }
     }
 
-    /** One finalization attempt of [stopOrFinish], every requirement verified (§8.7). */
+    /**
+     * One finalization attempt of [stopOrFinish], every requirement verified (§8.7). WD-08: the end checks — the full suite
+     * and the quality gates — run before the candidate is fixed, so what they write belongs to the candidate their evidence
+     * is about, and the increments are accepted again at it ([rebind]). WF-5, WF-6: a campaign pending completion at the
+     * candidate the attempt starts on — open, or voided by a decision that still stands — means nothing changed since it
+     * was asked: it is decided on its stored results and nothing runs (I3). WD-10: a request is reissued under the id it
+     * was first asked with while its [DecisionKey] holds; a stop it comes to again says so and what lifts it.
+     */
     private suspend fun finalAttempt(c: OpenedCampaign, scheduler: Scheduler, campaign: Boolean, authority: Authority?): CampaignState {
         val acceptances = Acceptances(c.store, clock)
-        val report = c.stamper.report(fresh = true)
-        val stamp = report.candidateId
         val contract = c.contract
+        val entry = c.stamper.report(fresh = true)
+        val stored = acceptances.pending(c.ids.work, c.ids.attempt).lastOrNull {
+            it.incrementId == null && it.status != PendingStatus.Applied && it.resultingStamp == entry.candidateId && it.contractVersion == contract.version && it.envId == entry.env.envId
+        }
+        val suite = if (stored == null && campaign) fullSuite(c, "campaign end") else null
+        val report = if (suite == null) entry else c.stamper.report(fresh = true)
+        val stamp = report.candidateId
         val ids = c.ids.withCandidate(stamp)
-        val stored = acceptances.open(c.ids.work, c.ids.attempt)
-            ?.takeIf { it.incrementId == null && it.resultingStamp == stamp && it.contractVersion == contract.version && it.envId == report.env.envId }
         val carried = carriedAcceptances(c, stamp)
-        val results = stored?.results ?: campaignResults(c, scheduler, campaign, authority, stamp)
+        val results = stored?.results ?: campaignResults(c, scheduler, campaign, suite, authority, stamp)
             .filterNot { it.status != ResultStatus.Passed && it.obligation in carried }
-        val spent = acceptances.reworkSpent(c.ids.work, c.ids.attempt, null, stamp, contract.version)
         // There is no cell to rework a campaign-level rejection: it goes to the authority at once.
         var resolved = Resolver.resolve(results, decision = acceptances.current(c.ids.work, c.ids.attempt, null, stamp, contract.version), reworkSpent = true)
+        val key = DecisionKey.of(null, stamp, contract.version, Resolver.resolve(results, reworkSpent = true).undecided.map { it.obligation })
+        val asked = stored ?: acceptances.pending(c.ids.work, c.ids.attempt).lastOrNull {
+            it.incrementId == null && it.status != PendingStatus.Applied && it.contractVersion == contract.version && it.envId == report.env.envId && it.key() == key
+        }
         var pending = stored
         if (resolved.resolution == Resolution.Await && authority != null) {
-            val record = pending ?: PendingCompletion(
-                idGen.next("pending"), c.ids.work, c.ids.attempt, null, null, contract.version, c.s0.stampId, stamp, null, report.env.envId, null,
-                emptyList(), results, emptyList(), resolved.gaps, checkNotNull(resolved.code), results.mapNotNull { it.evidenceRef }.distinct(), null, idGen.next("decide"),
-            ).also {
-                acceptances.save(ids, it)
-                c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, refs = it.evidence, text = "final acceptance awaits ${it.code.wire} (${it.id}): ${resolved.missing.joinToString("; ")}", at = clock.instant()))
-            }
+            val record = stored?.takeIf { it.status == PendingStatus.Open } ?: (
+                asked?.copy(results = results, gaps = resolved.gaps, code = checkNotNull(resolved.code), evidence = results.mapNotNull { it.evidenceRef }.distinct(), status = PendingStatus.Open, closedReason = null)
+                    ?: PendingCompletion(
+                        idGen.next("pending"), c.ids.work, c.ids.attempt, null, null, contract.version, c.s0.stampId, stamp, null, report.env.envId, null,
+                        emptyList(), results, emptyList(), resolved.gaps, checkNotNull(resolved.code), results.mapNotNull { it.evidenceRef }.distinct(), null, idGen.next("decide"),
+                    )
+                ).also {
+                    acceptances.save(ids, it)
+                    c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, refs = it.evidence, text = "final acceptance awaits ${it.code.wire} (${it.id}, request ${it.requestId}" +
+                        (if (asked != null) ", reissued under key $key" else "") + "): ${resolved.missing.joinToString("; ")}", at = clock.instant()))
+                }
             pending = record
             when (val settled = decide(c, ids, record, authority)) {
                 is Settled.Commit -> resolved = settled.resolved
@@ -2812,10 +2852,10 @@ public class Controller @JvmOverloads public constructor(
                     closePending(c, ids, record, PendingStatus.Void, "rework requested by ${settled.record.decision.by}")
                     return c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, "rework requested at campaign scope by ${settled.record.decision.by}: ${settled.record.decision.reason} — amend the contract or start a follow-up task"))
                 }
-                is Settled.Wait -> return c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, settled.reason, settled.code))
+                is Settled.Wait -> return c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, if (asked != null) unchanged(record, settled.reason) else settled.reason, settled.code))
                 is Settled.Void -> {
                     closePending(c, ids, record, PendingStatus.Void, settled.reason)
-                    return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "candidate or contract changed during final review; verification and review must be repeated"))
+                    return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, movedDuringReview(c, report, c.stamper.report(), contract)))
                 }
             }
         }
@@ -2824,18 +2864,61 @@ public class Controller @JvmOverloads public constructor(
             Resolution.Await -> return c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, "final acceptance needs a decision: ${resolved.missing.joinToString("; ")}", resolved.code))
             Resolution.Rework -> return c.advance(
                 if (resolved.results.any { it.executedFailure }) Transition.Stopped(CampaignOutcome.Failed, "final acceptance at @${stamp.hash8} failed: ${resolved.missing.joinToString("; ")}")
-                else Transition.Stopped(CampaignOutcome.WaitingForInput, "final acceptance at @${stamp.hash8}: ${resolved.missing.joinToString("; ")}"),
+                else Transition.Stopped(CampaignOutcome.WaitingForInput, "final acceptance at @${stamp.hash8}: ${resolved.missing.joinToString("; ")}" +
+                    (asked?.let { " — unchanged since request ${it.requestId} was decided about @${stamp.hash8}: amending the contract or starting a follow-up task lifts it" } ?: "")),
             )
         }
         val receipts = (resolved.evidenceRefs + carried.values.mapNotNull { it.evidenceRef }).distinct()
         if (receipts.isEmpty()) return c.advance(Transition.Stopped(CampaignOutcome.Failed, "final acceptance at @${stamp.hash8}: no acceptance evidence"))
-        if (c.stamper.report(fresh = true).candidateId != stamp || c.contract != contract) {
-            return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "candidate or contract changed during final review; verification and review must be repeated"))
+        val now = c.stamper.report(fresh = true)
+        if (now.candidateId != stamp || c.contract != contract) {
+            return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, movedDuringReview(c, report, now, contract)))
         }
         c.refusal()?.let { return c.advance(Transition.Stopped(stopOutcome(c), "final acceptance not published: $it")) }
+        rebind(c, scheduler, report, resolved.decision)?.let { return c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, it)) }
         pending?.let { closePending(c, ids, it, PendingStatus.Applied, resolved.decision?.let { d -> "accepted by ${d.decision.by}: ${d.decision.reason}" } ?: "final acceptance held") }
         c.advance(Transition.Finishing(stamp))
         return c.advance(Transition.Finished(stamp, receipts))
+    }
+
+    /**
+     * WD-08: the verified increments accepted at another candidate than [report]'s — the end checks moved the tree after
+     * them — accepted again there from the current receipts and the campaign gate's [decision], with no cell and no model
+     * call (FX-42), so the ledger the finish records holds at that candidate. `null` when every one holds; else why not.
+     */
+    private fun rebind(c: OpenedCampaign, scheduler: Scheduler, report: io.astrolabe.workspace.StampReport, decision: DecisionRecord?): String? {
+        val stamp = report.candidateId
+        val graph = checkNotNull(c.state).graph
+        for (increment in graph.increments.filter { it.status == IncrementStatus.Verified && graph.evidence[it.id]?.stamp != stamp }) {
+            val cell = increment.cells.lastOrNull() ?: return "final acceptance at @${stamp.hash8}: ${increment.id} has no cell to accept it again"
+            val proposal = CompletionProposal(increment.id, PacketStatus.Done.wire, c.contract.version, stamp, stamp, null, report.env.envId)
+            val evidence = completionEvidence(c, increment)
+            // The gate's decision named these items at this candidate; it speaks for the increment's own (I7: accepted, never verified).
+            val result = Verifier().accept(proposal, c.contract, increment, Register.empty(cell, increment.id, increment.title), checkNotNull(c.state).ledger, stamp,
+                currencies(c, scheduler, stamp), evidence.verdicts, evidence.unavailable, decision = decision?.copy(incrementId = increment.id) ?: evidence.decision, reworkSpent = true, acknowledged = acknowledged(c))
+            if (result !is CompletionResult.Accepted) {
+                val why = (result as? CompletionResult.Pending)?.missing ?: (result as? CompletionResult.Refused)?.missing
+                return "final acceptance at @${stamp.hash8}: verified ${increment.id} does not hold at the candidate the end checks left: ${why?.joinToString("; ") ?: result::class.simpleName}"
+            }
+            c.advance(Transition.Committed(result, stamp))
+        }
+        return null
+    }
+
+    /** WF-5: a stop the same pending completion comes to again — nothing changed since it was asked — names the request and what lifts it. */
+    private fun unchanged(pending: PendingCompletion, reason: String): String =
+        "$reason — unchanged since request ${pending.requestId} (key ${pending.key()}) was asked about @${pending.resultingStamp.hash8}: an accept or rework answer to it, or a change to the tree or the contract, lifts it"
+
+    /** WD-15: why the candidate a final decision or review was about no longer stands — the moved paths, or the contract. */
+    private fun movedDuringReview(c: OpenedCampaign, before: io.astrolabe.workspace.StampReport, after: io.astrolabe.workspace.StampReport, contract: Contract): String {
+        val moved = Stamper.diff(before, after)
+        val what = when {
+            c.contract.version != contract.version -> "contract v${contract.version} → v${c.contract.version}"
+            c.contract != contract -> "contract v${contract.version} changed"
+            moved.isEmpty() -> "the environment fingerprint changed"
+            else -> "moved: " + moved.take(MAX_MOVED).joinToString(", ") + (if (moved.size > MAX_MOVED) " (+${moved.size - MAX_MOVED} more)" else "")
+        }
+        return "candidate or contract changed during final review (@${before.candidateId.hash8} → @${after.candidateId.hash8}, $what); verification and review must be repeated"
     }
 
     /** Acceptance items a decider accepted for [stamp] at increment level (I7): their provenance stands at the campaign gate. */
@@ -2850,22 +2933,21 @@ public class Controller @JvmOverloads public constructor(
 
     /**
      * The campaign gate's obligations at [stamp] (§8.7, D-343), as results — never as stops: the declared full suite and
-     * quality gates, every `run:` item's current receipt, every independent item's assessment, and the campaign review
-     * when the §8.8 predicate owes one (with the refactor-mode equivalence evidence).
+     * quality gates ([suite], already run on the tree [stamp] names: WD-08), every `run:` item's current receipt, every
+     * independent item's assessment, and the campaign review when the §8.8 predicate owes one (with the refactor-mode
+     * equivalence evidence).
      */
-    private suspend fun campaignResults(c: OpenedCampaign, scheduler: Scheduler, campaign: Boolean, authority: Authority?, stamp: CandidateId): List<ObligationResult> {
+    private suspend fun campaignResults(c: OpenedCampaign, scheduler: Scheduler, campaign: Boolean, suite: FullSuite?, authority: Authority?, stamp: CandidateId): List<ObligationResult> {
         val state = checkNotNull(c.state)
         val contract = c.contract
         val refactor = RefactorMode.isActive(contract)
         val reviewOwed = if (campaign) CampaignFinish.reviewRequired(contract, state.graph.increments.count { it.status != IncrementStatus.Cancelled }, refactor) else null
         val results = ArrayList<ObligationResult>()
-        if (campaign) {
-            when (val full = fullSuite(c, "campaign end")) {
-                is FullSuite.Red -> results += ObligationResult(FULL_SUITE, ObligationKind.Run, ResultStatus.Failed, "final full suite red: ${full.detail}")
-                is FullSuite.NotCertified -> results += ObligationResult(FULL_SUITE, ObligationKind.Run, ResultStatus.Unverified, "final full suite could not certify: ${full.detail}")
-                FullSuite.Green -> results += ObligationResult(FULL_SUITE, ObligationKind.Run, ResultStatus.Passed, "final full suite green", c.checks[Checks.FULL]?.last?.receiptId)
-                FullSuite.Undeclared -> Unit
-            }
+        when (suite) {
+            is FullSuite.Red -> results += ObligationResult(FULL_SUITE, ObligationKind.Run, ResultStatus.Failed, "final full suite red: ${suite.detail}")
+            is FullSuite.NotCertified -> results += ObligationResult(FULL_SUITE, ObligationKind.Run, ResultStatus.Unverified, "final full suite could not certify: ${suite.detail}")
+            FullSuite.Green -> results += ObligationResult(FULL_SUITE, ObligationKind.Run, ResultStatus.Passed, "final full suite green", c.checks[Checks.FULL]?.last?.receiptId)
+            FullSuite.Undeclared, null -> Unit
         }
         val currencies = currencies(c, scheduler, stamp)
         for (item in contract.acceptance.filterIsInstance<Acceptance.Run>()) {
@@ -3026,6 +3108,9 @@ public class Controller @JvmOverloads public constructor(
         /** The review brief carries at most this much of the diff; the full diff stays a blob it names (D-124). */
         private const val MAX_REVIEW_DIFF_CHARS: Int = 16_000
         private const val CAMPAIGN_REVIEW: String = "campaign-review"
+
+        /** How many moved paths a void of the final review names before it counts the rest. */
+        private const val MAX_MOVED: Int = 10
 
         /** Campaign-gate obligation ids (D-343). */
         private const val FULL_SUITE: String = "campaign:full-suite"
