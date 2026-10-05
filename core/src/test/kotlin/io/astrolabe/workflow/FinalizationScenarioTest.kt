@@ -5,7 +5,9 @@ import io.astrolabe.campaign.CampaignOutcome
 import io.astrolabe.campaign.CampaignPolicy
 import io.astrolabe.campaign.OpenedCampaign
 import io.astrolabe.cell.WINDOWS
+import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Command
+import io.astrolabe.contract.Origin
 import io.astrolabe.contract.Shape
 import io.astrolabe.fixtures.Scripted
 import io.astrolabe.telemetry.CountedPhase
@@ -20,20 +22,24 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 /**
  * WF-5, WF-6 and WF-7 (plan §7.2, W1) on the dirty repository in S1: the campaign gate's quality gate is the fixture's
  * variant (b) — it prints a passing pytest run and rewrites the tracked `data/notes.json` — so the end checks move the
  * candidate and their own receipt cannot certify it (WD-14 stays W3's): the final acceptance waits for a decision. The
- * host is Studio's shape: it answers a decision request only by the id the user saw (WD-10).
+ * host is Studio's shape: it answers a decision request only by the id the user saw (WD-10). The guards count checks
+ * (receipts), requests and stops, none of which depends on the untracked files, so the fixture has one tool file, no big
+ * file and no settling wait (plan §7.2 rule 3: the suite stays within three minutes).
  */
 class FinalizationScenarioTest {
     @TempDir
     lateinit var stateRoot: Path
 
     @Test
-    fun `a final re-entry without new information reruns nothing and keeps its request, and the user's accept then completes`() = finalization(300) { s ->
+    fun `a final re-entry without new information reruns nothing and keeps its request, and the user's accept then completes across a crash`() = finalization { s ->
         val asked = ArrayList<AcceptanceDecisionRequest>()
         var answer: AcceptanceDecision? = null
         s.decide { r -> asked += r; answer?.takeIf { it.requestId == r.id } }
@@ -61,47 +67,84 @@ class FinalizationScenarioTest {
         expect(request.id in secondStop) { "WF-5: the second stop does not name the request that lifts it: $secondStop" }
         expect("no receipt" !in secondStop) { "WF-7: 'no receipt' after a reopen without changes: $secondStop" }
 
-        // WF-6: the user accepts the request they saw; the next entry applies it and runs nothing.
+        // WF-6: the user accepts the request they saw; the next entry applies it — and dies right after the applied record.
         answer = AcceptanceDecision(request.id, request.contractRevision, request.candidate, DecisionKind.Accept, Decider.User, "user", "the rewritten data file is expected")
         s.reopen()
         val held = receipts(s.campaign!!)
+        s.controller.crashAfterFinalApplied = { throw Crash() }
+        val crashed = runCatching { s.play { emptyList() } }.exceptionOrNull()
+        s.controller.crashAfterFinalApplied = null
+        expect(crashed is Crash) { "the fault point between the applied record and Finishing did not fire: $crashed" }
+        // The reopen after the crash resumes on the applied record: nothing runs after the accept.
+        s.reopen()
         val third = s.play { emptyList() }
         expect(third.outcome == CampaignOutcome.Completed) { "WF-6: the accepted candidate ended ${third.outcome}: ${third.state?.reason}" }
         expect(receipts(s.campaign!!) == held) { "WF-6: ${receipts(s.campaign!!) - held} checks ran after the accept" }
         val attempts = s.counted(CountedPhase.Finish).map { it.finishAttempts }
-        expect(attempts == listOf(1, 1, 1)) { "one finalization attempt per entry: $attempts" }
+        expect(attempts == listOf(1, 1, 1, 1)) { "one finalization attempt per entry: $attempts" }
         assertTrue(broken.isEmpty(), broken.joinToString("\n"))
     }
 
     @Test
-    fun `a policy accept for the candidate the end checks left completes it and nothing runs after it`() = finalization(300) { s ->
+    fun `a source edit while the final decision is asked still voids it, an item added at the same revision is asked anew, and a policy accept then completes`() = finalization { s ->
+        val asked = ArrayList<AcceptanceDecisionRequest>()
+        var answer: AcceptanceDecision? = null
+        var editing = true
+        var policy = false
         var atAccept = -1
         s.decide { r ->
-            atAccept = receipts(s.campaign!!)
-            AcceptanceDecision(r.id, r.contractRevision, r.candidate, DecisionKind.Accept, Decider.Policy, "studio:policy(auto)", "auto mode accepts what could not be verified")
+            asked += r
+            when {
+                editing -> {
+                    editing = false
+                    Files.writeString(s.root.resolve("src/util.py"), "def clamp(x, lo, hi):\n    return min(max(x, lo), hi)\n")
+                    AcceptanceDecision(r.id, r.contractRevision, r.candidate, DecisionKind.Accept, Decider.User, "user", "done")
+                }
+                policy -> {
+                    atAccept = receipts(s.campaign!!)
+                    AcceptanceDecision(r.id, r.contractRevision, r.candidate, DecisionKind.Accept, Decider.Policy, "studio:policy(auto)", "auto mode accepts what could not be verified")
+                }
+                else -> answer?.takeIf { it.requestId == r.id }
+            }
         }
-        val run = s.play(::edit)
-        assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
-        assertEquals(atAccept, receipts(s.campaign!!), "WF-6: no check runs after the accept")
-        assertEquals(listOf(1), s.counted(CountedPhase.Finish).map { it.finishAttempts })
+        val voided = s.play(::edit)
+        val reason = voided.state?.reason.orEmpty()
+        assertEquals(CampaignOutcome.BlockedExternal, voided.outcome, reason)
+        assertTrue("src/util.py" in reason, "the void names the moved path: $reason")
+        assertFalse(DirtyRepo.DATA in reason, "the gate's own write is no move of the candidate it fixed: $reason")
+
+        // The moved tree is new information: the end checks run again and a new request waits.
+        s.reopen()
+        assertEquals(CampaignOutcome.WaitingForInput, s.play { emptyList() }.outcome)
+        val request = asked.last { it.incrementId == null }
+        // The host adds an executable item at the same revision, then accepts the request it saw: that answer leaves it out.
+        s.campaign!!.contracts.strengthen(s.request.work, Acceptance.Run("AC-2", printing, Origin.Model("AC-1")))
+        answer = AcceptanceDecision(request.id, request.contractRevision, request.candidate, DecisionKind.Accept, Decider.User, "user", "done")
+        s.reopen()
+        val before = receipts(s.campaign!!)
+        val after = s.play { emptyList() }
+        assertEquals(CampaignOutcome.WaitingForInput, after.outcome, after.state?.reason)
+        val reasked = asked.last { it.incrementId == null }
+        assertNotEquals(request.id, reasked.id, "the stored results do not answer the new obligation set")
+        assertTrue(reasked.items.any { it.obligation == "AC-2" }, "the new item is put to the decider: ${reasked.items.map { it.obligation }}")
+        assertTrue(receipts(s.campaign!!) > before, "the end checks ran again for the new obligation set")
+
+        // WF-6 (policy, the 5 October auto mode): the policy accepts the request now waiting; nothing runs after its accept.
+        policy = true
+        s.reopen()
+        val accepted = s.play { emptyList() }
+        assertEquals(CampaignOutcome.Completed, accepted.outcome, accepted.state?.reason)
+        assertEquals(atAccept, receipts(s.campaign!!), "WF-6: no check runs after the policy's accept")
+        assertEquals(listOf(1, 1, 1, 1), s.counted(CountedPhase.Finish).map { it.finishAttempts })
     }
 
     @Test
-    fun `a real source edit while the final decision is asked still voids it`() = finalization(1) { s ->
-        s.decide { r ->
-            Files.writeString(s.root.resolve("src/util.py"), "def clamp(x, lo, hi):\n    return min(max(x, lo), hi)\n")
-            AcceptanceDecision(r.id, r.contractRevision, r.candidate, DecisionKind.Accept, Decider.User, "user", "done")
-        }
-        val run = s.play(::edit)
-        assertEquals(CampaignOutcome.BlockedExternal, run.outcome, run.state?.reason)
-        assertTrue("src/util.py" in run.state?.reason.orEmpty(), "the void names the moved path: ${run.state?.reason}")
-    }
-
-    @Test
-    fun `a red final gate still fails the campaign`() = finalization(1, gate = { red }) { s ->
+    fun `a red final gate still fails the campaign`() = finalization(gate = { red }) { s ->
         val run = s.play(::edit)
         assertEquals(CampaignOutcome.Failed, run.outcome, run.state?.reason)
     }
+
+    private class Crash : RuntimeException("injected crash after the applied record")
 
     /** The plan cell is skipped (the acceptance is executable); one cell edits, verifies `AC-1` and reports done. */
     private fun edit(c: OpenedCampaign): List<Scripted> = Scenario.editThenVerify(c, DirtyRepo.SOURCE, "    return sum(items)", "    return sum(x for x in items if x >= 0)")
@@ -110,8 +153,8 @@ class FinalizationScenarioTest {
     private fun receipts(c: OpenedCampaign): Int = c.store.db.query("SELECT body FROM receipts") { it.string("body") }.size
 
     /** S1 over the dirty repository with `AC-1` a plain printing check and [gate] the campaign's quality gate. */
-    private fun finalization(files: Int, gate: DirtyRepo.() -> Command = { check }, body: suspend (Scenario) -> Unit) = runBlocking {
-        DirtyRepo.create(files, DirtyRepo.Variant.RewritesData).use { dirty ->
+    private fun finalization(gate: DirtyRepo.() -> Command = { check }, body: suspend (Scenario) -> Unit) = runBlocking {
+        DirtyRepo.create(1, DirtyRepo.Variant.RewritesData, bigBytes = 0, settle = false).use { dirty ->
             Files.writeString(dirty.root.resolve(FAILING), recorded("pytest-fail-param.txt"))
             val quality = dirty.gate()
             Scenario(dirty.root, stateRoot, configure = { it.copy(qualityGates = listOf(quality)) }).use { s ->

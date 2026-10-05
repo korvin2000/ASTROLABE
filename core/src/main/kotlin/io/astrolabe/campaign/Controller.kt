@@ -2833,8 +2833,11 @@ public class Controller @JvmOverloads public constructor(
         val acceptances = Acceptances(c.store, clock)
         val contract = c.contract
         val entry = c.stamper.report(fresh = true)
+        // The same obligations too: an item added at the same revision is new information. An applied record counts — a
+        // stop between closing it and `Finishing` resumes on it, with no end check run again after the accept (WF-6).
+        val obligations = obligationSet(c, contract)
         val stored = acceptances.pending(c.ids.work, c.ids.attempt).lastOrNull {
-            it.incrementId == null && it.status != PendingStatus.Applied && it.resultingStamp == entry.candidateId && it.contractVersion == contract.version && it.envId == entry.env.envId
+            it.incrementId == null && it.resultingStamp == entry.candidateId && it.contractVersion == contract.version && it.envId == entry.env.envId && it.obligationSet == obligations
         }
         val suite = if (stored == null && campaign) fullSuite(c, "campaign end") else null
         val report = if (suite == null) entry else c.stamper.report(fresh = true)
@@ -2847,7 +2850,7 @@ public class Controller @JvmOverloads public constructor(
         var resolved = Resolver.resolve(results, decision = acceptances.current(c.ids.work, c.ids.attempt, null, stamp, contract.version), reworkSpent = true)
         val key = DecisionKey.of(null, stamp, contract.version, Resolver.resolve(results, reworkSpent = true).undecided.map { it.obligation })
         val asked = stored ?: acceptances.pending(c.ids.work, c.ids.attempt).lastOrNull {
-            it.incrementId == null && it.status != PendingStatus.Applied && it.contractVersion == contract.version && it.envId == report.env.envId && it.key() == key
+            it.incrementId == null && it.status != PendingStatus.Applied && it.contractVersion == contract.version && it.envId == report.env.envId && it.obligationSet == obligations && it.key() == key
         }
         var pending = stored
         if (resolved.resolution == Resolution.Await && authority != null) {
@@ -2856,8 +2859,12 @@ public class Controller @JvmOverloads public constructor(
                     ?: PendingCompletion(
                         idGen.next("pending"), c.ids.work, c.ids.attempt, null, null, contract.version, c.s0.stampId, stamp, null, report.env.envId, null,
                         emptyList(), results, emptyList(), resolved.gaps, checkNotNull(resolved.code), results.mapNotNull { it.evidenceRef }.distinct(), null, idGen.next("decide"),
+                        obligationSet = obligations,
                     )
                 ).also {
+                    // One campaign question at a time: an open one about another obligation set is superseded, never answered.
+                    acceptances.pending(c.ids.work, c.ids.attempt).filter { p -> p.incrementId == null && p.status == PendingStatus.Open && p.id != it.id }
+                        .forEach { p -> closePending(c, ids, p, PendingStatus.Void, "superseded by ${it.id}") }
                     acceptances.save(ids, it)
                     c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, refs = it.evidence, text = "final acceptance awaits ${it.code.wire} (${it.id}, request ${it.requestId}" +
                         (if (asked != null) ", reissued under key $key" else "") + "): ${resolved.missing.joinToString("; ")}", at = clock.instant()))
@@ -2894,8 +2901,30 @@ public class Controller @JvmOverloads public constructor(
         c.refusal()?.let { return c.advance(Transition.Stopped(stopOutcome(c), "final acceptance not published: $it")) }
         rebind(c, scheduler, report, resolved.decision)?.let { return c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, it)) }
         pending?.let { closePending(c, ids, it, PendingStatus.Applied, resolved.decision?.let { d -> "accepted by ${d.decision.by}: ${d.decision.reason}" } ?: "final acceptance held") }
+        crashAfterFinalApplied?.invoke()
         c.advance(Transition.Finishing(stamp))
         return c.advance(Transition.Finished(stamp, receipts))
+    }
+
+    /**
+     * Test fault point (W1): runs after the campaign pending completion is closed applied and before `Finishing` is saved,
+     * where a crash leaves an applied record and an unfinished campaign; the reopen must not run an end check again.
+     */
+    internal var crashAfterFinalApplied: (() -> Unit)? = null
+
+    /**
+     * The campaign gate's obligation set (W1), digested: the contract's acceptance items — a `run:` item's command is its
+     * check's definition — and the definitions of the end checks (the full suite, the quality gates). At one candidate,
+     * revision and environment only an item added at the same revision (strengthening) can change it.
+     */
+    private fun obligationSet(c: OpenedCampaign, contract: Contract): String {
+        val items = contract.acceptance.sortedBy { it.id }.map { item ->
+            val command = (item as? Acceptance.Run)?.let { Json.encodeToString(io.astrolabe.contract.Command.serializer(), it.command) }.orEmpty()
+            DecisionKey.delimited(listOf(item.id, item::class.simpleName.orEmpty(), item.criterion, item.obligationVersion.toString(), command))
+        }
+        val checks = c.checks.all().filter { it.trigger == io.astrolabe.verify.Trigger.CampaignEnd }.sortedBy { it.id }.map { "${it.id}=${it.definitionVersion.hex}" }
+        return io.astrolabe.id.Digest.ofUtf8(io.astrolabe.id.CanonicalEncoding.encode("campaign-obligations", 1,
+            listOf("acceptance" to DecisionKey.delimited(items), "checks" to DecisionKey.delimited(checks)))).hex
     }
 
     /**
