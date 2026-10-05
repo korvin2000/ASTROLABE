@@ -13231,11 +13231,13 @@ public final class io/astrolabe/event/AgentEvent$Telemetry$Companion {
 
 public final class io/astrolabe/event/AgentEvent$Telemetry$PhaseCounted : io/astrolabe/event/AgentEvent$Telemetry {
 	public static final field Companion Lio/astrolabe/event/AgentEvent$Telemetry$PhaseCounted$Companion;
-	public fun <init> (Lio/astrolabe/id/Identities;Ljava/lang/String;JJJJIILio/astrolabe/event/Phase;Lio/astrolabe/event/SpanId;Lio/astrolabe/event/SpanId;)V
-	public synthetic fun <init> (Lio/astrolabe/id/Identities;Ljava/lang/String;JJJJIILio/astrolabe/event/Phase;Lio/astrolabe/event/SpanId;Lio/astrolabe/event/SpanId;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Lio/astrolabe/id/Identities;Ljava/lang/String;JJJJIIJJLio/astrolabe/event/Phase;Lio/astrolabe/event/SpanId;Lio/astrolabe/event/SpanId;)V
+	public synthetic fun <init> (Lio/astrolabe/id/Identities;Ljava/lang/String;JJJJIIJJLio/astrolabe/event/Phase;Lio/astrolabe/event/SpanId;Lio/astrolabe/event/SpanId;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Lio/astrolabe/id/Identities;
-	public final fun component10 ()Lio/astrolabe/event/SpanId;
-	public final fun component11 ()Lio/astrolabe/event/SpanId;
+	public final fun component10 ()J
+	public final fun component11 ()Lio/astrolabe/event/Phase;
+	public final fun component12 ()Lio/astrolabe/event/SpanId;
+	public final fun component13 ()Lio/astrolabe/event/SpanId;
 	public final fun component2 ()Ljava/lang/String;
 	public final fun component3 ()J
 	public final fun component4 ()J
@@ -13243,10 +13245,12 @@ public final class io/astrolabe/event/AgentEvent$Telemetry$PhaseCounted : io/ast
 	public final fun component6 ()J
 	public final fun component7 ()I
 	public final fun component8 ()I
-	public final fun component9 ()Lio/astrolabe/event/Phase;
-	public final fun copy (Lio/astrolabe/id/Identities;Ljava/lang/String;JJJJIILio/astrolabe/event/Phase;Lio/astrolabe/event/SpanId;Lio/astrolabe/event/SpanId;)Lio/astrolabe/event/AgentEvent$Telemetry$PhaseCounted;
-	public static synthetic fun copy$default (Lio/astrolabe/event/AgentEvent$Telemetry$PhaseCounted;Lio/astrolabe/id/Identities;Ljava/lang/String;JJJJIILio/astrolabe/event/Phase;Lio/astrolabe/event/SpanId;Lio/astrolabe/event/SpanId;ILjava/lang/Object;)Lio/astrolabe/event/AgentEvent$Telemetry$PhaseCounted;
+	public final fun component9 ()J
+	public final fun copy (Lio/astrolabe/id/Identities;Ljava/lang/String;JJJJIIJJLio/astrolabe/event/Phase;Lio/astrolabe/event/SpanId;Lio/astrolabe/event/SpanId;)Lio/astrolabe/event/AgentEvent$Telemetry$PhaseCounted;
+	public static synthetic fun copy$default (Lio/astrolabe/event/AgentEvent$Telemetry$PhaseCounted;Lio/astrolabe/id/Identities;Ljava/lang/String;JJJJIIJJLio/astrolabe/event/Phase;Lio/astrolabe/event/SpanId;Lio/astrolabe/event/SpanId;ILjava/lang/Object;)Lio/astrolabe/event/AgentEvent$Telemetry$PhaseCounted;
 	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBlobBytesRead ()J
+	public final fun getBlobsRead ()J
 	public final fun getBytesRead ()J
 	public final fun getCounted ()Ljava/lang/String;
 	public final fun getFilesRead ()J
@@ -29146,6 +29150,12 @@ public final class io/astrolabe/workspace/Stamper {
 public final class io/astrolabe/workspace/Stamper$Companion {
 	public final fun diff (Lio/astrolabe/workspace/StampReport;Lio/astrolabe/workspace/StampReport;)Ljava/util/Set;
 	public final fun record (Lio/astrolabe/store/Store;Lio/astrolabe/id/Identities;Lio/astrolabe/id/CapturedStamp;)V
+}
+
+public final class io/astrolabe/workspace/UnreadableInput : java/io/IOException {
+	public fun <init> (Ljava/lang/String;ILjava/io/IOException;)V
+	public final fun getAttempts ()I
+	public final fun getPath ()Ljava/lang/String;
 }
 
 public final class io/astrolabe/workspace/VersionChange {
