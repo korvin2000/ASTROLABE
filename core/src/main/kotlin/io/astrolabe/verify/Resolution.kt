@@ -7,6 +7,8 @@ import io.astrolabe.contract.Origin
 import io.astrolabe.contract.Requirement
 import io.astrolabe.contract.UserRequest
 import io.astrolabe.id.CandidateId
+import io.astrolabe.id.CanonicalEncoding
+import io.astrolabe.id.Digest
 import io.astrolabe.id.Identities
 import io.astrolabe.register.Mark
 import io.astrolabe.register.Register
@@ -122,6 +124,30 @@ public data class AcceptanceDecisionRequest(
         require(contractRevision >= 1) { "contractRevision must be ≥ 1" }
         require(items.isNotEmpty()) { "a decision request names what needs deciding" }
         require(items.none { it.status == ResultStatus.Failed && it.kind == ObligationKind.Run }) { "an executed red check is never put to a decision (§8.8)" }
+    }
+
+    /**
+     * What this request asks, whatever its [id] ([DecisionKey], WD-10): the same key is the same question, which the
+     * controller reissues under the same id, so a host may keep a decision by either.
+     */
+    val key: String get() = DecisionKey.of(incrementId, candidate, contractRevision, items.map { it.obligation })
+}
+
+/**
+ * The key of an acceptance decision request (WD-10): its scope — the increment, or the campaign gate — the candidate, the
+ * contract revision and the obligations put to the decider, in no particular order. A host finds a decision it kept for
+ * a repeated request by it; the controller reuses a pending completion and its request id under it.
+ */
+public object DecisionKey {
+    @JvmStatic
+    public fun of(incrementId: String?, candidate: CandidateId, contractRevision: Int, obligations: Collection<String>): String {
+        val fields = listOf(
+            "scope" to (incrementId?.let { "increment:$it" } ?: "campaign"),
+            "candidate" to candidate.digest.hex,
+            "contract" to contractRevision.toString(),
+            "obligations" to obligations.distinct().sorted().joinToString("\n"),
+        )
+        return "dk-" + Digest.ofUtf8(CanonicalEncoding.encode("decision-key", 1, fields)).hex
     }
 }
 

@@ -9,6 +9,7 @@ import io.astrolabe.id.WorkId
 import io.astrolabe.store.Migrations
 import io.astrolabe.store.Store
 import io.astrolabe.verify.CompletionProposal
+import io.astrolabe.verify.DecisionKey
 import io.astrolabe.verify.DecisionKind
 import io.astrolabe.verify.DecisionRecord
 import io.astrolabe.verify.Gap
@@ -83,6 +84,9 @@ public data class PendingCompletion(
     public fun resolve(decision: DecisionRecord?): Resolved =
         Resolver.resolve(results, other, decision?.takeIf { it.appliesTo(resultingStamp, contractVersion) && it.incrementId == incrementId }, reworkSpent = true)
             .copy(acknowledged = acknowledged)
+
+    /** The [DecisionKey] of the request asked about this completion: its scope, candidate, contract version and undecided obligations (WD-10). */
+    public fun key(): String = DecisionKey.of(incrementId, resultingStamp, contractVersion, resolve(null).undecided.map { it.obligation })
 }
 
 /**
