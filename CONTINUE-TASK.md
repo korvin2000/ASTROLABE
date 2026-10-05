@@ -8,13 +8,13 @@ Rewritten every session (≤40 lines). Workflow: `CLAUDE.md` § Workflow. State 
 (`Config.protocol = Structured`): Dp3 specification for S0–S3 (D-414), D1 role / kernel / schemas / switch (D-419),
 D2 anchor and `state(note)` (D-422), D3 `finish` and epoch handoff (D-423), D3r integration fixes (D-425). Also merged:
 B7 one `RunSpec` (D-415), B5 arms and the reference arm `loop` (D-418), C16 nominal price of subscription models
-(D-417), C15 hotfix tails (D-416, D-420, D-424), Studio steps (root repo). P8: **35 DONE / 23 TODO**.
+(D-417), C15 hotfix tails (D-416, D-420, D-424), Studio steps (root repo). P8: **35 DONE / 36 TODO** (11 added 2026-10-05: wave W).
 
-## Next — session 5 (plan §7)
+## Next — session 4A first (`../session_4a_fix.md`; wave W, owner №30; `rg -n '^#### P8\.W\.' TODO.md`), then 4B; the items below (session 5, plan §7) wait for Gate P8.W
 1. **P8.D.7 first** — before `Direct` is switched on anywhere: orphan handoff recovery before sequence-changing
    transitions, fact retention by the cell's protocol. Codex review (owner: remaining reviews go to Codex).
-2. D4 (golden `[S]` per protocol, ≤ 15 direct fixtures, protocol choice in Studio), then D5 (structured / direct / loop);
-   E1; B6. Before D5: P8.C.17 item 1 (cap of one `verify`), the `summary.csv` overwrite, a re-pricing what-if in the auditor.
+2. P8.C.18 (module gaps from the verdicts; changes the structured `look` schema, so **before D4**) → D4 (golden `[S]`,
+   ≤ 15 direct fixtures, protocol choice in Studio) → D5; E1; B6. Before D5: P8.C.17 item 1, `summary.csv`, re-pricing in the auditor.
 3. Read the fast CI result of the session-4 push first (compile + ABI); the full suite runs only on a wave tag.
 
 ## Owner positions and rules from session 4

@@ -2315,8 +2315,14 @@ Goal: the model decides; the runtime executes, waits, records and finishes. Plan
 - Log: 2026-10-04 — Studio step merged (root `758e0b6`, line S4s): a subscription account (`oauth`) gets `AiGateProfiles.planPriceTable`; the model list shows the official price marked nominal, or "no money accounting"; the task meter, the task usage line and the statistics show paid and nominal apart. Opus review, no P1. Tails: no input field for a user-entered price; `StatsService` prices a subscription call with a positive bill by the table, the core by the bill; nothing was checked in a browser. [report](../plan2/reports/WP-S4s.md).
 
 #### P8.C.17 [M] C17 Verification tails of session 4 · TODO
+- Note 2026-10-05: item (3) moved to P8.W.8.
 - Repo: ASTROLABE. Pkg: `tool/verify/`, `verify/`, `tool/look/`, `tool/run/`. Spec: D-416, D-424; reports `../plan2/reports/WP-C15a.md`, `WP-C15b.md`.
 - Build: (1) an overall cap on the combined output of one `verify` (checks × retries) that keeps the first failing lines of every failed check; `look(recall)` by a receipt alias (raw blob, no read coverage), then drop the turn-budget exemption of a failed `verify`; (2) the Gradle wrapper for a `gradle` check without the executable — only when the wrapper content equals the base commit blob (`git hash-object` with path filters), or count `gradlew*` as an input of `gradle` in test integrity; bypasses to cover: `git mv`, `--skip-worktree`, a symlink; (3) node: mixed cargo / go + node output, same-named tests in different files, Node 18 reporters.
+#### P8.C.18 [M] C18 Gaps between modules found by the review verdicts — **before P8.D.4** · TODO
+- Note 2026-10-05: item (3) moved to P8.W.9; after Gate P8.W.
+- Deps: P8.D.7. Pkg: `cell/Cell.kt`, `tool/Dispatcher.kt`, `tool/look/Look.kt`, `tool/ToolSchemas.kt`, `context/Rebuild.kt`, `context/CarryForward.kt`, `Defaults.kt`, `campaign/Controller.kt`. Spec: plan §6 C18, §14; `../CODEX-REVIEW-VERDICT.md` ("Найдены и конкретные разрывы между модулями"), `../FABLE-REVIEW-VERDICT.md` §5 item 9, §2.3.
+- Build: (1) the host's `lookBudgetTokens` reaches `look`: the cell's wrapper around an executor passes `defaultReadTokens` through (today the dispatcher falls back to 4000, `Dispatcher.kt`); (2) the structured `look` schema promises nothing it lacks: `find` with `in=kb` is removed or routed to `kb.search` (today it answers "arrives in P2.6"), `since` is implemented or removed (the direct schema already has neither); (3) the carry settings work or are deleted: `Defaults.m`, `seedsMaxTokens`, the rebuild tail (constant 6 in `Rebuild.kt`, `CarryForward.SEED_CAP_TOKENS`); (4) search uses ripgrep when it is installed instead of the hard-wired `Searches.jvm()`; (5) a reachability test: every host-settable field of `Defaults` and `Config` is proved to reach its consumer through the real composition `Controller` → cell → dispatcher → tool; a field without a consumer fails the test.
+- Done: the five items with fixtures; the structured `look` schema bytes change once, before the golden `[S]` of P8.D.4 is taken. Opus review.
 
 ### P8.D Wave D — direct protocol
 #### P8.D.6 [V] Dp3 Direct specification amended for every shape — **before P8.D.1** (amendment 2026-10-04) · DONE
@@ -2341,11 +2347,60 @@ Goal: the model decides; the runtime executes, waits, records and finishes. Plan
 - Deps: P8.D.1–P8.D.3. Repo: ASTROLABE + root (Studio). Spec: plan §6 D4.
 #### P8.D.5 [V] D5 Paired benchmark direct vs structured; default protocol per model class · TODO
 - Note (owner, 2026-10-04, D-421): the money axis is reported by the bill and by re-pricing the flows over price profiles with output/input ratios of about 2, 3, 5 and "tens"; the auditor (P8.B.1) needs a re-pricing what-if for it. `loop` is a yardstick only.
-- Deps: P8.D.1–P8.D.4, P8.B.2, P8.B.5–P8.B.7. Spec: plan §6 D5, §9, appendix A.6. Amendment 2026-10-04: a third arm `loop` and a separate stratum of long tasks (confirmation set of P8.B.6).
+- Deps: P8.D.1–P8.D.4, P8.B.2, P8.B.5–P8.B.7. Spec: plan §6 D5, §9, appendix A.6. Amendment 2026-10-04: a third arm `loop` and a separate stratum of long tasks (confirmation set of P8.B.6). Owner №29: the report also ranks where direct loses to `loop` — optimisation targets for direct, not a case for replacing it (plan §14).
 - Build: the confirmation set (plan §9.2) includes the class "second task in the same project" (pairs on one base, one working directory and one store per pair; the runner gains a pair mode) so P8.G.1–G.2 reuse it; in D5 the pairs count as ordinary tasks.
 - [ ] **Gate P8.D:** L2 with compile-all and ABI → push `main` (fast CI job) → the wave tag starts the full suite, not awaited (plan §8.4, owner №28); Fable review of D5.
 
-### P8.H Wave H — role contour: shape S2 live, then S3 (amendment 2026-10-04; plan §4.3a, §6, owner №15–18; before E)
+### P8.W Wave W — workflow stabilization (amendment 2026-10-05; plan §6 wave W, §7.2, owner №30–36; before the rest of D)
+Evidence: `../ASTROLABE-DIAGNOSTICS-2026-10-05.md` (defects WD-01…WD-31 with `path:line`, stop states c1–c16). Every task starts with the failing scenario test of its invariant (plan §7.2) and ends with it green. P8.W.0–5 are session 4A (`../session_4a_fix.md`), P8.W.6–10 are session 4B.
+#### P8.W.0 [V] W0 Scenario harness, "dirty repository" fixture, phase counters, invariant registry · TODO
+- Repo: ASTROLABE. Pkg: tests `io.astrolabe.workflow`, `os/Git.kt`, `workspace/`, `telemetry/`, `eval-live`, `docs/reference/`. Spec: plan §6 W0, §7.2.
+- Build: (1) a scenario runner on the real composition `Controller` → cell → dispatcher → tools with the fake adapter; (2) the fixture: one commit, no `.gitignore`, an untracked directory of ≥ 1500 small files and one ≥ 20 MB file, a check that writes scratch output, a variant whose check rewrites a tracked data file, an exclusively locked file; (3) permanent counters in telemetry: git processes, files and bytes read per capture, objects written per snapshot, opens per host action, finalization attempts; (4) `docs/reference/workflow-invariants.md`: WF-1…WF-15 with the guard test and the files that can break each; (5) the live task `real-dirty-repo` in `eval-live`; (6) the rule of plan §7.2 in `../plan2/COMMON.md`.
+- Done: one scenario runs end to end on the fixture; the counters appear in events; the registry lists every invariant with its guard or `pending <task>`. Codex review.
+#### P8.W.1 [M] W1 Final acceptance terminates · TODO
+- Deps: P8.W.0. Pkg: `campaign/Controller.kt`, `verify/Resolution.kt`, the decision store. Spec: plan §6 W1; WD-08, WD-09, WD-10, WD-15; diagnostics appendix 1 and 2.
+- Build: (1) campaign-end checks run before the candidate is pinned, their evidence binds to the resulting candidate; (2) acceptance receipts that still apply to the candidate come back at open; (3) a pending final decision is keyed by candidate, contract version and obligations, re-issuing reuses the record and its id; (4) an accept by the user or by the policy for an unchanged candidate is terminal: nothing is re-run; (5) the same stop is not produced twice without new information: the second time the stop names the moved paths or the missing evidence and what resolves it.
+- Done: guards of WF-5 (core part), WF-6 (core part), WF-7 green; negative scenarios: a source edit between check and decision still voids, a red final suite still fails. Codex review.
+#### P8.W.2 [M] W2 Capture and snapshot cost; an unreadable file is not fatal · TODO
+- Deps: P8.W.0. Pkg: `workspace/ShadowRef.kt`, `DirtyState.kt`, `Stamper.kt`, `Workspace.kt`, `store/BlobStore.kt`, `os/Git.kt`. Spec: plan §6 W2; WD-01, WD-02, WD-03, WD-05, WD-07; D-364, D-374.
+- Build: (1) the phase split measured on the fixture and reported before any change; (2) a snapshot writes git objects in one process and only for entries changed since the previous snapshot of the work; (3) one read per file per capture: capture, stamp and blob store share the bytes and digests of one capture operation, fresh boundaries stay fresh; (4) content the store or the object database already holds is not published again; (5) an unreadable file gets a bounded retry, then a typed resumable condition naming the path — never a failed cell and never a silent omission from identity.
+- Done: guards of WF-2, WF-3, WF-4 green; stamp and manifest bytes unchanged; before/after counters in the line report. Codex review.
+#### P8.W.3 [M] W3 One declared scratch policy for candidate identity · TODO
+- Deps: P8.W.2. Pkg: `workspace/Stamper.kt`, `DirtyState.kt`, `verify/Scheduler.kt`, `contract/`, `docs/verification/scheduler.md`. Spec: plan §6 W3, owner №32; WD-06, WD-14; D-45, D-53, I-12.
+- Build: (1) the specification first: identity = tracked delta + untracked non-ignored content outside the declared scratch; the policy version and prefixes are recorded and frozen per attempt and counted in the stamp report; a tracked file under a scratch prefix stays in identity; dependency lockfiles stay inputs; a toolchain directory in the tree is not scratch; (2) the existing `ScratchPolicy` applied in the stamp, the snapshot, the input-mutation check, the drift and prescan lists; (3) an input a check rewrites that is not scratch stays an input: the stop names the path and offers to accept as is or to declare it an output of this task.
+- Done: the specification reviewed by Codex before the code; guard of WF-5 (scratch part) green; negative scenarios: a check rewriting a tracked source still moves the candidate, a tracked file under `build/` stays in identity. Codex review.
+#### P8.W.4 [M] W4 A reviewer that can block can read · TODO
+- Deps: P8.W.1. Pkg: `cell/Cell.kt`, `delegate/ReviewCell.kt`, `campaign/Controller.kt`. Spec: plan §6 W4, owner №35; WD-16, WD-18.
+- Build: (1) the admission of a child cell bounds the output allowance by the child's usable budget; (2) the review budget from the settings reaches the cell; (3) a review that cannot be admitted reports `unavailable` with the numbers before any model call; (4) a denied `verify(review)` names the accepted scopes.
+- Done: guard of WF-9 (core part) green: a review cell makes at least one model request and one `look` with the default budget and a model whose maximum output is 64K. Codex review.
+#### P8.W.5 [M] W5 Studio: one open, decisions, continue in place, the recap · TODO
+- Deps: P8.W.1, P8.W.3 (the scratch list). Repo: ASTROLABE-UI (root). Pkg: bridge `StudioHost.kt`; server `TaskService.java`, `DecisionService.java`, `ReviewPass.java`; frontend `features/task`. Spec: plan §6 W5, owner №35; WD-04, WD-11, WD-12, WD-17, WD-25, WD-26, WD-30.
+- Build: (1) one `open` per user action; (2) free text typed while an acceptance card is open decides nothing: the card asks for Accept or Rework and attaches the text; (3) the stored decision is found by the key of P8.W.1; (4) a retryable failure continues the same work, a follow-up only when the core refuses the reopen; (5) the follow-up recap carries every user message of the task verbatim and in order, the original first and uncut, one line per run, framed as still in force unless the previous run was completed and accepted; (6) the tool-less review pass never blocks: its "insufficient evidence" is "no review available"; (7) "evidence unavailable" is not "no passing check"; (8) the task shows the active scratch list and counts changes without scratch.
+- Done: guards of WF-1, WF-6 (Studio part), WF-8, WF-9 (Studio part), WF-10, WF-11 green. Codex review.
+- [ ] **Gate P8.W-A:** guards of WF-1…WF-11 green; L2 with compile-all and ABI; one Codex review of the merged `main` over the stop states c1–c16; live runs of `real-dirty-repo` in `auto` and `ask` reach a terminal state, counters recorded in `../plan2/reports/SESSION-4A.md`; push `main`; tag `v2-wave-WA` (starts the full suite, not awaited).
+#### P8.W.6 [C] W6 Task workflow specification · TODO
+- Deps: Gate P8.W-A. Pkg: `docs/runtime/`, `docs/state/contracts.md`. Spec: plan §6 W6, owner №31, №33, №34.
+- Build: the task intent and history; message kinds (continuation, steering, amendment, decision) and how an amendment reconciles closed increments; goal acceptance apart from sniffed suites; what crosses a cell boundary, a reopen and a follow-up. t6 draft → Codex review → owner.
+- Done: the specification merged with the owner's decisions recorded.
+#### P8.W.7 [M] W7 Task model and message kinds · TODO
+- Deps: P8.W.6. Pkg: `contract/`, `campaign/Controller.kt`, Studio `TaskService.java`. Spec: plan §6 W7; WD-13, WD-24.
+- Build: the objective is the original request plus amendments; a message to a work whose increments are all closed opens work and reaches a model; a confirmation is not an amendment.
+- Done: guard of WF-13 green. Codex review.
+#### P8.W.8 [M] W8 Goal acceptance apart from tests · TODO
+- Deps: P8.W.6, P8.W.7. Pkg: `cell/Gates.kt`, `campaign/PlanNeed.kt`, `verify/Resolution.kt`, `tool/verify/Verify.kt`, `tool/task/TaskTool.kt`, `tool/run/`, Studio. Spec: plan §6 W8; WD-19…WD-23; P8.C.17 item 3.
+- Build: `goalAcceptanceStated` read by the entry gate, the sufficiency hint and `PlanNeed`; a sniffed suite is regression evidence, not "independently verified"; a goal item stated by the model is allowed and judged; the path without tests; the saved Studio command is honoured; a question task ends with an answer; Node reporters.
+- Done: guard of WF-12 green; negative scenario "unrelated suites green, requested behaviour absent" does not close as verified. Codex review.
+#### P8.W.9 [M] W9 Context carry across boundaries, reopen and follow-up · TODO
+- Deps: P8.W.6. Pkg: `context/`, `cell/Cell.kt`, `campaign/Controller.kt`, bridge `StudioHost.kt`. Spec: plan §6 W9, owner №33; WD-27, WD-28, WD-29; P8.C.18 item 3.
+- Build: the previous cell's packet from the store; seeds with a fallback rule; carry across increments; pinned lines appended after the transcript; a parent-work link and the carry of its register and STATUS into a follow-up; the carry settings of P8.C.18 item 3.
+- Done: guards of WF-14, WF-15 green. Codex review.
+#### P8.W.10 [V] W10 Prompt cache of `openai-codex` on a reopen · TODO
+- Pkg: `provider-ai-gate`, SDK. Spec: plan §6 W10; WD-31.
+- Build: compare the wire request of a first open and of a reopen (cache key, session headers); fix the adapter or the SDK if the cause is ours.
+- Done: the cause recorded; a fix or an explicit "provider side".
+- [ ] **Gate P8.W:** guards of WF-1…WF-15 green; L2 with compile-all and ABI; Codex review; live run; push `main`; tag `v2-wave-W`; the owner repeats the `play5` scenario in Studio.
+
+### P8.H Wave H — role contour: shape S2 live, then S3 (amendment 2026-10-04; plan §4.3a, §6, owner №15–18; before E; after Gate P8.W, owner №30)
 #### P8.H.1 [V] H0 Role-contour specification · TODO
 - Deps: P8.D.1–P8.D.3. Pkg: `docs/` (`kernel-contract.md`, `architecture/roles-shapes.md`). Spec: plan §4.3a items 2–6, §6 H0.
 - Build: shape selection, forcing and upgrade with default numbers and the transition protocol; the tier table and the function policy with their rules; the extended plan schema and the question increment; the frozen debts of S2/S3 decided one by one; the switch-point table against the code after wave D. Codex review (shape transition, downgrade formula, money).
@@ -2390,6 +2445,10 @@ Goal: the model decides; the runtime executes, waits, records and finishes. Plan
 - Spec: plan §6 F1, §10.2.
 #### P8.F.2 [O] F2 Epoch trigger (shadow) · TODO
 - Spec: plan §6 F2, §10.3.
+#### P8.F.3 [O] F3 One budget for the whole model-visible request; stubs for old call arguments · TODO
+- Deps: P8.B.6 (long tasks for the measurement), P8.F.1. Pkg: `cell/Cell.kt`, `cell/Layout.kt`, `context/Rebuild.kt`, `telemetry/`, the offline auditor. Spec: plan §6 F3; `../CODEX-REVIEW-VERDICT.md` ("Почему контекст всё равно разрастается", rules 1–2 of the target system).
+- Build: one estimate of the request before every model call — fixed part, contract, pinned messages, call arguments, results, notes, tail; a working ceiling apart from the model's physical window, and a handoff or an explicit narrowing when the mandatory part does not fit (today the ceiling is `max(128K, fixed + pinned + 2 × R_max + anchor)`); at a rebuild old call arguments (created file bodies, patches) become stubs with a pointer, by whole protocol turns, keeping every call–result pair; the auditor splits the input into `[S]`, schemas, arguments and results. Behind a `Config` flag, off by default.
+- Done: on a long task the request stays under the working ceiling with the flag on; flag off → byte-identical behaviour; the decision to enable it rests on the P8.B.6 runs. Codex-W: the rule; Fable review.
 - [ ] **Gate P8.F:** L2 with compile-all and ABI → push `main` (fast CI job) → the wave tag starts the full suite, not awaited (plan §8.4, owner №28).
 
 ### P8.G Reserve — memory between tasks (reserve sessions 11–12, after D and E; owner decisions plan §11 №12–13; not a release criterion)
