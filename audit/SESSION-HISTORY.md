@@ -797,3 +797,12 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
   Codex caught a stale-bytes path in the shared-read recheck (metadata trust), fixed with an NTFS ChangeTime proof.
 - W1: end checks before the pin, receipts restored at open, `DecisionKey`, terminal accept; Codex P1: reused results
   ignored a strengthened contract — fixed. Owner: no re-review after fix rounds. Next: stage 2 (W3–W5, gate W-A).
+
+## 2026-10-05/06: ASTROLABE 2.0 session 4A stage 2 — wave W: scratch policy, review admission, Studio, gate W-A (D-429–D-431)
+- Budget mode (weekly limit 84 → 87 %); lines were background Opus sub-agents in worktrees; Codex reviews gpt-6.1-sol xhigh, one per line.
+- W3: WF suite 188 → 126 s first (scenarios of a class run concurrently); one declared scratch policy frozen per attempt;
+  spec reviewed before code (5 P1); its Controller wiring broke S3 writers — caught by W4's L2, fixed.
+- W4: review cells bounded by their own budget (0 → 2 requests, 1 look); fix round kept the Kotlin constructor ABI.
+- W5 (Studio): one open per action, card text attached, decisions by key per work, continue in place, verbatim recap; 2 P1 fixed.
+- WG: `eval-live --mode ask`. Integration review over c1–c16: 4 cross-line P1 fixed in WR (`DecisionKey` v3).
+- Gate: WF 20/0 171 s, Studio WF 15/0, live `real-dirty-repo` auto and ask completed. Next: session 4B (W6–W10).

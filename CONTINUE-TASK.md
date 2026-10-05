@@ -4,37 +4,35 @@ Rewritten every session (≤40 lines). Workflow: `CLAUDE.md` § Workflow. State 
 **Active program: ASTROLABE 2.0** — plan `../ASTROLABE-2-PLAN.md` (changes only via its §17), status = phase P8 in
 `TODO.md` (`rg -n '^#### P8\.W\.' TODO.md`), cards/reports `../plan2/`, diagnostics `../ASTROLABE-DIAGNOSTICS-2026-10-05.md`.
 
-**Checkpoint (2026-10-05, session 4A stage 1 closed):** W0 (D-426), W2 (D-427) and W1 (D-428) are merged and `main` is
-pushed. The WF suite `:core:test --tests 'io.astrolabe.workflow.*'` (177–188 s of tests on Windows) runs at every merge (CLAUDE.md
-§ Workflow, `../plan2/COMMON.md`). Guards green: WF-2, WF-3, WF-4, WF-5/6/7 (core part). Registry:
-`docs/reference/workflow-invariants.md`. Stage table and limit spend: `../plan2/reports/SESSION-4A.md`.
-P8: 38 DONE / 33 TODO.
+**Checkpoint (2026-10-06, session 4A closed):** W0–W5 merged and pushed (D-426–D-431), plus WG (`eval-live --mode
+auto|ask`) and WR (fix round of the integration review: 4 cross-line P1, `DecisionKey` v3). Gate P8.W-A: see its line in
+TODO.md (tag `v2-wave-WA`; the full CI suite on the tag is **not awaited** — read its result first thing next session and
+fix failures with targeted tests). Results: `../session_4a_results.md`; stage tables: `../plan2/reports/SESSION-4A.md`;
+integration review: `../plan2/reports/INTEGRATION-REVIEW-4A.md`. P8: 41 DONE / 30 TODO.
 
-## Next — **stage 2 of session 4A** (prompt `../session_4a_fix.md` §0 "Stage 2", relaunch with the same prompt)
-1. Restore the state (§8.7), read the fast CI result of the stage-1 push, check plan limits (`get_usage`; stop rules §0).
-2. **W3 (P8.W.3)** — spec first (one page, `docs/verification/scheduler.md` §8.4, D-45, D-53, D-374, I-12), Codex
-   review of the spec, then code. Owner of `workspace/Stamper.kt` after W2. Inputs: WD-06, WD-14; c5, c15; W2 tails below.
-3. **W4 (P8.W.4)** after W1 — owner of `campaign/Controller.kt` and `cell/Cell.kt` now. Also: a failed open emits no
-   `phase.counted` (W0 review); c13, c14.
-4. **W5 (P8.W.5)**, root repo (Studio) — decision lookup by `AcceptanceDecisionRequest.key` (`DecisionKey`, D-428);
-   `*WorkflowScenario*` guards WF-1, WF-6 (Studio), WF-8, WF-9 (Studio), WF-10, WF-11; c6, c8, c16.
-5. One Codex integration review of merged `main` over c1–c16 (`--effort medium`), then Gate P8.W-A: live
-   `real-dirty-repo` in `auto` and `ask` on a cheap model, counters → `SESSION-4A.md` baseline; push `main`, tag
-   `v2-wave-WA`; `../session_4a_results.md`.
+## Next — **session 4B (W6–W10)**, plan §6 wave W, §7 row 4B
+1. Restore (§8.7), read the CI result of tag `v2-wave-WA`, plan limits (`get_usage`).
+2. W6 task workflow specification first (t6 draft → Codex review → owner), then W7–W10 per TODO.
+3. WF suite is at 171 s of tests (limit 180): the first 4B line that adds a scenario cuts time first
+   (largest `DirtyRepoScenarioTest` 84 s, then `ReviewScenarioTest` 27 s, `FinalizationScenarioTest` 24 s).
 
-## Owner rules (2026-10-05)
-- Codex review once per line at `--effort medium`, no re-review after a fix round; after a stage everything is merged
-  into `main` and pushed. No Fable in session 4A; lines Opus, tests t1/background.
-- WF suite over budget: 188 s of tests on merged `main` (limit 180 s) — the first stage-2 line cuts time (largest: `DirtyRepoScenarioTest` 120 s).
+## Owner rules
+- Codex review: `--model gpt-6.1-sol --effort xhigh`, read-only, once per line; no re-review after a fix round.
+- Hard algorithmic/math/implementation questions: Fable 5.1 xhigh or Codex `--model gpt-6-astra --effort high`.
+- A card that changes `campaign/Controller.kt` names `campaign.*` in its L2 (W3 regression lesson).
+- WF suite (`:core:test --tests 'io.astrolabe.workflow.*'`, Studio `*WorkflowScenario*`) at every merge; Studio builds
+  against a core checkout given by `-Pstudio.astrolabeBuild=…` plus `-Pastrolabe.aiGateBuild=…`.
 
-## Stage-1 tails (owners)
-- W2: a modified tracked CRLF/filtered file is read twice (`DirtyState.kt:375-378`); `hash-object` recovery-blob reads
-  uncounted (`ShadowRef.kt:446`); unreadable input during `open` capture still throws to the host; reopen re-reads the
-  whole tree and Atlas reads all of `devtools/` (→ W3 scratch).
-- W1: c4, c9, c12 repeat with explanatory text on a third entry; restored receipts lack the `Scheduler.kt:536-538`
-  workspace filter (not shown exploitable); rebound items carry provenance `accepted`.
-- W0: counters are deltas on shared instances; `real-dirty-repo` `dir` accepts absolute/UNC paths (`eval-live` `Tasks.kt`);
-  scenario event barrier assumes lossless delivery; public `CountedPhase` duplicates the event's string field.
+## Tails for 4B (owners in `../session_4a_results.md` §4)
+- WF-1: a project with no declared checks still opens twice (core `CampaignPolicy` hook). WF-10: an exception inside a
+  cell ends the run final `failed` (`Controller.kt`, `Lifecycle.kt`) — Studio can only follow up.
+- Reads: open and finish read each untracked file about twice live (atlas parse, two fresh stamps); reopen re-reads the
+  tree; `canonicalise` ≈ 60 % of cell time at 1500 files (D-47, separate measured change).
+- Scratch: nested generated dirs (`tests/__pycache__`) are identity and raise integrity flags; "declare as output" (W6/W7).
+- Review: compile and routing reserve the full model output; no end-to-end unavailable campaign-review scenario.
+- Recap: full history has no context budget; decisions not bound to `obligationSet` in Studio (request lacks it).
+- `eval-live` still opens like the old Studio (2 opens per start, `StudioAttempt`); W0 tails (shared-instance counters,
+  UNC `dir`, lossless event barrier) unchanged.
 
-**Then:** session 4B (W6–W10) after Gate P8.W-A; session 5 (D7 first, C18, D4, D5, E1, B6, C17) after Gate P8.W. Frozen
-debts (plan §12), kept branches `v2/BL`, `v2/B4`, `v2/B4a3`, `v2/C10x` (never merge), transient tests — as before.
+**Then:** session 5 (D7 first, C18, D4, D5, E1, B6, C17) after Gate P8.W. Kept branches `v2/BL`, `v2/B4`, `v2/B4a3`,
+`v2/C10x` (never merge).

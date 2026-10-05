@@ -2,12 +2,12 @@
 
 Snapshot: TODO owns task status; CONTINUE-TASK.md owns next work; audit/SESSION-HISTORY.md records history.
 
-## Counts (2026-10-05, from `#### P… · STATUS` headings)
-**P0–P6 185/185 DONE.** P8 (ASTROLABE 2.0, plan `../ASTROLABE-2-PLAN.md`): **38 DONE / 33 TODO** — waves A, B (with B5,
-B7) and C (with C15, C16) done; wave D: Dp3, D1–D3 done, D7, D4, D5 open; wave W (workflow stabilization, sessions 4A/4B):
-W0–W2 done (scenario guards `io.astrolabe.workflow`, WF suite 188 s), W3–W10 open; then H, E, F, release.
-Recount: `rg -c '^#### P8\..*· DONE' TODO.md`. P7 out of scope except the AI Gate transport. **Live:** hotfix D-407–D-413
-verified offline only; one live screening of `eval-live` (16 runs, deepseek flash) passed 8/8 in both arms.
+## Counts (2026-10-06, from `#### P… · STATUS` headings)
+**P0–P6 185/185 DONE.** P8 (ASTROLABE 2.0, plan `../ASTROLABE-2-PLAN.md`): **41 DONE / 30 TODO** — waves A, B (with B5,
+B7) and C (with C15, C16) done; wave D: Dp3, D1–D3 done, D7, D4, D5 open; wave W: W0–W5 done (session 4A, gate P8.W-A;
+WF suite `io.astrolabe.workflow` 20 tests, 171 s; Studio `*WorkflowScenario*` 15), W6–W10 open (session 4B); then H, E, F, release.
+Recount: `rg -c '^#### P8\..*· DONE' TODO.md`. P7 out of scope except the AI Gate transport. **Live:** `real-dirty-repo`
+(1500 untracked files + 20 MB) completes in `auto` and `ask` on deepseek flash (gate P8.W-A, `../plan2/reports/SESSION-4A.md`).
 
 ## Completion levels
 - **P0–P6:** `FIXTURE_VALIDATED` on Windows + Linux CI (JDK 26). Every live gate is `UNMEASURED` (P7).
@@ -45,16 +45,15 @@ to `main` runs only the fast job (compile + ABI): green at `b0901dc`. Session 4:
 ## History (details in `audit/SESSION-HISTORY.md`; decisions in TODO §3)
 Audit remediation (D-321–D-325); AI Gate transport (D-326–D-336); phase 0 acceptance rule (D-337–D-355); plan-handoff
 fix (D-357–D-362); efficiency fix (D-363–D-375).
-## ASTROLABE 2.0 waves A–C (2026-10-02/03, D-376–D-406; details in TODO §3 and the session history)
-Wave A: `create` receipt, `run(op=wait)`, billed amount and timings in `ModelResponded`, stable `[S]` with the mask in
-`[A]`, `eval-live` runner, shell-accurate `EffectPolicy`, session key and price tiers. Wave B: screening set of 8 tasks,
-offline auditor `eval/audit`, B4 (wave A not worse over 128 runs). Wave C: declared acceptance recognised in `run`,
-provenance axis, seeds behind `SeedSelector`, hard per-task limits with `BudgetStop` and raise-and-resume, balance
-profiles, human-only clearing of test-integrity flags, strict regression gate per test identity, Studio limits and labels.
-## ASTROLABE 2.0 session 4 (2026-10-04, D-414–D-425)
-The direct protocol in the core, off by default (`Config.protocol`): specification for S0–S3, role `direct` with
-`kernel-direct/1` and 23 operations, `Roles.mainLine(protocol, shape)`, the direct `[A]` journal (Runs, Notes),
-`state(note)`, `task(finish)` with the conditional claim, epoch handoff under its own grant (`campaign/Handoffs.kt`).
-One `RunSpec` for Studio and `eval-live`; `eval-live` arms and the reference arm `loop`; nominal price of subscription
-models (paid and nominal spend apart, the money limit on their sum); per-test results of `node --test`; a per-turn
-output budget for `run` and `verify`; Studio `auto` mode asks about D-class effects. Money is judged over price profiles (D-421).
+## ASTROLABE 2.0 waves A–C and session 4 (2026-10-02/04, D-376–D-425; details in TODO §3 and the session history)
+Waves A–C: `create` receipt, `run(op=wait)`, billing and timings, `eval-live`, `EffectPolicy`, screening set, offline
+auditor, declared acceptance, provenance, hard per-task limits, strict regression gate, Studio limits. Session 4: the
+direct protocol (off by default), one `RunSpec` for Studio and `eval-live`, arm `loop`, nominal subscription prices (D-421).
+## ASTROLABE 2.0 session 4A (2026-10-05/06, D-426–D-431)
+Workflow invariants WF-1…WF-11 guarded by scenario tests (`io.astrolabe.workflow`, Studio `*WorkflowScenario*`; registry
+`docs/reference/workflow-invariants.md`; counters from `phase.counted`). Capture: one git process per snapshot, one read
+per file per capture, unreadable input is a resumable stop. Final acceptance: end checks before the pin, receipts
+restored at open, `DecisionKey` v3 (obligations, pinned inputs outside identity), terminal accept, crash windows recover.
+One declared scratch policy (`ScratchPolicy`, roots anchored at the repository root, frozen per attempt). Review cells
+bounded by their own budget. Studio: one open per action, card text attached, decisions by key per work, continue in place,
+verbatim recap. `eval-live --mode auto|ask`.
