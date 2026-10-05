@@ -10,7 +10,7 @@ TODO.md (tag `v2-wave-WA`; the full CI suite on the tag is **not awaited** — r
 fix failures with targeted tests). Results: `../session_4a_results.md`; stage tables: `../plan2/reports/SESSION-4A.md`;
 integration review: `../plan2/reports/INTEGRATION-REVIEW-4A.md`. P8: 41 DONE / 30 TODO.
 
-## Next — **session 4B (W6–W10)**, plan §6 wave W, §7 row 4B
+## Next — **session 4B (W6–W10)**, prompt `../session_4b_fix.md`, plan §6 wave W, §7 row 4B
 1. Restore (§8.7), read the CI result of tag `v2-wave-WA`, plan limits (`get_usage`).
 2. W6 task workflow specification first (t6 draft → Codex review → owner), then W7–W10 per TODO.
 3. WF suite is at 171 s of tests (limit 180): the first 4B line that adds a scenario cuts time first
