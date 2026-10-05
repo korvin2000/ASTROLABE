@@ -15,6 +15,7 @@ import io.astrolabe.evidence.Receipt
 import io.astrolabe.evidence.Receipts
 import io.astrolabe.evidence.TestedInputs
 import io.astrolabe.id.CandidateId
+import io.astrolabe.id.CanonicalEncoding
 import io.astrolabe.id.Digest
 import io.astrolabe.id.FileVersion
 import io.astrolabe.id.IdGen
@@ -32,6 +33,7 @@ import io.astrolabe.workspace.VersionRegistry
 import io.astrolabe.workspace.Workspace
 import io.astrolabe.workspace.WorkspacePath
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.Serializable
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.LinkOption
@@ -67,19 +69,53 @@ public data class Executed(
         this(command, cwd, shell, exit, outcome, counts, raw, limits, expectedExitCode, null)
 }
 
-/** Paths a check may write without touching its inputs (declared scratch/output policy, D-45): caches, build output, reports. */
-public data class ScratchPolicy(val prefixes: Set<String> = DEFAULT_PREFIXES) {
+/**
+ * Paths a check may write without touching its inputs (declared scratch/output policy, D-45): caches, build output, reports.
+ * [isScratch] keeps a check's own output out of its enumerated tested inputs, any segment matching, as D-45 always did.
+ * [excludes] is candidate identity's rule (§8.4, W3, owner №32) from [version] 2 on: an untracked path under one of
+ * [prefixes] taken as a root anchored at the repository root — `build/x`, never `src/build/x` — that is no dependency lock
+ * file. A tracked path is never excluded. [NONE] (version 0) excludes nothing: an attempt frozen without a policy keeps its
+ * v1 identity. One attempt freezes one policy before its `s0` ([io.astrolabe.AttemptConfig.scratch]).
+ */
+@Serializable
+public data class ScratchPolicy @JvmOverloads constructor(val prefixes: Set<String> = DEFAULT_PREFIXES, val version: Int = VERSION) {
     public fun isScratch(path: String): Boolean {
         val normalized = path.replace('\\', '/')
         return prefixes.any { p -> normalized == p || normalized.startsWith("$p/") || normalized.split('/').any { it == p } }
     }
 
+    /** [path] (repository-relative) is outside candidate identity under this policy: untracked, under a declared root, no lock file. */
+    @JvmOverloads
+    public fun excludes(path: String, tracked: Boolean = false): Boolean {
+        if (version < VERSION || tracked) return false
+        val normalized = path.replace('\\', '/')
+        if (normalized.substringAfterLast('/') in EnvFingerprint.LOCK_FILE_NAMES) return false
+        return prefixes.any { root -> normalized.startsWith("$root/") }
+    }
+
+    /** What a stamp or a snapshot manifest taken under this policy records of it; `null` for a policy that excludes nothing. */
+    val id: String?
+        get() = if (version < VERSION) null else Digest.ofUtf8(
+            CanonicalEncoding.encode("scratch-policy", version, listOf("roots" to prefixes.size.toString()) + prefixes.sortedWith(Stamper.PATH_ORDER).map { "root" to it }),
+        ).hex
+
     public companion object {
+        /** Anchored output roots outside identity (W3); version 1 was the unanchored match, never applied to identity. */
+        public const val VERSION: Int = 2
+
         @JvmField
         public val DEFAULT_PREFIXES: Set<String> = setOf(
             ".pytest_cache", "__pycache__", ".mypy_cache", ".ruff_cache", ".hypothesis", ".tox", ".nox",
             "build", "dist", "target", "out", ".gradle", "node_modules", ".cache", "coverage", ".coverage", "tmp", ".astrolabe/tmp",
         )
+
+        /** Excludes nothing from identity: an attempt or contract recorded before W3. */
+        @JvmField
+        public val NONE: ScratchPolicy = ScratchPolicy(emptySet(), 0)
+
+        /** The built-in policy a new attempt freezes (owner №32): [DEFAULT_PREFIXES] as anchored roots. */
+        @JvmField
+        public val BUILT_IN: ScratchPolicy = ScratchPolicy(DEFAULT_PREFIXES, VERSION)
     }
 }
 
@@ -114,6 +150,11 @@ public data class Currency @JvmOverloads constructor(
      * not compute it (the resolver then reads a current, eligible red as unknown).
      */
     val hold: RegressionHold? = null,
+    /**
+     * W3 (WD-14): the inputs the check itself rewrote while it ran — tracked files, or untracked ones outside the declared
+     * output roots — which keep its receipt from certifying; a decision request names them typed ([DecisionItem.rewrittenInputs]).
+     */
+    val rewrittenInputs: List<String> = emptyList(),
 ) {
     /** Only a current, eligible, green receipt certifies the final tree for its check. */
     val certifies: Boolean get() = applicability == Applicability.Current && eligible && green
@@ -185,22 +226,23 @@ public class Scheduler(
         val check = checks.first()
         return workspace.mutation.withLock {
             val before = stamper.report(fresh = true)
-            val paths = testedInputsFor(check, inputs)
-            val sharing = checks.filter { it === check || testedInputsFor(it, inputs) == paths }
+            val tracked = lazy { trackedPaths() }
+            val paths = testedInputsFor(check, inputs, tracked)
+            val sharing = checks.filter { it === check || testedInputsFor(it, inputs, tracked) == paths }
             val seenBefore = paths.associateWith { snapshot(it) }
             val manifests = sharing.map { manifestOf(it.inputClosure) }
             val executed = execute(workspace.root)
             val after = stamper.report(fresh = true)
             val changed = announceMoved(registry, before, after, "check ${check.id}")
             val limits = ArrayList<Limit>()
-            val tested = rescanned(check, inputs, paths, seenBefore, InputStability.Exclusive, limits)
+            val tested = rescanned(check, inputs, paths, seenBefore, InputStability.Exclusive, limits, tracked)
             Scheduled(sharing.zip(manifests).map { (each, manifest) -> recordRun(each, contractVersion, executed, before, after.candidateId, tested, manifest, ArrayList(limits)) }, changed)
         }
     }
 
     /** The tested inputs after a check: what moved against [seenBefore] (content or metadata, added or removed) is a mutation. */
-    private fun rescanned(check: Check, inputs: Collection<String>, paths: List<String>, seenBefore: Map<String, Seen>, stable: InputStability, limits: MutableList<Limit>): TestedInputs {
-        val afterPaths = testedInputsFor(check, inputs)
+    private fun rescanned(check: Check, inputs: Collection<String>, paths: List<String>, seenBefore: Map<String, Seen>, stable: InputStability, limits: MutableList<Limit>, tracked: Lazy<Set<String>> = lazy { trackedPaths() }): TestedInputs {
+        val afterPaths = testedInputsFor(check, inputs, tracked)
         val pathSet = paths.toHashSet()
         val afterSet = afterPaths.toHashSet()
         val mutated = (pathSet + afterSet).filter { it !in pathSet || it !in afterSet || snapshot(it) != seenBefore[it] }.toSet()
@@ -224,8 +266,9 @@ public class Scheduler(
     internal suspend fun pin(checks: List<Check>, inputs: Collection<String>): Pin = workspace.mutation.withLock {
         val check = checks.first()
         val before = stamper.report(fresh = true)
-        val paths = testedInputsFor(check, inputs)
-        val sharing = checks.filter { it === check || testedInputsFor(it, inputs) == paths }
+        val tracked = lazy { trackedPaths() }
+        val paths = testedInputsFor(check, inputs, tracked)
+        val sharing = checks.filter { it === check || testedInputsFor(it, inputs, tracked) == paths }
         Pin(sharing, inputs.toList(), before, paths, paths.associateWith { snapshot(it) }, sharing.map { manifestOf(it.inputClosure) })
     }
 
@@ -298,7 +341,7 @@ public class Scheduler(
         }
         try {
             val executed = execute(dir)
-            val after = scan(dir)
+            val after = scan(dir, exported.keys)
             val mutated = (exported.keys + after.keys).filter { exported[it] != after[it] }.toSet()
             val limits = arrayListOf(
                 Limit("input_stability", "isolated candidate @${report.candidateId.hash8}, verified before and after the check"),
@@ -347,6 +390,7 @@ public class Scheduler(
             outcome = outcome, parsed = executed.counts, inputClosure = check.inputClosure, testedInputs = if (concurrent) testedInputs.copy(stability = InputStability.Unknown) else testedInputs,
             raw = executed.raw, limits = limits, exitCode = executed.exit, at = clock.instant(), closureManifest = manifest, expectedExitCode = executed.expectedExitCode,
             evidenceKind = kind, checkOrigin = check.origin, evidenceDeclared = check.evidence != null, tests = executed.testsByCheck[check.id] ?: executed.tests,
+            inputPolicy = stamper.scratch.id,
         )
         receipts.record(receipt)
         aliasByReceipt[receipt.receiptId] = aliases.allocate(ids.work, receipt.receiptId, "receipt", ids.context, workspace.id).text
@@ -360,7 +404,9 @@ public class Scheduler(
         // A repository without a first commit has no base tree: every member is a dirty one.
         val base = if (report.baseCommit == Stamp.NO_COMMIT) emptyMap() else
             workspace.git.lsTree(ObjectId(report.baseCommit), recursive = true).associateBy { it.path }
-        val members = (base.keys + report.members.keys).filterNot { scratch.isScratch(it) }
+        // W3: under an output policy a tracked file is exported whatever its name; only untracked output stays behind.
+        val untracked = report.untracked.mapTo(HashSet()) { it.path }
+        val members = (base.keys + report.members.keys).filterNot { scratch.isScratch(it) && (!underPolicy || it in untracked) }
         Files.createDirectories(dir)
         val exportedPaths = WorkspacePath.of(dir)
         val copied = HashMap<String, FileVersion>()
@@ -386,15 +432,15 @@ public class Scheduler(
             }
             copied[path] = FileVersion.of(bytes)
         }
-        val seen = scan(dir)
+        val seen = scan(dir, members.toSet())
         return seen.takeIf { stamper.stamp().id == report.candidateId && it.keys == copied.keys && copied.all { (path, version) -> seen.getValue(path).version == version } }
     }
 
-    /** Content and metadata of every non-scratch file under [dir], by workspace-relative path. */
-    private fun scan(dir: Path): Map<String, Seen> = Files.walk(dir).use { stream ->
+    /** Content and metadata of every file under [dir] but scratch output, by workspace-relative path; [exported] files always count. */
+    private fun scan(dir: Path, exported: Set<String>): Map<String, Seen> = Files.walk(dir).use { stream ->
         stream.filter { Files.isRegularFile(it, LinkOption.NOFOLLOW_LINKS) }.toList()
     }.map { it.relativeTo(dir).joinToString("/") { part -> part.toString() } to it }
-        .filterNot { (path, _) -> scratch.isScratch(path) }
+        .filterNot { (path, _) -> scratch.isScratch(path) && path !in exported }
         .associate { (path, file) ->
             val attributes = Files.readAttributes(file, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
             path to Seen(FileVersion.of(Files.readAllBytes(file)), attributes.size(), attributes.lastModifiedTime(), Files.isExecutable(file))
@@ -440,6 +486,7 @@ public class Scheduler(
             outcome = result.outcome, parsed = result.counts, inputClosure = check.inputClosure,
             testedInputs = TestedInputs(result.touched.mapNotNull { path -> registry.version(path)?.let { path to it } }.toMap(), InputStability.Unknown),
             raw = result.log, limits = limits, exitCode = result.exit, at = clock.instant(), evidenceKind = check.evidenceKind, checkOrigin = check.origin, evidenceDeclared = check.evidence != null,
+            inputPolicy = stamper.scratch.id,
         )
         receipts.record(receipt)
         aliasByReceipt[receipt.receiptId] = aliases.allocate(ids.work, receipt.receiptId, "receipt", ids.context, workspace.id).text
@@ -473,11 +520,13 @@ public class Scheduler(
         val reasons = ArrayList<String>()
         refreshed.staleReason?.let { reasons += it }
         if (receipt == null) reasons += "receipt ${last.receiptId} is not in the store"
-        val eligible = (receipt?.testedInputs?.eligible ?: false) && unquiet.isEmpty()
+        val outside = receipt?.let(::movedOutsideIdentity).orEmpty()
+        val eligible = (receipt?.testedInputs?.eligible ?: false) && unquiet.isEmpty() && outside.isEmpty()
         if (receipt != null && !eligible) {
             reasons += when {
                 unquiet.isNotEmpty() -> "background run ${unquiet.joinToString(", ")} still live after the stop cancelled it: no receipt certifies the tree"
                 receipt.testedInputs.mutatedDuringCheck.isNotEmpty() -> "inputs moved during the check: ${receipt.testedInputs.mutatedDuringCheck.sorted().joinToString(", ")}"
+                outside.isNotEmpty() -> "inputs outside the candidate moved since the check: ${outside.joinToString(", ")}"
                 else -> "input stability ${receipt.testedInputs.stability.name.lowercase()} cannot certify the final tree"
             }
         }
@@ -485,7 +534,8 @@ public class Scheduler(
         // D-338: an unverified result names its cause for the decider — "cannot start python3", not just "unavailable".
         if (receipt != null && !green) reasons += "outcome ${receipt.outcome.name.lowercase()}" + (cause(receipt)?.let { ": $it" } ?: "")
         return Currency(last.receiptId, refreshed.applicability, eligible, green, reasons, red = receipt?.outcome == Outcome.Failed, mandatory = mandatory,
-            knownRed = if (mandatory) null else knownRedSince(check.id), hold = if (Regressions.of(registered)) hold(check.id, stampNow) else null)
+            knownRed = if (mandatory) null else knownRedSince(check.id), hold = if (Regressions.of(registered)) hold(check.id, stampNow) else null,
+            rewrittenInputs = receipt?.testedInputs?.mutatedDuringCheck?.sortedWith(Stamper.PATH_ORDER).orEmpty())
     }
 
     /** C1b ([Currency.knownRed]): walks this attempt's receipts of [checkId] in order; only a later `passed` one ends a red. */
@@ -544,6 +594,10 @@ public class Scheduler(
     private fun alias(receipt: Receipt): String = aliasByReceipt[receipt.receiptId] ?: aliases.byCanonical(ids.work, receipt.receiptId)?.text ?: receipt.receiptId
 
     private fun assess(check: Check, receipt: Receipt, stampNow: CandidateId?, env: Lazy<EnvFingerprint>): ApplicabilityVerdict {
+        // P2-1 (W3): stamps, tested inputs and manifests compare only under the output policy they were taken under.
+        if (receipt.inputPolicy != stamper.scratch.id && !Regressions.isBaseline(receipt)) {
+            return ApplicabilityVerdict(Applicability.Stale, "${receipt.receiptId} was recorded under output policy ${receipt.inputPolicy ?: "none"}, the attempt's is ${stamper.scratch.id ?: "none"}")
+        }
         // Re-pinning hashes the closure: only worth it when a complete closure could back a reuse proof.
         val reusable = stampNow != null && receipt.stampAfter != stampNow &&
             receipt.closureManifest?.completeness == ClosureCompleteness.Complete && receipt.checkDefinitionVersion == check.definitionVersion
@@ -560,23 +614,53 @@ public class Scheduler(
      * added or deleted member moves the membership; declared scratch output is excluded from the tree.
      */
     public fun manifestOf(closure: Closure): ClosureManifest {
+        val tracked = lazy { trackedPaths() }
         val tree = when (closure) {
             is Closure.Known -> closure.paths.toList()
             is Closure.Package -> filesUnder(closure.path)
             Closure.Unknown -> emptyList()
-        }.map { it.replace('\\', '/') }.filterNot { scratch.isScratch(it) }
-        return ClosureManifest.of(closure, tree, registry::version, excluded = { if (scratch.isScratch(it)) "declared scratch output" else null })
+        }.map { it.replace('\\', '/') }.filterNot { ownOutput(it, closure, tracked) }
+        return ClosureManifest.of(closure, tree, registry::version, excluded = { if (ownOutput(it, closure, tracked)) "declared scratch output" else null })
     }
 
     /** The paths whose stability the receipt vouches for: the declared closure minus scratch, or [inputs] for an unknown closure. */
-    public fun testedInputsFor(check: Check, inputs: Collection<String>): List<String> {
+    public fun testedInputsFor(check: Check, inputs: Collection<String>): List<String> = testedInputsFor(check, inputs, lazy { trackedPaths() })
+
+    private fun testedInputsFor(check: Check, inputs: Collection<String>, tracked: Lazy<Set<String>>): List<String> {
         val declared: Collection<String> = when (val closure = check.inputClosure) {
             is Closure.Known -> closure.paths
             is Closure.Package -> filesUnder(closure.path) + inputs
             Closure.Unknown -> if (inputs.isEmpty()) emptyList() else filesUnder(".") + inputs
         }
-        return declared.map { it.replace('\\', '/') }.filterNot { scratch.isScratch(it) }.distinct().sorted()
+        return declared.map { it.replace('\\', '/') }.filterNot { ownOutput(it, check.inputClosure, tracked) }.distinct().sorted()
     }
+
+    /**
+     * [path] is a check's own scratch output, left out of its tested inputs (D-45). Under an output policy (W3, P1-2/P1-3)
+     * a path a known closure declares and a tracked path stay inputs whatever their name: they are pinned in the receipt,
+     * and rewriting them makes the evidence ineligible.
+     */
+    private fun ownOutput(path: String, closure: Closure, tracked: Lazy<Set<String>>): Boolean =
+        scratch.isScratch(path) && !(underPolicy && (closure is Closure.Known || path in tracked.value))
+
+    private val underPolicy: Boolean get() = stamper.scratch.id != null
+
+    /** The paths of the index: what the stamp counts as tracked. */
+    private fun trackedPaths(): Set<String> = workspace.git.lsFiles().mapTo(HashSet()) { it.path }
+
+    /**
+     * P1-2 (W3): the tested inputs the candidate's identity leaves out — untracked output under a declared root that a
+     * known closure pinned — whose bytes no longer match the receipt. Read from disk, never from the cache (D-374).
+     */
+    private fun movedOutsideIdentity(receipt: Receipt): List<String> {
+        val outside = receipt.testedInputs.versions.filterKeys { stamper.scratch.excludes(it) }
+        if (outside.isEmpty()) return emptyList()
+        val tracked = trackedPaths()
+        return outside.filter { (path, version) -> path !in tracked && bytesNow(path)?.let(FileVersion::of) != version }.keys.sortedWith(Stamper.PATH_ORDER)
+    }
+
+    private fun bytesNow(path: String): ByteArray? =
+        (workspace.resolve(path, Intent.Read) as? PathResolution.Resolved)?.let { runCatching { workspace.bytes(it) }.getOrNull() }
 
     private fun filesUnder(prefix: String): List<String> {
         val root = if (prefix == "." || prefix.isEmpty() || prefix == "/") workspace.root else {

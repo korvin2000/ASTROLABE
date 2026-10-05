@@ -7,6 +7,7 @@ import io.astrolabe.id.Digest
 import io.astrolabe.id.Stamp
 import io.astrolabe.id.WorkspaceId
 import io.astrolabe.os.FileMode
+import io.astrolabe.verify.ScratchPolicy
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
@@ -352,5 +353,55 @@ class StamperTest {
             assertEquals(setOf("notes/a.txt"), Stamper.diff(added, deleted))
             assertEquals(listOf("notes/b.txt"), deleted.untracked.map { it.path })
         }
+    }
+
+    @Test
+    fun `under the output policy only untracked files below an anchored root leave identity, counted, and tracked ones stay`(@TempDir state: Path) {
+        WorkspaceFixture.create(state, scratch = ScratchPolicy.BUILT_IN) { repo ->
+            noHostExcludes(repo)
+            repo.write("build/keep.json", "[1]\n")
+            repo.commit("tracked output")
+        }.use { fixture ->
+            fixture.repo.modify("build/keep.json", "[2]\n")
+            fixture.repo.untracked("build/report.txt", "scratch\n")
+            fixture.repo.untracked("build/package-lock.json", "{}\n")
+            fixture.repo.untracked("src/out/Foo.kt", "class Foo\n")
+            fixture.repo.untracked("devtools/pkg/tmp/config", "tool\n")
+            val report = fixture.stamper.report(fresh = true)
+
+            assertEquals(listOf("build/keep.json"), report.trackedDelta.map { it.path }, "a tracked file under a root stays in identity")
+            assertEquals(listOf("build/package-lock.json", "devtools/pkg/tmp/config", "src/out/Foo.kt"), report.untracked.map { it.path },
+                "a nested name is no root, and a dependency lock file is an input wherever it is")
+            assertEquals(1, report.scratchCount)
+            assertEquals(ScratchPolicy.BUILT_IN, report.scratch)
+
+            fixture.repo.untracked("build/report.txt", "rewritten by a check\n")
+            fixture.repo.untracked("build/more/out.bin", "more\n")
+            assertEquals(report.stamp, fixture.stamper.report(fresh = true).stamp, "output under a root does not move the candidate")
+            fixture.repo.untracked("src/out/Foo.kt", "class Foo2\n")
+            assertEquals(setOf("src/out/Foo.kt"), Stamper.diff(report, fixture.stamper.report(fresh = true)))
+        }
+    }
+
+    @Test
+    fun `without a policy the stamp keeps its v1 bytes and a policy is part of the untracked manifest`(@TempDir state: Path) {
+        WorkspaceFixture.create(state) { repo -> noHostExcludes(repo) }.use { fixture ->
+            fixture.repo.untracked("notes.txt", "n\n")
+            val none = fixture.stamper.report(fresh = true)
+            assertEquals(none.stamp, Stamper(fixture.workspace, TEST_ENV).report(fresh = true).stamp, "NONE is the stamper before W3")
+            assertEquals(0, none.scratchCount)
+            val under = Stamper(fixture.workspace, TEST_ENV, scratch = ScratchPolicy.BUILT_IN).report(fresh = true)
+            assertEquals(none.untracked, under.untracked)
+            assertNotEquals(none.stamp.untrackedManifestHash, under.stamp.untrackedManifestHash, "v2 names its policy: stamps under two policies never compare equal")
+            assertEquals(none.stamp.trackedDeltaHash, under.stamp.trackedDeltaHash)
+        }
+    }
+
+    /** A host's global excludes file must not decide what the policy sees. */
+    private fun noHostExcludes(repo: TempRepo) {
+        val exclude = repo.root.resolve(".git/info/exclude")
+        Files.createDirectories(exclude.parent)
+        Files.write(exclude, ByteArray(0))
+        repo.config("core.excludesFile", exclude.toString().replace('\\', '/'))
     }
 }

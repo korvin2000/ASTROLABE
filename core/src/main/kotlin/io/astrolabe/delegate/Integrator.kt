@@ -16,6 +16,7 @@ import io.astrolabe.id.WorkspaceId
 import io.astrolabe.recover.Fence
 import io.astrolabe.store.BlobKind
 import io.astrolabe.store.BlobStore
+import io.astrolabe.verify.ScratchPolicy
 import io.astrolabe.workspace.ChangeListener
 import io.astrolabe.workspace.EnvFingerprint
 import io.astrolabe.workspace.Intent as PathIntent
@@ -183,6 +184,8 @@ public class Integrator @JvmOverloads constructor(
     private val horizon: IntegrationHorizon? = null,
     private val rebase: Rebase? = null,
     public val queue: MergeQueue = MergeQueue(),
+    /** The attempt's frozen output policy (W3): the main line and every candidate are stamped under it. */
+    private val scratch: ScratchPolicy = ScratchPolicy.NONE,
 ) {
     private val main: Workspace get() = workspaces.main
 
@@ -213,7 +216,7 @@ public class Integrator @JvmOverloads constructor(
             Fence.publish(result.dispatch.task.executionGeneration, now.generation, now.authority).refusal,
         )
         if (gaps.isNotEmpty()) return reject(result, IntegrationStep.Validate, "the result does not match its recorded dispatch", gaps)
-        val stamp = Stamper(main, env).report().candidateId
+        val stamp = Stamper(main, env, scratch = scratch).report().candidateId
         val moved = moved(result)
         if (stamp == result.packet.base!!.stamp && moved.isEmpty()) return result
         val evidence = listOfNotNull(if (stamp != result.packet.base.stamp) "main @${stamp.hash8}, result base @${result.packet.base.stamp.hash8}" else null) + moved.map { "read dependency $it moved" }
@@ -231,7 +234,7 @@ public class Integrator @JvmOverloads constructor(
     }
 
     private suspend fun merge(results: List<WriterResult>): List<Integration> {
-        val base = Stamper(main, env).report()
+        val base = Stamper(main, env, scratch = scratch).report()
         val (fresh, stale) = results.partition { it.packet.base!!.stamp == base.candidateId }
         val outcomes = ArrayList<Integration>()
         stale.forEach { outcomes += Integration.Rejected(listOf(it.handle), IntegrationStep.Freshness, "stale-for-integration", listOf("main moved to @${base.candidateId.hash8} while queued")) }
@@ -257,16 +260,16 @@ public class Integrator @JvmOverloads constructor(
             val changes = batch.flatMap { result -> result.packet.changes.map { result to it } }
             apply(candidate, changes)?.let { return outcomes + Integration.Rejected(handles, IntegrationStep.Apply, it) }
             val union = changes.map { it.second.path }.toSortedSet()
-            val testedReport = Stamper(candidate.workspace, env).report(fresh = true)
+            val testedReport = Stamper(candidate.workspace, env, scratch = scratch).report(fresh = true)
             val tested = testedReport.candidateId
             val combined = checks.verify(candidate.workspace, union, batch)
-            Stamper(candidate.workspace, env).report(fresh = true).takeIf { it.candidateId != tested }?.let { moved ->
+            Stamper(candidate.workspace, env, scratch = scratch).report(fresh = true).takeIf { it.candidateId != tested }?.let { moved ->
                 return outcomes + Integration.Rejected(handles, IntegrationStep.CombinedCheck, "combined checks changed the candidate: ${movedPathsHint(testedReport, moved)}")
             }
             if (combined.failures.isNotEmpty()) return outcomes + Integration.Rejected(handles, IntegrationStep.CombinedCheck, "the combined tree fails", combined.failures, returnsToMainLine = true)
             val gated = gates.verify(candidate.workspace, union, batch)
             if (gated.failures.isNotEmpty()) return outcomes + Integration.Rejected(handles, IntegrationStep.Gates, "contract lint or the required review refuses the combined tree", gated.failures, returnsToMainLine = true)
-            Stamper(candidate.workspace, env).report(fresh = true).takeIf { it.candidateId != tested }?.let { moved ->
+            Stamper(candidate.workspace, env, scratch = scratch).report(fresh = true).takeIf { it.candidateId != tested }?.let { moved ->
                 return outcomes + Integration.Rejected(handles, IntegrationStep.Gates, "review changed the tested candidate: ${movedPathsHint(testedReport, moved)}")
             }
             return outcomes + publish(candidate, base.candidateId, tested, batch, changes.map { it.second }, combined.receipts + gated.receipts)
@@ -290,7 +293,7 @@ public class Integrator @JvmOverloads constructor(
         val handles = batch.map { it.handle }
         val patchHash = patchHash(changes)
         return main.mutation.withLock {
-            val before = Stamper(main, env).report(fresh = true).candidateId
+            val before = Stamper(main, env, scratch = scratch).report(fresh = true).candidateId
             if (before != integrationBase) return@withLock Integration.Rejected(handles, IntegrationStep.Publish, "main moved during integration: @${before.hash8}, integration base @${integrationBase.hash8}")
             // Every postimage is read and checked before the first byte reaches the main line.
             val staged = changes.map { change ->
@@ -300,7 +303,7 @@ public class Integrator @JvmOverloads constructor(
                 }
                 change to bytes
             }
-            if (Stamper(candidate.workspace, env).report(fresh = true).candidateId != tested) return@withLock Integration.Rejected(handles, IntegrationStep.Publish, "the tested candidate changed before publication")
+            if (Stamper(candidate.workspace, env, scratch = scratch).report(fresh = true).candidateId != tested) return@withLock Integration.Rejected(handles, IntegrationStep.Publish, "the tested candidate changed before publication")
             val now = current()
             batch.firstOrNull { it.dispatch.task.contractVersion != now.contractVersion }?.let {
                 return@withLock Integration.Rejected(handles, IntegrationStep.Publish, "contract is v${now.contractVersion}, dispatched under v${it.dispatch.task.contractVersion}", archived = archive(batch))
@@ -316,7 +319,7 @@ public class Integrator @JvmOverloads constructor(
                     IntegrationPublication.replace(main, change.path, bytes)
                     registry.change(change.path, change.before, change.after, "integrated ${handles.joinToString(",")}")
                 }
-                Stamper(main, env).report(fresh = true).candidateId.also { check(it == tested) { "published tree differs from the tested candidate" } }
+                Stamper(main, env, scratch = scratch).report(fresh = true).candidateId.also { check(it == tested) { "published tree differs from the tested candidate" } }
             } catch (failure: Throwable) {
                 val recovery = runCatching { IntegrationPublication.rollback(main, registry, blobs, intents, intent) }.exceptionOrNull()
                 if (recovery != null) failure.addSuppressed(recovery)

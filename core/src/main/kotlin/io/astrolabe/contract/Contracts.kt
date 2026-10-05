@@ -220,6 +220,8 @@ public class Contracts(
         tokens: Tokens,
         protected: ProtectedPaths = ProtectedPaths(),
         cost: Money? = null,
+        /** The attempt's frozen output policy (W3), recorded in the contract; `null` records none. */
+        scratch: io.astrolabe.verify.ScratchPolicy? = null,
     ): S0Derivation {
         val request = UserRequest(idGen.next("U"), clock.instant(), text)
         val sniffed = Sniff.commands(atlas)
@@ -249,6 +251,7 @@ public class Contracts(
             authorization = Authorization(config.ceiling, config.dClass, config.capabilitySet),
             // Risk is not assessed here: incomplete discovery is unknown, never low (D-16); the pre-scan is P3.2.6.
             risk = null,
+            scratch = scratch?.takeIf { it.id != null },
         )
         return S0Derivation(contract, sniffed, primary = suites.firstOrNull { it.dir == PackageCommands.ROOT } ?: suites.firstOrNull())
     }

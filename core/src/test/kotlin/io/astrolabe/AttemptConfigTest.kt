@@ -11,6 +11,7 @@ import io.astrolabe.provider.StratumOutcome
 import io.astrolabe.provider.ToolMask
 import io.astrolabe.route.Tier
 import io.astrolabe.route.TierTable
+import io.astrolabe.verify.ScratchPolicy
 import java.math.BigDecimal
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -219,5 +220,22 @@ class AttemptConfigTest {
             tierTable = TierTable("test", profiles = mapping(linkedMapOf(Tier.High to unordered(listOf("main", "escalation")), Tier.Low to unordered(listOf("helper"))))),
         )
         return host to mutations
+    }
+
+    @Test
+    fun `a new attempt freezes the built-in output policy, and one frozen before it keeps its body and has none`() {
+        val json = Json { encodeDefaults = true }
+        val frozen = AttemptConfig.freeze(config)
+        assertEquals(ScratchPolicy.BUILT_IN, frozen.scratch)
+        val round = json.decodeFromString(AttemptConfig.serializer(), json.encodeToString(AttemptConfig.serializer(), frozen))
+        assertEquals(ScratchPolicy.BUILT_IN to frozen.fingerprint, round.scratch to round.fingerprint)
+
+        val legacy = AttemptConfig("test-harness", config, emptyMap())
+        val body = json.encodeToString(AttemptConfig.serializer(), legacy)
+        assertFalse("\"scratch\"" in body, "an attempt without a policy encodes no field, so its fingerprint is the one before W3")
+        val decoded = json.decodeFromString(AttemptConfig.serializer(), body)
+        assertEquals(ScratchPolicy.NONE to legacy.fingerprint, decoded.scratch to decoded.fingerprint)
+        assertNotEquals(legacy.fingerprint, AttemptConfig.freeze(config, "test-harness", emptyMap()).fingerprint, "the policy enters the fingerprint")
+        assertEquals(ScratchPolicy.NONE, legacy.copy(production = false).scratch, "a copy keeps the policy")
     }
 }

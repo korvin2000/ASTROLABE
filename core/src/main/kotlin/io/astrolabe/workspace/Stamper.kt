@@ -13,6 +13,7 @@ import io.astrolabe.os.StatusEntry
 import io.astrolabe.os.UntrackedFiles
 import io.astrolabe.store.Migrations
 import io.astrolabe.store.Store
+import io.astrolabe.verify.ScratchPolicy
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
@@ -75,6 +76,10 @@ public data class StampReport(
     val ignoredCount: Int?,
     /** Paths git listed that could not be read when the stamp was taken; recorded, not hashed. */
     val unreadable: List<String> = emptyList(),
+    /** The attempt's output policy the stamp was taken under (W3); [ScratchPolicy.NONE] for one frozen before it. */
+    val scratch: ScratchPolicy = ScratchPolicy.NONE,
+    /** Untracked files [scratch] kept out of identity — counted, never read (I-12: excluded explicitly, not silently). */
+    val scratchCount: Int = 0,
 ) {
     /** Every stamped member by path, tracked delta first. */
     public val members: Map<String, StampEntry> =
@@ -112,13 +117,19 @@ public data class StampReport(
  * Ignored files are excluded and counted ([StampReport.ignoredCount]). Harness state lives outside
  * the source tree by construction (D-44), so there is nothing of the harness's own to exclude; an
  * `.astrolabe/` directory *inside* the tree is repository content and is stamped like any other
- * file. Capture times and observational counters are excluded (I-05).
+ * file. Capture times and observational counters are excluded (I-05). Untracked files under the
+ * attempt's declared output roots ([scratch], W3) are excluded and counted ([StampReport.scratchCount]);
+ * the untracked manifest is then `astrolabe/untracked-manifest/v2`, which leads with
+ * `scratch-policy=<id>` so stamps taken under different policies never compare equal. [ScratchPolicy.NONE]
+ * keeps v1 byte for byte.
  */
 public class Stamper @JvmOverloads public constructor(
     private val workspace: Workspace,
     private val env: EnvFingerprint,
     /** Counting ignored files costs one `--ignored=matching` status pass over the tree. */
     private val countIgnored: Boolean = true,
+    /** The attempt's frozen output policy (§8.4, W3); every stamper, snapshot and scheduler of the attempt uses this one. */
+    public val scratch: ScratchPolicy = ScratchPolicy.NONE,
 ) {
 
     /** The candidate identity of the working tree right now; [fresh] as in [report]. */
@@ -153,6 +164,8 @@ public class Stamper @JvmOverloads public constructor(
             untracked = untracked,
             env = env,
             ignoredCount = if (countIgnored) status.entries.count { it is StatusEntry.Ignored } else null,
+            scratch = scratch,
+            scratchCount = status.entries.count { it is StatusEntry.Untracked && scratch.excludes(it.path) },
         )
     }
 
@@ -163,6 +176,9 @@ public class Stamper @JvmOverloads public constructor(
         public const val TRACKED_ENCODING_VERSION: Int = 1
 
         public const val UNTRACKED_ENCODING_VERSION: Int = 1
+
+        /** The untracked manifest under an output policy (W3): v1's lines after a leading `scratch-policy=<id>`. */
+        public const val UNTRACKED_POLICY_ENCODING_VERSION: Int = 2
 
         private val JSON = Json { prettyPrint = false; encodeDefaults = true }
 
@@ -294,6 +310,7 @@ public class Stamper @JvmOverloads public constructor(
 
     private fun untracked(status: GitStatus, fresh: Boolean, reads: ContentCache.Reads?): List<StampEntry> =
         status.entries.filterIsInstance<StatusEntry.Untracked>()
+            .filterNot { scratch.excludes(it.path) }
             .map { stampEntry(it.path, FileMode.ABSENT, fresh, reads) }
             .filter { it.type != EntryType.Deleted }
             .sortedWith(compareBy(PATH_ORDER) { it.path })
@@ -357,7 +374,9 @@ public class Stamper @JvmOverloads public constructor(
         StampEntry(path, EntryType.Deleted, FileMode.ABSENT, null, 0)
 
     private fun encode(kind: String, entries: List<StampEntry>): String {
-        val fields = ArrayList<Pair<String, String>>(entries.size * 4 + 1)
+        val fields = ArrayList<Pair<String, String>>(entries.size * 4 + 2)
+        val policy = scratch.id.takeIf { kind == "untracked-manifest" }
+        policy?.let { fields.add("scratch-policy" to it) }
         fields.add("count" to entries.size.toString())
         for (entry in entries) {
             fields.add("path" to entry.path)
@@ -365,7 +384,11 @@ public class Stamper @JvmOverloads public constructor(
             fields.add("mode" to entry.mode.octal)
             fields.add("digest" to (entry.digest?.hex ?: "deleted"))
         }
-        val version = if (kind == "tracked-delta") TRACKED_ENCODING_VERSION else UNTRACKED_ENCODING_VERSION
+        val version = when {
+            kind == "tracked-delta" -> TRACKED_ENCODING_VERSION
+            policy != null -> UNTRACKED_POLICY_ENCODING_VERSION
+            else -> UNTRACKED_ENCODING_VERSION
+        }
         return CanonicalEncoding.encode(kind, version, fields)
     }
 }
@@ -514,11 +537,14 @@ public data class EnvFingerprint(
 
 /**
  * Diagnosis for a stamp that moved under a check (F-123, F-133): the moved non-ignored paths, bounded to
- * [limit] plus a count, and the hint that build and test artifacts must be gitignored to leave the stamp alone.
+ * [limit] plus a count, and the hint that build and test artifacts must be gitignored — or, under an output policy
+ * (W3), written below one of its declared roots — to leave the stamp alone.
  */
 internal fun movedPathsHint(before: StampReport, after: StampReport, limit: Int = 10): String {
     val moved = Stamper.diff(before, after).toList()
     if (moved.isEmpty()) return "no stamped path moved (the environment fingerprint changed)"
     val shown = moved.take(limit).joinToString(", ") + if (moved.size > limit) " (+${moved.size - limit} more)" else ""
-    return "moved non-ignored paths: $shown; gitignore build and test artifacts so checks leave the stamp unchanged"
+    val roots = after.scratch.takeIf { it.id != null }?.prefixes?.sortedWith(Stamper.PATH_ORDER)
+    val under = roots?.let { " or write them under a declared output root (${it.joinToString(", ") { root -> "$root/" }})" }.orEmpty()
+    return "moved non-ignored paths: $shown; gitignore build and test artifacts$under so checks leave the stamp unchanged"
 }

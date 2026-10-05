@@ -2,6 +2,7 @@ package io.astrolabe.atlas
 
 import io.astrolabe.id.Digest
 import io.astrolabe.os.Git
+import io.astrolabe.workspace.SnapshotEntry
 import io.astrolabe.workspace.liveWorkspace
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -308,11 +309,22 @@ public data class Atlas(
          * read once: hashed, outlined, and its imports resolved against the other paths found.
          */
         @JvmStatic
-        public fun build(root: Path): Atlas {
+        public fun build(root: Path): Atlas = build(root, emptyMap())
+
+        /**
+         * [build] that takes the hash of a file no outline parser models ([Language.Other]) from [captured] — the entries
+         * this open's own capture read (W3; D-427 one read per file) — when the size it scanned matches, instead of reading
+         * it again; every other file is read as before, and such a file's outline comes on demand ([outline]). The rows are
+         * the ones a read would give: an unparsed file contributes its size and hash only. The atlas is orientation, never
+         * identity (§7.1, I-05).
+         */
+        internal fun build(root: Path, captured: Map<String, SnapshotEntry>): Atlas {
             val canonical = canonicalRoot(root)
             val scan = scanRepository(canonical)
             val known = scan.files.mapTo(HashSet()) { it.path }
-            val parsed = parseAll(canonical, scan.files)
+            val parsed = parseAll(canonical, scan.files) { file ->
+                captured[file.path]?.takeIf { it.present && it.sizeBytes == file.size && Language.of(file.path) == Language.Other }?.digest?.hash8
+            }
             val resolver = ImportResolver(known, parsed.outlines)
             val rows = scan.files.mapNotNull { buildRow(it, parsed, resolver, known) }.sortedBy { it.path }
             return Atlas(canonical, rows, scan.collapsed.sortedBy { it.path }).seedOutlines(parsed.outlines)
@@ -657,10 +669,14 @@ internal class ParsedFiles(
     val hashes: Map<String, String>,
 )
 
-internal fun parseAll(root: Path, files: List<ScannedFile>): ParsedFiles {
+internal fun parseAll(root: Path, files: List<ScannedFile>, captured: (ScannedFile) -> String? = { null }): ParsedFiles {
     val outlines = LinkedHashMap<String, Outline>(files.size)
     val hashes = HashMap<String, String>(files.size)
     for (file in files) {
+        captured(file)?.let { hash8 ->
+            hashes[file.path] = hash8
+            continue
+        }
         val bytes = readRelative(root, file.path) ?: continue
         hashes[file.path] = Digest.of(bytes).hash8
         outlines[file.path] = Outline.of(file.path, bytes)

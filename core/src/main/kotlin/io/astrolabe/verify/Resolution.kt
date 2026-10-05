@@ -12,6 +12,8 @@ import io.astrolabe.id.Digest
 import io.astrolabe.id.Identities
 import io.astrolabe.register.Mark
 import io.astrolabe.register.Register
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -47,6 +49,10 @@ public data class ObligationResult @JvmOverloads constructor(
     val findings: List<Finding> = emptyList(),
     val origin: Origin? = null,
     val humanOnly: Boolean = false,
+    /** W3 (WD-14): the inputs its check rewrote while it ran, which keep the result from passing; not encoded when empty. */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val rewrittenInputs: List<String> = emptyList(),
 ) {
     init {
         require(obligation.isNotBlank() && detail.isNotBlank()) { "a result names its obligation and says why" }
@@ -97,6 +103,14 @@ public data class DecisionItem @JvmOverloads constructor(
     val findings: List<Finding> = emptyList(),
     val by: String? = null,
     val humanOnly: Boolean = false,
+    /**
+     * W3 (WD-14, c15): the inputs the obligation's check rewrote while it ran — tracked files or untracked ones outside the
+     * declared output roots. They stay inputs, so the evidence cannot certify the tree: a host offers to accept the
+     * candidate as it is, which records the obligation `accepted`, never `verified`. Not encoded when empty.
+     */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val rewrittenInputs: List<String> = emptyList(),
 )
 
 /**
@@ -393,6 +407,10 @@ public data class Resolved(
     val undecided: List<ObligationResult>
         get() = results.filter { r -> gaps.any { it.obligation == r.obligation && it.kind != GapKind.Other } && !r.executedFailure }
 
+    /** [undecided] as the items of an acceptance-decision request, the rewritten inputs typed (W3). */
+    val decisionItems: List<DecisionItem>
+        get() = undecided.map { DecisionItem(it.obligation, it.kind, it.status, it.detail, it.findings, it.by, it.humanOnly, it.rewrittenInputs) }
+
     /** Reviewer rejections behind a [Resolution.Rework]: their findings reach the agent in a pinned block (D-341). */
     val rejections: List<ObligationResult> get() = results.filter { r -> r.reviewFailure && gaps.any { it.obligation == r.obligation } }
 }
@@ -401,17 +419,19 @@ public data class Resolved(
 public object Obligations {
     /**
      * A `run:` item or campaign check from its receipt's [currency]: passed only when current, eligible and green;
-     * failed only when current, eligible and red; everything else — no receipt, stale, ineligible, timed out,
-     * unavailable, inconclusive, not run — is unverified.
+     * failed only when current, eligible and red — or current and red with inputs the check itself rewrote: a factual
+     * failure stays red, an input mutation never turns it into a gap a decision could accept (W3, P1-4); everything
+     * else — no receipt, stale, ineligible, timed out, unavailable, inconclusive, not run — is unverified.
      */
     @JvmStatic
     public fun run(id: String, criterion: String, currency: Currency?): ObligationResult = when {
         currency?.receiptId == null -> ObligationResult(id, ObligationKind.Run, ResultStatus.Unverified, "$id: $criterion — no receipt")
         currency.certifies -> ObligationResult(id, ObligationKind.Run, ResultStatus.Passed, "$id: $criterion — green", currency.receiptId)
-        currency.applicability == Applicability.Current && currency.eligible && currency.red ->
+        currency.applicability == Applicability.Current && currency.red && (currency.eligible || currency.rewrittenInputs.isNotEmpty()) ->
             ObligationResult(id, ObligationKind.Run, ResultStatus.Failed, "$id: $criterion — " + currency.reasons.ifEmpty { listOf("outcome failed") }.joinToString("; "), currency.receiptId)
         else -> ObligationResult(id, ObligationKind.Run, ResultStatus.Unverified,
-            "$id: $criterion — " + currency.reasons.ifEmpty { listOf("receipt ${currency.receiptId} does not certify the current tree") }.joinToString("; "), currency.receiptId)
+            "$id: $criterion — " + currency.reasons.ifEmpty { listOf("receipt ${currency.receiptId} does not certify the current tree") }.joinToString("; "), currency.receiptId,
+            rewrittenInputs = currency.rewrittenInputs)
     }
 
     /**

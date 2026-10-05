@@ -3,6 +3,7 @@ package io.astrolabe.workspace
 import io.astrolabe.os.FileMode
 import io.astrolabe.os.RepositoryForm
 import io.astrolabe.os.UnsupportedRepositoryForm
+import io.astrolabe.verify.ScratchPolicy
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
@@ -322,6 +323,30 @@ class DirtyStateTest {
             kotlin.test.assertIs<RestoreResult.Restored>(shadow.restore(0))
             assertEquals("def a():\n    return 'user'\n", String(fixture.bytes("src/a.py"), StandardCharsets.UTF_8))
             assertEquals("keep me\n", String(fixture.bytes("notes.txt"), StandardCharsets.UTF_8))
+        }
+    }
+
+    @Test
+    fun `a writer that only adds output under a declared root never fails a capture under the output policy`(@TempDir state: Path) {
+        WorkspaceFixture.create(state, scratch = ScratchPolicy.BUILT_IN) { repo ->
+            val exclude = repo.root.resolve(".git/info/exclude")
+            Files.createDirectories(exclude.parent)
+            Files.write(exclude, ByteArray(0))
+            repo.config("core.excludesFile", exclude.toString().replace('\\', '/'))
+        }.use { fixture ->
+            fixture.repo.untracked("notes/n.txt", "kept\n")
+            fixture.repo.untracked("build/old.txt", "output\n")
+            var n = 0
+            // A dev server writing build output through the whole capture: the raw git status differs at every recheck (P2-3).
+            fixture.dirtyState.beforeRecheck = { fixture.repo.untracked("build/new-${++n}.txt", "output $n\n") }
+
+            val snapshot = fixture.dirtyState.capture(fresh = true)
+
+            assertEquals(1, n, "one attempt: output under a root is no change of what was captured")
+            assertEquals(listOf("notes/n.txt"), snapshot.entries.map { it.path })
+            assertEquals(ScratchPolicy.BUILT_IN.id, snapshot.scratchPolicy)
+            assertEquals(1, snapshot.scratchCount)
+            assertEquals(snapshot, fixture.dirtyState.latest, "the instance keeps its own last capture for the atlas")
         }
     }
 }
