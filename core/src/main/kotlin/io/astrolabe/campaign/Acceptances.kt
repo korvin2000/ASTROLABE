@@ -4,6 +4,7 @@ import io.astrolabe.id.AttemptId
 import io.astrolabe.id.CandidateId
 import io.astrolabe.id.ContextId
 import io.astrolabe.id.Digest
+import io.astrolabe.id.FileVersion
 import io.astrolabe.id.Identities
 import io.astrolabe.id.WorkId
 import io.astrolabe.store.Migrations
@@ -64,7 +65,21 @@ public data class PendingCompletion(
      * definitions, digested — so the results are reused only for the same set; `null` for an increment, or a record before W1.
      */
     val obligationSet: String? = null,
+    /**
+     * WR (P1-1): the inputs outside candidate identity the [results]' receipts pinned, at their bytes when the completion was
+     * asked about; the [results] are reused only while they still read so, and the [key] names them.
+     */
+    val outsideInputs: Map<String, FileVersion> = emptyMap(),
 ) {
+    /** The constructor before [outsideInputs] (WR). Kept for Java callers. */
+    public constructor(
+        id: String, work: WorkId, attempt: AttemptId, incrementId: String?, cell: ContextId?, contractVersion: Int, baseStamp: CandidateId,
+        resultingStamp: CandidateId, patchHash: Digest?, envId: Digest, registerVersion: Int?, flags: List<String>, results: List<ObligationResult>,
+        other: List<String>, gaps: List<Gap>, code: StopCode, evidence: List<String>, summary: String?, requestId: String, status: PendingStatus, closedReason: String?,
+        acknowledged: List<String>, obligationSet: String?,
+    ) : this(id, work, attempt, incrementId, cell, contractVersion, baseStamp, resultingStamp, patchHash, envId, registerVersion, flags, results, other, gaps, code,
+        evidence, summary, requestId, status, closedReason, acknowledged, obligationSet, emptyMap())
+
     /** The constructor before [obligationSet] (W1). Kept for Java callers. */
     public constructor(
         id: String, work: WorkId, attempt: AttemptId, incrementId: String?, cell: ContextId?, contractVersion: Int, baseStamp: CandidateId,
@@ -72,7 +87,7 @@ public data class PendingCompletion(
         other: List<String>, gaps: List<Gap>, code: StopCode, evidence: List<String>, summary: String?, requestId: String, status: PendingStatus, closedReason: String?,
         acknowledged: List<String>,
     ) : this(id, work, attempt, incrementId, cell, contractVersion, baseStamp, resultingStamp, patchHash, envId, registerVersion, flags, results, other, gaps, code,
-        evidence, summary, requestId, status, closedReason, acknowledged, null)
+        evidence, summary, requestId, status, closedReason, acknowledged, null, emptyMap())
 
     /** The constructor before [acknowledged] (P8.C.10). Kept for Java callers. */
     public constructor(
@@ -80,7 +95,7 @@ public data class PendingCompletion(
         resultingStamp: CandidateId, patchHash: Digest?, envId: Digest, registerVersion: Int?, flags: List<String>, results: List<ObligationResult>,
         other: List<String>, gaps: List<Gap>, code: StopCode, evidence: List<String>, summary: String?, requestId: String, status: PendingStatus, closedReason: String?,
     ) : this(id, work, attempt, incrementId, cell, contractVersion, baseStamp, resultingStamp, patchHash, envId, registerVersion, flags, results, other, gaps, code,
-        evidence, summary, requestId, status, closedReason, emptyList(), null)
+        evidence, summary, requestId, status, closedReason, emptyList(), null, emptyMap())
 
     init {
         require(id.isNotBlank() && requestId.isNotBlank()) { "a pending completion has an id and a request id" }
@@ -99,8 +114,11 @@ public data class PendingCompletion(
         Resolver.resolve(results, other, decision?.takeIf { it.appliesTo(resultingStamp, contractVersion) && it.incrementId == incrementId }, reworkSpent = true)
             .copy(acknowledged = acknowledged)
 
-    /** The [DecisionKey] of the request asked about this completion: its scope, candidate, contract version and undecided obligations (WD-10). */
-    public fun key(): String = DecisionKey.of(incrementId, resultingStamp, contractVersion, resolve(null).undecided.map { it.obligation })
+    /**
+     * The [DecisionKey] of the request asked about this completion: its scope, candidate, contract version, undecided
+     * obligations (WD-10) and pinned inputs outside identity (WR).
+     */
+    public fun key(): String = DecisionKey.of(incrementId, resultingStamp, contractVersion, resolve(null).undecided.map { it.obligation }, outsideInputs)
 }
 
 /**

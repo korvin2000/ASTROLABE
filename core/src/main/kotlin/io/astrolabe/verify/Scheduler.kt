@@ -333,7 +333,9 @@ public class Scheduler(
             val report = stamper.report(fresh = true)
             if (retryOf != null && (report.candidateId != retryOf.stampBefore ||
                     report.env.envId != retryOf.envId || !report.env.envKnown)) return null
-            Triple(report, manifestOf(check.inputClosure), export(report, dir))
+            // WR P1-3: a declared closure's every input goes with the candidate, one outside its identity included.
+            val declared = if (check.inputClosure == Closure.Unknown) emptyList() else testedInputsFor(check, inputs)
+            Triple(report, manifestOf(check.inputClosure), export(report, dir, declared))
         }
         if (exported == null) {
             deleteTree(dir)
@@ -398,8 +400,12 @@ public class Scheduler(
         return receipt
     }
 
-    /** Copies the stamped tree into [dir]; `null` when a member could not be read or a copy does not verify. */
-    private fun export(report: StampReport, dir: Path): Map<String, Seen>? {
+    /**
+     * Copies the stamped tree into [dir], and every [declared] input the stamp leaves out (untracked output under a root,
+     * an ignored file) from disk; `null` when a member or a declared input could not be read or a copy does not verify —
+     * a declared input is never silently left behind, so isolation is refused and the check runs exclusively (WR P1-3).
+     */
+    private fun export(report: StampReport, dir: Path, declared: Collection<String> = emptyList()): Map<String, Seen>? {
         if (report.unreadable.isNotEmpty() || stamper.stamp().id != report.candidateId) return null
         // A repository without a first commit has no base tree: every member is a dirty one.
         val base = if (report.baseCommit == Stamp.NO_COMMIT) emptyMap() else
@@ -432,7 +438,17 @@ public class Scheduler(
             }
             copied[path] = FileVersion.of(bytes)
         }
-        val seen = scan(dir, members.toSet())
+        for (path in declared.filterNot { it in copied || report.members[it]?.type == io.astrolabe.workspace.EntryType.Deleted }) {
+            val source = (workspace.resolve(path, Intent.Read) as? PathResolution.Resolved)?.real ?: return null
+            if (!Files.exists(source, LinkOption.NOFOLLOW_LINKS)) continue
+            if (!Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS)) return null
+            val bytes = bytesNow(path) ?: return null
+            val target = (exportedPaths.resolve(path, Intent.Read) as? PathResolution.Resolved)?.real ?: return null
+            Files.createDirectories(target.parent)
+            Files.write(target, bytes)
+            copied[path] = FileVersion.of(bytes)
+        }
+        val seen = scan(dir, copied.keys)
         return seen.takeIf { stamper.stamp().id == report.candidateId && it.keys == copied.keys && copied.all { (path, version) -> seen.getValue(path).version == version } }
     }
 
@@ -657,6 +673,18 @@ public class Scheduler(
         if (outside.isEmpty()) return emptyList()
         val tracked = trackedPaths()
         return outside.filter { (path, version) -> path !in tracked && bytesNow(path)?.let(FileVersion::of) != version }.keys.sortedWith(Stamper.PATH_ORDER)
+    }
+
+    /**
+     * WR P1-1: the inputs outside candidate identity that [receipts] pinned — untracked output under a declared root a known
+     * closure named — at their bytes on disk now (an absent one is left out), never from the cache (D-374). The candidate
+     * does not name these bytes, so a pending completion and its [DecisionKey] do; no pin outside identity reads nothing.
+     */
+    internal fun outsideIdentity(receipts: Collection<Receipt>): Map<String, FileVersion> {
+        val pinned = receipts.flatMap { it.testedInputs.versions.keys }.filterTo(sortedSetOf()) { stamper.scratch.excludes(it) }
+        if (pinned.isEmpty()) return emptyMap()
+        val tracked = trackedPaths()
+        return pinned.filter { it !in tracked }.mapNotNull { path -> bytesNow(path)?.let { path to FileVersion.of(it) } }.toMap()
     }
 
     private fun bytesNow(path: String): ByteArray? =

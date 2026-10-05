@@ -45,6 +45,7 @@ class FinalizationScenarioTest {
         REENTRY to { finalization(REENTRY, body = ::reEntryThenAccept) },
         VOID to { finalization(VOID, body = ::voidThenPolicyAccept) },
         RED to { finalization(RED, gate = { red }, body = ::redGate) },
+        APPLIED to { finalization(APPLIED, body = ::appliedThenStrengthened) },
     )
     private val played by lazy { Scenario.concurrently(plays.keys) { plays.getValue(it)() } }
 
@@ -58,6 +59,57 @@ class FinalizationScenarioTest {
 
     @Test
     fun `a red final gate still fails the campaign`() = played.getValue(RED).getOrThrow()
+
+    @Test
+    fun `an item added after an applied accept is asked anew, and a crash between Finishing and Finished needs no second acceptance`() =
+        played.getValue(APPLIED).getOrThrow()
+
+    /**
+     * WR P1-2 and P1-4. The host is Studio's shape: a kept answer is found by the request's key (D-430). The user's accept
+     * applies and the entry dies right after the applied record; an unverified item is then added at the same revision —
+     * the stored accept does not name it, so the user is asked again under a new key. The user accepts that; the entry dies
+     * between `Finishing` and `Finished`; the reopen completes on the applied record with no check and no question.
+     */
+    private suspend fun appliedThenStrengthened(s: Scenario) {
+        val asked = ArrayList<AcceptanceDecisionRequest>()
+        val kept = HashSet<String>()
+        s.decide { r ->
+            asked += r
+            if (r.key in kept) AcceptanceDecision(r.id, r.contractRevision, r.candidate, DecisionKind.Accept, Decider.User, "user", "accepted as it is") else null
+        }
+        val first = s.play(::edit)
+        assertEquals(CampaignOutcome.WaitingForInput, first.outcome, first.state?.reason)
+        val request = asked.last { it.incrementId == null }
+        kept += request.key
+        s.reopen()
+        s.controller.crashAfterFinalApplied = { throw Crash() }
+        val applied = runCatching { s.play { emptyList() } }.exceptionOrNull()
+        s.controller.crashAfterFinalApplied = null
+        assertTrue(applied is Crash, "the fault point after the applied record did not fire: $applied")
+
+        s.campaign!!.contracts.strengthen(s.request.work, Acceptance.Run("AC-2", printing, Origin.Model("AC-1")))
+        s.reopen()
+        val strengthened = s.play { emptyList() }
+        assertEquals(CampaignOutcome.WaitingForInput, strengthened.outcome, strengthened.state?.reason)
+        val reasked = asked.last { it.incrementId == null }
+        assertNotEquals(request.key, reasked.key, "P1-2: the new obligation set is a new question")
+        assertTrue(reasked.items.any { it.obligation == "AC-2" }, "P1-2: the user is asked about AC-2: ${reasked.items.map { it.obligation }}")
+
+        kept += reasked.key
+        s.reopen()
+        val held = receipts(s.campaign!!)
+        s.controller.crashAfterFinishing = { throw Crash() }
+        val finishing = runCatching { s.play { emptyList() } }.exceptionOrNull()
+        s.controller.crashAfterFinishing = null
+        assertTrue(finishing is Crash, "the fault point between Finishing and Finished did not fire: $finishing")
+        val questions = asked.size
+        s.reopen()
+        val done = s.play { emptyList() }
+        assertEquals(CampaignOutcome.Completed, done.outcome, "P1-4: ${done.state?.reason}")
+        assertEquals(held, receipts(s.campaign!!), "P1-4: a check ran after the accept")
+        assertEquals(questions, asked.size, "P1-4: asked again: ${asked.drop(questions).map { (it.incrementId ?: "campaign") to it.items.map { i -> i.obligation } }}")
+        assertTrue(s.adapter!!.calls.isEmpty(), "P1-4: the model was called")
+    }
 
     private suspend fun reEntryThenAccept(s: Scenario) {
         val asked = ArrayList<AcceptanceDecisionRequest>()
@@ -189,6 +241,7 @@ class FinalizationScenarioTest {
         const val REENTRY = "re-entry"
         const val VOID = "void"
         const val RED = "red"
+        const val APPLIED = "applied"
 
         val printing: Command = shell("type ${DirtyRepo.OUTPUT}", "cat ${DirtyRepo.OUTPUT}")
         val red: Command = shell("type $FAILING & exit /b 1", "cat $FAILING; exit 1")
