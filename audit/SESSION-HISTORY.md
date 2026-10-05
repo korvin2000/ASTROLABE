@@ -788,3 +788,12 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - First live screening of both arms (16 runs, deepseek flash, ≈ 0.19 USD): 8/8 each; the loop is cheaper on short tasks.
   Owner: the loop is a yardstick, the core is kept and made cheaper; money is judged over price profiles (D-421).
 - Left: P8.D.7 (crash-window residue, before `Direct` is switched on), P8.C.17 (verify cap, Gradle wrapper, node tails).
+
+## 2026-10-05: ASTROLABE 2.0 session 4A stage 1 — wave W: scenario guards, capture cost, final acceptance (D-426–D-428)
+- Run in budget mode (weekly limit 80 → 83 %); lines were background Opus sub-agents in worktrees, reviews Codex at medium effort.
+- W0: scenario harness on the real composition, dirty-repository fixture, `phase.counted` counters, WF registry; the WF suite
+  runs at every merge (CLAUDE.md § Workflow). Baseline: open at 1500 untracked files = 1535 git processes (WD-01).
+- W2: one git process per snapshot, one read per capture; open 1536 → 37 git processes; unreadable input is a resumable stop.
+  Codex caught a stale-bytes path in the shared-read recheck (metadata trust), fixed with an NTFS ChangeTime proof.
+- W1: end checks before the pin, receipts restored at open, `DecisionKey`, terminal accept; Codex P1: reused results
+  ignored a strengthened contract — fixed. Owner: no re-review after fix rounds. Next: stage 2 (W3–W5, gate W-A).

@@ -2,39 +2,39 @@
 
 Rewritten every session (≤40 lines). Workflow: `CLAUDE.md` § Workflow. State snapshot: `actual_state.md`.
 **Active program: ASTROLABE 2.0** — plan `../ASTROLABE-2-PLAN.md` (changes only via its §17), status = phase P8 in
-`TODO.md` (`rg -n '^#### P8' TODO.md`), cards/reports `../plan2/`, session 4 findings `../session_4_results.md`.
+`TODO.md` (`rg -n '^#### P8\.W\.' TODO.md`), cards/reports `../plan2/`, diagnostics `../ASTROLABE-DIAGNOSTICS-2026-10-05.md`.
 
-**Checkpoint (2026-10-04, session 4 closed):** the direct protocol is in the core, off by default
-(`Config.protocol = Structured`): Dp3 specification for S0–S3 (D-414), D1 role / kernel / schemas / switch (D-419),
-D2 anchor and `state(note)` (D-422), D3 `finish` and epoch handoff (D-423), D3r integration fixes (D-425). Also merged:
-B7 one `RunSpec` (D-415), B5 arms and the reference arm `loop` (D-418), C16 nominal price of subscription models
-(D-417), C15 hotfix tails (D-416, D-420, D-424), Studio steps (root repo). P8: **35 DONE / 36 TODO** (11 added 2026-10-05: wave W).
+**Checkpoint (2026-10-05, session 4A stage 1 closed):** W0 (D-426), W2 (D-427) and W1 (D-428) are merged and `main` is
+pushed. The WF suite `:core:test --tests 'io.astrolabe.workflow.*'` (177–188 s of tests on Windows) runs at every merge (CLAUDE.md
+§ Workflow, `../plan2/COMMON.md`). Guards green: WF-2, WF-3, WF-4, WF-5/6/7 (core part). Registry:
+`docs/reference/workflow-invariants.md`. Stage table and limit spend: `../plan2/reports/SESSION-4A.md`.
+P8: 38 DONE / 33 TODO.
 
-## Next — session 4A first (`../session_4a_fix.md`; wave W, owner №30; `rg -n '^#### P8\.W\.' TODO.md`), then 4B; the items below (session 5, plan §7) wait for Gate P8.W
-1. **P8.D.7 first** — before `Direct` is switched on anywhere: orphan handoff recovery before sequence-changing
-   transitions, fact retention by the cell's protocol. Codex review (owner: remaining reviews go to Codex).
-2. P8.C.18 (module gaps from the verdicts; changes the structured `look` schema, so **before D4**) → D4 (golden `[S]`,
-   ≤ 15 direct fixtures, protocol choice in Studio) → D5; E1; B6. Before D5: P8.C.17 item 1, `summary.csv`, re-pricing in the auditor.
-3. Read the fast CI result of the session-4 push first (compile + ABI); the full suite runs only on a wave tag.
+## Next — **stage 2 of session 4A** (prompt `../session_4a_fix.md` §0 "Stage 2", relaunch with the same prompt)
+1. Restore the state (§8.7), read the fast CI result of the stage-1 push, check plan limits (`get_usage`; stop rules §0).
+2. **W3 (P8.W.3)** — spec first (one page, `docs/verification/scheduler.md` §8.4, D-45, D-53, D-374, I-12), Codex
+   review of the spec, then code. Owner of `workspace/Stamper.kt` after W2. Inputs: WD-06, WD-14; c5, c15; W2 tails below.
+3. **W4 (P8.W.4)** after W1 — owner of `campaign/Controller.kt` and `cell/Cell.kt` now. Also: a failed open emits no
+   `phase.counted` (W0 review); c13, c14.
+4. **W5 (P8.W.5)**, root repo (Studio) — decision lookup by `AcceptanceDecisionRequest.key` (`DecisionKey`, D-428);
+   `*WorkflowScenario*` guards WF-1, WF-6 (Studio), WF-8, WF-9 (Studio), WF-10, WF-11; c6, c8, c16.
+5. One Codex integration review of merged `main` over c1–c16 (`--effort medium`), then Gate P8.W-A: live
+   `real-dirty-repo` in `auto` and `ask` on a cheap model, counters → `SESSION-4A.md` baseline; push `main`, tag
+   `v2-wave-WA`; `../session_4a_results.md`.
 
-## Owner positions and rules from session 4
-- The `loop` arm is a yardstick only; the core is kept and made cheaper, not replaced.
-- D-421: money is judged over price profiles with output/input ratios of about 2, 3, 5 and "tens", decisions rest first
-  on flows (requests, uncached input, cache read, output). First screening (8 tasks, deepseek flash, one repeat): both
-  arms 8/8; the core loses on uncached input (cache-prefix misses), on turns after green (22 of 75) and on
-  `state.patch`-only turns (13 of 75).
-- Push to `main` is allowed after the checks pass. Economy rules: plan §8.8; line estimates were 3–5× too high.
-## Tails (owners in `../session_4_results.md` §4)
-- D4: golden `[S]` of the other structured roles; an S0 run with `Direct`; "poll the handle" text; the ninth role in
-  Studio settings; fixture "`state(blocked)` after a split replans"; no rollback across D1 on a live `stateRoot`.
-- H1: `kind=probe` check, typed review approval for both scopes. H3: resume after a quota refill needs a runtime-owned
-  block cause; `maxHandoffs` is not in the facade or `RunSpec`. H8: writer packet per dispatch, integrity flags per epoch.
-- Studio: no price input for an unpriced subscription model; `StatsService` vs the core on a billed subscription call;
-  nothing of session 4 was checked in a browser.
+## Owner rules (2026-10-05)
+- Codex review once per line at `--effort medium`, no re-review after a fix round; after a stage everything is merged
+  into `main` and pushed. No Fable in session 4A; lines Opus, tests t1/background.
+- WF suite over budget: 188 s of tests on merged `main` (limit 180 s) — the first stage-2 line cuts time (largest: `DirtyRepoScenarioTest` 120 s).
 
-## Debts, branches, last gate
-Frozen debts (plan §12): D-254, D-70/D-71/D-241, D-252, D-113/D-120, D-124/D-244, D-200; D-66, D-28, D-92. Older tails of
-sessions 3 (C10, C11, C14, C3) and of the hotfix (state tool, loop gate) are untouched. Kept branches: `v2/BL`, `v2/B4`,
-`v2/B4a3` (never merge), `v2/C10x` (`e157dc7`, do not merge as is). Transient: `StamperTest`, Windows `ProcOwnershipTest`,
-FX-22. Gate P8.D is open (D7, D4, D5). Session 4 was verified by targeted tests per line and L2 on every merged state, no
-full suite; CI fast job green at `b0901dc`, the session-4 push is unread. `.llm-memory` cards lag behind sessions 3–4.
+## Stage-1 tails (owners)
+- W2: a modified tracked CRLF/filtered file is read twice (`DirtyState.kt:375-378`); `hash-object` recovery-blob reads
+  uncounted (`ShadowRef.kt:446`); unreadable input during `open` capture still throws to the host; reopen re-reads the
+  whole tree and Atlas reads all of `devtools/` (→ W3 scratch).
+- W1: c4, c9, c12 repeat with explanatory text on a third entry; restored receipts lack the `Scheduler.kt:536-538`
+  workspace filter (not shown exploitable); rebound items carry provenance `accepted`.
+- W0: counters are deltas on shared instances; `real-dirty-repo` `dir` accepts absolute/UNC paths (`eval-live` `Tasks.kt`);
+  scenario event barrier assumes lossless delivery; public `CountedPhase` duplicates the event's string field.
+
+**Then:** session 4B (W6–W10) after Gate P8.W-A; session 5 (D7 first, C18, D4, D5, E1, B6, C17) after Gate P8.W. Frozen
+debts (plan §12), kept branches `v2/BL`, `v2/B4`, `v2/B4a3`, `v2/C10x` (never merge), transient tests — as before.

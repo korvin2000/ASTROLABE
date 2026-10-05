@@ -2,9 +2,10 @@
 
 Snapshot: TODO owns task status; CONTINUE-TASK.md owns next work; audit/SESSION-HISTORY.md records history.
 
-## Counts (2026-10-04, from `#### P… · STATUS` headings)
-**P0–P6 185/185 DONE.** P8 (ASTROLABE 2.0, plan `../ASTROLABE-2-PLAN.md`): **35 DONE / 23 TODO** — waves A, B (with B5,
-B7) and C (with C15, C16) done; wave D: Dp3, D1–D3 done, D7 (review residue), D4, D5 open; then H, E, F, release.
+## Counts (2026-10-05, from `#### P… · STATUS` headings)
+**P0–P6 185/185 DONE.** P8 (ASTROLABE 2.0, plan `../ASTROLABE-2-PLAN.md`): **38 DONE / 33 TODO** — waves A, B (with B5,
+B7) and C (with C15, C16) done; wave D: Dp3, D1–D3 done, D7, D4, D5 open; wave W (workflow stabilization, sessions 4A/4B):
+W0–W2 done (scenario guards `io.astrolabe.workflow`, WF suite 188 s), W3–W10 open; then H, E, F, release.
 Recount: `rg -c '^#### P8\..*· DONE' TODO.md`. P7 out of scope except the AI Gate transport. **Live:** hotfix D-407–D-413
 verified offline only; one live screening of `eval-live` (16 runs, deepseek flash) passed 8/8 in both arms.
 
