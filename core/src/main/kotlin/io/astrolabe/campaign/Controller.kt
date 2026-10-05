@@ -1421,6 +1421,7 @@ public class Controller @JvmOverloads public constructor(
      * re-acceptance that needs a decision waits for one (D-343); the stop state is returned when it does.
      */
     private suspend fun refreshRegressions(c: OpenedCampaign, scheduler: Scheduler, authority: Authority): CampaignState? {
+        restoreFinal(c, scheduler)
         for (increment in checkNotNull(c.state).graph.increments.filter { it.status == IncrementStatus.Verified }) {
             val assessed = completionEvidence(c, increment)
             if (increment.accept.any { id -> (c.contract.acceptance(id) is Acceptance.Check || c.contract.acceptance(id) is Acceptance.Review) &&
@@ -1440,6 +1441,22 @@ public class Controller @JvmOverloads public constructor(
         val outcome = harnessVerify(c, ids, "regression", """{"what":"acceptance","ids":[${obligations.joinToString(",") { "\"$it\"" }}]}""")
         c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, text = "regression obligations re-run (campaign end): ${obligations.joinToString(", ")} · ${outcome.body.lineSequence().joinToString(" ")}", at = clock.instant()))
         return reaccept(c, scheduler, authority)
+    }
+
+    /**
+     * WR P1-4: a finalization interrupted between `Finishing` and `Finished` reopens with its ledger reset (`Resumed`). When
+     * the campaign gate's applied record still speaks for this candidate — contract, environment, obligation set and pinned
+     * inputs outside identity unchanged — the verified increments are accepted again with the gate's decision ([rebind]):
+     * no check and no question, before the ordinary re-acceptance, which reads the increments' own decisions only.
+     */
+    private fun restoreFinal(c: OpenedCampaign, scheduler: Scheduler) {
+        if (checkNotNull(c.state).ledger.unfinished().isEmpty()) return
+        val acceptances = Acceptances(c.store, clock)
+        val applied = acceptances.pending(c.ids.work, c.ids.attempt).lastOrNull { it.incrementId == null && it.status == PendingStatus.Applied } ?: return
+        val report = c.stamper.report(fresh = true)
+        if (applied.resultingStamp != report.candidateId || applied.contractVersion != c.contract.version || applied.envId != report.env.envId ||
+            applied.obligationSet != obligationSet(c, c.contract) || applied.outsideInputs != outsideInputs(c, scheduler, applied.results)) return
+        rebind(c, scheduler, report, acceptances.current(c.ids.work, c.ids.attempt, null, report.candidateId, c.contract.version), restoring = true)
     }
 
     /**
@@ -2977,17 +2994,26 @@ public class Controller @JvmOverloads public constructor(
      * WD-08: the verified increments accepted at another candidate than [report]'s — the end checks moved the tree after
      * them — accepted again there from the current receipts and the campaign gate's [decision], with no cell and no model
      * call (FX-42), so the ledger the finish records holds at that candidate. `null` when every one holds; else why not.
+     * [restoring] (WR P1-4): also those accepted there already whose ledger entries an interrupted finalization reset — each
+     * with the decision its accepted items name, which an earlier gate request may have made.
      */
-    private fun rebind(c: OpenedCampaign, scheduler: Scheduler, report: io.astrolabe.workspace.StampReport, decision: DecisionRecord?): String? {
+    private fun rebind(c: OpenedCampaign, scheduler: Scheduler, report: io.astrolabe.workspace.StampReport, decision: DecisionRecord?, restoring: Boolean = false): String? {
         val stamp = report.candidateId
-        val graph = checkNotNull(c.state).graph
-        for (increment in graph.increments.filter { it.status == IncrementStatus.Verified && graph.evidence[it.id]?.stamp != stamp }) {
+        val state = checkNotNull(c.state)
+        val graph = state.graph
+        val reset = if (restoring) state.ledger.unfinished().toSet() else emptySet()
+        val decisions = if (restoring) Acceptances(c.store, clock).decisions(c.ids.work, c.ids.attempt) else emptyList()
+        for (increment in graph.increments.filter { it.status == IncrementStatus.Verified && (graph.evidence[it.id]?.stamp != stamp || it.requirementIds.any { r -> r in reset }) }) {
             val cell = increment.cells.lastOrNull() ?: return "final acceptance at @${stamp.hash8}: ${increment.id} has no cell to accept it again"
             val proposal = CompletionProposal(increment.id, PacketStatus.Done.wire, c.contract.version, stamp, stamp, null, report.env.envId)
             val evidence = completionEvidence(c, increment)
+            // An accepted item's provenance names the request its decision answered (I7).
+            val named = graph.evidence[increment.id]?.takeIf { it.stamp == stamp }?.provenance.orEmpty()
+                .filter { it.how == io.astrolabe.verify.ProvenanceKind.Accepted }.mapNotNull { it.evidenceRef }.distinct().singleOrNull()
+            val own = named?.let { request -> decisions.lastOrNull { !it.spent && it.decision.requestId == request && it.appliesTo(stamp, c.contract.version) } }
             // The gate's decision named these items at this candidate; it speaks for the increment's own (I7: accepted, never verified).
             val result = Verifier().accept(proposal, c.contract, increment, Register.empty(cell, increment.id, increment.title), checkNotNull(c.state).ledger, stamp,
-                currencies(c, scheduler, stamp), evidence.verdicts, evidence.unavailable, decision = decision?.copy(incrementId = increment.id) ?: evidence.decision, reworkSpent = true, acknowledged = acknowledged(c))
+                currencies(c, scheduler, stamp), evidence.verdicts, evidence.unavailable, decision = (own ?: decision)?.copy(incrementId = increment.id) ?: evidence.decision, reworkSpent = true, acknowledged = acknowledged(c))
             if (result !is CompletionResult.Accepted) {
                 val why = (result as? CompletionResult.Pending)?.missing ?: (result as? CompletionResult.Refused)?.missing
                 return "final acceptance at @${stamp.hash8}: verified ${increment.id} does not hold at the candidate the end checks left: ${why?.joinToString("; ") ?: result::class.simpleName}"

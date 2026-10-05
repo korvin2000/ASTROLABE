@@ -405,7 +405,9 @@ public class Scheduler(
      * an ignored file) from disk; `null` when a member or a declared input could not be read or a copy does not verify —
      * a declared input is never silently left behind, so isolation is refused and the check runs exclusively (WR P1-3).
      */
-    private fun export(report: StampReport, dir: Path, declared: Collection<String> = emptyList()): Map<String, Seen>? {
+    private fun export(report: StampReport, dir: Path): Map<String, Seen>? = export(report, dir, emptyList())
+
+    private fun export(report: StampReport, dir: Path, declared: Collection<String>): Map<String, Seen>? {
         if (report.unreadable.isNotEmpty() || stamper.stamp().id != report.candidateId) return null
         // A repository without a first commit has no base tree: every member is a dirty one.
         val base = if (report.baseCommit == Stamp.NO_COMMIT) emptyMap() else
