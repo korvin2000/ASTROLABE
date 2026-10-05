@@ -37,12 +37,13 @@ internal class WorkspaceFixture private constructor(
     val os: LocalOs,
     val clock: FakeClock,
     env: EnvFingerprint,
+    scratch: io.astrolabe.verify.ScratchPolicy,
 ) : AutoCloseable {
 
     val workspace: Workspace = Workspace(WorkspaceId("ws-1"), repo.root, repo.git)
     val ids: Identities = Identities(work = WorkId("work-1"), attempt = AttemptId("attempt-1"))
     val registry: VersionRegistry = VersionRegistry(workspace)
-    val stamper: Stamper = Stamper(workspace, env)
+    val stamper: Stamper = Stamper(workspace, env, scratch = scratch)
     val dirtyState: DirtyState = DirtyState(workspace, store.blobs, stamper, ids, clock)
     val preimages: Preimages = Preimages(workspace, store.blobs, ids, clock)
 
@@ -104,7 +105,7 @@ internal class WorkspaceFixture private constructor(
 
     companion object {
         /** A repository with one commit, a project store under [stateRoot] and a frozen clock. */
-        fun create(stateRoot: Path, env: EnvFingerprint = TEST_ENV, build: (TempRepo) -> Unit = {}): WorkspaceFixture {
+        fun create(stateRoot: Path, env: EnvFingerprint = TEST_ENV, scratch: io.astrolabe.verify.ScratchPolicy = io.astrolabe.verify.ScratchPolicy.NONE, build: (TempRepo) -> Unit = {}): WorkspaceFixture {
             val repo = TempRepo.create()
             try {
                 repo.write("src/a.py", "def a():\n    return 1\n")
@@ -114,7 +115,7 @@ internal class WorkspaceFixture private constructor(
                 build(repo)
                 val clock = FakeClock(FIXED_INSTANT)
                 val store = Store.open(stateRoot, repo.git, clock)
-                return WorkspaceFixture(repo, store, LocalOs(clock), clock, env)
+                return WorkspaceFixture(repo, store, LocalOs(clock), clock, env, scratch)
             } catch (failure: Throwable) {
                 repo.close()
                 throw failure

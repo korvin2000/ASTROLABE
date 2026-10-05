@@ -2,6 +2,9 @@ package io.astrolabe
 
 import io.astrolabe.cell.RoleTexts
 import io.astrolabe.id.Digest
+import io.astrolabe.verify.ScratchPolicy
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
@@ -40,8 +43,8 @@ public data class Controls(
 
 /**
  * The frozen configuration of one attempt (invariant 12): harness version, validated config snapshot, role-text
- * versions and controls. Mid-attempt configuration changes have no effect until the next attempt (P1.9.4).
- * [fingerprint] enters compile and attempt fingerprints (D-38).
+ * versions, controls and the output policy. Mid-attempt configuration changes have no effect until the next attempt
+ * (P1.9.4). [fingerprint] enters compile and attempt fingerprints (D-38).
  */
 @Serializable(with = AttemptConfig.Serializer::class)
 public class AttemptConfig(
@@ -51,10 +54,22 @@ public class AttemptConfig(
     public val controls: Controls = Controls.ALL,
     /** False only for evaluation research arms; such attempts are ineligible for promotion. */
     public val production: Boolean = true,
+    scratch: ScratchPolicy?,
 ) {
+    /** The constructor before [scratch] (W3): an attempt without an output policy. Kept for Java callers. */
+    @JvmOverloads
+    public constructor(harnessVersion: String, config: Config, roleTextVersions: Map<String, String>, controls: Controls = Controls.ALL, production: Boolean = true) :
+        this(harnessVersion, config, roleTextVersions, controls, production, null)
+
     public val config: Config = configSnapshot(config)
     public val roleTextVersions: Map<String, String> = frozenMap(roleTextVersions)
-    private val snapshot = AttemptConfigSnapshot(harnessVersion, this.config, this.roleTextVersions, controls, production)
+
+    /**
+     * The output policy of the attempt (§8.4, W3, owner №32), frozen before its `s0`: every stamper, snapshot and scheduler
+     * of the attempt uses it. An attempt frozen before W3 has none ([ScratchPolicy.NONE]: its v1 identity is kept).
+     */
+    public val scratch: ScratchPolicy = scratch ?: ScratchPolicy.NONE
+    private val snapshot = AttemptConfigSnapshot(harnessVersion, this.config, this.roleTextVersions, controls, production, scratch?.takeIf { it.id != null })
     public val fingerprint: Digest = Digest.ofUtf8("astrolabe/attempt-config/v2\n" + STABLE_JSON.encodeToString(AttemptConfigSnapshot.serializer(), snapshot))
 
     /** Every construction path, including copy and decoding, takes a fresh immutable snapshot. */
@@ -64,7 +79,7 @@ public class AttemptConfig(
         roleTextVersions: Map<String, String> = this.roleTextVersions,
         controls: Controls = this.controls,
         production: Boolean = this.production,
-    ): AttemptConfig = AttemptConfig(harnessVersion, config, roleTextVersions, controls, production)
+    ): AttemptConfig = AttemptConfig(harnessVersion, config, roleTextVersions, controls, production, scratch.takeIf { it.id != null })
 
     public operator fun component1(): String = harnessVersion
     public operator fun component2(): Config = config
@@ -83,7 +98,7 @@ public class AttemptConfig(
         }
         override fun deserialize(decoder: Decoder): AttemptConfig {
             val value = decoder.decodeSerializableValue(AttemptConfigSnapshot.serializer())
-            return AttemptConfig(value.harnessVersion, value.config, value.roleTextVersions, value.controls, value.production)
+            return AttemptConfig(value.harnessVersion, value.config, value.roleTextVersions, value.controls, value.production, value.scratch)
         }
     }
 
@@ -104,7 +119,7 @@ public class AttemptConfig(
          */
         @JvmStatic
         public fun freeze(config: Config, harnessVersion: String = Astrolabe.VERSION, roleTextVersions: Map<String, String> = RoleTexts.versions(config)): AttemptConfig {
-            val attempt = AttemptConfig(harnessVersion, config, roleTextVersions)
+            val attempt = AttemptConfig(harnessVersion, config, roleTextVersions, scratch = ScratchPolicy.BUILT_IN)
             val violations = attempt.productionViolations()
             if (violations.isNotEmpty()) throw InvalidConfig(violations)
             return attempt
@@ -116,7 +131,7 @@ public class AttemptConfig(
          */
         @JvmStatic
         public fun researchArm(config: Config, controls: Controls, harnessVersion: String = Astrolabe.VERSION, roleTextVersions: Map<String, String> = emptyMap()): AttemptConfig =
-            AttemptConfig(harnessVersion, config, roleTextVersions, controls, production = false)
+            AttemptConfig(harnessVersion, config, roleTextVersions, controls, production = false, scratch = ScratchPolicy.BUILT_IN)
     }
 }
 
@@ -128,6 +143,10 @@ private data class AttemptConfigSnapshot(
     val roleTextVersions: Map<String, String>,
     val controls: Controls = Controls.ALL,
     val production: Boolean = true,
+    /** Not encoded when absent, so an attempt frozen before W3 keeps its body and its fingerprint. */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val scratch: ScratchPolicy? = null,
 )
 
 public class InvalidConfig(public val violations: List<ConfigViolation>) :

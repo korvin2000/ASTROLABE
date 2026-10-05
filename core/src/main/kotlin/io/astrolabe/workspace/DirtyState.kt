@@ -15,6 +15,8 @@ import io.astrolabe.os.UnsupportedRepositoryForm
 import io.astrolabe.os.UntrackedFiles
 import io.astrolabe.store.BlobKind
 import io.astrolabe.store.BlobStore
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.nio.charset.StandardCharsets
@@ -100,6 +102,18 @@ public data class Snapshot(
     /** Paths git listed that could not be read; recorded rather than silently dropped. */
     val unreadable: List<String> = emptyList(),
     @Serializable(with = InstantSerializer::class) val capturedAt: Instant,
+    /**
+     * The id of the attempt's output policy ([io.astrolabe.verify.ScratchPolicy.id], W3) when it kept untracked output
+     * out of this manifest; `null` before W3. Neither field is encoded at its default, so a manifest without a policy
+     * keeps its stored bytes.
+     */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val scratchPolicy: String? = null,
+    /** Untracked files the policy kept out, counted and never read (I-12). */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val scratchCount: Int = 0,
 ) {
     init {
         require(turn >= 0) { "turn must be ≥ 0, got $turn" }
@@ -118,7 +132,8 @@ public data class Snapshot(
     public val paths: Set<String> get() = entries.mapTo(LinkedHashSet()) { it.path }
 
     private fun encode(): String {
-        val fields = ArrayList<Pair<String, String>>(entries.size * 4 + staged.size * 4 + 3)
+        val fields = ArrayList<Pair<String, String>>(entries.size * 4 + staged.size * 4 + 4)
+        scratchPolicy?.let { fields.add("scratch-policy" to it) }
         fields.add("base" to baseCommit)
         fields.add("entries" to entries.size.toString())
         for (entry in entries.sortedWith(compareBy(Stamper.PATH_ORDER) { it.path })) {
@@ -134,11 +149,14 @@ public data class Snapshot(
             fields.add("staged.mode" to entry.mode.octal)
             fields.add("staged.digest" to entry.digest.hex)
         }
-        return CanonicalEncoding.encode("snapshot", ENCODING_VERSION, fields)
+        return CanonicalEncoding.encode("snapshot", if (scratchPolicy == null) ENCODING_VERSION else POLICY_ENCODING_VERSION, fields)
     }
 
     public companion object {
         public const val ENCODING_VERSION: Int = 1
+
+        /** A manifest taken under an output policy (W3): v1's lines after a leading `scratch-policy=<id>`. */
+        public const val POLICY_ENCODING_VERSION: Int = 2
 
         private val JSON = Json { prettyPrint = false; encodeDefaults = true }
 
@@ -226,7 +244,7 @@ public class DirtyState(
         var attempt = 1
         while (true) {
             try {
-                return captureOnce(turn, attempt, fresh, reads)
+                return captureOnce(turn, attempt, fresh, reads).also { latest = it }
             } catch (changed: SnapshotIntegrityError) {
                 if (attempt >= CAPTURE_ATTEMPTS) throw changed
                 attempt++
@@ -237,6 +255,14 @@ public class DirtyState(
     /** Test seam: runs after an attempt's reads and before its integrity recheck, with the attempt number. */
     internal var beforeRecheck: (attempt: Int) -> Unit = {}
 
+    /**
+     * The snapshot this instance captured last — on an open, that open's own capture (`s0` or the reopen's drift
+     * capture), never an older stored one. The atlas takes the digests of files it does not parse from it (W3).
+     */
+    @Volatile
+    internal var latest: Snapshot? = null
+        private set
+
     /** Git object ids of captured content by digest, computed from the capture's own read (WD-01); [ShadowRef] indexes with them. */
     private val objectIds = java.util.concurrent.ConcurrentHashMap<Digest, String>()
 
@@ -244,6 +270,7 @@ public class DirtyState(
     internal fun objectId(digest: Digest): String? = objectIds[digest]
 
     private fun captureOnce(turn: Int, attempt: Int, fresh: Boolean, reads: ContentCache.Reads): Snapshot {
+        val scratch = stamper.scratch
         val status = workspace.git.status(UntrackedFiles.ALL, includeIgnored = true)
         val index = workspace.git.lsFiles()
         val entries = LinkedHashMap<String, SnapshotEntry>()
@@ -258,7 +285,8 @@ public class DirtyState(
             when (entry) {
                 is StatusEntry.Ordinary -> read(entry.path, entry.worktreeMode)?.let { entries[entry.path] = it }
                 is StatusEntry.Unmerged -> read(entry.path, entry.worktreeMode)?.let { entries[entry.path] = it }
-                is StatusEntry.Untracked -> read(entry.path, FileMode.ABSENT)?.let { entries[entry.path] = it }
+                // W3: untracked output under the attempt's declared roots is outside identity: listed by git, never read.
+                is StatusEntry.Untracked -> if (!scratch.excludes(entry.path)) read(entry.path, FileMode.ABSENT)?.let { entries[entry.path] = it }
                 is StatusEntry.Renamed -> {
                     read(entry.path, entry.worktreeMode)?.let { entries[entry.path] = it }
                     if (entry.origin == ChangeOrigin.RENAME) {
@@ -300,7 +328,8 @@ public class DirtyState(
         }
         if (captured != recoverable || base != report.baseCommit || recheck != report.candidateId ||
             workspace.git.lsFiles() != index ||
-            workspace.git.status(UntrackedFiles.ALL, includeIgnored = true) != status
+            // W3: output written under a declared root during the capture is no change of what it captured.
+            outsideScratch(workspace.git.status(UntrackedFiles.ALL, includeIgnored = true)) != outsideScratch(status)
         ) {
             throw SnapshotIntegrityError("workspace or index changed during dirty-state capture; retry acquisition")
         }
@@ -312,8 +341,14 @@ public class DirtyState(
             stampId = report.stamp.id,
             ignoredCount = status.entries.count { it is StatusEntry.Ignored },
             capturedAt = clock.instant(),
+            scratchPolicy = scratch.id,
+            scratchCount = report.scratchCount,
         )
     }
+
+    /** [status] without the untracked entries the attempt's output policy keeps out of identity. */
+    private fun outsideScratch(status: GitStatus): GitStatus =
+        status.copy(entries = status.entries.filterNot { it is StatusEntry.Untracked && stamper.scratch.excludes(it.path) })
 
     /** The bytes of [entry], read back from its recovery blob. */
     public fun bytesOf(entry: SnapshotEntry): ByteArray? = entry.digest?.let { blobs.get(it).also { bytes -> workspace.blobRead(bytes.size) } }

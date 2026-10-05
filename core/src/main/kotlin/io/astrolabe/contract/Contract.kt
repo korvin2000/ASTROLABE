@@ -17,6 +17,8 @@ import io.astrolabe.id.InstantSerializer
 import io.astrolabe.id.WorkId
 import io.astrolabe.workspace.PathPattern
 import io.astrolabe.workspace.ProtectedPaths
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -254,6 +256,14 @@ public data class Contract(
     val authorization: Authorization,
     val risk: Risk? = null,
     val amendmentsPending: List<Amendment> = emptyList(),
+    /**
+     * The output policy the attempt froze before its `s0` (§8.4, W3, owner №32), recorded for authority and display:
+     * untracked output under these anchored roots is outside the candidate. `null` for a contract derived before W3,
+     * whose attempt has none. Not encoded when absent, so an older contract keeps its bytes.
+     */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val scratch: io.astrolabe.verify.ScratchPolicy? = null,
 ) {
     init {
         require(version >= 1) { "contract version starts at 1" }

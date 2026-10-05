@@ -112,13 +112,18 @@ class CadenceTest {
             val full = io.astrolabe.verify.Check(Checks.FULL, io.astrolabe.verify.CheckKind.Full, io.astrolabe.verify.Selector.All, io.astrolabe.evidence.Closure.Unknown, io.astrolabe.verify.CostClass.Expensive, io.astrolabe.verify.Trigger.CampaignEnd, command = mutating)
             c.checks.replace(full)
             assertEquals("NotCertified", result(), "a passing suite that changes its inputs is ineligible")
-            val scratch = Command(if (WINDOWS) listOf("cmd.exe", "/d", "/s", "/c", "mkdir build&echo scratch>build/report.txt&type pytest_pass.txt") else listOf("/bin/sh", "-c", "mkdir -p build; echo scratch > build/report.txt; cat pytest_pass.txt"))
+            // W3: `src/build/` is a check's own output (any segment, D-45) but no declared output root (anchored), so it moves the stamp.
+            val scratch = Command(if (WINDOWS) listOf("cmd.exe", "/d", "/s", "/c", "mkdir src\\build&echo scratch>src\\build\\report.txt&type pytest_pass.txt") else listOf("/bin/sh", "-c", "mkdir -p src/build; echo scratch > src/build/report.txt; cat pytest_pass.txt"))
             c.checks.replace(full.copy(command = scratch))
             assertEquals("NotCertified", result(), "a later suite stamp cannot silently replace the quality gate candidate")
             assertContains(last.toString(), "moved non-ignored paths: ")
-            assertContains(last.toString(), "build/report.txt")
+            assertContains(last.toString(), "src/build/report.txt")
             assertContains(last.toString(), "gitignore build and test artifacts")
             assertTrue(SqliteReceipts(c.store, clock).forCheck(Checks.FULL).last().testedInputs.eligible, "declared scratch output leaves the suite eligible")
+            // W3 (owner №32): output under a declared root is outside the candidate, so the gates and the suite certify one stamp.
+            val rooted = Command(if (WINDOWS) listOf("cmd.exe", "/d", "/s", "/c", "mkdir build&echo scratch>build\\report.txt&type pytest_pass.txt") else listOf("/bin/sh", "-c", "mkdir -p build; echo scratch > build/report.txt; cat pytest_pass.txt"))
+            c.checks.replace(full.copy(command = rooted))
+            assertEquals("Green", result(), "output under a declared root moves no candidate: $last")
         }
     }
 

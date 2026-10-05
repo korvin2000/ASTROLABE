@@ -16,6 +16,7 @@ import io.astrolabe.id.AttemptId
 import io.astrolabe.id.WorkId
 import io.astrolabe.verify.Checks
 import io.astrolabe.verify.RunnerCommands
+import io.astrolabe.verify.ScratchPolicy
 import io.astrolabe.workspace.ProtectedPaths
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -135,6 +136,22 @@ class DeriveS0Test {
             val custom = ProtectedPaths(writeDeniedPrefixes = setOf(".git", "infra"), writeDeniedNames = setOf("yarn.lock"))
             val derived = contracts.deriveS0(WorkId("W-2"), AttemptId("a1"), "add a flag", Atlas.build(repo.root), config, Tokens(1), custom)
             assertEquals(Scope(listOf("**"), listOf(".git/", "infra/", "yarn.lock")), derived.contract.scope)
+        }
+    }
+
+    @Test
+    fun `a derived contract records the attempt's output policy, and one without a policy encodes no field`() {
+        TempRepo.create().use { repo ->
+            repo.write("src/app.py", "def total(items):\n    return sum(items)\n")
+            repo.commit("initial")
+            val atlas = Atlas.build(repo.root)
+            val recorded = contracts.deriveS0(WorkId("W-1"), AttemptId("a1"), "Fix it", atlas, config, Tokens(500_000), scratch = ScratchPolicy.BUILT_IN).contract
+            assertEquals(ScratchPolicy.BUILT_IN, recorded.scratch)
+            val json = kotlinx.serialization.json.Json { encodeDefaults = true }
+            assertEquals(recorded, json.decodeFromString(Contract.serializer(), json.encodeToString(Contract.serializer(), recorded)))
+            val none = contracts.deriveS0(WorkId("W-2"), AttemptId("a1"), "Fix it", atlas, config, Tokens(500_000), scratch = ScratchPolicy.NONE).contract
+            assertNull(none.scratch, "a policy that excludes nothing is recorded as none")
+            assertFalse("\"scratch\"" in json.encodeToString(Contract.serializer(), none), "a contract without a policy keeps the bytes it had before W3")
         }
     }
 }

@@ -6,6 +6,8 @@ import io.astrolabe.id.Digest
 import io.astrolabe.id.FileVersion
 import io.astrolabe.id.Identities
 import io.astrolabe.id.InstantSerializer
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.time.Instant
@@ -161,7 +163,51 @@ public data class Receipt(
     val evidenceDeclared: Boolean = false,
     /** What a run of a harness regression check reported test by test (P8.C.10); `null` for any other check or an older receipt. */
     val tests: TestOutcomes? = null,
+    /**
+     * The id of the output policy ([io.astrolabe.verify.ScratchPolicy.id], W3) the run's stamps, tested inputs and closure
+     * manifest were taken under; `null` before W3 or under none. A receipt is current only for the policy it was recorded
+     * under. Not encoded at its default, so an older receipt keeps its bytes.
+     */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val inputPolicy: String? = null,
 ) {
+    /** The constructor before [inputPolicy] (W3). Kept for Java callers. */
+    public constructor(
+        receiptId: String,
+        ids: Identities,
+        checkId: String,
+        acceptanceIds: List<String>,
+        command: List<String>,
+        cwd: String?,
+        shell: Boolean,
+        stampBefore: CandidateId,
+        stampAfter: CandidateId,
+        envId: Digest,
+        verifierVersion: String,
+        checkDefinitionVersion: Digest,
+        contractVersion: Int,
+        outcome: Outcome,
+        parsed: Counts?,
+        inputClosure: Closure,
+        testedInputs: TestedInputs,
+        raw: Digest?,
+        limits: List<Limit>,
+        reuseOf: String?,
+        exitCode: Int?,
+        at: Instant,
+        closureManifest: ClosureManifest?,
+        expectedExitCode: Int?,
+        evidenceKind: EvidenceKind?,
+        checkOrigin: Origin?,
+        evidenceDeclared: Boolean,
+        tests: TestOutcomes?,
+    ) : this(
+        receiptId, ids, checkId, acceptanceIds, command, cwd, shell, stampBefore, stampAfter, envId, verifierVersion, checkDefinitionVersion,
+        contractVersion, outcome, parsed, inputClosure, testedInputs, raw, limits, reuseOf, exitCode, at, closureManifest, expectedExitCode,
+        evidenceKind, checkOrigin, evidenceDeclared, tests, null,
+    )
+
     /** The constructor before [tests] (P8.C.10). Kept for Java callers. */
     public constructor(
         receiptId: String,

@@ -552,7 +552,6 @@ public class Controller @JvmOverloads public constructor(
         ids: Identities, protected: ProtectedPaths, workspace: Workspace, counting: PhaseMark, opened: Int,
     ): OpenedCampaign {
         val registry = VersionRegistry(workspace)
-        val stamper = Stamper(workspace, EnvFingerprint.compute(env))
         val journal = Journal(store, clock)
         // C3: a run that died mid-session is closed at its last event before this open writes anything (minutes limit).
         LimitSessions.closeDangling(journal, ids, idGen)
@@ -572,6 +571,8 @@ public class Controller @JvmOverloads public constructor(
         if (effective != io.astrolabe.configSnapshot(requested)) {
             events?.emit(AgentEvent.Warning(ids, "config-frozen", "the configuration changed during attempt ${request.attempt.value}; it takes effect at the next attempt (invariant 12)"))
         }
+        // W3: the output policy the attempt froze before its s0 (none for one frozen earlier); every stamper of it uses this one.
+        val stamper = Stamper(workspace, EnvFingerprint.compute(env), scratch = frozen.scratch)
         val dirty = DirtyState(workspace, store.blobs, stamper, ids, clock)
         val shadow = ShadowRef(request.work, request.attempt, workspace, store, dirty, os, clock)
 
@@ -580,11 +581,12 @@ public class Controller @JvmOverloads public constructor(
         val s0 = if (first) dirty.capture(0, fresh = true).also { shadow.open(it) } else checkNotNull(shadow.manifest(0))
         val external = if (first) emptyList() else drift(shadow, dirty)
 
-        val atlas = Atlas.build(workspace.root)
+        // W3: files the atlas does not parse take their hash from this open's own capture instead of a second read.
+        val atlas = Atlas.build(workspace.root, dirty.latest?.entries?.associateBy { it.path }.orEmpty())
         val layered = PluggedLayers.of(layers, effective.flags, journal, ids, idGen, clock)
         // §3.7 impact_prescan (D-40): incomplete discovery over the request's candidate paths; it feeds both shape selections.
         val impactPrescan = ImpactPrescan.of(atlas, WORKSPACE, ImpactPrescan.inputs(atlas, WORKSPACE, request.text), kb.contractAnchors(), layered.tiers)
-        val derived = contracts.deriveS0(request.work, request.attempt, request.text, atlas, effective, policy.tokens, protected, policy.cost)
+        val derived = contracts.deriveS0(request.work, request.attempt, request.text, atlas, effective, policy.tokens, protected, policy.cost, scratch = frozen.scratch)
         val stored = contracts.current(request.work)
         check(stored == null || stored.attemptId == request.attempt) { "work ${request.work.value} is attempt ${stored?.attemptId?.value}; a new attempt is P2" }
         // §3.5: a new contract carries the shape its campaign runs in; the tool masks derive from it.
@@ -1937,7 +1939,7 @@ public class Controller @JvmOverloads public constructor(
 
     /** One acceptance-decision request for [pending] (D-338); an answer for another request, revision or candidate is no answer. */
     private suspend fun ask(c: OpenedCampaign, ids: Identities, pending: PendingCompletion, waiting: io.astrolabe.verify.Resolved, authority: Authority): DecisionRecord? {
-        val items = waiting.undecided.map { DecisionItem(it.obligation, it.kind, it.status, it.detail, it.findings, it.by, it.humanOnly) }
+        val items = waiting.decisionItems
         if (items.isEmpty()) return null
         val diff = runCatching { campaignReview(c, authority).diffBlob(c.s0.stampId, pending.resultingStamp).first.hex }.getOrNull()
         val request = AcceptanceDecisionRequest(
@@ -3012,7 +3014,7 @@ public class Controller @JvmOverloads public constructor(
         val results = ArrayList<ObligationResult>()
         when (suite) {
             is FullSuite.Red -> results += ObligationResult(FULL_SUITE, ObligationKind.Run, ResultStatus.Failed, "final full suite red: ${suite.detail}")
-            is FullSuite.NotCertified -> results += ObligationResult(FULL_SUITE, ObligationKind.Run, ResultStatus.Unverified, "final full suite could not certify: ${suite.detail}")
+            is FullSuite.NotCertified -> results += ObligationResult(FULL_SUITE, ObligationKind.Run, ResultStatus.Unverified, "final full suite could not certify: ${suite.detail}", rewrittenInputs = suite.rewritten)
             FullSuite.Green -> results += ObligationResult(FULL_SUITE, ObligationKind.Run, ResultStatus.Passed, "final full suite green", c.checks[Checks.FULL]?.last?.receiptId)
             FullSuite.Undeclared, null -> Unit
         }
@@ -3071,7 +3073,7 @@ public class Controller @JvmOverloads public constructor(
         data object Green : FullSuite
         data object Undeclared : FullSuite
         data class Red(val detail: String) : FullSuite
-        data class NotCertified(val detail: String) : FullSuite
+        data class NotCertified(val detail: String, val rewritten: List<String> = emptyList()) : FullSuite
     }
 
     /** Runs the declared full suite through the `verify` tool path (receipts, closures, redaction) and journals the result. */
@@ -3088,12 +3090,14 @@ public class Controller @JvmOverloads public constructor(
         val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, ids, clock)
         val required = (gates + listOfNotNull(check?.id)).mapNotNull { c.checks[it] }
         val currency = required.associate { it.id to scheduler.currency(it, stamp) }
-        val red = required.firstOrNull { currency.getValue(it.id).let { c -> c.red && c.applicability == io.astrolabe.verify.Applicability.Current && c.eligible } }
+        // W3 (P1-4): a factual red stays red when its check also rewrote an input; only certifying needs eligibility.
+        val red = required.firstOrNull { currency.getValue(it.id).let { c -> c.red && c.applicability == io.astrolabe.verify.Applicability.Current && (c.eligible || c.rewrittenInputs.isNotEmpty()) } }
         val gap = required.firstOrNull { !currency.getValue(it.id).certifies }
         val certification = when {
             red != null -> FullSuite.Red("${red.id} ${red.last?.receiptId} failed at @${stamp.hash8}")
             gap != null -> FullSuite.NotCertified("${gap.id}: ${currency.getValue(gap.id).reasons.joinToString("; ").ifEmpty { gap.last?.outcome?.name?.lowercase() ?: "not run" }} at @${stamp.hash8}" +
-                if (after.candidateId != before.candidateId) " · the gates and suite moved the stamp from @${before.candidateId.hash8}: ${movedPathsHint(before, after)}" else "")
+                if (after.candidateId != before.candidateId) " · the gates and suite moved the stamp from @${before.candidateId.hash8}: ${movedPathsHint(before, after)}" else "",
+                required.flatMap { currency.getValue(it.id).rewrittenInputs }.distinct().sortedWith(Stamper.PATH_ORDER))
             else -> null
         }
         if (check == null) {
