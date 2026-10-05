@@ -4717,6 +4717,7 @@ public final class io/astrolabe/campaign/PendingCompletion {
 	public final fun getSummary ()Ljava/lang/String;
 	public final fun getWork ()Lio/astrolabe/id/WorkId;
 	public fun hashCode ()I
+	public final fun key ()Ljava/lang/String;
 	public final fun proposal ()Lio/astrolabe/verify/CompletionProposal;
 	public final fun resolve (Lio/astrolabe/verify/DecisionRecord;)Lio/astrolabe/verify/Resolved;
 	public fun toString ()Ljava/lang/String;
@@ -25285,6 +25286,7 @@ public final class io/astrolabe/verify/AcceptanceDecisionRequest {
 	public final fun getIds ()Lio/astrolabe/id/Identities;
 	public final fun getIncrementId ()Ljava/lang/String;
 	public final fun getItems ()Ljava/util/List;
+	public final fun getKey ()Ljava/lang/String;
 	public final fun getReceipts ()Ljava/util/List;
 	public final fun getSummary ()Ljava/lang/String;
 	public fun hashCode ()I
@@ -26307,6 +26309,11 @@ public final synthetic class io/astrolabe/verify/DecisionItem$$serializer : kotl
 
 public final class io/astrolabe/verify/DecisionItem$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class io/astrolabe/verify/DecisionKey {
+	public static final field INSTANCE Lio/astrolabe/verify/DecisionKey;
+	public static final fun of (Ljava/lang/String;Lio/astrolabe/id/CandidateId;ILjava/util/Collection;)Ljava/lang/String;
 }
 
 public final class io/astrolabe/verify/DecisionKind : java/lang/Enum {
