@@ -8,6 +8,7 @@ import io.astrolabe.campaign.OpenedCampaign
 import io.astrolabe.cell.WINDOWS
 import io.astrolabe.contract.Command
 import io.astrolabe.contract.Shape
+import io.astrolabe.evidence.Closure
 import io.astrolabe.evidence.SqliteReceipts
 import io.astrolabe.fixtures.Scripted
 import io.astrolabe.telemetry.CountedPhase
@@ -23,6 +24,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 /**
@@ -42,6 +44,7 @@ class OutputPolicyScenarioTest {
         SCRATCH to { policy(SCRATCH, DirtyRepo.Variant.ScratchOutput, { scratchGate }, ::scratchOutput) },
         REWRITES to { policy(REWRITES, DirtyRepo.Variant.RewritesData, { rewrites }, ::rewrittenInputs) },
         RED to { policy(RED, DirtyRepo.Variant.RewritesData, { redRewrites }, ::redStaysRed) },
+        OUTSIDE to { policy(OUTSIDE, DirtyRepo.Variant.RewritesData, { check }, ::outsideInputMoved) },
     )
     private val played by lazy { Scenario.concurrently(plays.keys) { plays.getValue(it)() } }
 
@@ -54,6 +57,10 @@ class OutputPolicyScenarioTest {
 
     @Test
     fun `a red final gate that also rewrote an input stays red whatever the host accepts`() = played.getValue(RED).getOrThrow()
+
+    @Test
+    fun `a pinned input outside the candidate that changes while the final waits voids its stored results and the decision key`() =
+        played.getValue(OUTSIDE).getOrThrow()
 
     private suspend fun scratchOutput(s: Scenario) {
         val asked = ArrayList<AcceptanceDecisionRequest>()
@@ -96,6 +103,53 @@ class OutputPolicyScenarioTest {
         assertEquals(CampaignOutcome.Failed, run.outcome, run.state?.reason)
     }
 
+    /**
+     * WR P1-1: `AC-1` declares the untracked `build/input.json` (pinned, outside identity, D-429) and certifies; the gate's
+     * rewrite of a tracked file leaves the final waiting. The input changes — the candidate does not — and the user then
+     * accepts the request they saw. The host is Studio's shape: a kept answer is found by the request's key (D-430).
+     */
+    private suspend fun outsideInputMoved(s: Scenario) {
+        Files.createDirectories(s.root.resolve(INPUT).parent)
+        Files.writeString(s.root.resolve(INPUT), "1\n")
+        declareInput(s.campaign!!)
+        val asked = ArrayList<AcceptanceDecisionRequest>()
+        val kept = HashSet<String>()
+        s.decide { r ->
+            asked += r
+            if (r.key in kept) AcceptanceDecision(r.id, r.contractRevision, r.candidate, DecisionKind.Accept, Decider.User, "user", "accepted as it is") else null
+        }
+        val first = s.play(::edit)
+        assertEquals(CampaignOutcome.WaitingForInput, first.outcome, first.state?.reason)
+        val request = asked.last { it.incrementId == null }
+        val stamp = s.campaign!!.stamper.stamp(fresh = true).id
+
+        Files.writeString(s.root.resolve(INPUT), "2\n")
+        assertEquals(stamp, s.campaign!!.stamper.stamp(fresh = true).id, "the input is outside the candidate")
+        kept += request.key
+        declareInput(s.reopen())
+        val before = receipts(s.campaign!!)
+        val second = s.play { emptyList() }
+        assertEquals(CampaignOutcome.WaitingForInput, second.outcome, "the accept of the earlier request no longer applies: ${second.state?.reason}")
+        val reasked = asked.last { it.incrementId == null }
+        assertNotEquals(request.key, reasked.key, "the decision key moved with the input")
+        assertNotEquals(request.id, reasked.id, "a new request")
+        assertTrue(reasked.items.any { it.obligation == "AC-1" && INPUT in it.reason }, "AC-1's evidence no longer holds: ${reasked.items.map { it.reason }}")
+        assertTrue(receipts(s.campaign!!) > before, "the stored results were not reused: the end checks ran again")
+
+        kept += reasked.key
+        declareInput(s.reopen())
+        val third = s.play { emptyList() }
+        assertEquals(CampaignOutcome.Completed, third.outcome, third.state?.reason)
+    }
+
+    /** `AC-1` with a known closure: the printed output and the untracked input under `build/`. */
+    private fun declareInput(c: OpenedCampaign) {
+        val check = checkNotNull(c.checks[Checks.acceptId("AC-1")])
+        c.checks.replace(check.copy(inputClosure = Closure.Known(setOf(DirtyRepo.OUTPUT, INPUT))))
+    }
+
+    private fun receipts(c: OpenedCampaign): Int = c.store.db.query("SELECT body FROM receipts") { it.string("body") }.size
+
     /** The plan cell is skipped (the acceptance is executable); one cell edits, verifies `AC-1` and reports done. */
     private fun edit(c: OpenedCampaign): List<Scripted> = Scenario.editThenVerify(c, DirtyRepo.SOURCE, "    return sum(items)", "    return sum(x for x in items if x >= 0)")
 
@@ -119,6 +173,8 @@ class OutputPolicyScenarioTest {
         const val SCRATCH = "scratch"
         const val REWRITES = "rewrites"
         const val RED = "red"
+        const val OUTSIDE = "outside"
+        const val INPUT = "build/input.json"
         const val FAILING = "pytest_fail.txt"
         const val TRACKED_OUTPUT = "build/keep.json"
         const val UTIL = "src/util.py"

@@ -9,6 +9,7 @@ import io.astrolabe.contract.UserRequest
 import io.astrolabe.id.CandidateId
 import io.astrolabe.id.CanonicalEncoding
 import io.astrolabe.id.Digest
+import io.astrolabe.id.FileVersion
 import io.astrolabe.id.Identities
 import io.astrolabe.register.Mark
 import io.astrolabe.register.Register
@@ -132,7 +133,20 @@ public data class AcceptanceDecisionRequest(
     val receipts: List<String> = emptyList(),
     /** The agent's final text, a claim shown to the decider, never evidence. */
     val summary: String? = null,
+    /**
+     * WR (P1-1): the inputs outside candidate identity the evidence pinned — untracked output under a declared root a check
+     * declared — at their bytes when asked. The candidate does not name them, so the [key] does. Not encoded when empty.
+     */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val outsideInputs: Map<String, FileVersion> = emptyMap(),
 ) {
+    /** The constructor before [outsideInputs] (WR). Kept for Java callers. */
+    public constructor(
+        id: String, contractRevision: Int, ids: Identities, incrementId: String?, candidate: CandidateId, code: StopCode, items: List<DecisionItem>,
+        diffRef: String?, receipts: List<String>, summary: String?,
+    ) : this(id, contractRevision, ids, incrementId, candidate, code, items, diffRef, receipts, summary, emptyMap())
+
     init {
         require(id.isNotBlank()) { "a decision request has an id" }
         require(contractRevision >= 1) { "contractRevision must be ≥ 1" }
@@ -144,25 +158,28 @@ public data class AcceptanceDecisionRequest(
      * What this request asks, whatever its [id] ([DecisionKey], WD-10): the same key is the same question, which the
      * controller reissues under the same id, so a host may keep a decision by either.
      */
-    val key: String get() = DecisionKey.of(incrementId, candidate, contractRevision, items.map { it.obligation })
+    val key: String get() = DecisionKey.of(incrementId, candidate, contractRevision, items.map { it.obligation }, outsideInputs)
 }
 
 /**
  * The key of an acceptance decision request (WD-10): its scope — the increment, or the campaign gate — the candidate, the
- * contract revision and the obligations put to the decider, in no particular order, each length-delimited (encoding v2).
- * A host finds a decision it kept for a repeated request by it; the controller reuses a pending completion and its
- * request id under it.
+ * contract revision, the obligations put to the decider, in no particular order, each length-delimited, and (encoding v3,
+ * WR) the pinned inputs outside candidate identity at their bytes, so a changed one is a new question whose earlier answer
+ * no host applies. A host finds a decision it kept for a repeated request by it; the controller reuses a pending
+ * completion and its request id under it.
  */
 public object DecisionKey {
     @JvmStatic
-    public fun of(incrementId: String?, candidate: CandidateId, contractRevision: Int, obligations: Collection<String>): String {
+    @JvmOverloads
+    public fun of(incrementId: String?, candidate: CandidateId, contractRevision: Int, obligations: Collection<String>, outsideInputs: Map<String, FileVersion> = emptyMap()): String {
         val fields = listOf(
             "scope" to (incrementId?.let { "increment:$it" } ?: "campaign"),
             "candidate" to candidate.digest.hex,
             "contract" to contractRevision.toString(),
             "obligations" to delimited(obligations.distinct().sorted()),
+            "outside" to delimited(outsideInputs.entries.sortedBy { it.key }.map { "${it.key}=${it.value.digest.hex}" }),
         )
-        return "dk-" + Digest.ofUtf8(CanonicalEncoding.encode("decision-key", 2, fields)).hex
+        return "dk-" + Digest.ofUtf8(CanonicalEncoding.encode("decision-key", 3, fields)).hex
     }
 
     /** Each value prefixed by its length, so no list of values encodes like another (`["a","b"]` is not `["a\nb"]`). */

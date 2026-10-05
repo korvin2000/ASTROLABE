@@ -4,6 +4,7 @@ import io.astrolabe.contract.Command
 import io.astrolabe.evidence.Closure
 import io.astrolabe.evidence.Counts
 import io.astrolabe.evidence.InMemoryAliases
+import io.astrolabe.evidence.InputStability
 import io.astrolabe.evidence.Outcome
 import io.astrolabe.evidence.SqliteReceipts
 import io.astrolabe.fixtures.FakeClock
@@ -116,6 +117,19 @@ class ScratchPolicyTest {
         val moved = scheduler.currency(gen, stamp)
         assertFalse(moved.certifies)
         assertTrue(moved.reasons.any { "inputs outside the candidate moved since the check: build/generated.json" in it }, moved.reasons.toString())
+    }
+
+    @Test
+    fun `an isolated check gets every declared input, one outside the candidate included, and its receipt pins it`() = runTest {
+        val gen = checks["CHK-gen"]!!
+        val isolated = Scheduler(checks, workspace, VersionRegistry(workspace), stamper, SqliteReceipts(store, clock), InMemoryAliases(), idGen, ids, clock,
+            candidates = stateRoot.resolve("candidates"), isolateAll = true)
+        var seen: String? = null
+        val receipt = isolated.runCheck(gen, 1) { root -> executed().also { seen = root.resolve("build/generated.json").takeIf { Files.exists(it) }?.let(Files::readString) } }
+        assertEquals("{\"v\": 1}\n", seen, "WR P1-3: the declared input outside the candidate is exported with it")
+        assertEquals(InputStability.Isolated, receipt.testedInputs.stability, receipt.limits.toString())
+        assertTrue("build/generated.json" in receipt.testedInputs.versions, "WR P1-3: and pinned, never dropped: ${receipt.testedInputs.versions.keys}")
+        assertTrue(isolated.currency(gen, stamper.stamp(fresh = true).id).certifies)
     }
 
     @Test
