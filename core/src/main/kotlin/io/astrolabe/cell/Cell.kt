@@ -413,6 +413,18 @@ public class Cell @JvmOverloads constructor(
                 layout = Layout.render(ctx.role, ctx.config.executionMode, ctx.prime, CompiledK(ContractSlice.forIncrement(contract, increment), ctx.preexisting, sections), transcript(contract), capabilities.caching.breakpoints)
                 request = Request(layout + anchor.segment(), schemas.schemas, ctx.model.profile, ctx.model.effort, ctx.model.maxOutputTokens, mask, sessionKey = ids.work.sessionKey)
                 estimate = estimator.estimate(request)
+                // WD-16: a child's output headroom is what its own budget leaves after the input, never the model's maximum.
+                if (ctx.boundedOutput) {
+                    val usable = budget.available(if (reserveTurn) Spend.Check else Spend.Generation)
+                    val needed = minOf(MIN_OUTPUT_TOKENS, ctx.model.maxOutputTokens).toLong()
+                    val output = minOf(ctx.model.maxOutputTokens.toLong(), usable - estimate.upperBoundTokens)
+                    if (output < needed) {
+                        return partial(if (reserveTurn) PartialReason.Reserve else PartialReason.TokenBudget,
+                            "turn $turn not admitted before its model call: usable budget $usable tokens, input estimate ${estimate.upperBoundTokens}, " +
+                                "needed output $needed (model maximum ${ctx.model.maxOutputTokens})")
+                    }
+                    if (output < request.maxOutputTokens) request = request.copy(maxOutputTokens = output.toInt())
+                }
                 when (val validation = ctx.model.adapter.validate(request, estimate)) {
                     Validation.Ok -> Unit
                     is Validation.Rejected -> {
@@ -439,7 +451,7 @@ public class Cell @JvmOverloads constructor(
                     }
                 }
                 spend = if (reserveTurn) Spend.Check else Spend.Generation
-                admission = when (val admitted = budget.admit(spend, Tokens(estimate.upperBoundTokens + ctx.model.maxOutputTokens))) {
+                admission = when (val admitted = budget.admit(spend, Tokens(estimate.upperBoundTokens + request.maxOutputTokens))) {
                     is Admission.Admitted -> admitted
                     is Admission.Refused -> {
                         if (!reserveTurn && budget.limitDecision is io.astrolabe.budget.LimitDecision.Reserve) {
@@ -458,7 +470,7 @@ public class Cell @JvmOverloads constructor(
             events?.emit(AgentEvent.Cell.ModelRequested(ids, invocationId.value, estimate.tokens, ctx.model.profile.id, anchorTokens = anchor.tokens))
             val accounting = ctx.accounting
             if (accounting != null && !accounting.reserve(ids, invocationId.value, ctx.model.profile, admission.estimate.value,
-                    Accounting.estimateCost(ctx.model.profile, estimate.upperBoundTokens, ctx.model.maxOutputTokens.toLong()),
+                    Accounting.estimateCost(ctx.model.profile, estimate.upperBoundTokens, request.maxOutputTokens.toLong()),
                     if (spend == Spend.Generation) (contract.budget.tokens.value * (1.0 - contract.budget.reserves.verification - contract.budget.reserves.recoveryAndPersist)).toLong() else contract.budget.tokens.value,
                     contract.budget.cost)) {
                 admission.release()
@@ -501,7 +513,7 @@ public class Cell @JvmOverloads constructor(
                 val knownInput = usage?.quantities?.filterKeys { it.isInput }?.values?.fold(0L, Accounting::add) ?: 0L
                 val inputKnown = usage != null && usage.quantities.keys.any { it.isInput } && usage.unknown.none { it.isInput }
                 val inputCharge = if (inputKnown) knownInput else maxOf(knownInput, estimate.upperBoundTokens)
-                val outputCharge = usage?.quantities?.get(BillingDimension.OUTPUT) ?: ctx.model.maxOutputTokens.toLong()
+                val outputCharge = usage?.quantities?.get(BillingDimension.OUTPUT) ?: request.maxOutputTokens.toLong()
                 val charge = Accounting.add(inputCharge, outputCharge)
                 val complete = usage?.isComplete == true && inputKnown && BillingDimension.OUTPUT in usage.quantities
                 val funded = if (complete) charge else maxOf(charge, admission.estimate.value)
@@ -589,7 +601,7 @@ public class Cell @JvmOverloads constructor(
             // D-408: the same results must also leave the request under the ceiling, which reserves no output.
             val anchorGrowth = maxOf(0L, defaults.anchorMaxTokens - anchor.tokens)
             val headroom = minOf(
-                (capabilities.contextLimitTokens * defaults.alpha).toLong() - estimate.upperBoundTokens - responseTokens - ctx.model.maxOutputTokens - anchorGrowth,
+                (capabilities.contextLimitTokens * defaults.alpha).toLong() - estimate.upperBoundTokens - responseTokens - request.maxOutputTokens - anchorGrowth,
                 ceilingTokens(prefix(layout).total + pinnedTokens(contract)) - estimate.upperBoundTokens - responseTokens - anchorGrowth,
             )
             val readBudget = minOf(defaults.rMaxTokens.toLong(), maxOf(Dispatcher.READ_FLOOR_TOKENS, headroom))
@@ -1734,6 +1746,9 @@ public class Cell @JvmOverloads constructor(
 
         /** D-411: how much of a new user message the anchor quotes; the whole text is pinned in the transcript. */
         const val USER_MESSAGE_CHARS = 400
+
+        /** WD-16: the least output a bounded (child) turn is admitted with; below it the turn is not dispatched. */
+        const val MIN_OUTPUT_TOKENS = 2_048
 
         /** The nudges that say how much of the cell is left: shown before the other nudges (D-372). */
         val PRIORITY_NUDGES = setOf(Gates.STALL, Gates.RESERVE, Gates.TURNS)

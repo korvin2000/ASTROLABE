@@ -14,6 +14,7 @@ private val USAGE = """eval-live — the ASTROLABE headless live runner
   eval-live run --models <id,...> --out <dir> [--tasks <id,...|all>] [--provider openrouter] [--repeats 1] [--seed 0]
                 [--effort Low|Medium|High] [--max-cells ${RunSpec.MAX_CELLS}] [--deadline-minutes 60] [--tasks-dir <dir>] [--python <program>]
                 [--catalog <file>] [--credentials <file>] [--temp <dir>] [--keep-workspaces] [--arm default|loop]
+                [--mode auto|ask]
   eval-live tasks [--tasks-dir <dir>]
   eval-live check [--tasks <id,...|all>] [--tasks-dir <dir>] [--python <program>] [--temp <dir>]
 
@@ -95,6 +96,7 @@ internal object Cli {
             temp = temp(options), effort = named ?: RunSpec.EFFORT, maxCells = options.int("max-cells", RunSpec.MAX_CELLS),
             deadline = Duration.ofMinutes(options.long("deadline-minutes", 60)), keepWorkspaces = options.flag("keep-workspaces"),
             effortExplicit = named != null, arm = Arms.named(options.get("arm") ?: Arms.DEFAULT.name),
+            mode = HostMode.named(options.get("mode") ?: HostMode.Auto.wire),
         )
         val interpreters = Interpreters.detect(options.get("python"))
         val catalog = options.get("catalog")?.let(Path::of) ?: out.resolve("catalog-snapshot.json")

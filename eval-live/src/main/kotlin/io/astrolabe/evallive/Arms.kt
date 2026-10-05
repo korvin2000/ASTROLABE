@@ -99,10 +99,12 @@ internal object Fingerprints {
 
     /** The run's configuration: the arm, provider, model and the bench's knobs, with the core's launch constants. */
     fun config(plan: BenchPlan, model: String): String = sha256(
-        listOf(
+        listOfNotNull(
             plan.arm.canonical, "provider=${plan.provider}", "model=$model", "effort=${plan.effort.name}", "effortExplicit=${plan.effortExplicit}",
             "maxCells=${plan.maxCells}", "deadlineSeconds=${plan.deadline.seconds}", "limits=${RunSpec.LIMITS}", "leaseMinutes=${RunSpec.LEASE_MINUTES}",
             "guardWindows=${RunSpec.TOKEN_GUARD_WINDOWS}",
+            // Only an `ask` bench names its mode: `auto` results keep their fingerprints.
+            plan.mode.takeIf { it != HostMode.Auto }?.let { "mode=${it.wire}" },
         ).joinToString("\n"),
     )
 

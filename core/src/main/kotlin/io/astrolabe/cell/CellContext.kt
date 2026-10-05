@@ -186,6 +186,12 @@ public class CellContext @JvmOverloads constructor(
      * the controller reads it back at a handoff. `null`: a fresh ledger of the cell's own.
      */
     public val impact: ImpactNudges? = null,
+    /**
+     * WD-16: a child cell (§10.1) runs on its own small budget, so each request's output headroom is what that budget
+     * leaves after the input estimate, never the model's maximum; a turn that cannot leave 2,048 output tokens ends
+     * before its model call, naming the numbers. `false` (the main line) admits the model's full headroom, as before.
+     */
+    public val boundedOutput: Boolean = false,
 ) {
     init {
         require(ids.context != null) { "a cell runs under its own context id" }

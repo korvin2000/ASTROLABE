@@ -68,11 +68,25 @@ internal data class RunResult(
     val arm: String = Arms.DEFAULT.name,
     /** What this result stands for (B5): a kept result is reused only for the same key; `null` before B5, never reused. */
     val key: ResultKey? = null,
+    /** The Studio task mode the host played (WP-WG); a result written before modes existed reads back as `auto`. */
+    val mode: String = HostMode.Auto.wire,
+    /** The scripted user's part of an `ask` run, else `null`; the fields above describe the run as a whole. */
+    val ask: AskResult? = null,
+    /** The `phase.counted` events of the run summed by phase (§7.2), or `null` when no events were recorded. */
+    val phases: PhaseSummary? = null,
 ) {
     companion object {
         const val SCHEMA: Int = 1
     }
 }
+
+/**
+ * An `ask` run: the user gave [answers] acceptance answers, each followed by a session of the same work; [outcome] is
+ * the last session's campaign outcome, or `ask-exhausted` when a request was still open after the allowed answers.
+ * [segments] are the session that first stopped for the user and the sessions after each answer.
+ */
+@Serializable
+internal data class AskResult(val answers: Int, val outcome: String?, val segments: List<SegmentResult>)
 
 /** The user's message: due after [afterResponses], delivered after [deliveredAt] responses as contract version [contractVersion]; both `null` when the run ended first. */
 @Serializable

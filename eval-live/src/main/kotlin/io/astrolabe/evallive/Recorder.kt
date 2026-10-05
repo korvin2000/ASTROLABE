@@ -12,6 +12,7 @@ import io.astrolabe.provider.Charge
 import io.astrolabe.provider.Money
 import io.astrolabe.provider.PriceTable
 import io.astrolabe.telemetry.CallAccount
+import io.astrolabe.telemetry.CountedPhase
 import io.astrolabe.telemetry.Quantities
 import java.time.Instant
 import kotlinx.serialization.Serializable
@@ -226,6 +227,38 @@ internal data class Totals(
         const val UNKNOWN: String = "unknown"
 
         private val DECIMAL = Regex("""-?\d+(\.\d+)?""")
+    }
+}
+
+/** The counters of one phase's `phase.counted` events (§7.2), summed over its [events]. */
+@Serializable
+internal data class PhaseCounts(
+    val events: Int,
+    val gitProcesses: Long,
+    val filesRead: Long,
+    val bytesRead: Long,
+    val objectsWritten: Long,
+    val blobsRead: Long,
+    val blobBytesRead: Long,
+)
+
+/**
+ * A run's `phase.counted` events (WP-WG): [opens] campaign opens and [finishAttempts] finalization attempts — one event
+ * each — and the counters of every phase (`open`, `snapshot`, `finish`) in [byPhase].
+ */
+@Serializable
+internal data class PhaseSummary(val opens: Int, val finishAttempts: Int, val byPhase: Map<String, PhaseCounts>) {
+    companion object {
+        fun of(events: List<AgentEvent>): PhaseSummary {
+            val counted = events.filterIsInstance<AgentEvent.Telemetry.PhaseCounted>()
+            val byPhase = counted.groupBy { it.counted }.mapValues { (_, all) ->
+                PhaseCounts(
+                    all.size, all.sumOf { it.gitProcesses }, all.sumOf { it.filesRead }, all.sumOf { it.bytesRead },
+                    all.sumOf { it.objectsWritten }, all.sumOf { it.blobsRead }, all.sumOf { it.blobBytesRead },
+                )
+            }.toSortedMap()
+            return PhaseSummary(byPhase[CountedPhase.Open.wire]?.events ?: 0, byPhase[CountedPhase.Finish.wire]?.events ?: 0, byPhase)
+        }
     }
 }
 
