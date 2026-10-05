@@ -40,6 +40,9 @@ import io.astrolabe.telemetry.CountedPhase
 import io.astrolabe.verify.AcceptanceDecision
 import io.astrolabe.verify.AcceptanceDecisionRequest
 import java.nio.file.Path
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
 
 /**
  * The workflow scenario harness of plan §7.2 (W0): the real composition — [Controller] open, a cell, the dispatcher and
@@ -135,6 +138,27 @@ internal class Scenario(
     private fun stateRoot(): Path = Path.of(config.stateRoot!!)
 
     companion object {
+        /**
+         * Plays [play] for every key at once, one thread each, and returns each outcome by key. Scenarios share nothing
+         * — each has its own repository, store, controller and counters (D-426 counts per instance) — so a class of them
+         * costs its longest scenario instead of their sum (plan §7.2 rule 3: the suite stays within three minutes).
+         */
+        fun <K, T> concurrently(keys: Collection<K>, play: (K) -> T): Map<K, Result<T>> {
+            val pool = Executors.newFixedThreadPool(keys.size)
+            try {
+                val futures = keys.associateWith { key -> pool.submit(Callable { play(key) }) }
+                return futures.mapValues { (_, future) ->
+                    try {
+                        Result.success(future.get())
+                    } catch (failure: ExecutionException) {
+                        Result.failure(failure.cause ?: failure)
+                    }
+                }
+            } finally {
+                pool.shutdownNow()
+            }
+        }
+
         /** The usual one-cell script: read [path], replace [anchor] by [replacement], verify [acceptance], report done. */
         fun editThenVerify(c: OpenedCampaign, path: String, anchor: String, replacement: String, acceptance: String = "AC-1"): List<Scripted> {
             val version = checkNotNull(c.registry.version(path)) { "$path is not in the tree" }
