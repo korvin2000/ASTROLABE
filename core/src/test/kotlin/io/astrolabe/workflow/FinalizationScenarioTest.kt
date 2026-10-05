@@ -17,6 +17,7 @@ import io.astrolabe.verify.Checks
 import io.astrolabe.verify.Decider
 import io.astrolabe.verify.DecisionKind
 import kotlinx.coroutines.runBlocking
+import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
@@ -32,14 +33,33 @@ import kotlin.test.assertTrue
  * candidate and their own receipt cannot certify it (WD-14 stays W3's): the final acceptance waits for a decision. The
  * host is Studio's shape: it answers a decision request only by the id the user saw (WD-10). The guards count checks
  * (receipts), requests and stops, none of which depends on the untracked files, so the fixture has one tool file, no big
- * file and no settling wait (plan §7.2 rule 3: the suite stays within three minutes).
+ * file and no settling wait, and the three scenarios play at once on first use (plan §7.2 rule 3: the suite stays within
+ * three minutes).
  */
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class FinalizationScenarioTest {
     @TempDir
     lateinit var stateRoot: Path
 
+    private val plays: Map<String, () -> Unit> = mapOf(
+        REENTRY to { finalization(REENTRY, body = ::reEntryThenAccept) },
+        VOID to { finalization(VOID, body = ::voidThenPolicyAccept) },
+        RED to { finalization(RED, gate = { red }, body = ::redGate) },
+    )
+    private val played by lazy { Scenario.concurrently(plays.keys) { plays.getValue(it)() } }
+
     @Test
-    fun `a final re-entry without new information reruns nothing and keeps its request, and the user's accept then completes across a crash`() = finalization { s ->
+    fun `a final re-entry without new information reruns nothing and keeps its request, and the user's accept then completes across a crash`() =
+        played.getValue(REENTRY).getOrThrow()
+
+    @Test
+    fun `a source edit while the final decision is asked still voids it, an item added at the same revision is asked anew, and a policy accept then completes`() =
+        played.getValue(VOID).getOrThrow()
+
+    @Test
+    fun `a red final gate still fails the campaign`() = played.getValue(RED).getOrThrow()
+
+    private suspend fun reEntryThenAccept(s: Scenario) {
         val asked = ArrayList<AcceptanceDecisionRequest>()
         var answer: AcceptanceDecision? = null
         s.decide { r -> asked += r; answer?.takeIf { it.requestId == r.id } }
@@ -85,8 +105,7 @@ class FinalizationScenarioTest {
         assertTrue(broken.isEmpty(), broken.joinToString("\n"))
     }
 
-    @Test
-    fun `a source edit while the final decision is asked still voids it, an item added at the same revision is asked anew, and a policy accept then completes`() = finalization { s ->
+    private suspend fun voidThenPolicyAccept(s: Scenario) {
         val asked = ArrayList<AcceptanceDecisionRequest>()
         var answer: AcceptanceDecision? = null
         var editing = true
@@ -138,8 +157,7 @@ class FinalizationScenarioTest {
         assertEquals(listOf(1, 1, 1, 1), s.counted(CountedPhase.Finish).map { it.finishAttempts })
     }
 
-    @Test
-    fun `a red final gate still fails the campaign`() = finalization(gate = { red }) { s ->
+    private suspend fun redGate(s: Scenario) {
         val run = s.play(::edit)
         assertEquals(CampaignOutcome.Failed, run.outcome, run.state?.reason)
     }
@@ -152,12 +170,12 @@ class FinalizationScenarioTest {
     /** The receipts the campaign's store holds: a check that ran adds one. */
     private fun receipts(c: OpenedCampaign): Int = c.store.db.query("SELECT body FROM receipts") { it.string("body") }.size
 
-    /** S1 over the dirty repository with `AC-1` a plain printing check and [gate] the campaign's quality gate. */
-    private fun finalization(gate: DirtyRepo.() -> Command = { check }, body: suspend (Scenario) -> Unit) = runBlocking {
+    /** S1 over the dirty repository with `AC-1` a plain printing check and [gate] the campaign's quality gate; [name] keeps its store apart. */
+    private fun finalization(name: String, gate: DirtyRepo.() -> Command = { check }, body: suspend (Scenario) -> Unit) = runBlocking {
         DirtyRepo.create(1, DirtyRepo.Variant.RewritesData, bigBytes = 0, settle = false).use { dirty ->
             Files.writeString(dirty.root.resolve(FAILING), recorded("pytest-fail-param.txt"))
             val quality = dirty.gate()
-            Scenario(dirty.root, stateRoot, configure = { it.copy(qualityGates = listOf(quality)) }).use { s ->
+            Scenario(dirty.root, stateRoot.resolve(name), configure = { it.copy(qualityGates = listOf(quality)) }).use { s ->
                 s.policy = CampaignPolicy(Tokens(200_000), resumeExpected = true)
                 s.seed(printing, shape = Shape.S1)
                 s.open()
@@ -168,6 +186,9 @@ class FinalizationScenarioTest {
 
     private companion object {
         const val FAILING = "pytest_fail.txt"
+        const val REENTRY = "re-entry"
+        const val VOID = "void"
+        const val RED = "red"
 
         val printing: Command = shell("type ${DirtyRepo.OUTPUT}", "cat ${DirtyRepo.OUTPUT}")
         val red: Command = shell("type $FAILING & exit /b 1", "cat $FAILING; exit 1")
