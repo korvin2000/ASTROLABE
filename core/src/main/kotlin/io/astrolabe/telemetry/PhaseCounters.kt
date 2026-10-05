@@ -3,6 +3,7 @@ package io.astrolabe.telemetry
 import io.astrolabe.event.AgentEvent
 import io.astrolabe.event.Phase
 import io.astrolabe.id.Identities
+import io.astrolabe.os.Git
 import io.astrolabe.workspace.Workspace
 
 /** The phases §7.2 counts (`phase.counted`): a campaign open, a shadow snapshot of a tree, a finalization attempt. */
@@ -39,6 +40,13 @@ internal class PhaseMark private constructor(
         )
 
     companion object {
+        /** A phase that failed before its workspace existed (an open refused by the store or its project lock): its git counts only. */
+        fun beforeWorkspace(ids: Identities, git: Git, phase: CountedPhase, opens: Int, finishAttempts: Int = 0): AgentEvent.Telemetry.PhaseCounted =
+            AgentEvent.Telemetry.PhaseCounted(
+                ids, phase.wire, gitProcesses = git.processesStarted, filesRead = 0, bytesRead = 0, objectsWritten = git.objectsWritten,
+                opens = opens, finishAttempts = finishAttempts, blobsRead = 0, blobBytesRead = 0, phase = phase.phase,
+            )
+
         /** [gitProcesses] overrides the git baseline when the phase began before [workspace] existed (an open). */
         fun of(workspace: Workspace, gitProcesses: Long = workspace.git.processesStarted, objectsWritten: Long = workspace.git.objectsWritten): PhaseMark =
             PhaseMark(workspace, gitProcesses, workspace.filesRead, workspace.bytesRead, objectsWritten, workspace.blobsRead, workspace.blobBytesRead)

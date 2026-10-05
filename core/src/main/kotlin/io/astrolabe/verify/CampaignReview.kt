@@ -82,6 +82,9 @@ public class CampaignReview(
     /** The `CON` notes the plan references (superseded ids, `new: <summary>` for candidates), read when a request is built. */
     private val conReferences: () -> List<String> = { emptyList() },
 ) {
+    /** Why the reviewer before the host gave no verdict on a request id (WD-16: a review cell its budget could not admit); set by the controller. */
+    internal var unanswered: ((String) -> String?)? = null
+
     /** The attempt's latest review record, or `null` when none was requested. */
     public fun latest(): CampaignReviewRecord? = store.db.query(
         "SELECT body FROM packets WHERE work_id = ? AND attempt_id = ? AND kind = ? ORDER BY rowid DESC LIMIT 1",
@@ -129,7 +132,7 @@ public class CampaignReview(
         )
         val verdict = authority.review(request)
         val record = when {
-            verdict == null -> CampaignReviewRecord(request, null, "no reviewer answered $why: the campaign is blocked, the review is never skipped (D-23)", equivalence)
+            verdict == null -> CampaignReviewRecord(request, null, "no reviewer answered $why" + (unanswered?.invoke(request.id)?.let { " (review cell: $it)" } ?: "") + ": the campaign is blocked, the review is never skipped (D-23)", equivalence)
             verdict.requestId != request.id -> CampaignReviewRecord(request, verdict, "verdict answers ${verdict.requestId}, not ${request.id}", equivalence)
             Replies.check(verdict, contract.version) != ReplyValidity.Current -> CampaignReviewRecord(request, verdict, "verdict signed for contract v${verdict.contractRevision}, not v${contract.version}", equivalence)
             verdict.reviewedCandidate != stamp -> CampaignReviewRecord(request, verdict, "verdict reviewed @${verdict.reviewedCandidate.hash8}, not the final @${stamp.hash8}", equivalence)

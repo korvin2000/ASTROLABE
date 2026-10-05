@@ -2,6 +2,7 @@ package io.astrolabe.campaign
 
 import io.astrolabe.budget.LimitDecision
 import io.astrolabe.budget.LimitGate
+import io.astrolabe.budget.PricedLimitGate
 import io.astrolabe.budget.LimitKind
 import io.astrolabe.budget.LimitRule
 import io.astrolabe.budget.LimitSpend
@@ -407,11 +408,18 @@ internal class TaskLimitControl(private val idGen: IdGen, private val clock: Clo
         @Volatile private var admitting: Spend = Spend.Generation
 
         /** At a turn's start the next call is priced at the last admitted request's estimate; at admission at its own. */
-        val gate: LimitGate = LimitGate { spend, estimate ->
+        val gate: LimitGate = object : PricedLimitGate {
+            override fun check(spend: Spend, estimate: Tokens): LimitDecision = price(spend, estimate, model.maxOutputTokens.toLong())
+
+            override fun check(spend: Spend, estimate: Tokens, outputTokens: Long): LimitDecision = price(spend, estimate, outputTokens)
+        }
+
+        // WD-16: [estimate] is the request's input plus [outputTokens], the output it asks for (a bounded child's is below the model's).
+        private fun price(spend: Spend, estimate: Tokens, outputTokens: Long): LimitDecision {
             val now = spend(c)
             val e = if (estimate.value == 0L) c.limitState.lastEstimate else {
                 admitting = spend
-                Accounting.estimateCost(model.profile, (estimate.value - model.maxOutputTokens).coerceAtLeast(0), model.maxOutputTokens.toLong())
+                Accounting.estimateCost(model.profile, (estimate.value - outputTokens).coerceAtLeast(0), outputTokens)
                     .also { c.limitState.lastEstimate = it }
             }
             val price = LimitRule.nextCost(now, e)
@@ -420,7 +428,7 @@ internal class TaskLimitControl(private val idGen: IdGen, private val clock: Clo
             // A refusal that ends the cell: a spent limit. A turn that falls back to verify-and-report is not one, nor a generation
             // request refused by the reserve at admission: the cell renders that turn again as verify-and-report (C3r).
             if (decision is LimitDecision.Exhausted) block(c, decision, price)
-            decision
+            return decision
         }
 
         /** The transactional check: the calls on record and holds of cells in flight, plus this call at its estimate. */

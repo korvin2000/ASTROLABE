@@ -414,16 +414,19 @@ public class Cell @JvmOverloads constructor(
                 request = Request(layout + anchor.segment(), schemas.schemas, ctx.model.profile, ctx.model.effort, ctx.model.maxOutputTokens, mask, sessionKey = ids.work.sessionKey)
                 estimate = estimator.estimate(request)
                 // WD-16: a child's output headroom is what its own budget leaves after the input, never the model's maximum.
+                // Short of the least output, the turn still goes to admission at that least output, so a task limit's reserve
+                // re-renders it as verify-and-report (C3r) before the shortfall ends the cell with its numbers.
+                var shortfall: String? = null
                 if (ctx.boundedOutput) {
                     val usable = budget.available(if (reserveTurn) Spend.Check else Spend.Generation)
                     val needed = minOf(MIN_OUTPUT_TOKENS, ctx.model.maxOutputTokens).toLong()
                     val output = minOf(ctx.model.maxOutputTokens.toLong(), usable - estimate.upperBoundTokens)
                     if (output < needed) {
-                        return partial(if (reserveTurn) PartialReason.Reserve else PartialReason.TokenBudget,
-                            "turn $turn not admitted before its model call: usable budget $usable tokens, input estimate ${estimate.upperBoundTokens}, " +
-                                "needed output $needed (model maximum ${ctx.model.maxOutputTokens})")
+                        shortfall = "turn $turn not admitted before its model call: usable budget $usable tokens, input estimate ${estimate.upperBoundTokens}, " +
+                            "needed output $needed (model maximum ${ctx.model.maxOutputTokens})"
                     }
-                    if (output < request.maxOutputTokens) request = request.copy(maxOutputTokens = output.toInt())
+                    val cap = maxOf(output, needed).toInt()
+                    if (cap < request.maxOutputTokens) request = request.copy(maxOutputTokens = cap)
                 }
                 when (val validation = ctx.model.adapter.validate(request, estimate)) {
                     Validation.Ok -> Unit
@@ -451,7 +454,7 @@ public class Cell @JvmOverloads constructor(
                     }
                 }
                 spend = if (reserveTurn) Spend.Check else Spend.Generation
-                admission = when (val admitted = budget.admit(spend, Tokens(estimate.upperBoundTokens + request.maxOutputTokens))) {
+                admission = when (val admitted = budget.admit(spend, Tokens(estimate.upperBoundTokens + request.maxOutputTokens), request.maxOutputTokens.toLong())) {
                     is Admission.Admitted -> admitted
                     is Admission.Refused -> {
                         if (!reserveTurn && budget.limitDecision is io.astrolabe.budget.LimitDecision.Reserve) {
@@ -459,7 +462,9 @@ public class Cell @JvmOverloads constructor(
                             if (CellBudget.GATE !in nudges) nudges = (listOf(CellBudget.GATE) + nudges).take(MAX_NUDGES)
                             continue
                         }
-                        return partial(if (reserveTurn) PartialReason.Reserve else PartialReason.TokenBudget, admitted.reason)
+                        // A spent task limit keeps its own reason; otherwise a bounded turn names its shortfall.
+                        val reason = shortfall?.takeUnless { budget.limitDecision is io.astrolabe.budget.LimitDecision.Exhausted } ?: admitted.reason
+                        return partial(if (reserveTurn) PartialReason.Reserve else PartialReason.TokenBudget, reason)
                     }
                 }
                 break

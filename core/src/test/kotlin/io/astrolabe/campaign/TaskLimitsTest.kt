@@ -11,6 +11,7 @@ import io.astrolabe.budget.LimitDecision
 import io.astrolabe.budget.LimitKind
 import io.astrolabe.budget.LimitRule
 import io.astrolabe.budget.LimitSpend
+import io.astrolabe.budget.PricedLimitGate
 import io.astrolabe.budget.Spend
 import io.astrolabe.budget.TaskLimits
 import io.astrolabe.budget.Tokens
@@ -52,6 +53,7 @@ import io.astrolabe.provider.Invocation
 import io.astrolabe.provider.InvocationId
 import io.astrolabe.provider.Item
 import io.astrolabe.provider.Money
+import io.astrolabe.provider.Profile
 import io.astrolabe.provider.ProviderAdapter
 import io.astrolabe.provider.Request
 import io.astrolabe.provider.Response
@@ -176,6 +178,20 @@ class TaskLimitsTest {
             val spend = TaskLimitControl(idGen, clock, null).spend(c)
             assertEquals(CostBasis.Billed, spend.costBasis)
             assertEquals(0, BigDecimal("1.0").compareTo(spend.cost!!.amount))
+        }
+    }
+
+    @Test
+    fun `a bounded request is priced at the output it asks for, not the model's maximum`() = runBlocking<Unit> {
+        // WD-16: a review child admits 3513 input + 20487 output (24000) on a 64K-output model; priced as asked it is about
+        // $0.32 and fits $0.50, priced as 0 input + 64000 output (the model's maximum) it would be $0.96 and refused.
+        val large = Profile("large", FakeProfiles.PROVIDER, "fake-large", FakeProfiles.capabilities(200_000, 64_000), FakeProfiles.main.priceTable)
+        controller().open(repo.root, request, policy(TaskLimits(maxCost = usd("0.50")))).use { c ->
+            val model = CellModel(FakeAdapter(ScriptedModel.of()), large, HeuristicEstimator())
+            val gate = TaskLimitControl(idGen, clock, null).cell(c, model).gate
+            val priced = assertIs<PricedLimitGate>(gate).check(Spend.Generation, Tokens(24_000), 20_487)
+            assertFalse(priced is LimitDecision.Exhausted, "the request as asked fits the limit: $priced")
+            assertIs<LimitDecision.Exhausted>(gate.check(Spend.Generation, Tokens(24_000)), "priced at the model's maximum output it would not")
         }
     }
 

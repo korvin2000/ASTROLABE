@@ -70,6 +70,14 @@ public fun interface LimitGate {
     public fun check(spend: Spend, estimate: Tokens): LimitDecision
 }
 
+/**
+ * A [LimitGate] that prices a request's input and output apart (WD-16): a bounded child asks for less output than the
+ * model's maximum, so the price of [estimate] is its input at the input rate plus [outputTokens] at the output rate.
+ */
+internal interface PricedLimitGate : LimitGate {
+    fun check(spend: Spend, estimate: Tokens, outputTokens: Long): LimitDecision
+}
+
 /** What the cell must do when the working budget is gone (§5.9 reserve gate, FX-43). */
 public data class ReserveVerdict(
     val reached: Boolean,
@@ -127,9 +135,12 @@ public class CellBudget @JvmOverloads constructor(
             limits?.check(Spend.Generation, Tokens.ZERO).let { it != null && it !is LimitDecision.Within }
 
     /** Admits [estimate] tokens for [spend] from the partitions its purpose allows, splitting across them in order. */
-    public fun admit(spend: Spend, estimate: Tokens): Admission {
+    public fun admit(spend: Spend, estimate: Tokens): Admission = admit(spend, estimate, null)
+
+    /** [admit] with the output share of [estimate] named, so a [PricedLimitGate] prices input and output as the request asks (WD-16). */
+    internal fun admit(spend: Spend, estimate: Tokens, outputTokens: Long?): Admission {
         require(estimate.value >= 0) { "an estimate is never negative" }
-        limitRefusal(spend, estimate)?.let { return it }
+        limitRefusal(spend, estimate, outputTokens)?.let { return it }
         val order = order(spend)
         val available = order.sumOf { of(it).available.value }
         if (estimate.value > available) {
@@ -210,7 +221,9 @@ public class CellBudget @JvmOverloads constructor(
     internal val limitReserve: Boolean get() = limitDecision.let { it != null && it !is LimitDecision.Within }
 
     /** C3: a spent limit refuses every spend; a spent working part refuses all but verify-and-report spends. */
-    private fun limitRefusal(spend: Spend, estimate: Tokens): Admission.Refused? = when (val decision = limits?.check(spend, estimate).also { limitDecision = it }) {
+    private fun limitRefusal(spend: Spend, estimate: Tokens, outputTokens: Long? = null): Admission.Refused? = when (val decision = limits?.let { gate ->
+        if (outputTokens != null && gate is PricedLimitGate) gate.check(spend, estimate, outputTokens) else gate.check(spend, estimate)
+    }.also { limitDecision = it }) {
         null, LimitDecision.Within -> null
         is LimitDecision.Reserve -> if (spend.reportOrVerify) null else Admission.Refused(spend, estimate, "reserve reached: ${decision.reason}")
         is LimitDecision.Exhausted -> {
