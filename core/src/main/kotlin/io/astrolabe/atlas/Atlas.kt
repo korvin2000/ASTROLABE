@@ -1,6 +1,8 @@
 package io.astrolabe.atlas
 
 import io.astrolabe.id.Digest
+import io.astrolabe.os.Git
+import io.astrolabe.workspace.liveWorkspace
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.IOException
@@ -576,26 +578,10 @@ internal fun scanRepository(root: Path): RepositoryScan {
 /** `git ls-files -z` separates entries with a NUL byte. */
 private const val NUL: Char = '\u0000'
 
+/** Through the live workspace's git where one is open over [root], so the open phase counts the launch (§7.2). */
 private fun gitListFiles(root: Path, vararg selection: String): List<String>? {
-    val output = try {
-        val process = ProcessBuilder(listOf("git", "ls-files", "-z") + selection)
-            .directory(root.toFile())
-            .start()
-        val stderr = Thread { process.errorStream.use { it.readBytes() } }.apply {
-            isDaemon = true
-            start()
-        }
-        val bytes = process.inputStream.use { it.readBytes() }
-        val exit = process.waitFor()
-        stderr.join()
-        if (exit != 0) return null
-        String(bytes, Charsets.UTF_8)
-    } catch (_: IOException) {
-        return null
-    } catch (_: InterruptedException) {
-        Thread.currentThread().interrupt()
-        return null
-    }
+    val git = liveWorkspace(root)?.git ?: Git(root)
+    val output = git.listFiles(selection.toList())?.toString(Charsets.UTF_8) ?: return null
     return output.split(NUL).filter { it.isNotEmpty() }
 }
 
@@ -640,8 +626,10 @@ internal fun resolveRelative(root: Path, relative: String): Path {
     return resolved.real
 }
 
+/** Raw bytes of [relative], read through the live workspace over [root] where one is open so they are counted (§7.2). */
 internal fun readRelative(root: Path, relative: String): ByteArray? = try {
-    readBytes(resolveRelative(root, relative))
+    val file = resolveRelative(root, relative)
+    liveWorkspace(root).let { counted -> if (counted != null) counted.bytesAt(file) else readBytes(file) }
 } catch (_: IOException) {
     null
 }

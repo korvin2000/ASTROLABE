@@ -10,6 +10,7 @@ import java.nio.file.Path
 import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.attribute.FileTime
 import java.security.MessageDigest
+import io.astrolabe.os.WindowsChangeTime
 import java.time.Clock
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -33,9 +34,9 @@ internal class ContentCache(private val clock: Clock = Clock.systemUTC()) {
     /** What a read produced: the raw digest, the size, and git object ids by hash algorithm. */
     internal class Content(val digest: Digest, val sizeBytes: Long, val objectIds: Map<String, String>)
 
-    private data class Observed(val sizeBytes: Long, val modifiedNanos: Long, val fileKey: Any?, val changedNanos: Long?)
+    internal data class Observed(val sizeBytes: Long, val modifiedNanos: Long, val fileKey: Any?, val changedNanos: Long?)
 
-    private class Entry(val observed: Observed, val content: Content)
+    internal class Entry(val observed: Observed, val content: Content)
 
     private val entries = ConcurrentHashMap<Path, Entry>()
 
@@ -57,6 +58,53 @@ internal class ContentCache(private val clock: Clock = Clock.systemUTC()) {
         return cached.content.takeIf {
             cached.observed == before && (objectAlgorithm == null || objectAlgorithm in it.objectIds)
         }
+    }
+
+    /**
+     * The reads of one capture (WD-02), by real path: what each file looked like just before it was read, what the read
+     * held, and whether that look proves the bytes stable afterwards ([Taken.provable]). The manifest and the stamp share
+     * these, so both always describe the same bytes; the integrity recheck shares only what is provable (D-274, D-374).
+     */
+    internal class Reads {
+        internal val taken = HashMap<Path, Taken>()
+
+        /** True while the capture rechecks its reads: then only a provable take is reused. */
+        internal var rechecking: Boolean = false
+    }
+
+    /**
+     * One read of a capture. [provable]: the look carries a change time no user tool restores (`ctime`, NTFS
+     * `ChangeTime`) and the file had not changed within [RACY_WINDOW_NANOS] before the read, so any later write shows in
+     * the look. Without one of the two only a second read of the bytes proves them unchanged.
+     */
+    internal class Taken(val observed: Observed, val content: Content, val provable: Boolean)
+
+    /**
+     * [file]'s content inside one capture: what [reads] already took while the file still looks as it did before that
+     * read, else one read — from disk with [fresh], otherwise through this cache — recorded in [reads]. A fresh capture
+     * therefore reads every file from disk once for its manifest and stamp, and metadata never stands in for a read
+     * across captures. A recheck ([Reads.rechecking]) reuses a take only when it is [Taken.provable]; any other file is
+     * read again, so a same-size rewrite with a restored modification time between the read and the recheck is seen
+     * (D-274).
+     */
+    fun within(reads: Reads, file: Path, objectAlgorithm: String?, fresh: Boolean, read: () -> ByteArray?): Content? {
+        val now = observe(file)
+        val seen = reads.taken[file]
+        if (seen != null && now != null && seen.observed == now && (objectAlgorithm == null || objectAlgorithm in seen.content.objectIds) &&
+            (!reads.rechecking || seen.provable)
+        ) {
+            return seen.content
+        }
+        val readAt = nowNanos()
+        val content = if (fresh) load(file, objectAlgorithm, read) else of(file, objectAlgorithm, read)
+        if (content == null || now == null) {
+            reads.taken.remove(file)
+        } else {
+            val changed = now.changedNanos
+            val provable = changed != null && readAt - maxOf(now.modifiedNanos, changed) >= RACY_WINDOW_NANOS
+            reads.taken[file] = Taken(now, content, provable)
+        }
+        return content
     }
 
     /** Reads [file] through [read] unconditionally and records the result when it may be trusted later. */
@@ -92,7 +140,8 @@ internal class ContentCache(private val clock: Clock = Clock.systemUTC()) {
     }
 
     private fun changedNanos(file: Path): Long? {
-        if ("unix" !in file.fileSystem.supportedFileAttributeViews()) return null
+        // NTFS keeps a ChangeTime that restoring the modification time moves, like a POSIX ctime (WD-02, D-374).
+        if ("unix" !in file.fileSystem.supportedFileAttributeViews()) return WindowsChangeTime.of(file)
         return try {
             (Files.getAttribute(file, "unix:ctime", LinkOption.NOFOLLOW_LINKS) as? FileTime)?.to(TimeUnit.NANOSECONDS)
         } catch (_: UnsupportedOperationException) {
