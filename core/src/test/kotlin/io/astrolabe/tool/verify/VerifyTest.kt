@@ -450,6 +450,10 @@ class VerifyTest {
         assertEquals("unavailable", status(review))
         assertTrue(review.body.contains("no campaign review path is wired"), review.body)
         assertEquals("unavailable", status(run("""{"what":"review","scope":"increment"}""")))
+        // WD-18: a refused review names the scopes the cell accepts.
+        val named = run("""{"what":"review","scope":"diff"}""")
+        assertEquals("denied", status(named))
+        assertTrue(named.body.contains("this cell accepts no review scope"), named.body)
         assertEquals("unavailable", status(run("""{"what":"baseline"}""")))
         assertTrue(SqliteReceipts(store, clock).forCheck("CHK-full").isEmpty(), "refusals record no receipt")
     }

@@ -224,9 +224,9 @@ public class Verify(
     private suspend fun review(args: VerifyArgs, contract: Contract): ToolOutcome {
         val scope = args.scope ?: "campaign"
         if (scope == "increment") return incrementReview(args)
-        if (scope != "campaign") return refused(args, "denied", "review scope is increment or campaign, got '$scope'")
-        val reviewer = campaignReview ?: return refused(args, "unavailable", "no campaign review path is wired for this cell")
-        val base = s0 ?: return refused(args, "unavailable", "no captured initial candidate: the review has no diff base")
+        if (scope != "campaign") return refused(args, "denied", "review scope is increment or campaign, got '$scope'; ${acceptedScopes()}")
+        val reviewer = campaignReview ?: return refused(args, "unavailable", "no campaign review path is wired for this cell; ${acceptedScopes()}")
+        val base = s0 ?: return refused(args, "unavailable", "no captured initial candidate: the review has no diff base; ${acceptedScopes()}")
         val stamp = stamper.report().candidateId
         val currencies = checks.all().filter { it.last != null }.associate { it.id to scheduler.currency(it, stamp) }
         val equivalence = reviewer.equivalence(stamp, currencies)
@@ -250,7 +250,7 @@ public class Verify(
 
     /** `review(scope=increment)` ⇒ the review cell (§8.8), whose human fallback is `Authority.review`; a current approval is reused. */
     private suspend fun incrementReview(args: VerifyArgs): ToolOutcome {
-        val reviewer = incrementReview ?: return refused(args, "unavailable", "no increment review cell is wired for this cell (review cells run in S2+)")
+        val reviewer = incrementReview ?: return refused(args, "unavailable", "no increment review cell is wired for this cell (review cells run in S2+); ${acceptedScopes()}")
         val outcome = reviewer.review("review requested by the cell")
         val record = outcome.record
         val (status, text) = when (outcome) {
@@ -260,6 +260,12 @@ public class Verify(
         }
         val findings = record.verdict?.findings.orEmpty().joinToString("") { "\n  ${it.severity.name.lowercase()} ${it.location}: ${it.issue}" + (it.suggestedFix?.let { fix -> " → $fix" } ?: "") }
         return refused(args, status, "── Review ──\nincrement review ${record.packetId} @${record.candidate.hash8}: $text$findings")
+    }
+
+    /** WD-18: a refused `review` names the scopes this cell does accept, so the model asks for one that runs. */
+    private fun acceptedScopes(): String {
+        val accepted = listOfNotNull("increment".takeIf { incrementReview != null }, "campaign".takeIf { campaignReview != null && s0 != null })
+        return if (accepted.isEmpty()) "this cell accepts no review scope" else "this cell accepts scope=${accepted.joinToString(" or scope=")}"
     }
 
     // ------------------------------------------------------------------ ops

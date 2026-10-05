@@ -1,6 +1,7 @@
 package io.astrolabe.workflow
 
 import io.astrolabe.Config
+import io.astrolabe.Defaults
 import io.astrolabe.atlas.Atlas
 import io.astrolabe.budget.HeuristicEstimator
 import io.astrolabe.budget.Tokens
@@ -22,8 +23,8 @@ import io.astrolabe.contract.Reversibility
 import io.astrolabe.contract.Risk
 import io.astrolabe.contract.Shape
 import io.astrolabe.contract.SqliteContractRepository
-import io.astrolabe.delegate.ReviewBudget
 import io.astrolabe.delegate.ReviewCell
+import io.astrolabe.delegate.ReviewRecord
 import io.astrolabe.event.AgentEvent
 import io.astrolabe.event.Events
 import io.astrolabe.fixtures.EventRecorder
@@ -90,10 +91,34 @@ class ReviewScenarioTest {
 
     @Test
     fun `WF-9 the review cell on the default budget and a 64K-output model asks the model and looks`() = runBlocking<Unit> {
+        val reviewed = review(Defaults(),
+            // The review cell: it reads the changed file, then publishes its verdict.
+            Scripted.Reply(listOf(say("checking the change"), read("rv1", "src/a.py"))),
+            Scripted.Reply(listOf(say("""{"verdict":"approve","confidence":0.9,"findings":[]}"""))),
+        )
+        assertTrue(reviewed.requests > 0, "WF-9: the review cell made no model request: ${reviewed.record?.unavailable}")
+        assertTrue(reviewed.looks > 0, "WF-9: the review cell never looked: ${reviewed.record?.unavailable}")
+        val record = assertNotNull(reviewed.record, "the increment's review is recorded")
+        assertTrue(record.approved, "the reviewer's approval stands on its own verdict: ${record.unavailable}")
+    }
+
+    @Test
+    fun `a review its configured budget cannot admit is unavailable with the numbers before any model call`() = runBlocking<Unit> {
+        val reviewed = review(Defaults().copy(reviewIncrementTokens = 3_000))
+        assertEquals(0, reviewed.requests, "the unadmittable review cell asked the model")
+        val record = assertNotNull(reviewed.record, "the increment's review is recorded")
+        assertEquals(null, record.verdict, "no verdict without a review: never approved, never declined")
+        val why = record.unavailable.orEmpty()
+        assertTrue("not admitted before its model call" in why && "usable budget 2400 tokens" in why && "input estimate" in why && "needed output" in why, why)
+    }
+
+    private class Reviewed(val requests: Int, val looks: Int, val record: ReviewRecord?)
+
+    /** Plans one increment, implements it and lets its owed review run on [defaults]; [judge] are the review cell's replies. */
+    private suspend fun review(defaults: Defaults, vararg judge: Scripted): Reviewed {
         seed()
-        val config = Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all + (large.id to large))
-        val workingTokens = ReviewBudget.DEFAULT.incrementTokens.value
-        Controller(config, clock, idGen, events).open(repo.root, request, policy).use { c ->
+        val config = Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all + (large.id to large), defaults = defaults)
+        return Controller(config, clock, idGen, events).open(repo.root, request, policy).use { c ->
             val v = checkNotNull(c.registry.version("src/a.py"))
             val adapter = FakeAdapter(ScriptedModel.of(
                 Scripted.Reply(listOf(say("planning one increment"), call("p1", "task", """{"op":"propose","kind":"plan","proposal":$PLAN}"""))),
@@ -102,9 +127,7 @@ class ReviewScenarioTest {
                 Scripted.Reply(listOf(say("editing"), anchored("e1", "src/a.py", v, "    return 1", "    return 10"))),
                 Scripted.Reply(listOf(say("verifying"), call("v1", "verify", """{"what":"acceptance","ids":["AC-1"]}"""))),
                 Scripted.Reply(listOf(say("done"))),
-                // The review cell: it reads the changed file, then publishes its verdict.
-                Scripted.Reply(listOf(say("checking the change"), read("rv1", "src/a.py"))),
-                Scripted.Reply(listOf(say("""{"verdict":"approve","confidence":0.9,"findings":[]}"""))),
+                *judge,
             ))
             val run = Controller(config, clock, idGen, events).run(c, CellModel(adapter, large, HeuristicEstimator()))
             check(recorder.awaitCount(events.lastSeq.toInt())) { "events up to ${events.lastSeq} were not delivered" }
@@ -112,13 +135,10 @@ class ReviewScenarioTest {
             val requests = recorder.ofType<AgentEvent.Cell.ModelRequested>().filter(reviewer)
             val looks = recorder.ofType<AgentEvent.Cell.ToolCalled>().filter(reviewer).filter { it.family == "look" }
             val record = ReviewCell.latest(c.store, c.ids)
-            val outputs = adapter.calls.map { it.request.maxOutputTokens }
-            println("WF-9: review budget $workingTokens tokens; review requests ${requests.size} (estimates ${requests.map { it.estimatedTokens }}); " +
-                "looks ${looks.size}; request output limits $outputs; review ${record?.verdict?.outcome ?: record?.unavailable}; campaign ${run.outcome}: ${run.state?.reason}")
-            assertTrue(requests.isNotEmpty(), "WF-9: the review cell made no model request: ${record?.unavailable}")
-            assertTrue(looks.isNotEmpty(), "WF-9: the review cell never looked: ${record?.unavailable}")
-            assertNotNull(record, "the increment's review is recorded")
-            assertTrue(record.approved, "the reviewer's approval stands on its own verdict: ${record.unavailable}")
+            println("review budget ${defaults.reviewIncrementTokens} tokens; review requests ${requests.size} (estimates ${requests.map { it.estimatedTokens }}); " +
+                "looks ${looks.size}; request output limits ${adapter.calls.map { it.request.maxOutputTokens }}; review ${record?.verdict?.outcome ?: record?.unavailable}; " +
+                "campaign ${run.outcome}: ${run.state?.reason}")
+            Reviewed(requests.size, looks.size, record)
         }
     }
 
