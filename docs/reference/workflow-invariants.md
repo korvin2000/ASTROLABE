@@ -33,14 +33,15 @@ scenario: `DirtyRepoScenarioTest`.
 
 `K/` = `core/src/main/kotlin/io/astrolabe/`; `Studio:` = the Studio backend in the root repository.
 Counters: `open`/`snapshot`/`finish` = `phase.counted` events of that phase; fields `gitProcesses`, `filesRead`,
-`bytesRead`, `objectsWritten`, `opens`, `finishAttempts`; "model requests" = the fake adapter's calls.
+`bytesRead` (tree reads, the atlas's included), `blobsRead`/`blobBytesRead` (store blobs read back for the tree),
+`objectsWritten`, `opens`, `finishAttempts`; "model requests" = the fake adapter's calls.
 
 | № | Property | Guard | Files that can break it (WD) | Counter |
 |---|---|---|---|---|
 | WF-1 | One user action is one campaign open | pending P8.W.5 | Studio: `StudioHost.kt` (WD-04); `K/campaign/Controller.kt` `open` | `open` events per host action (`opens`) |
-| WF-2 | Boundary cost does not depend on the number of untracked files | pending P8.W.2 | `K/workspace/ShadowRef.kt`, `DirtyState.kt`, `Stamper.kt`, `Workspace.kt`, `K/store/BlobStore.kt`, `K/os/Git.kt` (WD-01, WD-02, WD-07) | `gitProcesses` per `open`/`snapshot` equal at 300 and 1500 files; `filesRead` ≤ files per capture |
-| WF-3 | What is unchanged is stored once | pending P8.W.2 | `K/workspace/ShadowRef.kt`, `K/store/BlobStore.kt`, `K/campaign/Controller.kt` snapshot calls (WD-01, WD-07) | `objectsWritten` of the second `snapshot` after one edited file = 1 |
-| WF-4 | An unreadable file does not end the run | pending P8.W.2 | `K/workspace/Workspace.kt`, `Stamper.kt`, `DirtyState.kt` (WD-05) | outcome is a resumable stop naming the path, never `agent_error` (`DirtyRepo` variant `LockedFile`) |
+| WF-2 | Boundary cost does not depend on the number of untracked files | `DirtyRepoScenarioTest` (P8.W.2) | `K/workspace/ShadowRef.kt`, `DirtyState.kt`, `Stamper.kt`, `Workspace.kt`, `K/store/BlobStore.kt`, `K/workspace/ContentCache.kt`, `K/os/Git.kt`, `K/atlas/Atlas.kt` (WD-01, WD-02, WD-07) | `gitProcesses` per `open`/`snapshot` equal at 300 and 1500 files; per capture `filesRead` + `blobsRead` ≤ files (+ atlas rows at an open), the 20 MB file read once |
+| WF-3 | What is unchanged is stored once | `DirtyRepoScenarioTest` (P8.W.2) | `K/workspace/ShadowRef.kt`, `K/store/BlobStore.kt`, `K/campaign/Controller.kt` snapshot calls (WD-01, WD-07) | `objectsWritten` of the second `snapshot` after one edited file = 1; a second work's `open` writes 0 objects and no recovery blob |
+| WF-4 | An unreadable file does not end the run | `UnreadableFileScenarioTest` (P8.W.2) | `K/workspace/Workspace.kt`, `Stamper.kt`, `DirtyState.kt` (WD-05) | outcome is a resumable stop naming the path, never `agent_error` (`DirtyRepo` variant `LockedFile`) |
 | WF-5 | Finalization is idempotent | pending P8.W.1 (with P8.W.3) | `K/campaign/Controller.kt` `stopOrFinish`, `K/verify/Resolution.kt`, `K/verify/Scheduler.kt`, `K/workspace/Stamper.kt` (WD-08, WD-14, WD-15, WD-06) | `finishAttempts` without new information yields no repeated stop; a check writing only scratch output does not move the candidate |
 | WF-6 | A person's or policy's decision is final for an unchanged candidate | pending P8.W.1 (with P8.W.5) | `K/campaign/Controller.kt` (decide, pending completion), `K/verify/Resolution.kt`; Studio: `DecisionService.java` (WD-10) | no check runs after "accept"; a stored decision applies to a repeated request |
 | WF-7 | Evidence survives a reopen | pending P8.W.1 | `K/campaign/Controller.kt` open (check registry, held receipts) (WD-09) | no "no receipt" after a reopen without changes |

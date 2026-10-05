@@ -105,6 +105,7 @@ import io.astrolabe.workspace.Preimage
 import io.astrolabe.workspace.Ranges
 import io.astrolabe.workspace.StampReport
 import io.astrolabe.workspace.Stamper
+import io.astrolabe.workspace.UnreadableInput
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
@@ -320,6 +321,9 @@ public class Cell @JvmOverloads constructor(
                 // Invariant 11: the interruption is recorded as its own outcome before the cancellation propagates.
                 withContext(NonCancellable) { settle(CellStatus.Cancelled, "cancelled: ${cancelled.message ?: "coroutine cancelled"}") }
                 throw cancelled
+            } catch (unreadable: UnreadableInput) {
+                // WD-05: a file another process holds is outside the cell's control; the cell blocks on it by name, resumably.
+                return finish(blocked(BlockedRequest("unreadable input ${unreadable.path}: ${unreadable.message}", listOf(unreadable.path), null, turn)))
             } catch (failure: Exception) {
                 val error = "${failure::class.simpleName}: ${failure.message}${site(failure)}"
                 val checkpoint = settle(CellStatus.Failed, error)

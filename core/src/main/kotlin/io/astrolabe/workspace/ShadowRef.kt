@@ -3,7 +3,6 @@ package io.astrolabe.workspace
 import io.astrolabe.id.AttemptId
 import io.astrolabe.id.CandidateId
 import io.astrolabe.id.Digest
-import io.astrolabe.id.Hashing
 import io.astrolabe.id.Identities
 import io.astrolabe.id.InstantSerializer
 import io.astrolabe.id.WorkId
@@ -16,6 +15,7 @@ import io.astrolabe.os.Os
 import io.astrolabe.os.RefUpdateRejected
 import io.astrolabe.os.TreeEntryKind
 import io.astrolabe.store.BlobKind
+import io.astrolabe.store.MissingBlob
 import io.astrolabe.store.Store
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -25,7 +25,6 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.attribute.PosixFilePermission
-import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
 
@@ -152,7 +151,7 @@ public class ShadowRef @JvmOverloads public constructor(
 
     /** The manifest of [turn], read back from its blob. */
     public fun manifest(turn: Int): Snapshot? =
-        record(turn)?.let { Snapshot.decode(store.blobs.get(it.manifestBlob)) }
+        record(turn)?.let { Snapshot.decode(blob(it.manifestBlob)) }
 
     /** The commit the ref points at right now, or `null` when no snapshot has been taken. */
     public fun head(): ObjectId? = workspace.git.readRef(ref)
@@ -250,7 +249,7 @@ public class ShadowRef @JvmOverloads public constructor(
             }
             val fromManifest = targetManifest?.entry(path)?.takeIf { it.present }?.digest
             val bytes = if (fromManifest != null) {
-                store.blobs.get(fromManifest)
+                blob(fromManifest)
             } else {
                 limitations.add(
                     "'$path' was clean at turn $turn, so its bytes come from the repository object " +
@@ -299,7 +298,7 @@ public class ShadowRef @JvmOverloads public constructor(
                 continue
             }
             val manifestDigest = manifest.entry(path)?.takeIf { it.present }?.digest
-            val bytes = if (manifestDigest != null) store.blobs.get(manifestDigest) else {
+            val bytes = if (manifestDigest != null) blob(manifestDigest) else {
                 fromObjectStore++
                 git.catFile(entry.id)
             }
@@ -359,7 +358,8 @@ public class ShadowRef @JvmOverloads public constructor(
     private fun commit(manifest: Snapshot): SnapshotRecord {
         val git = workspace.git
         val index = readIndex()
-        val previous = index.records.lastOrNull()?.let { ObjectId.parse(it.commit) }
+        val last = index.records.lastOrNull()
+        val previous = last?.let { ObjectId.parse(it.commit) }
 
         val entries = LinkedHashMap<String, IndexEntry>()
         for (row in git.lsFiles()) {
@@ -369,15 +369,13 @@ public class ShadowRef @JvmOverloads public constructor(
             }
             entries[row.path] = IndexEntry(row.mode, row.id, row.path)
         }
+        val objects = objectIds(manifest, last)
         for (entry in manifest.entries) {
             if (!entry.present) {
                 entries.remove(entry.path)
                 continue
             }
-            val bytes = store.blobs.get(entry.digest!!)
-            val id = git.hashObject(bytes, noFilters = true, write = true)
-            verifyRawObjectId(id, bytes, entry.path)
-            entries[entry.path] = IndexEntry(entry.mode, id, entry.path)
+            entries[entry.path] = IndexEntry(entry.mode, objects.getValue(entry.digest!!), entry.path)
         }
 
         Files.createDirectories(tempIndex.parent)
@@ -412,27 +410,59 @@ public class ShadowRef @JvmOverloads public constructor(
         writeIndex(next)
         Files.deleteIfExists(pendingFile)
         Files.deleteIfExists(tempIndex)
+        indexed = Indexed(commit.hex, objects)
         return record
     }
 
+    /** The objects of the commit this instance last wrote, by content digest; the next snapshot starts from them. */
+    private class Indexed(val commit: String, val objects: Map<Digest, ObjectId>)
+
+    @Volatile
+    private var indexed: Indexed? = null
+
     /**
-     * §4.3 integrity: the id git returns for raw bytes must be the id those bytes have. A different
-     * one would mean a filter ran despite `--no-filters`, which is the failure I-12 is about.
+     * WD-01: the git object of every present entry of [manifest], by content digest. Content the snapshot [last] already
+     * indexed keeps its object — its manifest names the digest and its tree the object, so nothing is hashed again. The
+     * rest is looked up in the object database with one `cat-file --batch-check`, and only what git lacks is written,
+     * with one `hash-object -w --stdin-paths` over the recovery blobs. Each such id is the one the raw bytes must have,
+     * computed from the capture's own read (§4.3, I-12).
      */
-    private fun verifyRawObjectId(id: ObjectId, bytes: ByteArray, path: String) {
-        if (id.hex.length != SHA1_HEX) return // a SHA-256 repository; the local check does not apply
-        val digest = MessageDigest.getInstance("SHA-1")
-        digest.update("blob ${bytes.size}".toByteArray(StandardCharsets.US_ASCII))
-        digest.update(0.toByte())
-        digest.update(bytes)
-        val expected = Hashing.hex(digest.digest())
-        if (expected != id.hex) {
-            throw SnapshotIntegrityError(
-                "git stored '$path' as $id but its ${bytes.size} raw bytes hash to $expected — " +
-                    "a content filter ran during snapshotting (D-53, I-12)",
-            )
+    private fun objectIds(manifest: Snapshot, last: SnapshotRecord?): Map<Digest, ObjectId> {
+        val wanted = manifest.entries.mapNotNullTo(LinkedHashSet()) { it.digest }
+        val objects = HashMap<Digest, ObjectId>(wanted.size * 2)
+        if (last != null) {
+            val known = indexed?.takeIf { it.commit == last.commit }?.objects ?: run {
+                val before = Snapshot.decode(blob(last.manifestBlob))
+                val tree = treeOf(workspace.git, ObjectId.parse(last.commit))
+                before.entries.mapNotNull { e -> e.digest?.let { d -> tree[e.path]?.let { d to it.id } } }.toMap()
+            }
+            for (digest in wanted) known[digest]?.let { objects[digest] = it }
         }
+        val rest = wanted.filter { it !in objects }
+        if (rest.isEmpty()) return objects
+        val expected = rest.associateWith { expectedId(it) }
+        val present = workspace.git.presentObjects(expected.values)
+        val missing = rest.filter { expected.getValue(it) !in present }
+        val stored = workspace.git.hashObjects(missing.map { store.blobs.file(it) ?: throw MissingBlob(it, "recovery blob ${it.hex} is not on disk") })
+        missing.forEachIndexed { i, digest ->
+            val want = expected.getValue(digest)
+            val got = stored[i]
+            if (got != want) {
+                throw SnapshotIntegrityError(
+                    "git stored the bytes of ${digest.hex} as $got but they hash to $want — a content filter ran during snapshotting (D-53, I-12)",
+                )
+            }
+        }
+        for (digest in rest) objects[digest] = expected.getValue(digest)
+        return objects
     }
+
+    /**
+     * The object id the bytes of [digest] must have: the capture's, else hashed from the recovery blob (counted) with the
+     * repository's object hash. §4.3: a stored id that differs means a filter ran despite `--no-filters` (I-12).
+     */
+    private fun expectedId(digest: Digest): ObjectId =
+        ObjectId.parse(dirtyState.objectId(digest) ?: ContentCache.objectId(workspace.objectAlgorithm, blob(digest)))
 
     private fun changedPaths(target: Map<String, TreeBlob>, latest: Map<String, TreeBlob>): List<String> =
         (target.keys + latest.keys).filter { target[it] != latest[it] }.sortedWith(Stamper.PATH_ORDER)
@@ -445,6 +475,9 @@ public class ShadowRef @JvmOverloads public constructor(
     private data class TreeBlob(val mode: FileMode, val id: ObjectId)
 
     private fun digestOfBlob(git: Git, id: ObjectId): Digest = Digest.of(git.catFile(id))
+
+    /** A store blob read for this tree, counted (§7.2). */
+    private fun blob(digest: Digest): ByteArray = store.blobs.get(digest).also { workspace.blobRead(it.size) }
 
     private fun digestOfFile(file: Path): Digest = Digest.of(Files.readAllBytes(file))
 
@@ -507,7 +540,7 @@ public class ShadowRef @JvmOverloads public constructor(
         val head = workspace.git.readRef(ref)?.hex
         when (head) {
             record.commit -> {
-                val manifest = Snapshot.decode(store.blobs.get(record.manifestBlob))
+                val manifest = Snapshot.decode(blob(record.manifestBlob))
                 check(manifest.turn == record.turn && manifest.manifestDigest == record.manifestDigest &&
                     manifest.stampId == record.stampId) { "pending snapshot manifest is inconsistent" }
                 writeIndex(pending)
@@ -535,8 +568,6 @@ public class ShadowRef @JvmOverloads public constructor(
         /** Author and committer of every shadow commit; never the user's identity. */
         @JvmField
         public val HARNESS_IDENTITY: Identity = Identity("ASTROLABE", "astrolabe@astrolabe.invalid")
-
-        private const val SHA1_HEX = 40
 
         private val JSON = Json { prettyPrint = false; encodeDefaults = true; ignoreUnknownKeys = true }
     }

@@ -83,6 +83,11 @@ internal class DirtyRepo private constructor(val repo: TempRepo, val untrackedFi
             require(untrackedFiles >= 1) { "the tool directory holds at least one file" }
             val repo = TempRepo.create()
             try {
+                // No exclusion from the host either: a global core.excludesFile or a template info/exclude would hide the tool directory.
+                val exclude = repo.root.resolve(".git/info/exclude")
+                Files.createDirectories(exclude.parent)
+                Files.write(exclude, ByteArray(0))
+                repo.config("core.excludesFile", exclude.toString().replace('\\', '/'))
                 repo.write(SOURCE, "def total(items):\n    return sum(items)\n")
                 repo.write("src/util.py", "def clamp(x, lo, hi):\n    return max(lo, min(x, hi))\n")
                 repo.write("tests/test_app.py", "from src.app import total\n\n\ndef test_total():\n    assert total([1, 2]) == 3\n")
@@ -95,6 +100,10 @@ internal class DirtyRepo private constructor(val repo: TempRepo, val untrackedFi
                 }
                 write(repo.root, LOCKED, "locked by a tool\n".toByteArray())
                 write(repo.root, BIG, ByteArray(BIG_BYTES) { (it * 31 + (it ushr 11)).toByte() })
+                // A virus scanner's on-access scan of just-written files can fail a metadata read for a moment, which a
+                // capture answers with one more read; reading them once here lets those scans finish first (a real
+                // tool directory is old), so the read counters measure the harness, not the scanner.
+                Files.walk(repo.root.resolve(UNTRACKED_DIR)).use { all -> all.filter(Files::isRegularFile).forEach { Files.readAllBytes(it) } }
                 return DirtyRepo(repo, untrackedFiles, variant)
             } catch (failure: Throwable) {
                 repo.close()

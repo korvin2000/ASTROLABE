@@ -134,6 +134,24 @@ public class BlobStore internal constructor(
         return digest
     }
 
+    /**
+     * [put] of [bytes] the caller hashed to [digest] in the same operation, so a capture hashes each read once (WD-02).
+     * Content already held under [digest] is not published again: no write and no row transaction.
+     */
+    internal fun put(bytes: ByteArray, digest: Digest, kind: BlobKind, ids: Identities, recovery: Boolean): Digest {
+        if (holds(digest, recovery)) return digest
+        val target = directory(recovery).resolve(digest.hex)
+        if (!Files.exists(target)) publish(bytes, target)
+        faults.at(BlobPoint.AFTER_MOVE_BEFORE_ROW)
+        insertRow(digest, bytes.size.toLong(), kind, ids, recovery)
+        faults.at(BlobPoint.AFTER_ROW)
+        return digest
+    }
+
+    /** The file holding [digest]'s bytes, recovery copy first, or `null` when neither copy is on disk. */
+    internal fun file(digest: Digest): Path? =
+        listOf(true, false).map { directory(it).resolve(digest.hex) }.firstOrNull { Files.isRegularFile(it, NOFOLLOW_LINKS) }
+
     /** The bytes of [digest]; a referenced blob that is not on disk is an integrity failure. */
     public fun get(digest: Digest): ByteArray {
         val recovery = recoveryOf(digest)

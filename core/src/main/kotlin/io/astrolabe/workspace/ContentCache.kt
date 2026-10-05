@@ -33,9 +33,9 @@ internal class ContentCache(private val clock: Clock = Clock.systemUTC()) {
     /** What a read produced: the raw digest, the size, and git object ids by hash algorithm. */
     internal class Content(val digest: Digest, val sizeBytes: Long, val objectIds: Map<String, String>)
 
-    private data class Observed(val sizeBytes: Long, val modifiedNanos: Long, val fileKey: Any?, val changedNanos: Long?)
+    internal data class Observed(val sizeBytes: Long, val modifiedNanos: Long, val fileKey: Any?, val changedNanos: Long?)
 
-    private class Entry(val observed: Observed, val content: Content)
+    internal class Entry(val observed: Observed, val content: Content)
 
     private val entries = ConcurrentHashMap<Path, Entry>()
 
@@ -57,6 +57,30 @@ internal class ContentCache(private val clock: Clock = Clock.systemUTC()) {
         return cached.content.takeIf {
             cached.observed == before && (objectAlgorithm == null || objectAlgorithm in it.objectIds)
         }
+    }
+
+    /**
+     * The reads of one capture (WD-02), by real path: what each file looked like just before it was read and what the
+     * read held. A capture's manifest, stamp and integrity recheck share these instead of reading the file again.
+     */
+    internal class Reads {
+        internal val taken = HashMap<Path, Entry>()
+    }
+
+    /**
+     * [file]'s content inside one capture: what [reads] already took while the file still looks as it did before that
+     * read, else one read — from disk with [fresh], otherwise through this cache — recorded in [reads]. A fresh capture
+     * therefore reads every file from disk exactly once (D-374), and metadata never stands in for a read across captures.
+     */
+    fun within(reads: Reads, file: Path, objectAlgorithm: String?, fresh: Boolean, read: () -> ByteArray?): Content? {
+        val now = observe(file)
+        val seen = reads.taken[file]
+        if (seen != null && now != null && seen.observed == now && (objectAlgorithm == null || objectAlgorithm in seen.content.objectIds)) {
+            return seen.content
+        }
+        val content = if (fresh) load(file, objectAlgorithm, read) else of(file, objectAlgorithm, read)
+        if (content == null || now == null) reads.taken.remove(file) else reads.taken[file] = Entry(now, content)
+        return content
     }
 
     /** Reads [file] through [read] unconditionally and records the result when it may be trusted later. */

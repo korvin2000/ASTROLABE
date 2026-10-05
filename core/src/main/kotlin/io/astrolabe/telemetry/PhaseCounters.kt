@@ -22,6 +22,8 @@ internal class PhaseMark private constructor(
     private val filesRead: Long,
     private val bytesRead: Long,
     private val objectsWritten: Long,
+    private val blobsRead: Long,
+    private val blobBytesRead: Long,
 ) {
     fun counted(ids: Identities, phase: CountedPhase, opens: Int, finishAttempts: Int): AgentEvent.Telemetry.PhaseCounted =
         AgentEvent.Telemetry.PhaseCounted(
@@ -30,12 +32,15 @@ internal class PhaseMark private constructor(
             filesRead = workspace.filesRead - filesRead,
             bytesRead = workspace.bytesRead - bytesRead,
             objectsWritten = workspace.git.objectsWritten - objectsWritten,
-            opens = opens, finishAttempts = finishAttempts, phase = phase.phase,
+            opens = opens, finishAttempts = finishAttempts,
+            blobsRead = workspace.blobsRead - blobsRead,
+            blobBytesRead = workspace.blobBytesRead - blobBytesRead,
+            phase = phase.phase,
         )
 
     companion object {
         /** [gitProcesses] overrides the git baseline when the phase began before [workspace] existed (an open). */
         fun of(workspace: Workspace, gitProcesses: Long = workspace.git.processesStarted, objectsWritten: Long = workspace.git.objectsWritten): PhaseMark =
-            PhaseMark(workspace, gitProcesses, workspace.filesRead, workspace.bytesRead, objectsWritten)
+            PhaseMark(workspace, gitProcesses, workspace.filesRead, workspace.bytesRead, objectsWritten, workspace.blobsRead, workspace.blobBytesRead)
     }
 }

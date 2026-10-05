@@ -183,6 +183,8 @@ public data class Separated(
 }
 
 private const val CAPTURE_ATTEMPTS = 3
+private const val SHA1_HEX = 40
+private const val SHA256_HEX = 64
 
 /**
  * The initial dirty-state record (§4.6, D-53, FX-06).
@@ -219,10 +221,12 @@ public class DirtyState(
             throw UnsupportedRepositoryForm(it, "dirty-state capture")
         }
         // D-274: a concurrent writer (dev server, IDE autosave) gets a bounded, immediate retry; the last failure stands.
+        // WD-02: the attempts share one capture's reads, so a retry reads again only what moved.
+        val reads = ContentCache.Reads()
         var attempt = 1
         while (true) {
             try {
-                return captureOnce(turn, attempt, fresh)
+                return captureOnce(turn, attempt, fresh, reads)
             } catch (changed: SnapshotIntegrityError) {
                 if (attempt >= CAPTURE_ATTEMPTS) throw changed
                 attempt++
@@ -233,20 +237,32 @@ public class DirtyState(
     /** Test seam: runs after an attempt's reads and before its integrity recheck, with the attempt number. */
     internal var beforeRecheck: (attempt: Int) -> Unit = {}
 
-    private fun captureOnce(turn: Int, attempt: Int, fresh: Boolean): Snapshot {
+    /** Git object ids of captured content by digest, computed from the capture's own read (WD-01); [ShadowRef] indexes with them. */
+    private val objectIds = java.util.concurrent.ConcurrentHashMap<Digest, String>()
+
+    /** The git object id of captured content [digest], when a capture of this tree computed it from the bytes it read. */
+    internal fun objectId(digest: Digest): String? = objectIds[digest]
+
+    private fun captureOnce(turn: Int, attempt: Int, fresh: Boolean, reads: ContentCache.Reads): Snapshot {
         val status = workspace.git.status(UntrackedFiles.ALL, includeIgnored = true)
         val index = workspace.git.lsFiles()
         val entries = LinkedHashMap<String, SnapshotEntry>()
+        val algorithm = when ((status.branch?.oid ?: index.firstOrNull()?.id)?.hex?.length) {
+            SHA1_HEX -> "SHA-1"
+            SHA256_HEX -> "SHA-256"
+            else -> workspace.objectAlgorithm
+        }
+        val read = { path: String, mode: FileMode -> worktreeEntry(path, mode, fresh, reads, algorithm) }
 
         for (entry in status.entries) {
             when (entry) {
-                is StatusEntry.Ordinary -> worktreeEntry(entry.path, entry.worktreeMode, fresh)?.let { entries[entry.path] = it }
-                is StatusEntry.Unmerged -> worktreeEntry(entry.path, entry.worktreeMode, fresh)?.let { entries[entry.path] = it }
-                is StatusEntry.Untracked -> worktreeEntry(entry.path, FileMode.ABSENT, fresh)?.let { entries[entry.path] = it }
+                is StatusEntry.Ordinary -> read(entry.path, entry.worktreeMode)?.let { entries[entry.path] = it }
+                is StatusEntry.Unmerged -> read(entry.path, entry.worktreeMode)?.let { entries[entry.path] = it }
+                is StatusEntry.Untracked -> read(entry.path, FileMode.ABSENT)?.let { entries[entry.path] = it }
                 is StatusEntry.Renamed -> {
-                    worktreeEntry(entry.path, entry.worktreeMode, fresh)?.let { entries[entry.path] = it }
+                    read(entry.path, entry.worktreeMode)?.let { entries[entry.path] = it }
                     if (entry.origin == ChangeOrigin.RENAME) {
-                        val origin = worktreeEntry(entry.origPath, FileMode.ABSENT, fresh)
+                        val origin = read(entry.origPath, FileMode.ABSENT)
                         if (origin?.kind == SnapshotEntryKind.Deleted) entries[entry.origPath] = origin
                     }
                 }
@@ -256,10 +272,11 @@ public class DirtyState(
         }
 
         val staged = stagedEntries(status, index)
-        val report = stamper.report(fresh)
+        // WD-02: the stamp hashes the bytes this capture read and stored, not a second read of them.
+        val report = stamper.report(fresh, reads)
         // Include raw differences hidden by Git's clean filters and checkout conversions.
         for ((path, entry) in report.members) {
-            if (path !in entries) worktreeEntry(path, entry.mode, fresh)?.let { entries[path] = it }
+            if (path !in entries) read(path, entry.mode)?.let { entries[path] = it }
         }
         val captured = entries.mapValues { (_, entry) ->
             val type = when (entry.kind) {
@@ -273,7 +290,8 @@ public class DirtyState(
         // A directory member (nested repository, submodule) carries no bytes to recover.
         val recoverable = report.members.filterValues { it.type != EntryType.Directory }
         beforeRecheck(attempt)
-        if (captured != recoverable || base != report.baseCommit || stamper.stamp().id != report.candidateId ||
+        // The recheck re-reads only files that no longer look as they did when this capture read them.
+        if (captured != recoverable || base != report.baseCommit || stamper.report(false, reads).stamp.id != report.candidateId ||
             workspace.git.lsFiles() != index ||
             workspace.git.status(UntrackedFiles.ALL, includeIgnored = true) != status
         ) {
@@ -291,7 +309,7 @@ public class DirtyState(
     }
 
     /** The bytes of [entry], read back from its recovery blob. */
-    public fun bytesOf(entry: SnapshotEntry): ByteArray? = entry.digest?.let(blobs::get)
+    public fun bytesOf(entry: SnapshotEntry): ByteArray? = entry.digest?.let { blobs.get(it).also { bytes -> workspace.blobRead(bytes.size) } }
 
     // ------------------------------------------------------------ internals
 
@@ -328,7 +346,7 @@ public class DirtyState(
         return staged.sortedWith(compareBy(Stamper.PATH_ORDER) { it.path + "" + it.stage })
     }
 
-    private fun worktreeEntry(path: String, reportedMode: FileMode, fresh: Boolean): SnapshotEntry? {
+    private fun worktreeEntry(path: String, reportedMode: FileMode, fresh: Boolean, reads: ContentCache.Reads, algorithm: String): SnapshotEntry? {
         val resolved = workspace.paths.resolveCapture(path)
         if (resolved !is PathResolution.Resolved) {
             throw SnapshotIntegrityError("cannot capture '$path': $resolved")
@@ -337,8 +355,10 @@ public class DirtyState(
             PathKind.Missing -> deleted(path)
             PathKind.Symlink -> {
                 val bytes = linkTarget(resolved.real).toByteArray(StandardCharsets.UTF_8)
+                val digest = Digest.of(bytes)
+                objectIds[digest] = ContentCache.objectId(algorithm, bytes)
                 SnapshotEntry(path, SnapshotEntryKind.Symlink, FileMode.SYMLINK,
-                    blobs.put(bytes, BlobKind.PREIMAGE, ids, recovery = true), bytes.size.toLong())
+                    blobs.put(bytes, digest, BlobKind.PREIMAGE, ids, recovery = true), bytes.size.toLong())
             }
             PathKind.Regular -> {
                 // One mode rule with the stamp report the recheck compares against (D-293).
@@ -346,13 +366,21 @@ public class DirtyState(
                 // D-364: unchanged content already in the recovery store is not read or stored again.
                 val known = if (fresh) null else workspace.contents.cached(resolved.real)
                 if (known != null && blobs.holds(known.digest, recovery = true)) {
+                    known.objectIds[algorithm]?.let { objectIds[known.digest] = it }
                     return SnapshotEntry(path, SnapshotEntryKind.File, mode, known.digest, known.sizeBytes)
                 }
+                // WD-02: one read per capture — the bytes go to the store under the digest that read produced, once.
                 var bytes: ByteArray? = null
-                workspace.contents.load(resolved.real, null) { workspace.bytes(resolved).also { bytes = it } }
-                val read = bytes ?: throw SnapshotIntegrityError("'$path' disappeared during capture")
-                SnapshotEntry(path, SnapshotEntryKind.File, mode,
-                    blobs.put(read, BlobKind.PREIMAGE, ids, recovery = true), read.size.toLong())
+                val load = { workspace.bytes(resolved).also { bytes = it } }
+                var content = workspace.contents.within(reads, resolved.real, algorithm, fresh = true, load)
+                if (content != null && bytes == null && !blobs.holds(content.digest, recovery = true)) {
+                    // This capture's stamp read the file first (a raw difference git status hid): its bytes were never stored.
+                    content = workspace.contents.load(resolved.real, algorithm, load)
+                }
+                val got = content ?: throw SnapshotIntegrityError("'$path' disappeared during capture")
+                got.objectIds[algorithm]?.let { objectIds[got.digest] = it }
+                bytes?.let { blobs.put(it, got.digest, BlobKind.PREIMAGE, ids, recovery = true) }
+                SnapshotEntry(path, SnapshotEntryKind.File, mode, got.digest, got.sizeBytes)
             }
             PathKind.Directory -> null
             else -> throw SnapshotIntegrityError("unsupported capture kind ${resolved.kind}: $path")

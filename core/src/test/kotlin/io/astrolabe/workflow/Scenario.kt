@@ -84,8 +84,8 @@ internal class Scenario(
         }
     }
 
-    /** Opens the campaign (closing an open one first): one `phase.counted` open event per call. */
-    fun open(): OpenedCampaign {
+    /** Opens the campaign of [request] (closing an open one first): one `phase.counted` open event per call. */
+    fun open(request: CampaignRequest = this.request): OpenedCampaign {
         campaign?.close()
         campaign = null
         return controller.open(root, request, policy).also { campaign = it }
