@@ -61,14 +61,16 @@ class PrecompileCampaignTest {
     private val files = (1..3).map { "src/f$it.py" }
 
     /**
-     * The acceptance command. A [mutating] one writes a declared scratch artifact into the tree on its first run
-     * only — the increment's own verify-on-stop, since a plan cell runs no product acceptance (d4d2524) — and
-     * leaves [sentinel] outside the repository, so the tree moves while I1's checks run and stays put afterwards.
+     * The acceptance command. A [mutating] one writes its own output into the tree on its first run only — the
+     * increment's own verify-on-stop, since a plan cell runs no product acceptance (d4d2524) — and leaves [sentinel]
+     * outside the repository, so the tree moves while I1's checks run and stays put afterwards. The output goes to
+     * `docs/build/`: a check's own output (no tested input, D-45) but no declared output root (W3 anchors them at the
+     * repository root), so it moves the candidate as untracked build output did before the output policy.
      */
     private fun printing(mutating: Boolean, sentinel: Path): Command = when {
-        WINDOWS && mutating -> Command(listOf("cmd.exe", "/d", "/s", "/c", "type pytest_pass.txt & if not exist $sentinel (echo checked> build\\marker.txt& echo x> $sentinel)"))
+        WINDOWS && mutating -> Command(listOf("cmd.exe", "/d", "/s", "/c", "type pytest_pass.txt & if not exist $sentinel (echo checked> docs\\build\\marker.txt& echo x> $sentinel)"))
         WINDOWS -> Command(listOf("cmd.exe", "/d", "/s", "/c", "type pytest_pass.txt"))
-        mutating -> Command(listOf("/bin/sh", "-c", "cat pytest_pass.txt; if [ ! -e $sentinel ]; then echo checked > build/marker.txt; echo x > $sentinel; fi"))
+        mutating -> Command(listOf("/bin/sh", "-c", "cat pytest_pass.txt; if [ ! -e $sentinel ]; then echo checked > docs/build/marker.txt; echo x > $sentinel; fi"))
         else -> Command(listOf("/bin/sh", "-c", "cat pytest_pass.txt"))
     }
 
@@ -85,7 +87,7 @@ class PrecompileCampaignTest {
         files.forEachIndexed { i, path -> repo.write(path, "def f():\n    return ${i + 1}\n") }
         repo.write("pytest_pass.txt", javaClass.getResourceAsStream("/shaper/pytest-pass.txt")!!.use { String(it.readAllBytes(), Charsets.UTF_8) })
         repo.commit("initial")
-        Files.createDirectories(repo.resolve("build"))
+        Files.createDirectories(repo.resolve(MARKER).parent)
         // One sentinel per acceptance: every command runs once in the plan cell, so only AC-1 moves the tree, in I1.
         fun check(i: Int) = printing(mutating, root.resolve("$name-sentinel-$i").toAbsolutePath())
         Store.open(stateRoot, repo.git, clock).use { store ->
@@ -119,7 +121,7 @@ class PrecompileCampaignTest {
                 val run = Controller(config, clock, idGen, precompiles = metrics).run(c, CellModel(FakeAdapter(ScriptedModel.of(*replies.toTypedArray())), FakeProfiles.main, HeuristicEstimator()), maxCells = 6)
                 val boundary = c.journal.events(JournalScope(request.work, kinds = setOf(JournalKind.Boundary, JournalKind.Check))).map { it.text }
                 val manifests = c.store.db.query("SELECT body FROM manifests ORDER BY rowid") { Json.decodeFromString(Manifest.serializer(), it.string("body")) }
-                Outcome(run, boundary, manifests, metrics.report(), metrics.samples().size, Files.exists(repo.root.resolve("build/marker.txt")))
+                Outcome(run, boundary, manifests, metrics.report(), metrics.samples().size, Files.exists(repo.root.resolve(MARKER)))
             }
         }
     }
@@ -147,9 +149,9 @@ class PrecompileCampaignTest {
     fun `FX-44 a tree that moved while the checks ran discards the pre-compiled K and recompiles at the boundary`() {
         val on = campaign("moved", precompile = true, mutating = true)
         assertEquals(CampaignOutcome.Completed, on.run.outcome, on.run.state?.reason)
-        assertTrue(on.marker, "the check wrote build/marker.txt: " + on.boundary.toString())
+        assertTrue(on.marker, "the check wrote $MARKER: " + on.boundary.toString())
         val lines = on.boundary.precompile()
-        // I1's check writes build/marker.txt: the stamp at close differs from the stamp the I2 pre-compile was tagged with.
+        // I1's check writes docs/build/marker.txt: the stamp at close differs from the stamp the I2 pre-compile was tagged with.
         assertTrue(lines.any { it.startsWith("precompile I2 started @") }, lines.toString())
         assertTrue(lines.any { it.startsWith("precompile I2 miss: stamp moved (fp ") && it.endsWith("· discarded, recompiled") }, on.boundary.toString())
         assertTrue(lines.none { it.startsWith("precompile I2 hit") }, lines.toString())
@@ -182,5 +184,10 @@ class PrecompileCampaignTest {
         assertEquals(2, served.size, on.manifests.map { it.incrementId }.toString())
         assertEquals(fresh, served)
         assertEquals(0, on.report.misses)
+    }
+
+    private companion object {
+        /** A check's own output outside every declared output root (W3), so it moves the candidate. */
+        const val MARKER: String = "docs/build/marker.txt"
     }
 }

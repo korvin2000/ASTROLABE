@@ -383,7 +383,7 @@ internal class S3Round(
         val config = c.attempt.config
         val contract = c.contract
         val coordinator = c.ids.copy(context = ContextId(idGen.next("s3")))
-        val workspaces = Workspaces(c.workspace, c.store.layout.candidates, env)
+        val workspaces = Workspaces(c.workspace, c.store.layout.candidates, env, scratch = c.stamper.scratch)
         val writers = Writers(workspaces, writerCell)
         val horizon = IntegrationHorizon()
         val coherence = Coherence(c.registry).also { it.register(horizon) }

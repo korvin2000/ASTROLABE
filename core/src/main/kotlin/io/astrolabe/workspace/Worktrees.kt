@@ -44,10 +44,12 @@ public class WorktreeRefused(message: String) : IllegalStateException(message)
  * worktree. [remove] only ever removes a worktree this instance created, with `git worktree remove`, which never
  * touches a branch or a ref.
  */
-public class Workspaces(
+public class Workspaces @JvmOverloads constructor(
     public val main: Workspace,
     candidates: Path,
     private val env: EnvFingerprint,
+    /** The attempt's frozen output policy (W3): the main line and every worktree are stamped under it, so their candidates compare. */
+    private val scratch: io.astrolabe.verify.ScratchPolicy = io.astrolabe.verify.ScratchPolicy.NONE,
 ) {
     private val root: Path = candidates.resolve("worktrees")
     private val open = LinkedHashMap<WorkspaceId, Worktree>()
@@ -59,7 +61,7 @@ public class Workspaces(
         require(increment.isNotBlank()) { "a worktree belongs to an increment" }
         val id = idOf(work, attempt, increment)
         synchronized(open) { require(id !in open) { "increment $increment of ${work.value}/${attempt.value} already has worktree ${id.value}" } }
-        val report = Stamper(main, env).report(fresh = true)
+        val report = Stamper(main, env, scratch = scratch).report(fresh = true)
         val commit = ObjectId.parseOrNull(report.baseCommit)
             ?: throw WorktreeRefused("the main line has no base commit to add a worktree at")
         val dir = root.resolve(id.value)
@@ -69,7 +71,7 @@ public class Workspaces(
         val worktree = try {
             val workspace = Workspace(id, dir, Git(dir, main.git.executable, main.git.timeoutMillis), main.paths.protectedPaths)
             copyDelta(report, workspace)
-            val own = Stamper(workspace, env).report(fresh = true)
+            val own = Stamper(workspace, env, scratch = scratch).report(fresh = true)
             if (own.candidateId != report.candidateId) {
                 throw WorktreeRefused("worktree ${id.value} stamps @${own.candidateId.hash8}, the main candidate @${report.candidateId.hash8}: differing ${Stamper.diff(report, own).sorted()}")
             }
