@@ -7,10 +7,8 @@ import java.nio.channels.FileChannel
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
-import java.nio.file.attribute.FileTime
 import java.nio.file.attribute.PosixFilePermissions
 import java.time.Duration
-import java.time.Instant
 
 /**
  * The "dirty repository" of plan §7.2 (W0), generated per test and never committed: one commit of a few sources, a
@@ -82,6 +80,9 @@ internal class DirtyRepo private constructor(val repo: TempRepo, val untrackedFi
         const val OUTPUT: String = "pytest_pass.txt"
         private const val PER_DIRECTORY = 100
 
+        /** Past the content cache's racy window of 2 s (`ContentCache.RACY_WINDOW_NANOS`). */
+        private val SETTLE: Duration = Duration.ofMillis(2_200)
+
         fun create(untrackedFiles: Int = 1500, variant: Variant = Variant.Plain): DirtyRepo {
             require(untrackedFiles >= 1) { "the tool directory holds at least one file" }
             val repo = TempRepo.create()
@@ -103,10 +104,11 @@ internal class DirtyRepo private constructor(val repo: TempRepo, val untrackedFi
                 }
                 write(repo.root, LOCKED, "locked by a tool\n".toByteArray())
                 write(repo.root, BIG, ByteArray(BIG_BYTES) { (it * 31 + (it ushr 11)).toByte() })
-                // A real tool directory is old. Files written within the racy window (D-364) are re-read by every
-                // non-fresh stamp, so the read counters would measure how fast the scenario follows the generation.
-                val old = FileTime.from(Instant.now().minus(Duration.ofHours(1)))
-                Files.walk(repo.root.resolve(UNTRACKED_DIR)).use { all -> all.filter(Files::isRegularFile).forEach { Files.setLastModifiedTime(it, old) } }
+                // A real tool directory is old. A file changed within the racy window (D-364) is read again by every
+                // non-fresh stamp and by a capture's recheck — rightly, its change time proves nothing yet — so the read
+                // counters would measure how fast the scenario follows the generation. The fixture lets the window pass
+                // instead of back-dating times: restoring a modification time moves the change time (ctime, NTFS ChangeTime).
+                Thread.sleep(SETTLE.toMillis())
                 return DirtyRepo(repo, untrackedFiles, variant)
             } catch (failure: Throwable) {
                 repo.close()

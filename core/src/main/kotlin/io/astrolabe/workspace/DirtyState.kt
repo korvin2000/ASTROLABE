@@ -290,8 +290,15 @@ public class DirtyState(
         // A directory member (nested repository, submodule) carries no bytes to recover.
         val recoverable = report.members.filterValues { it.type != EntryType.Directory }
         beforeRecheck(attempt)
-        // The recheck re-reads only files that no longer look as they did when this capture read them.
-        if (captured != recoverable || base != report.baseCommit || stamper.report(false, reads).stamp.id != report.candidateId ||
+        // D-274/D-374: the recheck reads a file again unless its look proves it unwritten since this capture read it (a
+        // change time no tool restores, outside the racy window); a fresh capture rereads from disk, never the shared cache.
+        reads.rechecking = true
+        val recheck = try {
+            stamper.report(fresh, reads).stamp.id
+        } finally {
+            reads.rechecking = false
+        }
+        if (captured != recoverable || base != report.baseCommit || recheck != report.candidateId ||
             workspace.git.lsFiles() != index ||
             workspace.git.status(UntrackedFiles.ALL, includeIgnored = true) != status
         ) {
