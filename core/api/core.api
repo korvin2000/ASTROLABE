@@ -29308,6 +29308,8 @@ public final class io/astrolabe/workspace/WorkspacePath$Companion {
 public final class io/astrolabe/workspace/Workspaces {
 	public static final field Companion Lio/astrolabe/workspace/Workspaces$Companion;
 	public fun <init> (Lio/astrolabe/workspace/Workspace;Ljava/nio/file/Path;Lio/astrolabe/workspace/EnvFingerprint;)V
+	public fun <init> (Lio/astrolabe/workspace/Workspace;Ljava/nio/file/Path;Lio/astrolabe/workspace/EnvFingerprint;Lio/astrolabe/verify/ScratchPolicy;)V
+	public synthetic fun <init> (Lio/astrolabe/workspace/Workspace;Ljava/nio/file/Path;Lio/astrolabe/workspace/EnvFingerprint;Lio/astrolabe/verify/ScratchPolicy;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun createWorktree (Lio/astrolabe/id/WorkId;Lio/astrolabe/id/AttemptId;Ljava/lang/String;)Lio/astrolabe/workspace/Worktree;
 	public final fun getMain ()Lio/astrolabe/workspace/Workspace;
 	public final fun getWorktrees ()Ljava/util/List;
