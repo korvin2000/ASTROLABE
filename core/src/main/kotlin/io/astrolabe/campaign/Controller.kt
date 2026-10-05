@@ -164,6 +164,8 @@ import io.astrolabe.register.Validator
 import io.astrolabe.store.FaultPoints
 import io.astrolabe.store.Store
 import io.astrolabe.telemetry.Accounting
+import io.astrolabe.telemetry.CountedPhase
+import io.astrolabe.telemetry.PhaseMark
 import io.astrolabe.telemetry.Spans
 import io.astrolabe.telemetry.TraceSpanStatus
 import io.astrolabe.tool.ParsedCalls
@@ -384,6 +386,9 @@ public class OpenedCampaign internal constructor(
     /** C11: the increment reviews asked of the host for a person in this open (increment, candidate, revision): asked once. */
     internal val personAsked: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
+    /** §7.2 phase counter: finalization attempts (the campaign gate entered with every requirement verified) in this open. */
+    internal val finishAttempts: java.util.concurrent.atomic.AtomicInteger = java.util.concurrent.atomic.AtomicInteger()
+
     /** Why dispatch or publication is refused now: cancellation first, then the lease; `null` when authorized. */
     public fun refusal(): String? = cancellation.reason?.let { "cancelled: $it" } ?: lease?.let { leases.authority(it).refusal() }
 
@@ -477,6 +482,9 @@ public class Controller @JvmOverloads public constructor(
     /** The task limits' spend, sessions and gate (C3). */
     private val limitControl = TaskLimitControl(idGen, clock, events)
 
+    /** §7.2 phase counter: campaign opens by this controller (WF-1 counts them per host action). */
+    private val opens = java.util.concurrent.atomic.AtomicInteger()
+
     /**
      * Publishes a finished campaign's candidate beyond `patch` when the host asks for it (§14.2, D-192, D-250): one
      * [Publisher] for the attempt, each requested stage a separate D-class grant through [authority], journaled before
@@ -505,7 +513,8 @@ public class Controller @JvmOverloads public constructor(
             throw failure
         }
         try {
-            return open(repo, git, store, os, request, policy, owned = true)
+            // The open's git count starts with the store's own commands on this fresh instance (§7.2).
+            return open(repo, git, store, os, request, policy, owned = true, gitBaseline = 0, objectsBaseline = 0)
         } catch (failure: Throwable) {
             runCatching { os.close() }
             runCatching { store.close() }
@@ -515,12 +524,17 @@ public class Controller @JvmOverloads public constructor(
 
     /** Opens [request]'s campaign in [project], whose store, lock and OS stay the project's (P1.9.6). */
     public fun open(project: Project, request: CampaignRequest, policy: CampaignPolicy): OpenedCampaign =
-        open(project.root, project.git, project.store, project.os, request, policy, owned = false)
+        open(project.root, project.git, project.store, project.os, request, policy, owned = false, project.git.processesStarted, project.git.objectsWritten)
 
-    private fun open(repo: Path, git: Git, store: Store, os: LocalOs, request: CampaignRequest, policy: CampaignPolicy, owned: Boolean): OpenedCampaign {
+    private fun open(
+        repo: Path, git: Git, store: Store, os: LocalOs, request: CampaignRequest, policy: CampaignPolicy, owned: Boolean,
+        gitBaseline: Long, objectsBaseline: Long,
+    ): OpenedCampaign {
         val ids = Identities(request.work, request.attempt)
         val protected = ProtectedPaths()
         val workspace = Workspace(WORKSPACE, repo, git, protected)
+        val counting = PhaseMark.of(workspace, gitBaseline, objectsBaseline)
+        val opened = opens.incrementAndGet()
         val registry = VersionRegistry(workspace)
         val stamper = Stamper(workspace, EnvFingerprint.compute(env))
         val journal = Journal(store, clock)
@@ -768,6 +782,7 @@ public class Controller @JvmOverloads public constructor(
             plugged[it] = layered
             it.limitState.reserve = latched
             it.limitState.reserveAnnounced = latched != null
+            events?.emit(counting.counted(ids, CountedPhase.Open, opened, 0))
         }
     }
 
@@ -2451,7 +2466,7 @@ public class Controller @JvmOverloads public constructor(
             workspace = CellWorkspace(tree.workspace, tree.registry, coherence, tree.stamper, workset, tree.checks, scheduler, tree.atlas, checker),
             evidence = CellEvidence(c.journal, observations, aliases, receipts, c.intents, registerVersions, checkpoints, preimages),
             prime = c.prime, ledger = ledger, preexisting = compiled.k.ledger, config = config,
-            turnCheckpoint = TurnCheckpoint { snapshot(tree) },
+            turnCheckpoint = TurnCheckpoint { snapshot(c, tree, ids) },
             generation = generation,
             accounting = accounting,
             manifest = manifest.id,
@@ -2562,7 +2577,7 @@ public class Controller @JvmOverloads public constructor(
             runCell(c, seat.context, increment, role, routing.model, authority, syntax, compiled, span, checkNotNull(c.state).ledger, pinned = listOf(brief), child = ChildForm(seat.cancellation, budget), tree = tree)
                 .exit.also { exit ->
                     // The writer's final bytes stay in its own shadow ref after the worktree is removed (§10.4).
-                    snapshot(tree)
+                    snapshot(c, tree)
                     routing.selected?.let { router.record(it, outcomeOf(exit)) }
                     exit?.let { exits[dispatch.handle.id] = it }
                 }
@@ -2757,6 +2772,17 @@ public class Controller @JvmOverloads public constructor(
         if (state.ledger.unfinished().isNotEmpty() || scheduler == null) {
             return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, unfinished))
         }
+        val attempt = c.finishAttempts.incrementAndGet()
+        val counting = PhaseMark.of(c.workspace)
+        try {
+            return finalAttempt(c, scheduler, campaign, authority)
+        } finally {
+            events?.emit(counting.counted(c.ids, CountedPhase.Finish, opens.get(), attempt))
+        }
+    }
+
+    /** One finalization attempt of [stopOrFinish], every requirement verified (§8.7). */
+    private suspend fun finalAttempt(c: OpenedCampaign, scheduler: Scheduler, campaign: Boolean, authority: Authority?): CampaignState {
         val acceptances = Acceptances(c.store, clock)
         val report = c.stamper.report(fresh = true)
         val stamp = report.candidateId
@@ -2957,13 +2983,18 @@ public class Controller @JvmOverloads public constructor(
         c.checks.all().filter { it.last != null }.associate { it.id to scheduler.currency(it, stamp) }
 
     /** Records the main line as the next shadow snapshot, when it moved since the last one. */
-    private fun snapshot(c: OpenedCampaign) = snapshot(CellTree.main(c))
+    private fun snapshot(c: OpenedCampaign) = snapshot(c, CellTree.main(c))
 
-    /** Records [tree] as the next snapshot of its own shadow ref, when it moved since the last one. */
-    private fun snapshot(tree: CellTree) {
-        val last = tree.shadow.records().last()
-        val now = tree.dirty.capture(last.turn + 1)
-        if (now.manifestDigest != checkNotNull(tree.shadow.manifest(last.turn)).manifestDigest) tree.shadow.snapshot(now)
+    /** Records [tree] as the next snapshot of its own shadow ref, when it moved since the last one; counted (§7.2). */
+    private fun snapshot(c: OpenedCampaign, tree: CellTree, ids: Identities = c.ids) {
+        val counting = PhaseMark.of(tree.workspace)
+        try {
+            val last = tree.shadow.records().last()
+            val now = tree.dirty.capture(last.turn + 1)
+            if (now.manifestDigest != checkNotNull(tree.shadow.manifest(last.turn)).manifestDigest) tree.shadow.snapshot(now)
+        } finally {
+            events?.emit(counting.counted(ids, CountedPhase.Snapshot, opens.get(), c.finishAttempts.get()))
+        }
     }
 
     /**
