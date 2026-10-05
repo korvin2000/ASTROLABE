@@ -508,13 +508,17 @@ public class Controller @JvmOverloads public constructor(
      */
     public fun open(repo: Path, request: CampaignRequest, policy: CampaignPolicy): OpenedCampaign {
         val git = Git(repo, timeoutMillis = config.defaults.gitDeadlineSeconds * 1000L)
-        val store = Store.open(config, git, clock, faults)
+        var opened: Store? = null
         val os = try {
+            opened = Store.open(config, git, clock, faults)
             LocalOs(clock)
         } catch (failure: Throwable) {
-            store.close()
+            opened?.close()
+            // §7.2: an open the store or its project lock refused still reports what it cost.
+            events?.emit(PhaseMark.beforeWorkspace(Identities(request.work, request.attempt), git, CountedPhase.Open, opens.incrementAndGet()))
             throw failure
         }
+        val store = checkNotNull(opened)
         try {
             // The open's git count starts with the store's own commands on this fresh instance (§7.2).
             return open(repo, git, store, os, request, policy, owned = true, gitBaseline = 0, objectsBaseline = 0)
@@ -2533,8 +2537,6 @@ public class Controller @JvmOverloads public constructor(
             turnBudgetHandoff = turnBudgetHandoff,
             carriedFlags = continues?.testIntegrity().orEmpty(),
             impact = impact,
-            // WD-16: a child is admitted on its own budget, its output bounded by what that budget leaves.
-            boundedOutput = child != null,
             acknowledged = acknowledged(c),
             knowledge = knowledge,
             completionEvidence = if (child == null && role.packetKind == io.astrolabe.cell.PacketKind.Result) { raised ->
@@ -2552,7 +2554,8 @@ public class Controller @JvmOverloads public constructor(
                 completionEvidence(c, increment, flags)
             } else null,
             noteHorizon = if (tree.workspace === c.workspace) NoteHorizon(KbWriter(c.store, estimator, clock), Notes(c.store), ids) else null,
-        )
+        // WD-16: a child is admitted on its own budget, its output bounded by what that budget leaves.
+        ).also { it.boundedOutput = child != null }
         val limits = cellLimits.gate
         val budget = child?.budget?.let { CellBudget.of(it.tokens, it.turns, contract.budget.reserves, limits = limits) }
             ?: CellBudget.of(Tokens(Accounting(c.store, clock).remainingTokens(c.ids.work, contract.budget.tokens.value).coerceAtLeast(3)), contract.budget.turnsPerCell, contract.budget.reserves, limits = limits)
@@ -3066,7 +3069,7 @@ public class Controller @JvmOverloads public constructor(
             authority, c.shadow, c.workspace, c.stamper, c.store, c.journal, SqliteReceipts(c.store, clock), c.checks, idGen, c.ids, clock,
             checklist = { plan()?.refactorChecklist },
             conReferences = { plan()?.let { p -> p.conReferences + p.conCandidates.map { "new: ${it.summary}" } }.orEmpty() },
-        )
+        ).also { review -> (authority as? ReviewCellAuthority)?.let { judged -> review.unanswered = judged::unanswered } }
     }
 
     private sealed interface FullSuite {

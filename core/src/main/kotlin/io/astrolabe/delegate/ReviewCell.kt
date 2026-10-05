@@ -66,8 +66,17 @@ public class ReviewCellAuthority(
     private val tier: Tier,
     private val packetOf: (ReviewRequest) -> EvidencePacket,
 ) : Authority by host {
-    override suspend fun review(request: ReviewRequest): Verdict? =
-        ReviewCell.ladder(judge, packetOf(request), tier).verdict ?: host.review(request)
+    private val unanswered = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    override suspend fun review(request: ReviewRequest): Verdict? {
+        val ladder = ReviewCell.ladder(judge, packetOf(request), tier)
+        ladder.verdict?.let { return it }
+        ladder.reason?.let { unanswered[request.id] = it }
+        return host.review(request)
+    }
+
+    /** Why the review cell gave no verdict on [requestId] before the host was asked (WD-16: the numbers of an unadmitted cell). */
+    internal fun unanswered(requestId: String): String? = unanswered[requestId]
 }
 
 /** How fresh a recorded assessment is against the tree now (§8.7): a changed dependency invalidates it; unassessed is unknown. */

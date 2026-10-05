@@ -45,4 +45,27 @@ class TaskLimitTurnTest {
             assertFalse(exit is CellExit.Partial && f.adapter.calls.isEmpty())
         }
     }
+
+    @Test
+    fun `a bounded child whose working tokens cannot hold the least output still takes the reserve turn the task limit opens`() = runBlocking<Unit> {
+        CellFixture(stateRoot).use { f ->
+            // WD-16 with C3r: 1000 working tokens leave no output after the input, the verification reserve does; the limit's
+            // reserve at admission re-renders the turn as verify-and-report instead of ending the cell on the shortfall.
+            val asked = ArrayList<Pair<Spend, Long>>()
+            val gate = LimitGate { spend, estimate ->
+                val admitted = asked.any { it.second > 0 }
+                asked += spend to estimate.value
+                if (estimate.value == 0L && !admitted) LimitDecision.Within else LimitDecision.Reserve(LimitKind.Cost, "task limit: the next call reaches the reserve")
+            }
+            val model = ScriptedModel.of(Scripted.Reply(listOf(say("verified, done"))))
+            val ctx = f.context(model).also { it.boundedOutput = true }
+            val budget = CellBudget(Tokens(31_000), 12, CellReserve(Tokens(30_000), 2, Tokens.ZERO, 0), limits = gate)
+            val exit = f.cell().run(ctx, f.increment, budget)
+
+            assertTrue(f.adapter.calls.isNotEmpty(), "the shortfall ended the cell before the reserve turn: $exit")
+            assertEquals(listOf(Spend.Generation, Spend.Check), asked.filter { it.second > 0 }.map { it.first }.take(2), "refused as generation, admitted as verify-and-report")
+            assertFalse(f.request(1).mask!!.allows("edit.anchored"), "the re-rendered turn masks edits")
+            assertTrue(f.request(1).maxOutputTokens <= 16_000, "the bounded output never exceeds the model's")
+        }
+    }
 }

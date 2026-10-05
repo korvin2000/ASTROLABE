@@ -226,6 +226,10 @@ class ReviewCellTest {
             assertEquals(VerdictOutcome.Revise, judged.review(p.request())!!.outcome)
             val fallback = ReviewCellAuthority(human, ScriptedJudge(JudgeRun(null, Tokens.ZERO, "no profile")), Tier.High) { p }
             assertEquals("human:owner", fallback.review(p.request())!!.signedBy)
+            // WD-16: why the review cell gave no verdict travels to the campaign record when the host gives none either.
+            val unanswered = ReviewCellAuthority(AutonomousAuthority(), ScriptedJudge(JudgeRun(null, Tokens.ZERO, "turn 1 not admitted before its model call: usable budget 2400 tokens")), Tier.High) { p }
+            assertEquals(null, unanswered.review(p.request()))
+            assertEquals("turn 1 not admitted before its model call: usable budget 2400 tokens", unanswered.unanswered(p.request().id))
             assertEquals(RoutingFunction.ReviewCritical, ReviewTriggers.function(p.triggers))
         }
     }
