@@ -119,6 +119,11 @@ No doc tour, no exploration. Get counts with `rg -c`.
   No local full `build`. At a merge: the touched packages plus `./gradlew assemble testClasses checkKotlinAbi`. The full
   suite runs unattended on a wave or release tag; never wait for it — read its result at the next session start and
   fix failures with targeted tests.
+- *Workflow invariants (plan §7.2, owner №36):* every merge of every line runs the WF suite
+  `./gradlew :core:test --tests 'io.astrolabe.workflow.*'` (Studio: `--tests '*WorkflowScenario*'`), whatever it touched;
+  registry `docs/reference/workflow-invariants.md`. Guards count (git processes, reads, objects, opens, finish attempts,
+  model requests), never seconds. No line disables, loosens or deletes a guard: a review finding that cannot be fixed
+  without breaking an invariant is not fixed — the line reports `БЛОКЕР` with both sides, the owner decides (D-364/D-374).
 - Known environmental failures (above) don't block a gate; no baseline reruns to re-prove them.
 - Long commands run quietly; never paste full logs.
 

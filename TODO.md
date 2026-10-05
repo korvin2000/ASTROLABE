@@ -2353,7 +2353,7 @@ Goal: the model decides; the runtime executes, waits, records and finishes. Plan
 
 ### P8.W Wave W — workflow stabilization (amendment 2026-10-05; plan §6 wave W, §7.2, owner №30–36; before the rest of D)
 Evidence: `../ASTROLABE-DIAGNOSTICS-2026-10-05.md` (defects WD-01…WD-31 with `path:line`, stop states c1–c16). Every task starts with the failing scenario test of its invariant (plan §7.2) and ends with it green. P8.W.0–5 are session 4A (`../session_4a_fix.md`), P8.W.6–10 are session 4B.
-#### P8.W.0 [V] W0 Scenario harness, "dirty repository" fixture, phase counters, invariant registry · TODO
+#### P8.W.0 [V] W0 Scenario harness, "dirty repository" fixture, phase counters, invariant registry · IN_PROGRESS
 - Repo: ASTROLABE. Pkg: tests `io.astrolabe.workflow`, `os/Git.kt`, `workspace/`, `telemetry/`, `eval-live`, `docs/reference/`. Spec: plan §6 W0, §7.2.
 - Build: (1) a scenario runner on the real composition `Controller` → cell → dispatcher → tools with the fake adapter; (2) the fixture: one commit, no `.gitignore`, an untracked directory of ≥ 1500 small files and one ≥ 20 MB file, a check that writes scratch output, a variant whose check rewrites a tracked data file, an exclusively locked file; (3) permanent counters in telemetry: git processes, files and bytes read per capture, objects written per snapshot, opens per host action, finalization attempts; (4) `docs/reference/workflow-invariants.md`: WF-1…WF-15 with the guard test and the files that can break each; (5) the live task `real-dirty-repo` in `eval-live`; (6) the rule of plan §7.2 in `../plan2/COMMON.md`.
 - Done: one scenario runs end to end on the fixture; the counters appear in events; the registry lists every invariant with its guard or `pending <task>`. Codex review.
