@@ -446,6 +446,55 @@ class HandoffTest {
     }
 
     @Test
+    fun `a handoff whose process died before its return was kept is recovered from the terminal packet, and its epoch owes the review and the refs`() = runBlocking<Unit> {
+        val request = CampaignRequest(WorkId("W-handoff-packet"), AttemptId("a1"), "make a return 10")
+        repo.write(testPath, "def test_a():\n    assert 1 == 1\n")
+        repo.write("src/b.py", "from a import a\n\n\ndef b():\n    return a()\n")
+        repo.commit("a test and a caller of a")
+        seed(request, Shape.S1, writePaths = listOf("src/", "tests/"))
+        lateinit var handedOff: ContextId
+        controller().open(repo.root, request, policy).use { c ->
+            // Epoch A weakens the test and changes the signature of `a`, which src/b.py calls, then hands off.
+            val epochA = weakening(c).take(2) + listOf(
+                Scripted.Reply(listOf(read("read-a", "src/a.py"))),
+                Scripted.Reply(listOf(anchored("widen", "src/a.py", c.registry.version("src/a.py")!!, "def a():", "def a(x):"))),
+                Scripted.Fault(FaultKind.ContextOverflow),
+                Scripted.Fault(FaultKind.ContextOverflow),
+            )
+            // The process dies after the cell's end settled, before the controller keeps its return.
+            c.store.db.tx { it.execute("CREATE TRIGGER die BEFORE INSERT ON packets WHEN NEW.kind = 'returned_handoff' BEGIN SELECT RAISE(ABORT, 'simulated process death'); END") }
+            assertFails { controller().run(c, scripted(epochA), maxHandoffs = 1) }
+            c.store.db.tx { it.execute("DROP TRIGGER die") }
+            assertTrue(ReturnedHandoffs(c.store, clock).all(c.ids.work, c.ids.attempt).isEmpty(), "no return was kept")
+            handedOff = c.state!!.cells.single().cell
+        }
+        controller().open(repo.root, request, policy).use { c ->
+            assertEquals(CellStatus.Partial, c.state!!.cells.single { it.cell == handedOff }.status, "the return is recovered from the packet, not a lost cell")
+            val recovered = ReturnedHandoffs(c.store, clock).all(c.ids.work, c.ids.attempt).single()
+            assertEquals(handedOff, recovered.cell)
+            assertEquals(HandoffCause.Pressure, recovered.cause)
+            assertEquals(io.astrolabe.route.RoutingFunction.Implementing, recovered.function)
+            assertEquals(listOf(testPath), recovered.testIntegrity().map { it.path }, "the packet kept the flag")
+            assertEquals(listOf("a"), recovered.impactNudges().map { it.definition.symbol }, "the packet kept the public impact")
+            // Epoch B proposes completion without an edit: the review it owes rejects epoch A's weakening and `a`'s callers are unread.
+            val run = controller().run(c, scripted(rejected + listOf(Scripted.Fault(FaultKind.ContextOverflow), Scripted.Fault(FaultKind.ContextOverflow))), maxHandoffs = 1)
+
+            assertEquals("the campaign's 1 handoffs are spent with 2 requirements unverified", run.state?.reason)
+            val epoch = spends(c).single().also { assertEquals(handedOff.value, it.text("from"), "the epoch was paid from the grant") }.text("to")
+            val review = assertNotNull(io.astrolabe.delegate.ReviewCell.latest(c.store, c.ids), "epoch B's completion asked for the review")
+            assertTrue(review.integrity.any { testPath in it } && !review.approved, "the reviewer saw epoch A's change: ${review.integrity}")
+            val successor = ReturnedHandoffs(c.store, clock).all(c.ids.work, c.ids.attempt).single { it.cell.value == epoch }
+            assertTrue(successor.gaps.any { "src/a.py" in it && "impact" in it }, "the refused completion names the unread refs: ${successor.gaps}")
+            assertEquals(listOf(testPath), successor.testIntegrity().map { it.path }, "the epoch inherited the test-integrity flag")
+            assertEquals(listOf("a"), successor.impactNudges().map { it.definition.symbol }, "the epoch inherited the unresolved public impact")
+            val increment = c.state!!.graph.increments.single()
+            assertEquals(listOf(handedOff.value, epoch), increment.cells.map { it.value })
+            assertEquals(0, increment.sizing.continuations)
+            assertTrue(increment.status != IncrementStatus.Verified, "${increment.status}")
+        }
+    }
+
+    @Test
     fun `an unresolved public impact nudge is kept with the handoff and stays pending in the epoch's ledger`() {
         val definition = io.astrolabe.atlas.ChangedDefinition("src/a.py", "a", io.astrolabe.atlas.DeclarationKind.entries.first(), io.astrolabe.atlas.DefinitionChange.Signature, public = true)
         val nudge = io.astrolabe.cell.ImpactNudge(definition, references = 3, turn = 2)

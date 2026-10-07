@@ -4,11 +4,13 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import org.slf4j.LoggerFactory
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.Path
 import java.util.Base64
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * The ripgrep backend. The invocation is pinned and explicit; output is parsed once, at this
@@ -19,12 +21,21 @@ import java.util.Base64
  * runs: with explicit file arguments `rg` searches hidden files and reports matches from binary
  * files before their first NUL (verified against rg 15.2.0), so those rules are enforced once, in
  * [Candidates], for both backends.
+ *
+ * With a [fallback], an [executable] whose first start fails before any succeeded (a Windows `.cmd` shim, a broken
+ * binary) hands this search and every later one to the fallback, said in one log line; without one, or after a start
+ * succeeded, a failed start is that search's `Failed` outcome.
  */
-internal class RipgrepSearch(private val executable: String) : Search {
+internal class RipgrepSearch(private val executable: String, private val fallback: Search? = null) : Search {
+    private val fellBack = AtomicReference<Search?>()
 
-    override val backend: SearchBackend = SearchBackend.Ripgrep
+    @Volatile
+    private var started = false
+
+    override val backend: SearchBackend get() = fellBack.get()?.backend ?: SearchBackend.Ripgrep
 
     override fun find(request: SearchRequest): SearchOutcome {
+        fellBack.get()?.let { return it.find(request) }
         val deadline = System.nanoTime() + 30_000_000_000L
         PatternSubset.check(request.pattern, request.mode)?.let { return it }
         val candidates = when (val resolved = Candidates.resolve(request)) {
@@ -39,7 +50,11 @@ internal class RipgrepSearch(private val executable: String) : Search {
         val known = candidates.associateBy { it.relPath }
         val command = baseCommand(request)
         for (chunk in chunks(candidates)) {
-            val failure = runChunk(root, command, chunk, known, collector, deadline)
+            val failure = try {
+                runChunk(root, command, chunk, known, collector, deadline)
+            } catch (unstartable: Unstartable) {
+                return fallBack(unstartable.cause, request)
+            }
             if (failure != null) return failure
             if (collector.truncation != null) break
         }
@@ -69,6 +84,17 @@ internal class RipgrepSearch(private val executable: String) : Search {
 
     private fun perFileCap(maxHits: Int): Int = if (maxHits == Int.MAX_VALUE) maxHits else maxHits + 1
 
+    /** No chunk has started yet, so nothing was collected: [request] runs whole on the fallback, which every later search keeps. */
+    private fun fallBack(cause: IOException, request: SearchRequest): SearchOutcome {
+        val to = checkNotNull(fallback)
+        if (fellBack.compareAndSet(null, to)) {
+            LoggerFactory.getLogger(RipgrepSearch::class.java).warn("search backend {} instead of ripgrep: '{}' could not start ({})", to.backend.name.lowercase(), executable, cause.message)
+        }
+        return to.find(request)
+    }
+
+    private class Unstartable(override val cause: IOException) : RuntimeException(cause)
+
     /** Runs one chunk; returns a terminal outcome on failure, or null when the chunk finished. */
     private fun runChunk(
         root: Path,
@@ -82,8 +108,10 @@ internal class RipgrepSearch(private val executable: String) : Search {
         val process = try {
             ProcessBuilder(command + chunk.map { it.relPath }).directory(root.toFile()).start()
         } catch (e: IOException) {
+            if (!started && fallback != null) throw Unstartable(e)
             return SearchOutcome.Failed("could not start '$executable': ${e.message}")
         }
+        started = true
         val stderr = ByteArrayOutputStream()
         val timedOut = java.util.concurrent.atomic.AtomicBoolean(false)
         val timer = java.util.Timer("search-deadline", true)

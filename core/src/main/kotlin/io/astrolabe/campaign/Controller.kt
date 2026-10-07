@@ -513,8 +513,11 @@ public class Controller @JvmOverloads public constructor(
     // C18: the search backend, chosen once per campaign open and logged in one line — ripgrep when `rg` resolves on the host's PATH, else the JVM.
     private val searches = Collections.synchronizedMap(WeakHashMap<OpenedCampaign, Search>())
 
-    /** The search backend of [c]'s cells: ripgrep when `rg` resolves on the host's `PATH`, else the in-process JVM backend. */
-    internal fun search(c: OpenedCampaign): Search = searches[c] ?: Searches.auto { host.onPath(RIPGREP) }.also {
+    /**
+     * The search backend of [c]'s cells: ripgrep when a launchable `rg` resolves on the host's `PATH` (never a Windows
+     * `.cmd`/`.bat` shim), else the in-process JVM backend; a ripgrep that fails to start on its first search falls back to the JVM.
+     */
+    internal fun search(c: OpenedCampaign): Search = searches[c] ?: (if (host.launchable(RIPGREP)) io.astrolabe.os.search.RipgrepSearch(RIPGREP, Searches.jvm()) else Searches.jvm()).also {
         searches[c] = it
         LoggerFactory.getLogger(Controller::class.java).info("search backend {} for {}/{}", it.backend.name.lowercase(), c.ids.work.value, c.ids.attempt.value)
     }
@@ -696,11 +699,28 @@ public class Controller @JvmOverloads public constructor(
         val priorVersion = state?.contractVersion
         // A-D.6: a handoff kept for the very row its process died before writing is that return, never a lost cell, so its
         // increment continues as an epoch paid from the grant. It is applied first: its record names the row's `seq`, which
-        // any transition below (a host fix's unblock) would move past it.
+        // any transition below (a host fix's unblock) would move past it. A process that died before keeping the record left
+        // its fields in the cell's terminal packet (one transaction with the terminal checkpoint): the record is kept from
+        // it first, at that row's `seq`, and applied the same way, with the obligations the epoch inherits.
         state?.running?.takeIf { state.phase == CampaignPhase.Running }?.let { running ->
-            val checkpoint = SqliteCheckpoints(store, clock).latest(running.cell) ?: return@let
+            val checkpoints = SqliteCheckpoints(store, clock)
+            val checkpoint = checkpoints.latest(running.cell) ?: return@let
             val stored = checkNotNull(state)
-            val kept = ReturnedHandoffs(store, clock).all(request.work, request.attempt).lastOrNull { it.cell == running.cell && it.seq == stored.seq + 1 } ?: return@let
+            val records = ReturnedHandoffs(store, clock)
+            val all = records.all(request.work, request.attempt)
+            val kept = all.lastOrNull { it.cell == running.cell && it.seq == stored.seq + 1 }
+                ?: checkpoints.packet(running.cell)?.takeIf { it.handoff != null && checkpoint.status == CellStatus.Partial && all.none { k -> k.cell == running.cell } }?.let { packet ->
+                    val handoffs = Handoffs(journal, idGen, clock, ids)
+                    // The function the cell was dispatched with: an epoch's is its predecessor's, else by the increment's cells before it.
+                    val before = stored.graph.increments.first { it.id == running.increment }.cells.takeWhile { it != running.cell }
+                    val function = before.lastOrNull()?.takeIf { handoffs.spendOf(it)?.to == running.cell }?.let { from -> all.lastOrNull { it.cell == from }?.function }
+                        ?: if (before.isEmpty()) RoutingFunction.Implementing else RoutingFunction.Continuation
+                    ReturnedHandoff.recovered(idGen.next("returned"), stored.seq + 1, packet, checkpoint, handoffs.current()?.id, function).also { recovered ->
+                        records.save(ids, recovered)
+                        journal.append(JournalEvent(idGen.next("ev"), ids, checkpoint.turn, JournalKind.Reconcile, refs = listOf(running.cell.value, recovered.id), text = "open: cell ${running.cell.value} handed off before its return was kept · return ${recovered.id} kept from its terminal packet", at = clock.instant()))
+                    }
+                }
+                ?: return@let
             val register = SqliteRegisterVersions(store, clock).latest(running.cell)
                 ?: Register.empty(running.cell, running.increment, stored.graph.increments.first { it.id == running.increment }.title)
             journal.append(JournalEvent(idGen.next("ev"), ids, checkpoint.turn, JournalKind.Reconcile, refs = listOf(running.cell.value, kept.id), text = "open: cell ${running.cell.value} handed off before its controller stopped · its kept return ${kept.id} applied", at = clock.instant()))
@@ -1762,7 +1782,7 @@ public class Controller @JvmOverloads public constructor(
             parent.value, register, Seeds.cellEnd(checkpoints, last), packet, { c.registry.version(it) }, { true }, verification,
             statusNotes(c).summary(parent), defaults.parentCarryMaxTokens.toLong(), { estimator.estimate(it).tokens }, defaults.seedsMaxTokens.toLong(),
             io.astrolabe.context.SeedRule.of(role.protocol, defaults.seedRule).selector, defaults.seedFallback,
-            touched = if (packet == null) checkpoints.latest(last)?.touched.orEmpty() else emptyList(),
+            touched = if (packet == null) checkpoints.latest(last)?.touched.orEmpty() else emptyList(), protocol = role.protocol,
         )
     }
 

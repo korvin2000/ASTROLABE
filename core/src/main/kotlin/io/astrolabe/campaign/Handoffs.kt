@@ -4,6 +4,7 @@ import io.astrolabe.atlas.ChangedDefinition
 import io.astrolabe.atlas.DeclarationKind
 import io.astrolabe.atlas.DefinitionChange
 import io.astrolabe.cell.CellCheckpoint
+import io.astrolabe.cell.CellPacket
 import io.astrolabe.cell.Change
 import io.astrolabe.cell.ChangeOrigin
 import io.astrolabe.cell.CellExit
@@ -115,6 +116,20 @@ internal data class ReturnedHandoff(
                 packet.stamp, packet.envId, packet.changes.map(KeptChange::of), packet.gaps, packet.receipts, exit.checkpoint.touched, packet.reason,
                 exit.hint, checkNotNull(exit.handoffCause) { "a handoff exit names its cause" }, grant, function, tier, profile,
                 packet.flags.testIntegrity.map { KeptFlag.of(it.copy(verdict = null)) }, impact.filter { it.definition.public }.map(KeptImpact::of),
+            )
+        }
+
+        /**
+         * The record of a handoff whose controller stopped before keeping it, from the cell's terminal [packet] and
+         * [checkpoint] (A-D.6): the same fields [of] keeps from the exit; the tier and profile the routing chose are not
+         * in the packet and stay `null` (an epoch is routed by [function] alone).
+         */
+        fun recovered(id: String, seq: Long, packet: CellPacket, checkpoint: CellCheckpoint, grant: String?, function: RoutingFunction): ReturnedHandoff {
+            val handoff = checkNotNull(packet.handoff) { "a recovered return is a handoff's" }
+            return ReturnedHandoff(
+                id, seq, packet.cell, packet.increment, packet.role, handoff.turns, packet.registerVersion, packet.contractVersion,
+                packet.stamp, packet.envId, packet.changes.map { KeptChange.of(it.change()) }, packet.gaps, packet.receipts, checkpoint.touched, packet.reason,
+                handoff.hint, handoff.cause, grant, function, null, null, handoff.flags.map { KeptFlag.of(it.flag()) }, handoff.impact.map { KeptImpact.of(it.nudge()) },
             )
         }
     }

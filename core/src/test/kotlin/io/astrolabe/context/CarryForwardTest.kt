@@ -4,6 +4,7 @@ import io.astrolabe.cell.CellPacket
 import io.astrolabe.cell.ChangeOrigin
 import io.astrolabe.cell.PacketChange
 import io.astrolabe.cell.PacketStatus
+import io.astrolabe.cell.Protocol
 import io.astrolabe.cell.TouchKind
 import io.astrolabe.evidence.Anchor
 import io.astrolabe.evidence.ClaimKind
@@ -177,5 +178,26 @@ class CarryForwardTest {
             register = full.register.copy(open = emptyList(), deadEnds = emptyList(), decisions = emptyList(), amendments = emptyList(), facts = emptyList())).render()
         val floor = parent(tokens(bare))
         assertTrue(tokens(floor.render()) <= tokens(bare), "the cap holds: ${floor.cut}")
+    }
+
+    @Test
+    fun `a direct parent carry with note ids holds parentCarryMaxTokens as the direct block renders it`() {
+        val tokens = { text: String -> text.length / 4L }
+        // Many short decisions and open items: each direct line adds its id, so the direct block outgrows the structured one.
+        val notes = register.copy(
+            decisions = (1..24).map { Decision(it, "keep $it", "why $it", null) },
+            open = (1..12).map { OpenItem(it, "open $it") },
+        )
+        fun parent(cap: Long, protocol: Protocol) = CarryForward.parent("W-1", notes, emptyList(), stored, { versions[it] }, { true },
+            emptyList(), null, cap, tokens, protocol = protocol)
+        val structured = parent(100_000, Protocol.Structured).render(Protocol.Structured)
+        val direct = parent(100_000, Protocol.Direct).render(Protocol.Direct)
+        assertTrue("d24 keep 24" in direct && "o12 open 12" in direct, direct)
+        assertTrue(tokens(direct) > tokens(structured), "the direct block is the larger one here")
+        val cap = tokens(structured)
+        assertTrue(parent(cap, Protocol.Structured).cut.isEmpty(), "the structured block fits the cap whole")
+        val capped = parent(cap, Protocol.Direct)
+        assertTrue(capped.cut.isNotEmpty(), "the direct block is cut by its own render")
+        assertTrue(tokens(capped.render(Protocol.Direct)) <= cap, "the direct block holds the cap: ${capped.cut}")
     }
 }

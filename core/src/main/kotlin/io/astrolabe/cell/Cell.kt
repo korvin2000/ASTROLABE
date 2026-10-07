@@ -167,6 +167,8 @@ public class Cell @JvmOverloads constructor(
         val evidenceRefs: List<String> = emptyList(),
         /** The typed reason of a partial exit, for the `cell.ended` event (A-D.6). */
         val partialReason: PartialReason? = null,
+        /** A-D.6: a handoff's cause and hint, which its terminal packet keeps with the obligations settle adds. */
+        val handoff: PacketHandoff? = null,
         val make: (Int, Register, CellCheckpoint, ResultPacket) -> CellExit,
     )
 
@@ -1458,11 +1460,11 @@ public class Cell @JvmOverloads constructor(
         }
 
         /** A turn's checkpoint; with the cell's end [packet], the terminal one (§4.1: one transaction with the packet row). */
-        private fun persist(checkpoint: CellCheckpoint, packet: ResultPacket? = null) {
+        private fun persist(checkpoint: CellCheckpoint, packet: ResultPacket? = null, handoff: PacketHandoff? = null) {
             val stamped = ids.withCandidate(checkpoint.stamp)
             ev.registerVersions.save(stamped, register)
             if (packet == null) ev.checkpoints.save(stamped, checkpoint, ws.workset.export())
-            else ev.checkpoints.settle(stamped, checkpoint, ws.workset.export(), CellPacket.of(packet, checkpoint))
+            else ev.checkpoints.settle(stamped, checkpoint, ws.workset.export(), CellPacket.of(packet, checkpoint, handoff))
             ev.journal.append(
                 JournalEvent(
                     idGen.next("ev"), ids, turn, JournalKind.Boundary, text = "turn $turn ${checkpoint.status.name.lowercase()} · stamp @${checkpoint.stamp?.hash8 ?: "none"} · STATE v${checkpoint.registerVersion} · open intents ${checkpoint.openIntents.size}",
@@ -1476,11 +1478,16 @@ public class Cell @JvmOverloads constructor(
          * the final checkpoint, never from later state, and both are committed with the end export in one transaction;
          * `Cell.Ended` follows the commit.
          */
-        private fun settle(status: CellStatus, reason: String?, partialReason: PartialReason? = null, blocked: BlockedRequest? = null, evidenceRefs: List<String> = emptyList()): Pair<CellCheckpoint, ResultPacket> {
+        private fun settle(
+            status: CellStatus, reason: String?, partialReason: PartialReason? = null, blocked: BlockedRequest? = null, evidenceRefs: List<String> = emptyList(),
+            handoff: PacketHandoff? = null,
+        ): Pair<CellCheckpoint, ResultPacket> {
             if (reconciledTurn != turn) runCatching { reconcile("exit at turn $turn") }
             val checkpoint = checkpoint(status, lastReport?.candidateId, reason)
             val packet = packet(PacketStatus.of(status), reason, blocked, evidenceRefs)
-            persist(checkpoint, packet)
+            // A-D.6: a handoff's obligations are durable with its terminal checkpoint, before the controller keeps its record.
+            persist(checkpoint, packet, handoff?.copy(turns = budget.turnsTaken, flags = packet.flags.testIntegrity.map { PacketFlag.of(it.copy(verdict = null)) },
+                impact = impact.unresolvedPublic.map(PacketImpact::of)))
             // A cancelled cell journals no packet boundary (its row is in the store): the exit propagates the cancellation.
             if (status != CellStatus.Cancelled) persistPacket(packet)
             events?.emit(AgentEvent.Cell.Ended(ids, status.name.lowercase(), null, ctx.manifest, partialReason = partialReason?.wire))
@@ -1489,7 +1496,7 @@ public class Cell @JvmOverloads constructor(
 
         /** The exit reports the turns the budget actually admitted; a turn refused before dispatch was never taken. */
         private fun finish(exit: Exit): CellExit {
-            val (checkpoint, packet) = settle(exit.status, exit.reason, exit.partialReason, exit.blocked, exit.evidenceRefs)
+            val (checkpoint, packet) = settle(exit.status, exit.reason, exit.partialReason, exit.blocked, exit.evidenceRefs, exit.handoff)
             return exit.make(budget.turnsTaken, register, checkpoint, packet)
         }
 
@@ -1503,7 +1510,7 @@ public class Cell @JvmOverloads constructor(
                 HandoffCause.Pressure -> "handoff: context full after one rebuild — the work continues in a fresh cell from the carry-forward"
                 HandoffCause.TurnBudget -> "handoff: turn budget spent with work done — the work continues in a fresh cell"
             }
-            return Exit(CellStatus.Partial, "${PartialReason.Handoff.name}: $hint", partialReason = PartialReason.Handoff) { t, r, cp, p ->
+            return Exit(CellStatus.Partial, "${PartialReason.Handoff.name}: $hint", partialReason = PartialReason.Handoff, handoff = PacketHandoff(cause, hint, 0)) { t, r, cp, p ->
                 CellExit.Partial(t, r, cp, p, PartialReason.Handoff, hint, cause)
             }
         }

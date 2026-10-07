@@ -138,6 +138,34 @@ class FactCoherenceTest {
     }
 
     @Test
+    fun `a host override of the direct role's wording without a protocol retains as the cell ran, so its verified note survives two boundaries`(@org.junit.jupiter.api.io.TempDir state: java.nio.file.Path) {
+        io.astrolabe.workspace.WorkspaceFixture.create(state).use { f ->
+            val checkpoints = SqliteCheckpoints(f.store, f.clock)
+            val d = Roles.direct
+            // The v1.0 constructor, as a JSON override without `protocol`: new wording, and the protocol field at its structured default.
+            val reworded = io.astrolabe.cell.Role(d.name, d.contextView, d.noteScope, d.skillFilter, d.toolMask, d.permission, d.tierPrior,
+                d.duties + "keep every note short", d.askBack, d.packetKind, d.personaLines, d.policyTextVersion, d.deniedNoteKinds)
+            assertEquals(Protocol.Structured, reworded.protocol)
+            val roles = Roles.defaults + (d.name to reworded)
+            assertEquals(Protocol.Direct, io.astrolabe.cell.RoleTexts.worded(d, roles[d.name]).protocol, "the cell runs as direct with the override's wording")
+            var register = Register.empty(cell, "I1", "fix the checkout race").copy(
+                facts = listOf(Fact(1, ClaimKind.Verified, "lock is taken per request", Anchor("src/checkout.py", v("c-1")), "#5")),
+            )
+            for (n in 1..2) {
+                val ended = register.copy(cell = ContextId("direct-$n"))
+                val checkpoint = CellCheckpoint(ended.cell, "I1", 1, CellStatus.Completed, ended.version, null, 0, 0, emptyList(), emptyList(), emptyList(), 0)
+                checkpoints.settle(f.ids.copy(context = ended.cell), checkpoint, emptyList(),
+                    CellPacket(ended.cell, "I1", d.name, PacketStatus.Done, null, ended.version, 1, null, null, null, ended, emptyList(), emptyList(), emptyList()))
+                val protocol = FactRetention.protocolOf(f.store, f.clock, ended.cell, roles, fallback = Protocol.Structured)
+                assertEquals(Protocol.Direct, protocol, "boundary $n retains by the protocol the cell ran")
+                register = FactRetention.capture(f.store, f.ids, ended, { v("moved") }, { it in evidence }, estimator, 1200, f.clock, protocol).register
+            }
+            assertEquals(listOf(1), register.facts.map { it.n }, "the stale verified note survives two boundaries (A-D.4)")
+            assertEquals(2, register.fact(1)!!.staleCells)
+        }
+    }
+
+    @Test
     fun `repeated rebuilds keep the race evidence reachable through dead ends and the archive (FX-20)`() {
         val moved = mapOf("tests/test_checkout.py" to v("t-2"), "src/checkout.py" to v("c-2"))
         var register = raceReport
