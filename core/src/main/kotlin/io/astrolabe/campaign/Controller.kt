@@ -2653,6 +2653,8 @@ public class Controller @JvmOverloads public constructor(
             // §8.8: review(scope=increment) is the review cell for S2+ main-line cells; a review cell never reaches it (no verify.review in its mask).
             incrementReview = if (child == null && contract.shape >= Shape.S2) IncrementReview { why -> reviewCell(c, increment, model, authority, syntax, span).obtain(evidence(c, increment, listOf(why), emptyList(), preexistingLines(compiled.k.ledger), authority), Tier.Medium, c.registry::version) } else null,
             tiers = layered.tiers,
+            // P8.C.17: one call's checks and retries share the turn's effective output budget.
+            outputBudgetTokens = maxOf(config.defaults.runTurnBudgetTokens, config.defaults.runBudgetTokens),
         )
         verify.inputs = tree.atlas.rows.map { it.path }
         verify.regressionBaseline = baseline
@@ -2678,7 +2680,7 @@ public class Controller @JvmOverloads public constructor(
         }
         val tools = CellTools(
             state = StateTool(Validator(estimator, registerCapTokens = config.defaults.registerCapTokens, patchCapTokens = config.defaults.patchCapTokens, factLineMaxChars = config.defaults.factLineMaxChars, protocol = role.protocol), registerVersions, c.journal, estimator, idGen, ids, clock, register ?: Register.empty(cellId, increment.id, increment.title), events),
-            look = Look(tree.workspace, tree.registry, workset, tree.atlas, search(c), c.journal, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, checks = tree.checks, mounts = layered.mounts, bmaps = BmapStore(c.store), tools = layered.tools, tiers = layered.tiers, budgetTokens = config.defaults.lookBudgetTokens),
+            look = Look(tree.workspace, tree.registry, workset, tree.atlas, search(c), c.journal, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, checks = tree.checks, mounts = layered.mounts, bmaps = BmapStore(c.store), tools = layered.tools, tiers = layered.tiers, budgetTokens = config.defaults.lookBudgetTokens, receipts = SqliteReceipts(c.store, clock)),
             edit = Edit(
                 tree.workspace, tree.registry, workset, c.os, preimages, ScopeGuard(tree.workspace), c.contracts, tree.checks, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, syntax,
                 // D-99: `revert:turn:N` names the tree's shadow snapshots (the turn checkpoint records them).

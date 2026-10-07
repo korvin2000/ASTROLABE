@@ -13,28 +13,23 @@ import io.astrolabe.tool.ToolOutcome
  * Only the shown body changes. The call ran in full; its header, `green`/`ready` facts, receipts, log, parse and the
  * outcome every gate, signature and claim reads stay the executor's, and a cut body grants nothing (D-49).
  *
- * A failing `verify` is never cut: its receipts are not recallable through `look(recall)`, and a rerun may not reproduce
- * a flaky failure, so its diagnostics stay whole and the other results share what it leaves.
+ * A failing `verify` is cut like any red result (P8.C.17, D-424): its own output is already capped per call with every
+ * failed check's first lines kept, and each check's whole output is recallable by its receipt alias.
  */
 internal object TurnOutput {
     /**
      * The short forms of [results] (op id → outcome, in emitted order) whose bodies together pass [budgetTokens];
      * an op absent from the map is shown as executed. Every cut result keeps at least a floor, the turn's failing
-     * results get the remainder first and the rest follow in emitted order. The shown bodies of the results that may be
-     * cut never measure more than [budgetTokens] less the failing `verify` bodies. A pure function of the outcomes.
+     * results get the remainder first and the rest follow in emitted order. A pure function of the outcomes.
      */
     fun fit(results: List<Pair<Int, ToolOutcome>>, budgetTokens: Long, estimator: TokenEstimator): Map<Int, ToolOutcome> {
         if (results.isEmpty()) return emptyMap()
         val costs = results.associate { (opId, outcome) -> opId to estimator.estimate(outcome.body).tokens }
         if (costs.values.sum() <= budgetTokens) return emptyMap()
-        val (kept, cuttable) = results.partition { (_, outcome) -> failingVerify(outcome) }
-        if (cuttable.isEmpty()) return emptyMap()
-        val budget = maxOf(0L, budgetTokens - kept.sumOf { costs.getValue(it.first) })
-        if (cuttable.sumOf { costs.getValue(it.first) } <= budget) return emptyMap()
-        val floor = minOf(SHORT_FORM_TOKENS, budget / cuttable.size)
-        var left = budget - cuttable.sumOf { minOf(costs.getValue(it.first), floor) }
+        val floor = minOf(SHORT_FORM_TOKENS, budgetTokens / results.size)
+        var left = budgetTokens - results.sumOf { minOf(costs.getValue(it.first), floor) }
         val shown = HashMap<Int, ToolOutcome>()
-        for ((opId, outcome) in cuttable.sortedBy { if (red(it.second)) 0 else 1 }) {
+        for ((opId, outcome) in results.sortedBy { if (red(it.second)) 0 else 1 }) {
             val cost = costs.getValue(opId)
             if (cost <= floor) continue
             if (cost - floor <= left) {
@@ -98,7 +93,7 @@ internal object TurnOutput {
         val alias = outcome.resultAlias?.takeIf { Aliases.parse(it) != null }
         return when {
             outcome.header?.tool == "run" && alias != null -> "full output: look(recall, id=$alias)"
-            outcome.header?.tool == "verify" -> "the full check output is not recallable; the receipt lines above hold each check's outcome"
+            outcome.header?.tool == "verify" -> "each check's full output: look(recall, id=<its receipt alias in the lines above>)"
             else -> "the full output is not recallable"
         }
     }

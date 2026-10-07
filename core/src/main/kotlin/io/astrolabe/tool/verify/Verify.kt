@@ -1,5 +1,6 @@
 package io.astrolabe.tool.verify
 
+import io.astrolabe.Defaults
 import io.astrolabe.atlas.Atlas
 import io.astrolabe.atlas.EditHunk
 import io.astrolabe.atlas.EditSet
@@ -17,6 +18,7 @@ import io.astrolabe.auth.RedactionConfig
 import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Contract
 import io.astrolabe.contract.Contracts
+import io.astrolabe.contract.EvidencePurpose
 import io.astrolabe.contract.Origin
 import io.astrolabe.evidence.Outcome
 import io.astrolabe.evidence.Receipt
@@ -127,6 +129,8 @@ public class Verify(
     private val incrementReview: IncrementReview? = null,
     /** Where the blast selection's import graph takes its outlines: tier 0, or a host tier-1 index (D-251). */
     private val tiers: IndexTiers = IndexTiers.TIER_0,
+    /** P8.C.17: the cap on one call's output, its checks and retries together; the turn's `max(runTurnBudgetTokens, runBudgetTokens)`. */
+    private val outputBudgetTokens: Int = Defaults().runTurnBudgetTokens,
 ) : ToolExecutor {
     internal var beforeDispatch: () -> Unit = {}
         set(value) {
@@ -455,7 +459,8 @@ public class Verify(
         }
         val stampNow = stamper.stamp().id
         val lines = selected.zip(receipts).map { (check, receipt) -> lineOf(check, receipt, scheduler.currency(check, stampNow), scheduler.aliasOf(receipt.receiptId)) }
-        val body = ChecksRender.render(stampNow, lines, maxLines = lines.size.coerceAtLeast(1)) + "\n" + views.joinToString("\n")
+        val shown = selected.indices.map { i -> VerifyOutput.View(selected[i].id, views[i], receipts[i].outcome != Outcome.Passed, scheduler.aliasOf(receipts[i].receiptId)) }
+        val body = VerifyOutput.cap(ChecksRender.render(stampNow, lines, maxLines = lines.size.coerceAtLeast(1)), shown, outputBudgetTokens.toLong(), estimator)
         // The status is the worst runner outcome of the batch, in the §8.4 vocabulary; never "ok" over a red check.
         val worst = SEVERITY.firstOrNull { severity -> receipts.any { it.outcome == severity } } ?: Outcome.Passed
         return outcome(args, wire(worst), body, receipts, stampNow)
@@ -639,14 +644,15 @@ public class Verify(
         val tokens = CommandMatch.tokens(requested, shell) ?: return emptyList()
         val dir = directoryOf(cwd) ?: return emptyList()
         fun realizes(check: Check) = check.command?.let { CommandMatch.matches(tokens, it.argv) && directoryOf(it.cwd) == dir } == true
-        val matching = checks.all().filter { declared(it, contract) && realizes(it) }
+        // Task-workflow §3.3 (WD-21): the model's stated goal criterion is evaluated by what ran — its authorized run is the
+        // item's check and binds the receipt — never by its word; the launch stays `run`'s, under the effect policy (D-262).
+        // D-434: goal checks come first, so a regression check of the same command shares the execution, never shadows it.
+        val matching = (checks.all().filter { declared(it, contract) && realizes(it) } + stated(contract).filter(::realizes))
+            .distinctBy { it.id }.sortedBy { check -> if (check.acceptanceIds.any { contract.acceptance(it)?.evidencePurpose == EvidencePurpose.Goal }) 0 else 1 }
         // One execution is the receipt of exactly the declared command it ran: another declaration shares it only verbatim.
         val first = matching.firstOrNull()?.command
         val declared = matching.filter { it.command!!.argv == first!!.argv && directoryOf(it.command.cwd) == directoryOf(first.cwd) }
         if (declared.isNotEmpty()) return declared
-        // Task-workflow §3.3 (WD-21): the model's stated goal criterion is evaluated by what ran — its authorized run is the
-        // item's check and binds the receipt — never by its word; the launch stays `run`'s, under the effect policy (D-262).
-        stated(contract).firstOrNull(::realizes)?.let { return listOf(it) }
         if (!modelChecks) return declared
         checks.all().firstOrNull { it.id.startsWith(Checks.MODEL_PREFIX) && realizes(it) }?.let { return listOf(it) }
         val kind = EvidenceKinds.recognize(tokens) ?: return emptyList()

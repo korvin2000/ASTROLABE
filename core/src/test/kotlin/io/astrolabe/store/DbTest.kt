@@ -77,6 +77,27 @@ class DbTest {
     }
 
     @Test
+    fun `a store under a root longer than 250 characters opens and keeps its rows`() {
+        var deep = root
+        while (deep.toString().length <= 260) deep = deep.resolve("a-directory-name-that-makes-the-project-root-long")
+        openStore(deep).use { store ->
+            store.insertRow("packets", "id" to "p-1", "kind" to "result")
+            assertEquals(1L, store.db.count("SELECT count(*) FROM packets"))
+            assertEquals("wal", store.db.query("PRAGMA journal_mode") { it.string(1) }.first().lowercase())
+        }
+        openStore(deep).use { store -> assertEquals(1L, store.db.count("SELECT count(*) FROM packets"), "reopened at the same file") }
+    }
+
+    @Test
+    fun `a long Windows path is passed in its extended form, a short one as it is`() {
+        val short = Path.of("C:\\work\\state.sqlite")
+        assertEquals("jdbc:sqlite:C:/work/state.sqlite", Db.url(short, windows = true))
+        val long = Path.of("C:\\" + "d".repeat(250) + "\\b#c%d\\state.sqlite")
+        assertEquals("jdbc:sqlite:file:\\\\%3F\\C:\\" + "d".repeat(250) + "\\b%23c%25d\\state.sqlite", Db.url(long, windows = true))
+        assertEquals("jdbc:sqlite:" + long.toString().replace('\\', '/'), Db.url(long, windows = false))
+    }
+
+    @Test
     fun `a transaction commits its writes and rolls back on failure`() {
         openStore(root).use { store ->
             store.insertRow("packets", "id" to "p-1", "kind" to "result")

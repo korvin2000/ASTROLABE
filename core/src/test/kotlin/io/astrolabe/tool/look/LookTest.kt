@@ -99,6 +99,38 @@ class LookTest {
     private fun refusal(json: String): String = (ToolCalls.parse(listOf(ProviderCall("c1", "look", json))) as ParsedCalls.Invalid).error
 
     @Test
+    fun `a receipt alias recalls the check's whole stored output and grants no coverage`() = runTest {
+        val log = (1..50).joinToString("\n") { "FAILED tests/test_$it.py - AssertionError: case $it" }
+        val raw = store.blobs.put(log.toByteArray(Charsets.UTF_8), io.astrolabe.store.BlobKind.LOG, ids)
+        val stamp = io.astrolabe.id.CandidateId(io.astrolabe.id.Digest.ofUtf8("stamp"))
+        val receipts = io.astrolabe.evidence.InMemoryReceipts()
+        receipts.record(
+            io.astrolabe.evidence.Receipt(
+                "rcpt-1", ids, "CHK-1", emptyList(), listOf("pytest"), null, false, stamp, stamp, io.astrolabe.id.Digest.ofUtf8("env"), "test",
+                io.astrolabe.id.Digest.ofUtf8("def"), 1, io.astrolabe.evidence.Outcome.Failed, io.astrolabe.evidence.Counts(failed = 50),
+                io.astrolabe.evidence.Closure.Unknown, io.astrolabe.evidence.TestedInputs(emptyMap(), io.astrolabe.evidence.InputStability.Exclusive), raw,
+                at = java.time.Instant.EPOCH,
+            ),
+        )
+        val alias = SqliteAliases(store, clock).allocate(ids.work, "rcpt-1", "receipt", ids.context, workspace.id).text
+        assertEquals("refused", status(look("""{"what":"recall","id":"$alias"}""")), "without the receipts a receipt alias is refused as before")
+
+        look = Look(
+            workspace, registry, workset, Atlas.build(repo.root), Searches.jvm(), journal,
+            SqliteObservations(store, clock), SqliteAliases(store, clock), store.blobs, Redaction(), estimator, idGen, ids, receipts = receipts,
+        )
+        val recalled = look("""{"what":"recall","id":"$alias"}""")
+        assertEquals("ok", status(recalled), recalled.body)
+        assertEquals("recall of $alias", recalled.body.lines().first())
+        assertTrue(recalled.body.contains("FAILED tests/test_1.py - AssertionError: case 1"), recalled.body)
+        assertTrue(recalled.body.contains("FAILED tests/test_50.py - AssertionError: case 50"), recalled.body)
+        assertTrue(recalled.header!!.versions.isEmpty(), "a check's output is no file: D-49, no coverage")
+        assertTrue(workset.entries.isEmpty(), "nothing became KNOWN")
+        val part = look("""{"what":"recall","id":"$alias","range":"49-50"}""")
+        assertEquals(listOf("FAILED tests/test_49.py - AssertionError: case 49", "FAILED tests/test_50.py - AssertionError: case 50"), part.body.lines().drop(1))
+    }
+
+    @Test
     fun `a truncated archive recall continues over the archive, never over the active notes`() = runTest {
         val archived = (1..40).map { "x$it archived note number $it" }
         look.notes = { archive -> if (archive) archived else (1..40).map { "h$it active note number $it" } }

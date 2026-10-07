@@ -78,8 +78,6 @@ class ArmTest {
 
     @Test
     fun `an arm with a field the core cannot honour is refused, never run without it`() {
-        val direct = assertFailsWith<UsageError> { Arms.named("direct") }
-        assertTrue("D1" in direct.message.orEmpty(), direct.message)
         assertFailsWith<UsageError> { Arms.named("nope") }
         assertEquals(Arms.LOOP, Arms.named("loop"))
         assertEquals(Arms.DEFAULT, Arms.named("default"))
@@ -95,10 +93,21 @@ class ArmTest {
 
         // The command line refuses it before any provider is reached.
         val cli = assertFailsWith<UsageError> {
-            Cli.execute(listOf("run", "--models", "fake-main", "--out", dir.resolve("out").toString(), "--arm", "direct", "--tasks", "bugfix-pagination"), Clock.systemUTC())
+            Cli.execute(listOf("run", "--models", "fake-main", "--out", dir.resolve("out").toString(), "--arm", "odd", "--tasks", "bugfix-pagination"), Clock.systemUTC())
         }
-        assertTrue("D1" in cli.message.orEmpty(), cli.message)
+        assertTrue("odd" in cli.message.orEmpty(), cli.message)
         assertTrue(Files.notExists(dir.resolve("out")), "nothing ran")
         assertEquals(0, binds.get())
+    }
+
+    @Test
+    fun `the direct arm runs the core with the direct protocol`() {
+        val task = LoopFixtures.task(dir)
+        val base = LoopFixtures.plan(dir, task, Arms.DEFAULT).spec(FakeProfiles.main, dir)
+        assertEquals(io.astrolabe.cell.Protocol.Structured, Arms.named("default").spec(base).config.protocol)
+        val direct = Arms.named("direct").spec(base)
+        assertEquals(io.astrolabe.cell.Protocol.Direct, direct.config.protocol)
+        assertEquals(base.copy(config = base.config.copy(protocol = io.astrolabe.cell.Protocol.Direct)), direct, "only the protocol differs")
+        assertTrue(Arm("odd", ArmRunner.Loop, protocol = Protocol.Direct).unsupported().single().contains("loop"))
     }
 }

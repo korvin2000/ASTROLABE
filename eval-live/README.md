@@ -69,9 +69,9 @@ models, acceptance, limits and accounting; one results directory can hold severa
 |---|---|---|
 | `default` | the core, structured protocol, the Studio's default launch (`RunSpec.defaults`) | runs |
 | `loop` | the reference loop below, over `provider-api` only | runs |
-| `direct` | the core with the direct protocol | refused until the core has it (D1) |
+| `direct` | the core with the direct protocol (`Config.protocol = Direct`, D1) | runs |
 
-An arm that sets a field the core cannot honour yet — the direct protocol (D1), a forced shape (H2), a model table (H3),
+An arm that sets a field the core cannot honour yet — a forced shape (H2), a model table (H3),
 or any core field on the loop — is refused with an error naming the field, never run as if it were not set.
 
 ### The loop arm: rules of a fair comparison
@@ -159,7 +159,8 @@ the core arm except the agent's own machinery. These rules were written before t
 - `acceptance.log` — the acceptance output; `workspace.diff` — the agent's changes against the base commit.
 
 `<out>/summary.json` (all results) and `<out>/summary.csv` (one row per run; an unknown value is an empty cell) are
-rewritten after every run.
+rewritten after every run over every run of the directory — this bench's and each kept `result.json` of another arm,
+model or mode (a set-aside `*.stale-*` result is not a run) — one row per task × model × arm × mode × repeat.
 
 ## Tasks
 

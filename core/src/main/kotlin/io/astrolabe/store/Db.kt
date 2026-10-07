@@ -172,11 +172,26 @@ public class Db private constructor(
         /** `PRAGMA synchronous` value that means FULL. */
         private const val SYNCHRONOUS_FULL = "2"
 
+        /**
+         * The JDBC URL of the database at [path]. T-31: Windows opens a path past MAX_PATH only in its extended form
+         * `\\?\C:\…`, so a long one is passed as a URI filename with that prefix — `%`, `?` and `#` percent-encoded, since
+         * sqlite-jdbc reads a bare `?` as the start of its pragmas.
+         */
+        internal fun url(path: Path, windows: Boolean = java.io.File.separatorChar == '\\'): String {
+            val text = path.toString()
+            if (!windows || text.length < LONG_PATH_CHARS || text.startsWith("\\\\")) return "jdbc:sqlite:${text.replace('\\', '/')}"
+            val extended = "\\\\?\\" + text.replace('/', '\\')
+            return "jdbc:sqlite:file:" + extended.replace("%", "%25").replace("?", "%3F").replace("#", "%23")
+        }
+
+        /** Below MAX_PATH (260) less the `-journal`, `-wal` and `-shm` suffixes SQLite appends. */
+        private const val LONG_PATH_CHARS = 240
+
         /** Opens (creating if absent) the store database at [Layout.database] with verified pragmas. */
         @JvmStatic
         public fun open(layout: Layout): Db {
             val path = layout.database.toAbsolutePath().normalize()
-            val connection = DriverManager.getConnection("jdbc:sqlite:${path.toString().replace('\\', '/')}")
+            val connection = DriverManager.getConnection(url(path))
             val db = Db(path, connection)
             try {
                 db.applyPragmas()

@@ -95,6 +95,29 @@ public object AuditMarkdown {
             row(g.group, "${g.runs}", count(c.independent, c.independentShare), count(c.agentTest, c.agentTestShare), count(c.unverified, c.unverifiedShare), "${c.unknown}")
         }
         appendLine()
+        appendLine("## Groups: re-pricing what-if (D-421)")
+        appendLine()
+        appendLine("What-if: each group's flows priced at other models' list prices per million tokens (input / cache read / cache write / output); another model's flows would differ.")
+        appendLine("`—` in a price: no discount, the class is priced as input. Shares: uncached input / cache read / cache write / output.")
+        appendLine()
+        for (g in report.groups) {
+            val f = g.flows
+            appendLine("- ${g.group}: " + (f?.let { "requests ${it.requests} · uncached ${it.uncachedInput} · cache read ${it.cacheRead} · cache write ${it.cacheWrite} · output ${it.output} (reasoning ${it.reasoning})" } ?: "flows unknown"))
+        }
+        appendLine()
+        row("prices", "out/in", *report.groups.flatMap { listOf(it.group, "shares") }.toTypedArray())
+        rule(2 + 2 * report.groups.size)
+        row("by the bill (basis total)", "—", *report.groups.flatMap { g ->
+            listOf(money(g.total), listOf(g.uncachedInput, g.cacheRead, g.cacheWrite, g.output).joinToString(" / ") { share(it) })
+        }.toTypedArray())
+        for (p in Repricing.PROFILES) {
+            val prices = listOf(p.input, p.cacheRead, p.cacheWrite, p.output).joinToString(" / ") { money(it) }
+            row("${p.name}: $prices", p.ratio, *report.groups.flatMap { g ->
+                val r = g.repricing.firstOrNull { it.profile == p.name }
+                listOf(money(r?.money), r?.let { listOf(it.uncachedInputShare, it.cacheReadShare, it.cacheWriteShare, it.outputShare).joinToString(" / ") { v -> pct(v) } } ?: "—")
+            }.toTypedArray())
+        }
+        appendLine()
         appendLine("## Details")
         for (r in report.runs) {
             appendLine()
