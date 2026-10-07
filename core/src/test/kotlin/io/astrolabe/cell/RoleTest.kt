@@ -100,6 +100,8 @@ class RoleTest {
             val ops = direct.effectiveOps(shape, wide)
             assertTrue(ops.allows("state.note") && ops.allows("task.finish"), "$shape: ${ops.allowed}")
             assertEquals(shape != Shape.S0, ops.allows("task.propose"), "propose is masked in S0 only")
+            // A-D.8: the whole effective mask, not only its three named members — the shape hides propose in S0 and nothing else.
+            assertEquals(if (shape == Shape.S0) direct.toolMask.allowed - "task.propose" else direct.toolMask.allowed, ops.allowed, "direct in $shape")
             // The structured masks of A-D.3 rule 3, before the direct-only names: no structured role's effective ops move.
             val before = when (shape) {
                 Shape.S0 -> ToolOps.implementingS0.allowed
