@@ -225,6 +225,9 @@ public class TaskTool(
             exchanges += Asked(question, answer, context.turn, evidenceEventId = null, amendedToVersion = amended.version)
             result("answered", "answered (amends the contract → v${amended.version}): $text\nquestion ${question.id}: ${question.text}")
         } else {
+            // T-49 (task-workflow §2, D-433): a factual answer joins the work's messages as an `answer` to its question, so every
+            // later request carries it like any other user message; the contract version stays.
+            contracts.message(ids.work, MessageKind.Answer, text, answers = question.id)
             val event = journal?.append(JournalEvent(idGen.next("ev"), ids, context.turn, JournalKind.Result, text = "answer to ${question.id} (${question.text}): $text", at = clock.instant()))
             exchanges += Asked(question, answer, context.turn, evidenceEventId = event?.eventId, amendedToVersion = null)
             // §3.7: only a person's choice of the approving option is a verdict; a model's or an unknown answerer's resolves nothing.

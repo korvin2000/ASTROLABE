@@ -246,6 +246,12 @@ class TaskToolTest {
             assertEquals("answered", status(out), out.body)
             assertTrue(out.body.startsWith("answered (factual, recorded as evidence #event 1; contract stays v1): half-up"), out.body)
             assertEquals(1, contracts.current(ids.work)!!.version, "a factual answer never bumps the version")
+            // T-49: the answer joins the work's messages, so every later request carries it (WF-11).
+            val current = contracts.current(ids.work)!!
+            val message = current.requests.last()
+            assertEquals("half-up", message.text)
+            assertEquals(io.astrolabe.contract.MessageKind.Answer, current.kindOf(message))
+            assertEquals("q-1", message.answers)
             val pinned = tool.asked.single()
             assertEquals("round half-up or bankers?", pinned.question.text)
             assertEquals(2, pinned.turn)
