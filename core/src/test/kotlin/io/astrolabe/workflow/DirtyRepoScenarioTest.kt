@@ -21,7 +21,8 @@ import kotlin.test.assertTrue
  * whole class, both at once ([Scenario.concurrently]). The counters are printed as `WF-counters` lines (the W2 report's before and after numbers).
  *
  * Guards: WF-2 (the git processes of every open and every snapshot are the same at 300 and 1500 files, and a capture
- * reads each file at most once) and WF-3 (the snapshot after one edited file writes one object; a new work publishes
+ * reads each file at most once — the request names a path, as live requests do, so the open's pre-scan builds the import
+ * graph over the tool files: T-03) and WF-3 (the snapshot after one edited file writes one object; a new work publishes
  * nothing the store or the object database already holds).
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -64,10 +65,11 @@ class DirtyRepoScenarioTest {
         for (run in listOf(at300, at1500)) {
             val opens = run.counted.filter { it.counted == CountedPhase.Open.wire }
             for (open in opens) {
-                // The open is the capture plus the atlas, which parses each listed source once; a few manifests and configs besides.
+                // T-03: the capture reads each file once and the atlas takes its outlines from that read; the pre-scan's import
+                // graph reads a parsed source again for its dynamic imports, a few manifests and configs besides — never a tool file.
                 val reads = open.filesRead + open.blobsRead
-                assertTrue(reads <= run.treeFiles + run.atlasRows + SLACK_FILES,
-                    "${run.files} files: an open read ${open.filesRead} files and ${open.blobsRead} blobs for ${run.treeFiles} files and ${run.atlasRows} atlas rows")
+                assertTrue(reads <= run.treeFiles + SLACK_FILES,
+                    "${run.files} files: an open read ${open.filesRead} files and ${open.blobsRead} blobs for ${run.treeFiles} files")
                 // The atlas never parses the big file, so twice its size means a capture read it twice.
                 assertTrue(open.bytesRead + open.blobBytesRead < 2L * DirtyRepo.BIG_BYTES,
                     "${run.files} files: an open read ${open.bytesRead} bytes and ${open.blobBytesRead} blob bytes: the big file more than once")
@@ -97,7 +99,6 @@ class DirtyRepoScenarioTest {
         val files: Int,
         val counted: List<AgentEvent.Telemetry.PhaseCounted>,
         val treeFiles: Int,
-        val atlasRows: Int,
         val recoveryBlobsBefore: Set<String>,
         val recoveryBlobsAfter: Set<String>,
         val secondManifest: Set<String>,
@@ -106,16 +107,15 @@ class DirtyRepoScenarioTest {
     /** Open, one edit-verify-done cell, reopen, then the second work's open; prints the counters as `WF-counters` lines. */
     private fun scenario(files: Int): Played = runBlocking {
         DirtyRepo.create(files).use { dirty ->
-            Scenario(dirty.root, stateRoot.resolve("$files")).use { s ->
+            Scenario(dirty.root, stateRoot.resolve("$files"), text = REQUEST).use { s ->
                 s.seed(dirty.check)
                 s.open()
                 val run = s.play { c -> Scenario.editThenVerify(c, DirtyRepo.SOURCE, "    return sum(items)", "    return sum(x for x in items if x >= 0)") }
                 assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
                 val reopened = s.reopen()
-                val atlasRows = reopened.atlas.rows.size
                 val recovery = reopened.store.layout.blobsRecovery
                 val before = blobFiles(recovery)
-                val second = s.open(CampaignRequest(WorkId("W-2"), AttemptId("a1"), "make total ignore negative items"))
+                val second = s.open(CampaignRequest(WorkId("W-2"), AttemptId("a1"), REQUEST))
                 val after = blobFiles(second.store.layout.blobsRecovery)
                 val manifest = setOf(checkNotNull(second.shadow.record(0)).manifestBlob.hex)
                 val tree = dirty.repo.git.lsFiles().size + dirty.repo.git.status().untracked.size
@@ -123,7 +123,7 @@ class DirtyRepoScenarioTest {
                     println("WF-counters files=$files ${it.counted} git=${it.gitProcesses} read=${it.filesRead} bytes=${it.bytesRead} " +
                         "blobs=${it.blobsRead} blobBytes=${it.blobBytesRead} objects=${it.objectsWritten} opens=${it.opens} finish=${it.finishAttempts}")
                 }
-                Played(files, counted, tree, atlasRows, before, after, manifest)
+                Played(files, counted, tree, before, after, manifest)
             }
         }
     }
@@ -134,5 +134,8 @@ class DirtyRepoScenarioTest {
     private companion object {
         /** Reads beside the capture and the atlas: lock and package manifests, rules, the snapshot manifests. */
         const val SLACK_FILES = 20
+
+        /** Names a path and an identifier, so the open's pre-scan builds the import graph (T-03, as a live request does). */
+        const val REQUEST = "make total in src/app.py ignore negative items"
     }
 }

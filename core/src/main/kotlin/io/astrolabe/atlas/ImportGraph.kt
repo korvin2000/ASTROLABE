@@ -161,7 +161,12 @@ public class ImportGraph private constructor(
             }
 
             val outlines = LinkedHashMap<String, Outline>()
-            for (path in files.keys) outlines[path] = source.outline(path)
+            val languages = atlas.rows.associate { it.path to it.lang }
+            // T-03: only a parsed language has imports to extract; another file's outline would be read for nothing.
+            for (path in files.keys) {
+                val language = languages.getValue(path)
+                outlines[path] = if (language.hasOutlineParser) source.outline(path) else Outline.empty(path, language)
+            }
             val parsed = outlines.values.filter { it.language.hasOutlineParser }
             val tier = if (parsed.isNotEmpty() && parsed.all { it.tier.level >= IndexTier.Syntax.level }) IndexTier.Syntax else IndexTier.Lexical
             val resolver = ImportResolver(known, outlines)
