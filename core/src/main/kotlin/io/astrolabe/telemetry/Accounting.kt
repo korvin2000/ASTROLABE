@@ -204,6 +204,10 @@ public class Accounting internal constructor(
         Money(it.currency, (it.amount - spent.amount).max(BigDecimal.ZERO), it.unknown || spent.unknown)
     }
 
+    /** The profile [invocationId] was recorded under, or `null` when no call of that id is on record (binding physics, E1). */
+    internal fun profileId(invocationId: String): String? =
+        store.db.query("SELECT profile_id FROM usage WHERE invocation_id = ?", invocationId) { it.string("profile_id") }.firstOrNull()
+
     /** Every call of [work], in recording order. */
     public fun calls(work: WorkId): List<CallAccount> = store.db.query(
         "SELECT body FROM usage WHERE work_id = ? ORDER BY created_at, rowid", work,

@@ -125,17 +125,53 @@ class MigrationsTest {
         openStore(root).use { store ->
             val index = "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'packets_by_context'"
             assertEquals(1L, store.db.count(index))
-            // A store written by v5: the index absent, version 6 not recorded, a packet row present.
+            // A store written by v5: the index absent, versions 6 and 7 not recorded, a packet row present.
+            revertV7(store)
             store.db.tx {
                 it.execute("DROP INDEX packets_by_context")
                 it.execute("DELETE FROM schema_version WHERE version = 6")
             }
             store.insertRow("packets", "id" to "packet-cell-1", "kind" to "cell_packet", ids = TEST_IDS.copy(context = io.astrolabe.id.ContextId("cell-1")))
             assertEquals(5, Migrations.version(store.db))
-            assertEquals(6, Migrations.apply(store.db, TEST_CLOCK))
+            assertEquals(Migrations.SCHEMA_VERSION, Migrations.apply(store.db, TEST_CLOCK))
             assertEquals(1L, store.db.count(index))
             assertEquals(1L, store.db.count("SELECT count(*) FROM packets WHERE context_id = 'cell-1'"))
         }
+    }
+
+    @Test
+    fun `schema v7 adds binding physics and orders routing_log and a v6 store migrates to it once keeping its rows`() {
+        openStore(root).use { store ->
+            val inspector = StoreInspector(store)
+            val current = inspector.tables()
+            // A store written by v6: no binding tables, routing_log in its v1 shape with a row, version 7 not recorded.
+            revertV7(store)
+            store.insertRow("routing_log", "id" to "r-1", "function" to "Implementing", "tier" to "High", "outcome" to "Accepted")
+            assertEquals(6, Migrations.version(store.db))
+            assertTrue("binding_physics" !in inspector.tables())
+
+            assertEquals(7, Migrations.apply(store.db, TEST_CLOCK))
+            val applied = store.db.count("SELECT count(*) FROM schema_version")
+            assertEquals(7, Migrations.apply(store.db, TEST_CLOCK), "IX-21: a second run applies nothing")
+            assertEquals(applied, store.db.count("SELECT count(*) FROM schema_version"))
+            assertEquals(current, inspector.tables())
+            assertEquals(1L, store.db.count("SELECT count(*) FROM routing_log WHERE id = 'r-1' AND seq IS NULL AND binding_key IS NULL"), "the v6 row is kept")
+            assertEquals(1L, store.db.count("SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'routing_log_by_attempt'"))
+            store.insertRow("routing_log", "id" to "r-2", "function" to "Plan", "tier" to "High", "outcome" to "Selected", "seq" to 1)
+            assertFailsWith<StoreError> {
+                store.insertRow("routing_log", "id" to "r-3", "function" to "Plan", "tier" to "High", "outcome" to "Selected", "seq" to 1)
+            }
+        }
+    }
+
+    /** Undoes v7 on a current store: what a v6 build left behind. */
+    private fun revertV7(store: Store) = store.db.tx {
+        it.execute("DROP TABLE binding_physics")
+        it.execute("DROP TABLE binding_snapshots")
+        it.execute("DROP INDEX routing_log_by_attempt")
+        it.execute("ALTER TABLE routing_log DROP COLUMN seq")
+        it.execute("ALTER TABLE routing_log DROP COLUMN binding_key")
+        it.execute("DELETE FROM schema_version WHERE version = 7")
     }
 
     @Test

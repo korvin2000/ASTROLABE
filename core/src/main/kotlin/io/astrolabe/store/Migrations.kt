@@ -4,7 +4,8 @@ import java.time.Clock
 
 /**
  * The schema of `state.sqlite` and the versioned, idempotent migration runner (D-03, D-25, IX-21): v1 is the P0
- * schema, v2 adds `campaigns`, the controller's lifecycle state (P1.9.1).
+ * schema, v2 adds `campaigns`, the controller's lifecycle state (P1.9.1); v7 adds binding physics (`binding_physics`,
+ * `binding_snapshots`) and gives `routing_log` its decision order (`seq`, `binding_key`; plan §4.6, E1).
  *
  * ## Shape of every table
  * Each row carries the four identity columns of §3.3 — `work_id`, `attempt_id`, `candidate_id`,
@@ -24,6 +25,7 @@ import java.time.Clock
  * | cell runtime | `cells`, `turns`, `manifests`, `register_versions`, `workset_exports`, `observations`, `claims`, `packets` |
  * | curator | `notes`, `notes_fts`, `note_queue`, `note_usage`, `note_revisions` |
  * | router | `routing_log` |
+ * | binding physics | `binding_physics`, `binding_snapshots` |
  * | blob store | `blobs` |
  * | alias allocator | `aliases` |
  * | migration runner | `schema_version` |
@@ -44,7 +46,7 @@ import java.time.Clock
  */
 public object Migrations {
     /** The schema version this build writes; every row records it. */
-    public const val SCHEMA_VERSION: Int = 6
+    public const val SCHEMA_VERSION: Int = 7
 
     /** Every table of the current schema, in creation order (`notes_fts` is the FTS5 virtual table). */
     public val TABLES: List<String> = listOf(
@@ -85,6 +87,8 @@ public object Migrations {
         "note_revisions",
         "pending_completions",
         "acceptance_decisions",
+        "binding_physics",
+        "binding_snapshots",
     )
 
     /**
@@ -316,6 +320,22 @@ public object Migrations {
             statements = listOf(
                 // ---- W9 (task-workflow §4.1): a cell's packet row is read back by cell id, never from process memory ----
                 "CREATE INDEX packets_by_context ON packets (context_id, kind)",
+            ),
+        ),
+        Migration(
+            version = 7,
+            statements = listOf(
+                // ---- E1 (plan §4.6): one row per binding key; `updated_seq` orders the table's updates --------------------
+                "CREATE TABLE binding_physics (" +
+                    "binding_key TEXT PRIMARY KEY NOT NULL, $IDS, updated_seq INTEGER NOT NULL, $META)",
+                "CREATE UNIQUE INDEX binding_physics_by_seq ON binding_physics (updated_seq)",
+                // ---- the physics an attempt reads, frozen once (invariant 12, tier "frozen per attempt") ---------------
+                "CREATE TABLE binding_snapshots (" +
+                    "$IDS, as_of_seq INTEGER NOT NULL, $META, PRIMARY KEY (work_id, attempt_id))",
+                // ---- routing decisions in attempt order, joinable to their binding -----------------------------------
+                "ALTER TABLE routing_log ADD COLUMN seq INTEGER",
+                "ALTER TABLE routing_log ADD COLUMN binding_key TEXT",
+                "CREATE UNIQUE INDEX routing_log_by_attempt ON routing_log (work_id, attempt_id, seq)",
             ),
         ),
     )

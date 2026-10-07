@@ -4,6 +4,7 @@ import io.astrolabe.atlas.RiskFloorInput
 import io.astrolabe.budget.Tokens
 import io.astrolabe.contract.Reversibility
 import io.astrolabe.contract.Risk
+import io.astrolabe.id.Identities
 import io.astrolabe.provider.Effort
 import io.astrolabe.provider.Money
 import io.astrolabe.provider.Profile
@@ -174,6 +175,13 @@ public class Router @JvmOverloads constructor(public val calibration: Calibratio
         val best = ranked.minWith(compareBy<Ranked> { it.expected == null }.thenBy { it.expected?.amount }.thenBy { it.profile.id })
         return Routed.Selected(function, tier, effort, best.profile, best.tokens, best.cost, best.expected, excluded, trace, packet.featureClass)
     }
+
+    /**
+     * As [selectProfile] for the attempt of [ids], writing the decision to [log] (§4.6, E1): the attempt's binding
+     * snapshot is frozen over the policy's candidates at its first decision, and every decision is one `routing_log` row.
+     */
+    public fun selectProfile(function: RoutingFunction, packet: RoutingPacket, impact: RiskFloorInput?, policy: RoutingPolicy, log: RoutingLog, ids: Identities): Routed =
+        selectProfile(function, packet, impact, policy).also { log.decided(ids, it, policy.candidates.values) }
 
     /** Logs the verified outcome of a selection as its `(function, tier, effort, outcome)` quadruple. */
     public fun record(selected: Routed.Selected, outcome: RoutingOutcome) {
