@@ -1,21 +1,27 @@
 package io.astrolabe.evallive
 
 import io.astrolabe.Astrolabe
+import io.astrolabe.AttemptConfig
+import io.astrolabe.Config
 import io.astrolabe.InvalidConfig
 import io.astrolabe.RunSpec
 import io.astrolabe.atlas.PackageCommands
 import io.astrolabe.atlas.Sniff
 import io.astrolabe.atlas.Sniffed
+import io.astrolabe.campaign.Attempts
 import io.astrolabe.campaign.CampaignRequest
 import io.astrolabe.campaign.Controller
 import io.astrolabe.campaign.OpenedCampaign
 import io.astrolabe.campaign.S0Run
 import io.astrolabe.campaign.ShapeDecision
+import io.astrolabe.cell.Protocol
+import io.astrolabe.cell.Roles
 import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Command
 import io.astrolabe.contract.Contract
 import io.astrolabe.contract.Contracts
 import io.astrolabe.contract.Origin
+import io.astrolabe.contract.Shape
 import io.astrolabe.contract.SqliteContractRepository
 import io.astrolabe.event.AgentEvent
 import io.astrolabe.event.AmendmentProposal
@@ -95,6 +101,35 @@ internal object StudioPolicy {
         "in the project root: every later task is given that file. " +
         "The user reads what you write in messages: use plain words, say what you changed and how you checked it, " +
         "and leave the ids of requirements, acceptance items and notes out of them."
+
+    /** `Guidance.DIRECT_NOTES`, verbatim: [WORKING_NOTES] for a main line of the direct protocol (`state(note)`, `task(finish)`). */
+    const val DIRECT_WORKING_NOTES: String = "Working notes: if the request is a question or a greeting and needs no change to the files, write your answer " +
+        "and end the task with the task tool, op \"answer\", {\"text\": your answer}: do not make a plan and do not call other tools without need. " +
+        "Otherwise keep short notes with the state tool, op \"note\", {\"note\": {\"kind\", \"text\", \"evidence\"}} where kind is \"decision\" for a choice made, " +
+        "\"hypothesis\" for an assumption, \"open\" for a question still open and \"deadend\" for an approach that failed; evidence names a stored result " +
+        "(\"#2\") or a run or verify call of the same turn (\"op:1\"). " +
+        "When the work is done and checked, end the task with the task tool, op \"finish\", {\"text\": a short summary}: the harness runs the declared " +
+        "checks and decides (op \"answer\" is only for a request that changes no file). " +
+        "If one part cannot be done here (for example opening a browser), finish the rest and say so in that summary instead of stopping as blocked. " +
+        "The run tool starts a program directly from \"argv\" (program, then its arguments); for shell syntax such as pipes, && or " +
+        "setting a variable use its \"cmd\" form with one command line instead. " +
+        "To keep a fact about this project for later tasks (where a tool lives, how the app is started), add a line to AGENTS.md " +
+        "in the project root: every later task is given that file. " +
+        "The user reads what you write in messages: use plain words, say what you changed and how you checked it, " +
+        "and leave the ids of requirements, acceptance items and notes out of them."
+
+    /** `Guidance.notes`: the working notes for a main line of [protocol]. */
+    fun workingNotes(protocol: Protocol): String = when (protocol) {
+        Protocol.Structured -> WORKING_NOTES
+        Protocol.Direct -> DIRECT_WORKING_NOTES
+    }
+
+    /** `StudioHost.protocolOf`: the protocol the opened campaign's main line speaks — the frozen attempt's, in the contract's shape. */
+    fun protocolOf(opened: OpenedCampaign): Protocol = Roles.mainLine(opened.attempt.config.protocol, opened.contract.shape).protocol
+
+    /** `StudioHost.expectedProtocol`: [protocolOf] before the open — the frozen [attempt]'s protocol, else [config]'s; the [stored] shape, else S0. */
+    fun expectedProtocol(attempt: AttemptConfig?, config: Config, stored: Contract?): Protocol =
+        Roles.mainLine(attempt?.config?.protocol ?: config.protocol, stored?.shape ?: Shape.S0).protocol
 
     /** `Verification.REVIEW_TEXT`: the `check:` item of a project without a test command. */
     const val REVIEW_TEXT: String = "The change fulfils the request"
@@ -222,13 +257,11 @@ internal object StudioPolicy {
         return if (one.length > max) one.substring(0, max - 1) + "…" else one
     }
 
-    /** `StudioHost.verificationOf`: how an opened contract is verified. */
-    fun verificationOf(opened: OpenedCampaign): VerificationSetup {
-        val runs = opened.contract.acceptance.filterIsInstance<Acceptance.Run>().map { it.command.argv }
-        if (runs.isEmpty()) return VerificationSetup("review", "none", emptyList())
-        val declared = runs.any { it in opened.sniffed.packages.mapNotNull { p -> p.test } }
-        return VerificationSetup("tests", if (declared) "declared" else "saved", runs)
-    }
+    /**
+     * `StudioHost.verificationOf`: how an opened contract is verified — by origin, as [of] reads the stored one before
+     * the open (WD-23), never by matching sniffed suites: the two never disagree over one contract (WF-1, review 5 P2 #1).
+     */
+    fun verificationOf(opened: OpenedCampaign): VerificationSetup = of(opened.contract)
 }
 
 /** `VerificationSetup` of the bridge: [kind] `tests` or `review`, [source] `declared`, `saved` or `none`. */
@@ -365,6 +398,7 @@ internal data class AttemptOutcome(
     val stopCode: String?,
     val reason: String?,
     val failure: String?,
+    /** The cells this session started: a reopen of the same work does not count the earlier sessions' cells again. */
     val cells: Int?,
     val decisions: List<PolicyDecision>,
     /** The response count after which the runner stopped the attempt (WP-B2 `interrupt`), or null when it did not. */
@@ -494,10 +528,12 @@ internal class StudioAttempt(private val clock: Clock, private val idGen: IdGen,
                 val stored = Contracts(SqliteContractRepository(project.store, clock), idGen, clock).current(work)
                 val expected = if (stored != null) StudioPolicy.of(stored) else StudioPolicy.expected(workspace)
                 val declared = if (stored == null) StudioPolicy.declaredChecks(expected) else emptyList()
-                fun notesOf(setup: VerificationSetup) = listOf(StudioPolicy.WORKING_NOTES, StudioPolicy.platform(osName), StudioPolicy.verificationText(setup))
-                val notes = notesOf(expected)
+                fun notesOf(setup: VerificationSetup, protocol: Protocol) = listOf(StudioPolicy.workingNotes(protocol), StudioPolicy.platform(osName), StudioPolicy.verificationText(setup))
+                val notes = notesOf(expected, StudioPolicy.expectedProtocol(Attempts(project.store, clock).load(work, request.attempt), config, stored))
                 var opened = controller.open(project, request, policy.copy(hostNotes = notes, declaredChecks = declared))
                 val openedVersion = opened.contract.version
+                // Review 5 P2 #4: a segment counts the cells it started, not the work's cells so far — a reopen continues them.
+                val earlierCells = opened.state?.cells.orEmpty().mapTo(HashSet()) { it.cell }
                 var amended = false
                 val verification = when {
                     declared.isNotEmpty() && opened.state != null -> expected
@@ -508,7 +544,7 @@ internal class StudioAttempt(private val clock: Clock, private val idGen: IdGen,
                     }
                     else -> StudioPolicy.verificationOf(opened)
                 }
-                val actual = notesOf(verification)
+                val actual = notesOf(verification, StudioPolicy.protocolOf(opened))
                 // A second open only when the first could not run or found other notes than expected (the preflight guessed wrong,
                 // never silently); a campaign this open could not free from a limit stays stopped, one open per action.
                 if ((amended || actual != notes) && opened.limitHold == null) {
@@ -537,7 +573,7 @@ internal class StudioAttempt(private val clock: Clock, private val idGen: IdGen,
                         stopCode = if (ended) (run?.state?.stopCode ?: campaign.stop?.code)?.wire else null,
                         reason = if (ended) run?.state?.reason ?: campaign.stop?.reason else if (failure == null) CLOSED else null,
                         failure = failure,
-                        cells = (run?.state ?: campaign.state)?.cells?.size,
+                        cells = (run?.state ?: campaign.state)?.cells?.map { it.cell }?.toSet()?.minus(earlierCells)?.size,
                         decisions = authority.decisions.toList(),
                         interruptedAt = script.interruptAfterResponses.takeIf { campaign.cancellation.reason == INTERRUPTED },
                         closedAt = closedAt,
