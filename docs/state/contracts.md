@@ -14,6 +14,14 @@
 ## 4. The durable layer (campaign state)
 
 Everything in this section lives outside the source tree (`.astrolabe/` beside the repo, or a user cache keyed by repo hash) so that its own updates never disturb workspace stamps `[J1 §7.1]`. Nothing here is reachable through `edit`; the model reaches it only through `state` and `task` ops the harness validates. Storage layout: `state.sqlite` (canonical structured records, event ordering), `blobs/<digest>` (captured bytes, preimages, diffs, logs), `kb/` ([§4.5](../knowledge/records.md#sec-4-5)), `exports/` (derived human-readable views), `indexes/` (disposable), `candidates/` (worktrees or snapshot refs), `campaigns/` (frozen evaluation manifests). The database is canonical for structured records; Markdown exports are derived, never competing authorities `[B §4.1]`. This includes contract authority, runtime progress, KB record revisions and usage counters: the examples below are joined read projections, not separately writable copies. KB Markdown files are immutable exported views; KB search indexes are rebuildable, not a second authority. The curator is the sole KB publisher, the verifier/integrator owns acceptance, and the controller alone commits resulting ledger transitions.
+**Binding physics and routing decisions (store v7, ASTROLABE 2.0 plan §4.6, §10.4).** Cache share, speed and prices are properties of the binding — model × gateway × upstream × wire API, an unknown upstream or wire API its own bucket (`route/BindingKey.kt`, canonical `model|gateway|upstream|wireApi`, unknown = `?`).
+
+| Table | Writer | Key and typed columns | `body` |
+|---|---|---|---|
+| `binding_physics` | binding physics (`route/BindingPhysics.kt`), from `cell.model_responded` with the reconciled usage | `binding_key` (PK); `updated_seq` (unique, the table-wide order of the last update); identity columns of the last call | `BindingPhysicsRow`: calls; cache share (prior, current series of the provider session: Σb, Σc, blocks = n_eff, lifetime totals, last input per transcript); latency samples of the session (a, v fit); reasoning tokens per request (n, Σ); errors by kind; prices kept apart — documented by price tier, billed by currency, inferred by tier/currency from the last 32 bills |
+| `binding_snapshots` | binding physics | `(work_id, attempt_id)` (PK); `as_of_seq` | `BindingSnapshot`: the attempt's profile routes and their rows on every upstream, frozen at the attempt's first routing decision; a reopen reads the same row |
+| `routing_log` | router (`route/RoutingLog.kt`) | `id`; `function`, `tier`, `outcome` (decision kind); `seq` (unique per attempt); `binding_key` | `RoutingDecision`: selected profile and effort, its binding route, `snapshotSeq`, reason, exclusions, feature class |
+
 <!-- end-source-section: 4 -->
 
 <!-- source-section: 4.1 -->
