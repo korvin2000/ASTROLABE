@@ -134,6 +134,13 @@ internal object GitRepo {
         return GitBase(git(dir, "write-tree", env = env).trim(), index.toAbsolutePath())
     }
 
+    /** Commits everything in [dir] (a pair's first task, plan §9.2); returns the commit the next task is measured against. */
+    fun commitAll(dir: Path, message: String): GitBase {
+        git(dir, "add", "-A")
+        git(dir, "commit", "-q", "--no-verify", "--allow-empty", "-m", message)
+        return GitBase(git(dir, "rev-parse", "HEAD").trim(), null)
+    }
+
     /** Every change of [dir] against [base], untracked files included, as a binary-safe patch. */
     fun diff(dir: Path, base: GitBase): String {
         git(dir, "add", "-A", env = base.env)

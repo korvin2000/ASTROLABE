@@ -1,0 +1,5 @@
+[project]
+name = "depot"
+version = "0.3.0"
+description = "Stock, orders and the admin desk of a small warehouse"
+requires-python = ">=3.10"

@@ -1,0 +1,10 @@
+{
+  "id": "second-task-pairs",
+  "class": "second-task",
+  "title": "Second task in the same project (after api-callers): the reservations become visible to the shop, the desk and the morning report",
+  "acceptance": {
+    "argv": ["{python}", "_acceptance/accept.py"],
+    "timeoutSeconds": 120
+  },
+  "after": "api-callers"
+}

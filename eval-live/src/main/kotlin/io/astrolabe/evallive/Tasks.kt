@@ -145,6 +145,8 @@ internal data class TaskFile(
     val message: MessageSpec? = null,
     val reopen: ReopenSpec? = null,
     val dirt: DirtSpec? = null,
+    /** The id of the task this one is the second of (plan §9.2, pairs): see [BenchTask.first]. */
+    val after: String? = null,
 )
 
 /**
@@ -170,11 +172,36 @@ internal class BenchTask(
     val reopen: ReopenSpec? = null,
     /** The untracked tool tree laid into the workspace after the base commit (WP-W0); needs a base commit. */
     val dirt: DirtSpec? = null,
+    /** The id of the first task of the pair this task is the second of, as `task.json` names it (`after`). */
+    val after: String? = null,
+    /**
+     * Plan §9.2 (pairs, "second task in the same project"): the task [after] names, resolved by [all]. The runner
+     * runs it first on its own base, commits what it left and then runs this task in the same working directory and
+     * the same state root, measuring this one; this task's own `base/` (the first's base with the first's reference
+     * laid over it) only serves the validity check.
+     */
+    val first: BenchTask? = null,
 ) {
     init {
         require(interrupt == null || reopen == null) { "task $id: an interruption and a second session do not combine" }
         require(dirt == null || baseCommit) { "task $id: a dirty tree is laid over a committed base" }
+        require(first == null || first.id == after) { "task $id: its first task is ${first?.id}, not $after" }
+        if (after != null) {
+            require(after != id) { "task $id: a task is not the second of itself" }
+            require(interrupt == null && reopen == null && message == null && dirt == null) { "task $id: the second task of a pair has no interrupt, reopen, message or dirt" }
+        }
+        if (first != null) {
+            require(first.after == null) { "task $id: its first task $after is itself the second of a pair" }
+            require(first.baseCommit && first.interrupt == null && first.reopen == null && first.message == null && first.dirt == null) {
+                "task $id: the first task of a pair runs plain on a committed base (no interrupt, reopen, message or dirt)"
+            }
+        }
     }
+
+    /** This task as the second of a pair whose first task is [first]. */
+    fun pairedWith(first: BenchTask): BenchTask = BenchTask(
+        id, kind, title, prompt, dir, acceptance, hidden, reference, wrong, interrupt, baseCommit, message, reopen, dirt, after, first,
+    )
 
     val base: Path get() = dir.resolve("base")
 
@@ -208,15 +235,19 @@ internal class BenchTask(
             return BenchTask(
                 file.id, file.kind, file.title, prompt, dir, file.acceptance,
                 parts.getValue("acceptance"), parts.getValue("reference"), parts.getValue("wrong"), file.interrupt,
-                file.baseCommit, file.message, file.reopen, file.dirt,
+                file.baseCommit, file.message, file.reopen, file.dirt, file.after,
             )
         }
 
-        /** Every task under [root] (one directory with a `task.json` each), by id. */
+        /** Every task under [root] (one directory with a `task.json` each), by id; the second task of a pair gets its [first]. */
         fun all(root: Path, bundle: HiddenBundle = HiddenBundle.classpath): List<BenchTask> {
             require(root.isDirectory()) { "no tasks directory at $root" }
-            return Files.list(root).use { dirs -> dirs.filter { it.resolve("task.json").let(Files::isRegularFile) }.toList() }
-                .map { load(it, bundle) }.sortedBy { it.id }
+            val loaded = Files.list(root).use { dirs -> dirs.filter { it.resolve("task.json").let(Files::isRegularFile) }.toList() }
+                .map { load(it, bundle) }.associateBy { it.id }
+            return loaded.values.map { task ->
+                val after = task.after ?: return@map task
+                task.pairedWith(loaded[after] ?: throw IllegalArgumentException("task ${task.id} comes after an unknown task '$after'"))
+            }.sortedBy { it.id }
         }
 
         /** The tasks named in [ids] (`all` for every one), in the order named. */

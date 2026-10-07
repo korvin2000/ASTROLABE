@@ -76,6 +76,11 @@ internal data class RunResult(
     val phases: PhaseSummary? = null,
     /** What became of the task's dirt (T-14): written in the tree, outside it (not dirt of the repository), or not written, with the reason; `null` for a task without dirt. */
     val dirt: DirtResult? = null,
+    /**
+     * Plan §9.2: the first task of a pair, for the second task of one, else `null`. The fields above then measure the
+     * second task alone — its outcome, cells, wall time, totals, phases and its diff against the commit the first left.
+     */
+    val pair: PairResult? = null,
 ) {
     companion object {
         const val SCHEMA: Int = 1
@@ -121,6 +126,10 @@ internal data class InterruptResult(
     val atResponse: Int?,
     val segments: List<SegmentResult>,
 )
+
+/** The first task of a pair (plan §9.2): its id, its own acceptance on what it left, and its segment. */
+@Serializable
+internal data class PairResult(val after: String, val firstAcceptance: AcceptanceResult?, val first: SegmentResult? = null)
 
 /** One attempt (or session) of an interrupted or reopened run; [totals] count only its own events. */
 @Serializable
