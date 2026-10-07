@@ -1,6 +1,13 @@
 package io.astrolabe.context
 
 import io.astrolabe.budget.HeuristicEstimator
+import io.astrolabe.cell.CellCheckpoint
+import io.astrolabe.cell.CellPacket
+import io.astrolabe.cell.CellStatus
+import io.astrolabe.cell.PacketStatus
+import io.astrolabe.cell.Protocol
+import io.astrolabe.cell.Roles
+import io.astrolabe.cell.SqliteCheckpoints
 import io.astrolabe.evidence.Anchor
 import io.astrolabe.evidence.ClaimKind
 import io.astrolabe.id.ContextId
@@ -94,6 +101,39 @@ class FactCoherenceTest {
             val capped = capture(refuted, cap = 1)
             assertEquals(listOf(2), capped.register.archive.facts.map { it.n })
             assertEquals(listOf(1), capped.register.facts.map { it.n })
+        }
+    }
+
+    @Test
+    fun `a structured cell of a direct attempt ages its stale verified facts as a structured one, and a direct cell keeps them`(@org.junit.jupiter.api.io.TempDir state: java.nio.file.Path) {
+        io.astrolabe.workspace.WorkspaceFixture.create(state).use { f ->
+            val checkpoints = SqliteCheckpoints(f.store, f.clock)
+            val stale = Register.empty(cell, "I1", "fix the checkout race").copy(
+                facts = listOf(Fact(1, ClaimKind.Verified, "lock is taken per request", Anchor("src/checkout.py", v("c-1")), "#5")),
+            )
+            // A cell of [role] ends with its packet (none: it never settled), and the boundary retains its register as the
+            // controller does in a direct attempt.
+            fun ended(register: Register, role: String?): Retention {
+                if (role != null) {
+                    val checkpoint = CellCheckpoint(register.cell, "I1", 1, CellStatus.Completed, register.version, null, 0, 0, emptyList(), emptyList(), emptyList(), 0)
+                    checkpoints.settle(f.ids.copy(context = register.cell), checkpoint, emptyList(),
+                        CellPacket(register.cell, "I1", role, PacketStatus.Done, null, register.version, 1, null, null, null, register, emptyList(), emptyList(), emptyList()))
+                }
+                val protocol = FactRetention.protocolOf(f.store, f.clock, register.cell, Roles.defaults, fallback = Protocol.Direct)
+                return FactRetention.capture(f.store, f.ids, register, { v("moved") }, { it in evidence }, estimator, 1200, f.clock, protocol)
+            }
+            fun twoCells(name: String, role: String?): Retention =
+                ended(ended(stale.copy(cell = ContextId("$name-1")), role).register.copy(cell = ContextId("$name-2")), role)
+
+            val review = twoCells("review", Roles.defaults.getValue("review").name)
+            assertEquals(listOf(1), review.archived.map { it.n }, "a review cell drops the stale verified fact as a structured cell does")
+            assertTrue(review.register.facts.none { it.kind == ClaimKind.Verified })
+            val direct = twoCells("direct", Roles.defaults.getValue("direct").name)
+            assertEquals(listOf(1), direct.register.facts.map { it.n }, "a direct cell keeps it (A-D.4)")
+            assertEquals(2, direct.register.fact(1)!!.staleCells)
+            assertTrue(direct.archived.isEmpty())
+            val unsettled = twoCells("lost", null)
+            assertEquals(listOf(1), unsettled.register.facts.map { it.n }, "a cell without its packet retains by the fallback, the attempt's main line")
         }
     }
 
