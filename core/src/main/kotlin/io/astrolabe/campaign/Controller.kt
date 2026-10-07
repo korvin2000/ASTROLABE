@@ -847,12 +847,12 @@ public class Controller @JvmOverloads public constructor(
     /**
      * WD-05 (WF-4): a file of the tree another process holds stops the run where it was met — a fresh stamp after a
      * cell, a snapshot, a finalization — resumably and by its path, never as a failed run; the running cell, if any, is
-     * reconciled first as an interruption. A campaign that already ended keeps its outcome.
+     * reconciled first ([Lifecycle.unreadableSettlement]). A campaign that already ended keeps its outcome.
      */
     private fun unreadable(c: OpenedCampaign, input: UnreadableInput): S0Run {
         val state = c.state
         if (state == null || state.phase == CampaignPhase.Ended) return S0Run(state, null, null, null)
-        state.running?.let { running -> SqliteCheckpoints(c.store, clock).latest(running.cell)?.let { c.advance(Transition.Interrupted(it)) } }
+        state.running?.let { running -> c.advance(Lifecycle.unreadableSettlement(running.cell, SqliteCheckpoints(c.store, clock).latest(running.cell))) }
         return S0Run(c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, "unreadable input ${input.path}: ${input.message}")), null, null, null)
     }
 
