@@ -300,7 +300,7 @@ public class Git @JvmOverloads constructor(
         if (noFilters) argv.add("--no-filters")
         if (write) argv.add("-w")
         argv.add("--stdin")
-        return ObjectId.parse(decode(run(argv, stdin = bytes))).also { if (write) written.incrementAndGet() }
+        return ObjectId.parse(decode(run(argv, stdin = bytes))).also { if (write) written.incrementAndGet().also { PhaseTally.add(PhaseTally.Count.ObjectsWritten) } }
     }
 
     /**
@@ -332,6 +332,7 @@ public class Git @JvmOverloads constructor(
         val out = decode(run(listOf("hash-object", "-w", "--no-filters", "--stdin-paths"), stdin = input.toString().toByteArray(StandardCharsets.UTF_8)))
         val ids = out.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.map(ObjectId::parse).toList()
         written.addAndGet(files.size.toLong())
+        PhaseTally.add(PhaseTally.Count.ObjectsWritten, files.size.toLong())
         if (ids.size != files.size) throw GitError(listOf(executable, "hash-object", "--stdin-paths"), 0, "expected ${files.size} ids, got ${ids.size}")
         return ids
     }
@@ -550,7 +551,7 @@ public class Git @JvmOverloads constructor(
         val builder = ProcessBuilder(command).directory(repo.toFile())
         applyEnvironment(builder, indexFile, extraEnv)
         val process = try {
-            builder.start().also { started.incrementAndGet() }
+            builder.start().also { started.incrementAndGet(); PhaseTally.add(PhaseTally.Count.GitProcesses) }
         } catch (failure: IOException) {
             throw GitError(command, START_FAILED, "cannot start '$executable': ${failure.message}")
         }

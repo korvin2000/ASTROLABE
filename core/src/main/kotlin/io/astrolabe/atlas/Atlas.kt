@@ -318,11 +318,16 @@ public data class Atlas(
          * the ones a read would give: an unparsed file contributes its size and hash only. The atlas is orientation, never
          * identity (§7.1, I-05).
          */
-        internal fun build(root: Path, captured: Map<String, SnapshotEntry>): Atlas {
+        internal fun build(root: Path, captured: Map<String, SnapshotEntry>, tap: AtlasTap? = null): Atlas {
             val canonical = canonicalRoot(root)
             val scan = scanRepository(canonical)
             val known = scan.files.mapTo(HashSet()) { it.path }
-            val parsed = parseAll(canonical, scan.files) { file ->
+            // T-03/T-25: a parsed file the capture read takes its outline from that read when the capture recorded those bytes.
+            val tapped = { file: ScannedFile ->
+                val entry = captured[file.path]?.takeIf { it.present && it.sizeBytes == file.size }
+                tap?.taken?.get(file.path)?.takeIf { entry?.digest?.hash8 == it.first }
+            }
+            val parsed = parseAll(canonical, scan.files, tapped) { file ->
                 captured[file.path]?.takeIf { it.present && it.sizeBytes == file.size && Language.of(file.path) == Language.Other }?.digest?.hash8
             }
             val resolver = ImportResolver(known, parsed.outlines)
@@ -669,12 +674,22 @@ internal class ParsedFiles(
     val hashes: Map<String, String>,
 )
 
-internal fun parseAll(root: Path, files: List<ScannedFile>, captured: (ScannedFile) -> String? = { null }): ParsedFiles {
+internal fun parseAll(
+    root: Path,
+    files: List<ScannedFile>,
+    tapped: (ScannedFile) -> Pair<String, Outline>? = { null },
+    captured: (ScannedFile) -> String? = { null },
+): ParsedFiles {
     val outlines = LinkedHashMap<String, Outline>(files.size)
     val hashes = HashMap<String, String>(files.size)
     for (file in files) {
         captured(file)?.let { hash8 ->
             hashes[file.path] = hash8
+            continue
+        }
+        tapped(file)?.let { (hash8, outline) ->
+            hashes[file.path] = hash8
+            outlines[file.path] = outline
             continue
         }
         val bytes = readRelative(root, file.path) ?: continue

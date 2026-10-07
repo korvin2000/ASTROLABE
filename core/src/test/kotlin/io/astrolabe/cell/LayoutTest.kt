@@ -251,6 +251,27 @@ class LayoutTest {
         assertEquals(4, request.segments.count { it.breakpoint }, "S R K T, within the provider's four")
     }
 
+    @Test
+    fun `a contract delta names each changed item by id with its new line and nothing for an equal slice`() {
+        assertNull(slice.delta(slice.copy()), "an equal slice has no delta")
+        assertEquals("[contract v3 delta] no change to increment inc-1", slice.copy(contractVersion = 3).delta(slice))
+        val next = slice.copy(
+            contractVersion = 3,
+            requirements = slice.requirements + Requirement("R2", "keep the old code path", listOf("A2"), authorityRef = "user/2"),
+            acceptance = listOf(
+                Acceptance.Run("A1", Command(listOf("python", "-m", "unittest"), cwd = "pkg"), Origin.User),
+                Acceptance.Run("A2", Command(listOf("python", "-m", "pytest")), Origin.User),
+            ),
+            exclusions = emptyList(),
+        )
+        assertEquals(
+            "[contract v3 delta] R2 added: keep the old code path  accept: A2; A1 → (user, v1): ${next.acceptance[0].criterion}  cwd: pkg; " +
+                "A2 added: (user, v1): ${next.acceptance[1].criterion}; exclusion do not touch the public API removed",
+            next.delta(slice),
+        )
+        assertEquals(next.delta(slice), next.copy().delta(slice.copy()), "byte-stable for equal inputs")
+    }
+
     private companion object {
         const val GOLDEN_S_IMPLEMENTING: String = "311827f81e8390431317be6be1732eef68fc76872729623f6dcc12b1c7dce024"
         const val GOLDEN_SCHEMAS_IMPLEMENTING: String = "2baecef747376403c00599b1d72f21d28104df940985f8963dbc3ef5b9c17c15"

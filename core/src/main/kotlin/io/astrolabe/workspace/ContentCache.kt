@@ -68,6 +68,9 @@ internal class ContentCache(private val clock: Clock = Clock.systemUTC()) {
     internal class Reads {
         internal val taken = HashMap<Path, Taken>()
 
+        /** T-21: bytes the stamp read of a raw difference git status hid, for the capture to store without reading again. */
+        internal val kept = HashMap<Path, ByteArray>()
+
         /** True while the capture rechecks its reads: then only a provable take is reused. */
         internal var rechecking: Boolean = false
     }

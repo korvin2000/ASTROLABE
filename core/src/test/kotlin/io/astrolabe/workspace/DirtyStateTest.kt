@@ -265,6 +265,28 @@ class DirtyStateTest {
         }
     }
 
+    @Test
+    fun `T-21 a raw difference git status hides is read once by its capture and stored byte-exactly`(@TempDir state: Path) {
+        WorkspaceFixture.create(state) { repo ->
+            repo.gitattributes("*.txt text eol=lf\n")
+            repo.write("data/notes.txt", "a\nb\n")
+            repo.commit("eol")
+        }.use { fixture ->
+            // Raw CRLF over an LF blob: git's clean conversion makes it equal, so only the stamp's raw compare finds it.
+            val crlf = "a\r\nb\r\n".toByteArray(StandardCharsets.UTF_8)
+            fixture.repo.write("data/notes.txt", crlf)
+            val reads = java.util.Collections.synchronizedList(ArrayList<String>())
+            fixture.workspace.tap = { real, _ -> reads += real.fileName.toString() }
+
+            val snapshot = fixture.dirtyState.capture(fresh = true)
+
+            fixture.workspace.tap = null
+            assertContentEquals(crlf, fixture.dirtyState.bytesOf(snapshot.entry("data/notes.txt")!!), "the raw bytes are stored")
+            // The stamp and the D-274 recheck read every tracked file (README.md once each); the capture adds no third read.
+            assertEquals(reads.count { it == "README.md" }, reads.count { it == "notes.txt" }, "the capture stored what the stamp read: $reads")
+        }
+    }
+
     // ---------------------------------------------------------- content reuse (D-364)
 
     @Test

@@ -85,7 +85,10 @@ internal class Scenario(
      * item is the project's check the host declared for the goal ([purpose] `goal`, W8); `null` leaves the legacy reading
      * of a sniffed suite — regression evidence only (task-workflow §3.1).
      */
-    fun seed(check: Command, id: String = "AC-1", shape: Shape? = null, purpose: EvidencePurpose? = EvidencePurpose.Goal) {
+    fun seed(
+        check: Command, id: String = "AC-1", shape: Shape? = null, purpose: EvidencePurpose? = EvidencePurpose.Goal,
+        adjust: (io.astrolabe.contract.Contract) -> io.astrolabe.contract.Contract = { it },
+    ) {
         check(campaign == null) { "seed before the first open" }
         Store.open(stateRoot(), Git(root), clock).use { store ->
             val contracts = Contracts(SqliteContractRepository(store, clock), idGen, clock)
@@ -93,7 +96,7 @@ internal class Scenario(
             // Every requirement is checked by [id], as `deriveS0` binds a sniffed suite.
             val seeded = derived.copy(acceptance = listOf(Acceptance.Run(id, check, Origin.Harness, scope = Contracts.TOUCHED, purpose = purpose)),
                 requirements = derived.requirements.map { it.copy(acceptance = listOf(id)) })
-            contracts.open(if (shape == null) seeded else seeded.copy(shape = shape))
+            contracts.open(adjust(if (shape == null) seeded else seeded.copy(shape = shape)))
         }
     }
 
@@ -110,12 +113,15 @@ internal class Scenario(
     /** Plays one run of model replies against the open campaign (opening it when none is); [script] sees the campaign for file versions. */
     suspend fun play(script: (OpenedCampaign) -> List<Scripted>): S0Run = playWith { c -> ScriptedModel.of(*script(c).toTypedArray()) }
 
-    /** [play] with a model of the test's own making (a turn that throws, one with a side effect). */
-    suspend fun playWith(model: (OpenedCampaign) -> ScriptedModel): S0Run {
+    /**
+     * [play] with a model of the test's own making (a turn that throws, one with a side effect) and the run's cell cap
+     * [maxCells] (a cap of one stops the run after its first cell).
+     */
+    suspend fun playWith(maxCells: Int = Controller.DEFAULT_MAX_CELLS, model: (OpenedCampaign) -> ScriptedModel): S0Run {
         val c = campaign ?: open()
         val fake = FakeAdapter(model(c))
         adapter = fake
-        return controller.run(c, CellModel(fake, FakeProfiles.main, HeuristicEstimator()), host).also { last = it }
+        return controller.run(c, CellModel(fake, FakeProfiles.main, HeuristicEstimator()), host, maxCells = maxCells).also { last = it }
     }
 
     /** The host answers every final acceptance request with [answer] from now on (`null` leaves it waiting). */

@@ -121,6 +121,24 @@ class MigrationsTest {
     }
 
     @Test
+    fun `schema v6 indexes packets by cell and a v5 store migrates to it keeping its rows`() {
+        openStore(root).use { store ->
+            val index = "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'packets_by_context'"
+            assertEquals(1L, store.db.count(index))
+            // A store written by v5: the index absent, version 6 not recorded, a packet row present.
+            store.db.tx {
+                it.execute("DROP INDEX packets_by_context")
+                it.execute("DELETE FROM schema_version WHERE version = 6")
+            }
+            store.insertRow("packets", "id" to "packet-cell-1", "kind" to "cell_packet", ids = TEST_IDS.copy(context = io.astrolabe.id.ContextId("cell-1")))
+            assertEquals(5, Migrations.version(store.db))
+            assertEquals(6, Migrations.apply(store.db, TEST_CLOCK))
+            assertEquals(1L, store.db.count(index))
+            assertEquals(1L, store.db.count("SELECT count(*) FROM packets WHERE context_id = 'cell-1'"))
+        }
+    }
+
+    @Test
     fun `the journal sequence is unique within a work item`() {
         openStore(root).use { store ->
             store.insertRow("journal", "event_id" to "e-1", "seq" to 1, "kind" to "call")

@@ -1,5 +1,10 @@
 package io.astrolabe.context
 
+import io.astrolabe.cell.CellPacket
+import io.astrolabe.cell.ChangeOrigin
+import io.astrolabe.cell.PacketChange
+import io.astrolabe.cell.PacketStatus
+import io.astrolabe.cell.TouchKind
 import io.astrolabe.evidence.Anchor
 import io.astrolabe.evidence.ClaimKind
 import io.astrolabe.id.ContextId
@@ -19,6 +24,7 @@ import io.astrolabe.workspace.Ranges
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** P2.4.1 `CarryForward` (§6.2): FX-11 — amendments and scoped dead ends survive a rollover; KNOWN = seeds only, declared. */
@@ -59,7 +65,7 @@ class CarryForwardTest {
         next = "edit handlers",
     )
 
-    private fun carry(cap: Long = CarryForward.SEED_CAP_TOKENS) = CarryForward.carry(
+    private fun carry(cap: Long = CarryForward.SEED_CAP_TOKENS, fallback: Boolean = false) = CarryForward.carry(
         previous = register,
         export = listOf(
             entry("src/router.py", v("router-1")),
@@ -74,6 +80,16 @@ class CarryForwardTest {
         receipts = listOf(CarriedReceipt("CHK-accept-AC-1", "rcpt-3", "stale")),
         pinned = listOf("Fix the retry path", "Also keep the old CLI flag (user amendment)"),
         seedCapTokens = cap,
+        fallback = fallback,
+    )
+
+    private val stored = CellPacket(
+        ContextId("cell-1"), "I2", "implementing", PacketStatus.Partial, "TurnBudget: spent", 9, 1, null, null, null, register,
+        listOf(
+            PacketChange("src/handlers.py", TouchKind.Modified, v("handlers-0"), v("handlers-1"), ChangeOrigin.Edit),
+            PacketChange("src/pay/fees.py", TouchKind.Modified, v("fees-0"), v("fees-1"), ChangeOrigin.Edit),
+        ),
+        listOf("rcpt-3"), listOf("gap one"),
     )
 
     @Test
@@ -108,5 +124,52 @@ class CarryForwardTest {
         assertTrue(tight.seedTokens <= 500)
         assertEquals(listOf("src/handlers.py"), tight.seeds.map { it.path })
         assertTrue(tight.notSeen.any { it.path == "src/pay/fees.py" && it.reason.startsWith("over the 500-token") })
+    }
+
+    @Test
+    fun `every carry is headed as data and a stored packet row gives the packet line and the touched ledger`() {
+        val c = CarryForward.carry(register, emptyList(), null, { versions[it] }, { true }, emptyList(), emptyList(), stored = stored)
+        assertEquals("partial (TurnBudget: spent) · gaps: gap one · receipts: rcpt-3", c.packetLine)
+        assertEquals(listOf(CarriedTouch("src/handlers.py", v("handlers-1")), CarriedTouch("src/pay/fees.py", v("fees-1"))), c.touched)
+        assertTrue(c.render().startsWith(Carry.DATA_HEADING + "\nCARRY-FORWARD from cell-1 (STATE v9)\n"), c.render())
+        assertFalse(Regex("\\d{4}-\\d{2}-\\d{2}T").containsMatchIn(c.render()), "no wall-clock in a carried block")
+    }
+
+    @Test
+    fun `with no candidate from the attempt's rule the carry falls back to Seeds v2 and says so, and a v1 selection keeps its bytes`() {
+        val planless = register.copy(plan = emptyList(), next = null, focus = null)
+        val export = listOf(entry("src/router.py", v("router-2")), entry("src/handlers.py", v("handlers-1")))
+        val none = CarryForward.carry(planless, export, null, { versions[it] }, { true }, emptyList(), emptyList(), touched = setOf("src/handlers.py"))
+        assertTrue(none.seeds.isEmpty())
+        assertNull(none.seedReason)
+        assertEquals("v1", none.seedRule)
+        val fell = CarryForward.carry(planless, export, null, { versions[it] }, { true }, emptyList(), emptyList(), touched = setOf("src/handlers.py"), fallback = true)
+        assertEquals(listOf("src/handlers.py", "src/router.py"), fell.seeds.map { it.path }, "Seeds v2: touched first")
+        assertEquals("fallback", fell.seedReason)
+        assertEquals("v2", fell.seedRule)
+        assertEquals(carry(), carry(fallback = true), "a rule that yields a candidate keeps its selection and bytes")
+    }
+
+    @Test
+    fun `a parent carry holds decisions and dead ends longest under its cap and names what it cut`() {
+        val tokens = { text: String -> text.length / 4L }
+        val export = listOf(entry("src/handlers.py", v("handlers-1")), entry("src/pay/fees.py", v("fees-1")))
+        val status = "boundary: cell_end · cell: cell-1\nverification: CHK-accept-AC-1 rcpt-3 (current)\nopen handles: (none)\narchived records: 0"
+        fun parent(cap: Long) = CarryForward.parent("W-1", register, export, stored, { versions[it] }, { true },
+            listOf(CarriedReceipt("CHK-accept-AC-1", "rcpt-3", "current")), status, cap, tokens)
+        val full = parent(100_000)
+        assertEquals("parent W-1 · cell-1", full.source)
+        assertTrue(full.cut.isEmpty())
+        val k = full.render()
+        assertTrue(k.startsWith(Carry.DATA_HEADING) && "STATUS:" in k && "Decisions:" in k && "Dead ends:" in k, k)
+        assertFalse("reproduce in tests" in k || "router dispatches by name" in k, "the parent's plan and facts stay home: $k")
+        assertEquals(listOf("src/handlers.py", "src/pay/fees.py"), full.seeds.map { it.path }, "the parent's touched paths are seeds")
+
+        val target = full.copy(status = null, receipts = emptyList(), touched = emptyList(), register = full.register.copy(open = emptyList())).render()
+        val tight = parent(tokens(target))
+        assertEquals("STATUS note", tight.cut.first(), tight.cut.toString())
+        assertTrue(tight.cut.any { it.startsWith("touched ledger") } && tight.cut.none { it.startsWith("decisions") || it.startsWith("dead ends") }, tight.cut.toString())
+        assertTrue(tokens(tight.render()) <= tokens(target))
+        assertEquals(tight, parent(tokens(target)), "deterministic")
     }
 }
