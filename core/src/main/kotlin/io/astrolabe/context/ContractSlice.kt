@@ -41,23 +41,55 @@ public data class ContractSlice(
     public fun render(): String {
         val sb = StringBuilder()
         sb.append("[K] contract v").append(contractVersion).append(" · increment ").append(incrementId).append('\n')
-        requirements.forEach { r ->
-            sb.append(r.id).append(": ").append(r.text).append("  accept: ").append(r.acceptance.joinToString(", ")).append('\n')
-        }
-        acceptance.forEach { a ->
-            sb.append(a.id).append(" (").append(a.origin).append(", v").append(a.obligationVersion).append("): ").append(a.criterion)
-            when (a) {
-                is Acceptance.Run -> a.command.cwd?.let { sb.append("  cwd: ").append(it) }
-                is Acceptance.Check -> a.evidenceRef?.let { sb.append("  evidence: ").append(it) }
-                is Acceptance.Review -> a.signedBy?.let { sb.append("  signed: ").append(it) }
-            }
-            originalObligations[a.id]?.let { sb.append("\n  original obligation: ").append(it) }
-            sb.append('\n')
-        }
+        requirements.forEach { sb.append(line(it)).append('\n') }
+        acceptance.forEach { sb.append(line(it)).append('\n') }
         if (constraints.isNotEmpty()) sb.append("constraints: ").append(constraints.joinToString(" · ") { "${it.id} ${it.text} (${it.authority})" }).append('\n')
         if (exclusions.isNotEmpty()) sb.append("exclusions: ").append(exclusions.joinToString(", ")).append('\n')
         if (contractsTouched.isNotEmpty()) sb.append("contracts touched: ").append(contractsTouched.joinToString(", ")).append('\n')
         return sb.toString()
+    }
+
+    /**
+     * The authoritative delta from [previous] to this slice (task-workflow §4.4, WF-15): the one line a revision made
+     * mid-cell appends to `[T]` while `[K]` stays as built — `[contract v4 delta] R2 added: …; AC-5 added: …; AC-1 → …`.
+     * Each item is named by id with its new rendered line, in this slice's order, removals last; byte-stable for equal
+     * inputs. `null` when nothing differs, the version included.
+     */
+    public fun delta(previous: ContractSlice): String? {
+        if (this == previous) return null
+        val parts = ArrayList<String>()
+        fun <T> diff(before: List<T>, after: List<T>, id: (T) -> String, render: (T) -> String, renderBefore: (T) -> String = render) {
+            val old = before.associateBy(id)
+            val ids = after.map(id).toSet()
+            for (item in after) {
+                val was = old[id(item)]
+                when {
+                    was == null -> parts += "${id(item)} added: ${render(item)}"
+                    renderBefore(was) != render(item) -> parts += "${id(item)} → ${render(item)}"
+                }
+            }
+            before.filter { id(it) !in ids }.forEach { parts += "${id(it)} removed" }
+        }
+        diff(previous.requirements, requirements, { it.id }, { line(it).substringAfter(": ") })
+        diff(previous.acceptance, acceptance, { it.id }, { line(it).substringAfter(' ') }, { previous.line(it).substringAfter(' ') })
+        diff(previous.constraints, constraints, { it.id }, { "${it.text} (${it.authority})" })
+        diff(previous.exclusions, exclusions, { "exclusion $it" }, { it })
+        diff(previous.contractsTouched, contractsTouched, { "contract $it" }, { it })
+        if (incrementId != previous.incrementId) parts += "increment ${previous.incrementId} → $incrementId"
+        if (parts.isEmpty()) parts += "no change to increment $incrementId"
+        return "[contract v$contractVersion delta] " + parts.joinToString("; ")
+    }
+
+    private fun line(r: Requirement): String = "${r.id}: ${r.text}  accept: ${r.acceptance.joinToString(", ")}"
+
+    private fun line(a: Acceptance): String = buildString {
+        append(a.id).append(" (").append(a.origin).append(", v").append(a.obligationVersion).append("): ").append(a.criterion)
+        when (a) {
+            is Acceptance.Run -> a.command.cwd?.let { append("  cwd: ").append(it) }
+            is Acceptance.Check -> a.evidenceRef?.let { append("  evidence: ").append(it) }
+            is Acceptance.Review -> a.signedBy?.let { append("  signed: ").append(it) }
+        }
+        originalObligations[a.id]?.let { append("\n  original obligation: ").append(it) }
     }
 
     public companion object {

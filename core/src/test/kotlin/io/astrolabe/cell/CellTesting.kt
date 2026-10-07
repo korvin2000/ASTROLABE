@@ -196,14 +196,14 @@ internal class CellFixture(
     lateinit var adapter: FakeAdapter
         private set
 
-    fun context(model: ScriptedModel, profile: Profile = FakeProfiles.main, profiles: Map<String, Profile> = FakeProfiles.all, holdResponses: Boolean = false, role: Role = Roles.implementing, manifest: String? = null, diagnoses: Diagnoses? = null, turnBudgetHandoff: Boolean = false): CellContext {
+    fun context(model: ScriptedModel, profile: Profile = FakeProfiles.main, profiles: Map<String, Profile> = FakeProfiles.all, holdResponses: Boolean = false, role: Role = Roles.implementing, manifest: String? = null, diagnoses: Diagnoses? = null, turnBudgetHandoff: Boolean = false, taskTool: TaskTool? = null): CellContext {
         adapter = FakeAdapter(model, profiles, holdResponses = holdResponses)
         return CellContext(
             ids = ids,
             role = role,
             contracts = contracts,
             model = CellModel(adapter, profile, estimator),
-            tools = CellTools(if (role.protocol == Protocol.Direct) directState else state, look, edit, if (Roles.readOnlyRuns(role)) newRun(role.name) else run, verify, if (role.protocol == Protocol.Direct) directTask else task, kb),
+            tools = CellTools(if (role.protocol == Protocol.Direct) directState else state, look, edit, if (Roles.readOnlyRuns(role)) newRun(role.name) else run, verify, taskTool ?: if (role.protocol == Protocol.Direct) directTask else task, kb),
             workspace = CellWorkspace(workspace, registry, coherence, stamper, workset, checks, scheduler, atlas, checker),
             evidence = CellEvidence(journal, observations, aliases, receipts, intents, registerVersions, checkpoints, preimages),
             prime = Prime.render(atlas, Sniff.commands(atlas)),

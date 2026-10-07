@@ -49,6 +49,15 @@ public class StatusNotes(private val writer: KbWriter, private val notes: Notes,
         return note
     }
 
+    /**
+     * The STATUS note's summary a carry takes along (task-workflow §4.3, §4.5): its lines up to the count of archived
+     * records, without the records themselves; `null` before the first checkpoint.
+     */
+    public fun summary(work: WorkId): String? {
+        val body = notes.get(id(work))?.body ?: return null
+        return body.lineSequence().takeWhile { !it.startsWith("{") }.joinToString("\n").trimEnd()
+    }
+
     /** The archived register records of [work], oldest first; empty before the first checkpoint. */
     public fun archived(work: WorkId): List<ArchivedRecord> {
         val body = notes.get(id(work))?.body ?: return emptyList()

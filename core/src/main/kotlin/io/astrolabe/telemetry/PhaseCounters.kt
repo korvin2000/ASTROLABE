@@ -3,8 +3,8 @@ package io.astrolabe.telemetry
 import io.astrolabe.event.AgentEvent
 import io.astrolabe.event.Phase
 import io.astrolabe.id.Identities
-import io.astrolabe.os.Git
-import io.astrolabe.workspace.Workspace
+import io.astrolabe.os.PhaseTally
+import kotlinx.coroutines.withContext
 
 /** The phases §7.2 counts (`phase.counted`): a campaign open, a shadow snapshot of a tree, a finalization attempt. */
 public enum class CountedPhase(public val wire: String, internal val phase: Phase) {
@@ -14,41 +14,33 @@ public enum class CountedPhase(public val wire: String, internal val phase: Phas
 }
 
 /**
- * The counters of [workspace] and its git at the start of a phase (§7.2). Both are monotonic per instance, so the
- * phase's cost is a difference; concurrent work on the same tree during the phase is counted with it.
+ * The counters of one phase call (§7.2, T-13): the git processes, written objects and tree and blob reads the phase's
+ * own work made — counted per call through its [PhaseTally], never as differences of totals on instances a host shares,
+ * so a host's `git status` on the same instance while the phase runs is not the phase's. A nested phase (a snapshot
+ * inside a finalization) adds to the phase it runs in, as before.
  */
-internal class PhaseMark private constructor(
-    private val workspace: Workspace,
-    private val gitProcesses: Long,
-    private val filesRead: Long,
-    private val bytesRead: Long,
-    private val objectsWritten: Long,
-    private val blobsRead: Long,
-    private val blobBytesRead: Long,
-) {
+internal class PhaseMark private constructor(private val tally: PhaseTally) {
+    /** Runs the synchronous phase [block] counted by this mark. */
+    fun <T> run(block: () -> T): T = tally.within(block)
+
+    /** Runs the suspending phase [block] counted by this mark, on whichever threads it resumes. */
+    suspend fun <T> runSuspending(block: suspend () -> T): T = withContext(tally.element) { block() }
+
     fun counted(ids: Identities, phase: CountedPhase, opens: Int, finishAttempts: Int): AgentEvent.Telemetry.PhaseCounted =
         AgentEvent.Telemetry.PhaseCounted(
             ids, phase.wire,
-            gitProcesses = workspace.git.processesStarted - gitProcesses,
-            filesRead = workspace.filesRead - filesRead,
-            bytesRead = workspace.bytesRead - bytesRead,
-            objectsWritten = workspace.git.objectsWritten - objectsWritten,
+            gitProcesses = tally[PhaseTally.Count.GitProcesses],
+            filesRead = tally[PhaseTally.Count.FilesRead],
+            bytesRead = tally[PhaseTally.Count.BytesRead],
+            objectsWritten = tally[PhaseTally.Count.ObjectsWritten],
             opens = opens, finishAttempts = finishAttempts,
-            blobsRead = workspace.blobsRead - blobsRead,
-            blobBytesRead = workspace.blobBytesRead - blobBytesRead,
+            blobsRead = tally[PhaseTally.Count.BlobsRead],
+            blobBytesRead = tally[PhaseTally.Count.BlobBytesRead],
             phase = phase.phase,
         )
 
     companion object {
-        /** A phase that failed before its workspace existed (an open refused by the store or its project lock): its git counts only. */
-        fun beforeWorkspace(ids: Identities, git: Git, phase: CountedPhase, opens: Int, finishAttempts: Int = 0): AgentEvent.Telemetry.PhaseCounted =
-            AgentEvent.Telemetry.PhaseCounted(
-                ids, phase.wire, gitProcesses = git.processesStarted, filesRead = 0, bytesRead = 0, objectsWritten = git.objectsWritten,
-                opens = opens, finishAttempts = finishAttempts, blobsRead = 0, blobBytesRead = 0, phase = phase.phase,
-            )
-
-        /** [gitProcesses] overrides the git baseline when the phase began before [workspace] existed (an open). */
-        fun of(workspace: Workspace, gitProcesses: Long = workspace.git.processesStarted, objectsWritten: Long = workspace.git.objectsWritten): PhaseMark =
-            PhaseMark(workspace, gitProcesses, workspace.filesRead, workspace.bytesRead, objectsWritten, workspace.blobsRead, workspace.blobBytesRead)
+        /** A new mark, nested in the phase the calling thread or coroutine runs in, if any. */
+        fun begin(): PhaseMark = PhaseMark(PhaseTally.open())
     }
 }
