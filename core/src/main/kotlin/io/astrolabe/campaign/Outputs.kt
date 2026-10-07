@@ -70,7 +70,8 @@ public object DeclaredOutputs {
      * "Apply now" (§5.1): the user or the host ends the running attempt of [c] so that [next] opens on the current tree — a
      * new `s0` under the effective policy with the declared outputs, the baseline per §8.5 — and keeps the old attempt's
      * receipts as history. The contract moves to [next] in a host-origin revision; the host then opens [next]. Refused
-     * when no declared output waits for the next attempt.
+     * when no declared output waits for the next attempt, and — an [IllegalStateException], before anything moves — while
+     * the attempt runs: a run in progress or a running cell.
      */
     @JvmStatic
     @JvmOverloads
@@ -78,6 +79,10 @@ public object DeclaredOutputs {
         require(next != c.ids.attempt) { "the next attempt has another id than ${next.value}" }
         val pending = c.contract.outputs.map { normalize(it.path) }.filterNot { c.attempt.scratch.isOutput(it) }
         require(pending.isNotEmpty()) { "no declared output waits for the next attempt" }
+        // WR2 (P1 #2): refused before anything moves while the attempt runs — a run or its cell would write under the next attempt.
+        check(c.limitState.session == null && c.state?.running == null) {
+            "attempt ${c.ids.attempt.value} is running: stop it (cancel, or let it stop), then apply the declared output now"
+        }
         c.journal.append(JournalEvent("ev-apply-${c.ids.attempt.value}-${next.value}", c.ids, null, JournalKind.Boundary, refs = pending,
             text = "attempt ${c.ids.attempt.value} ends: declared output ${pending.joinToString(", ")} applied now; attempt ${next.value} opens on the current tree", at = clock.instant()))
         return c.contracts.amendByHost(c.ids.work, "attempt ${next.value}: declared output ${pending.joinToString(", ")} applied now") { it.copy(attemptId = next) }

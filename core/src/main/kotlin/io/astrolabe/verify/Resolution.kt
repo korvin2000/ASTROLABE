@@ -232,7 +232,15 @@ public data class DecisionRecord(
     val decision: AcceptanceDecision,
     val obligations: List<String>,
     val spent: Boolean = false,
+    /** WR2 (P1 #1): the [DecisionKey] of the request it answers; `null` for a record before it. */
+    val key: String? = null,
+    /** WR2 (P1 #1): the inputs outside candidate identity that request's evidence pinned, at the bytes it was asked about. */
+    val outsideInputs: Map<String, FileVersion> = emptyMap(),
 ) {
+    /** The constructor before [key] and [outsideInputs] (WR2). Kept for Java callers. */
+    public constructor(id: String, incrementId: String?, decision: AcceptanceDecision, obligations: List<String>, spent: Boolean) :
+        this(id, incrementId, decision, obligations, spent, null, emptyMap())
+
     /** Whether this record speaks for [candidate] at [contractVersion]; a moved tree or contract makes it history. */
     public fun appliesTo(candidate: CandidateId, contractVersion: Int): Boolean =
         decision.candidate == candidate && decision.contractRevision == contractVersion

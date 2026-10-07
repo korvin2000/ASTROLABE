@@ -72,7 +72,10 @@ public class RequirementGraph(
             for (item in increment.accept.distinct().sorted()) if (item !in acceptance) {
                 issue(GraphIssueCode.UnknownAcceptance, id, "unknown acceptance $item")
             }
-            if (increment.accept.none { item ->
+            // WR2 (P1 #7, task-workflow §2.4 A): a response to a recorded message is resolved by its packet; the regression
+            // obligations it takes may be none, and the campaign gate still runs every item.
+            val response = (increment.produces as? Production.Resolves)?.questionId.let { message -> contract.requests.any { it.id == message } }
+            if (!response && increment.accept.none { item ->
                     acceptance[item] is Acceptance.Run ||
                         acceptance[item] is Acceptance.Check && !increment.evidenceKinds[item].isNullOrBlank()
                 }) {

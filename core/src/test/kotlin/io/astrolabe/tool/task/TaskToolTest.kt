@@ -269,6 +269,10 @@ class TaskToolTest {
         val contract = contracts.current(ids.work)!!
         assertEquals(2, contract.version)
         assertEquals("Use bankers rounding everywhere, including reports.", contract.requests.last().text, "the authority is the message, stored verbatim")
+        // P1 #5 (task-workflow §2.4 B, D-317): an amending answer is the question's answer and derives its requirement, so its work has a scope.
+        val request = contract.requests.last()
+        assertEquals(io.astrolabe.contract.MessageKind.Amendment to tool.asked.single().question.id, request.kind to request.answers)
+        assertEquals(request.text, contract.requirements.singleOrNull { it.authorityRef == request.id }?.text, "the answer derives its requirement: ${contract.requirements}")
         assertEquals(2, tool.asked.single().amendedToVersion)
         assertNull(tool.asked.single().evidenceEventId)
         assertTrue(Journal(store, clock).search("bankers", JournalScope(ids.work)).events.isEmpty(), "an amendment is the contract's record, not evidence")

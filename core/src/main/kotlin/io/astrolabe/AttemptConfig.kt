@@ -88,6 +88,13 @@ public class AttemptConfig(
     public fun withOutputs(declared: Collection<String>): AttemptConfig =
         AttemptConfig(harnessVersion, config, roleTextVersions, controls, production, scratch.withOutputs(declared).takeIf { it.id != null })
 
+    /**
+     * Task-workflow §5.2 (D-435, WR2): this configuration with the toolchain directories of [programs] kept in identity
+     * ([io.astrolabe.verify.ScratchPolicy.withToolchains]), frozen before the attempt's `s0` like the outputs.
+     */
+    public fun withToolchains(programs: Collection<String>): AttemptConfig =
+        AttemptConfig(harnessVersion, config, roleTextVersions, controls, production, scratch.withToolchains(programs).takeIf { it.id != null })
+
     public operator fun component1(): String = harnessVersion
     public operator fun component2(): Config = config
     public operator fun component3(): Map<String, String> = roleTextVersions

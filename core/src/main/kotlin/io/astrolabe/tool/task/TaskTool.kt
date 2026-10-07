@@ -7,6 +7,7 @@ import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Command
 import io.astrolabe.contract.Contracts
 import io.astrolabe.contract.EvidencePurpose
+import io.astrolabe.contract.MessageKind
 import io.astrolabe.contract.Origin
 import io.astrolabe.delegate.Assembled
 import io.astrolabe.delegate.ChildPacket
@@ -105,6 +106,16 @@ public class TaskTool(
     private val autoDeclareOutputs: Boolean = false,
 ) : ToolExecutor {
     internal var beforeDispatch: () -> Unit = {}
+
+    /** Task-workflow §3.7: the paths of the cell's flagged test edits that wait for an approving review; the cell sets it. */
+    internal var flagged: (() -> List<String>)? = null
+
+    /**
+     * Task-workflow §3.7: records a person's approval of the flagged [paths] — their answer to [question] — as that
+     * person's verdict on the flags, and says so; `null` when it records nothing. The cell sets it; absent: nothing is recorded.
+     */
+    internal var approveFlags: (suspend (paths: List<String>, question: Question, answer: Answer) -> String?)? = null
+
     init {
         require(ids.context != null) { "task runs inside a cell: ids.context is its lineage" }
     }
@@ -190,7 +201,11 @@ public class TaskTool(
 
     private suspend fun ask(args: TaskArgs, context: TurnContext): ToolOutcome {
         val contract = contracts.current(ids.work) ?: return result("denied", "no committed contract for ${ids.work}")
-        val question = Question(idGen.next("q"), contract.version, ids, args.question!!, args.options.orEmpty())
+        // §3.7 (T-42): a question that names every flagged test edit offers the harness's own choice, so a person's approval
+        // is structured — the first option chosen — and never read from free text.
+        val flags = flagged?.invoke().orEmpty().takeIf { paths -> paths.isNotEmpty() && paths.all { it in args.question!! } }.orEmpty()
+        val options = if (flags.isEmpty()) args.options.orEmpty() else listOf("approve the change to ${flags.joinToString(", ")}", "keep it flagged for review")
+        val question = Question(idGen.next("q"), contract.version, ids, args.question!!, options)
         events?.emit(AgentEvent.Ask.Question(ids, question.id))
         val answer = authority.ask(question)
         beforeDispatch()
@@ -204,14 +219,18 @@ public class TaskTool(
         if (text.isBlank()) return block(question, context, "the answer is empty")
         events?.emit(AgentEvent.Ask.Answered(ids, question.id, answer.changesRequirements))
         return if (answer.changesRequirements) {
-            // §4.1: the authority is the message itself — appended verbatim, version bumped, no evidence record needed.
-            val amended = contracts.amendByUser(ids.work, text)
+            // §4.1: the authority is the message itself — appended verbatim, version bumped, no evidence record needed. WR2 (P1 #5,
+            // task-workflow §2.4 B, D-317): recorded as this question's answer, which derives its requirement, so its work has a scope.
+            val amended = contracts.message(ids.work, MessageKind.Answer, text, answers = question.id, changesRequirements = true)
             exchanges += Asked(question, answer, context.turn, evidenceEventId = null, amendedToVersion = amended.version)
             result("answered", "answered (amends the contract → v${amended.version}): $text\nquestion ${question.id}: ${question.text}")
         } else {
             val event = journal?.append(JournalEvent(idGen.next("ev"), ids, context.turn, JournalKind.Result, text = "answer to ${question.id} (${question.text}): $text", at = clock.instant()))
             exchanges += Asked(question, answer, context.turn, evidenceEventId = event?.eventId, amendedToVersion = null)
-            result("answered", "answered (factual, recorded as evidence${event?.let { " #event ${it.seq}" } ?: ""}; contract stays v${contract.version}): $text\nquestion ${question.id}: ${question.text}")
+            // §3.7: only a person's choice of the approving option is a verdict; a model's or an unknown answerer's resolves nothing.
+            val verdict = if (flags.isNotEmpty() && answer.chosenOption == 0 && answer.decider == io.astrolabe.verify.Decider.User) approveFlags?.invoke(flags, question, answer) else null
+            result("answered", "answered (factual, recorded as evidence${event?.let { " #event ${it.seq}" } ?: ""}; contract stays v${contract.version}): $text\nquestion ${question.id}: ${question.text}" +
+                (verdict?.let { "\n$it" } ?: ""))
         }
     }
 

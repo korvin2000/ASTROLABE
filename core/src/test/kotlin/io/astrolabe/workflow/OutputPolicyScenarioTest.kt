@@ -26,7 +26,9 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
@@ -48,6 +50,9 @@ class OutputPolicyScenarioTest {
         RED to { policy(RED, DirtyRepo.Variant.RewritesData, { redRewrites }, ::redStaysRed) },
         OUTSIDE to { policy(OUTSIDE, DirtyRepo.Variant.RewritesData, { check }, ::outsideInputMoved) },
         DECLARED to { declaredOutput() },
+        WAITED to { policy(WAITED, DirtyRepo.Variant.RewritesData, { check }, ::outsideInputMovedWhileAsked) },
+        LIVE to { policy(LIVE, DirtyRepo.Variant.Plain, { check }, ::applyNowWhileRunning) },
+        TOOLCHAIN to { toolchainKept() },
     )
     private val played by lazy { Scenario.concurrently(plays.keys) { plays.getValue(it)() } }
 
@@ -68,6 +73,90 @@ class OutputPolicyScenarioTest {
     @Test
     fun `T-06 T-07 a nested generated directory is outside identity, a declared output leaves it from the next attempt, and apply now opens it on the tree`() =
         played.getValue(DECLARED).getOrThrow()
+
+    @Test
+    fun `an accept of evidence whose pinned input moved while it was asked applies to nothing, and no later key is answered by it`() =
+        played.getValue(WAITED).getOrThrow()
+
+    @Test
+    fun `apply now while the attempt's cell runs is refused before anything moves`() = played.getValue(LIVE).getOrThrow()
+
+    @Test
+    fun `a toolchain a check launches from under a generated-directory marker stays in identity, frozen in the policy and its id`() =
+        played.getValue(TOOLCHAIN).getOrThrow()
+
+    /**
+     * P1 #1: the quality gate declares the untracked `build/input.json` (pinned, outside identity) and rewrites a tracked
+     * file, so the final waits; the input changes while the decision is asked and the user accepts what they saw: the
+     * accept applies to nothing, and the next request — a new key — is never answered by it.
+     */
+    private suspend fun outsideInputMovedWhileAsked(s: Scenario) {
+        Files.createDirectories(s.root.resolve(INPUT).parent)
+        Files.writeString(s.root.resolve(INPUT), "1\n")
+        declareGateInput(s.campaign!!)
+        val asked = ArrayList<AcceptanceDecisionRequest>()
+        s.decide { r ->
+            asked += r
+            if (r.incrementId != null || asked.count { it.incrementId == null } > 1) null else {
+                Files.writeString(s.root.resolve(INPUT), "2\n")
+                AcceptanceDecision(r.id, r.contractRevision, r.candidate, DecisionKind.Accept, Decider.User, "user", "accepted as I saw it")
+            }
+        }
+        val first = s.play(::edit)
+        assertNotEquals(CampaignOutcome.Completed, first.outcome, "the accept was about an input that moved while it was asked: ${first.state?.reason}")
+        assertTrue("inputs outside the candidate its evidence pinned changed" in first.state?.reason.orEmpty(), "the stop names the moved pinned input: ${first.state?.reason}")
+        declareGateInput(s.reopen())
+        val second = s.play { emptyList() }
+        assertNotEquals(CampaignOutcome.Completed, second.outcome, "the earlier accept answers no later key: ${second.state?.reason}")
+        val final = asked.filter { it.incrementId == null }
+        assertEquals(2, final.size, "the final is asked again: ${final.map { it.key }}")
+        assertNotEquals(final.first().key, final.last().key, "under a new key")
+    }
+
+    /** P1 #2 (task-workflow §5.1): "apply now" while the attempt's cell runs is refused before anything moves; the run keeps its records. */
+    private suspend fun applyNowWhileRunning(s: Scenario) {
+        io.astrolabe.campaign.DeclaredOutputs.declare(s.campaign!!, "reports/", io.astrolabe.contract.OutputDeclarer.User, "the task's report", clock = s.clock)
+        var refused: Throwable? = null
+        var turns = 0
+        val run = s.playWith { o ->
+            val version = checkNotNull(o.registry.version(DirtyRepo.SOURCE))
+            io.astrolabe.fixtures.ScriptedModel(listOf(io.astrolabe.fixtures.ScriptedModel.Turn({ true }, { _ ->
+                turns++
+                when (turns) {
+                    1 -> {
+                        refused = runCatching { io.astrolabe.campaign.DeclaredOutputs.applyNow(o, AttemptId("a2"), s.clock) }.exceptionOrNull()
+                        Scripted.Reply(listOf(io.astrolabe.cell.CellFixture.say("reading"), io.astrolabe.cell.CellFixture.read("c1", DirtyRepo.SOURCE)))
+                    }
+                    2 -> Scripted.Reply(listOf(io.astrolabe.cell.CellFixture.say("editing"),
+                        io.astrolabe.cell.CellFixture.anchored("c2", DirtyRepo.SOURCE, version, "    return sum(items)", "    return sum(x for x in items if x >= 0)")))
+                    3 -> Scripted.Reply(listOf(io.astrolabe.cell.CellFixture.say("verifying"), io.astrolabe.cell.CellFixture.call("c3", "verify", """{"what":"acceptance","ids":["AC-1"]}""")))
+                    else -> Scripted.Reply(listOf(io.astrolabe.cell.CellFixture.say("done")))
+                }
+            }, once = false)))
+        }
+        assertTrue(refused is IllegalStateException, "apply now under a running cell is refused: $refused")
+        assertEquals(AttemptId("a1"), s.campaign!!.contract.attemptId, "the contract stays with the running attempt")
+        assertNotNull(run.outcome, "the run ends on its own records: ${run.state?.reason}")
+    }
+
+    /**
+     * P1 #4 (task-workflow §5.2, D-435): a toolchain a registered check launches from an untracked directory under a
+     * generated-directory marker stays in identity; the attempt's effective policy freezes the exception and its id names it.
+     */
+    private fun toolchainKept() = runBlocking {
+        DirtyRepo.create(1, bigBytes = 0, settle = false).use { dirty ->
+            Files.createDirectories(dirty.root.resolve(TOOL).parent)
+            Files.writeString(dirty.root.resolve(TOOL), "echo lint\n")
+            Scenario(dirty.root, stateRoot.resolve(TOOLCHAIN)).use { s ->
+                s.seed(Command(listOf(TOOL)), shape = Shape.S1)
+                val c = s.open()
+                assertFalse(c.attempt.scratch.excludes(TOOL), "the launched toolchain is identity: ${c.attempt.scratch}")
+                assertTrue(c.attempt.scratch.excludes("tools/.cache/other/x.txt"), "the rest of the marker's directory stays outside")
+                assertNotEquals(io.astrolabe.verify.ScratchPolicy.BUILT_IN.id, c.attempt.scratch.id, "the policy id names the exception")
+                assertTrue(TOOL in c.stamper.report(fresh = true).untracked.map { it.path }, "the stamp hashes the toolchain")
+            }
+        }
+    }
 
     /**
      * Task-workflow §5.3 (D-435, WF-5, WF-3): under v3 a check writes `tests/__pycache__/x.pyc` (a generated-directory marker:
@@ -215,6 +304,12 @@ class OutputPolicyScenarioTest {
         assertEquals(CampaignOutcome.Completed, third.outcome, third.state?.reason)
     }
 
+    /** The quality gate with a known closure: the tracked data file it rewrites and the untracked input under `build/`. */
+    private fun declareGateInput(c: OpenedCampaign) {
+        val gate = c.checks.all().single { it.kind == io.astrolabe.verify.CheckKind.Quality }
+        c.checks.replace(gate.copy(inputClosure = Closure.Known(setOf(DirtyRepo.DATA, INPUT))))
+    }
+
     /** `AC-1` with a known closure: the printed output and the untracked input under `build/`. */
     private fun declareInput(c: OpenedCampaign) {
         val check = checkNotNull(c.checks[Checks.acceptId("AC-1")])
@@ -248,6 +343,10 @@ class OutputPolicyScenarioTest {
         const val RED = "red"
         const val OUTSIDE = "outside"
         const val DECLARED = "declared"
+        const val WAITED = "waited"
+        const val LIVE = "live"
+        const val TOOLCHAIN = "toolchain"
+        const val TOOL = "tools/.cache/bin/lint.cmd"
         const val OUT = "reports/out.json"
         const val PYC = "tests/__pycache__/x.pyc"
         const val INPUT = "build/input.json"

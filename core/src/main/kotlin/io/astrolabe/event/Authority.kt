@@ -25,6 +25,7 @@ public data class Question(
  * A user's answer. [changesRequirements] decides the path (§4.1): a factual answer is recorded as evidence
  * without a new contract revision; one that changes authority or requirements becomes an amendment.
  */
+@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
 @Serializable
 public data class Answer(
     val questionId: String,
@@ -32,7 +33,16 @@ public data class Answer(
     val text: String,
     val chosenOption: Int? = null,
     val changesRequirements: Boolean = false,
-)
+    /**
+     * Who answered, when the host knows (task-workflow §3.7): only [io.astrolabe.verify.Decider.User] — a person — makes an
+     * approval of a flagged test edit that person's verdict on the flag; `null` (unknown) or a policy's resolves nothing.
+     */
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val decider: io.astrolabe.verify.Decider? = null,
+) {
+    /** The constructor before [decider] (WR2). Kept for Java callers. */
+    public constructor(questionId: String, contractRevision: Int, text: String, chosenOption: Int?, changesRequirements: Boolean) :
+        this(questionId, contractRevision, text, chosenOption, changesRequirements, null)
+}
 
 /** A D-class effect awaiting approval (§4.6): recorded as an intent before dispatch. */
 @Serializable
