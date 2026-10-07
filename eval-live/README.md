@@ -159,7 +159,8 @@ the core arm except the agent's own machinery. These rules were written before t
 - `acceptance.log` — the acceptance output; `workspace.diff` — the agent's changes against the base commit.
 
 `<out>/summary.json` (all results) and `<out>/summary.csv` (one row per run; an unknown value is an empty cell) are
-rewritten after every run.
+rewritten after every run over every run of the directory — this bench's and each kept `result.json` of another arm,
+model or mode (a set-aside `*.stale-*` result is not a run) — one row per task × model × arm × mode × repeat.
 
 ## Tasks
 

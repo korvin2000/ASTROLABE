@@ -4,6 +4,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.readText
 import kotlin.io.path.writeText
@@ -146,19 +147,23 @@ internal data class SegmentResult(
     val openedContractVersion: Int? = null,
 )
 
-/** `summary.json` (every result) and `summary.csv` (one flat row per run), rewritten after each run. */
+/**
+ * `summary.json` (every result) and `summary.csv` (one flat row per run), rewritten after each run over every run of the
+ * results directory — this bench's and the kept `result.json` of every other arm, model or mode — so a second bench in
+ * the same `--out` adds its rows and never overwrites the first's (P8.C.17).
+ */
 internal object Summary {
     private val json = Json { prettyPrint = true; encodeDefaults = true }
     private val compact = Json { ignoreUnknownKeys = true }
 
     val COLUMNS: List<String> = listOf(
-        "order", "task", "class", "provider", "model", "arm", "repeat", "outcome", "stop_code", "accepted", "acceptance_exit",
+        "order", "task", "class", "provider", "model", "arm", "mode", "repeat", "outcome", "stop_code", "accepted", "acceptance_exit",
         "attempt_wall_s", "model_requests", "uncached_input", "cache_read", "cache_write", "output", "cost", "cost_priced_part",
         "currency", "cost_basis", "cells", "turns", "tool_calls", "changed_files", "failure", "interrupt_mode",
     )
 
     fun write(out: Path, results: List<RunResult>) {
-        val sorted = results.sortedBy { it.order }
+        val sorted = merged(out, results)
         out.resolve("summary.json").writeText(json.encodeToString(ListSerializer(RunResult.serializer()), sorted))
         out.resolve("summary.csv").writeText(buildString {
             appendLine(COLUMNS.joinToString(","))
@@ -166,8 +171,26 @@ internal object Summary {
         })
     }
 
+    /**
+     * [results] with every other run kept under `<out>/runs` (a set-aside `*.stale-*` result is not a run), one per task ×
+     * model × arm × mode × repeat — this bench's result wins its key — ordered by arm, mode, then the bench's order.
+     */
+    fun merged(out: Path, results: List<RunResult>): List<RunResult> {
+        fun key(r: RunResult) = listOf(r.task, r.model, r.arm, r.mode, r.repeat.toString())
+        val byKey = LinkedHashMap<List<String>, RunResult>()
+        val runs = out.resolve("runs")
+        if (Files.isDirectory(runs)) {
+            val files = Files.walk(runs).use { paths ->
+                paths.filter { it.fileName.toString() == "result.json" && ".stale-" !in it.parent.fileName.toString() }.sorted().toList()
+            }
+            for (file in files) runCatching { read(file) }.getOrNull()?.let { byKey[key(it)] = it }
+        }
+        for (r in results) byKey[key(r)] = r
+        return byKey.values.sortedWith(compareBy<RunResult>({ it.arm }, { it.mode }, { it.order }, { it.model }, { it.task }, { it.repeat }))
+    }
+
     fun row(r: RunResult): List<String?> = listOf(
-        r.order.toString(), r.task, r.taskClass, r.provider, r.model, r.arm, r.repeat.toString(), r.outcome, r.stopCode,
+        r.order.toString(), r.task, r.taskClass, r.provider, r.model, r.arm, r.mode, r.repeat.toString(), r.outcome, r.stopCode,
         r.acceptance?.passed?.toString(), r.acceptance?.exitCode?.toString(),
         r.attemptWallMillis?.let { "%.1f".format(java.util.Locale.ROOT, it / 1000.0) }, r.totals?.modelRequests?.toString(),
         r.totals?.uncachedInputTokens?.toString(), r.totals?.cacheReadTokens?.toString(), r.totals?.cacheWriteTokens?.toString(),
