@@ -43,6 +43,8 @@ public data class CellCheckpoint(
     val reason: String? = null,
     /** Pressure rebuilds performed in this cell so far (§5.8); each is a decomposition failure (§3.8). */
     val rebuilds: Int = 0,
+    /** The contract's requests the cell's latest turn was rendered with (D-411, T-36): messages it has consumed. */
+    val requestsSeen: Int = 0,
 ) {
     init {
         require(turn >= 0) { "turn must be ≥ 0" }

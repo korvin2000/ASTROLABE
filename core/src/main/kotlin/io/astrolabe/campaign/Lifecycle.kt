@@ -428,7 +428,9 @@ public object Lifecycle {
                 val rebuilt = exit.checkpoint.rebuilds + if (exit is CellExit.Partial && exit.reason == PartialReason.Pressure) 1 else 0
                 val sized = s.graph.recordCell(running.increment, cell, exit.turns, exit.checkpoint.touched, rebuilt)
                 val graph = if (exit is CellExit.Blocked) sized.block(running.increment, cell) else sized
-                s.next(graph = graph, cells = s.cells.map { if (it.cell == cell) it.copy(status = exit.status) else it }, contractVersion = v)
+                // T-36 (task-workflow §2.4 A): a message the cell's last turn was rendered with was consumed by it — no response increment.
+                s.next(graph = graph, cells = s.cells.map { if (it.cell == cell) it.copy(status = exit.status) else it }, contractVersion = v,
+                    messagesSeen = maxOf(s.messagesSeen, exit.checkpoint.requestsSeen))
             }
             is Transition.Lost -> {
                 expect(s, CampaignPhase.Running)

@@ -527,40 +527,45 @@ public class Controller @JvmOverloads public constructor(
      * pre-scan stub and the shape. A reopen of a campaign that stopped on something outside it resumes it.
      */
     public fun open(repo: Path, request: CampaignRequest, policy: CampaignPolicy): OpenedCampaign {
-        val git = Git(repo, timeoutMillis = config.defaults.gitDeadlineSeconds * 1000L)
-        var opened: Store? = null
-        val os = try {
-            opened = Store.open(config, git, clock, faults)
-            LocalOs(clock)
-        } catch (failure: Throwable) {
-            opened?.close()
-            // §7.2: an open the store or its project lock refused still reports what it cost.
-            events?.emit(PhaseMark.beforeWorkspace(Identities(request.work, request.attempt), git, CountedPhase.Open, opens.incrementAndGet()))
-            throw failure
-        }
-        val store = checkNotNull(opened)
-        try {
-            // The open's git count starts with the store's own commands on this fresh instance (§7.2).
-            return open(repo, git, store, os, request, policy, owned = true, gitBaseline = 0, objectsBaseline = 0)
-        } catch (failure: Throwable) {
-            runCatching { os.close() }
-            runCatching { store.close() }
-            throw failure
+        // §7.2, T-13: the open counts its own calls from here — the store's commands included — and no other caller's.
+        val counting = PhaseMark.begin()
+        return counting.run {
+            val git = Git(repo, timeoutMillis = config.defaults.gitDeadlineSeconds * 1000L)
+            var opened: Store? = null
+            val os = try {
+                opened = Store.open(config, git, clock, faults)
+                LocalOs(clock)
+            } catch (failure: Throwable) {
+                opened?.close()
+                // §7.2: an open the store or its project lock refused still reports what it cost.
+                events?.emit(counting.counted(Identities(request.work, request.attempt), CountedPhase.Open, opens.incrementAndGet(), 0))
+                throw failure
+            }
+            val store = checkNotNull(opened)
+            try {
+                open(repo, git, store, os, request, policy, owned = true, counting)
+            } catch (failure: Throwable) {
+                runCatching { os.close() }
+                runCatching { store.close() }
+                throw failure
+            }
         }
     }
 
     /** Opens [request]'s campaign in [project], whose store, lock and OS stay the project's (P1.9.6). */
-    public fun open(project: Project, request: CampaignRequest, policy: CampaignPolicy): OpenedCampaign =
-        open(project.root, project.git, project.store, project.os, request, policy, owned = false, project.git.processesStarted, project.git.objectsWritten)
+    public fun open(project: Project, request: CampaignRequest, policy: CampaignPolicy): OpenedCampaign {
+        // T-13: the host's own commands on the project's shared git, before or during the open, are not the open's.
+        val counting = PhaseMark.begin()
+        return counting.run { open(project.root, project.git, project.store, project.os, request, policy, owned = false, counting) }
+    }
 
     private fun open(
         repo: Path, git: Git, store: Store, os: LocalOs, request: CampaignRequest, policy: CampaignPolicy, owned: Boolean,
-        gitBaseline: Long, objectsBaseline: Long,
+        counting: PhaseMark,
     ): OpenedCampaign {
         val ids = Identities(request.work, request.attempt)
         val protected = ProtectedPaths()
         val workspace = Workspace(WORKSPACE, repo, git, protected)
-        val counting = PhaseMark.of(workspace, gitBaseline, objectsBaseline)
         val opened = opens.incrementAndGet()
         try {
             return opening(repo, git, store, os, request, policy, owned, ids, protected, workspace, counting, opened)
@@ -601,19 +606,28 @@ public class Controller @JvmOverloads public constructor(
         val shadow = ShadowRef(request.work, request.attempt, workspace, store, dirty, os, clock)
 
         // Capture before anything else looks at the tree: snapshot 0 is the user's pre-existing state.
+        // T-03/T-25: the files the capture reads hand the atlas their outlines from that read (D-427, one read per file).
+        val tap = io.astrolabe.atlas.AtlasTap(workspace.root)
+        workspace.tap = tap
         val first = shadow.record(0) == null
-        val s0 = if (first) dirty.capture(0, fresh = true).also { shadow.open(it) } else checkNotNull(shadow.manifest(0))
         // T-24 (WF-4 at open): a file another process holds stops the reopened campaign resumably by its path below.
         var unreadable: UnreadableInput? = null
-        val external = if (first) emptyList() else try {
-            drift(shadow, dirty)
-        } catch (input: UnreadableInput) {
-            unreadable = input
-            emptyList()
+        val s0: io.astrolabe.workspace.Snapshot
+        val external: List<Touched>
+        try {
+            s0 = if (first) dirty.capture(0, fresh = true).also { shadow.open(it) } else checkNotNull(shadow.manifest(0))
+            external = if (first) emptyList() else try {
+                drift(shadow, dirty)
+            } catch (input: UnreadableInput) {
+                unreadable = input
+                emptyList()
+            }
+        } finally {
+            workspace.tap = null
         }
 
         // W3: files the atlas does not parse take their hash from this open's own capture instead of a second read.
-        val atlas = Atlas.build(workspace.root, dirty.latest?.entries?.associateBy { it.path }.orEmpty())
+        val atlas = Atlas.build(workspace.root, dirty.latest?.entries?.associateBy { it.path }.orEmpty(), tap)
         val layered = PluggedLayers.of(layers, effective.flags, journal, ids, idGen, clock)
         // §3.7 impact_prescan (D-40): incomplete discovery over the request's candidate paths; it feeds both shape selections.
         val impactPrescan = ImpactPrescan.of(atlas, WORKSPACE, ImpactPrescan.inputs(atlas, WORKSPACE, request.text), kb.contractAnchors(), layered.tiers)
@@ -1141,13 +1155,15 @@ public class Controller @JvmOverloads public constructor(
             }
             if (epoch == null) cells += 1
             // §6.2: a continuation starts from the previous cell's validated register, seeds and packet — never its transcript.
-            val carry = ready.cells.lastOrNull()?.let { previous -> carryFrom(c, previous, epoch?.packet ?: packets.lastOrNull { it.ids.context == previous }, role, handoff = epoch != null) }
+            // Task workflow §4.1–§4.5: from the store — the increment's previous cell, the last closed increment, or the parent.
+            val crossing = crossing(c, ready, role, handoff = epoch != null)
+            val carry = crossing?.carry
             val seeds = carry?.let { Seeds.render(it.seeds, c.registry::read) }
             val resume = resumeNote(c, ready, carry)
             val knowledge = knowledge(c, ready, role, model, touched = carry?.seeds.orEmpty().map { it.path }.toSet())
             val inputs = CompileInputs(carry = carry, seeds = seeds, currentVersion = { c.registry.version(it) }, notes = knowledge.notes, contractsIndex = knowledge.contractsIndex, skills = knowledge.skills, skillConflicts = knowledge.skillConflicts)
             val (reworkLines, reworkRecords) = reworkNotes(c, ready)
-            val pinned = listOfNotNull(resume, attempts.line(ready.id)) + recovery.lines(ready.id) + hostAnswers(c, ready) + reworkLines
+            val pinned = listOfNotNull(resume, crossing?.note, attempts.line(ready.id)) + recovery.lines(ready.id) + hostAnswers(c, ready) + reworkLines
             val compiler = Compiler(model.estimator, c.attempt.config)
             // §6.6: a pre-compiled [K] is served for cell_end(next_increment) only, on a full-fingerprint and coverage match.
             val take = precompile?.let { p ->
@@ -1191,7 +1207,7 @@ public class Controller @JvmOverloads public constructor(
             val dispatched = c.advance(Transition.Dispatched(ready.id, cellId, epoch = epoch != null))
             spendReworks(c, cellId, reworkRecords)
             val increment = dispatched.graph.increments.first { it.id == ready.id }
-            val register = carry?.register?.copy(cell = cellId, increment = increment.id, incrementTitle = increment.title)
+            val register = crossing?.takeIf { it.continuation }?.carry?.register?.copy(cell = cellId, increment = increment.id, incrementTitle = increment.title)
             // The pre-compile job lives in this scope: joined at cell close, cancelled with the cell (§6.6).
             val run = coroutineScope {
                 val trigger = precompile?.let { p -> trigger(c, this, p, cellId, increment, cellModel) }
@@ -1674,11 +1690,63 @@ public class Controller @JvmOverloads public constructor(
             }, HeuristicEstimator(), c.attempt.config.defaults.registerCapTokens, clock, c.attempt.config.protocol)
     }
 
+    /** What crosses into a cell (task-workflow §4): the [carry], and whether its register seeds the cell's STATE ([continuation]). */
+    private class Crossing(val carry: Carry, val continuation: Boolean) {
+        /** The resume note's line naming where a carry across an increment or a work comes from (§4.3). */
+        val note: String? get() = carry.source?.takeIf { !continuation }?.let { "carried from $it" }
+    }
+
     /**
-     * The carry-forward of [cell] (§6.2) for the next cell of [role]: its latest register, its end export and its packet,
-     * re-validated now. [handoff]: the next cell is [cell]'s epoch (A-D.6).
+     * Task workflow §4.1–§4.5: what [ready]'s next cell starts from, read from the store by cell id, never from process
+     * memory — the increment's previous cell (a continuation); else the last cell of the latest closed increment, whose
+     * register travels as data and never as the new increment's STATE (§4.3, a response or an amendment's increment
+     * alike); else, for a follow-up's first cell, its direct parent's last cell (§4.5).
      */
-    private fun carryFrom(c: OpenedCampaign, cell: ContextId, packet: ResultPacket?, role: Role, handoff: Boolean = false): Carry? {
+    private fun crossing(c: OpenedCampaign, ready: Increment, role: Role, handoff: Boolean): Crossing? {
+        ready.cells.lastOrNull()?.let { previous -> return carryFrom(c, previous, role, handoff)?.let { Crossing(it, continuation = true) } }
+        val state = checkNotNull(c.state)
+        val closed = state.graph.increments.filter { it.status == IncrementStatus.Verified && it.cells.isNotEmpty() }.map { it.id }.toSet()
+        state.cells.lastOrNull { it.increment in closed && it.increment != ready.id }?.let { previous ->
+            val carry = carryFrom(c, previous.cell, role) ?: return null
+            return Crossing(carry.copy(source = "${previous.increment} · ${previous.cell.value}", status = statusNotes(c).summary(c.ids.work)), continuation = false)
+        }
+        if (state.cells.isNotEmpty()) return null
+        return c.contract.parentWork?.let { parent -> parentCarry(c, parent, role) }?.let { Crossing(it, continuation = false) }
+    }
+
+    private fun statusNotes(c: OpenedCampaign): StatusNotes = StatusNotes(KbWriter(c.store, HeuristicEstimator(), clock), Notes(c.store), c.store.layout.kb)
+
+    /**
+     * Task workflow §4.5 (№33): the direct parent's last ended cell as data for a follow-up's first cell — its validated
+     * register's decisions, dead ends and open items, its touched ledger, its last verification status and STATUS — capped
+     * at `parentCarryMaxTokens`, with seeds from its end export re-served at current versions.
+     */
+    private fun parentCarry(c: OpenedCampaign, parent: WorkId, role: Role): Carry? {
+        val contract = c.contracts.current(parent) ?: return null
+        val state = SqliteCampaigns(c.store, clock).load(parent, contract.attemptId) ?: return null
+        val last = state.cells.lastOrNull { it.status != CellStatus.Running }?.cell ?: return null
+        val register = SqliteRegisterVersions(c.store, clock).latest(last) ?: return null
+        val checkpoints = SqliteCheckpoints(c.store, clock)
+        val packet = checkpoints.packet(last)
+        val receipts = SqliteReceipts(c.store, clock)
+        val verification = packet?.receipts.orEmpty().mapNotNull { id -> receipts.get(id)?.let { CarriedReceipt(it.checkId, it.receiptId, it.outcome.name.lowercase()) } }
+        val defaults = c.attempt.config.defaults
+        val estimator = HeuristicEstimator()
+        return CarryForward.parent(
+            parent.value, register, Seeds.cellEnd(checkpoints, last), packet, { c.registry.version(it) }, { true }, verification,
+            statusNotes(c).summary(parent), defaults.parentCarryMaxTokens.toLong(), { estimator.estimate(it).tokens }, defaults.seedsMaxTokens.toLong(),
+            io.astrolabe.context.SeedRule.of(role.protocol, defaults.seedRule).selector, defaults.seedFallback,
+            touched = if (packet == null) checkpoints.latest(last)?.touched.orEmpty() else emptyList(),
+        )
+    }
+
+    /**
+     * The carry-forward of [cell] (§6.2) for the next cell of [role]: its latest register, its end export and its packet
+     * row, re-validated now — read by cell id from the store, so a boundary after a reopen carries the bytes an in-process
+     * boundary carries (task-workflow §4.1). A cell without its packet row (a store of the old two-step end) carries from
+     * its checkpoint and export alone and says so (`packetMissing`). [handoff]: the next cell is [cell]'s epoch (A-D.6).
+     */
+    private fun carryFrom(c: OpenedCampaign, cell: ContextId, role: Role, handoff: Boolean = false): Carry? {
         val retained = retainedFacts(c, cell) ?: return null
         if (retained.archived.isNotEmpty()) {
             val status = StatusNotes(KbWriter(c.store, HeuristicEstimator(), clock), Notes(c.store), c.store.layout.kb)
@@ -1691,14 +1759,20 @@ public class Controller @JvmOverloads public constructor(
         val register = withReviewOpenItems(c, retained.register)
         val aliases = SqliteAliases(c.store, clock)
         val receipts = SqliteReceipts(c.store, clock)
+        val checkpoints = SqliteCheckpoints(c.store, clock)
+        val stored = checkpoints.packet(cell)
+        val touched = if (stored == null) checkpoints.latest(cell)?.touched.orEmpty() else emptyList()
         // D-398: the cell boundary selects seeds by the attempt's seed rule, as the pressure rebuild does; v1 keeps its bytes.
-        // A-D.7 K1: a direct cell always takes Seeds v2.
-        return CarryForward.carry(
-            register, Seeds.cellEnd(SqliteCheckpoints(c.store, clock), cell), packet, { c.registry.version(it) },
+        // A-D.7 K1: a direct cell always takes Seeds v2. Task workflow §4.2: a rule that selects nothing falls back to v2.
+        val carry = CarryForward.carry(
+            register, Seeds.cellEnd(checkpoints, cell), null, { c.registry.version(it) },
             { id -> Aliases.parse(id)?.let { aliases.resolve(c.ids.work, it) } != null }, emptyList(), emptyList(),
-            selector = io.astrolabe.context.SeedRule.of(role.protocol, c.attempt.config.defaults.seedRule).selector,
+            selector = io.astrolabe.context.SeedRule.of(role.protocol, c.attempt.config.defaults.seedRule).selector, touched = touched,
             latestReceipts = c.checks.all().mapNotNull { it.last?.receiptId?.let(receipts::get) }, handoff = handoff,
+            fallback = c.attempt.config.defaults.seedFallback, stored = stored,
         ).copy(capacityGap = retained.capacityGap)
+        if (stored != null) return carry
+        return carry.copy(packetMissing = true, touched = touched.sorted().map { io.astrolabe.context.CarriedTouch(it, c.registry.version(it)) })
     }
 
     /** Every ended campaign leaves a finish receipt, stored and exported, and says so on the bus (§5.9). */
@@ -1809,7 +1883,8 @@ public class Controller @JvmOverloads public constructor(
         // A-D.6: the epoch a handoff left; it continues from the predecessor's packet.
         val epoch = pendingEpoch(c, epochs)?.takeIf { it.kept.incrementId == ready.id }
         // §13.4 rebuild(resume): a cell that continues a lost or interrupted one starts from its validated carry-forward.
-        val carry = ready.cells.lastOrNull()?.let { previous -> carryFrom(c, previous, epoch?.packet, role, handoff = epoch != null) }
+        val crossing = crossing(c, ready, role, handoff = epoch != null)
+        val carry = crossing?.carry
         val seeds = carry?.let { Seeds.render(it.seeds, c.registry::read) }
         val resume = resumeNote(c, ready, carry)
         val knowledge = knowledge(c, ready, role, model, touched = carry?.seeds.orEmpty().map { it.path }.toSet())
@@ -1835,9 +1910,9 @@ public class Controller @JvmOverloads public constructor(
         val dispatched = c.advance(Transition.Dispatched(ready.id, cellId, epoch = epoch != null))
         spendReworks(c, cellId, reworkRecords)
         val increment = dispatched.graph.increments.first { it.id == ready.id }
-        val register = carry?.register?.copy(cell = cellId, increment = increment.id, incrementTitle = increment.title)
+        val register = crossing?.takeIf { it.continuation }?.carry?.register?.copy(cell = cellId, increment = increment.id, incrementTitle = increment.title)
         // A-D.6: S0 has no continuation of its own, so its cell may hand off on a spent turn budget.
-        val run = runCell(c, cellId, increment, role, cellModel, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = listOfNotNull(resume) + hostAnswers(c, ready) + reworkLines,
+        val run = runCell(c, cellId, increment, role, cellModel, authority, syntax, compiled, span, dispatched.ledger, register, seeds?.shown.orEmpty(), pinned = listOfNotNull(resume, crossing?.note) + hostAnswers(c, ready) + reworkLines,
             boundary = if (epoch != null) BoundaryReason.Epoch else null, inputs = inputs, rework = reworkLines.isNotEmpty(), turnBudgetHandoff = true, continues = epoch?.kept)
         val ids = run.ids
         val scheduler = run.scheduler
@@ -2932,9 +3007,9 @@ public class Controller @JvmOverloads public constructor(
             return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, unfinished))
         }
         val attempt = c.finishAttempts.incrementAndGet()
-        val counting = PhaseMark.of(c.workspace)
+        val counting = PhaseMark.begin()
         try {
-            return finalAttempt(c, scheduler, campaign, authority)
+            return counting.runSuspending { finalAttempt(c, scheduler, campaign, authority) }
         } finally {
             events?.emit(counting.counted(c.ids, CountedPhase.Finish, opens.get(), attempt))
         }
@@ -3260,11 +3335,13 @@ public class Controller @JvmOverloads public constructor(
 
     /** Records [tree] as the next snapshot of its own shadow ref, when it moved since the last one; counted (§7.2). */
     private fun snapshot(c: OpenedCampaign, tree: CellTree, ids: Identities = c.ids) {
-        val counting = PhaseMark.of(tree.workspace)
+        val counting = PhaseMark.begin()
         try {
-            val last = tree.shadow.records().last()
-            val now = tree.dirty.capture(last.turn + 1)
-            if (now.manifestDigest != checkNotNull(tree.shadow.manifest(last.turn)).manifestDigest) tree.shadow.snapshot(now)
+            counting.run {
+                val last = tree.shadow.records().last()
+                val now = tree.dirty.capture(last.turn + 1)
+                if (now.manifestDigest != checkNotNull(tree.shadow.manifest(last.turn)).manifestDigest) tree.shadow.snapshot(now)
+            }
         } finally {
             events?.emit(counting.counted(ids, CountedPhase.Snapshot, opens.get(), c.finishAttempts.get()))
         }

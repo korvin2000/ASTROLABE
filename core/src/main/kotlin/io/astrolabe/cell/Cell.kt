@@ -1401,7 +1401,7 @@ public class Cell @JvmOverloads constructor(
             knownFiles = ws.workset.entries.map { it.path }.distinct().size, knownTokens = ws.workset.knownTokens,
             openIntents = ev.intents.open().map { it.intentId }, touched = touched.toList(),
             unresolvedFlags = TestIntegrity.unresolved(flags.values.toList()).map { it.line }, journalSeq = ev.journal.lastSeq(ids.work), reason = reason,
-            rebuilds = rebuilds,
+            rebuilds = rebuilds, requestsSeen = seenRequests,
         )
 
         /**
