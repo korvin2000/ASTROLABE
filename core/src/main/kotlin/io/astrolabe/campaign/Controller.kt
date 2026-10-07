@@ -1782,7 +1782,7 @@ public class Controller @JvmOverloads public constructor(
             parent.value, register, Seeds.cellEnd(checkpoints, last), packet, { c.registry.version(it) }, { true }, verification,
             statusNotes(c).summary(parent), defaults.parentCarryMaxTokens.toLong(), { estimator.estimate(it).tokens }, defaults.seedsMaxTokens.toLong(),
             io.astrolabe.context.SeedRule.of(role.protocol, defaults.seedRule).selector, defaults.seedFallback,
-            touched = if (packet == null) checkpoints.latest(last)?.touched.orEmpty() else emptyList(),
+            touched = if (packet == null) checkpoints.latest(last)?.touched.orEmpty() else emptyList(), protocol = role.protocol,
         )
     }
 

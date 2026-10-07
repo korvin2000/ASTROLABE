@@ -118,14 +118,16 @@ public data class Carry(
     }
 
     /**
-     * This carry within [maxTokens] of [estimate]d block text (task-workflow §4.5): whole records are cut from the end of
-     * the lowest priority first — STATUS and the verification status, then open items, the touched ledger, dead ends and
-     * decisions last — and each cut is named in [cut]. Deterministic: a pure function of the carry and the cap.
+     * This carry within [maxTokens] of [estimate]d block text as [protocol] renders it (task-workflow §4.5): whole records
+     * are cut from the end of the lowest priority first — STATUS and the verification status, then open items, the touched
+     * ledger, dead ends and decisions last — and each cut is named in [cut]. Deterministic: a pure function of the carry,
+     * the cap and the protocol.
      */
-    public fun capped(maxTokens: Long, estimate: (String) -> Long): Carry {
+    @JvmOverloads
+    public fun capped(maxTokens: Long, estimate: (String) -> Long, protocol: Protocol = Protocol.Structured): Carry {
         var c = this
         val cuts = ArrayList<String>()
-        fun over() = estimate(c.render()) > maxTokens
+        fun over() = estimate(c.render(protocol)) > maxTokens
         if (over() && c.status != null) {
             cuts += "STATUS note"
             c = c.copy(status = null)
@@ -232,7 +234,8 @@ public object CarryForward {
      * The carry of a follow-up's first cell from its direct parent (task-workflow §4.5, №33): the parent's last validated
      * register — its decisions, dead ends and open items, never its plan or facts — its touched ledger, its last
      * verification status and its STATUS summary, as data under [Carry.DATA_HEADING], with seeds from the parent's end
-     * export re-served at current versions (NOT SEEN when moved); the block is [Carry.capped] at [maxTokens].
+     * export re-served at current versions (NOT SEEN when moved); the block is [Carry.capped] at [maxTokens] as [protocol] —
+     * the protocol of the role the block is rendered for — renders it.
      */
     @JvmStatic
     @JvmOverloads
@@ -251,9 +254,10 @@ public object CarryForward {
         selector: SeedSelector = SeedSelector.V1,
         fallback: Boolean = true,
         touched: Collection<String> = emptyList(),
+        protocol: Protocol = Protocol.Structured,
     ): Carry {
         val kept = register.copy(plan = emptyList(), facts = emptyList(), amendments = emptyList(), next = null, focus = null)
         val base = carry(kept, export, null, currentVersion, evidenceExists, receipts, emptyList(), seedCapTokens, selector, touched, emptyList(), fallback = fallback, stored = packet)
-        return base.copy(source = "parent $parentWork · ${register.cell.value}", status = status, packetMissing = packet == null).capped(maxTokens, estimate)
+        return base.copy(source = "parent $parentWork · ${register.cell.value}", status = status, packetMissing = packet == null).capped(maxTokens, estimate, protocol)
     }
 }
