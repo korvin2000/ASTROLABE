@@ -816,11 +816,12 @@ class TaskLimitsTest {
     @Test
     fun `the cell boundary takes its seeds from the attempt's seed rule`() = runBlocking<Unit> {
         // D-398 at the cell boundary: I1's first cell reads a.py without naming it in Next or Focus and runs out of turns;
-        // Seeds v1 carries nothing into the continuation, Seeds v2 carries the recent read.
-        suspend fun continuationK(rule: io.astrolabe.context.SeedRule): String {
-            val work = CampaignRequest(WorkId("W-c3-seed-${rule.wire}"), AttemptId("a1"), request.text)
+        // Seeds v1 carries nothing into the continuation, Seeds v2 carries the recent read; with the fallback on (task
+        // workflow §4.2, the default) a v1 selection of nothing falls back to Seeds v2.
+        suspend fun continuationK(rule: io.astrolabe.context.SeedRule, fallback: Boolean = false): String {
+            val work = CampaignRequest(WorkId("W-c3-seed-${rule.wire}-$fallback"), AttemptId("a1"), request.text)
             seed(work, defaults = io.astrolabe.Defaults(turnsPerCell = 5))
-            val ctl = Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all, defaults = alwaysPlan.copy(seedRule = rule)), clock, idGen)
+            val ctl = Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all, defaults = alwaysPlan.copy(seedRule = rule, seedFallback = fallback)), clock, idGen)
             return ctl.open(repo.root, work, CampaignPolicy(Tokens(400_000))).use { c ->
                 val look = (1..4).map { Scripted.Reply(listOf<Item>(say("looking"), io.astrolabe.cell.CellFixture.Companion.tree("t-$it"))) }
                 val adapter = FakeAdapter(ScriptedModel.of(*(planning() + Scripted.Reply(listOf<Item>(say("reading"), read("r-a", "src/a.py"))) + look).toTypedArray()))
@@ -832,6 +833,7 @@ class TaskLimitsTest {
         }
         assertFalse("SEED src/a.py" in continuationK(io.astrolabe.context.SeedRule.V1))
         assertTrue("SEED src/a.py" in continuationK(io.astrolabe.context.SeedRule.V2))
+        assertTrue("SEED src/a.py" in continuationK(io.astrolabe.context.SeedRule.V1, fallback = true))
     }
 
     @TempDir
