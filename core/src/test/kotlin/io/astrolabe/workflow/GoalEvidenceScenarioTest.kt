@@ -45,6 +45,7 @@ class GoalEvidenceScenarioTest {
         REGRESSION to { play(REGRESSION, null, ::regressionOnly) },
         STATED to { play(STATED, null, ::statedCriterion) },
         DECLARED to { play(DECLARED, EvidencePurpose.Goal, ::declaredGoal) },
+        CLAIM to { play(CLAIM, EvidencePurpose.Goal, ::statedClaim) },
     )
     private val played by lazy { Scenario.concurrently(plays.keys) { plays.getValue(it)() } }
 
@@ -58,6 +59,9 @@ class GoalEvidenceScenarioTest {
 
     @Test
     fun `WF-12 the host's own goal item green at the final tree gives independent`() = played.getValue(DECLARED).getOrThrow()
+
+    @Test
+    fun `a goal claim the model states after the plan is decided at the final, never skipped`() = played.getValue(CLAIM).getOrThrow()
 
     private suspend fun regressionOnly(s: Scenario) {
         val run = s.play(::edit)
@@ -95,6 +99,17 @@ class GoalEvidenceScenarioTest {
         assertEquals(script.size, s.adapter!!.calls.size, "the classification asks the model nothing")
     }
 
+    /** P1 #6 (task-workflow §3.3): the model's goal claim stated after the plan is in no increment's acceptance; the final decides it. */
+    private suspend fun statedClaim(s: Scenario) {
+        val c = s.campaign!!
+        c.contracts.strengthen(s.request.work, Acceptance.Check("AC-2", "total ignores negative items", Origin.Model("R1"), obligationVersion = c.contract.version, purpose = EvidencePurpose.Goal))
+        val asked = ArrayList<io.astrolabe.verify.AcceptanceDecisionRequest>()
+        s.decide { r -> asked += r; null }
+        val run = s.play(::edit)
+        assertEquals(CampaignOutcome.WaitingForInput, run.outcome, "the model's unassessed goal claim is put to the decider: ${run.state?.reason}")
+        assertTrue(asked.any { r -> r.incrementId == null && r.items.any { it.obligation == "AC-2" } }, "the final asks about AC-2: ${asked.map { it.items.map { i -> i.obligation } }}")
+    }
+
     private suspend fun declaredGoal(s: Scenario) {
         val run = s.play(::edit)
         assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
@@ -127,6 +142,7 @@ class GoalEvidenceScenarioTest {
         const val REGRESSION = "regression"
         const val STATED = "stated"
         const val DECLARED = "declared"
+        const val CLAIM = "claim"
 
         /** The model's own goal command: the same printed pytest run as `AC-1`, another command line. */
         val goal: Command = if (WINDOWS) Command(listOf("cmd.exe", "/d", "/s", "/c", "type .\\${DirtyRepo.OUTPUT}"))

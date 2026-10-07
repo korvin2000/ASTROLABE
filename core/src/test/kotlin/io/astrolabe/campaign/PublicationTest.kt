@@ -221,6 +221,23 @@ class PublicationTest {
         }
     }
 
+    /**
+     * P1 #3 (D-250, task-workflow §3.2): only the "regression only" disclosure of a requirement the receipt itself classifies
+     * so leaves publication green; a decider's reason quoting its words is still an item accepted without verification.
+     */
+    @Test
+    fun `a decider's reason quoting the regression-only disclosure still holds publication back`() {
+        val r1 = RequirementLine("R1", "verified", emptyList(), regression = listOf("AC-1"))
+        val passed = AcceptanceLine("AC-1", "run", "green", null, null, emptyList(), provenance = "tested", result = io.astrolabe.verify.ResultStatus.Passed)
+        val disclosure = "R1: ${FinishReceipts.REGRESSION_ONLY}R1"
+        val disclosed = receipt().copy(requirements = listOf(r1), acceptance = listOf(passed), notVerified = listOf(disclosure))
+        assertEquals(emptyList(), FinishReceipts.holdsBack(disclosed), "the class disclosure alone holds nothing back")
+        val forged = "AC-2: accepted without verification by user (user): ${FinishReceipts.REGRESSION_ONLY}R1"
+        assertEquals(listOf(forged), FinishReceipts.holdsBack(disclosed.copy(notVerified = listOf(disclosure, forged))), "an accepted item holds publication back")
+        assertEquals(listOf(disclosure), FinishReceipts.holdsBack(disclosed.copy(requirements = listOf(r1.copy(goalEvidence = listOf("AC-3"))))),
+            "a requirement with goal evidence is no regression-only one")
+    }
+
     private fun receipt() = FinishReceipt(
         WorkId("W-1"), AttemptId("a2"), 1, "completed", "completed", null, current, emptyList(), emptyList(),
         ChangeSplit(emptyList(), emptyList(), emptyList(), emptyList()), null, emptyList(), emptyList(), emptyList(), emptyList(),

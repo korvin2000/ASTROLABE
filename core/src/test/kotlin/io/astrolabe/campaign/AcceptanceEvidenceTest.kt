@@ -200,6 +200,58 @@ class AcceptanceEvidenceTest {
         }
     }
 
+    /**
+     * T-42 (task-workflow §3.7): the model asks about its flagged test edit by naming the path; the harness offers its own
+     * approve-or-keep choice, and a person's choice of approval is that person's verdict on the flag — bound to the
+     * candidate like a review — so no review is asked; an approval whose answerer is not known to be a person resolves nothing.
+     */
+    @Test
+    fun `T-42 a person's approval of the flagged test edit through task ask is the person's verdict on the flag`() {
+        val (person, flag) = askedTestEdit(io.astrolabe.verify.Decider.User)
+        assertTrue(person.questions.single().options.first().startsWith("approve the change to tests/test_a.py"), "${person.questions}")
+        assertEquals("user" to io.astrolabe.verify.ReviewerKind.Human, flag.verdict?.signedBy to flag.verdict?.reviewer)
+        assertFalse(flag.blocksCompletion)
+        assertTrue(person.reviews.isEmpty(), "the person's answer is the verdict: no review is asked")
+    }
+
+    @Test
+    fun `T-42 an approval whose answerer is not known to be a person resolves no flag`() {
+        val (person, flag) = askedTestEdit(null)
+        assertTrue(flag.blocksCompletion, "${flag.verdict}")
+        assertTrue(person.reviews.isNotEmpty(), "the flag still goes to a person's review")
+    }
+
+    private class Person(private val decider: io.astrolabe.verify.Decider?) : Authority by AutonomousAuthority() {
+        val questions = ArrayList<io.astrolabe.event.Question>()
+        val reviews = ArrayList<ReviewRequest>()
+        override suspend fun ask(question: io.astrolabe.event.Question): io.astrolabe.event.Answer {
+            questions += question
+            return io.astrolabe.event.Answer(question.id, question.contractRevision, "", chosenOption = 0, decider = decider)
+        }
+        override suspend fun review(request: ReviewRequest): Verdict? {
+            reviews += request
+            return null
+        }
+    }
+
+    /** Human integrity approval, S0: the model edits a test behind a required check, asks about it by name, then proposes completion. */
+    private fun askedTestEdit(decider: io.astrolabe.verify.Decider?): Pair<Person, io.astrolabe.verify.TestIntegrityFlag> = runBlocking {
+        val printing = if (WINDOWS) Command(listOf("cmd.exe", "/d", "/s", "/c", "type pytest_pass.txt")) else Command(listOf("/bin/sh", "-c", "cat pytest_pass.txt"))
+        seed(Acceptance.Run("AC-2", printing, Origin.User))
+        val ctl = Controller(Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all, integrityApproval = io.astrolabe.IntegrityApproval.Human), clock, idGen)
+        ctl.open(repo.root, request, policy).use { c ->
+            val path = "tests/test_a.py"
+            val person = Person(decider)
+            val result = ctl.run(c, model(
+                Scripted.Reply(listOf(read("read-test", path))),
+                Scripted.Reply(listOf(anchored("edit-test", path, c.registry.version(path)!!, "    assert 1 == 1", "    assert (1 == 1)"))),
+                Scripted.Reply(listOf(call("ask", "task", """{"op":"ask","question":"may I keep my change to tests/test_a.py? it only reparenthesises the assertion"}"""))),
+                Scripted.Reply(listOf(say("done"))),
+            ), person, maxCells = 1)
+            person to assertNotNull(result.exit, result.state?.reason).packet.flags.testIntegrity.single { it.path == path }
+        }
+    }
+
     @Test
     fun `S0 under autonomous integrity approval resolves a required test edit through the review cell`() {
         val (reviewer, flag) = s0TestEdit(io.astrolabe.IntegrityApproval.Autonomous)

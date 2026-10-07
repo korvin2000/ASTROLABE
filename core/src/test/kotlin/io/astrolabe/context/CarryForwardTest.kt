@@ -171,5 +171,11 @@ class CarryForwardTest {
         assertTrue(tight.cut.any { it.startsWith("touched ledger") } && tight.cut.none { it.startsWith("decisions") || it.startsWith("dead ends") }, tight.cut.toString())
         assertTrue(tokens(tight.render()) <= tokens(target))
         assertEquals(tight, parent(tokens(target)), "deterministic")
+
+        // WR2 (P2): a cap below the decisions still holds — whatever else the block renders is cut too, and named.
+        val bare = full.copy(status = null, receipts = emptyList(), touched = emptyList(), notSeen = emptyList(), packetLine = null, pinned = emptyList(),
+            register = full.register.copy(open = emptyList(), deadEnds = emptyList(), decisions = emptyList(), amendments = emptyList(), facts = emptyList())).render()
+        val floor = parent(tokens(bare))
+        assertTrue(tokens(floor.render()) <= tokens(bare), "the cap holds: ${floor.cut}")
     }
 }

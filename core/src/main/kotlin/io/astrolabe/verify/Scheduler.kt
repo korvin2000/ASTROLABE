@@ -78,8 +78,9 @@ public data class Executed(
  * [prefixes] taken as a root anchored at the repository root — `build/x`, never `src/build/x` — that is no dependency lock
  * file. Version 3 (task-workflow §5.2, D-435) adds the generated-directory [markers], matched as any directory segment
  * (`tests/__pycache__/x.pyc`), and the task's declared [outputs] (§5.1) as anchored roots. A tracked path is never
- * excluded. [NONE] (version 0) excludes nothing: an attempt frozen without a policy keeps its v1 identity. One attempt
- * freezes one policy before its `s0` ([io.astrolabe.AttemptConfig.scratch]); a running attempt keeps its v2 policy.
+ * excluded, nor (version 3, WR2) a path under one of the [toolchains] a registered check launches from. [NONE] (version 0)
+ * excludes nothing: an attempt frozen without a policy keeps its v1 identity. One attempt freezes one policy before its
+ * `s0` ([io.astrolabe.AttemptConfig.scratch]); a running attempt keeps its v2 policy.
  */
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
@@ -89,6 +90,8 @@ public data class ScratchPolicy @JvmOverloads constructor(
     /** Not encoded when empty, so a v2 policy keeps its bytes and its attempt its fingerprint. */
     @EncodeDefault(EncodeDefault.Mode.NEVER) val markers: Set<String> = emptySet(),
     @EncodeDefault(EncodeDefault.Mode.NEVER) val outputs: Set<String> = emptySet(),
+    /** §5.2 (WR2, P1 #4): directories in the tree a registered check launches its program from; never scratch. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val toolchains: Set<String> = emptySet(),
 ) {
     public fun isScratch(path: String): Boolean {
         val normalized = path.replace('\\', '/')
@@ -107,6 +110,7 @@ public data class ScratchPolicy @JvmOverloads constructor(
         if (version < ANCHORED || tracked) return false
         val normalized = path.replace('\\', '/')
         if (normalized.substringAfterLast('/') in EnvFingerprint.LOCK_FILE_NAMES) return false
+        if (version >= MARKED && toolchains.any { root -> normalized.startsWith("$root/") }) return false
         if (prefixes.any { root -> normalized.startsWith("$root/") } || isOutput(normalized)) return true
         return version >= MARKED && normalized.split('/').dropLast(1).any { it in markers }
     }
@@ -120,12 +124,28 @@ public data class ScratchPolicy @JvmOverloads constructor(
         return if (version < MARKED || roots.isEmpty()) this else copy(outputs = outputs + roots)
     }
 
+    /**
+     * §5.2 (D-435, WR2 P1 #4): this policy with the directory of each of [programs] — the program paths in the tree the
+     * attempt's checks launch, repository-relative — that it would otherwise exclude kept in identity, frozen like the
+     * outputs and named in [id]. A program found on the `PATH` (no directory part) is no path of the tree; a version-2 base
+     * takes none.
+     */
+    public fun withToolchains(programs: Collection<String>): ScratchPolicy {
+        if (version < MARKED) return this
+        val directories = programs.map { it.replace('\\', '/').removePrefix("./") }
+            .filter { '/' in it && !it.startsWith("/") && ':' !in it && it.split('/').none { part -> part == ".." || part == "." } && excludes(it) }
+            .map { it.substringBeforeLast('/') }.toSet()
+        return if (directories.isEmpty()) this else copy(toolchains = toolchains + directories)
+    }
+
     /** What a stamp or a snapshot manifest taken under this policy records of it; `null` for a policy that excludes nothing. */
     val id: String?
         get() = if (version < ANCHORED) null else Digest.ofUtf8(
             CanonicalEncoding.encode("scratch-policy", version, listOf("roots" to prefixes.size.toString()) + prefixes.sortedWith(Stamper.PATH_ORDER).map { "root" to it } +
                 if (version < MARKED) emptyList() else listOf("markers" to markers.size.toString()) + markers.sorted().map { "marker" to it } +
-                    listOf("outputs" to outputs.size.toString()) + outputs.sortedWith(Stamper.PATH_ORDER).map { "output" to it }),
+                    listOf("outputs" to outputs.size.toString()) + outputs.sortedWith(Stamper.PATH_ORDER).map { "output" to it } +
+                    // Encoded only when present, so a policy without one keeps its id.
+                    if (toolchains.isEmpty()) emptyList() else listOf("toolchains" to toolchains.size.toString()) + toolchains.sortedWith(Stamper.PATH_ORDER).map { "toolchain" to it }),
         ).hex
 
     public companion object {
@@ -736,6 +756,9 @@ public class Scheduler(
         val tracked = trackedPaths()
         return pinned.filter { it !in tracked }.mapNotNull { path -> bytesNow(path)?.let { path to FileVersion.of(it) } }.toMap()
     }
+
+    /** WR2 (P1 #1): whether every pinned input outside identity still reads at the bytes [pins] name — re-read now, never metadata. */
+    internal fun readsNow(pins: Map<String, FileVersion>): Boolean = pins.all { (path, version) -> bytesNow(path)?.let { FileVersion.of(it) } == version }
 
     private fun bytesNow(path: String): ByteArray? =
         (workspace.resolve(path, Intent.Read) as? PathResolution.Resolved)?.let { runCatching { workspace.bytes(it) }.getOrNull() }

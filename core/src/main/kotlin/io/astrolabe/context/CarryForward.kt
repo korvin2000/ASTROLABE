@@ -143,6 +143,15 @@ public data class Carry(
         shorten({ it.touched }, { carry, kept -> carry.copy(touched = kept) }, "touched ledger")
         shorten({ it.register.deadEnds }, { carry, kept -> carry.copy(register = carry.register.copy(deadEnds = kept)) }, "dead ends")
         shorten({ it.register.decisions }, { carry, kept -> carry.copy(register = carry.register.copy(decisions = kept)) }, "decisions")
+        // WR2 (P2): then what the block still renders beyond its heading and KNOWN line, so the cap holds whatever it carried.
+        shorten({ it.register.amendments }, { carry, kept -> carry.copy(register = carry.register.copy(amendments = kept)) }, "proposed amendments")
+        shorten({ it.register.facts }, { carry, kept -> carry.copy(register = carry.register.copy(facts = kept)) }, "facts")
+        shorten({ it.notSeen }, { carry, kept -> carry.copy(notSeen = kept) }, "not-seen entries")
+        if (over() && c.packetLine != null) {
+            cuts += "previous packet line"
+            c = c.copy(packetLine = null)
+        }
+        shorten({ it.pinned }, { carry, kept -> carry.copy(pinned = kept) }, "pinned messages")
         return c.copy(cut = cut + cuts)
     }
 

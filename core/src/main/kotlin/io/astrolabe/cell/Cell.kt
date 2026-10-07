@@ -307,6 +307,9 @@ public class Cell @JvmOverloads constructor(
             tools.edit?.increment = increment
             tools.edit?.protocol = ctx.role.protocol
             tools.task?.protocol = ctx.role.protocol
+            // §3.7 (T-42): a question naming every flagged test edit may carry a person's verdict on them.
+            tools.task?.flagged = { flags.values.filter { it.blocksCompletion }.map { it.path } }
+            ctx.flagApproval?.let { approve -> tools.task?.approveFlags = { paths, question, answer -> approve(paths, flags.values.toList(), question, answer) } }
             // A-D.4: a direct cell executes notes under its role's mask, and reads them back through look(recall, id=notes).
             if (ctx.role.protocol == Protocol.Direct) {
                 tools.state.direct(ctx.role.toolMask, ctx.contracts)

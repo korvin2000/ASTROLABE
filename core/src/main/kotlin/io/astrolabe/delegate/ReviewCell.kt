@@ -235,15 +235,7 @@ public class ReviewCell @JvmOverloads constructor(
         else -> outcome.name.lowercase()
     }
 
-    private fun record(ids: Identities, record: ReviewRecord) {
-        store.db.tx { tx ->
-            tx.execute(
-                "INSERT INTO packets (id, work_id, attempt_id, candidate_id, context_id, kind, schema_version, created_at, body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                idGen.next("irev"), ids.work, ids.attempt, record.candidate, ids.context, KIND, Migrations.SCHEMA_VERSION, clock.instant(),
-                JSON.encodeToString(ReviewRecord.serializer(), record),
-            )
-        }
-    }
+    private fun record(ids: Identities, record: ReviewRecord): Unit = save(store, idGen, clock, ids, record)
 
     private fun journal(packet: EvidencePacket, text: String) {
         journal?.append(
@@ -259,6 +251,15 @@ public class ReviewCell @JvmOverloads constructor(
 
     public companion object {
         public const val KIND: String = "increment-review"
+
+        /** Stores [record] for [ids] as a review cell does (task-workflow §3.7: also a person's verdict given through `task.ask`). */
+        internal fun save(store: Store, idGen: IdGen, clock: Clock, ids: Identities, record: ReviewRecord): Unit = store.db.tx { tx ->
+            tx.execute(
+                "INSERT INTO packets (id, work_id, attempt_id, candidate_id, context_id, kind, schema_version, created_at, body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                idGen.next("irev"), ids.work, ids.attempt, record.candidate, ids.context, KIND, Migrations.SCHEMA_VERSION, clock.instant(),
+                JSON.encodeToString(ReviewRecord.serializer(), record),
+            )
+        }
 
         internal suspend fun ladder(judge: ReviewJudge, packet: EvidencePacket, tier: Tier): Ladder {
             val path = ArrayList<String>()

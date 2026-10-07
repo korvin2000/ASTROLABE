@@ -23,7 +23,9 @@ import io.astrolabe.provider.ToolCall
 import io.astrolabe.provider.ToolResult
 import io.astrolabe.provider.Text
 import kotlinx.coroutines.runBlocking
+import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.api.io.TempDir
+import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -35,16 +37,27 @@ import kotlin.test.assertTrue
  * steering message from the host, then asks a question the host answers as a fact, then asks again and the answer
  * changes the requirements. Every request's `[S][R][K][T]` bytes are a prefix of the next request's: the message and the
  * answers arrive after the transcript as pinned items, the revision as a `[contract v2 delta]` item, and `[K]` keeps its
- * bytes while the harness reads the current contract — the projection boundary is real.
+ * bytes while the harness reads the current contract — the projection boundary is real. A review note that arrives
+ * mid-cell takes the same append path (T-41). The plays run at once.
  */
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AppendOnlyPrefixScenarioTest {
     @TempDir
     lateinit var stateRoot: Path
 
+    private val plays: Map<String, () -> Unit> = mapOf(MESSAGES to ::messagesMidCell, NOTE to ::reviewNoteMidCell)
+    private val played by lazy { Scenario.concurrently(plays.keys) { plays.getValue(it)() } }
+
     @Test
-    fun `WF-15 a steering message, a factual answer and an amending answer append to the transcript and keep every request a prefix`() = runBlocking {
+    fun `WF-15 a steering message, a factual answer and an amending answer append to the transcript and keep every request a prefix`() =
+        played.getValue(MESSAGES).getOrThrow()
+
+    @Test
+    fun `T-41 a review note mid-cell appends after the transcript and keeps every request a prefix`() = played.getValue(NOTE).getOrThrow()
+
+    private fun messagesMidCell() = runBlocking<Unit> {
         DirtyRepo.create(1, bigBytes = 0, settle = false).use { dirty ->
-            Scenario(dirty.root, stateRoot).use { s ->
+            Scenario(dirty.root, stateRoot.resolve(MESSAGES)).use { s ->
                 s.policy = CampaignPolicy(Tokens(200_000), resumeExpected = true)
                 s.seed(dirty.check, shape = Shape.S1)
                 s.open()
@@ -96,6 +109,44 @@ class AppendOnlyPrefixScenarioTest {
         }
     }
 
+    /**
+     * T-41 (WF-15, task-workflow §4.4): a review note that arrives mid-cell — the stop's settling of a background run still
+     * live at a completion proposal (P8.C.12) — appends after the transcript as a pinned item; `AC-1` stays red, so the cell
+     * goes on, and every request after the note keeps the cached bytes of the one before as its prefix.
+     */
+    private fun reviewNoteMidCell() = runBlocking<Unit> {
+        DirtyRepo.create(1, bigBytes = 0, settle = false).use { dirty ->
+            Files.writeString(dirty.root.resolve(FAILING), javaClass.getResourceAsStream("/shaper/pytest-fail-param.txt")!!.use { String(it.readAllBytes(), Charsets.UTF_8) })
+            Scenario(dirty.root, stateRoot.resolve(NOTE)).use { s ->
+                s.policy = CampaignPolicy(Tokens(200_000), resumeExpected = true)
+                s.seed(red, shape = Shape.S1)
+                s.open()
+                val long = if (io.astrolabe.cell.WINDOWS) "ping -n 30 127.0.0.1" else "sleep 30"
+                var n = 0
+                s.playWith(maxCells = 1) { _ ->
+                    ScriptedModel(listOf(ScriptedModel.Turn({ true }, { _ ->
+                        n++
+                        when (n) {
+                            1 -> Scripted.Reply(listOf(say("reading"), read("r1", DirtyRepo.SOURCE)))
+                            2 -> Scripted.Reply(listOf(say("starting the server"), call("b1", "run", """{"cmd":"$long","bg":true}""")))
+                            else -> Scripted.Reply(listOf(say("done")))
+                        }
+                    }, once = false)))
+                }
+                val requests = checkNotNull(s.adapter).calls.map { it.request }
+                val noted = requests.indexOfFirst { r ->
+                    r.segment(SegmentKind.T)!!.items.filterIsInstance<Message>().any { it.text.startsWith("[pinned review] stop cancelled background run") }
+                }
+                assertTrue(noted > 0, "the review note reached a later request of the cell: ${requests.size} requests")
+                for (i in 1..noted) {
+                    val (before, after) = requests[i - 1] to requests[i]
+                    for (kind in listOf(SegmentKind.S, SegmentKind.R, SegmentKind.K)) assertEquals(before.segment(kind), after.segment(kind), "request ${i + 1}: [$kind] keeps its bytes")
+                    assertTrue(rendered(after).startsWith(rendered(before)), "request ${i + 1}: request $i is its prefix")
+                }
+            }
+        }
+    }
+
     /** The request's cached regions as text, in order: what a provider's prefix cache compares. */
     private fun rendered(request: Request): String = buildString {
         for (kind in listOf(SegmentKind.S, SegmentKind.R, SegmentKind.K, SegmentKind.T)) {
@@ -108,5 +159,15 @@ class AppendOnlyPrefixScenarioTest {
         is ToolCall -> "call:${item.id}:${item.name}:${item.argsJson}"
         is ToolResult -> "result:${item.callId}:" + item.content.filterIsInstance<Text>().joinToString("") { it.text }
         else -> item.toString()
+    }
+
+    private companion object {
+        const val MESSAGES = "messages"
+        const val NOTE = "note"
+        const val FAILING = "pytest_fail.txt"
+
+        /** Prints a failing pytest run and exits 1: `AC-1` is red on every tree. */
+        val red: io.astrolabe.contract.Command = if (io.astrolabe.cell.WINDOWS) io.astrolabe.contract.Command(listOf("cmd.exe", "/d", "/s", "/c", "type $FAILING & exit /b 1"))
+            else io.astrolabe.contract.Command(listOf("/bin/sh", "-c", "cat $FAILING; exit 1"))
     }
 }

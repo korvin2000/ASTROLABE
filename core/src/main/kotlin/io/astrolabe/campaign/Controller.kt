@@ -76,6 +76,7 @@ import io.astrolabe.context.StatusNotes
 import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Contract
 import io.astrolabe.contract.Contracts
+import io.astrolabe.contract.EvidencePurpose
 import io.astrolabe.contract.Increment
 import io.astrolabe.contract.IncrementStatus
 import io.astrolabe.contract.Ledger
@@ -601,7 +602,11 @@ public class Controller @JvmOverloads public constructor(
         // C3: the balance profile applies once, when the attempt freezes; a reopen asks for the frozen one unless it names another.
         val requested = BalanceProfiles.applied(config, policy.balance ?: storedAttempt?.config?.balance ?: config.balance)
         // Task-workflow §5.1: the attempt's effective output policy — the base plus the contract's outputs at its first open — frozen before its s0.
-        val frozen = storedAttempt ?: AttemptConfig.freeze(requested).withOutputs(contracts.current(request.work)?.outputs.orEmpty().map { it.path })
+        // §5.2 (WR2, P1 #4): and the toolchain directories in the tree its known checks launch from stay in identity.
+        val knownContract = contracts.current(request.work)
+        val launched = (knownContract?.acceptance.orEmpty().filterIsInstance<Acceptance.Run>().map { it.command } + policy.declaredChecks.filterIsInstance<Acceptance.Run>().map { it.command } +
+            requested.qualityGates).map { command -> command.cwd?.takeIf { it.isNotBlank() && it != "." }?.let { "${it.trimEnd('/', '\\')}/${command.argv.first()}" } ?: command.argv.first() }
+        val frozen = storedAttempt ?: AttemptConfig.freeze(requested).withOutputs(knownContract?.outputs.orEmpty().map { it.path }).withToolchains(launched)
             .also { attempts.save(request.work, request.attempt, it) }
         val effective = frozen.config
         if (effective != io.astrolabe.configSnapshot(requested)) {
@@ -1524,7 +1529,7 @@ public class Controller @JvmOverloads public constructor(
         val report = c.stamper.report(fresh = true)
         if (applied.resultingStamp != report.candidateId || applied.contractVersion != c.contract.version || applied.envId != report.env.envId ||
             applied.obligationSet != obligationSet(c, c.contract) || applied.outsideInputs != outsideInputs(c, scheduler, applied.results)) return
-        rebind(c, scheduler, report, acceptances.current(c.ids.work, c.ids.attempt, null, report.candidateId, c.contract.version), restoring = true)
+        rebind(c, scheduler, report, decisionFor(c, null, report.candidateId, c.contract.version, applied.key()), restoring = true)
     }
 
     /**
@@ -2049,6 +2054,14 @@ public class Controller @JvmOverloads public constructor(
             c.journal.append(JournalEvent(idGen.next("ev"), ids, turns, JournalKind.Reconcile, refs = accepted.receiptIds, text = "late completion of ${increment.id} archived; publication refused: $reason", at = clock.instant()))
             return c.advance(Transition.Stopped(stopOutcome(c), "late completion archived; publication refused: $reason"))
         }
+        // WR2 (P1 #5, task-workflow §2.4 B): an amendment recorded while the cell ran — an amending answer to its question —
+        // derived a requirement no increment covers yet; the commit validates the graph against that contract, so the
+        // amendment's increment is derived first (the cell has returned: no cell runs).
+        if (checkNotNull(c.state).graph.validate(c.contract).isNotEmpty()) intake(c)?.let { return it }
+        if (checkNotNull(c.state).graph.increments.first { it.id == increment.id }.status == IncrementStatus.Cancelled) {
+            c.journal.append(JournalEvent(idGen.next("ev"), ids, turns, JournalKind.Reconcile, refs = accepted.receiptIds, text = "completion of ${increment.id} archived: the user cancelled its requirements while it ran", at = clock.instant()))
+            return null
+        }
         c.advance(Transition.Committed(accepted, stampNow))
         // I7: an increment accepted on a decider's word is `accepted`, never `verified`.
         events?.emit(AgentEvent.Campaign.IncrementClosed(c.ids, increment.id, if (accepted.verified) "verified" else "accepted"))
@@ -2091,11 +2104,10 @@ public class Controller @JvmOverloads public constructor(
      * candidate, else the authority's answer to one request, validated before use. Asking costs no model call.
      */
     private suspend fun decide(c: OpenedCampaign, ids: Identities, pending: PendingCompletion, authority: Authority): Settled {
-        val acceptances = Acceptances(c.store, clock)
         val waiting = pending.resolve(null)
         // C11: a policy's word settles nothing only a person settles — such a request is asked again, so a person can answer.
         // WR P1-2: an accept answers the obligations its request named; one that leaves any undecided is asked anew, under a new key.
-        val decision = acceptances.current(c.ids.work, c.ids.attempt, pending.incrementId, pending.resultingStamp, pending.contractVersion)
+        val decision = decisionFor(c, pending.incrementId, pending.resultingStamp, pending.contractVersion, pending.key())
             ?.takeUnless { it.decision.decider == io.astrolabe.verify.Decider.Policy && waiting.undecided.any { r -> r.humanOnly } }
             ?.takeIf { it.decision.kind != DecisionKind.Accept || waiting.undecided.all { r -> r.obligation in it.obligations } }
             ?: ask(c, ids, pending, waiting, authority)
@@ -2104,6 +2116,10 @@ public class Controller @JvmOverloads public constructor(
         val now = c.stamper.report(fresh = true).candidateId
         if (now != pending.resultingStamp || c.contract.version != pending.contractVersion) {
             return Settled.Void(pending, "the tree or contract moved while the decision was asked (@${now.hash8}, v${c.contract.version})")
+        }
+        // WR2 (P1 #1): and the inputs outside identity its evidence pinned, re-read now, still read as they did when asked.
+        if (outsideInputs(c, scheduler(c), pending.results) != pending.outsideInputs) {
+            return Settled.Void(pending, "inputs outside the candidate its evidence pinned changed while the decision was asked")
         }
         return when (resolved.resolution) {
             Resolution.Complete -> Settled.Commit(pending, resolved, decision?.let { "${it.decision.kind.name.lowercase()} by ${it.decision.by}: ${it.decision.reason}" } ?: "all obligations settled")
@@ -2134,7 +2150,8 @@ public class Controller @JvmOverloads public constructor(
             c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, refs = listOf(request.id), text = "acceptance decision ${request.id}: $invalid · the campaign waits", at = clock.instant()))
             return null
         }
-        val record = DecisionRecord(idGen.next("decision"), pending.incrementId, checkNotNull(reply), items.map { it.obligation })
+        val record = DecisionRecord(idGen.next("decision"), pending.incrementId, checkNotNull(reply), items.map { it.obligation },
+            key = pending.key(), outsideInputs = pending.outsideInputs)
         Acceptances(c.store, clock).record(ids, record)
         c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, refs = listOf(request.id),
             text = "acceptance decision ${request.id}: ${reply.kind.name.lowercase()} by ${reply.by} (${reply.decider.name.lowercase()}): ${reply.reason}", at = clock.instant()))
@@ -2736,7 +2753,14 @@ public class Controller @JvmOverloads public constructor(
             } else null,
             noteHorizon = if (tree.workspace === c.workspace) NoteHorizon(KbWriter(c.store, estimator, clock), Notes(c.store), ids) else null,
         // WD-16: a child is admitted on its own budget, its output bounded by what that budget leaves.
-        ).also { it.boundedOutput = child != null }
+        ).also {
+            it.boundedOutput = child != null
+            // §3.7 (T-42): a person's approval of the flagged test edits, given through task.ask, is that person's verdict on them.
+            if (child == null && role.packetKind == io.astrolabe.cell.PacketKind.Result &&
+                increment.accept.none { a -> c.contract.acceptance(a) is Acceptance.Check || c.contract.acceptance(a) is Acceptance.Review }) {
+                it.flagApproval = { paths, raised, question, _ -> personFlagVerdict(c, ids, increment, paths, raised, question) }
+            }
+        }
         val limits = cellLimits.gate
         val budget = child?.budget?.let { CellBudget.of(it.tokens, it.turns, contract.budget.reserves, limits = limits) }
             ?: CellBudget.of(Tokens(Accounting(c.store, clock).remainingTokens(c.ids.work, contract.budget.tokens.value).coerceAtLeast(3)), contract.budget.turnsPerCell, contract.budget.reserves, limits = limits)
@@ -2908,6 +2932,26 @@ public class Controller @JvmOverloads public constructor(
         return hostReviewer(c, authority).obtain(packet(), tier, c.registry::version)
     }
 
+    /**
+     * Task-workflow §3.7 (T-42): a person's approval of the flagged test edits [paths] — their answer to the model's
+     * [question] — recorded as that person's verdict on the cell's flags: a review record on the human path bound to the
+     * candidate, the contract revision and the paths' versions like a review (§5.9), which the completion's evidence reads
+     * and no review asks again. Its criteria are the increment's items, none of them a `check:` or `review:` (the caller's rule).
+     */
+    private fun personFlagVerdict(c: OpenedCampaign, ids: Identities, increment: Increment, paths: List<String>, raised: List<io.astrolabe.verify.TestIntegrityFlag>, question: io.astrolabe.event.Question): String {
+        val flags = acceptanceFlags(c, raised)
+        val stamp = c.stamper.report().candidateId
+        val verdict = io.astrolabe.verify.Verdict(question.id, c.contract.version, stamp, io.astrolabe.verify.VerdictOutcome.Approve, confidence = 1.0, signedBy = "user",
+            reviewer = io.astrolabe.verify.ReviewerKind.Human)
+        val record = io.astrolabe.delegate.ReviewRecord(question.id, ReviewScope.Increment, increment.id, c.contract.version, stamp, increment.accept,
+            paths.mapNotNull { path -> c.registry.version(path)?.let { path to it } }.toMap(), verdict, path = listOf(io.astrolabe.delegate.ReviewRecord.HUMAN),
+            integrity = flags.map { it.copy(verdict = null).line + it.originalObligation.orEmpty() })
+        ReviewCell.save(c.store, idGen, clock, ids, record)
+        c.journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, refs = listOf(question.id),
+            text = "flagged ${paths.joinToString(", ")} approved by the user's answer to ${question.id}: a person's verdict on the flag (§3.7)", at = clock.instant()))
+        return "recorded as your verdict on the flagged ${paths.joinToString(", ")} at @${stamp.hash8}: a later change asks again"
+    }
+
     private fun hostReviewer(c: OpenedCampaign, authority: Authority): ReviewCell =
         ReviewCell(io.astrolabe.delegate.ReviewJudge { _, _ -> io.astrolabe.delegate.JudgeRun(null, Tokens(0), "host assessment required") }, authority, c.store, idGen, clock, c.journal)
 
@@ -2952,7 +2996,7 @@ public class Controller @JvmOverloads public constructor(
         val contract = c.contract
         val record = latestReview(c, increment, flags)
         val acceptances = Acceptances(c.store, clock)
-        val decision = acceptances.current(c.ids.work, c.ids.attempt, increment.id, stamp, contract.version)
+        val decision = decisionFor(c, increment.id, stamp, contract.version)
         val reworkSpent = acceptances.reworkSpent(c.ids.work, c.ids.attempt, increment.id, stamp, contract.version)
         val independent = increment.accept.filter { contract.acceptance(it) is Acceptance.Check || contract.acceptance(it) is Acceptance.Review }
         val verdict = record?.verdict?.takeIf { record.unavailable == null }
@@ -3055,9 +3099,10 @@ public class Controller @JvmOverloads public constructor(
         val results = stored?.results ?: campaignResults(c, scheduler, campaign, suite, authority, stamp)
             .filterNot { it.status != ResultStatus.Passed && it.obligation in carried }
         val outside = stored?.outsideInputs ?: outsideInputs(c, scheduler, results)
-        // There is no cell to rework a campaign-level rejection: it goes to the authority at once.
-        var resolved = Resolver.resolve(results, decision = acceptances.current(c.ids.work, c.ids.attempt, null, stamp, contract.version), reworkSpent = true)
         val key = DecisionKey.of(null, stamp, contract.version, Resolver.resolve(results, reworkSpent = true).undecided.map { it.obligation }, outside)
+        // There is no cell to rework a campaign-level rejection: it goes to the authority at once. WR2 (P1 #1): only a decision
+        // made under this very key speaks for it — another key's pins or obligations were another question.
+        var resolved = Resolver.resolve(results, decision = decisionFor(c, null, stamp, contract.version, key), reworkSpent = true)
         val asked = stored ?: acceptances.pending(c.ids.work, c.ids.attempt).lastOrNull {
             it.incrementId == null && it.status != PendingStatus.Applied && it.contractVersion == contract.version && it.envId == report.env.envId && it.obligationSet == obligations && it.key() == key
         }
@@ -3088,7 +3133,10 @@ public class Controller @JvmOverloads public constructor(
                 is Settled.Wait -> return c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, if (asked != null) unchanged(record, settled.reason) else settled.reason, settled.code))
                 is Settled.Void -> {
                     closePending(c, ids, record, PendingStatus.Void, settled.reason)
-                    return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, movedDuringReview(c, report, c.stamper.report(), contract)))
+                    val after = c.stamper.report()
+                    val why = if (after.candidateId != report.candidateId || c.contract != contract) movedDuringReview(c, report, after, contract)
+                        else "${settled.reason} (request ${record.requestId}): verification and review must be repeated"
+                    return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, why))
                 }
             }
         }
@@ -3106,6 +3154,11 @@ public class Controller @JvmOverloads public constructor(
         val now = c.stamper.report(fresh = true)
         if (now.candidateId != stamp || c.contract != contract) {
             return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal, movedDuringReview(c, report, now, contract)))
+        }
+        // WR2 (P1 #1): the pinned inputs outside identity are re-read before the commit too; the stamp does not see them.
+        if (outsideInputs(c, scheduler, results) != outside) {
+            return c.advance(Transition.Stopped(CampaignOutcome.BlockedExternal,
+                "inputs outside the candidate the final evidence pinned changed during final review (@${stamp.hash8}): verification and review must be repeated"))
         }
         c.refusal()?.let { return c.advance(Transition.Stopped(stopOutcome(c), "final acceptance not published: $it")) }
         rebind(c, scheduler, report, resolved.decision)?.let { return c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, it)) }
@@ -3127,6 +3180,19 @@ public class Controller @JvmOverloads public constructor(
      * finishing; the reopen resets its ledger and must restore it from the applied record without a check or a question.
      */
     internal var crashAfterFinishing: (() -> Unit)? = null
+
+    /**
+     * WR2 (P1 #1): the latest unspent decision about [incrementId] that speaks for [candidate] at [contractVersion] and for
+     * the question asked: under [key] when the caller knows it, and in any case only while the inputs outside identity its
+     * request pinned still read at those bytes, re-read now. A record from before the key was kept matches as it did.
+     */
+    private fun decisionFor(c: OpenedCampaign, incrementId: String?, candidate: CandidateId, contractVersion: Int, key: String? = null): DecisionRecord? {
+        val scheduler by lazy { scheduler(c) }
+        return Acceptances(c.store, clock).decisions(c.ids.work, c.ids.attempt).lastOrNull {
+            !it.spent && it.incrementId == incrementId && it.appliesTo(candidate, contractVersion) &&
+                (key == null || it.key == null || it.key == key) && (it.outsideInputs.isEmpty() || scheduler.readsNow(it.outsideInputs))
+        }
+    }
 
     /** WR P1-1: the inputs outside candidate identity the receipts behind [results] pinned, at their bytes now ([Scheduler.outsideIdentity]). */
     private fun outsideInputs(c: OpenedCampaign, scheduler: Scheduler, results: List<ObligationResult>): Map<String, FileVersion> {
@@ -3222,7 +3288,7 @@ public class Controller @JvmOverloads public constructor(
         val results = ArrayList<ObligationResult>()
         when (suite) {
             is FullSuite.Red -> results += ObligationResult(FULL_SUITE, ObligationKind.Run, ResultStatus.Failed, "final full suite red: ${suite.detail}")
-            is FullSuite.NotCertified -> results += ObligationResult(FULL_SUITE, ObligationKind.Run, ResultStatus.Unverified, "final full suite could not certify: ${suite.detail}", rewrittenInputs = suite.rewritten)
+            is FullSuite.NotCertified -> results += ObligationResult(FULL_SUITE, ObligationKind.Run, ResultStatus.Unverified, "final full suite could not certify: ${suite.detail}", suite.receipt, rewrittenInputs = suite.rewritten)
             FullSuite.Green -> results += ObligationResult(FULL_SUITE, ObligationKind.Run, ResultStatus.Passed, "final full suite green", c.checks[Checks.FULL]?.last?.receiptId)
             FullSuite.Undeclared, null -> Unit
         }
@@ -3244,6 +3310,15 @@ public class Controller @JvmOverloads public constructor(
                 val kind = if (item is Acceptance.Review) ObligationKind.Review else ObligationKind.Check
                 results += Obligations.verdict(id, kind, item.criterion, assessed.verdicts[id], contract.version, stamp, assessed.unavailable[id])
             }
+        }
+        // WR2 (P1 #6, task-workflow §3.3): a goal claim the model stated after the plan is in no increment's acceptance; the
+        // final decides each one still strengthening a live requirement — unverified until a decider takes it, never skipped.
+        val assessedItems = results.mapTo(HashSet()) { it.obligation }
+        for (item in contract.acceptance.filterIsInstance<Acceptance.Check>().filter { it.id !in assessedItems }) {
+            val strengthens = (item.origin as? io.astrolabe.contract.Origin.Model)?.strengthens?.split('+') ?: continue
+            if (strengthens.none { contract.requirement(it)?.lapsed == false }) continue
+            results += Obligations.verdict(item.id, ObligationKind.Check, item.criterion, null, contract.version, stamp,
+                "the model's goal criterion for ${strengthens.joinToString("+")}, stated after the plan: no increment assessed it").copy(origin = item.origin)
         }
         if (reviewOwed != null) {
             if (authority == null) {
@@ -3281,7 +3356,8 @@ public class Controller @JvmOverloads public constructor(
         data object Green : FullSuite
         data object Undeclared : FullSuite
         data class Red(val detail: String) : FullSuite
-        data class NotCertified(val detail: String, val rewritten: List<String> = emptyList()) : FullSuite
+        /** [receipt]: the first uncertifying check's last receipt (WR2, P1 #1: its pinned inputs outside identity are in the key). */
+        data class NotCertified(val detail: String, val rewritten: List<String> = emptyList(), val receipt: String? = null) : FullSuite
     }
 
     /** Runs the declared full suite through the `verify` tool path (receipts, closures, redaction) and journals the result. */
@@ -3305,7 +3381,7 @@ public class Controller @JvmOverloads public constructor(
             red != null -> FullSuite.Red("${red.id} ${red.last?.receiptId} failed at @${stamp.hash8}")
             gap != null -> FullSuite.NotCertified("${gap.id}: ${currency.getValue(gap.id).reasons.joinToString("; ").ifEmpty { gap.last?.outcome?.name?.lowercase() ?: "not run" }} at @${stamp.hash8}" +
                 if (after.candidateId != before.candidateId) " · the gates and suite moved the stamp from @${before.candidateId.hash8}: ${movedPathsHint(before, after)}" else "",
-                required.flatMap { currency.getValue(it.id).rewrittenInputs }.distinct().sortedWith(Stamper.PATH_ORDER))
+                required.flatMap { currency.getValue(it.id).rewrittenInputs }.distinct().sortedWith(Stamper.PATH_ORDER), currency.getValue(gap.id).receiptId)
             else -> null
         }
         if (check == null) {
@@ -3413,7 +3489,9 @@ public class Controller @JvmOverloads public constructor(
                 state.graph.increments.none { it.id == "inc-${r.id}" }
         } ?: return null
         val verified = state.graph.increments.filter { it.status == IncrementStatus.Verified }
-        val accept = Contracts.regressionItems(contract).ifEmpty { verified.flatMap { it.accept }.distinct() }
+        // WR2 (P1 #7, task-workflow §2.4 A): a response shows nothing regressed — regression obligations only, never the goal
+        // checks of the increments before it; with none, its packet resolves it (the campaign gate still runs every item).
+        val accept = contract.acceptance.filterIsInstance<Acceptance.Run>().filter { it.evidencePurpose == EvidencePurpose.Regression }.map { it.id }
         val response = Increment(
             id = "inc-${message.id}",
             requirementIds = contract.requirements.filterNot { it.lapsed }.map { it.id },

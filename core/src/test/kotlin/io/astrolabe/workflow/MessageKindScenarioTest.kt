@@ -118,6 +118,8 @@ class MessageKindScenarioTest {
         assertTrue(s.adapter!!.calls.isNotEmpty(), "WF-13: the sent note reached no model")
         val response = s.campaign!!.state!!.graph.increments.single { it.id == "inc-${sent.id}" }
         assertEquals(Production.Resolves(sent.id), response.produces)
+        // P1 #7: a response takes regression obligations only — AC-1 is the goal's — and is resolved by its packet.
+        assertEquals(emptyList(), response.accept, "the response inherits no goal check")
         assertEquals(IncrementStatus.Verified, response.status, second.state?.reason)
         assertEquals(CampaignOutcome.WaitingForInput, second.outcome, second.state?.reason)
         val again = asked.last { it.incrementId == null }

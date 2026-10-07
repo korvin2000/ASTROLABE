@@ -199,6 +199,14 @@ public class CellContext @JvmOverloads constructor(
      */
     public var boundedOutput: Boolean = false
         internal set
+
+    /**
+     * Task-workflow §3.7 (T-42): records a person's approval, through `task.ask`, of the flagged test edits `paths` as that
+     * person's verdict on the cell's flags, and returns the line the model reads. The controller sets it for an
+     * implementing cell whose increment has no `check:` or `review:` item (their assessment stays the review's); `null`:
+     * nothing is recorded. Outside the constructor so its binary signature stays as it was.
+     */
+    internal var flagApproval: (suspend (paths: List<String>, flags: List<io.astrolabe.verify.TestIntegrityFlag>, question: io.astrolabe.event.Question, answer: io.astrolabe.event.Answer) -> String?)? = null
 }
 
 /** A refusal of dispatch authority (§3.7 `enforce_dispatch_authority`): the cell ends before any spend. */
