@@ -40,6 +40,10 @@ public data class RunAudit(
     val wastes: List<WasteShare>,
     val residency: ResidencyWhatIf,
     val provenance: Provenance,
+    /** The run's flows (D-421); `null` when a reported class is unknown. */
+    val flows: Flows? = null,
+    /** [flows] at every [Repricing.PROFILES] price (D-421): a what-if, another model's flows would differ. */
+    val repricing: List<Repriced> = emptyList(),
 )
 
 /**
@@ -66,6 +70,10 @@ public data class GroupAudit @JvmOverloads constructor(
     val qHat: Double?,
     val wastes: List<WasteShare>,
     val provenanceClasses: ProvenanceShares = ProvenanceShares.of(emptyList()),
+    /** The runs' flows summed (D-421); `null` when any run's are unknown. */
+    val flows: Flows? = null,
+    /** [flows] at every [Repricing.PROFILES] price (D-421). */
+    val repricing: List<Repriced> = emptyList(),
 )
 
 /**
@@ -128,10 +136,12 @@ public object Audit {
         val anatomy = Anatomy.of(trace.calls, book)
         val losses = Losses(trace, input.journal.format, book, defaults.k)
         val cache = losses.cache()
+        val flows = Flows.of(anatomy)
         return RunAudit(
             info, anatomy, cache, losses.wastes(anatomy, cache),
             ResidencyReplay.of(trace, losses, book, input.journal.format, defaults),
             Provenance.of(input.journal, trace, input.result),
+            flows, Repricing.of(flows),
         )
     }
 
@@ -157,6 +167,7 @@ public object Audit {
             }
         }
         val accepted = runs.map { it.provenance.external }
+        val flows = if (runs.any { it.flows == null }) null else runs.map { it.flows!! }.reduce(Flows::plus)
         return GroupAudit(
             group = name,
             runs = runs.size,
@@ -176,6 +187,8 @@ public object Audit {
             qHat = runs.sumOf { it.cache.cacheableTokens }.takeIf { it > 0 }?.let { b -> runs.sumOf { it.cache.cachedTokens }.toDouble() / b },
             wastes = wastes,
             provenanceClasses = ProvenanceShares.of(runs.map { it.provenance.provenanceClass }),
+            flows = flows,
+            repricing = Repricing.of(flows),
         )
     }
 
