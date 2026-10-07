@@ -282,7 +282,8 @@ class DirtyStateTest {
 
             fixture.workspace.tap = null
             assertContentEquals(crlf, fixture.dirtyState.bytesOf(snapshot.entry("data/notes.txt")!!), "the raw bytes are stored")
-            assertEquals(1, reads.count { it == "notes.txt" }, "one read of the raw difference: $reads")
+            // The stamp and the D-274 recheck read every tracked file (README.md once each); the capture adds no third read.
+            assertEquals(reads.count { it == "README.md" }, reads.count { it == "notes.txt" }, "the capture stored what the stamp read: $reads")
         }
     }
 

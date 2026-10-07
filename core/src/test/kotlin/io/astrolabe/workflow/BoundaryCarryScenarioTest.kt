@@ -1,5 +1,7 @@
 package io.astrolabe.workflow
 
+import io.astrolabe.budget.Tokens
+import io.astrolabe.campaign.CampaignPolicy
 import io.astrolabe.campaign.OpenedCampaign
 import io.astrolabe.cell.CellFixture.Companion.anchored
 import io.astrolabe.cell.CellFixture.Companion.call
@@ -76,6 +78,8 @@ class BoundaryCarryScenarioTest {
     private fun scenario(name: String): Played = runBlocking {
         DirtyRepo.create(10, bigBytes = 0).use { dirty ->
             Scenario(dirty.root, stateRoot.resolve(name)).use { s ->
+                // S1: a partial cell continues its increment in a next cell of the same run (S0 has no continuation of its own).
+                s.policy = CampaignPolicy(Tokens(200_000), resumeExpected = true)
                 s.seed(dirty.check, shape = Shape.S1) { it.copy(budget = it.budget.copy(turnsPerCell = TURNS)) }
                 s.open()
                 var reads: Long? = null
@@ -95,7 +99,8 @@ class BoundaryCarryScenarioTest {
                     s.playModel(maxCells = 1) { c -> model(c, emptyList()) }
                 }
                 val c = checkNotNull(s.campaign)
-                val request = checkNotNull(s.adapter).calls.map { it.request }.first(::carried)
+                val request = checkNotNull(s.adapter).calls.map { it.request }.firstOrNull(::carried)
+                    ?: error("$name: no request carried a carry-forward; the run ended ${s.outcome?.wire}: ${s.last?.state?.reason}")
                 val k = (request.segment(SegmentKind.K)!!.items.single() as Message).text
                 val carry = k.substringAfter("## Carry-forward\n").substringBefore("\n## ")
                 val seeds = Regex("KNOWN: seeds only \\((\\d+)\\)").find(carry)?.groupValues?.get(1)?.toInt() ?: 0

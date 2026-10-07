@@ -1169,8 +1169,9 @@ class CellTest {
 
     @Test
     fun `a pressure rebuild takes its seeds from the attempt's seed rule`() = runTest {
-        // Neither Next nor Focus names the file read, so Seeds v1 carries nothing and Seeds v2 carries the recent read.
-        suspend fun rebuiltK(rule: io.astrolabe.context.SeedRule): String = CellFixture(stateRoot.resolve(rule.wire), defaults = Defaults(alpha = 0.1, seedRule = rule)).use { f ->
+        // Neither Next nor Focus names the file read, so Seeds v1 carries nothing and Seeds v2 carries the recent read; with
+        // the fallback on (task workflow §4.2, the default) a v1 selection of nothing falls back to Seeds v2.
+        suspend fun rebuiltK(rule: io.astrolabe.context.SeedRule, fallback: Boolean = false): String = CellFixture(stateRoot.resolve(rule.wire + fallback), defaults = Defaults(alpha = 0.1, seedRule = rule, seedFallback = fallback)).use { f ->
             val small = Profile("small", FakeProfiles.PROVIDER, "fake-small", FakeProfiles.capabilities(12_000, 500), FakeProfiles.main.priceTable)
             val model = ScriptedModel.of(Scripted.Reply(listOf(say("look"), read("c1", "src/a.py"), patch("c0", """{"next":"look again"}"""))), Scripted.Reply(listOf(say("look again"), tree("c2"))))
             assertIs<CellExit.Partial>(f.run(model, profile = small, profiles = FakeProfiles.all + (small.id to small)))
@@ -1180,6 +1181,7 @@ class CellTest {
         }
         assertFalse("SEED src/a.py" in rebuiltK(io.astrolabe.context.SeedRule.V1))
         assertTrue("SEED src/a.py" in rebuiltK(io.astrolabe.context.SeedRule.V2))
+        assertTrue("SEED src/a.py" in rebuiltK(io.astrolabe.context.SeedRule.V1, fallback = true))
     }
 
     @Test
