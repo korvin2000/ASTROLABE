@@ -265,6 +265,46 @@ class DirtyStateTest {
         }
     }
 
+    @Test
+    fun `T-21 a raw difference git status hides is read once by its capture and stored byte-exactly`(@TempDir state: Path) {
+        WorkspaceFixture.create(state) { repo ->
+            repo.gitattributes("*.txt text eol=lf\n")
+            repo.write("data/notes.txt", "a\nb\n")
+            repo.commit("eol")
+        }.use { fixture ->
+            // Raw CRLF over an LF blob: git's clean conversion makes it equal, so only the stamp's raw compare finds it.
+            val crlf = "a\r\nb\r\n".toByteArray(StandardCharsets.UTF_8)
+            fixture.repo.write("data/notes.txt", crlf)
+            val reads = java.util.Collections.synchronizedList(ArrayList<String>())
+            fixture.workspace.tap = { real, _ -> reads += real.fileName.toString() }
+
+            val snapshot = fixture.dirtyState.capture(fresh = true)
+
+            fixture.workspace.tap = null
+            assertContentEquals(crlf, fixture.dirtyState.bytesOf(snapshot.entry("data/notes.txt")!!), "the raw bytes are stored")
+            assertEquals(1, reads.count { it == "notes.txt" }, "one read of the raw difference: $reads")
+        }
+    }
+
+    @Test
+    fun `T-04 a later workspace over the same root reuses the content cache and an acceptance capture still reads fresh`(@TempDir state: Path) {
+        WorkspaceFixture.create(state).use { fixture ->
+            fixture.repo.untracked("notes/a.txt", "tool file\n")
+            fixture.repo.modify("src/a.py", "def a():\n    return 5\n")
+            fixture.settle()
+            val first = fixture.dirtyState.capture(turn = 1)
+
+            val reopened = Workspace(io.astrolabe.id.WorkspaceId("ws-1"), fixture.repo.root, fixture.repo.git)
+            val dirty = DirtyState(reopened, fixture.store.blobs, Stamper(reopened, TEST_ENV), fixture.ids, fixture.clock)
+            val again = dirty.capture(turn = 1)
+
+            assertEquals(0L, reopened.filesRead, "the reopen's capture of an unchanged tree reads no content")
+            assertContentEquals(Snapshot.encodeToBytes(first), Snapshot.encodeToBytes(again))
+            dirty.capture(turn = 1, fresh = true)
+            assertTrue(reopened.filesRead >= 2, "an acceptance capture reads fresh whatever the cache holds: ${reopened.filesRead}")
+        }
+    }
+
     // ---------------------------------------------------------- content reuse (D-364)
 
     @Test

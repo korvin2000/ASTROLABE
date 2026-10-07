@@ -1509,4 +1509,50 @@ class CellTest {
             assertTrue(f.journal.events(JournalScope(f.ids.work, kinds = setOf(JournalKind.Boundary))).any { it.text.startsWith("eviction age at turn 4: 2 stubbed") })
         }
     }
+
+    @Test
+    fun `WF-15 answered questions and a contract revision append after the transcript and keep every earlier request a prefix`() = runTest {
+        CellFixture(stateRoot).use { f ->
+            val answers = object : io.astrolabe.event.Authority by io.astrolabe.event.AutonomousAuthority() {
+                override suspend fun ask(question: io.astrolabe.event.Question): io.astrolabe.event.Answer =
+                    if ("factual" in question.text) io.astrolabe.event.Answer(question.id, question.contractRevision, "the value is 10")
+                    else io.astrolabe.event.Answer(question.id, question.contractRevision, "make a return 11 instead", changesRequirements = true)
+            }
+            val task = io.astrolabe.tool.task.TaskTool(answers, f.contracts, f.journal, f.estimator, f.idGen, f.ids, f.clock, f.events)
+            val model = ScriptedModel.of(
+                Scripted.Reply(listOf(say("reading"), read("c1", "src/a.py"))),
+                Scripted.Reply(listOf(say("asking"), call("c2", "task", """{"op":"ask","question":"a factual question?"}"""))),
+                Scripted.Reply(listOf(say("asking again"), call("c3", "task", """{"op":"ask","question":"which value now?"}"""))),
+                Scripted.Reply(listOf(say("reading again"), read("c4", "src/b.py"))),
+                Scripted.Reply(listOf(say("done"))),
+            )
+
+            f.cell().run(f.context(model, taskTool = task), f.increment, f.budget(6))
+
+            val requests = f.adapter.calls.map { it.request }
+            assertTrue(requests.size >= 4, "four requests at least: ${requests.size}")
+            for (n in 1 until 4) {
+                val (before, after) = requests[n - 1] to requests[n]
+                for (kind in listOf(SegmentKind.S, SegmentKind.R, SegmentKind.K)) {
+                    assertEquals(before.segment(kind), after.segment(kind), "request ${n + 1}: [$kind] is fixed at the projection's build")
+                }
+                val t0 = before.segment(SegmentKind.T)!!.items
+                val t1 = after.segment(SegmentKind.T)!!.items
+                assertEquals(t0, t1.take(t0.size), "request ${n + 1}: [T] of request $n is a prefix")
+            }
+            val texts = { n: Int -> f.transcript(n).filterIsInstance<io.astrolabe.provider.Message>().map { it.text } }
+            assertTrue(texts(3).any { it.startsWith("[pinned answer ") && "the value is 10" in it }, "the factual answer is appended: ${texts(3)}")
+            assertTrue(texts(4).any { it.startsWith("[contract v${f.contract.version + 1} delta]") }, "the revision is appended as its delta: ${texts(4)}")
+            assertTrue(texts(4).any { it.startsWith("[pinned U-") && "make a return 11 instead" in it }, "the amending answer's request is appended: ${texts(4)}")
+            val k = (requests[3].segment(SegmentKind.K)!!.items.single() as io.astrolabe.provider.Message).text
+            assertTrue(k.startsWith("[K] contract v${f.contract.version} "), "[K] stays as built while the contract moved on: ${k.lineSequence().first()}")
+            assertEquals(f.contract.version + 1, f.contracts.current(f.ids.work)!!.version, "the harness side reads the current contract")
+            // Task workflow §4.1: the cell's end wrote its packet row with its terminal checkpoint, built over that checkpoint.
+            val end = assertNotNull(f.checkpoints.latest(f.ids.context!!))
+            val packet = assertNotNull(f.checkpoints.packet(f.ids.context!!), "the packet row is in the store")
+            assertEquals(end.registerVersion, packet.registerVersion)
+            assertEquals(end.stamp, packet.stamp)
+            assertEquals(f.contract.version + 1, packet.contractVersion)
+        }
+    }
 }

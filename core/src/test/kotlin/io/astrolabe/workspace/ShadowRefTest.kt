@@ -152,6 +152,21 @@ class ShadowRefTest {
     }
 
     @Test
+    fun `T-22 the recovery blobs git hashes into the object database are counted as blob reads`(@TempDir state: Path) {
+        WorkspaceFixture.create(state).use { fixture ->
+            fixture.repo.modify("src/a.py", "def a():\n    return 77\n")
+            fixture.repo.untracked("notes.txt", "fresh notes\n")
+            val blobs = fixture.workspace.blobsRead
+            val objects = fixture.workspace.git.objectsWritten
+
+            fixture.shadowRef().open(fixture.dirtyState.capture())
+
+            assertTrue(fixture.workspace.git.objectsWritten - objects >= 2, "git lacked both objects")
+            assertTrue(fixture.workspace.blobsRead - blobs >= 2, "each hashed recovery blob is a counted read: ${fixture.workspace.blobsRead - blobs}")
+        }
+    }
+
+    @Test
     fun `a recovery blob path past 260 characters is still written to git`(@TempDir temp: Path) {
         // Windows MAX_PATH: git opens each recovery blob by its absolute path, 80 characters below the project root
         // (`blobs/recovery/<hex>`), while the database 14 below it must stay openable; a 116-character state root
