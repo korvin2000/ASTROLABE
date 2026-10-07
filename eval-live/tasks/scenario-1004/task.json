@@ -1,0 +1,14 @@
+{
+  "id": "scenario-1004",
+  "class": "scenario",
+  "title": "The 4 October scenario: a notes app in a repository without a commit gets an HTML view through a vendored dependency installed offline, with a clarification sent mid-run",
+  "acceptance": {
+    "argv": ["{python}", "_acceptance/accept.py"],
+    "timeoutSeconds": 120
+  },
+  "baseCommit": false,
+  "message": {
+    "afterResponses": 4,
+    "text": "One more thing: notes often contain HTML pasted from e-mails. On the HTML page it must show as text, never as markup, so escape raw HTML in the body too (marklet has an option for that). The Markdown formatting itself must still render."
+  }
+}
