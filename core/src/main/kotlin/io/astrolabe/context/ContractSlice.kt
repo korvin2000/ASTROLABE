@@ -8,9 +8,10 @@ import io.astrolabe.contract.Requirement
 import kotlinx.serialization.Serializable
 
 /**
- * The mandatory `[K]` contract slice (§5.1, §6.1 as refined by D-52): this increment's requirements verbatim,
- * ALL constraints and exclusions, and the **complete** applicable acceptance definitions (command, criterion
- * text, origin, obligation version, requirement links). An id without its definition never passes coverage.
+ * The mandatory `[K]` contract slice (§5.1, §6.1 as refined by D-52): the objective (task-workflow §1.2), this
+ * increment's requirements verbatim with their status, ALL constraints and exclusions, and the **complete** applicable
+ * acceptance definitions (command, criterion text, origin, obligation version, requirement links). An id without its
+ * definition never passes coverage.
  */
 @Serializable
 public data class ContractSlice(
@@ -25,7 +26,15 @@ public data class ContractSlice(
     val contractsTouched: List<String> = emptyList(),
     /** Independent obligations retained across copying and serialization, including increment-only checks. */
     val incrementAcceptanceIds: Set<String> = acceptance.map { it.id }.toSet(),
+    /** T-50: the currently authorized objective — the original request plus every amendment ([Contract.objective]). */
+    val objective: String = "",
 ) {
+    /** The constructor before [objective] (P8.C.17). Kept for Java callers. */
+    public constructor(
+        contractVersion: Int, incrementId: String, requirements: List<Requirement>, constraints: List<Constraint>, exclusions: List<String>,
+        acceptance: List<Acceptance>, originalObligations: Map<String, String>, contractsTouched: List<String>, incrementAcceptanceIds: Set<String>,
+    ) : this(contractVersion, incrementId, requirements, constraints, exclusions, acceptance, originalObligations, contractsTouched, incrementAcceptanceIds, "")
+
     /** Acceptance ids the slice must define: every id the increment accepts plus every id its requirements name. */
     val requiredAcceptanceIds: Set<String>
         get() = incrementAcceptanceIds + requirements.flatMap { it.acceptance }
@@ -41,6 +50,7 @@ public data class ContractSlice(
     public fun render(): String {
         val sb = StringBuilder()
         sb.append("[K] contract v").append(contractVersion).append(" · increment ").append(incrementId).append('\n')
+        if (objective.isNotEmpty()) sb.append("objective: ").append(objective).append('\n')
         requirements.forEach { sb.append(line(it)).append('\n') }
         acceptance.forEach { sb.append(line(it)).append('\n') }
         if (constraints.isNotEmpty()) sb.append("constraints: ").append(constraints.joinToString(" · ") { "${it.id} ${it.text} (${it.authority})" }).append('\n')
@@ -75,12 +85,15 @@ public data class ContractSlice(
         diff(previous.constraints, constraints, { it.id }, { "${it.text} (${it.authority})" })
         diff(previous.exclusions, exclusions, { "exclusion $it" }, { it })
         diff(previous.contractsTouched, contractsTouched, { "contract $it" }, { it })
+        if (objective != previous.objective) parts += "objective → ${objective.replace("\n", " / ")}"
         if (incrementId != previous.incrementId) parts += "increment ${previous.incrementId} → $incrementId"
         if (parts.isEmpty()) parts += "no change to increment $incrementId"
         return "[contract v$contractVersion delta] " + parts.joinToString("; ")
     }
 
-    private fun line(r: Requirement): String = "${r.id}: ${r.text}  accept: ${r.acceptance.joinToString(", ")}"
+    private fun line(r: Requirement): String = "${r.id}: ${r.text}  accept: ${r.acceptance.joinToString(", ")}" +
+        // The contract's own status: the campaign ledger, not the contract, tracks progress, so `pending` is not shown.
+        (if (r.status == io.astrolabe.contract.RequirementStatus.Pending) "" else "  status: ${r.status.wire}")
 
     private fun line(a: Acceptance): String = buildString {
         append(a.id).append(" (").append(a.origin).append(", v").append(a.obligationVersion).append("): ").append(a.criterion)
@@ -111,6 +124,7 @@ public data class ContractSlice(
                 originalObligations = originalObligations,
                 contractsTouched = contract.contractsTouched,
                 incrementAcceptanceIds = increment.accept.toSet(),
+                objective = contract.objective,
             )
         }
     }
