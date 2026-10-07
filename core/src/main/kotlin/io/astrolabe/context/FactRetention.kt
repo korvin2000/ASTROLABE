@@ -2,6 +2,8 @@ package io.astrolabe.context
 
 import io.astrolabe.cell.Protocol
 import io.astrolabe.cell.Role
+import io.astrolabe.cell.RoleTexts
+import io.astrolabe.cell.Roles
 import io.astrolabe.cell.SqliteCheckpoints
 import io.astrolabe.id.ContextId
 import io.astrolabe.id.Digest
@@ -17,12 +19,14 @@ import java.time.Clock
 /** One durable retention decision per ended cell; a reopened boundary never ages facts twice. */
 internal object FactRetention {
     /**
-     * A-D.4: the protocol of the role that wrote [cell]'s register — the role its end packet names, resolved in the
-     * attempt's [roles] — so a structured cell of a direct attempt (plan, review, probe, repair) ages its facts as a
-     * structured one. [fallback] serves a cell that never settled its packet (a lost cell, a store of the old end).
+     * A-D.4: the protocol of the role that wrote [cell]'s register — the role its end packet names, resolved as the cell
+     * ran it: the declared role worded by the attempt's [roles] ([RoleTexts.worded]), so a host override that changes the
+     * wording only never changes the protocol — and a structured cell of a direct attempt (plan, review, probe, repair)
+     * ages its facts as a structured one. [fallback] serves a cell that never settled its packet (a lost cell, a store of
+     * the old end) or names no declared role.
      */
     fun protocolOf(store: Store, clock: Clock, cell: ContextId, roles: Map<String, Role>, fallback: Protocol): Protocol =
-        SqliteCheckpoints(store, clock).packet(cell)?.role?.let { roles[it]?.protocol } ?: fallback
+        SqliteCheckpoints(store, clock).packet(cell)?.role?.let { name -> Roles.defaults[name]?.let { RoleTexts.worded(it, roles[name]).protocol } } ?: fallback
 
     fun capture(
         store: Store, ids: Identities, register: Register, current: (String) -> FileVersion?,
