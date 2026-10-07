@@ -1,0 +1,9 @@
+{
+  "id": "merge-conflict",
+  "class": "merge-conflict",
+  "title": "Two independent export formats, CSV and JSON, both registered in the one format registry",
+  "acceptance": {
+    "argv": ["{python}", "_acceptance/accept.py"],
+    "timeoutSeconds": 120
+  }
+}

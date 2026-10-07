@@ -193,6 +193,16 @@ when the core refused the plan or found other notes than expected.
 `reopen` = `{"afterResponses": K}`: the session is closed after K responses and the same work reopens in the same state
 root (`result.json` → `reopen`), as the Studio's resume does.
 
+`after` = `"<id>"` (plan §9.2, pairs — "second task in the same project"): the task is the second of a pair whose first
+task is `<id>`. The runner copies the first task's base, runs the first task as a work of its own (auto mode, no
+scripted interrupt, reopen, message or dirt on either task), runs the first task's acceptance on what it left, commits
+that as `after <id>` and then runs the second task in the same working directory and the same state root. Only the
+second is measured: outcome, cells, policy decisions, wall time, totals, phases, `workspace.diff` and `changedFiles`
+are its own (the diff is taken against the commit the first left); `result.json` → `pair`: `after`, `firstAcceptance`
+and `first` (the first task's segment with its totals). The second task's own `base/` is the first task's base with the
+first task's `reference/` laid over it — it serves the validity check only (`TaskValidityTest` checks that it matches). A
+first task that fails as a harness run stops the pair with a `failure`; in D5 a pair counts as an ordinary task.
+
 | id | class | wrong/ |
 |---|---|---|
 | `bugfix-pagination` | bug with a reproducer | fixes the reproducer's case only: empty and exactly full listings get a page too many |
@@ -206,3 +216,14 @@ root (`result.json` → `reopen`), as the Studio's resume does.
 | `port-framework` | port a small REST service (`library/`, 8 endpoints, token check, request ids) from the in-house `http.server` micro-framework (`tinyhttp/`) to the ASGI-style one in the repository (`miniasgi/`), wire behaviour unchanged; 31 files, 3 packages; the acceptance drives the bare ASGI protocol and checks that the old layer is not imported (debugging set) | the happy paths ported, the implicit behaviour of the old framework lost: error answers in the new framework's `{"detail": …}` shape, request id missing on the 401, invalid JSON a 500, repeated `tag` parameters collapsed to one |
 | `large-tree` | the bulky-parcel line moves from 100 to 120 cm in a tree of 52 files and 7 packages; the places are found by following references, not names from the request (one named constant, two re-derived literals, a JSON data file), and two look-alike limits (the postal contract, customs) must stay (debugging set) | the named constant and one literal changed, the label note and the weekly report's config left on 100 cm |
 | `two-sessions` | `reopen` after 3 responses: the user's own day instead of the UTC date in six places of a scheduling library, then quiet hours (`next_send_time`) built on the same clock; the acceptance judges both parts of the final tree (debugging set) | three of the six places fixed, quiet hours computed on the UTC clock |
+
+**Closed confirmation set (B6b, for D5 and H7) — not for debugging or threshold tuning.** These tasks are run only by
+the confirmation benches; never use them to debug the harness, to tune a policy or a threshold, or as examples.
+
+| id | class | wrong/ |
+|---|---|---|
+| `scenario-1004` | the 4 October scenario: a notes app (`notes/` API on `http.server`, `notesclient/` client and command line; 19 files, 2 packages) in a repository **without a commit** (`baseCommit: false`) gets an HTML view rendered by `marklet` 1.2.0, a wheel in `vendor/` to install offline into `.venv` and declare in `requirements.txt`; a `message` after 4 responses asks to show raw HTML as text (the acceptance puts the vendored wheel first on `sys.path` and checks it is unchanged) | the page is right but raw HTML in the body passes through: the mid-run message is lost |
+| `api-callers` | API change and its callers in 5 packages (21 files): `Inventory.reserve` returns a `Reservation` tied to an order (`order_id` keyword-only, `OutOfStock` instead of `False`), `release`/`ship` take it; checkout, cancel, fulfilment, the shop's 409 and the operator desk follow | every caller converted, but a short order's earlier reservations are not given back: rejected orders leak stock |
+| `merge-conflict` | two independent subtasks in one request (CSV and JSON export) that both edit the one registry file (`spend/export/registry.py`; 17 files, 3 packages); the acceptance checks both formats, that nothing was lost and that nothing is there twice (dict keys, definitions, `spend formats`) | both modules written, the JSON entry registered twice and the CSV entry lost — a bad merge |
+| `node-api` | Node monorepo (built-ins only, no `npm install`, `node --test`; 18 files, 3 packages): `quote(items, { region, coupon })` returns a breakdown in cents and `formatMoney` takes cents; the API (`node:http`) and the command line follow. The acceptance is Python that runs `node` found by `shutil.which` (it fails with the reason when Node is absent) | the API drops the coupon: the caller does not pass the new option |
+| `second-task-pairs` | second task of a pair (`after: api-callers`): reservations become visible — `Inventory.reservations`, `GET /orders/<id>/reservations`, the desk's `holds` and a morning-report line that counts only the desk | the desk's holds and the report line count every reservation, not only the desk's |

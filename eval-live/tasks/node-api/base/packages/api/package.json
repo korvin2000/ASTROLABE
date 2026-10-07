@@ -1,0 +1,7 @@
+{
+  "name": "@tally/api",
+  "version": "1.4.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js"
+}

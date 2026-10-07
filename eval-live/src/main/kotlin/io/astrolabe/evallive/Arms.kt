@@ -141,6 +141,8 @@ internal object Fingerprints {
             "base=${HiddenFiles.read(task.base).digest}", "hidden=${task.hidden.digest}",
             // Only a dirty task names its dirt: the other tasks keep their fingerprints.
             task.dirt?.let { "dirt=$it" },
+            // Only the second task of a pair names its first: the other tasks keep their fingerprints.
+            task.first?.let { "after=${this.task(it)}" },
         ).joinToString("\n"),
     )
 }

@@ -146,8 +146,13 @@ internal class Bench(
         val workspace = temp.resolve("workspace")
         var dirt: DirtPlacement? = null
         try {
-            Trees.copy(run.task.base, workspace)
-            val base = if (run.task.baseCommit) GitRepo.initWithBase(workspace) else GitRepo.initWithoutCommit(workspace, temp.resolve("base.index"))
+            // Plan §9.2: a pair starts from its first task's base; the second is measured against what the first left.
+            val earlier = run.task.first
+            require(run.task.after == null || earlier != null) { "task ${run.task.id} is the second of a pair whose first task ${run.task.after} was not loaded" }
+            Trees.copy((earlier ?: run.task).base, workspace)
+            var base = if (run.task.baseCommit || earlier != null) GitRepo.initWithBase(workspace) else GitRepo.initWithoutCommit(workspace, temp.resolve("base.index"))
+            var pair: PairResult? = null
+            var measuredFrom = 0
             dirt = run.task.dirt?.write(workspace)
             val interrupt = run.task.interrupt
             val reopen = run.task.reopen
@@ -174,6 +179,16 @@ internal class Bench(
                             val script = SessionScript(interrupt?.afterResponses, reopen?.afterResponses, run.task.message)
                             // The loop's limits are per work: a second session of the same work continues its spend; a follow-up is a new work.
                             val budget = LoopBudget()
+                            if (earlier != null) {
+                                // The first task of the pair: a work of its own in the same workspace and state root, in auto mode.
+                                val opening = segment(earlier.prompt, bound, events, temp, spec, SessionScript(), null, LoopBudget())
+                                segments += opening
+                                val accepted = runCatching { Acceptance(interpreters, plan.temp).run(earlier, workspace) }.getOrNull()
+                                pair = PairResult(earlier.id, accepted)
+                                opening.failure?.let { throw IllegalStateException("the first task ${earlier.id} of the pair: $it") }
+                                base = GitRepo.commitAll(workspace, "after ${earlier.id}")
+                                measuredFrom = segments.size
+                            }
                             val first = segment(run.task.prompt, bound, events, temp, spec, script, null, budget, user)
                             segments += first
                             // WP-B2: the user's constraint arrives as the Studio delivers a message after the run stopped or ended.
@@ -201,8 +216,10 @@ internal class Bench(
                             }
                         } finally {
                             recorder.drain()
-                            totals = totalsOf(recorder.events())
-                            phases = PhaseSummary.of(recorder.events())
+                            // A pair measures its second task: the run's totals and phases start after the first task.
+                            val measured = segments.getOrNull(measuredFrom)?.let { recorder.events(it.fromSeq, Long.MAX_VALUE) } ?: if (measuredFrom == 0) recorder.events() else emptyList()
+                            totals = totalsOf(measured)
+                            phases = PhaseSummary.of(measured)
                             dropped = recorder.dropped
                             segments.replaceAll { it.copy(totals = totalsOf(recorder.events(it.fromSeq, it.toSeq))) }
                         }
@@ -215,9 +232,12 @@ internal class Bench(
             } finally {
                 runCatching { binding?.close() }
             }
+            pair = pair?.copy(first = segments.firstOrNull()?.let(::segmentResult))
+            val opening = segments.take(measuredFrom)
+            val ownSegments = segments.drop(measuredFrom)
             failure = failure ?: segments.firstNotNullOfOrNull { it.failure }
-            val attempt = segments.lastOrNull()?.attempt
-            val attempts = segments.map { it.attempt }
+            val attempt = ownSegments.lastOrNull()?.attempt
+            val attempts = ownSegments.map { it.attempt }
             val diff = GitRepo.diff(workspace, base)
             dir.resolve("workspace.diff").writeText(diff)
             val acceptance = runCatching { Acceptance(interpreters, plan.temp).run(run.task, workspace, dir.resolve("acceptance.log")) }
@@ -250,7 +270,7 @@ internal class Bench(
                 acceptanceDigest = run.task.hidden.digest,
                 startedAt = started.toString(),
                 endedAt = clock.instant().toString(),
-                attemptWallMillis = if (segments.isEmpty()) null else segments.sumOf { it.wallMillis },
+                attemptWallMillis = if (ownSegments.isEmpty()) null else ownSegments.sumOf { it.wallMillis },
                 totals = totals,
                 eventsDropped = dropped,
                 changedFiles = DIFF_FILE.findAll(diff).count(),
@@ -279,6 +299,7 @@ internal class Bench(
                 },
                 phases = phases,
                 dirt = dirt?.result,
+                pair = pair.takeIf { opening.isNotEmpty() },
             )
             dir.resolve("result.json").writeText(Summary.encode(result))
             return result

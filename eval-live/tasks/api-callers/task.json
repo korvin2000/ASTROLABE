@@ -1,0 +1,9 @@
+{
+  "id": "api-callers",
+  "class": "api-change",
+  "title": "Stock reservations become objects tied to an order; checkout, cancel, fulfilment, the shop and the operator desk follow",
+  "acceptance": {
+    "argv": ["{python}", "_acceptance/accept.py"],
+    "timeoutSeconds": 120
+  }
+}

@@ -1,0 +1,3 @@
+# Runtime dependencies. There is no network here: packages come from vendor/
+#   python -m pip install --no-index --find-links vendor -r requirements.txt
+marklet==1.2.0

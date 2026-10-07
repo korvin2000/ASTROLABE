@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
+import java.time.Duration
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -26,15 +27,32 @@ class TaskValidityTest {
         assumeTrue(runCatching { interpreters.expand(Interpreters.PYTHON) }.isSuccess, "no Python 3 on the PATH")
         val all = BenchTask.all(tasks)
         assertTrue(all.map { it.id }.containsAll(listOf("api-currency", "bugfix-pagination", "env-launcher", "interrupt-csv", "investigate-totals", "large-tree", "port-framework", "red-test", "rest-todo", "two-sessions", "ui-clear-done")), all.map { it.id }.toString())
+        // The closed confirmation set (B6b).
+        assertTrue(all.map { it.id }.containsAll(listOf("api-callers", "merge-conflict", "node-api", "scenario-1004", "second-task-pairs")), all.map { it.id }.toString())
+        val node = runCatching { Proc.run(listOf("node", "--version"), temp, Duration.ofSeconds(20)).exitCode == 0 }.getOrDefault(false)
         val acceptance = Acceptance(interpreters, temp)
         for (task in all) {
-            val v = acceptance.validate(task, Acceptance.VISIBLE_TESTS)
+            task.first?.let { first ->
+                // Plan §9.2: the second task's own base is what the first leaves when it is solved — its base with its reference laid over it.
+                assertEquals(HiddenFiles.of(HiddenFiles.read(first.base).files + first.reference.files).digest, HiddenFiles.read(task.base).digest, "${task.id}: its base is not ${first.id}'s base with ${first.id}'s reference laid over it")
+            }
+            // A Node task's visible tests are `node --test`; without Node it cannot be judged here (its acceptance fails with the reason).
+            val nodeTask = Files.isRegularFile(task.base.resolve("package.json"))
+            if (nodeTask && !node) {
+                println("${task.id}: skipped, no node on the PATH")
+                continue
+            }
+            val v = acceptance.validate(task, if (nodeTask) NODE_TESTS else Acceptance.VISIBLE_TESTS)
             assertTrue(!v.onBase.passed, "${task.id}: the acceptance passes on the base\n${v.onBase.outputTail}")
             assertTrue(!v.onWrong.passed, "${task.id}: the acceptance passes on the wrong patch\n${v.onWrong.outputTail}")
             assertTrue(v.onReference.passed, "${task.id}: the acceptance fails on the reference\n${v.onReference.outputTail}")
             assertEquals(true, v.visibleGreenOnReference, "${task.id}: the visible tests fail on the reference")
             assertTrue(v.sound)
         }
+    }
+
+    private companion object {
+        val NODE_TESTS = listOf("node", "--test")
     }
 
     /** An installed task directory: only what the agent may see. */

@@ -1,0 +1,9 @@
+{
+  "name": "tally",
+  "private": true,
+  "type": "module",
+  "description": "Price quotes: the pricing library, the quote API and the command line, in one repository",
+  "scripts": {
+    "test": "node --test"
+  }
+}
