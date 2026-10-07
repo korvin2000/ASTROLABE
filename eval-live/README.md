@@ -181,6 +181,18 @@ runner stopped it), `segments` (work id, outcome, stop code, reason, failure, ce
 run's own fields describe the whole: outcome and ids of the last segment, the sum of cells, wall time and totals of
 both, every policy decision; `summary.csv` adds `interrupt_mode`.
 
+`dirt` = `{"dir": "devtools", "files": 1500, "bigMegabytes": 20}` (optional, WP-W0): after the base commit the runner adds an
+untracked directory of `files` small files, one of them `bigMegabytes` MB. `dir` is a relative name (under the workspace) or,
+T-14, an absolute path — `C:\...`, `\\server\share\...`, `/...`: the tree is then written there, outside the repository,
+so it is not dirt of the tree; the runner removes what it wrote when the run ends, and never stops for dirt it cannot write
+(an unreachable share, a path of the other system, a directory that is already there is left as it is). `result.json` →
+`dirt`: `dir`, `inTree`, `written`, `reason` (`null` for a task without dirt). A start opens the campaign once (T-12): the
+verification setup's notes and declared checks go in with the first open, as the Studio's launch does; a second open only
+when the core refused the plan or found other notes than expected.
+
+`reopen` = `{"afterResponses": K}`: the session is closed after K responses and the same work reopens in the same state
+root (`result.json` → `reopen`), as the Studio's resume does.
+
 | id | class | wrong/ |
 |---|---|---|
 | `bugfix-pagination` | bug with a reproducer | fixes the reproducer's case only: empty and exactly full listings get a page too many |
@@ -191,3 +203,6 @@ both, every policy decision; `summary.csv` adds `interrupt_mode`.
 | `red-test` | a visible test already red on the base (the same bug sits in the batch recount, which only the hidden acceptance covers; a changed `tests/test_reorder.py` is refused) | fixes the single-item path only |
 | `ui-clear-done` | UI change with little build: a "Clear completed" button in a plain-JavaScript page plus `DELETE /api/todos?done=true` (API over HTTP, HTML through `html.parser`, `static/app.js` checked as text — no JavaScript engine) | the server removes every todo, not only the completed ones |
 | `investigate-totals` | long investigation with a refuted first hypothesis (the request blames float rounding; the cause is an inclusive month end) | `Decimal` rounding, the month boundary still inclusive |
+| `port-framework` | port a small REST service (`library/`, 8 endpoints, token check, request ids) from the in-house `http.server` micro-framework (`tinyhttp/`) to the ASGI-style one in the repository (`miniasgi/`), wire behaviour unchanged; 31 files, 3 packages; the acceptance drives the bare ASGI protocol and checks that the old layer is not imported (debugging set) | the happy paths ported, the implicit behaviour of the old framework lost: error answers in the new framework's `{"detail": …}` shape, request id missing on the 401, invalid JSON a 500, repeated `tag` parameters collapsed to one |
+| `large-tree` | the bulky-parcel line moves from 100 to 120 cm in a tree of 52 files and 7 packages; the places are found by following references, not names from the request (one named constant, two re-derived literals, a JSON data file), and two look-alike limits (the postal contract, customs) must stay (debugging set) | the named constant and one literal changed, the label note and the weekly report's config left on 100 cm |
+| `two-sessions` | `reopen` after 3 responses: the user's own day instead of the UTC date in six places of a scheduling library, then quiet hours (`next_send_time`) built on the same clock; the acceptance judges both parts of the final tree (debugging set) | three of the six places fixed, quiet hours computed on the UTC clock |

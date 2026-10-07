@@ -25,7 +25,7 @@ class TaskValidityTest {
         val interpreters = Interpreters.detect()
         assumeTrue(runCatching { interpreters.expand(Interpreters.PYTHON) }.isSuccess, "no Python 3 on the PATH")
         val all = BenchTask.all(tasks)
-        assertTrue(all.map { it.id }.containsAll(listOf("api-currency", "bugfix-pagination", "env-launcher", "interrupt-csv", "investigate-totals", "red-test", "rest-todo", "ui-clear-done")), all.map { it.id }.toString())
+        assertTrue(all.map { it.id }.containsAll(listOf("api-currency", "bugfix-pagination", "env-launcher", "interrupt-csv", "investigate-totals", "large-tree", "port-framework", "red-test", "rest-todo", "two-sessions", "ui-clear-done")), all.map { it.id }.toString())
         val acceptance = Acceptance(interpreters, temp)
         for (task in all) {
             val v = acceptance.validate(task, Acceptance.VISIBLE_TESTS)

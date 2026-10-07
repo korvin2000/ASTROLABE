@@ -1,0 +1,9 @@
+{
+  "id": "large-tree",
+  "class": "large-tree",
+  "title": "Move the bulky-parcel line from 100 cm to 120 cm in a 50-file tree: one constant, two re-derived literals and a data file, with two look-alike limits that must stay",
+  "acceptance": {
+    "argv": ["{python}", "_acceptance/accept.py"],
+    "timeoutSeconds": 120
+  }
+}

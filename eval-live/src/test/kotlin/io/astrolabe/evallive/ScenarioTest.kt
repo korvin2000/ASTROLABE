@@ -141,12 +141,15 @@ class ScenarioTest {
         assertEquals(StudioAttempt.CLOSED, first.reason)
         assertTrue(first.workId != null && first.workId == second.workId, "one work across both sessions: $reopen")
         assertEquals(1, first.openedContractVersion, "the first session created the work")
-        assertTrue(assertNotNull(second.openedContractVersion) >= 2, "the second session found the contract the first one stored: $second")
+        // T-12: the review item is declared at the first open, so no host amendment raises the stored contract above version 1 (it was 2 when the amendment followed a refusal).
+        assertEquals(1, second.openedContractVersion, "the second session found the contract the first one stored: $second")
         assertNull(second.failure, second.failure)
         assertNotNull(second.outcome, "$second")
         assertEquals(second.workId, result.workId)
         assertEquals(second.outcome, result.outcome)
         assertEquals(reopen.segments.sumOf { it.totals!!.modelResponses }, assertNotNull(result.totals).modelResponses)
+        // T-12: one open per session, the second of them over the stored contract.
+        assertEquals(2, assertNotNull(result.phases).opens, "${result.phases}")
     }
 
     @Test

@@ -1,0 +1,5 @@
+[project]
+name = "parcelhub"
+version = "2.4.0"
+description = "Parcel rating, carrier choice, labels, customs paperwork and reports"
+requires-python = ">=3.10"

@@ -1,0 +1,9 @@
+{
+  "id": "port-framework",
+  "class": "port",
+  "title": "Port a small REST service from the in-house http.server micro-framework to the ASGI-style one, wire behaviour unchanged",
+  "acceptance": {
+    "argv": ["{python}", "_acceptance/accept.py"],
+    "timeoutSeconds": 120
+  }
+}
