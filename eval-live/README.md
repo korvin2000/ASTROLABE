@@ -69,9 +69,9 @@ models, acceptance, limits and accounting; one results directory can hold severa
 |---|---|---|
 | `default` | the core, structured protocol, the Studio's default launch (`RunSpec.defaults`) | runs |
 | `loop` | the reference loop below, over `provider-api` only | runs |
-| `direct` | the core with the direct protocol | refused until the core has it (D1) |
+| `direct` | the core with the direct protocol (`Config.protocol = Direct`, D1) | runs |
 
-An arm that sets a field the core cannot honour yet — the direct protocol (D1), a forced shape (H2), a model table (H3),
+An arm that sets a field the core cannot honour yet — a forced shape (H2), a model table (H3),
 or any core field on the loop — is refused with an error naming the field, never run as if it were not set.
 
 ### The loop arm: rules of a fair comparison

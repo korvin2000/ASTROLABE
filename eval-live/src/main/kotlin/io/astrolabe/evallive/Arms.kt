@@ -15,8 +15,11 @@ import java.util.HexFormat
 /** What runs an arm's attempts: the core through the Studio's launch, or the reference loop over `provider-api`. */
 internal enum class ArmRunner(val wire: String) { Core("core"), Loop("loop") }
 
-/** The core's protocol: the structured one it has, or the direct one D1 brings. */
-internal enum class Protocol(val wire: String) { Structured("structured"), Direct("direct") }
+/** The core's protocol (`Config.protocol`): structured, or direct (D1). */
+internal enum class Protocol(val wire: String, val core: io.astrolabe.cell.Protocol) {
+    Structured("structured", io.astrolabe.cell.Protocol.Structured),
+    Direct("direct", io.astrolabe.cell.Protocol.Direct),
+}
 
 /**
  * An arm (plan §6 B5): a named configuration of one bench over [RunSpec.defaults], so arms are compared as
@@ -41,7 +44,6 @@ internal data class Arm(
             if (protocol != Protocol.Structured || shape != null || models != null) add("the loop arm has no core protocol, shape or model table")
             return@buildList
         }
-        if (protocol == Protocol.Direct) add("protocol ${protocol.wire}: the core has no direct protocol yet (D1)")
         if (shape != null) add("shape forcing '$shape': the core cannot force a shape yet (H2)")
         if (models != null) add("model table ${models.toSortedMap()}: the core runs one model for every function (H3)")
     }
@@ -50,10 +52,10 @@ internal data class Arm(
     val canonical: String
         get() = "arm=$name;runner=${runner.wire};protocol=${protocol.wire};shape=${shape ?: "-"};models=${models?.toSortedMap() ?: "-"}"
 
-    /** The arm's [RunSpec] over the default arm's: every field an arm can set today leaves it as it is. */
+    /** The arm's [RunSpec] over the default arm's: its protocol set in `Config.protocol`; every other field leaves it as it is. */
     fun spec(base: RunSpec): RunSpec {
         check(unsupported().isEmpty()) { "arm $name cannot run: ${unsupported().joinToString("; ")}" }
-        return base
+        return if (base.config.protocol == protocol.core) base else base.copy(config = base.config.copy(protocol = protocol.core))
     }
 
     companion object {
