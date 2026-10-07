@@ -121,6 +121,18 @@ class ChecksTest {
     }
 
     @Test
+    fun `T-37 the digest's objective is the request and its amendments, never a steering message`() {
+        val messages = contract.copy(requests = listOf(
+            UserRequest("U1", Instant.EPOCH, "add the retry path", io.astrolabe.contract.MessageKind.Request),
+            UserRequest("U2", Instant.EPOCH, "keep the log format", io.astrolabe.contract.MessageKind.Steering),
+            UserRequest("U3", Instant.EPOCH, "also cover timeouts", io.astrolabe.contract.MessageKind.Amendment),
+        ))
+        val digest = ContractDigest.render(messages, ledger, emptyList(), estimator)
+        assertTrue("\"add the retry path\" + \"also cover timeouts\"" in digest, digest)
+        assertTrue("keep the log format" !in digest, "steering is pinned verbatim elsewhere, never the objective: $digest")
+    }
+
+    @Test
     fun `slice carries complete acceptance definitions and an id-only slice fails coverage (IX-11)`() {
         val increment = Increment("I2", listOf("R2"), accept = listOf("AC-4"), writeScope = listOf("src/pay/"), expectedFiles = 3)
         val slice = ContractSlice.forIncrement(contract, increment, originalObligations = mapOf("AC-4" to "pytest -k idempot (before weakening)"))

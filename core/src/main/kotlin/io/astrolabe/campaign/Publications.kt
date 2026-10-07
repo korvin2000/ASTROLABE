@@ -83,7 +83,7 @@ internal class Publications(private val idGen: IdGen, private val clock: Clock) 
         // D-250: L0–L2 are green at the final stamp only for a completed campaign with nothing left unverified; an item
         // accepted without verification is listed in `notVerified` (D-342), so it never publishes beyond `patch`. The
         // "regression only" disclosure (task-workflow §3.2) is the goal-evidence class, not an unverified obligation.
-        val green = finish.stamp.takeIf { finish.status == "completed" && finish.notVerified.all(FinishReceipts::classOnly) }
+        val green = finish.stamp.takeIf { finish.status == "completed" && FinishReceipts.holdsBack(finish).isEmpty() }
         val evidence = PublicationEvidence(
             shape = contract.shape,
             risk = contract.risk,

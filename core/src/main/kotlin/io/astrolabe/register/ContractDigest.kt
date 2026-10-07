@@ -13,7 +13,7 @@ public class DigestCapacity(public val requiredTokens: Long, public val capToken
 
 /**
  * The ≤ 150-token contract digest at the tail of `[A]` (§5.1, D-17): the current authorized objective
- * (every verbatim request, newest last), requirement and obligation ids with status and currency, and the
+ * (the request and every amendment verbatim, newest last — task-workflow §1.2, T-37; steering is pinned elsewhere), requirement and obligation ids with status and currency, and the
  * critical exclusions. Ids-only rendering is allowed here and nowhere else (D-52); the full acceptance
  * definitions stay in `[K]`. Truncation is deterministic and labelled: the oldest request text shrinks first,
  * then acceptance statuses collapse to `+N more`; requirement statuses and exclusions are never dropped.
@@ -30,7 +30,8 @@ public object ContractDigest {
         capTokens: Int = 150,
     ): String {
         require(capTokens > 0)
-        var requests = contract.requests.map { it.text }
+        val objective = contract.objectiveRequests.map { it.text }
+        var requests = objective
         var statuses = obligations
         var text = compose(contract, ledger, requests, statuses)
         while (estimator.estimate(text).tokens > capTokens) {
@@ -41,7 +42,7 @@ public object ContractDigest {
                 else -> throw DigestCapacity(estimator.estimate(text).tokens, capTokens)
             }
             val hidden = obligations.size - statuses.size
-            text = compose(contract, ledger, requests, statuses, hiddenStatuses = hidden, requestsHidden = contract.requests.size - requests.size)
+            text = compose(contract, ledger, requests, statuses, hiddenStatuses = hidden, requestsHidden = objective.size - requests.size)
         }
         return text
     }

@@ -342,10 +342,7 @@ public object FinishReceipts {
                 regression = lines.filterNot(::goal).map { it.id })
         }
         // §3.2: a requirement whose only green evidence is regression says so, never "verified independently" (WF-12).
-        val regressionOnly = requirements.filter { line ->
-            line.provenanceClass == ProvenanceClass.Unverified && line.goalEvidence.isEmpty() && line.regression.isNotEmpty() &&
-                line.regression.all { id -> acceptance.firstOrNull { it.id == id }?.result == ResultStatus.Passed }
-        }.map { "${it.id}: $REGRESSION_ONLY${it.id}" }
+        val regressionLines = requirements.filter { regressionOnly(it, acceptance) }.map { disclosure(it.id) }
         // C1b: a mandatory check outside the acceptance items and the campaign gate (the blast radius, the types of touched
         // files) red on the final tree — completed past on an Open item — leaves the campaign unverified; a known red does not.
         // P8.C.10: theirs is the hold — the attempt's failures not shown fixed on the final tree: each is disclosed in
@@ -389,7 +386,7 @@ public object FinishReceipts {
                 acceptance.filter { it.provenance == null }.map { it.id } +
                 acceptance.filter { it.provenance == "accepted" }.map { "${it.id}: accepted without verification by ${it.acceptedBy} (${it.decider}): ${it.acceptedReason}" } +
                 decided.values.filter { p -> acceptance.none { it.id == p.item } }.map { "${it.item}: accepted without verification by ${it.by} (${it.decider?.name?.lowercase()}): ${it.reason}" } +
-                redOnFinalTree + regressionOnly,
+                redOnFinalTree + regressionLines,
             deadEnds = registers.flatMap { r -> r.deadEnds.map { it.text } },
             decisions = registers.flatMap { r -> r.decisions.map { "${it.text} because ${it.because}" } },
             // §4.2: a boundary-crossing decision is promoted to an ADR candidate; the curator admits it (P4.1).
@@ -510,11 +507,23 @@ public object FinishReceipts {
     /** Task-workflow §3.2: the `notVerified` disclosure of a requirement whose only green evidence is regression. */
     internal const val REGRESSION_ONLY: String = "regression only: no goal-level check of "
 
+    /** §3.2: [line] is a requirement whose only green evidence is regression — every regression item passed, no goal evidence. */
+    internal fun regressionOnly(line: RequirementLine, acceptance: List<AcceptanceLine>): Boolean =
+        line.provenanceClass == ProvenanceClass.Unverified && line.goalEvidence.isEmpty() && line.regression.isNotEmpty() &&
+            line.regression.all { id -> acceptance.firstOrNull { it.id == id }?.result == ResultStatus.Passed }
+
+    /** The `notVerified` disclosure of regression-only requirement [id]. */
+    internal fun disclosure(id: String): String = "$id: $REGRESSION_ONLY$id"
+
     /**
-     * A `notVerified` line that only discloses the goal-evidence class (§3.2): L0–L2 are green, so it holds no publication
-     * back (D-250) — as an `agent_test` result does not; an unverified or decided item does.
+     * D-250: the `notVerified` lines of [finish] that hold publication beyond `patch` back — every one but the disclosure of a
+     * requirement the receipt itself classifies regression only (§3.2: L0–L2 are green, as for an `agent_test` result). WR2
+     * (P1 #3): classified by the receipt's structure, never by text, so a decider's reason that quotes it holds back as before.
      */
-    internal fun classOnly(line: String): Boolean = REGRESSION_ONLY in line
+    internal fun holdsBack(finish: FinishReceipt): List<String> {
+        val disclosed = finish.requirements.filter { regressionOnly(it, finish.acceptance) }.mapTo(HashSet()) { disclosure(it.id) }
+        return finish.notVerified.filterNot { it in disclosed }
+    }
 
     /** The last tier of a review that went to the host's authority (`ReviewCell`). */
     private const val HUMAN: String = "human"
