@@ -18,7 +18,7 @@ class DefaultsTest {
         "Register cap / contract digest cap / patch cap" to listOf("registerCapTokens", "digestCapTokens", "digestTokensPerRequirement", "digestCapCeilingTokens", "patchCapTokens"),
         "Fact line / note body / note summary" to listOf("factLineMaxChars", "noteBodyMaxTokens", "noteSummaryMaxChars"),
         "Workset seeds per cell / KB injection / focus notes / focus zoom" to
-            listOf("seedsMaxTokens", "seedRule", "injectionMaxNotes", "injectionMaxTokens", "focusNotesMaxTokens", "focusZoomMaxTokens"),
+            listOf("seedsMaxTokens", "seedRule", "seedFallback", "parentCarryMaxTokens", "injectionMaxNotes", "injectionMaxTokens", "focusNotesMaxTokens", "focusZoomMaxTokens"),
         "Touched ledger in [A]" to listOf("touchedInAnchor"),
         "Direct [A] journal: Runs / Notes / target" to listOf("directRunsMaxLines", "directNotesMaxTokens", "directAnchorTargetTokens"),
         "Checker time box" to listOf("checkerTimeBoxSeconds", "checkerFallbackTimeBoxSeconds"),
@@ -90,6 +90,8 @@ class DefaultsTest {
         assertEquals(60, d.providerTerminalWaitSeconds)
         assertEquals(3, d.attemptsPerIncrement)
         assertEquals(600, d.factLineMaxChars)
+        assertEquals(true, d.seedFallback)
+        assertEquals(4_000, d.parentCarryMaxTokens)
         assertEquals(Triple(5, 200, 800), Triple(d.directRunsMaxLines, d.directNotesMaxTokens, d.directAnchorTargetTokens))
         assertTrue(d.violations().isEmpty())
     }
