@@ -1440,7 +1440,7 @@ public class Controller @JvmOverloads public constructor(
             val green = checks.isNotEmpty() && checks.all { scheduler.currency(it, stamp).certifies }
             AcceptanceCheck(green, "acceptance ${increment.accept.joinToString(", ")} ${if (green) "green" else "not green"} at @${stamp.hash8}")
         }
-        val helper = Repair(router, CellRepairRunner(childCell(c, increment, model, authority, syntax, span), idGen, c.cancellation, model.estimator), acceptance, model.estimator, config.defaults, RoleTexts.worded(Roles.repair, config.role(Roles.repair.name)))
+        val helper = Repair(router, CellRepairRunner(childCell(c, increment, model, authority, syntax, span), idGen, c.cancellation, model.estimator), acceptance, model.estimator, config.defaults, RoleTexts.worded(Roles.repair, config.role(Roles.repair.name)), io.astrolabe.route.RoutingLog(c.store, clock), ids)
         val tiered = config.tierTable.profiles.isNotEmpty() && config.tierTable.profileIds.all { it in config.profiles }
         val policy = RoutingPolicy(if (tiered) config.tierTable else TierTable.single(model.profile.id), if (tiered) config.profiles else mapOf(model.profile.id to model.profile), RoutingBudget(remainingCost = Accounting(c.store, clock).remainingCost(c.ids.work, c.contract.budget.cost)), configuredEffort = model.effort)
         val packet = RoutingPacket(increment.risk ?: c.contract.risk, CellRepairRunner.DEFAULT_BUDGET.tokens.value, model.maxOutputTokens, featureClass = "repair:${increment.id}")
@@ -1795,7 +1795,7 @@ public class Controller @JvmOverloads public constructor(
             { id -> Aliases.parse(id)?.let { aliases.resolve(c.ids.work, it) } != null }, emptyList(), emptyList(),
             selector = io.astrolabe.context.SeedRule.of(role.protocol, c.attempt.config.defaults.seedRule).selector, touched = touched,
             latestReceipts = c.checks.all().mapNotNull { it.last?.receiptId?.let(receipts::get) }, handoff = handoff,
-            fallback = c.attempt.config.defaults.seedFallback, stored = stored,
+            fallback = c.attempt.config.defaults.seedFallback, stored = stored, seedCapTokens = c.attempt.config.defaults.seedsMaxTokens.toLong(),
         ).copy(capacityGap = retained.capacityGap)
         if (stored != null) return carry
         return carry.copy(packetMissing = true, touched = touched.sorted().map { io.astrolabe.context.CarriedTouch(it, c.registry.version(it)) })
@@ -2500,7 +2500,7 @@ public class Controller @JvmOverloads public constructor(
                 val packet = RoutingPacket(increment.risk ?: contract.risk, wire, current.maxOutputTokens, previousTier = previousTier,
                     featureClass = "${contract.shape.name.lowercase()}:${increment.expectedFiles}", reserveTokens = arithmetic.reserveTokens.toLong())
                 val policy = RoutingPolicy(table, candidates - misfits.keys, budget, configuredEffort = model.effort)
-                when (val routed = router.selectProfile(function, packet, impact, policy)) {
+                when (val routed = router.selectProfile(function, packet, impact, policy, io.astrolabe.route.RoutingLog(c.store, clock), c.ids)) {
                     is Routed.Deterministic -> return Routing(current, compiled, null, null)
                     is Routed.Refused -> {
                         if (misfits.isEmpty()) return Routing(current, compiled, null, routed)
