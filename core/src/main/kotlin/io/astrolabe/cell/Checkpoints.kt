@@ -1,5 +1,8 @@
 package io.astrolabe.cell
 
+import io.astrolabe.atlas.ChangedDefinition
+import io.astrolabe.atlas.DeclarationKind
+import io.astrolabe.atlas.DefinitionChange
 import io.astrolabe.id.CandidateId
 import io.astrolabe.id.ContextId
 import io.astrolabe.id.Digest
@@ -9,7 +12,12 @@ import io.astrolabe.register.Register
 import io.astrolabe.store.Migrations
 import io.astrolabe.store.Store
 import io.astrolabe.store.Tx
+import io.astrolabe.verify.AcceptanceSurface
+import io.astrolabe.verify.TestIntegrityFlag
+import io.astrolabe.verify.Verdict
 import io.astrolabe.workset.Entry
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -67,7 +75,8 @@ public data class PacketChange(val path: String, val kind: TouchKind, val before
  * The `packets` row of a cell's end (task-workflow §4.1, W9): written by the cell's settle in the transaction of its
  * terminal checkpoint and end export, and built from that checkpoint — never from later state — so a boundary reads the
  * previous cell's summary by its id from the store, in this process or after a reopen, and both give the same carry.
- * [register] is the register at [registerVersion]: its decisions, dead ends and open items travel verbatim.
+ * [register] is the register at [registerVersion]: its decisions, dead ends and open items travel verbatim. [handoff] is set
+ * exactly for a handoff end (A-D.6) and is not encoded otherwise, so the row of every other end keeps its bytes.
  */
 @Serializable
 public data class CellPacket(
@@ -87,17 +96,78 @@ public data class CellPacket(
     val gaps: List<String>,
     val notesToPersist: List<NoteCandidate> = emptyList(),
     val openQuestions: List<String> = emptyList(),
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val handoff: PacketHandoff? = null,
 ) {
     public companion object {
         public const val KIND: String = "cell_packet"
 
-        /** The row of [packet], which the cell built over [checkpoint]. */
+        /** The row of [packet], which the cell built over [checkpoint]; [handoff] for a handoff end. */
         @JvmStatic
-        public fun of(packet: ResultPacket, checkpoint: CellCheckpoint): CellPacket = CellPacket(
+        @JvmOverloads
+        public fun of(packet: ResultPacket, checkpoint: CellCheckpoint, handoff: PacketHandoff? = null): CellPacket = CellPacket(
             checkNotNull(packet.ids.context), packet.increment, packet.role, packet.status, packet.reason, checkpoint.registerVersion,
             packet.contractVersion, packet.base?.stamp, packet.stamp, packet.envId, packet.register, packet.changes.map(PacketChange::of),
-            packet.receipts, packet.gaps, packet.claims.notesToPersist, packet.claims.openQuestions,
+            packet.receipts, packet.gaps, packet.claims.notesToPersist, packet.claims.openQuestions, handoff,
         )
+    }
+}
+
+/**
+ * A-D.6: a handoff end as the cell's terminal packet keeps it — the typed cause, the hint and the turns taken, and the
+ * completion obligations its epoch inherits: the test-integrity [flags] without a verdict (the epoch's completion obtains
+ * its own) and the unresolved changed public definitions ([impact]). Written in the transaction of the terminal
+ * checkpoint, so a controller that stops before its `returned_handoff` record leaves them durable all the same.
+ */
+@Serializable
+public data class PacketHandoff(
+    val cause: HandoffCause,
+    val hint: String,
+    val turns: Int,
+    val flags: List<PacketFlag> = emptyList(),
+    val impact: List<PacketImpact> = emptyList(),
+)
+
+/** A [TestIntegrityFlag] as a [PacketHandoff] keeps it. */
+@Serializable
+public data class PacketFlag(
+    val path: String,
+    val surface: AcceptanceSurface,
+    val cause: String,
+    val requiredChecks: List<String>,
+    val kind: String,
+    val reason: String?,
+    val verdict: Verdict?,
+    val originalObligation: String?,
+    val humanOnly: Boolean = false,
+) {
+    public fun flag(): TestIntegrityFlag = TestIntegrityFlag(path, surface, cause, requiredChecks, kind, reason, verdict, originalObligation, humanOnly)
+
+    public companion object {
+        @JvmStatic
+        public fun of(flag: TestIntegrityFlag): PacketFlag =
+            PacketFlag(flag.path, flag.surface, flag.cause, flag.requiredChecks, flag.kind, flag.reason, flag.verdict, flag.originalObligation, flag.humanOnly)
+    }
+}
+
+/** An unresolved [ImpactNudge] as a [PacketHandoff] keeps it. */
+@Serializable
+public data class PacketImpact(
+    val path: String,
+    val symbol: String,
+    val kind: DeclarationKind,
+    val change: DefinitionChange,
+    val public: Boolean,
+    val references: Int,
+    val turn: Int,
+) {
+    public fun nudge(): ImpactNudge = ImpactNudge(ChangedDefinition(path, symbol, kind, change, public), references, turn)
+
+    public companion object {
+        @JvmStatic
+        public fun of(nudge: ImpactNudge): PacketImpact =
+            nudge.definition.let { d -> PacketImpact(d.path, d.symbol, d.kind, d.change, d.public, nudge.references, nudge.turn) }
     }
 }
 
