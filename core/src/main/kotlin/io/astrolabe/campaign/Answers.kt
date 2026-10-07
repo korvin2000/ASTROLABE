@@ -1,6 +1,7 @@
 package io.astrolabe.campaign
 
 import io.astrolabe.evidence.Intent
+import io.astrolabe.evidence.Observation
 import io.astrolabe.workspace.Preimage
 import kotlinx.serialization.json.Json
 
@@ -26,12 +27,20 @@ internal object Answers {
             Json.decodeFromString(Preimage.serializer(), it.string("body"))
         }.firstOrNull { it.versionAfter != null }
         if (edited != null) return "an edit was applied to ${edited.path}"
-        for (intent in executions(c)) {
+        val executions = executions(c)
+        for (intent in executions) {
             if (intent.expectedEffect.startsWith("D ")) return "an action with effects ran: ${intent.argv.joinToString(" ")} (D-class)"
             // D-321: effects a stamp of the tree cannot observe (network, install, outside the workspace, a background process);
             // a script interpreter's are observed by the stamp (§9.4), so the candidate at s0 shows it left none.
             if (!intent.workspaceConfined && !intent.stampObserved) return "an action with effects ran: ${intent.argv.joinToString(" ")} (effects outside what the tree shows)"
         }
+        // WR2 (P1 #11, T-44): sticky — an execution after which the recorded candidate differed from s0 is a durable effect,
+        // though a later one restored the bytes (§3.5: "any execution after which the candidate differs from s0").
+        val argv = executions.associate { it.actionId to it.argv }
+        val moved = c.store.db.query("SELECT body FROM observations WHERE work_id = ? AND attempt_id = ? ORDER BY rowid", c.ids.work, c.ids.attempt) {
+            Json.decodeFromString(Observation.serializer(), it.string("body"))
+        }.firstOrNull { it.actionId in argv && it.candidate != null && it.candidate != c.s0.stampId }
+        if (moved != null) return "an action moved the tree: ${argv.getValue(moved.actionId).joinToString(" ")} (@${c.s0.stampId.hash8} → @${moved.candidate?.hash8})"
         return null
     }
 
