@@ -369,7 +369,11 @@ public class ShadowRef @JvmOverloads public constructor(
             }
             entries[row.path] = IndexEntry(row.mode, row.id, row.path)
         }
-        val objects = objectIds(manifest, last)
+        val objects = try {
+            objectIds(manifest, last)
+        } finally {
+            dirtyState.releaseKept()
+        }
         for (entry in manifest.entries) {
             if (!entry.present) {
                 entries.remove(entry.path)
@@ -443,7 +447,16 @@ public class ShadowRef @JvmOverloads public constructor(
         val expected = rest.associateWith { expectedId(it) }
         val present = workspace.git.presentObjects(expected.values)
         val missing = rest.filter { expected.getValue(it) !in present }
-        val stored = workspace.git.hashObjects(missing.map { store.blobs.file(it) ?: throw MissingBlob(it, "recovery blob ${it.hex} is not on disk") })
+        // T-22: git gets the bytes the capture read where it kept them; any other content streams from its recovery blob, counted.
+        val kept = missing.map { dirtyState.keptBytes(it) }
+        val files = missing.mapIndexed { i, digest ->
+            if (kept[i] != null) null else store.blobs.file(digest) ?: throw MissingBlob(digest, "recovery blob ${digest.hex} is not on disk")
+        }
+        val sizes = missing.indices.map { i -> kept[i]?.size?.toLong() ?: Files.size(files[i]!!).also(workspace::blobRead) }
+        val stored = workspace.git.writeBlobs(sizes) { i, out ->
+            val bytes = kept[i]
+            if (bytes != null) out.write(bytes) else Files.newInputStream(files[i]!!).use { it.transferTo(out) }
+        }
         missing.forEachIndexed { i, digest ->
             val want = expected.getValue(digest)
             val got = stored[i]
@@ -477,7 +490,7 @@ public class ShadowRef @JvmOverloads public constructor(
     private fun digestOfBlob(git: Git, id: ObjectId): Digest = Digest.of(git.catFile(id))
 
     /** A store blob read for this tree, counted (§7.2). */
-    private fun blob(digest: Digest): ByteArray = store.blobs.get(digest).also { workspace.blobRead(it.size) }
+    private fun blob(digest: Digest): ByteArray = store.blobs.get(digest).also { workspace.blobRead(it.size.toLong()) }
 
     private fun digestOfFile(file: Path): Digest = Digest.of(Files.readAllBytes(file))
 

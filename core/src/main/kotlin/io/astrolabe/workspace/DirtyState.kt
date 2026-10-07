@@ -201,6 +201,9 @@ public data class Separated(
 }
 
 private const val CAPTURE_ATTEMPTS = 3
+
+/** T-22: the bytes one capture keeps in memory for the snapshot's git objects; content past it is streamed from its recovery blob. */
+private const val KEPT_OBJECT_BYTES_MAX = 32L * 1024 * 1024
 private const val SHA1_HEX = 40
 private const val SHA256_HEX = 64
 
@@ -241,6 +244,7 @@ public class DirtyState(
         // D-274: a concurrent writer (dev server, IDE autosave) gets a bounded, immediate retry; the last failure stands.
         // WD-02: the attempts share one capture's reads, so a retry reads again only what moved.
         val reads = ContentCache.Reads()
+        releaseKept()
         var attempt = 1
         while (true) {
             try {
@@ -268,6 +272,28 @@ public class DirtyState(
 
     /** The git object id of captured content [digest], when a capture of this tree computed it from the bytes it read. */
     internal fun objectId(digest: Digest): String? = objectIds[digest]
+
+    /**
+     * T-22 (D-427): the bytes the last capture read and stored, by digest, up to [KEPT_OBJECT_BYTES_MAX] in all, so the
+     * snapshot that records it writes the objects git lacks from that very read instead of reading each recovery blob again.
+     */
+    private val kept = java.util.concurrent.ConcurrentHashMap<Digest, ByteArray>()
+    private val keptBytes = java.util.concurrent.atomic.AtomicLong()
+
+    /** The bytes of captured content [digest] when the last capture kept them (T-22). */
+    internal fun keptBytes(digest: Digest): ByteArray? = kept[digest]
+
+    /** Drops the kept bytes: the snapshot has written its objects, or a new capture begins. */
+    internal fun releaseKept() {
+        kept.clear()
+        keptBytes.set(0)
+    }
+
+    private fun keep(digest: Digest, bytes: ByteArray) {
+        if (kept.containsKey(digest)) return
+        val size = bytes.size.toLong()
+        if (keptBytes.addAndGet(size) > KEPT_OBJECT_BYTES_MAX) keptBytes.addAndGet(-size) else kept[digest] = bytes
+    }
 
     private fun captureOnce(turn: Int, attempt: Int, fresh: Boolean, reads: ContentCache.Reads): Snapshot {
         val scratch = stamper.scratch
@@ -352,7 +378,7 @@ public class DirtyState(
         status.copy(entries = status.entries.filterNot { it is StatusEntry.Untracked && stamper.scratch.excludes(it.path) })
 
     /** The bytes of [entry], read back from its recovery blob. */
-    public fun bytesOf(entry: SnapshotEntry): ByteArray? = entry.digest?.let { blobs.get(it).also { bytes -> workspace.blobRead(bytes.size) } }
+    public fun bytesOf(entry: SnapshotEntry): ByteArray? = entry.digest?.let { blobs.get(it).also { bytes -> workspace.blobRead(bytes.size.toLong()) } }
 
     // ------------------------------------------------------------ internals
 
@@ -400,6 +426,7 @@ public class DirtyState(
                 val bytes = linkTarget(resolved.real).toByteArray(StandardCharsets.UTF_8)
                 val digest = Digest.of(bytes)
                 objectIds[digest] = ContentCache.objectId(algorithm, bytes)
+                keep(digest, bytes)
                 SnapshotEntry(path, SnapshotEntryKind.Symlink, FileMode.SYMLINK,
                     blobs.put(bytes, digest, BlobKind.PREIMAGE, ids, recovery = true), bytes.size.toLong())
             }
@@ -424,7 +451,10 @@ public class DirtyState(
                 }
                 val got = content ?: throw SnapshotIntegrityError("'$path' disappeared during capture")
                 got.objectIds[algorithm]?.let { objectIds[got.digest] = it }
-                bytes?.let { blobs.put(it, got.digest, BlobKind.PREIMAGE, ids, recovery = true) }
+                bytes?.let {
+                    blobs.put(it, got.digest, BlobKind.PREIMAGE, ids, recovery = true)
+                    keep(got.digest, it)
+                }
                 SnapshotEntry(path, SnapshotEntryKind.File, mode, got.digest, got.sizeBytes)
             }
             PathKind.Directory -> null
