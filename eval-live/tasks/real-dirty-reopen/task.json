@@ -1,0 +1,20 @@
+{
+  "id": "real-dirty-reopen",
+  "class": "dirty-repo",
+  "title": "Account balance counts refunds twice, in a working tree full of untracked tool files — the session closes after three responses and the same work reopens",
+  "acceptance": {
+    "argv": [
+      "{python}",
+      "_acceptance/accept.py"
+    ],
+    "timeoutSeconds": 120
+  },
+  "dirt": {
+    "dir": "devtools",
+    "files": 1500,
+    "bigMegabytes": 20
+  },
+  "reopen": {
+    "afterResponses": 3
+  }
+}
