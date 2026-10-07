@@ -5,12 +5,14 @@ import io.astrolabe.budget.Tokens
 import io.astrolabe.cell.Role
 import io.astrolabe.cell.Roles
 import io.astrolabe.contract.Shape
+import io.astrolabe.id.Identities
 import io.astrolabe.provider.Profile
 import io.astrolabe.provider.TokenEstimator
 import io.astrolabe.provider.ToolMask
 import io.astrolabe.route.Routed
 import io.astrolabe.route.Router
 import io.astrolabe.route.RoutingFunction
+import io.astrolabe.route.RoutingLog
 import io.astrolabe.route.RoutingPacket
 import io.astrolabe.route.RoutingPolicy
 
@@ -95,6 +97,9 @@ public class Repair @JvmOverloads constructor(
     private val defaults: Defaults = Defaults(),
     /** The repair role as the attempt's configuration words it (`RoleTexts.worded`); the capsule mask replaces its mask. */
     private val role: Role = Roles.repair,
+    /** With [ids], the helper's routing decision is a `routing_log` row of that attempt over its frozen binding snapshot (§4.6, E1). */
+    private val routingLog: RoutingLog? = null,
+    private val ids: Identities? = null,
 ) {
     public suspend fun repair(capsule: Capsule, shape: Shape, packet: RoutingPacket, policy: RoutingPolicy, owner: Diagnoses? = null): RepairOutcome {
         val outcome = run(capsule.frozen(), shape, packet, policy)
@@ -106,7 +111,9 @@ public class Repair @JvmOverloads constructor(
         val op = capsule.intendedOperation
         if (shape < Shape.S2) return escalated(op, "capsule repair is S2+ only (shape $shape)", "not available in $shape", 0)
         if (capsule.remainingBudget == Tokens.ZERO) return escalated(op, "no remaining budget for a repair", "budget", 0)
-        val profile = when (val routed = router.selectProfile(RoutingFunction.RepairHelper, packet, null, policy)) {
+        val routed = if (routingLog != null && ids != null) router.selectProfile(RoutingFunction.RepairHelper, packet, null, policy, routingLog, ids)
+            else router.selectProfile(RoutingFunction.RepairHelper, packet, null, policy)
+        val profile = when (routed) {
             is Routed.Selected -> routed.profile
             is Routed.Refused -> return escalated(op, routed.reason, "no affordable helper profile", 0)
             is Routed.Deterministic -> return escalated(op, "the repair helper routes to a model", "routing", 0)
