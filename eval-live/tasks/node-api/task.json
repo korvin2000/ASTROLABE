@@ -1,0 +1,9 @@
+{
+  "id": "node-api",
+  "class": "api-change-node",
+  "title": "Node monorepo: quote takes an options object with a coupon and answers a breakdown in cents; the API and the command line follow",
+  "acceptance": {
+    "argv": ["{python}", "_acceptance/accept.py"],
+    "timeoutSeconds": 120
+  }
+}

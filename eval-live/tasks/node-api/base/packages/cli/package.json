@@ -1,0 +1,7 @@
+{
+  "name": "@tally/cli",
+  "version": "1.4.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js"
+}
