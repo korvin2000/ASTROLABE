@@ -1420,7 +1420,7 @@ public class Cell @JvmOverloads constructor(
                 register, ws.workset.export(), null, ws.registry::version,
                 { id -> Aliases.parse(id)?.let { ev.aliases.resolve(ids.work, it) } != null }, emptyList(), pinned(contract),
                 selector = io.astrolabe.context.SeedRule.of(ctx.role.protocol, defaults.seedRule).selector, touched = changes().map { it.path },
-                latestReceipts = ws.checks.all().mapNotNull { check -> check.last?.receiptId?.let { ev.receipts.get(it) } }, fallback = defaults.seedFallback,
+                latestReceipts = ws.checks.all().mapNotNull { check -> check.last?.receiptId?.let { ev.receipts.get(it) } }, fallback = defaults.seedFallback, seedCapTokens = defaults.seedsMaxTokens.toLong(),
             )
             val seeds = io.astrolabe.context.Seeds.render(carry.seeds, ws.registry::read)
             val carried = carry.copy(seeds = seeds.shown, notSeen = carry.notSeen + seeds.notSeen)

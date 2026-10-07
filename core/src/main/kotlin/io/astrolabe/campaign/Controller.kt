@@ -1795,7 +1795,7 @@ public class Controller @JvmOverloads public constructor(
             { id -> Aliases.parse(id)?.let { aliases.resolve(c.ids.work, it) } != null }, emptyList(), emptyList(),
             selector = io.astrolabe.context.SeedRule.of(role.protocol, c.attempt.config.defaults.seedRule).selector, touched = touched,
             latestReceipts = c.checks.all().mapNotNull { it.last?.receiptId?.let(receipts::get) }, handoff = handoff,
-            fallback = c.attempt.config.defaults.seedFallback, stored = stored,
+            fallback = c.attempt.config.defaults.seedFallback, stored = stored, seedCapTokens = c.attempt.config.defaults.seedsMaxTokens.toLong(),
         ).copy(capacityGap = retained.capacityGap)
         if (stored != null) return carry
         return carry.copy(packetMissing = true, touched = touched.sorted().map { io.astrolabe.context.CarriedTouch(it, c.registry.version(it)) })
