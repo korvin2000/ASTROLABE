@@ -40,6 +40,7 @@ internal data class RunResult(
     val reason: String?,
     /** Why the run could not produce an outcome (a harness or transport failure), or `null`. */
     val failure: String?,
+    /** The cells the run started, each once: the sum of its segments' own cells. */
     val cells: Int?,
     val policyDecisions: List<PolicyDecision>,
     val acceptance: AcceptanceResult?,

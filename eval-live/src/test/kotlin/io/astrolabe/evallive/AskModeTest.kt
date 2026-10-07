@@ -74,7 +74,12 @@ class AskModeTest {
         assertEquals(waiting.workId, resumed.workId, "the answer resumes the same work: $ask")
         assertEquals(listOf("waiting", "answered"), acceptance(result))
         val phases = assertNotNull(result.phases)
-        assertTrue(phases.opens >= 2 && phases.finishAttempts >= 1, "$phases")
+        // Review 5 P2 #1 (WF-1): one open for the start and one for the reopen after the answer.
+        assertEquals(2, phases.opens, "$phases")
+        assertTrue(phases.finishAttempts >= 1, "$phases")
+        // Review 5 P2 #4: the reopen continues the work without a new cell, and the run's cells are not counted twice.
+        assertEquals(listOf(1, 0), ask.segments.map { it.cells }, "$ask")
+        assertEquals(1, result.cells, "$ask")
     }
 
     @Test
