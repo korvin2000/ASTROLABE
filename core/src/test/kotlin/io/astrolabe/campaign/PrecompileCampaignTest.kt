@@ -48,7 +48,10 @@ import kotlin.test.assertTrue
 /**
  * P3.7.1 boundary pre-compilation in the S1 loop (§6.6, FX-44): behind `Flags.precompile`, the next increment's
  * `[K]` is built at the completion proposal while verify-on-stop runs, served at the boundary only on a full
- * fingerprint match, and discarded with a journaled reason when an input moved.
+ * fingerprint match, and discarded with a journaled reason when an input moved. W9 (owner decision): an increment whose
+ * first cell starts from a carry (task-workflow §4.3) — every next increment of a campaign — is served nothing, since a
+ * `[K]` built before the boundary cannot hold the carry the boundary produces; it compiles fresh. A hit on an equal
+ * fingerprint is covered where no carry exists, by `io.astrolabe.context.PrecompileTest`.
  */
 class PrecompileCampaignTest {
     @TempDir
@@ -129,36 +132,30 @@ class PrecompileCampaignTest {
     private fun List<String>.precompile(): List<String> = filter { it.startsWith("precompile ") }
 
     @Test
-    fun `FX-44 the next K is pre-built at the completion proposal and served at the boundary on a matching fingerprint`() {
+    fun `FX-44 a next increment that starts from a carry is pre-built at the proposal but served nothing and compiles fresh`() {
         val on = campaign("on", precompile = true, mutating = false)
         assertEquals(CampaignOutcome.Completed, on.run.outcome, on.run.state?.reason)
         val lines = on.boundary.precompile()
-        // Only the slow acceptance check remains at the proposal, so the boundary qualifies (§6.6).
+        // Only the slow acceptance check remains at the proposal, so the boundary qualifies (§6.6) and the job starts.
         assertTrue(lines.any { it.startsWith("precompile I2 started @") && it.endsWith(" slow") }, lines.toString())
-        assertTrue(lines.any { it.startsWith("precompile I2 hit: [K] reused @") && it.endsWith("· coverage revalidated") }, lines.toString())
+        assertTrue(lines.any { it.startsWith("precompile I2 discarded: I2 starts from the carry of I1 · cell-") }, lines.toString())
         assertTrue(lines.any { it.startsWith("precompile I3 started @") }, lines.toString())
-        assertTrue(lines.any { it.startsWith("precompile I3 hit: [K] reused @") }, lines.toString())
+        assertTrue(lines.any { it.startsWith("precompile I3 discarded: I3 starts from the carry of I2 · cell-") }, lines.toString())
         assertTrue(lines.any { it == "precompile skipped: no increment ready after I3" }, lines.toString())
-        assertEquals(Triple(2, 0, 2), Triple(on.report.hits, on.report.misses, on.report.boundaries), on.report.toString())
-        assertNotNull(on.report.p50BoundaryNanos)
-        assertNotNull(on.report.p95BoundaryNanos)
-        assertTrue(on.report.p95BoundaryNanos!! >= on.report.p50BoundaryNanos!!)
+        assertTrue(lines.none { " hit: " in it }, "a carried increment is never served a pre-built K: $lines")
+        assertEquals(Triple(0, 0, 2), Triple(on.report.hits, on.report.misses, on.report.boundaries), on.report.toString())
     }
 
     @Test
-    fun `FX-44 a tree that moved while the checks ran discards the pre-compiled K and recompiles at the boundary`() {
+    fun `FX-44 a tree that moved while the checks ran still completes and serves no pre-built K to a carried increment`() {
         val on = campaign("moved", precompile = true, mutating = true)
         assertEquals(CampaignOutcome.Completed, on.run.outcome, on.run.state?.reason)
         assertTrue(on.marker, "the check wrote $MARKER: " + on.boundary.toString())
         val lines = on.boundary.precompile()
-        // I1's check writes docs/build/marker.txt: the stamp at close differs from the stamp the I2 pre-compile was tagged with.
         assertTrue(lines.any { it.startsWith("precompile I2 started @") }, lines.toString())
-        assertTrue(lines.any { it.startsWith("precompile I2 miss: stamp moved (fp ") && it.endsWith("· discarded, recompiled") }, on.boundary.toString())
-        assertTrue(lines.none { it.startsWith("precompile I2 hit") }, lines.toString())
-        // I2 rewrites the same scratch bytes: tested inputs and the stamp stay stable, so I3 reuses its pre-compile.
-        assertTrue(lines.any { it.startsWith("precompile I3 hit: [K] reused @") }, lines.toString())
-        assertEquals(1, on.report.hits)
-        assertEquals(1, on.report.misses)
+        assertTrue(lines.any { it.startsWith("precompile I2 discarded: I2 starts from the carry of ") }, on.boundary.toString())
+        assertTrue(lines.none { " hit: " in it }, lines.toString())
+        assertEquals(0, on.report.hits)
         assertEquals(2, on.report.boundaries)
     }
 
@@ -177,7 +174,7 @@ class PrecompileCampaignTest {
         val off = campaign("inv-off", precompile = false, mutating = false)
         assertEquals(CampaignOutcome.Completed, on.run.outcome, on.run.state?.reason)
         assertEquals(CampaignOutcome.Completed, off.run.outcome, off.run.state?.reason)
-        assertEquals(2, on.report.hits, "the served contexts are the ones compared")
+        assertEquals(0, on.report.hits, "a carried increment is served nothing: both runs compile it fresh")
         fun projection(m: Manifest) = listOf(m.incrementId, m.outcome, m.selectedUnits, m.omissions, m.arithmetic, m.estimatedTokens, m.seeds, m.notesInjected, m.boundaryReason?.wire)
         val served = on.manifests.filter { it.incrementId in setOf("I2", "I3") }.map(::projection)
         val fresh = off.manifests.filter { it.incrementId in setOf("I2", "I3") }.map(::projection)

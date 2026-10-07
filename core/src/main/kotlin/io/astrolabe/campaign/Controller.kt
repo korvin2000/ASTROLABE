@@ -1170,6 +1170,11 @@ public class Controller @JvmOverloads public constructor(
                 if (ready.cells.isNotEmpty()) {
                     p.discard("${ready.id} continues; pre-compilation applies to the next increment only")
                     null
+                } else if (carry != null) {
+                    // Owner decision (W9): a K pre-built before the boundary cannot hold the carry the boundary produces
+                    // (task-workflow §4.3); the layer serves nothing here and the cell compiles fresh with its carry.
+                    p.discard("${ready.id} starts from the carry of ${carry.source ?: carry.register.cell.value}; pre-compilation serves no carried increment")
+                    null
                 } else {
                     p.take(fingerprint(c, contract, ready, c.stamper.report().candidateId, model, inputs, null, pinned)) { compiled ->
                         (compiled as? Compiled.Ready)?.let { compiler.coverage(contract, ready, it.k, c.prime, pinned, inputs) }.orEmpty()
