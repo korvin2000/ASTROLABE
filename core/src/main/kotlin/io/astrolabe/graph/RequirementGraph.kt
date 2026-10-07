@@ -88,7 +88,8 @@ public class RequirementGraph(
                 issue(GraphIssueCode.UnsupportedVerification, id, "verified status lacks evidence for this increment definition")
             }
         }
-        for (requirement in contract.requirements.sortedBy { it.id }) {
+        // Task-workflow §2.4 C: a cancelled or replaced requirement needs no coverage; its history stays.
+        for (requirement in contract.requirements.filterNot { it.lapsed }.sortedBy { it.id }) {
             val assigned = coverage[requirement.id].orEmpty()
             if (assigned.isEmpty()) issue(GraphIssueCode.UncoveredRequirement, null, "uncovered requirement ${requirement.id}")
             val covered = assigned.flatMap { it.accept }.toSet()
@@ -253,6 +254,7 @@ public class RequirementGraph(
                 }
             }
             val status = when {
+                requirement.lapsed -> RequirementStatus.Cancelled
                 verified -> RequirementStatus.Verified
                 blocked -> RequirementStatus.Blocked
                 assigned.any { it.status == IncrementStatus.InProgress || it.status == IncrementStatus.Verified } -> RequirementStatus.InProgress
@@ -264,7 +266,7 @@ public class RequirementGraph(
         // An invalid prerequisite invalidates its transitive dependents, including requirement cycles.
         val dependents = contract.requirements.flatMap { r -> r.dependsOn.map { it to r.id } }
             .groupBy({ it.first }, { it.second })
-        val pending = ArrayDeque(entries.values.filter { !it.stampValid }.map { it.requirementId })
+        val pending = ArrayDeque(entries.values.filter { !it.stampValid && it.status != RequirementStatus.Cancelled }.map { it.requirementId })
         while (pending.isNotEmpty()) for (id in dependents[pending.removeFirst()].orEmpty()) {
             val entry = entries.getValue(id)
             if (entry.stampValid) {

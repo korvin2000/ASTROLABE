@@ -279,7 +279,8 @@ public class DirtyState(
             SHA256_HEX -> "SHA-256"
             else -> workspace.objectAlgorithm
         }
-        val read = { path: String, mode: FileMode -> worktreeEntry(path, mode, fresh, reads, algorithm) }
+        val pass = workspace.paths.capturePass()
+        val read = { path: String, mode: FileMode -> worktreeEntry(path, mode, fresh, reads, algorithm, pass) }
 
         for (entry in status.entries) {
             when (entry) {
@@ -388,8 +389,8 @@ public class DirtyState(
         return staged.sortedWith(compareBy(Stamper.PATH_ORDER) { it.path + "" + it.stage })
     }
 
-    private fun worktreeEntry(path: String, reportedMode: FileMode, fresh: Boolean, reads: ContentCache.Reads, algorithm: String): SnapshotEntry? {
-        val resolved = workspace.paths.resolveCapture(path)
+    private fun worktreeEntry(path: String, reportedMode: FileMode, fresh: Boolean, reads: ContentCache.Reads, algorithm: String, pass: WorkspacePath.CapturePass): SnapshotEntry? {
+        val resolved = pass.resolve(path)
         if (resolved !is PathResolution.Resolved) {
             throw SnapshotIntegrityError("cannot capture '$path': $resolved")
         }

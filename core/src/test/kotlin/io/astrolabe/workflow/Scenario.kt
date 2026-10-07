@@ -103,10 +103,13 @@ internal class Scenario(
     fun reopen(): OpenedCampaign = open()
 
     /** Plays one run of model replies against the open campaign (opening it when none is); [script] sees the campaign for file versions. */
-    suspend fun play(script: (OpenedCampaign) -> List<Scripted>): S0Run = playModel { c -> ScriptedModel.of(*script(c).toTypedArray()) }
+    suspend fun play(script: (OpenedCampaign) -> List<Scripted>): S0Run = playWith { c -> ScriptedModel.of(*script(c).toTypedArray()) }
 
-    /** [play] with the model built by [model] and the run's cell cap [maxCells] (a cap of one stops the run after its first cell). */
-    suspend fun playModel(maxCells: Int = Controller.DEFAULT_MAX_CELLS, model: (OpenedCampaign) -> ScriptedModel): S0Run {
+    /**
+     * [play] with a model of the test's own making (a turn that throws, one with a side effect) and the run's cell cap
+     * [maxCells] (a cap of one stops the run after its first cell).
+     */
+    suspend fun playWith(maxCells: Int = Controller.DEFAULT_MAX_CELLS, model: (OpenedCampaign) -> ScriptedModel): S0Run {
         val c = campaign ?: open()
         val fake = FakeAdapter(model(c))
         adapter = fake

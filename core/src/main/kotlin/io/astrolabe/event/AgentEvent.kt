@@ -44,7 +44,15 @@ public sealed interface AgentEvent {
     public sealed interface Campaign : AgentEvent {
         @Serializable
         @SerialName("campaign.opened")
-        public data class Opened(override val ids: Identities, val requestId: String, override val phase: Phase = Phase.Understand, override val span: SpanId? = null, override val parent: SpanId? = null) : Campaign
+        public data class Opened @JvmOverloads constructor(
+            override val ids: Identities,
+            val requestId: String,
+            override val phase: Phase = Phase.Understand,
+            override val span: SpanId? = null,
+            override val parent: SpanId? = null,
+            /** The work this one follows up (task-workflow §1.4); `null` for a first run or a new task. */
+            val parentWork: String? = null,
+        ) : Campaign
 
         @Serializable
         @SerialName("campaign.shape_selected")
@@ -85,7 +93,21 @@ public sealed interface AgentEvent {
     public sealed interface Contract : AgentEvent {
         @Serializable
         @SerialName("contract.amended")
-        public data class Amended(override val ids: Identities, val version: Int, val by: String, override val phase: Phase = Phase.Understand, override val span: SpanId? = null, override val parent: SpanId? = null) : Contract
+        public data class Amended @JvmOverloads constructor(
+            override val ids: Identities,
+            val version: Int,
+            val by: String,
+            override val phase: Phase = Phase.Understand,
+            override val span: SpanId? = null,
+            override val parent: SpanId? = null,
+            /** The user's message that amended it (task-workflow §2.4 E); `null` for a host or a resolved model proposal. */
+            val requestId: String? = null,
+        ) : Contract
+
+        /** A message sent to the work, recorded verbatim under [id] (task-workflow §1.1, §2.4 E); [kind] is its `MessageKind.wire`. */
+        @Serializable
+        @SerialName("contract.message_recorded")
+        public data class MessageRecorded(override val ids: Identities, val id: String, val kind: String, override val phase: Phase = Phase.Understand, override val span: SpanId? = null, override val parent: SpanId? = null) : Contract
 
         @Serializable
         @SerialName("contract.amendment_proposed")

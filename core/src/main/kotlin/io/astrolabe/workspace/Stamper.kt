@@ -148,8 +148,9 @@ public class Stamper @JvmOverloads public constructor(
     /** [report] inside one capture: files [reads] already took and that still look the same are not read again (WD-02). */
     internal fun report(fresh: Boolean, reads: ContentCache.Reads?): StampReport {
         val status = workspace.git.status(UntrackedFiles.ALL, includeIgnored = countIgnored)
-        val tracked = trackedDelta(status, fresh, reads)
-        val untracked = untracked(status, fresh, reads)
+        val pass = workspace.paths.capturePass()
+        val tracked = trackedDelta(status, fresh, reads, pass)
+        val untracked = untracked(status, fresh, reads, pass)
         val baseCommit = status.branch?.let { it.oid?.hex ?: Stamp.NO_COMMIT }
             ?: throw SnapshotIntegrityError("git status omitted the base commit")
         val stamp = Stamp(
@@ -248,17 +249,17 @@ public class Stamper @JvmOverloads public constructor(
 
     // ------------------------------------------------------------ internals
 
-    private fun trackedDelta(status: GitStatus, fresh: Boolean, reads: ContentCache.Reads?): List<StampEntry> {
+    private fun trackedDelta(status: GitStatus, fresh: Boolean, reads: ContentCache.Reads?, pass: WorkspacePath.CapturePass): List<StampEntry> {
         val entries = LinkedHashMap<String, StampEntry>()
         for (entry in status.entries) {
             when (entry) {
-                is StatusEntry.Ordinary -> entries[entry.path] = stampEntry(entry.path, entry.worktreeMode, fresh, reads)
-                is StatusEntry.Unmerged -> entries[entry.path] = stampEntry(entry.path, entry.worktreeMode, fresh, reads)
+                is StatusEntry.Ordinary -> entries[entry.path] = stampEntry(entry.path, entry.worktreeMode, fresh, reads, pass)
+                is StatusEntry.Unmerged -> entries[entry.path] = stampEntry(entry.path, entry.worktreeMode, fresh, reads, pass)
                 is StatusEntry.Renamed -> {
-                    entries[entry.path] = stampEntry(entry.path, entry.worktreeMode, fresh, reads)
+                    entries[entry.path] = stampEntry(entry.path, entry.worktreeMode, fresh, reads, pass)
                     // A rename removes its origin from the candidate; a copy leaves it in place.
                     if (entry.origin == ChangeOrigin.RENAME) {
-                        val origin = stampEntry(entry.origPath, FileMode.ABSENT, fresh, reads)
+                        val origin = stampEntry(entry.origPath, FileMode.ABSENT, fresh, reads, pass)
                         if (origin.type == EntryType.Deleted) entries[entry.origPath] = origin
                     }
                 }
@@ -276,7 +277,7 @@ public class Stamper @JvmOverloads public constructor(
         for (row in workspace.git.lsFiles()) {
             // A gitlink is a directory on disk; git status already reports submodule changes.
             if (row.stage != 0 || row.path in entries || row.mode == FileMode.GITLINK) continue
-            val entry = captureEntry(row.path, row.mode, fresh, reads, row) { real, bytes ->
+            val entry = captureEntry(row.path, row.mode, fresh, reads, pass, row) { real, bytes ->
                 if (reads != null && bytes.size <= KEEP_FILE_BYTES && heldBytes + bytes.size <= KEEP_TOTAL_BYTES) {
                     held[row.path] = real to bytes
                     heldBytes += bytes.size
@@ -326,10 +327,10 @@ public class Stamper @JvmOverloads public constructor(
         return changed
     }
 
-    private fun untracked(status: GitStatus, fresh: Boolean, reads: ContentCache.Reads?): List<StampEntry> =
+    private fun untracked(status: GitStatus, fresh: Boolean, reads: ContentCache.Reads?, pass: WorkspacePath.CapturePass): List<StampEntry> =
         status.entries.filterIsInstance<StatusEntry.Untracked>()
             .filterNot { scratch.excludes(it.path) }
-            .map { stampEntry(it.path, FileMode.ABSENT, fresh, reads) }
+            .map { stampEntry(it.path, FileMode.ABSENT, fresh, reads, pass) }
             .filter { it.type != EntryType.Deleted }
             .sortedWith(compareBy(PATH_ORDER) { it.path })
 
@@ -338,15 +339,15 @@ public class Stamper @JvmOverloads public constructor(
      * which is the only mode that is meaningful on a platform without a POSIX executable bit;
      * [FileMode.ABSENT] means "git did not say", and the mode is then derived from the file itself.
      */
-    private fun stampEntry(path: String, reportedMode: FileMode, fresh: Boolean, reads: ContentCache.Reads?): StampEntry =
-        checkNotNull(captureEntry(path, reportedMode, fresh, reads))
+    private fun stampEntry(path: String, reportedMode: FileMode, fresh: Boolean, reads: ContentCache.Reads?, pass: WorkspacePath.CapturePass): StampEntry =
+        checkNotNull(captureEntry(path, reportedMode, fresh, reads, pass))
 
     /** [keep] receives the bytes this call read of a tracked file whose raw content differs from its [baseline] object. */
     private fun captureEntry(
-        path: String, reportedMode: FileMode, fresh: Boolean, reads: ContentCache.Reads?, baseline: LsFilesEntry? = null,
+        path: String, reportedMode: FileMode, fresh: Boolean, reads: ContentCache.Reads?, pass: WorkspacePath.CapturePass, baseline: LsFilesEntry? = null,
         keep: ((Path, ByteArray) -> Unit)? = null,
     ): StampEntry? {
-        val resolved = workspace.paths.resolveCapture(path)
+        val resolved = pass.resolve(path)
         if (resolved !is PathResolution.Resolved) {
             throw SnapshotIntegrityError("cannot stamp '$path': $resolved")
         }

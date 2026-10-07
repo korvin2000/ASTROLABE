@@ -90,13 +90,13 @@ class BoundaryCarryScenarioTest {
                     },
                 )
                 if (name == IN_PROCESS) {
-                    s.playModel(maxCells = 2) { c -> model(c, cellOne(c)) }
+                    s.playWith(maxCells = 2) { c -> model(c, cellOne(c)) }
                 } else {
-                    s.playModel(maxCells = 1) { c -> model(c, cellOne(c)) }
+                    s.playWith(maxCells = 1) { c -> model(c, cellOne(c)) }
                     if (name == PACKET_CUT) s.campaign!!.store.db.tx { it.execute("DELETE FROM packets WHERE kind = ?", CellPacket.KIND) }
                     val reopened = s.reopen()
                     start = reopened.workspace.filesRead
-                    s.playModel(maxCells = 1) { c -> model(c, emptyList()) }
+                    s.playWith(maxCells = 1) { c -> model(c, emptyList()) }
                 }
                 val c = checkNotNull(s.campaign)
                 val request = checkNotNull(s.adapter).calls.map { it.request }.firstOrNull(::carried)
