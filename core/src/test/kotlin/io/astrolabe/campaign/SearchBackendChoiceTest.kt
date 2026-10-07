@@ -36,10 +36,10 @@ class SearchBackendChoiceTest {
         fun env(dir: Path) = if (os == OsFamily.Windows) mapOf("Path" to dir.toString(), "PATHEXT" to ".COM;.EXE") else mapOf("PATH" to dir.toString())
         val clock = FakeClock.at("2026-10-07T10:00:00Z")
         val idGen = FixedIdGen()
-        TempRepo.create().use { repo ->
-            repo.write("src/a.py", "def a():\n    return 1\n")
-            repo.commit("initial")
-            for ((dir, expected) in listOf(empty to SearchBackend.Jvm, bin to SearchBackend.Ripgrep)) {
+        for ((dir, expected) in listOf(empty to SearchBackend.Jvm, bin to SearchBackend.Ripgrep)) {
+            TempRepo.create().use { repo ->
+                repo.write("src/a.py", "def a():\n    return 1\n")
+                repo.commit("initial")
                 val config = Config(stateRoot = tmp.resolve("state-${expected.name}").toString(), profiles = FakeProfiles.all)
                 val controller = Controller(config, clock, idGen, host = PathProbe(os, env(dir)))
                 controller.open(repo.root, CampaignRequest(WorkId("W-1"), AttemptId("a1"), "make a return 10"), CampaignPolicy(Tokens(100_000))).use { c ->
