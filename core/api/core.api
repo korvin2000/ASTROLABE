@@ -21372,6 +21372,30 @@ public final class io/astrolabe/route/AttemptState$Terminal : io/astrolabe/route
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class io/astrolabe/route/BetaParameters {
+	public fun <init> ()V
+	public fun <init> (DD)V
+	public synthetic fun <init> (DDILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()D
+	public final fun component2 ()D
+	public final fun copy (DD)Lio/astrolabe/route/BetaParameters;
+	public static synthetic fun copy$default (Lio/astrolabe/route/BetaParameters;DDILjava/lang/Object;)Lio/astrolabe/route/BetaParameters;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAlpha ()D
+	public final fun getBeta ()D
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/route/BindingEstimatorsKt {
+	public static final fun estimateCacheShare (Lio/astrolabe/route/CacheShareState;)Lio/astrolabe/route/CacheShareEstimate;
+	public static final fun estimateLatency (Lio/astrolabe/route/LatencyState;)Lio/astrolabe/route/LatencyEstimate;
+	public static final fun estimatePrices (Lio/astrolabe/route/PriceState;)Lio/astrolabe/route/PriceEstimate;
+	public static final fun updateCacheShare (Lio/astrolabe/route/CacheShareState;Lio/astrolabe/route/CacheObservation;)Lio/astrolabe/route/CacheShareState;
+	public static final fun updateLatency (Lio/astrolabe/route/LatencyState;Lio/astrolabe/route/LatencyObservation;)Lio/astrolabe/route/LatencyState;
+	public static final fun updatePrices (Lio/astrolabe/route/PriceState;Lio/astrolabe/route/PriceObservation;)Lio/astrolabe/route/PriceState;
+}
+
 public final class io/astrolabe/route/CacheKey {
 	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
 	public final fun component1 ()Ljava/lang/String;
@@ -21385,6 +21409,28 @@ public final class io/astrolabe/route/CacheKey {
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class io/astrolabe/route/CacheObservation {
+	public fun <init> (Lio/astrolabe/route/CacheSeriesKey;JJJLjava/lang/String;Z)V
+	public synthetic fun <init> (Lio/astrolabe/route/CacheSeriesKey;JJJLjava/lang/String;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lio/astrolabe/route/CacheSeriesKey;
+	public final fun component2 ()J
+	public final fun component3 ()J
+	public final fun component4 ()J
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Z
+	public final fun copy (Lio/astrolabe/route/CacheSeriesKey;JJJLjava/lang/String;Z)Lio/astrolabe/route/CacheObservation;
+	public static synthetic fun copy$default (Lio/astrolabe/route/CacheObservation;Lio/astrolabe/route/CacheSeriesKey;JJJLjava/lang/String;ZILjava/lang/Object;)Lio/astrolabe/route/CacheObservation;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBlockId ()Ljava/lang/String;
+	public final fun getCacheableTokens ()J
+	public final fun getCachedTokens ()J
+	public final fun getHarnessRewrite ()Z
+	public final fun getInputTokens ()J
+	public final fun getSeriesKey ()Lio/astrolabe/route/CacheSeriesKey;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class io/astrolabe/route/CacheSchedule {
 	public static final field DEFAULT_MAX_DELAY I
 	public static final field INSTANCE Lio/astrolabe/route/CacheSchedule;
@@ -21392,6 +21438,65 @@ public final class io/astrolabe/route/CacheSchedule {
 	public static final fun order (Ljava/util/List;)Ljava/util/List;
 	public static final fun order (Ljava/util/List;Lio/astrolabe/route/CacheKey;)Ljava/util/List;
 	public static synthetic fun order$default (Ljava/util/List;Lio/astrolabe/route/CacheKey;ILjava/lang/Object;)Ljava/util/List;
+}
+
+public final class io/astrolabe/route/CacheSeriesKey {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;)Lio/astrolabe/route/CacheSeriesKey;
+	public static synthetic fun copy$default (Lio/astrolabe/route/CacheSeriesKey;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lio/astrolabe/route/CacheSeriesKey;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getSessionId ()Ljava/lang/String;
+	public final fun getUpstream ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/route/CacheShareEstimate {
+	public fun <init> (Ljava/lang/Double;ILio/astrolabe/route/BetaParameters;DLio/astrolabe/route/ProbabilityInterval;Ljava/lang/Double;)V
+	public final fun component1 ()Ljava/lang/Double;
+	public final fun component2 ()I
+	public final fun component3 ()Lio/astrolabe/route/BetaParameters;
+	public final fun component4 ()D
+	public final fun component5 ()Lio/astrolabe/route/ProbabilityInterval;
+	public final fun component6 ()Ljava/lang/Double;
+	public final fun copy (Ljava/lang/Double;ILio/astrolabe/route/BetaParameters;DLio/astrolabe/route/ProbabilityInterval;Ljava/lang/Double;)Lio/astrolabe/route/CacheShareEstimate;
+	public static synthetic fun copy$default (Lio/astrolabe/route/CacheShareEstimate;Ljava/lang/Double;ILio/astrolabe/route/BetaParameters;DLio/astrolabe/route/ProbabilityInterval;Ljava/lang/Double;ILjava/lang/Object;)Lio/astrolabe/route/CacheShareEstimate;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEffectiveCalls ()I
+	public final fun getInterval90 ()Lio/astrolabe/route/ProbabilityInterval;
+	public final fun getMean ()D
+	public final fun getOverallCachedShare ()Ljava/lang/Double;
+	public final fun getPosterior ()Lio/astrolabe/route/BetaParameters;
+	public final fun getQHat ()Ljava/lang/Double;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/route/CacheShareState {
+	public fun <init> ()V
+	public fun <init> (Lio/astrolabe/route/BetaParameters;Lio/astrolabe/route/CacheSeriesKey;JJLjava/util/Set;JJ)V
+	public synthetic fun <init> (Lio/astrolabe/route/BetaParameters;Lio/astrolabe/route/CacheSeriesKey;JJLjava/util/Set;JJILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lio/astrolabe/route/BetaParameters;
+	public final fun component2 ()Lio/astrolabe/route/CacheSeriesKey;
+	public final fun component3 ()J
+	public final fun component4 ()J
+	public final fun component5 ()Ljava/util/Set;
+	public final fun component6 ()J
+	public final fun component7 ()J
+	public final fun copy (Lio/astrolabe/route/BetaParameters;Lio/astrolabe/route/CacheSeriesKey;JJLjava/util/Set;JJ)Lio/astrolabe/route/CacheShareState;
+	public static synthetic fun copy$default (Lio/astrolabe/route/CacheShareState;Lio/astrolabe/route/BetaParameters;Lio/astrolabe/route/CacheSeriesKey;JJLjava/util/Set;JJILjava/lang/Object;)Lio/astrolabe/route/CacheShareState;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBlockIds ()Ljava/util/Set;
+	public final fun getCacheableTokens ()J
+	public final fun getCachedTokens ()J
+	public final fun getPrior ()Lio/astrolabe/route/BetaParameters;
+	public final fun getSeriesKey ()Lio/astrolabe/route/CacheSeriesKey;
+	public final fun getTotalCachedTokens ()J
+	public final fun getTotalInputTokens ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class io/astrolabe/route/CalibrationEntry {
@@ -21565,6 +21670,217 @@ public final class io/astrolabe/route/FunctionTable {
 }
 
 public final class io/astrolabe/route/FunctionTable$Companion {
+}
+
+public abstract interface class io/astrolabe/route/LatencyEstimate {
+}
+
+public final class io/astrolabe/route/LatencyEstimate$Inseparable : io/astrolabe/route/LatencyEstimate {
+	public fun <init> (Ljava/lang/Double;)V
+	public final fun component1 ()Ljava/lang/Double;
+	public final fun copy (Ljava/lang/Double;)Lio/astrolabe/route/LatencyEstimate$Inseparable;
+	public static synthetic fun copy$default (Lio/astrolabe/route/LatencyEstimate$Inseparable;Ljava/lang/Double;ILjava/lang/Object;)Lio/astrolabe/route/LatencyEstimate$Inseparable;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAggregateTokensPerSecond ()Ljava/lang/Double;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/route/LatencyEstimate$Separated : io/astrolabe/route/LatencyEstimate {
+	public fun <init> (DDD)V
+	public final fun component1 ()D
+	public final fun component2 ()D
+	public final fun component3 ()D
+	public final fun copy (DDD)Lio/astrolabe/route/LatencyEstimate$Separated;
+	public static synthetic fun copy$default (Lio/astrolabe/route/LatencyEstimate$Separated;DDDILjava/lang/Object;)Lio/astrolabe/route/LatencyEstimate$Separated;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getOutputTokensPerSecond ()D
+	public final fun getSecondsPerOutputToken ()D
+	public final fun getStartupSeconds ()D
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/route/LatencyObservation {
+	public fun <init> (Ljava/lang/String;JD)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()J
+	public final fun component3 ()D
+	public final fun copy (Ljava/lang/String;JD)Lio/astrolabe/route/LatencyObservation;
+	public static synthetic fun copy$default (Lio/astrolabe/route/LatencyObservation;Ljava/lang/String;JDILjava/lang/Object;)Lio/astrolabe/route/LatencyObservation;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getElapsedSeconds ()D
+	public final fun getOutputTokens ()J
+	public final fun getSessionId ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/route/LatencyState {
+	public fun <init> ()V
+	public fun <init> (Ljava/lang/String;Ljava/util/List;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/util/List;
+	public final fun copy (Ljava/lang/String;Ljava/util/List;)Lio/astrolabe/route/LatencyState;
+	public static synthetic fun copy$default (Lio/astrolabe/route/LatencyState;Ljava/lang/String;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/route/LatencyState;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getObservations ()Ljava/util/List;
+	public final fun getSessionId ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/astrolabe/route/PriceEstimate {
+}
+
+public final class io/astrolabe/route/PriceEstimate$Determined : io/astrolabe/route/PriceEstimate {
+	public fun <init> (Lio/astrolabe/route/PriceRates;Lio/astrolabe/route/PriceProvenance;)V
+	public final fun component1 ()Lio/astrolabe/route/PriceRates;
+	public final fun component2 ()Lio/astrolabe/route/PriceProvenance;
+	public final fun copy (Lio/astrolabe/route/PriceRates;Lio/astrolabe/route/PriceProvenance;)Lio/astrolabe/route/PriceEstimate$Determined;
+	public static synthetic fun copy$default (Lio/astrolabe/route/PriceEstimate$Determined;Lio/astrolabe/route/PriceRates;Lio/astrolabe/route/PriceProvenance;ILjava/lang/Object;)Lio/astrolabe/route/PriceEstimate$Determined;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getProvenance ()Lio/astrolabe/route/PriceProvenance;
+	public final fun getRates ()Lio/astrolabe/route/PriceRates;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/route/PriceEstimate$InsufficientData : io/astrolabe/route/PriceEstimate {
+	public fun <init> (Lio/astrolabe/route/PriceInsufficiency;)V
+	public final fun component1 ()Lio/astrolabe/route/PriceInsufficiency;
+	public final fun copy (Lio/astrolabe/route/PriceInsufficiency;)Lio/astrolabe/route/PriceEstimate$InsufficientData;
+	public static synthetic fun copy$default (Lio/astrolabe/route/PriceEstimate$InsufficientData;Lio/astrolabe/route/PriceInsufficiency;ILjava/lang/Object;)Lio/astrolabe/route/PriceEstimate$InsufficientData;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getReason ()Lio/astrolabe/route/PriceInsufficiency;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/route/PriceInsufficiency : java/lang/Enum {
+	public static final field InconsistentBills Lio/astrolabe/route/PriceInsufficiency;
+	public static final field NonPhysicalRates Lio/astrolabe/route/PriceInsufficiency;
+	public static final field RankDeficient Lio/astrolabe/route/PriceInsufficiency;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/route/PriceInsufficiency;
+	public static fun values ()[Lio/astrolabe/route/PriceInsufficiency;
+}
+
+public final class io/astrolabe/route/PriceObservation {
+	public fun <init> (Lio/astrolabe/route/PriceScope;JJJDJD)V
+	public synthetic fun <init> (Lio/astrolabe/route/PriceScope;JJJDJDILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lio/astrolabe/route/PriceScope;
+	public final fun component2 ()J
+	public final fun component3 ()J
+	public final fun component4 ()J
+	public final fun component5 ()D
+	public final fun component6 ()J
+	public final fun component7 ()D
+	public final fun copy (Lio/astrolabe/route/PriceScope;JJJDJD)Lio/astrolabe/route/PriceObservation;
+	public static synthetic fun copy$default (Lio/astrolabe/route/PriceObservation;Lio/astrolabe/route/PriceScope;JJJDJDILjava/lang/Object;)Lio/astrolabe/route/PriceObservation;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBilledCost ()D
+	public final fun getCacheReadTokens ()J
+	public final fun getCacheWriteTokens ()J
+	public final fun getFeeUnits ()D
+	public final fun getOutputTokens ()J
+	public final fun getScope ()Lio/astrolabe/route/PriceScope;
+	public final fun getUncachedInputTokens ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/route/PriceProvenance : java/lang/Enum {
+	public static final field Billed Lio/astrolabe/route/PriceProvenance;
+	public static final field Documented Lio/astrolabe/route/PriceProvenance;
+	public static final field Inferred Lio/astrolabe/route/PriceProvenance;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/astrolabe/route/PriceProvenance;
+	public static fun values ()[Lio/astrolabe/route/PriceProvenance;
+}
+
+public final class io/astrolabe/route/PriceRates {
+	public fun <init> (DDDLjava/lang/Double;Ljava/lang/Double;)V
+	public synthetic fun <init> (DDDLjava/lang/Double;Ljava/lang/Double;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()D
+	public final fun component2 ()D
+	public final fun component3 ()D
+	public final fun component4 ()Ljava/lang/Double;
+	public final fun component5 ()Ljava/lang/Double;
+	public final fun copy (DDDLjava/lang/Double;Ljava/lang/Double;)Lio/astrolabe/route/PriceRates;
+	public static synthetic fun copy$default (Lio/astrolabe/route/PriceRates;DDDLjava/lang/Double;Ljava/lang/Double;ILjava/lang/Object;)Lio/astrolabe/route/PriceRates;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCacheReadPerToken ()D
+	public final fun getCacheWritePerToken ()Ljava/lang/Double;
+	public final fun getOutputPerToken ()D
+	public final fun getPerFeeUnit ()Ljava/lang/Double;
+	public final fun getUncachedInputPerToken ()D
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/route/PriceScope {
+	public fun <init> (Ljava/lang/String;Lio/astrolabe/route/Tier;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lio/astrolabe/route/Tier;
+	public final fun copy (Ljava/lang/String;Lio/astrolabe/route/Tier;)Lio/astrolabe/route/PriceScope;
+	public static synthetic fun copy$default (Lio/astrolabe/route/PriceScope;Ljava/lang/String;Lio/astrolabe/route/Tier;ILjava/lang/Object;)Lio/astrolabe/route/PriceScope;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getRouteId ()Ljava/lang/String;
+	public final fun getTier ()Lio/astrolabe/route/Tier;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/route/PriceState {
+	public fun <init> (Lio/astrolabe/route/PriceScope;ZZLio/astrolabe/route/PriceTolerance;Ljava/util/List;)V
+	public synthetic fun <init> (Lio/astrolabe/route/PriceScope;ZZLio/astrolabe/route/PriceTolerance;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lio/astrolabe/route/PriceScope;
+	public final fun component2 ()Z
+	public final fun component3 ()Z
+	public final fun component4 ()Lio/astrolabe/route/PriceTolerance;
+	public final fun component5 ()Ljava/util/List;
+	public final fun copy (Lio/astrolabe/route/PriceScope;ZZLio/astrolabe/route/PriceTolerance;Ljava/util/List;)Lio/astrolabe/route/PriceState;
+	public static synthetic fun copy$default (Lio/astrolabe/route/PriceState;Lio/astrolabe/route/PriceScope;ZZLio/astrolabe/route/PriceTolerance;Ljava/util/List;ILjava/lang/Object;)Lio/astrolabe/route/PriceState;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getIncludeCacheWrite ()Z
+	public final fun getIncludeFees ()Z
+	public final fun getObservations ()Ljava/util/List;
+	public final fun getScope ()Lio/astrolabe/route/PriceScope;
+	public final fun getTolerance ()Lio/astrolabe/route/PriceTolerance;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/route/PriceTolerance {
+	public fun <init> ()V
+	public fun <init> (DDD)V
+	public synthetic fun <init> (DDDILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()D
+	public final fun component2 ()D
+	public final fun component3 ()D
+	public final fun copy (DDD)Lio/astrolabe/route/PriceTolerance;
+	public static synthetic fun copy$default (Lio/astrolabe/route/PriceTolerance;DDDILjava/lang/Object;)Lio/astrolabe/route/PriceTolerance;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAbsoluteCost ()D
+	public final fun getRank ()D
+	public final fun getRelativeCost ()D
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/astrolabe/route/ProbabilityInterval {
+	public fun <init> (DD)V
+	public final fun component1 ()D
+	public final fun component2 ()D
+	public final fun copy (DD)Lio/astrolabe/route/ProbabilityInterval;
+	public static synthetic fun copy$default (Lio/astrolabe/route/ProbabilityInterval;DDILjava/lang/Object;)Lio/astrolabe/route/ProbabilityInterval;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getLower ()D
+	public final fun getUpper ()D
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class io/astrolabe/route/Refusal : java/lang/Enum {
