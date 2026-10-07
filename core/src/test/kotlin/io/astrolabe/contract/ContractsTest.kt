@@ -145,12 +145,13 @@ class ContractsTest {
             }
             assertEquals(2, amended.version)
             assertEquals(2, amended.requests.size)
-            assertEquals("Also cover the retry path.", amended.objective)
+            // WD-24 (task-workflow §1.2): the objective is the request plus the amendment, never the last text.
+            assertEquals("${amended.requests[0].id}: ${amended.requests[0].text}\namended by ${amended.requests[1].id}: Also cover the retry path.", amended.objective)
             assertEquals(listOf(contract(), amended), contracts.history(work).map { it.copy(amendmentsPending = emptyList()) })
 
-            assertTrue(recorder.awaitCount(3))
+            assertTrue(recorder.awaitCount(4))
             assertEquals(
-                listOf("AmendmentProposed", "AmendmentResolved", "Amended"),
+                listOf("AmendmentProposed", "AmendmentResolved", "MessageRecorded", "Amended"),
                 recorder.events.map { it::class.simpleName },
             )
         }

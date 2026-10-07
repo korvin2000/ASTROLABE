@@ -79,6 +79,7 @@ import io.astrolabe.contract.Contracts
 import io.astrolabe.contract.Increment
 import io.astrolabe.contract.IncrementStatus
 import io.astrolabe.contract.Ledger
+import io.astrolabe.contract.MessageKind
 import io.astrolabe.contract.Shape
 import io.astrolabe.contract.SqliteContractRepository
 import io.astrolabe.event.AgentEvent
@@ -275,10 +276,14 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 
-/** What a host opens a campaign for (§3.7 `campaign(request, repo, policy)`); a reopen passes the same ids. */
-public data class CampaignRequest(val work: WorkId, val attempt: AttemptId, val text: String) {
+/**
+ * What a host opens a campaign for (§3.7 `campaign(request, repo, policy)`); a reopen passes the same ids. [parentWork]
+ * names the work a follow-up follows (task-workflow §1.3, §1.4): it must have a final outcome, and the first open records it.
+ */
+public data class CampaignRequest @JvmOverloads constructor(val work: WorkId, val attempt: AttemptId, val text: String, val parentWork: WorkId? = null) {
     init {
         require(text.isNotBlank()) { "a campaign needs a request" }
+        require(parentWork != work) { "a work does not follow itself" }
     }
 }
 
@@ -309,6 +314,13 @@ public data class CampaignPolicy @JvmOverloads constructor(
      * attempt at its first open (invariant 12): a reopen naming another one changes nothing until the next attempt.
      */
     val balance: BalanceProfile? = null,
+    /**
+     * WF-1 (task-workflow §3.6): acceptance items the host declares for a new contract — its saved test command, a review
+     * check — added to the derived contract before it is stored (ids renumbered after the derived ones, every requirement
+     * bound to them), so a project the core derives nothing executable for opens once. Ignored once a contract is stored;
+     * what a saved command means beside the sniffed suites is W8's.
+     */
+    val declaredChecks: List<Acceptance> = emptyList(),
 )
 
 /** What open-time reconciliation found (§13.1), before any consequential action. */
@@ -379,7 +391,15 @@ public class OpenedCampaign internal constructor(
      * `CampaignState.reason` says why it stopped.
      */
     public val limitHold: LimitHold? = null,
+    /** T-24 (WF-4 at open): the path this reopen could not read; the campaign stopped `blocked_external` on it, resumably. */
+    public val unreadable: String? = null,
 ) : AutoCloseable {
+    /**
+     * T-28: untracked files the attempt's output policy kept out of the latest snapshot this open took (W3, I-12) —
+     * counted, never read; the open's capture when it took none since.
+     */
+    public fun scratchCount(): Int = dirty.latest?.scratchCount ?: s0.scratchCount
+
     /** Cancels this campaign: no further dispatch, no publication; effects already made are archived (D-26). */
     public val cancellation: Cancellation = Cancellation()
 
@@ -583,7 +603,14 @@ public class Controller @JvmOverloads public constructor(
         // Capture before anything else looks at the tree: snapshot 0 is the user's pre-existing state.
         val first = shadow.record(0) == null
         val s0 = if (first) dirty.capture(0, fresh = true).also { shadow.open(it) } else checkNotNull(shadow.manifest(0))
-        val external = if (first) emptyList() else drift(shadow, dirty)
+        // T-24 (WF-4 at open): a file another process holds stops the reopened campaign resumably by its path below.
+        var unreadable: UnreadableInput? = null
+        val external = if (first) emptyList() else try {
+            drift(shadow, dirty)
+        } catch (input: UnreadableInput) {
+            unreadable = input
+            emptyList()
+        }
 
         // W3: files the atlas does not parse take their hash from this open's own capture instead of a second read.
         val atlas = Atlas.build(workspace.root, dirty.latest?.entries?.associateBy { it.path }.orEmpty())
@@ -593,8 +620,10 @@ public class Controller @JvmOverloads public constructor(
         val derived = contracts.deriveS0(request.work, request.attempt, request.text, atlas, effective, policy.tokens, protected, policy.cost, scratch = frozen.scratch)
         val stored = contracts.current(request.work)
         check(stored == null || stored.attemptId == request.attempt) { "work ${request.work.value} is attempt ${stored?.attemptId?.value}; a new attempt is P2" }
+        // №31 (task-workflow §1.3): a follow-up opens only after a parent with a final outcome; one that can go on is resumed.
+        if (stored == null) request.parentWork?.let { parent -> followable(contracts, campaigns, parent)?.let { throw IllegalArgumentException(it) } }
         // §3.5: a new contract carries the shape its campaign runs in; the tool masks derive from it.
-        val contract = stored ?: contracts.open(derived.contract.let { d ->
+        val contract = stored ?: contracts.open(declared(derived.contract, policy.declaredChecks).copy(parentWork = request.parentWork).let { d ->
             val initial = (ShapeSelector.select(d, impactPrescan.prescan, effective.defaults.shapePolicy, policy.resumeExpected, capabilities = CAPABILITIES) as? ShapeDecision.Selected)?.shape
             if (initial == Shape.S1 || initial == Shape.S2) d.copy(shape = initial) else d
         })
@@ -636,8 +665,8 @@ public class Controller @JvmOverloads public constructor(
         fun renewGrant(reason: String) {
             if (effective.protocol == Protocol.Direct) Handoffs(journal, idGen, clock, ids).resumed(reason)
         }
-        if (state?.phase == CampaignPhase.Ended && state.outcome?.resumable == true) {
-            val reason = "reopened after ${state.outcome?.wire}"
+        if (state?.phase == CampaignPhase.Ended && state.resumable) {
+            val reason = "reopened after ${state.outcome?.wire}" + if (state.failedResumably) " (a cell's failure, WF-10)" else ""
             state = Lifecycle.apply(state, contract, Transition.Resumed(reason)).also(campaigns::save)
             renewGrant(reason)
         }
@@ -694,7 +723,12 @@ public class Controller @JvmOverloads public constructor(
             journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Reconcile, refs = listOf(intent.intentId, intent.actionId), text = "open: intent ${intent.intentId} (${intent.argv.joinToString(" ")}) never committed · unknown_outcome", at = clock.instant()))
             events?.emit(AgentEvent.Run.Reconciled(ids, intent.actionId, "unknown_outcome"))
         }
-        val stamp = stamper.report().candidateId
+        val stamp = try {
+            stamper.report().candidateId
+        } catch (input: UnreadableInput) {
+            unreadable = unreadable ?: input
+            shadow.records().last().stampId
+        }
         restoreReceipts(checks, SqliteReceipts(store, clock), ids, stamp)
         if (external.isNotEmpty()) {
             journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Reconcile, refs = external.map { it.path }, text = "open: ${external.size} paths moved while closed (external) · reconciled @${stamp.hash8}", at = clock.instant()))
@@ -748,6 +782,12 @@ public class Controller @JvmOverloads public constructor(
         if (state?.phase == CampaignPhase.Opened) {
             state = Lifecycle.apply(state, contract, Transition.Reconciled(reconciliation.unknownOutcomes)).also(campaigns::save)
         }
+        unreadable?.let { input ->
+            journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Reconcile, refs = listOf(input.path), text = "open: unreadable input ${input.path} · the campaign stops until it can be read", at = clock.instant()))
+            if (state?.phase == CampaignPhase.Running && state.running == null) {
+                state = Lifecycle.apply(state, contract, Transition.Stopped(CampaignOutcome.BlockedExternal, "unreadable input ${input.path}: ${input.message}")).also(campaigns::save)
+            }
+        }
 
         // §13.1: the old owner's unknown effects are reconciled above, before this writer is granted the workspace.
         val leases = Leases(store, clock)
@@ -773,7 +813,7 @@ public class Controller @JvmOverloads public constructor(
         val prescan = impactPrescan.prescan
         journal.append(JournalEvent(idGen.next("ev"), ids, null, JournalKind.Boundary, refs = impactPrescan.blast, text = "open: impact ${impactPrescan.log}", at = clock.instant()))
         val selected = ShapeSelector.select(contract, prescan, effective.defaults.shapePolicy, policy.resumeExpected, capabilities = CAPABILITIES)
-        events?.emit(AgentEvent.Campaign.Opened(ids, contract.requests.last().id))
+        events?.emit(AgentEvent.Campaign.Opened(ids, contract.requests.last().id, parentWork = contract.parentWork?.value))
         val inputs = when (selected) {
             is ShapeDecision.Selected -> selected.inputs
             is ShapeDecision.Unavailable -> selected.inputs
@@ -801,6 +841,7 @@ public class Controller @JvmOverloads public constructor(
             request, ids, store, os, workspace, registry, stamper, dirty, shadow, s0, atlas, derived.sniffed, commands,
             contracts, checks, rules, prime, kb, journal, intents, campaigns, reconciliation, prescan, impactPrescan, shape, state, refusal, owned,
             frozen, lease, leases, frozenNotes = Notes(store).all(), hostNotes = policy.hostNotes.filter { it.isNotBlank() }, limits = limits, limitHold = limitHold,
+            unreadable = unreadable?.path,
         ).also {
             plugged[it] = layered
             it.limitState.reserve = latched
@@ -1038,6 +1079,7 @@ public class Controller @JvmOverloads public constructor(
             // §3.5 select_shape(contract, impact, plan): the S3 branch reads the admitted plan's records (D-183, P5.8.1).
             s3 = S3Intake.admit(c, writerEstimates(c, model), CAPABILITIES, events, idGen, clock).takeIf { it.units.isNotEmpty() }
         }
+        intake(c)?.let { return S0Run(it, null, resumed, null) }
         var last = S0Run(c.state, null, resumed, null)
         var cells = 0
         val writerExits = ConcurrentHashMap<String, CellExit>()
@@ -1047,6 +1089,8 @@ public class Controller @JvmOverloads public constructor(
         var lastKey: CacheKey? = null
         while (true) {
             c.refusal()?.let { return last.copy(state = c.advance(Transition.Stopped(stopOutcome(c), "dispatch refused: $it"))) }
+            // Task-workflow §2.4: a message recorded during this run gets its work at the next boundary.
+            intake(c)?.let { return last.copy(state = it) }
             val state = checkNotNull(c.state)
             val contract = c.contract
             val scheduler = Scheduler(c.checks, c.workspace, c.registry, c.stamper, SqliteReceipts(c.store, clock), SqliteAliases(c.store, clock), idGen, c.ids, clock, candidates = candidates(c), retryCandidates = c.store.layout.candidates)
@@ -1204,7 +1248,7 @@ public class Controller @JvmOverloads public constructor(
                         ?.let { return last.copy(state = it) }
                 }
                 is Disposition.Stop -> {
-                    if (completion !is CompletionResult.Pending) return last.copy(state = c.advance(Transition.Stopped(disposition.outcome, disposition.reason, disposition.code)))
+                    if (completion !is CompletionResult.Pending) return last.copy(state = c.advance(stopped(exit, disposition)))
                     when (val settled = settle(c, run.ids, increment, checkNotNull(kept), completion, authority)) {
                         is Settled.Commit -> {
                             val returned = checkNotNull(c.state).graph.increments.first { it.id == increment.id }
@@ -1739,10 +1783,17 @@ public class Controller @JvmOverloads public constructor(
         // D-340: a completion waiting for a decision is settled first — no cell, no budget check, no model call.
         when (val resumed = resumePending(c, authority) ?: resumeReturned(c, authority, refused = null) { _, _ -> null }) {
             null, Resumed.Continue -> Unit
-            is Resumed.Committed -> return S0Run(stopOrFinish(c, "requirements remain unverified after ${resumed.result.incrementId}", scheduler(c), authority = authority), null, resumed.result, null)
+            is Resumed.Committed -> {
+                // Task-workflow §2.4 A: a message sent while the decision was pending gets its response increment now.
+                intake(c)?.let { return S0Run(it, null, resumed.result, null) }
+                if (checkNotNull(c.state).ledger.unfinished().isEmpty()) {
+                    return S0Run(stopOrFinish(c, "requirements remain unverified after ${resumed.result.incrementId}", scheduler(c), authority = authority), null, resumed.result, null)
+                }
+            }
             is Resumed.Stopped -> return S0Run(resumed.state, null, null, null)
         }
         reassessBlocked(c, authority)
+        intake(c)?.let { return S0Run(it, null, null, null) }
         val opened = checkNotNull(c.state)
         check(opened.phase == CampaignPhase.Running && opened.running == null) { "runS0 needs a reconciled campaign with no running cell; it is ${opened.phase}" }
         val contract = c.contract
@@ -1820,7 +1871,14 @@ public class Controller @JvmOverloads public constructor(
         if (!exit.handoff) routing.selected?.let { router.record(it, outcomeOf(exit, completion)) }
         val state = when (val disposition = Lifecycle.disposition(exit, completion)) {
             is Disposition.Close -> commit(c, ids, exit.turns, increment, disposition.accepted, stampNow)
-                ?: stopOrFinish(c, "requirements remain unverified after ${increment.id}", scheduler, authority = authority)
+                ?: run {
+                    // Task-workflow §2.4: another increment a message derived runs next, and verified work is re-accepted at the
+                    // tree it left (FX-42) before the finish.
+                    if (checkNotNull(c.state).ledger.unfinished().isNotEmpty() && checkNotNull(c.state).graph.increments.size > 1) {
+                        return runS0(c, model, authority, syntax, span, reworks, maxHandoffs, epochs)
+                    }
+                    stopOrFinish(c, "requirements remain unverified after ${increment.id}", scheduler, authority = authority)
+                }
             // A-D.6: a handoff continues the increment in an epoch — the user's limits still stop it first.
             is Disposition.Continue if exit.handoff -> onLimit(c, authority) ?: run {
                 epochs += exit.packet
@@ -1851,10 +1909,20 @@ public class Controller @JvmOverloads public constructor(
                         c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput, "${settled.reason}; resume to continue"))
                     }
                 }
-            } else c.advance(Transition.Stopped(disposition.outcome, disposition.reason, disposition.code))
+            } else c.advance(stopped(exit, disposition))
         }
         return S0Run(state, exit, completion, compiled)
     }
+
+    /**
+     * The stop a returned cell's [disposition] ends the run with. WF-10 (task-workflow §1.3): a cell that failed — an
+     * exception inside it — ends that cell `failed` and the run as a `failed` stop a reopen continues, naming the error;
+     * the next open resumes the increment from its carry. `failed` stays final for the campaign gate's red end checks.
+     */
+    private fun stopped(exit: CellExit, disposition: Disposition.Stop): Transition.Stopped =
+        if (exit is CellExit.Failed) {
+            Transition.Stopped(CampaignOutcome.Failed, "cell ${exit.packet.ids.context?.value} failed: ${disposition.reason} — reopen to continue the same work", resumable = true)
+        } else Transition.Stopped(disposition.outcome, disposition.reason, disposition.code)
 
     /**
      * The verifier over a completed cell's proposal (§8.7, D-337): current receipts, the reviewers' results at this
@@ -1969,6 +2037,7 @@ public class Controller @JvmOverloads public constructor(
         val request = AcceptanceDecisionRequest(
             pending.requestId, pending.contractVersion, c.ids.withCandidate(pending.resultingStamp).withContext(pending.cell), pending.incrementId,
             pending.resultingStamp, waiting.code ?: pending.code, items, diff, pending.evidence, pending.summary, pending.outsideInputs,
+            obligationSet = pending.obligationSet,
         )
         val reply = authority.decide(request)
         val invalid = when {
@@ -2036,7 +2105,9 @@ public class Controller @JvmOverloads public constructor(
             return Resumed.Continue
         }
         if (void != null) {
-            closePending(c, ids, pending, PendingStatus.Void, "$void; the work continues in a cell")
+            // Task-workflow §2.4 D: a request of an older revision is superseded, its record kept with the new revision.
+            if (pending.contractVersion != c.contract.version) closePending(c, ids, pending, PendingStatus.Superseded, "superseded by contract v${c.contract.version}")
+            else closePending(c, ids, pending, PendingStatus.Void, "$void; the work continues in a cell")
             return null
         }
         // The campaign gate's own pending completion is settled where final acceptance runs.
@@ -3204,6 +3275,105 @@ public class Controller @JvmOverloads public constructor(
      * compares against it. A crashed mutation after its snapshot shows here too: the tree, not the model, says
      * what moved (FX-23).
      */
+    /**
+     * Task-workflow §2.4 A–C, at a boundary with no running cell: the work each recorded message gets. A cancelled or
+     * replaced requirement's open increment is cancelled (C); an amendment's requirements get `inc-n`, depending on every
+     * verified increment (B); a `continuation` or `steering` message that finds every increment closed gets a response
+     * increment `inc-U-n` (A), so it reaches a model (WF-13). Each step is journalled (§2.4 E). The stop state when an
+     * amendment derives no valid increment.
+     */
+    private fun intake(c: OpenedCampaign): CampaignState? {
+        val opened = c.state ?: return null
+        if (opened.phase != CampaignPhase.Running || opened.running != null) return null
+        val contract = c.contract
+        fun line(refs: List<String>, text: String) = c.journal.append(JournalEvent(idGen.next("ev"), c.ids, null, JournalKind.Reconcile, refs = refs, text = text, at = clock.instant()))
+        for (increment in opened.graph.increments.filter { it.status != IncrementStatus.Verified && it.status != IncrementStatus.Cancelled }) {
+            if (increment.requirementIds.any { contract.requirement(it)?.lapsed != true }) continue
+            val reason = "${increment.requirementIds.joinToString(", ")} cancelled or replaced by the user (contract v${contract.version})"
+            c.advance(Transition.IncrementCancelled(increment.id, reason))
+            line(listOf(increment.id), "cancelled ${increment.id}: $reason")
+        }
+        val graph = checkNotNull(c.state).graph
+        val covered = graph.increments.filter { it.status != IncrementStatus.Cancelled }.flatMap { it.requirementIds }.toSet()
+        val amended = contract.requirements.filter { r ->
+            !r.lapsed && r.id !in covered && contract.requests.any { it.id == r.authorityRef && contract.kindOf(it) == MessageKind.Amendment }
+        }
+        for ((requestId, requirements) in amended.groupBy { it.authorityRef }) {
+            val state = checkNotNull(c.state)
+            val verified = state.graph.increments.filter { it.status == IncrementStatus.Verified }.map { it.id }
+            val known = state.graph.increments.map { it.id }.toMutableSet()
+            val added = requirements.map { r ->
+                val id = "inc-${r.id.removePrefix("R")}".let { if (it in known) "$it-$requestId" else it }.also { known += it }
+                Increment(id, listOf(r.id), r.acceptance, contract.scope.writePaths, 0, title = r.text.lineSequence().first().take(TITLE_CHARS),
+                    dependsOn = verified, produces = io.astrolabe.graph.Production.Artifact)
+            }
+            val issues = state.graph.copy(increments = state.graph.increments + added).validate(contract)
+            if (issues.isNotEmpty()) {
+                return c.advance(Transition.Stopped(CampaignOutcome.WaitingForInput,
+                    "amendment $requestId (contract v${contract.version}) derives no valid increment: ${issues.joinToString("; ") { it.detail }} — state a run: acceptance for it"))
+            }
+            c.advance(Transition.Amended(contract.version, requestId, added))
+            line(listOf(requestId) + added.map { it.id }, "amended v${contract.version} by $requestId: ${added.joinToString(", ") { it.id }} added" +
+                (if (verified.isEmpty()) "" else " (depends on ${verified.joinToString(", ")})"))
+        }
+        val state = checkNotNull(c.state)
+        if (state.graph.increments.any { it.status != IncrementStatus.Verified && it.status != IncrementStatus.Cancelled }) return null
+        val message = contract.requests.drop(maxOf(1, state.messagesSeen)).lastOrNull { r ->
+            contract.kindOf(r).let { it == MessageKind.Continuation || it == MessageKind.Steering || it == MessageKind.Answer } &&
+                state.graph.increments.none { it.id == "inc-${r.id}" }
+        } ?: return null
+        val verified = state.graph.increments.filter { it.status == IncrementStatus.Verified }
+        val accept = Contracts.regressionItems(contract).ifEmpty { verified.flatMap { it.accept }.distinct() }
+        val response = Increment(
+            id = "inc-${message.id}",
+            requirementIds = contract.requirements.filterNot { it.lapsed }.map { it.id },
+            accept = accept,
+            writeScope = contract.scope.writePaths,
+            expectedFiles = 0,
+            title = "${message.id}: ${message.text.lineSequence().first().take(TITLE_CHARS)}",
+            dependsOn = verified.map { it.id },
+            produces = io.astrolabe.graph.Production.Resolves(message.id),
+            evidenceKinds = verified.flatMap { it.evidenceKinds.entries }.filter { it.key in accept }.associate { it.key to it.value },
+        )
+        val issues = state.graph.copy(increments = state.graph.increments + response).validate(contract)
+        if (issues.isNotEmpty()) {
+            line(listOf(message.id), "no response increment for ${message.id}: ${issues.joinToString("; ") { it.detail }}")
+            return null
+        }
+        c.advance(Transition.ResponseOpened(message.id, response))
+        line(listOf(message.id, response.id), "response ${response.id} opened for ${message.id} (${contract.kindOf(message).wire})")
+        return null
+    }
+
+    /**
+     * №31 (task-workflow §1.3, §1.4): why [parent] cannot be followed up — it is not in this project's store, or it can
+     * still be continued and is resumed instead — or `null` when it ended with a final outcome.
+     */
+    private fun followable(contracts: Contracts, campaigns: Campaigns, parent: WorkId): String? {
+        val contract = contracts.current(parent) ?: return "work ${parent.value} is not in this project: a follow-up names a work of the same project"
+        val state = campaigns.load(parent, contract.attemptId)
+        val continued = state == null || state.phase != CampaignPhase.Ended || state.resumable ||
+            state.outcome == CampaignOutcome.BudgetExhausted && (state.budgetStop?.resumable == true || state.contractStop?.cause?.resumable == true)
+        return if (continued) "work ${parent.value} can be continued: resume it (${state?.outcome?.wire ?: state?.phase?.name?.lowercase() ?: "never opened"})" else null
+    }
+
+    /** WF-1 (task-workflow §3.6): [contract] with the host's [items] added — ids after the derived ones, every requirement bound to them. */
+    private fun declared(contract: Contract, items: List<Acceptance>): Contract {
+        if (items.isEmpty()) return contract
+        val taken = contract.acceptance.map { it.id }.toMutableSet()
+        var n = contract.acceptance.size
+        val added = items.map { item ->
+            do n++ while ("AC-$n" in taken)
+            val id = "AC-$n".also { taken += it }
+            when (item) {
+                is Acceptance.Run -> item.copy(id = id)
+                is Acceptance.Check -> item.copy(id = id)
+                is Acceptance.Review -> item.copy(id = id)
+            }
+        }
+        return contract.copy(acceptance = contract.acceptance + added, requirements = contract.requirements.map { it.copy(acceptance = it.acceptance + added.map { a -> a.id }) })
+    }
+
     private fun drift(shadow: ShadowRef, dirty: DirtyState): List<Touched> {
         val last = shadow.records().last()
         val before = checkNotNull(shadow.manifest(last.turn)).entries.associateBy { it.path }
@@ -3245,6 +3415,9 @@ public class Controller @JvmOverloads public constructor(
         /** The agent's final text kept with a pending completion, for the decider. */
         private const val MAX_SUMMARY_CHARS: Int = 4_000
         private const val HOST_ANSWER: String = "host answer for "
+
+        /** How much of a message titles the increment it derives (task-workflow §2.4); the message itself is pinned whole. */
+        private const val TITLE_CHARS: Int = 80
         private const val PRESCAN_REFRESHED: String = "impact pre-scan refreshed: "
 
         /** The heading of the host's notes in a cell's pinned context (D-345): the user did not write them. */

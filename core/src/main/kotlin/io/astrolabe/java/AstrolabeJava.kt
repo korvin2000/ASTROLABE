@@ -86,14 +86,15 @@ public class AstrolabeJava private constructor(private val core: Astrolabe) : Au
 
     /** Opens and starts a campaign; completes once it is open and reconciled. A `null` policy is D-67's default. */
     /** A [publication] asks for stages beyond `patch` after the campaign finishes (§14.2); none by default. */
+    /** A [parentWork] makes it a follow-up of that ended work (task-workflow §1.3); `null` for a new task. */
     @JvmOverloads
-    public fun campaign(project: Project, request: String, policy: CampaignPolicy? = null, publication: PublicationRequest? = null): CompletableFuture<JavaCampaignHandle> =
-        scope.future { JavaCampaignHandle(core.campaign(project, request, policy, publication), scope, core.events) }
+    public fun campaign(project: Project, request: String, policy: CampaignPolicy? = null, publication: PublicationRequest? = null, parentWork: WorkId? = null): CompletableFuture<JavaCampaignHandle> =
+        scope.future { JavaCampaignHandle(core.campaign(project, request, policy, publication, parentWork), scope, core.events) }
 
     /** [campaign], blocking the calling thread until the campaign is open. */
     @JvmOverloads
-    public fun campaignBlocking(project: Project, request: String, policy: CampaignPolicy? = null, publication: PublicationRequest? = null): JavaCampaignHandle =
-        join(campaign(project, request, policy, publication))
+    public fun campaignBlocking(project: Project, request: String, policy: CampaignPolicy? = null, publication: PublicationRequest? = null, parentWork: WorkId? = null): JavaCampaignHandle =
+        join(campaign(project, request, policy, publication, parentWork))
 
     /**
      * Reopens [work]'s stopped campaign and starts it again, the same work and attempt (C14, [Astrolabe.resume]): a [policy]
@@ -165,6 +166,10 @@ public class JavaCampaignHandle internal constructor(
     }
 
     public fun amend(text: String): Contract = handle.amend(text)
+
+    /** A message of [kind] (`null`: the state's, D-433) recorded once per [hostRef] (task-workflow §2.1). */
+    @JvmOverloads
+    public fun message(kind: io.astrolabe.contract.MessageKind?, text: String, hostRef: String? = null): Contract = handle.message(kind, text, hostRef)
 
     /** Registers [sink] for this campaign's events only. */
     public fun subscribe(sink: EventSink): Subscription =

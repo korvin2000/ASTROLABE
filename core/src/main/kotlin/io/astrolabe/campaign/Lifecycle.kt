@@ -5,8 +5,11 @@ import io.astrolabe.cell.CellExit
 import io.astrolabe.cell.CellStatus
 import io.astrolabe.cell.PartialReason
 import io.astrolabe.contract.Contract
+import io.astrolabe.contract.Increment
 import io.astrolabe.contract.IncrementStatus
 import io.astrolabe.contract.Ledger
+import io.astrolabe.contract.LedgerEntry
+import io.astrolabe.contract.RequirementStatus
 import io.astrolabe.graph.RequirementGraph
 import io.astrolabe.id.AttemptId
 import io.astrolabe.id.CandidateId
@@ -171,8 +174,19 @@ public data class CampaignState private constructor(
     val budgetStop: BudgetStop? = null,
     /** What spent the contract's budget in a [BudgetStop.ContractBudget] stop (C14); `null` otherwise, and for a stop before C14. */
     val contractStop: ContractBudgetStop? = null,
+    /**
+     * How many of the contract's messages the last dispatched cell was compiled with (task-workflow §2.4 A): a later
+     * `continuation` or `steering` message that finds every increment closed gets a response increment of its own.
+     */
+    val messagesSeen: Int = 0,
+    /**
+     * A `failed` stop a reopen continues (WF-10, task-workflow §1.3): a cell failed on an exception — the cell is
+     * `failed`, the work is not, and the next open resumes its increment from its carry.
+     */
+    val failedResumably: Boolean = false,
 ) {
     init {
+        require(!failedResumably || outcome == CampaignOutcome.Failed) { "only a failed stop is resumed as a failure" }
         require(budgetStop == null || outcome == CampaignOutcome.BudgetExhausted) { "a budget stop code marks budget_exhausted only" }
         require(contractStop == null || budgetStop == BudgetStop.ContractBudget) { "a contract budget cause marks a contract budget stop only" }
         require(seq >= 0 && contractVersion >= 1) { "seq ≥ 0 and a committed contract version" }
@@ -186,6 +200,9 @@ public data class CampaignState private constructor(
     /** The cell in flight, if any; no terminal transition is legal while one runs. */
     val running: CellState? get() = cells.firstOrNull { it.status == CellStatus.Running }
 
+    /** The campaign stopped on something a reopen may get past: a resumable outcome or a cell's failure (WF-10). */
+    val resumable: Boolean get() = outcome?.resumable == true || failedResumably
+
     internal fun next(
         phase: CampaignPhase = this.phase,
         graph: RequirementGraph = this.graph,
@@ -197,7 +214,9 @@ public data class CampaignState private constructor(
         stopCode: StopCode? = this.stopCode,
         budgetStop: BudgetStop? = this.budgetStop,
         contractStop: ContractBudgetStop? = this.contractStop,
-    ): CampaignState = CampaignState(work, attempt, contractVersion, phase, graph, ledger, cells, outcome, reason, seq + 1, stopCode, budgetStop, contractStop)
+        messagesSeen: Int = this.messagesSeen,
+        failedResumably: Boolean = this.failedResumably,
+    ): CampaignState = CampaignState(work, attempt, contractVersion, phase, graph, ledger, cells, outcome, reason, seq + 1, stopCode, budgetStop, contractStop, messagesSeen, failedResumably)
 
     internal companion object {
         fun opened(contract: Contract, graph: RequirementGraph): CampaignState = CampaignState(
@@ -264,6 +283,27 @@ public sealed interface Transition {
     /** The authority withdrew an increment; its history stays. */
     public data class IncrementCancelled(val increment: String, val reason: String) : Transition
 
+    /**
+     * An explicit amendment by [requestId] raised the contract to [version] (task-workflow §2.4 B): its requirements get
+     * [increments] — each depending on every verified increment — added to the graph, which still validates. Verified
+     * increments are never reopened; their receipts stay regression obligations.
+     */
+    public data class Amended(val version: Int, val requestId: String, val increments: List<Increment>) : Transition {
+        init {
+            require(requestId.isNotBlank() && increments.isNotEmpty()) { "an amendment names its message and the work it derives" }
+        }
+    }
+
+    /**
+     * A `continuation` or `steering` message [requestId] found every increment closed (task-workflow §2.4 A): it gets
+     * [increment], which resolves it — no revision and no requirement of its own.
+     */
+    public data class ResponseOpened(val requestId: String, val increment: Increment) : Transition {
+        init {
+            require(requestId.isNotBlank()) { "a response increment names its message" }
+        }
+    }
+
     /** Every requirement is verified at [stamp]: final acceptance begins. */
     public data class Finishing(val stamp: CandidateId) : Transition
 
@@ -296,8 +336,11 @@ public sealed interface Transition {
         val budget: BudgetStop? = null,
         /** C14: what spent the contract's budget, for a [BudgetStop.ContractBudget] stop. */
         val contract: ContractBudgetStop? = null,
+        /** WF-10: a `failed` stop on a cell's exception, which a reopen continues (task-workflow §1.3). */
+        val resumable: Boolean = false,
     ) : Transition {
         init {
+            require(!resumable || outcome == CampaignOutcome.Failed) { "only a failed stop is marked resumable; the other outcomes say it themselves" }
             require(budget == null || outcome == CampaignOutcome.BudgetExhausted) { "a budget stop code marks budget_exhausted only" }
             require(contract == null || budget == BudgetStop.ContractBudget) { "a contract budget cause marks a contract budget stop only" }
             require(outcome != CampaignOutcome.Completed) { "completed is reached only through Finished" }
@@ -372,7 +415,8 @@ public object Lifecycle {
                 expect(s, CampaignPhase.Running)
                 check(s.running == null) { "cell ${s.running?.cell} is still running" }
                 val graph = s.graph.continueIncrement(contract, transition.increment, transition.cell, transition.epoch)
-                s.next(graph = graph, cells = s.cells + CellState(transition.cell, transition.increment, CellStatus.Running), contractVersion = v)
+                s.next(graph = graph, cells = s.cells + CellState(transition.cell, transition.increment, CellStatus.Running), contractVersion = v,
+                    messagesSeen = contract.requests.size)
             }
             is Transition.Returned -> {
                 expect(s, CampaignPhase.Running)
@@ -435,6 +479,14 @@ public object Lifecycle {
                 check(s.running?.increment != transition.increment) { "${transition.increment} has a running cell; cancel the cell first" }
                 s.next(graph = s.graph.cancel(transition.increment, transition.reason), contractVersion = v)
             }
+            is Transition.Amended -> {
+                check(v == transition.version) { "amendment to v${transition.version} applied to contract v$v" }
+                extended(s, contract, transition.increments)
+            }
+            is Transition.ResponseOpened -> {
+                check(contract.requests.any { it.id == transition.requestId }) { "no message ${transition.requestId} to respond to" }
+                extended(s, contract, listOf(transition.increment))
+            }
             is Transition.Finishing -> {
                 expect(s, CampaignPhase.Running)
                 check(s.running == null) { "cell ${s.running?.cell} is still running" }
@@ -455,14 +507,14 @@ public object Lifecycle {
                 expect(s, CampaignPhase.Opened, CampaignPhase.Running, CampaignPhase.Finishing)
                 check(s.running == null) { "reconcile the running cell ${s.running?.cell} before a terminal outcome" }
                 s.next(phase = CampaignPhase.Ended, outcome = transition.outcome, reason = transition.reason, contractVersion = v, stopCode = transition.code,
-                    budgetStop = transition.budget, contractStop = transition.contract)
+                    budgetStop = transition.budget, contractStop = transition.contract, failedResumably = transition.resumable)
             }
             is Transition.Resumed -> {
                 expect(s, CampaignPhase.Ended, CampaignPhase.Finishing)
                 val interrupted = s.phase == CampaignPhase.Finishing
-                check(interrupted || s.outcome?.resumable == true) { "a ${s.outcome?.wire} campaign does not resume" }
+                check(interrupted || s.resumable) { "a ${s.outcome?.wire} campaign does not resume" }
                 s.next(phase = CampaignPhase.Opened, outcome = null, reason = null, contractVersion = v, stopCode = null, budgetStop = null, contractStop = null,
-                    ledger = if (interrupted) Ledger.initial(contract) else s.ledger)
+                    ledger = if (interrupted) Ledger.initial(contract) else s.ledger, failedResumably = false)
             }
             is Transition.LimitRaised -> {
                 expect(s, CampaignPhase.Ended)
@@ -529,10 +581,34 @@ public object Lifecycle {
     private fun expect(state: CampaignState, vararg phases: CampaignPhase) =
         check(state.phase in phases) { "illegal in ${state.phase}; expected ${phases.joinToString()}" }
 
+    /**
+     * Task-workflow §2.4 A, B: [added] joins the graph — every existing increment exactly as it was — and the result still
+     * validates. The requirements they cover hold the campaign open until they are verified; a lapsed one holds nothing.
+     */
+    private fun extended(s: CampaignState, contract: Contract, added: List<Increment>): CampaignState {
+        expect(s, CampaignPhase.Opened, CampaignPhase.Running)
+        check(s.running == null) { "cell ${s.running?.cell} is still running" }
+        val known = s.graph.increments.map { it.id }.toSet()
+        check(added.none { it.id in known } && added.all { it.status == IncrementStatus.Pending && it.cells.isEmpty() }) { "added increments are new and pending" }
+        val graph = s.graph.copy(increments = s.graph.increments + added)
+        val issues = graph.validate(contract)
+        check(issues.isEmpty()) { "an amended graph that does not validate is never installed: ${issues.joinToString { it.detail }}" }
+        val open = added.flatMap { it.requirementIds }.toSet()
+        val entries = contract.requirements.associate { r ->
+            val kept = s.ledger[r.id]
+            r.id to when {
+                r.lapsed -> LedgerEntry(r.id, RequirementStatus.Cancelled)
+                r.id in open || kept == null -> LedgerEntry(r.id, RequirementStatus.Pending, kept?.evidence.orEmpty())
+                else -> kept
+            }
+        }
+        return s.next(graph = graph, ledger = Ledger(entries), contractVersion = contract.version)
+    }
+
     private fun verifiedLedger(state: CampaignState, contract: Contract, stamp: CandidateId): Ledger {
         check(contract.requirements.isNotEmpty()) { "an empty contract is never completed" }
         val ledger = state.graph.ledger(contract, stamp)
-        val unfinished = ledger.entries.values.filter { !it.stampValid }.map { it.requirementId }
+        val unfinished = ledger.entries.values.filter { !it.stampValid && it.status != RequirementStatus.Cancelled }.map { it.requirementId }
         check(unfinished.isEmpty()) { "requirements not verified at @${stamp.hash8}: $unfinished" }
         check(state.graph.increments.none { it.status == IncrementStatus.Blocked || it.status == IncrementStatus.InProgress }) {
             "an increment is still open"

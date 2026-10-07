@@ -140,12 +140,26 @@ public data class AcceptanceDecisionRequest(
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val outsideInputs: Map<String, FileVersion> = emptyMap(),
+    /**
+     * T-11: the campaign gate's obligation set the request's results answer (`PendingCompletion.obligationSet`): a host
+     * keeps a decision with it and applies it again only for the same set; `null` for an increment. Not in the [key] (its
+     * encoding stays v3) and not encoded when absent.
+     */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val obligationSet: String? = null,
 ) {
+    /** The constructor before [obligationSet] (T-11). Kept for Java callers. */
+    public constructor(
+        id: String, contractRevision: Int, ids: Identities, incrementId: String?, candidate: CandidateId, code: StopCode, items: List<DecisionItem>,
+        diffRef: String?, receipts: List<String>, summary: String?, outsideInputs: Map<String, FileVersion>,
+    ) : this(id, contractRevision, ids, incrementId, candidate, code, items, diffRef, receipts, summary, outsideInputs, null)
+
     /** The constructor before [outsideInputs] (WR). Kept for Java callers. */
     public constructor(
         id: String, contractRevision: Int, ids: Identities, incrementId: String?, candidate: CandidateId, code: StopCode, items: List<DecisionItem>,
         diffRef: String?, receipts: List<String>, summary: String?,
-    ) : this(id, contractRevision, ids, incrementId, candidate, code, items, diffRef, receipts, summary, emptyMap())
+    ) : this(id, contractRevision, ids, incrementId, candidate, code, items, diffRef, receipts, summary, emptyMap(), null)
 
     init {
         require(id.isNotBlank()) { "a decision request has an id" }

@@ -103,9 +103,12 @@ internal class Scenario(
     fun reopen(): OpenedCampaign = open()
 
     /** Plays one run of model replies against the open campaign (opening it when none is); [script] sees the campaign for file versions. */
-    suspend fun play(script: (OpenedCampaign) -> List<Scripted>): S0Run {
+    suspend fun play(script: (OpenedCampaign) -> List<Scripted>): S0Run = playWith { c -> ScriptedModel.of(*script(c).toTypedArray()) }
+
+    /** [play] with a model of the test's own making (a turn that throws, one with a side effect). */
+    suspend fun playWith(model: (OpenedCampaign) -> ScriptedModel): S0Run {
         val c = campaign ?: open()
-        val fake = FakeAdapter(ScriptedModel.of(*script(c).toTypedArray()))
+        val fake = FakeAdapter(model(c))
         adapter = fake
         return controller.run(c, CellModel(fake, FakeProfiles.main, HeuristicEstimator()), host).also { last = it }
     }

@@ -571,13 +571,16 @@ public class Git @JvmOverloads constructor(
         var completed = false
         try {
             while (true) {
-                collectLiveDescendants(process, descendants)
                 pumps.filter { it.isDone }.forEach { it.get() }
                 if (!process.isAlive && pumps.all { it.isDone }) break
                 val remaining = deadline - System.nanoTime()
                 if (remaining <= 0) throw IOException("git deadline exceeded after $timeoutMillis ms")
-                if (process.isAlive) process.waitFor(minOf(remaining, TimeUnit.MILLISECONDS.toNanos(25)), TimeUnit.NANOSECONDS)
-                else Thread.sleep(10)
+                if (process.isAlive) {
+                    process.waitFor(minOf(remaining, TimeUnit.MILLISECONDS.toNanos(25)), TimeUnit.NANOSECONDS)
+                    // D-303: a git that outlives a wait has its descendants recorded for a kill; one that ended within it
+                    // completes and kills nothing, so it costs no process snapshot (a full system walk on Windows, WF-2).
+                    if (process.isAlive) collectLiveDescendants(process, descendants)
+                } else Thread.sleep(10)
             }
             val execution = Execution(process.exitValue(), stdout.get(), decode(stderr.get()))
             completed = true
