@@ -144,10 +144,11 @@ internal class Bench(
         val started = clock.instant()
         val temp = Files.createTempDirectory(plan.temp, "run-")
         val workspace = temp.resolve("workspace")
+        var dirt: DirtPlacement? = null
         try {
             Trees.copy(run.task.base, workspace)
             val base = if (run.task.baseCommit) GitRepo.initWithBase(workspace) else GitRepo.initWithoutCommit(workspace, temp.resolve("base.index"))
-            run.task.dirt?.write(workspace)
+            dirt = run.task.dirt?.write(workspace)
             val interrupt = run.task.interrupt
             val reopen = run.task.reopen
             val segments = ArrayList<Segment>()
@@ -277,10 +278,12 @@ internal class Bench(
                     AskResult(u.answers, if (exhausted) ScriptedUser.EXHAUSTED else asked.lastOrNull()?.attempt?.outcome, asked.map(::segmentResult))
                 },
                 phases = phases,
+                dirt = dirt?.result,
             )
             dir.resolve("result.json").writeText(Summary.encode(result))
             return result
         } finally {
+            runCatching { dirt?.close() }.onFailure { log("could not remove the dirt outside the tree: ${it.message}") }
             if (plan.keepWorkspaces) log("kept the run directory $temp") else runCatching { Trees.delete(temp) }.onFailure { log("could not remove $temp: ${it.message}") }
         }
     }

@@ -3,6 +3,7 @@ package io.astrolabe.evallive
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
@@ -61,18 +62,52 @@ internal data class ReopenSpec(val afterResponses: Int) {
  * A dirty working tree (WP-W0, plan §7.2): after the base is committed the runner adds an untracked [dir] of [files]
  * small files, one of them [bigMegabytes] MB, never committed and never ignored — the `devtools/` of the 5 October runs.
  * The base itself carries no `.gitignore`, so what its checks write stays in the tree.
+ *
+ * T-14: [dir] is a plain relative name (under the workspace) or an absolute path — `C:\...`, `\\server\share\...` or
+ * `/...`. The tree is then written there, outside the repository, where git never sees it: it is not dirt of the tree,
+ * [write] says so in its [DirtResult], and the runner removes what it wrote when the run ends. Dirt that cannot be
+ * written there (an unreachable share, a path of the other system, a directory that already exists) never stops a run.
  */
 @Serializable
 internal data class DirtSpec(val dir: String = "devtools", val files: Int = 1500, val bigMegabytes: Int = 20) {
     init {
-        require(dir.isNotBlank() && !dir.contains("..") && !dir.startsWith("/") && !dir.startsWith(".git")) { "a dirt directory is a plain relative name" }
+        require(dir.isNotBlank() && !dir.contains("..")) { "a dirt directory is a relative name or an absolute path, without '..'" }
+        if (isAbsoluteName) require(!dir.startsWith("\\\\") || DIRT_UNC.matches(dir)) { "a UNC dirt path names a server and a share" }
+        else require(!dir.startsWith(".git")) { "a dirt directory is not the repository's own" }
         require(files >= 1) { "a dirt directory holds at least one file" }
         require(bigMegabytes >= 0) { "the big file's size is not negative" }
     }
 
-    /** Writes the untracked files under [root]: `files - 1` small ones in sub-directories of 100, then `bundle.bin`. */
-    fun write(root: Path) {
-        val base = root.resolve(dir)
+    /** Whether [dir] is written as an absolute path (drive, UNC or rooted), whatever system this is. */
+    private val isAbsoluteName: Boolean get() = DIRT_ABSOLUTE.containsMatchIn(dir)
+
+    /**
+     * Writes the untracked files: `files - 1` small ones in sub-directories of 100, then `bundle.bin` — under [root], or
+     * at the absolute [dir]. The placement is closed when the run ends.
+     */
+    fun write(root: Path): DirtPlacement {
+        if (!isAbsoluteName) {
+            writeTree(root.resolve(dir))
+            return DirtPlacement(DirtResult(dir, inTree = true, written = true), null)
+        }
+        val target = runCatching { Path.of(dir) }.getOrNull()?.takeIf { it.isAbsolute }?.normalize()
+            ?: return DirtPlacement(DirtResult(dir, inTree = false, written = false, reason = "not an absolute path on this system"), null)
+        val tree = root.toAbsolutePath().normalize()
+        if (target.startsWith(tree) && target != tree) {
+            writeTree(target)
+            return DirtPlacement(DirtResult(dir, inTree = true, written = true), null)
+        }
+        if (Files.exists(target)) return DirtPlacement(DirtResult(dir, inTree = false, written = false, reason = "outside the tree and already there; left as it is"), null)
+        return try {
+            writeTree(target)
+            DirtPlacement(DirtResult(dir, inTree = false, written = true, reason = "outside the tree: not untracked files of the repository"), target)
+        } catch (e: IOException) {
+            runCatching { Trees.delete(target) }
+            DirtPlacement(DirtResult(dir, inTree = false, written = false, reason = "outside the tree and not writable: ${e::class.java.simpleName}: ${e.message}"), null)
+        }
+    }
+
+    private fun writeTree(base: Path) {
         for (n in 0 until files - 1) {
             val file = base.resolve("pkg-${n / 100}").resolve("file-$n.txt")
             Files.createDirectories(file.parent)
@@ -81,6 +116,20 @@ internal data class DirtSpec(val dir: String = "devtools", val files: Int = 1500
         Files.createDirectories(base)
         val bytes = bigMegabytes * 1024 * 1024
         Files.write(base.resolve("bundle.bin"), ByteArray(bytes) { (it * 31 + (it ushr 11)).toByte() })
+    }
+}
+
+private val DIRT_ABSOLUTE = Regex("""^([A-Za-z]:[\\/]|\\\\|/)""")
+private val DIRT_UNC = Regex("""^\\\\[^\\/]+[\\/][^\\/]+.*""")
+
+/** What became of a task's dirt in one run (T-14), kept in `result.json`: [inTree] says whether it is untracked files of the repository. */
+@Serializable
+internal data class DirtResult(val dir: String, val inTree: Boolean, val written: Boolean, val reason: String? = null)
+
+/** The dirt written for a run; closing it removes what lies outside the tree ([outside] is the directory the runner created there). */
+internal class DirtPlacement(val result: DirtResult, private val outside: Path?) : AutoCloseable {
+    override fun close() {
+        outside?.let { Trees.delete(it) }
     }
 }
 

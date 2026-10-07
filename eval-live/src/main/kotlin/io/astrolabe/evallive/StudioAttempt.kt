@@ -4,6 +4,7 @@ import io.astrolabe.Astrolabe
 import io.astrolabe.InvalidConfig
 import io.astrolabe.RunSpec
 import io.astrolabe.atlas.PackageCommands
+import io.astrolabe.atlas.Sniff
 import io.astrolabe.atlas.Sniffed
 import io.astrolabe.campaign.CampaignRequest
 import io.astrolabe.campaign.Controller
@@ -13,7 +14,9 @@ import io.astrolabe.campaign.ShapeDecision
 import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Command
 import io.astrolabe.contract.Contract
+import io.astrolabe.contract.Contracts
 import io.astrolabe.contract.Origin
+import io.astrolabe.contract.SqliteContractRepository
 import io.astrolabe.event.AgentEvent
 import io.astrolabe.event.AmendmentProposal
 import io.astrolabe.event.Answer
@@ -129,6 +132,38 @@ internal object StudioPolicy {
         val root = sniffed.packages.firstOrNull { it.dir == PackageCommands.ROOT } ?: sniffed.packages.firstOrNull()
         val declared = root?.let { it.typecheck ?: it.build ?: it.lint }
         return if (declared != null) VerificationSetup("review", "declared", emptyList(), listOf(declared)) else VerificationSetup("review", "none", emptyList())
+    }
+
+    /**
+     * `StudioHost.expectedVerification` of a new work, without saved checks: the suites the manifests under [root] declare
+     * (the sniffed command of every package that has one), else the setup a contract without any gets.
+     */
+    fun expected(root: Path): VerificationSetup {
+        val sniffed = Sniff.commands(root, listedPaths(root))
+        val suites = sniffed.packages.mapNotNull { it.test }
+        return if (suites.isEmpty()) choose(sniffed) else VerificationSetup("tests", "declared", suites)
+    }
+
+    /** The repository's tracked and unignored files, `/`-separated, by one `git ls-files`; empty when git cannot say. */
+    private fun listedPaths(root: Path): Set<String> {
+        val result = runCatching { Proc.run(listOf("git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"), root, Duration.ofSeconds(30)) }.getOrNull()
+        if (result == null || result.exitCode != 0) return emptySet()
+        return result.output.split('\u0000').filterTo(HashSet()) { it.isNotEmpty() }
+    }
+
+    /**
+     * `Verification.items` (T-01, WF-1; T-12): the items the core's `CampaignPolicy.declaredChecks` takes for a new contract
+     * — the review item of a project with no test command — so the work opens once, with no host amendment.
+     */
+    fun declaredChecks(setup: VerificationSetup): List<Acceptance> =
+        if (setup.commands.isEmpty()) listOf(Acceptance.Check("AC-review", REVIEW_TEXT, Origin.User)) else emptyList()
+
+    /** `Verification.of`: how a stored [contract] is verified, read by origin: `saved` for the user's own `run:` items, else `declared`. */
+    fun of(contract: Contract): VerificationSetup {
+        val runs = contract.acceptance.filterIsInstance<Acceptance.Run>()
+        if (runs.isEmpty()) return VerificationSetup("review", "none", emptyList())
+        val users = runs.filter { it.origin is Origin.User || it.origin is Origin.Amended }
+        return if (users.isNotEmpty()) VerificationSetup("tests", "saved", users.map { it.command.argv }) else VerificationSetup("tests", "declared", runs.map { it.command.argv })
     }
 
     /** `Verification.apply`: [contract] with the items of [setup] appended and every requirement bound to them. */
@@ -454,17 +489,32 @@ internal class StudioAttempt(private val clock: Clock, private val idGen: IdGen,
                 )
                 val policy = spec.policy
                 val request = CampaignRequest(work, AttemptId(Astrolabe.FIRST_ATTEMPT), prompt)
-                var opened = controller.open(project, request, policy)
+                // T-12 (WF-1), as `StudioHost.launch`: the notes and the declared checks are worked out before the open from what
+                // it will find — the stored contract, or the suites a new one is derived from — so one open serves the start.
+                val stored = Contracts(SqliteContractRepository(project.store, clock), idGen, clock).current(work)
+                val expected = if (stored != null) StudioPolicy.of(stored) else StudioPolicy.expected(workspace)
+                val declared = if (stored == null) StudioPolicy.declaredChecks(expected) else emptyList()
+                fun notesOf(setup: VerificationSetup) = listOf(StudioPolicy.WORKING_NOTES, StudioPolicy.platform(osName), StudioPolicy.verificationText(setup))
+                val notes = notesOf(expected)
+                var opened = controller.open(project, request, policy.copy(hostNotes = notes, declaredChecks = declared))
                 val openedVersion = opened.contract.version
-                val verification = if (opened.state == null) {
-                    // Studio 2 §7.3: the core refuses a plan with nothing executable to accept against; supply it and open again.
-                    StudioPolicy.choose(opened.sniffed).also { setup -> opened.contracts.amendByHost(work, "verification setup (${setup.kind})") { StudioPolicy.apply(it, setup) } }
-                } else {
-                    StudioPolicy.verificationOf(opened)
+                var amended = false
+                val verification = when {
+                    declared.isNotEmpty() && opened.state != null -> expected
+                    opened.state == null -> {
+                        // Studio 2 §7.3: the core still refuses a plan with nothing executable to accept against; supply it and open again.
+                        amended = true
+                        StudioPolicy.choose(opened.sniffed).also { setup -> opened.contracts.amendByHost(work, "verification setup (${setup.kind})") { StudioPolicy.apply(it, setup) } }
+                    }
+                    else -> StudioPolicy.verificationOf(opened)
                 }
-                val notes = listOf(StudioPolicy.WORKING_NOTES, StudioPolicy.platform(osName), StudioPolicy.verificationText(verification))
-                // As `StudioHost.launch`: a campaign this open could not free from a limit stays stopped, one open per action.
-                if (opened.limitHold == null) opened = controller.open(project, request, policy.copy(hostNotes = notes))
+                val actual = notesOf(verification)
+                // A second open only when the first could not run or found other notes than expected (the preflight guessed wrong,
+                // never silently); a campaign this open could not free from a limit stays stopped, one open per action.
+                if ((amended || actual != notes) && opened.limitHold == null) {
+                    if (!amended) events.emit(AgentEvent.Warning(opened.ids, "preflight-diverged", "the host notes the preflight expected differ from the opened contract's; the campaign opens again with them (WF-1)"))
+                    opened = controller.open(project, request, policy.copy(hostNotes = actual))
+                }
                 val frozen = opened.attempt.config
                 val main = config.profiles[frozen.profileRoles.main] ?: frozen.profiles[frozen.profileRoles.main] ?: binding.profile
                 val model = spec.cellModel(binding.adapter, main, binding.estimators.estimatorFor(main))

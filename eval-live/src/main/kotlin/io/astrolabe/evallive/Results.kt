@@ -74,6 +74,8 @@ internal data class RunResult(
     val ask: AskResult? = null,
     /** The `phase.counted` events of the run summed by phase (§7.2), or `null` when no events were recorded. */
     val phases: PhaseSummary? = null,
+    /** What became of the task's dirt (T-14): written in the tree, outside it (not dirt of the repository), or not written, with the reason; `null` for a task without dirt. */
+    val dirt: DirtResult? = null,
 ) {
     companion object {
         const val SCHEMA: Int = 1
