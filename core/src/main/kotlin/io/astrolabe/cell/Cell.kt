@@ -190,6 +190,9 @@ public class Cell @JvmOverloads constructor(
     /** A refused [call]: [reason] as the model reads it, [key] the same without per-turn call ids. */
     private class Refusal(val call: NativeCall, val reason: String, val key: String)
 
+    /** One pinned row of `[T]`: [text] in the head block, [arrived] when it is appended after the projection was built (§4.4). */
+    private class PinnedRow(val key: String, val text: String, val arrived: String)
+
     private inner class Loop(private val ctx: CellContext, private val increment: Increment, private val budget: CellBudget) {
         private val ids = ctx.ids
         private val cell = ids.context!!
@@ -255,6 +258,13 @@ public class Cell @JvmOverloads constructor(
 
         /** Reviewer rejections pinned verbatim for the rest of the cell (D-341). */
         private val reviewNotes = LinkedHashSet<String>()
+
+        // WF-15 (task-workflow §4.4): the projection's fixed part and the pinned rows appended after it was built.
+        private var builtSlice: ContractSlice? = null
+        private var deltaBase: ContractSlice? = null
+        private var head: List<String> = emptyList()
+        private val shownRows = HashSet<String>()
+        private val arrived = ArrayList<Resident>()
         /** The previous turn's edits: what the §6.3 focus notes anchor on beside the register's focus. */
         private var editedThisTurn: Set<String> = emptySet()
 
@@ -326,8 +336,8 @@ public class Cell @JvmOverloads constructor(
                 return finish(blocked(BlockedRequest("unreadable input ${unreadable.path}: ${unreadable.message}", listOf(unreadable.path), null, turn)))
             } catch (failure: Exception) {
                 val error = "${failure::class.simpleName}: ${failure.message}${site(failure)}"
-                val checkpoint = settle(CellStatus.Failed, error)
-                return CellExit.Failed(budget.turnsTaken, register, checkpoint, persistPacket(packet(PacketStatus.Failed, error)), error)
+                val (checkpoint, packet) = settle(CellStatus.Failed, error)
+                return CellExit.Failed(budget.turnsTaken, register, checkpoint, packet, error)
             } finally {
                 tools.edit?.beforeDispatch = {}
                 (tools.run as? io.astrolabe.tool.run.Run)?.beforeDispatch = {}
@@ -382,6 +392,8 @@ public class Cell @JvmOverloads constructor(
                 ev.journal.append(JournalEvent(idGen.next("ev"), ids, turn, JournalKind.Boundary, text = "refactor mode (${refactor.reasons.first()}): red_ok_until ${RefactorMode.RED_OK_UNTIL}", at = clock.instant()))
             }
             redOkUntilIncrementEnd = refactor.active
+            project(contract)
+            val k = CompiledK(checkNotNull(builtSlice), ctx.preexisting, sections)
             lateinit var repairable: Set<String>
             lateinit var mask: ToolMask
             lateinit var anchor: AnchorRender
@@ -410,7 +422,7 @@ public class Cell @JvmOverloads constructor(
                 } catch (capacity: DigestCapacity) {
                     return partial(PartialReason.Pressure, "replan: ${capacity.message}")
                 }
-                layout = Layout.render(ctx.role, ctx.config.executionMode, ctx.prime, CompiledK(ContractSlice.forIncrement(contract, increment), ctx.preexisting, sections), transcript(contract), capabilities.caching.breakpoints)
+                layout = Layout.render(ctx.role, ctx.config.executionMode, ctx.prime, k, transcript(), capabilities.caching.breakpoints)
                 request = Request(layout + anchor.segment(), schemas.schemas, ctx.model.profile, ctx.model.effort, ctx.model.maxOutputTokens, mask, sessionKey = ids.work.sessionKey)
                 estimate = estimator.estimate(request)
                 // WD-16: a child's output headroom is what its own budget leaves after the input, never the model's maximum.
@@ -607,7 +619,7 @@ public class Cell @JvmOverloads constructor(
             val anchorGrowth = maxOf(0L, defaults.anchorMaxTokens - anchor.tokens)
             val headroom = minOf(
                 (capabilities.contextLimitTokens * defaults.alpha).toLong() - estimate.upperBoundTokens - responseTokens - request.maxOutputTokens - anchorGrowth,
-                ceilingTokens(prefix(layout).total + pinnedTokens(contract)) - estimate.upperBoundTokens - responseTokens - anchorGrowth,
+                ceilingTokens(prefix(layout).total + pinnedTokens()) - estimate.upperBoundTokens - responseTokens - anchorGrowth,
             )
             val readBudget = minOf(defaults.rMaxTokens.toLong(), maxOf(Dispatcher.READ_FLOOR_TOKENS, headroom))
             val result = if (calls.isNotEmpty()) dispatcher.dispatch(turn, calls, Tokens(readBudget)) else null
@@ -752,7 +764,7 @@ public class Cell @JvmOverloads constructor(
             ws.scheduler.refresh(stampNow.candidateId, stampNow.env)
             worksetDrops()
             residency.due(residents, turn)?.let { trigger -> evict(trigger) }
-            val current = residency.occupancy(prefix(layout), residents, turn, anchor.tokens, pinnedTokens(contract))
+            val current = residency.occupancy(prefix(layout), residents, turn, anchor.tokens, head.sumOf { estimator.estimate(it).tokens })
             occupancy = current
 
             // Gates on records. D-278: only a patch that materially changes the register acknowledges prior loop
@@ -790,7 +802,7 @@ public class Cell @JvmOverloads constructor(
                 patchRejection = if (calls.any { it.family == ToolFamily.State && (it.op == "patch" || it.op == "note") }) tools.state.lastRejection else null,
                 lastProgressTurn = lastProgressTurn, liveRunOutput = liveRunOutput,
                 contextTokens = current.totalTokens, contextMaxTokens = capabilities.contextLimitTokens.toLong(), rebuilds = rebuilds,
-                contextCeilingTokens = ceilingTokens(current.prefix.total + pinnedTokens(contract)),
+                contextCeilingTokens = ceilingTokens(current.prefix.total + pinnedTokens()),
                 reserve = budget.verdict(outstanding(currenciesNow)), turnsMax = budget.turns, completionProposed = proposal,
                 currencies = currenciesNow, verdicts = validEvidence?.verdicts.orEmpty(), unavailable = validEvidence?.unavailable.orEmpty(), flags = gateFlags, fired = fired, defaults = defaults,
                 impactNudges = impact.unresolved, unresolvedImpactNudges = impact.unresolvedPublic.map { it.missing },
@@ -900,15 +912,69 @@ public class Cell @JvmOverloads constructor(
             )
         }
 
-        private fun transcript(contract: Contract): Transcript = Transcript(pinned(contract), residency.items(residents))
+        /** `[T]`: the head block fixed at the projection's build, then the items in arrival order, appended pinned rows among them. */
+        private fun transcript(): Transcript = Transcript(head, residency.items(residents))
 
         /** Pinned verbatim (invariant 1): the contract's requests, the caller's messages and every question this cell asked. */
-        private fun pinned(contract: Contract): List<String> =
-            contract.requests.map { it.text } + ctx.pinned + tools.task?.asked.orEmpty().map { asked ->
-                "question ${asked.question.id}: ${asked.question.text}" + (asked.answer?.let { "\nanswer: ${it.text}" } ?: "\nanswer: none")
-            } + reviewNotes + rebuildNotes
+        private fun pinned(contract: Contract): List<String> = pinnedRows(contract).map { it.text }
 
-        private fun pinnedTokens(contract: Contract): Long = pinned(contract).sumOf { estimator.estimate(it).tokens }
+        /**
+         * The pinned rows with the key that tells a row already shown from a new one and the form it takes when it arrives
+         * after the projection was built (task-workflow §4.4: a pinned item carries its id, never a timestamp or a counter).
+         */
+        private fun pinnedRows(contract: Contract): List<PinnedRow> =
+            contract.requests.map { PinnedRow("request ${it.id}", it.text, "[pinned ${it.id}] ${it.text}") } +
+                ctx.pinned.mapIndexed { index, text -> PinnedRow("host $index", text, text) } +
+                tools.task?.asked.orEmpty().map { asked ->
+                    val text = "question ${asked.question.id}: ${asked.question.text}" + (asked.answer?.let { "\nanswer: ${it.text}" } ?: "\nanswer: none")
+                    PinnedRow("question ${asked.question.id} ${asked.answer != null}", text, "[pinned answer ${asked.question.id}] $text")
+                } +
+                reviewNotes.map { PinnedRow("review $it", it, "[pinned review] $it") } +
+                rebuildNotes.map { PinnedRow("rebuild $it", it, it) }
+
+        /** The pinned tokens no rebuild removes: the head block and the rows appended since it was built. */
+        private fun pinnedTokens(): Long = head.sumOf { estimator.estimate(it).tokens } + arrived.sumOf { it.tokens }
+
+        /**
+         * WF-15 (task-workflow §4.4): the projection boundary. At the cell's first turn and after a rebuild `[K]`'s contract
+         * slice and `[T]`'s head block are fixed; a pinned row that arrives later is appended at its arrival point as a
+         * pinned item, never evicted or stubbed, and a contract revision is appended as its delta while `[K]` stays as built,
+         * so every request's cached prefix is a prefix of the next one. Gates and resolvers read the current contract.
+         */
+        private fun project(contract: Contract) {
+            val slice = ContractSlice.forIncrement(contract, increment)
+            val rows = pinnedRows(contract)
+            val built = builtSlice
+            if (built == null) {
+                builtSlice = slice
+                deltaBase = slice
+                head = rows.map { it.text }
+                shownRows.clear()
+                rows.mapTo(shownRows) { it.key }
+                return
+            }
+            for (row in rows) if (shownRows.add(row.key)) arrive(row.arrived)
+            slice.delta(deltaBase ?: built)?.let { line ->
+                arrive(line)
+                deltaBase = slice
+            }
+        }
+
+        private fun arrive(text: String) {
+            val item = Message.text(io.astrolabe.provider.Role.User, text)
+            val resident = Resident.message(item, turn, item.estimate(estimator).tokens, pinned = true)
+            residents = residents + resident
+            arrived += resident
+        }
+
+        /** At a rebuild the appended rows fold into the head block and the deltas into `[K]` (§4.4). */
+        private fun unproject(kept: List<Resident>): List<Resident> {
+            val folded = arrived.toSet()
+            builtSlice = null
+            deltaBase = null
+            arrived.clear()
+            return kept.filter { it !in folded }
+        }
 
         /**
          * D-408: the ceiling this cell can enforce. [fixed] is what no rebuild removes — `[S][R][K]` and the pinned
@@ -1350,7 +1416,7 @@ public class Cell @JvmOverloads constructor(
                 register, ws.workset.export(), null, ws.registry::version,
                 { id -> Aliases.parse(id)?.let { ev.aliases.resolve(ids.work, it) } != null }, emptyList(), pinned(contract),
                 selector = io.astrolabe.context.SeedRule.of(ctx.role.protocol, defaults.seedRule).selector, touched = changes().map { it.path },
-                latestReceipts = ws.checks.all().mapNotNull { check -> check.last?.receiptId?.let { ev.receipts.get(it) } },
+                latestReceipts = ws.checks.all().mapNotNull { check -> check.last?.receiptId?.let { ev.receipts.get(it) } }, fallback = defaults.seedFallback,
             )
             val seeds = io.astrolabe.context.Seeds.render(carry.seeds, ws.registry::read)
             val carried = carry.copy(seeds = seeds.shown, notSeen = carry.notSeen + seeds.notSeen)
@@ -1358,7 +1424,7 @@ public class Cell @JvmOverloads constructor(
                 KSection("carry-forward", "Carry-forward", carried.render(ctx.role.protocol)) +
                 seeds.blocks.mapIndexed { index, text -> KSection("seed-$index", "Seed", text) }
             val current = io.astrolabe.context.Projection(rebuilds, ctx.role, ctx.model.profile, ctx.prime,
-                CompiledK(ContractSlice.forIncrement(contract, increment), ctx.preexisting, sections), transcript(contract), "")
+                CompiledK(ContractSlice.forIncrement(contract, increment), ctx.preexisting, sections), Transcript(pinned(contract), residency.items(residents)), "")
             val (next, record) = io.astrolabe.context.Rebuild.run(
                 RebuildReason.Pressure, current, carried, "", ctx.prime,
                 { _, _ -> current.k.copy(sections = nextSections) },
@@ -1378,7 +1444,7 @@ public class Cell @JvmOverloads constructor(
             if (record.lost.isNotEmpty()) return
             rebuilds = next.generation
             sections = next.k.sections
-            residents = fittingTail((occupancy?.prefix?.total ?: 0L) + pinnedTokens(contract))
+            residents = unproject(fittingTail((occupancy?.prefix?.total ?: 0L) + pinned(contract).sumOf { estimator.estimate(it).tokens }))
             ws.workset.rebuild(seeds.shown)
             tools.state.validated(carried.register)
             val note = "rebuilt: pressure (generation $rebuilds) - $why - ${carried.known}"
@@ -1387,10 +1453,12 @@ public class Cell @JvmOverloads constructor(
             events?.emit(AgentEvent.Cell.Rebuilt(ids, why, Generation(rebuilds)))
         }
 
-        private fun persist(checkpoint: CellCheckpoint) {
+        /** A turn's checkpoint; with the cell's end [packet], the terminal one (§4.1: one transaction with the packet row). */
+        private fun persist(checkpoint: CellCheckpoint, packet: ResultPacket? = null) {
             val stamped = ids.withCandidate(checkpoint.stamp)
             ev.registerVersions.save(stamped, register)
-            ev.checkpoints.save(stamped, checkpoint, ws.workset.export())
+            if (packet == null) ev.checkpoints.save(stamped, checkpoint, ws.workset.export())
+            else ev.checkpoints.settle(stamped, checkpoint, ws.workset.export(), CellPacket.of(packet, checkpoint))
             ev.journal.append(
                 JournalEvent(
                     idGen.next("ev"), ids, turn, JournalKind.Boundary, text = "turn $turn ${checkpoint.status.name.lowercase()} · stamp @${checkpoint.stamp?.hash8 ?: "none"} · STATE v${checkpoint.registerVersion} · open intents ${checkpoint.openIntents.size}",
@@ -1399,19 +1467,25 @@ public class Cell @JvmOverloads constructor(
             )
         }
 
-        /** Every exit path: the tree is reconciled if this turn has not done it, then the final checkpoint is persisted. */
-        private fun settle(status: CellStatus, reason: String?, partialReason: PartialReason? = null): CellCheckpoint {
+        /**
+         * Every exit path (task-workflow §4.1): the tree is reconciled if this turn has not done it; the packet is built over
+         * the final checkpoint, never from later state, and both are committed with the end export in one transaction;
+         * `Cell.Ended` follows the commit.
+         */
+        private fun settle(status: CellStatus, reason: String?, partialReason: PartialReason? = null, blocked: BlockedRequest? = null, evidenceRefs: List<String> = emptyList()): Pair<CellCheckpoint, ResultPacket> {
             if (reconciledTurn != turn) runCatching { reconcile("exit at turn $turn") }
             val checkpoint = checkpoint(status, lastReport?.candidateId, reason)
-            persist(checkpoint)
+            val packet = packet(PacketStatus.of(status), reason, blocked, evidenceRefs)
+            persist(checkpoint, packet)
+            // A cancelled cell journals no packet boundary (its row is in the store): the exit propagates the cancellation.
+            if (status != CellStatus.Cancelled) persistPacket(packet)
             events?.emit(AgentEvent.Cell.Ended(ids, status.name.lowercase(), null, ctx.manifest, partialReason = partialReason?.wire))
-            return checkpoint
+            return checkpoint to packet
         }
 
         /** The exit reports the turns the budget actually admitted; a turn refused before dispatch was never taken. */
         private fun finish(exit: Exit): CellExit {
-            val checkpoint = settle(exit.status, exit.reason, exit.partialReason)
-            val packet = persistPacket(packet(PacketStatus.of(exit.status), exit.reason, exit.blocked, exit.evidenceRefs))
+            val (checkpoint, packet) = settle(exit.status, exit.reason, exit.partialReason, exit.blocked, exit.evidenceRefs)
             return exit.make(budget.turnsTaken, register, checkpoint, packet)
         }
 

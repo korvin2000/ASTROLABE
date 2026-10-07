@@ -2,9 +2,13 @@ package io.astrolabe.cell
 
 import io.astrolabe.id.CandidateId
 import io.astrolabe.id.ContextId
+import io.astrolabe.id.Digest
+import io.astrolabe.id.FileVersion
 import io.astrolabe.id.Identities
+import io.astrolabe.register.Register
 import io.astrolabe.store.Migrations
 import io.astrolabe.store.Store
+import io.astrolabe.store.Tx
 import io.astrolabe.workset.Entry
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
@@ -46,10 +50,73 @@ public data class CellCheckpoint(
     }
 }
 
-/** Persistence seam for cell checkpoints; the cell runtime is the one writer of `cells`, `turns` and `workset_exports`. */
+/** One net change as a [CellPacket] keeps it: the path and its versions (diffs stay in the store). */
+@Serializable
+public data class PacketChange(val path: String, val kind: TouchKind, val before: FileVersion?, val after: FileVersion?, val origin: ChangeOrigin) {
+    public fun change(): Change = Change(path, kind, before, after, origin)
+
+    public companion object {
+        @JvmStatic
+        public fun of(change: Change): PacketChange = PacketChange(change.path, change.kind, change.before, change.after, change.origin)
+    }
+}
+
+/**
+ * The `packets` row of a cell's end (task-workflow §4.1, W9): written by the cell's settle in the transaction of its
+ * terminal checkpoint and end export, and built from that checkpoint — never from later state — so a boundary reads the
+ * previous cell's summary by its id from the store, in this process or after a reopen, and both give the same carry.
+ * [register] is the register at [registerVersion]: its decisions, dead ends and open items travel verbatim.
+ */
+@Serializable
+public data class CellPacket(
+    val cell: ContextId,
+    val increment: String,
+    val role: String,
+    val status: PacketStatus,
+    val reason: String?,
+    val registerVersion: Int,
+    val contractVersion: Int,
+    val base: CandidateId?,
+    val stamp: CandidateId?,
+    val envId: Digest?,
+    val register: Register,
+    val changes: List<PacketChange>,
+    val receipts: List<String>,
+    val gaps: List<String>,
+    val notesToPersist: List<NoteCandidate> = emptyList(),
+    val openQuestions: List<String> = emptyList(),
+) {
+    public companion object {
+        public const val KIND: String = "cell_packet"
+
+        /** The row of [packet], which the cell built over [checkpoint]. */
+        @JvmStatic
+        public fun of(packet: ResultPacket, checkpoint: CellCheckpoint): CellPacket = CellPacket(
+            checkNotNull(packet.ids.context), packet.increment, packet.role, packet.status, packet.reason, checkpoint.registerVersion,
+            packet.contractVersion, packet.base?.stamp, packet.stamp, packet.envId, packet.register, packet.changes.map(PacketChange::of),
+            packet.receipts, packet.gaps, packet.claims.notesToPersist, packet.claims.openQuestions,
+        )
+    }
+}
+
+/**
+ * Persistence seam for cell checkpoints; the cell runtime is the one writer of `cells`, `turns`, `workset_exports` and
+ * its `packets` rows ([CellPacket.KIND]).
+ */
 public interface Checkpoints {
     /** Saves the turn's checkpoint and the Workset export it goes with, atomically where the store allows. */
     public fun save(ids: Identities, checkpoint: CellCheckpoint, export: List<Entry>)
+
+    /**
+     * The cell's end (task-workflow §4.1): its terminal [checkpoint], its end [export] and its [packet], in one transaction
+     * where the store allows — a crash leaves all three or the previous checkpoint, never an ended cell without its packet.
+     */
+    public fun settle(ids: Identities, checkpoint: CellCheckpoint, export: List<Entry>, packet: CellPacket) {
+        save(ids, checkpoint, export)
+    }
+
+    /** The packet [cell] settled with; `null` before its end or when the row is missing (a store of the old two-step). */
+    public fun packet(cell: ContextId): CellPacket? = null
 
     public fun latest(cell: ContextId): CellCheckpoint?
 
@@ -63,6 +130,7 @@ public class InMemoryCheckpoints : Checkpoints {
     private val cells = LinkedHashMap<ContextId, CellCheckpoint>()
     private val turns = LinkedHashMap<Pair<ContextId, Int>, CellCheckpoint>()
     private val exports = LinkedHashMap<Pair<ContextId, Int>, List<Entry>>()
+    private val packets = LinkedHashMap<ContextId, CellPacket>()
 
     @Synchronized
     override fun save(ids: Identities, checkpoint: CellCheckpoint, export: List<Entry>) {
@@ -70,6 +138,15 @@ public class InMemoryCheckpoints : Checkpoints {
         turns[checkpoint.cell to checkpoint.turn] = checkpoint
         exports[checkpoint.cell to checkpoint.turn] = export.toList()
     }
+
+    @Synchronized
+    override fun settle(ids: Identities, checkpoint: CellCheckpoint, export: List<Entry>, packet: CellPacket) {
+        save(ids, checkpoint, export)
+        packets[checkpoint.cell] = packet
+    }
+
+    @Synchronized
+    override fun packet(cell: ContextId): CellPacket? = packets[cell]
 
     @Synchronized
     override fun latest(cell: ContextId): CellCheckpoint? = cells[cell]
@@ -87,7 +164,23 @@ public class InMemoryCheckpoints : Checkpoints {
  * whole rather than a turn without its export.
  */
 public class SqliteCheckpoints(private val store: Store, private val clock: Clock) : Checkpoints {
-    override fun save(ids: Identities, checkpoint: CellCheckpoint, export: List<Entry>): Unit = store.db.tx { tx ->
+    override fun save(ids: Identities, checkpoint: CellCheckpoint, export: List<Entry>): Unit = store.db.tx { tx -> write(tx, ids, checkpoint, export) }
+
+    override fun settle(ids: Identities, checkpoint: CellCheckpoint, export: List<Entry>, packet: CellPacket): Unit = store.db.tx { tx ->
+        write(tx, ids, checkpoint, export)
+        tx.execute(
+            "INSERT OR REPLACE INTO packets (id, work_id, attempt_id, candidate_id, context_id, kind, schema_version, created_at, body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "packet-${checkpoint.cell.value}", ids.work, ids.attempt, checkpoint.stamp ?: ids.candidate, checkpoint.cell, CellPacket.KIND,
+            Migrations.SCHEMA_VERSION, clock.instant(), JSON.encodeToString(CellPacket.serializer(), packet),
+        )
+    }
+
+    override fun packet(cell: ContextId): CellPacket? =
+        store.db.query("SELECT body FROM packets WHERE context_id = ? AND kind = ? ORDER BY rowid DESC LIMIT 1", cell, CellPacket.KIND) {
+            JSON.decodeFromString(CellPacket.serializer(), it.string("body"))
+        }.firstOrNull()
+
+    private fun write(tx: Tx, ids: Identities, checkpoint: CellCheckpoint, export: List<Entry>) {
         val body = JSON.encodeToString(CellCheckpoint.serializer(), checkpoint)
         val now = clock.instant()
         val candidate = checkpoint.stamp ?: ids.candidate

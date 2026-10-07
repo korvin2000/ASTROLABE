@@ -44,7 +44,7 @@ import java.time.Clock
  */
 public object Migrations {
     /** The schema version this build writes; every row records it. */
-    public const val SCHEMA_VERSION: Int = 5
+    public const val SCHEMA_VERSION: Int = 6
 
     /** Every table of the current schema, in creation order (`notes_fts` is the FTS5 virtual table). */
     public val TABLES: List<String> = listOf(
@@ -309,6 +309,13 @@ public object Migrations {
                 "CREATE TABLE acceptance_decisions (" +
                     "id TEXT PRIMARY KEY NOT NULL, $IDS, increment_id TEXT, request_id TEXT NOT NULL, kind TEXT NOT NULL, spent INTEGER NOT NULL, $META)",
                 "CREATE INDEX acceptance_decisions_by_work ON acceptance_decisions (work_id, attempt_id, created_at)",
+            ),
+        ),
+        Migration(
+            version = 6,
+            statements = listOf(
+                // ---- W9 (task-workflow §4.1): a cell's packet row is read back by cell id, never from process memory ----
+                "CREATE INDEX packets_by_context ON packets (context_id, kind)",
             ),
         ),
     )

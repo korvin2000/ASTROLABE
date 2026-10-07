@@ -7,6 +7,8 @@ import io.astrolabe.kb.Note
 import io.astrolabe.provider.Profile
 import io.astrolabe.store.Migrations
 import io.astrolabe.store.Store
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -33,6 +35,20 @@ public data class ManifestSeed(val path: String, val range: String, val hash: St
 
 @Serializable
 public data class ManifestOmission(val unit: String, val reason: String)
+
+/**
+ * The carry a context was built with (task-workflow §4.1–§4.5): its [source] cell (or `inc-1 · cell-7`, `parent W-1 · cell-3`),
+ * the [seedRule] applied and `fallback` as [seedReason] when Seeds v2 stood in, [packetMissing] when the previous cell's
+ * packet row was not in the store, and what a token cap [cut].
+ */
+@Serializable
+public data class ManifestCarry(
+    val source: String,
+    val seedRule: String?,
+    val seedReason: String?,
+    val packetMissing: Boolean,
+    val cut: List<String>,
+)
 
 /** The §6.1 budget arithmetic, in tokens; `null` where effective history was unknown (D-06). */
 @Serializable
@@ -75,6 +91,10 @@ public data class Manifest(
     val boundaryReason: BoundaryReason? = null,
     /** `ready`, `needs_rescoping` or `needs_more_evidence`. */
     val outcome: String,
+    /** Task workflow §4.1–§4.5: where the carry came from, the seed rule applied, a missing packet row, what a cap cut. */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val carry: ManifestCarry? = null,
 ) {
     public companion object {
         /** The manifest of [compiled] for the cell in [ids]; [notes]/[seeds] are the compile's inputs, filtered to what was selected. */
@@ -127,6 +147,7 @@ public data class Manifest(
                     is Compiled.NeedsRescoping -> "needs_rescoping"
                     is Compiled.NeedsEvidence -> "needs_more_evidence"
                 },
+                carry = inputs.carry?.let { ManifestCarry(it.source ?: it.register.cell.value, it.seedRule, it.seedReason, it.packetMissing, it.cut) },
             )
         }
     }
