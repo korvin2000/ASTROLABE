@@ -21,6 +21,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.FileSystems
 import java.nio.file.Files
 import java.nio.file.LinkOption
+import java.nio.file.Path
 import java.time.Clock
 import java.time.Instant
 
@@ -182,6 +183,10 @@ public class Stamper @JvmOverloads public constructor(
 
         private val JSON = Json { prettyPrint = false; encodeDefaults = true }
 
+        /** T-21: the largest raw difference whose bytes a capture keeps from its stamp's read, and the total it keeps. */
+        private const val KEEP_FILE_BYTES: Int = 1 shl 20
+        private const val KEEP_TOTAL_BYTES: Long = 32L shl 20
+
         /** Paths whose stamped member differs between [a] and [b], sorted. */
         @JvmStatic
         public fun diff(a: StampReport, b: StampReport): Set<String> {
@@ -264,17 +269,30 @@ public class Stamper @JvmOverloads public constructor(
         // Git status compares filtered content. Even a Git-clean path can have different raw
         // bytes (or an ignored mode change), so compare every remaining tracked path to its object.
         val converted = ArrayList<Pair<LsFilesEntry, StampEntry>>()
+        // T-21: the bytes of a raw difference git status hid, kept (bounded) for the capture that stores them, so the
+        // capture does not read the file a second time; a file past the bounds is read again, as before.
+        val held = HashMap<String, Pair<Path, ByteArray>>()
+        var heldBytes = 0L
         for (row in workspace.git.lsFiles()) {
             // A gitlink is a directory on disk; git status already reports submodule changes.
             if (row.stage != 0 || row.path in entries || row.mode == FileMode.GITLINK) continue
-            val entry = captureEntry(row.path, row.mode, fresh, reads, row) ?: continue
+            val entry = captureEntry(row.path, row.mode, fresh, reads, row) { real, bytes ->
+                if (reads != null && bytes.size <= KEEP_FILE_BYTES && heldBytes + bytes.size <= KEEP_TOTAL_BYTES) {
+                    held[row.path] = real to bytes
+                    heldBytes += bytes.size
+                }
+            } ?: continue
             if (entry.type == EntryType.File && entry.mode == row.mode && '\n' !in row.path && '\r' !in row.path) {
                 converted.add(row to entry)
             } else {
                 entries[row.path] = entry
+                held[row.path]?.let { (real, bytes) -> reads?.kept?.put(real, bytes) }
             }
         }
-        for ((row, entry) in checkoutChanged(converted)) entries[row.path] = entry
+        for ((row, entry) in checkoutChanged(converted)) {
+            entries[row.path] = entry
+            held[row.path]?.let { (real, bytes) -> reads?.kept?.put(real, bytes) }
+        }
         return entries.values.sortedWith(compareBy(PATH_ORDER) { it.path })
     }
 
@@ -323,7 +341,11 @@ public class Stamper @JvmOverloads public constructor(
     private fun stampEntry(path: String, reportedMode: FileMode, fresh: Boolean, reads: ContentCache.Reads?): StampEntry =
         checkNotNull(captureEntry(path, reportedMode, fresh, reads))
 
-    private fun captureEntry(path: String, reportedMode: FileMode, fresh: Boolean, reads: ContentCache.Reads?, baseline: LsFilesEntry? = null): StampEntry? {
+    /** [keep] receives the bytes this call read of a tracked file whose raw content differs from its [baseline] object. */
+    private fun captureEntry(
+        path: String, reportedMode: FileMode, fresh: Boolean, reads: ContentCache.Reads?, baseline: LsFilesEntry? = null,
+        keep: ((Path, ByteArray) -> Unit)? = null,
+    ): StampEntry? {
         val resolved = workspace.paths.resolveCapture(path)
         if (resolved !is PathResolution.Resolved) {
             throw SnapshotIntegrityError("cannot stamp '$path': $resolved")
@@ -337,7 +359,8 @@ public class Stamper @JvmOverloads public constructor(
             }
             PathKind.Regular -> {
                 val algorithm = baseline?.let(::objectAlgorithm)
-                val read = { workspace.bytes(resolved) }
+                var bytes: ByteArray? = null
+                val read = { workspace.bytes(resolved).also { bytes = it } }
                 val content = when {
                     reads != null -> workspace.contents.within(reads, resolved.real, algorithm, fresh, read)
                     fresh -> workspace.contents.load(resolved.real, algorithm, read)
@@ -345,6 +368,7 @@ public class Stamper @JvmOverloads public constructor(
                 } ?: throw SnapshotIntegrityError("'$path' disappeared during stamping")
                 val mode = fileMode(resolved, reportedMode)
                 if (baseline != null && mode == baseline.mode && content.objectIds[algorithm] == baseline.id.hex) return null
+                bytes?.let { read -> keep?.invoke(resolved.real, read) }
                 StampEntry(path, EntryType.File, mode, content.digest, content.sizeBytes)
             }
             PathKind.Directory -> StampEntry(path, EntryType.Directory, FileMode.TREE, Digest.ofUtf8(""), 0)

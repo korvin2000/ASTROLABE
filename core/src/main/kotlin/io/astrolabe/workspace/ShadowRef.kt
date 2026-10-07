@@ -443,7 +443,10 @@ public class ShadowRef @JvmOverloads public constructor(
         val expected = rest.associateWith { expectedId(it) }
         val present = workspace.git.presentObjects(expected.values)
         val missing = rest.filter { expected.getValue(it) !in present }
-        val stored = workspace.git.hashObjects(missing.map { store.blobs.file(it) ?: throw MissingBlob(it, "recovery blob ${it.hex} is not on disk") })
+        val files = missing.map { store.blobs.file(it) ?: throw MissingBlob(it, "recovery blob ${it.hex} is not on disk") }
+        val stored = workspace.git.hashObjects(files)
+        // T-22 (§7.2): git read each recovery blob it hashed; those reads are the snapshot's, counted as blob reads.
+        files.forEach { workspace.blobRead(Files.size(it).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()) }
         missing.forEachIndexed { i, digest ->
             val want = expected.getValue(digest)
             val got = stored[i]

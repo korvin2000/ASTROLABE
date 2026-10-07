@@ -74,10 +74,23 @@ public class Workspace @JvmOverloads public constructor(
     internal fun blobRead(sizeBytes: Int) {
         blobsReadCount.incrementAndGet()
         blobBytesReadCount.addAndGet(sizeBytes.toLong())
+        io.astrolabe.os.PhaseTally.add(io.astrolabe.os.PhaseTally.Count.BlobsRead)
+        io.astrolabe.os.PhaseTally.add(io.astrolabe.os.PhaseTally.Count.BlobBytesRead, sizeBytes.toLong())
     }
 
-    /** Content digests every [Stamper] of this workspace shares for the workspace's lifetime (D-364). */
-    internal val contents: ContentCache = ContentCache()
+    /**
+     * Content digests every [Stamper] of this workspace shares (D-364) — T-04: and every later workspace over the same root
+     * in this process, so a reopen's capture does not read an unchanged tree again. Each hit is validated as before (size,
+     * modification and change time, file key, the racy window); an acceptance stamp reads fresh and never consults it.
+     */
+    internal val contents: ContentCache = sharedContents(this.root)
+
+    /**
+     * T-03/T-25: told the bytes of every file this workspace reads while it is set — the open's capture hands them to the
+     * atlas built right after it, so the atlas reads none of those files again. Never set outside one capture.
+     */
+    @Volatile
+    internal var tap: ((Path, ByteArray) -> Unit)? = null
 
     init {
         val repo = runCatching { git.repo.toRealPath() }.getOrDefault(git.repo)
@@ -115,6 +128,9 @@ public class Workspace @JvmOverloads public constructor(
                 return if (Files.isDirectory(real)) null else Files.readAllBytes(real).also { read ->
                     filesReadCount.incrementAndGet()
                     bytesReadCount.addAndGet(read.size.toLong())
+                    io.astrolabe.os.PhaseTally.add(io.astrolabe.os.PhaseTally.Count.FilesRead)
+                    io.astrolabe.os.PhaseTally.add(io.astrolabe.os.PhaseTally.Count.BytesRead, read.size.toLong())
+                    tap?.invoke(real, read)
                 }
             } catch (missing: java.nio.file.NoSuchFileException) {
                 return null
@@ -150,6 +166,15 @@ public class UnreadableInput(
 
 private const val READ_ATTEMPTS = 3
 private const val READ_RETRY_MILLIS = 50L
+
+/** T-04: the content cache of each root in this process, held softly: memory pressure may drop one, never a wrong hit. */
+private val CONTENTS = java.util.concurrent.ConcurrentHashMap<Path, java.lang.ref.SoftReference<ContentCache>>()
+
+private fun sharedContents(root: Path): ContentCache {
+    var cache: ContentCache? = null
+    CONTENTS.compute(root) { _, held -> held?.get()?.let { cache = it; held } ?: ContentCache().let { cache = it; java.lang.ref.SoftReference(it) } }
+    return checkNotNull(cache)
+}
 
 /** The newest live workspace over each root, both held weakly (§7.2 counters). */
 private val LIVE: MutableMap<Path, java.lang.ref.WeakReference<Workspace>> = java.util.WeakHashMap()

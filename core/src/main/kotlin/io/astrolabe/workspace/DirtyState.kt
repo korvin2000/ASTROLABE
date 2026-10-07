@@ -417,7 +417,9 @@ public class DirtyState(
                 var content = workspace.contents.within(reads, resolved.real, algorithm, fresh = true, load)
                 if (content != null && bytes == null && !blobs.holds(content.digest, recovery = true)) {
                     // This capture's stamp read the file first (a raw difference git status hid): its bytes were never stored.
-                    content = workspace.contents.load(resolved.real, algorithm, load)
+                    // T-21: the stamp kept them when they were the bytes of that take; otherwise the file is read again.
+                    val kept = reads.kept.remove(resolved.real)?.takeIf { Digest.of(it) == content!!.digest }
+                    if (kept != null) bytes = kept else content = workspace.contents.load(resolved.real, algorithm, load)
                 }
                 val got = content ?: throw SnapshotIntegrityError("'$path' disappeared during capture")
                 got.objectIds[algorithm]?.let { objectIds[got.digest] = it }
