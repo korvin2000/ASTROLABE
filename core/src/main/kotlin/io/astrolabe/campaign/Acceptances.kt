@@ -23,7 +23,17 @@ import kotlinx.serialization.json.Json
 import java.time.Clock
 
 @Serializable
-public enum class PendingStatus { Open, Applied, Void }
+public enum class PendingStatus {
+    Open,
+    Applied,
+    Void,
+
+    /**
+     * An explicit amendment moved the contract past the revision it was asked at (task-workflow §2.4 D): its record is
+     * kept, closed with the new revision, and the campaign end asks anew on the new candidate.
+     */
+    Superseded,
+}
 
 /**
  * A completion proposal whose acceptance waits for an authority (D-339), kept durably so that a decision can be applied

@@ -108,10 +108,17 @@ public class Astrolabe @JvmOverloads public constructor(
      * campaign has finished (§14.2): each is a separate grant through the authority; without one nothing is published.
      */
     @JvmOverloads
-    public suspend fun campaign(project: Project, request: String, policy: CampaignPolicy? = null, publication: PublicationRequest? = null): CampaignHandle {
+    public suspend fun campaign(
+        project: Project,
+        request: String,
+        policy: CampaignPolicy? = null,
+        publication: PublicationRequest? = null,
+        /** The work this campaign follows up (task-workflow §1.3): it must have ended with a final outcome; `null` for a new task. */
+        parentWork: WorkId? = null,
+    ): CampaignHandle {
         val profile = mainProfile()
         val chosen = policy ?: CampaignPolicy(Tokens(profile.capabilities.contextLimitTokens.toLong() * config.defaults.campaignCells))
-        return start(project, { CampaignRequest(WorkId(idGen.next("W")), AttemptId(FIRST_ATTEMPT), request) }, chosen, publication)
+        return start(project, { CampaignRequest(WorkId(idGen.next("W")), AttemptId(FIRST_ATTEMPT), request, parentWork) }, chosen, publication)
     }
 
     /**
@@ -152,7 +159,7 @@ public class Astrolabe @JvmOverloads public constructor(
                     run.outcome ?: c.stop?.outcome ?: CampaignOutcome.Failed
                 }
             }
-            return CampaignHandle(opened.ids.work, job, opened, events, project.views, published, finished).also { project.active = it }
+            return CampaignHandle(opened.ids.work, job, opened, events, project.views, published, finished, clock).also { project.active = it }
         }
     }
 
@@ -219,6 +226,7 @@ public class CampaignHandle internal constructor(
     public val views: Views,
     private val published: AtomicReference<PublicationRun?> = AtomicReference(null),
     private val finished: AtomicReference<FinishReceipt?> = AtomicReference(null),
+    private val clock: Clock = Clock.systemUTC(),
 ) {
     public val done: Boolean get() = job.isCompleted
 
@@ -255,6 +263,15 @@ public class CampaignHandle internal constructor(
         opened.cancellation.cancel("cancelled by the host")
     }
 
-    /** A user amendment (§4.1): recorded against the contract at once; the running cell sees it on its next turn. */
-    public fun amend(text: String): Contract = opened.contracts.amendByUser(workId, text)
+    /** An explicit user amendment (§4.1): `message(Amendment, text)`; the running cell sees it on its next turn. */
+    public fun amend(text: String): Contract = message(io.astrolabe.contract.MessageKind.Amendment, text)
+
+    /**
+     * A message to this campaign (task-workflow §2.1, §2.2): recorded verbatim at once — once per [hostRef] — and pinned
+     * from the running cell's next turn. A `null` [kind] is the state's (`steering` while it runs); only
+     * [io.astrolabe.contract.MessageKind.Amendment] raises the contract's revision.
+     */
+    @JvmOverloads
+    public fun message(kind: io.astrolabe.contract.MessageKind?, text: String, hostRef: String? = null): Contract =
+        io.astrolabe.campaign.Messages.record(opened.contracts, opened.store, clock, workId, kind, text, hostRef)
 }

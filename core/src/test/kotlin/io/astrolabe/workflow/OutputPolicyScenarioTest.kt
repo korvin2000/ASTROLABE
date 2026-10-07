@@ -74,6 +74,8 @@ class OutputPolicyScenarioTest {
         assertEquals(1, accept.size, "AC-1 ran once: the gate's output did not move the candidate it certified")
         assertEquals(accept.single().stampAfter, c.stamper.stamp(fresh = true).id, "the final candidate is the one AC-1 certified")
         assertEquals(listOf(1), s.counted(CountedPhase.Finish).map { it.finishAttempts })
+        // T-28: the reopen's capture counts the output it kept out, and the host reads that count.
+        assertEquals(1, s.reopen().scratchCount(), "build/report.txt is the one untracked output file kept out")
     }
 
     private suspend fun rewrittenInputs(s: Scenario) {

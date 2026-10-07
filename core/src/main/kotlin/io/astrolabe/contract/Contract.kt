@@ -28,15 +28,70 @@ import java.time.Instant
 @Serializable
 public enum class Shape { S0, S1, S2, S3 }
 
-/** A verbatim user request; the list on the contract is append-only (§4.1). */
+/**
+ * The kind of a message sent to a work (task-workflow §2.1, D-433). The host declares it; the model never classifies a
+ * user message. Only [Amendment] changes the contract's revision.
+ */
+@Serializable
+public enum class MessageKind(public val wire: String) {
+    /** The first message of a work. */
+    @SerialName("request") Request("request"),
+
+    /** "Go on", "yes", an acknowledgement: no new authority. */
+    @SerialName("continuation") Continuation("continuation"),
+
+    /** How, not what — and every untyped free text short of a final outcome (§2.2). */
+    @SerialName("steering") Steering("steering"),
+
+    /** What: only the explicit "change the task", a resolved model proposal or a `rework(text)` decision; never a default. */
+    @SerialName("amendment") Amendment("amendment"),
+
+    /** The answer to a pending `task.ask`; an amendment too only when it changes requirements (D-317). */
+    @SerialName("answer") Answer("answer"),
+}
+
+/**
+ * A verbatim user message; the list on the contract is append-only (§4.1, task-workflow §1.1). [kind] is `null` in a
+ * contract stored before W7 ([Contract.kindOf] reads it), [answers] names the question an [MessageKind.Answer] answers,
+ * [hostRef] makes a host's retried delivery idempotent. None is encoded at its default, so an older contract keeps its bytes.
+ */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 public data class UserRequest(
     val id: String,
     @Serializable(with = InstantSerializer::class) val at: Instant,
     val text: String,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val kind: MessageKind? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val answers: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val hostRef: String? = null,
 ) {
+    /** The constructor before W7: a message of no recorded kind. Kept for Java callers. */
+    public constructor(id: String, at: Instant, text: String) : this(id, at, text, null, null, null)
+
     init {
         require(id.isNotBlank() && text.isNotBlank()) { "request needs an id and text" }
+        require(answers == null || kind == MessageKind.Answer || kind == MessageKind.Amendment) { "only an answer names the question it answers" }
+    }
+}
+
+/** Who declared a task output (task-workflow §5.1, D-435). */
+@Serializable
+public enum class OutputDeclarer { User, Host, Model }
+
+/**
+ * A path the task declares as its own output (task-workflow §5.1): recorded append-only at the contract [version] that
+ * declared it; it leaves candidate identity from the next attempt (W8 applies it). [cell] names the model's cell.
+ */
+@Serializable
+public data class DeclaredOutput(
+    val path: String,
+    val by: OutputDeclarer,
+    val reason: String,
+    val version: Int,
+    val cell: ContextId? = null,
+) {
+    init {
+        require(path.isNotBlank() && reason.isNotBlank() && version >= 1) { "a declared output names its path, reason and version" }
     }
 }
 
@@ -47,8 +102,12 @@ public enum class RequirementStatus(public val wire: String) {
     InProgress("in_progress"),
     Verified("verified"),
     Blocked("blocked"),
+
+    /** The user cancelled or replaced the requirement (task-workflow §2.4 C): it no longer holds the campaign open. */
+    Cancelled("cancelled"),
 }
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 public data class Requirement(
     val id: String,
@@ -57,10 +116,21 @@ public data class Requirement(
     val dependsOn: List<String> = emptyList(),
     val authorityRef: String,
     val status: RequirementStatus = RequirementStatus.Pending,
+    /** Why the user cancelled it (task-workflow §2.4 C); its text never changes. Not encoded when absent. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val cancelledReason: String? = null,
+    /** The requirement that replaced it (§2.4 C). Not encoded when absent. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val supersededBy: String? = null,
 ) {
+    /** The constructor before W7. Kept for Java callers. */
+    public constructor(id: String, text: String, acceptance: List<String>, dependsOn: List<String>, authorityRef: String, status: RequirementStatus) :
+        this(id, text, acceptance, dependsOn, authorityRef, status, null, null)
+
     init {
         require(id.isNotBlank() && text.isNotBlank() && authorityRef.isNotBlank()) { "requirement needs id, text and authority" }
     }
+
+    /** Cancelled or replaced by the user (§2.4 C): it holds nothing open, and its history stays. */
+    val lapsed: Boolean get() = cancelledReason != null || supersededBy != null
 }
 
 /** Where an acceptance item came from (§4.1). The model may only add ([Model], `strengthens`). */
@@ -264,6 +334,17 @@ public data class Contract(
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val scratch: io.astrolabe.verify.ScratchPolicy? = null,
+    /**
+     * The work this one follows up (task-workflow §1.4): set by the host at the first open, immutable after it; the core
+     * opens it only when the parent has a final outcome. `null` for a first run or a new task. Not encoded when absent.
+     */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val parentWork: WorkId? = null,
+    /** The task's declared outputs (task-workflow §5.1), append-only; W8 applies them from the next attempt. Not encoded when empty. */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val outputs: List<DeclaredOutput> = emptyList(),
 ) {
     init {
         require(version >= 1) { "contract version starts at 1" }
@@ -287,8 +368,23 @@ public data class Contract(
         return copy(acceptance = acceptance + item)
     }
 
-    /** The currently authorized objective: the latest request text (D-17). */
-    val objective: String get() = requests.last().text
+    /** [request]'s kind; a request stored before W7 reads as the first `request` and every later one an `amendment` (§1.1). */
+    public fun kindOf(request: UserRequest): MessageKind =
+        request.kind ?: if (request.id == requests.first().id) MessageKind.Request else MessageKind.Amendment
+
+    /** The messages the objective is made of (task-workflow §1.2): the original request, then every amendment in order. */
+    val objectiveRequests: List<UserRequest>
+        get() = requests.filterIndexed { i, r -> i == 0 || kindOf(r) == MessageKind.Amendment }
+
+    /**
+     * The currently authorized objective (WD-24, task-workflow §1.2): the original request plus every amendment, in order,
+     * each after its id — never the last text. Steering and continuation messages are pinned verbatim but are not the goal.
+     */
+    val objective: String
+        get() = objectiveRequests.let { goal ->
+            if (goal.size == 1) goal.single().text
+            else goal.mapIndexed { i, r -> if (i == 0) "${r.id}: ${r.text}" else "amended by ${r.id}: ${r.text}" }.joinToString("\n")
+        }
 
     /**
      * §4.1 auto-derivation: a harness-sniffed suite is not a goal-level acceptance. While this is false the
@@ -356,11 +452,11 @@ public data class LedgerEntry(
 public data class Ledger(val entries: Map<String, LedgerEntry>) {
     public operator fun get(requirementId: String): LedgerEntry? = entries[requirementId]
 
-    public fun unfinished(): List<String> = entries.values.filter { it.status != RequirementStatus.Verified }.map { it.requirementId }
+    public fun unfinished(): List<String> = entries.values.filter { it.status != RequirementStatus.Verified && it.status != RequirementStatus.Cancelled }.map { it.requirementId }
 
     public companion object {
         @JvmStatic
         public fun initial(contract: Contract): Ledger =
-            Ledger(contract.requirements.associate { it.id to LedgerEntry(it.id, RequirementStatus.Pending) })
+            Ledger(contract.requirements.associate { it.id to LedgerEntry(it.id, if (it.lapsed) RequirementStatus.Cancelled else RequirementStatus.Pending) })
     }
 }
