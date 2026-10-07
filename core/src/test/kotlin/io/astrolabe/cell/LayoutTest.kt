@@ -144,6 +144,27 @@ class LayoutTest {
     }
 
     @Test
+    fun `every role with its own bytes has a golden S and schema set, the direct pair included`() {
+        // A-D.8: a change here is a harness change — bump Kernel, KernelDirect, Roles or ErrorPolicy VERSION and refresh the goldens.
+        val adapter = FakeAdapter(ScriptedModel.of())
+        assertEquals(GOLDEN.keys, Roles.defaults.keys, "every declared role has its pair")
+        for ((name, pair) in GOLDEN) {
+            val r = Roles.defaults.getValue(name)
+            val system = Layout.system(r, ExecutionMode.TrustedLocal)
+            assertEquals(pair.first, Digest.ofUtf8(system).hex, "the [S] bytes of $name moved:\n$system")
+            val set = assertIs<SchemaSelection.Supported>(ToolSchemas.forLineage(adapter, FakeProfiles.main, r)).set
+            assertEquals(pair.second, set.fingerprint.hex, "the $name schema bytes moved")
+            assertEquals(set.fingerprint, ToolSchemas.fingerprint(r), "$name: Fingerprint.schemas is the set sent")
+        }
+        assertEquals(GOLDEN_S_IMPLEMENTING to GOLDEN_SCHEMAS_IMPLEMENTING, GOLDEN.getValue(Roles.implementing.name))
+        assertEquals(GOLDEN_SCHEMAS_IMPLEMENTING, GOLDEN.getValue(Roles.writer.name).second, "the writer sends the implementing schema bytes")
+        assertEquals(GOLDEN.size, GOLDEN.values.map { it.first }.toSet().size, "every role's [S] has its own bytes")
+        assertEquals(GOLDEN.size - 1, GOLDEN.values.map { it.second }.toSet().size, "only writer and implementing share a schema set")
+        // D-414 item 1: one direct role for S0 and S1, so one direct pair.
+        assertEquals(Roles.mainLine(Protocol.Direct, Shape.S0), Roles.mainLine(Protocol.Direct, Shape.S1))
+    }
+
+    @Test
     fun `the direct S speaks kernel-direct-1, lists the direct names and thirteen error rows, whatever the shape`() {
         val direct = Roles.direct
         val system = Layout.system(direct, ExecutionMode.TrustedLocal)
@@ -275,5 +296,18 @@ class LayoutTest {
     private companion object {
         const val GOLDEN_S_IMPLEMENTING: String = "311827f81e8390431317be6be1732eef68fc76872729623f6dcc12b1c7dce024"
         const val GOLDEN_SCHEMAS_IMPLEMENTING: String = "cfe7784bcfc70dbddff371d84db2a80fda042172d43bb73ee9e61f19cacd2858"
+
+        /** A-D.8: role → (`[S]` digest in trusted-local mode, schema-set fingerprint on the fake main profile). */
+        val GOLDEN: Map<String, Pair<String, String>> = mapOf(
+            "implementing" to (GOLDEN_S_IMPLEMENTING to GOLDEN_SCHEMAS_IMPLEMENTING),
+            "plan" to ("478142ac99f4d5b31f8f397279373eab313e9e27b3f505eec4f18ca4c5addeb4" to "f7f36060e0162042860feff312325a0626263fa9c8e60ff6cf4b9fa1b2527a87"),
+            "probe" to ("b5c5739efcbc037785b3e149e3d1ebd89054d9d2f2cadb7421bbc0e3a665f492" to "141099704ee3191db91f8b90a6576aab299503e8e90e4558c6fab76c48299645"),
+            "review" to ("9c58d5e6b7b4cc57d2386594f539f4aff5fc8b2ed6f0c65c06eb8a477470d0d6" to "448263e08a4d68d8b72758e483f66c05ca2e0cb3fa7f8b5e985dbe1b188595f9"),
+            "qa" to ("13bce1146538d36d266db8ab3ca67f65707cfd9a8467c607d69bdee348320922" to "b5ccfa954e4c01d6c1d098f94bacc18b481b71879f8397c8cfccae1b540dabbe"),
+            "writer" to ("1bef7859f822ee0b8001cdc813dda6bf32b4e5541ec423309ab00cf87459705f" to GOLDEN_SCHEMAS_IMPLEMENTING),
+            "repair" to ("28e3167b8b553a44897c75c0817cec86474fa6861b60c30f96d841567bad8b12" to "c072159dd8d57eb3cee7e09b430d016946218327f33756151317f594e003b7e0"),
+            "extractor" to ("0d259f5beb4f7eed75d51480b121f8f0b0d71f2628bcd7f0455c923021cb84f3" to "28e31acd2df192b9f37f264d0879c4920631cfb9637eab5190ca2f6eb9e059d0"),
+            "direct" to ("015fc5bd535ed9a1ececb530044f0cad6bffb26abd72203fa01eb0ebcd134767" to "1ef3b4ba75ab9f8c0b960677a02462783d66b184c0cbf1e38a976a28d90f1f4b"),
+        )
     }
 }
