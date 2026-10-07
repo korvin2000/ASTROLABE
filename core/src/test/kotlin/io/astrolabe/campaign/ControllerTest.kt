@@ -441,7 +441,8 @@ class ControllerTest {
             val ac1 = finish.acceptance.single()
             assertEquals("green", ac1.status)
             assertTrue(ac1.logIds.isNotEmpty())
-            assertTrue(finish.notVerified.isEmpty())
+            // Task-workflow §3.2 (W8): the sniffed suite is regression evidence, disclosed as such — never "verified independently".
+            assertEquals(listOf("R1: regression only: no goal-level check of R1"), finish.notVerified)
             assertEquals(Stage.Patch, finish.highestAuthorizedStage)
             assertTrue(finish.checksRun.any { it.receiptId.isNotBlank() && it.verifierVersion.isNotBlank() })
             assertTrue(Files.exists(c.store.layout.exports.resolve(request.work.value).resolve("finish-receipt.json")))

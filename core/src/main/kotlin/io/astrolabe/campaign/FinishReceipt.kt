@@ -345,7 +345,7 @@ public object FinishReceipts {
         val regressionOnly = requirements.filter { line ->
             line.provenanceClass == ProvenanceClass.Unverified && line.goalEvidence.isEmpty() && line.regression.isNotEmpty() &&
                 line.regression.all { id -> acceptance.firstOrNull { it.id == id }?.result == ResultStatus.Passed }
-        }.map { "${it.id}: regression only: no goal-level check of ${it.id}" }
+        }.map { "${it.id}: $REGRESSION_ONLY${it.id}" }
         // C1b: a mandatory check outside the acceptance items and the campaign gate (the blast radius, the types of touched
         // files) red on the final tree — completed past on an Open item — leaves the campaign unverified; a known red does not.
         // P8.C.10: theirs is the hold — the attempt's failures not shown fixed on the final tree: each is disclosed in
@@ -506,6 +506,15 @@ public object FinishReceipts {
         r.approved && r.contractVersion == contractVersion && (!human || r.path.lastOrNull() == HUMAN) &&
             r.integrity.any { it.startsWith("acceptance surface: $path (") } &&
             (r.evidenceVersions[path]?.let { it == current } ?: (r.candidate == candidate))
+
+    /** Task-workflow §3.2: the `notVerified` disclosure of a requirement whose only green evidence is regression. */
+    internal const val REGRESSION_ONLY: String = "regression only: no goal-level check of "
+
+    /**
+     * A `notVerified` line that only discloses the goal-evidence class (§3.2): L0–L2 are green, so it holds no publication
+     * back (D-250) — as an `agent_test` result does not; an unverified or decided item does.
+     */
+    internal fun classOnly(line: String): Boolean = REGRESSION_ONLY in line
 
     /** The last tier of a review that went to the host's authority (`ReviewCell`). */
     private const val HUMAN: String = "human"

@@ -71,7 +71,7 @@ class OutputPolicyScenarioTest {
 
     /**
      * Task-workflow §5.3 (D-435, WF-5, WF-3): under v3 a check writes `tests/__pycache__/x.pyc` (a generated-directory marker:
-     * outside identity) and `reports/out.json` (moves the candidate). The user declares `reports/`: the contract's version
+     * outside identity) and `reports/out.json` (moves the candidate: its own input, so it stops once naming it). The user declares `reports/`: the contract's version
      * moves, the running attempt's effective policy and receipts do not, and the model's own proposal of another path is
      * refused in auto mode with the policy named. The user applies it now: the next attempt opens on the tree with a new
      * `s0` under a policy naming `reports`, the check's rerun moves no candidate and stores nothing, and the tracked
@@ -97,12 +97,14 @@ class OutputPolicyScenarioTest {
                         Scripted.Reply(listOf(io.astrolabe.cell.CellFixture.say("done"))),
                     )
                 }
-                assertEquals(CampaignOutcome.Completed, run.outcome, run.state?.reason)
+                assertEquals(CampaignOutcome.WaitingForInput, run.outcome, run.state?.reason)
+                assertTrue(OUT in run.state?.reason.orEmpty() && PYC !in run.state?.reason.orEmpty(), "the report moved the candidate, the marker's file did not: ${run.state?.reason}")
                 val untracked = first.stamper.report(fresh = true).untracked.map { it.path }
                 assertTrue(OUT in untracked && PYC !in untracked, "T-06: the marker's file is outside identity, the report is not: $untracked")
                 assertTrue("autoDeclareOutputs" in s.adapter!!.calls.last().request.toString(), "the model's proposal is refused with the policy named")
                 val before = first.contract.version
-                val receipt = SqliteReceipts(first.store, s.clock).forCheck(Checks.acceptId("AC-1")).single()
+                val receipt = SqliteReceipts(first.store, s.clock).forCheck(Checks.acceptId("AC-1")).last()
+                val askedBefore = asked.size
 
                 assertEquals("reports/README.md is tracked: a tracked path is never excluded (D-429)", io.astrolabe.campaign.DeclaredOutputs.refusal(first, "reports/README.md"))
                 val declared = io.astrolabe.campaign.DeclaredOutputs.declare(first, "reports/", io.astrolabe.contract.OutputDeclarer.User, "the task's report", clock = s.clock)
@@ -124,7 +126,7 @@ class OutputPolicyScenarioTest {
                 assertEquals(CampaignOutcome.Completed, rerun.outcome, rerun.state?.reason)
                 val again = SqliteReceipts(next.store, s.clock).forCheck(Checks.acceptId("AC-1")).filter { it.ids.attempt == AttemptId("a2") }
                 assertEquals(listOf(next.s0.stampId), again.map { it.stampAfter }, "one receipt, and the rerun moved no candidate")
-                assertTrue(asked.isEmpty(), "no decision request: ${asked.map { it.items }}")
+                assertEquals(askedBefore, asked.size, "no decision request in the next attempt: ${asked.drop(askedBefore).map { it.items }}")
                 val snapshots = s.counted(CountedPhase.Snapshot).filter { it.ids.attempt == AttemptId("a2") }
                 assertEquals(0L, snapshots.sumOf { it.objectsWritten }, "the next attempt's snapshots store neither path: $snapshots")
             }
