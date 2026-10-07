@@ -1,0 +1,12 @@
+{
+  "id": "two-sessions",
+  "class": "two-sessions",
+  "title": "Reminders on the user's own day in six places, then quiet hours built on the same clock — the session closes after three responses and the same work reopens",
+  "acceptance": {
+    "argv": ["{python}", "_acceptance/accept.py"],
+    "timeoutSeconds": 120
+  },
+  "reopen": {
+    "afterResponses": 3
+  }
+}

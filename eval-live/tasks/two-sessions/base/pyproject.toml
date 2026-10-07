@@ -1,0 +1,5 @@
+[project]
+name = "sched"
+version = "0.7.0"
+description = "Reminders, a daily digest and notifications"
+requires-python = ">=3.10"
