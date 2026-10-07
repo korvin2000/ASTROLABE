@@ -806,3 +806,13 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - W5 (Studio): one open per action, card text attached, decisions by key per work, continue in place, verbatim recap; 2 P1 fixed.
 - WG: `eval-live --mode ask`. Integration review over c1–c16: 4 cross-line P1 fixed in WR (`DecisionKey` v3).
 - Gate: WF 20/0 171 s, Studio WF 15/0, live `real-dirty-repo` auto and ask completed. Next: session 4B (W6–W10).
+
+## 2026-10-07: ASTROLABE 2.0 session 4B — wave W part 2: the task is understood and remembered, gate P8.W (D-432–D-438)
+- Started by fixing the red full suite of tag `v2-wave-WA` (WAF: S0 unreadable input, Windows long paths, `.Git` case).
+- W6 spec (Fable) → one Codex review (9 P1) → owner decisions D-433…D-435 and tail decisions D-436; W10: WD-31 is provider side.
+- Owner mid-session: optimistic mode, reviews only after large sets — per-line reviews folded into one integration review.
+- W7 message kinds and task model; W8 goal apart from tests, outputs, v3 markers; W9 carry from the store, append-only prefix.
+  W8/W9 shared `Controller.kt` by "everything else first, hot-file hunks last" — no conflicts. D-437 (precompile), D-438 (publication).
+- Integration review: 11 cross-line P1 fixed in WR2 (core) / WR2s (Studio). Live: T-03 passed its fixture guard yet stayed ×2 live → P8.W.11.
+- Gate: WF 43/43 179.5 s, Studio WF 25/0, live auto/ask/reopen completed; tag `v2-wave-W`. Tails 28 → 0 open (23 scheduled). Next: session 5.
+
