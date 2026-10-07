@@ -187,7 +187,9 @@ class OutputPolicyScenarioTest {
                     )
                 }
                 assertEquals(CampaignOutcome.WaitingForInput, run.outcome, run.state?.reason)
-                assertTrue(OUT in run.state?.reason.orEmpty() && PYC !in run.state?.reason.orEmpty(), "the report moved the candidate, the marker's file did not: ${run.state?.reason}")
+                // Typed, not the reason's text: the reason echoes the check's argv, which names both paths (§5.3 "no flag").
+                val flagged = asked.flatMap { it.items }.filter { it.obligation == "AC-1" }
+                assertTrue(flagged.isNotEmpty() && flagged.all { it.rewrittenInputs == listOf(OUT) }, "the report moved the candidate, the marker's file did not: ${flagged.map { it.rewrittenInputs }} (${run.state?.reason})")
                 val untracked = first.stamper.report(fresh = true).untracked.map { it.path }
                 assertTrue(OUT in untracked && PYC !in untracked, "T-06: the marker's file is outside identity, the report is not: $untracked")
                 assertTrue("autoDeclareOutputs" in s.adapter!!.calls.last().request.toString(), "the model's proposal is refused with the policy named")
