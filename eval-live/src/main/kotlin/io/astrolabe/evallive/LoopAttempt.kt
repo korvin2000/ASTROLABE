@@ -495,10 +495,14 @@ internal class LoopTools(private val workspace: Path, private val defaults: Defa
      */
     private fun resolve(path: String, intent: Intent): Path {
         if (intent == Intent.Read && path.trim().trimEnd('/', '\\') in setOf("", ".")) return paths.root
-        return when (val resolved = paths.resolve(path, intent)) {
+        val real = when (val resolved = paths.resolve(path, intent)) {
             is PathResolution.Resolved -> resolved.real
             is PathResolution.Rejected -> throw IllegalArgumentException("'$path' refused: ${resolved.detail}")
         }
+        // A case-sensitive disk (Linux) does not refuse `.Git`; the loop refuses git's directory in any case on every OS.
+        val segments = path.split('/', '\\') + (if (real.startsWith(paths.root)) paths.root.relativize(real).map { it.toString() } else emptyList())
+        require(segments.none { it.equals(".git", ignoreCase = true) }) { "'$path' refused: git's directory is not a workspace file" }
+        return real
     }
 
     private fun read(path: String): ToolAnswer {
