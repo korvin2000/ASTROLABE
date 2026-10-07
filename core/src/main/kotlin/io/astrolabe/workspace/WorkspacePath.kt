@@ -249,7 +249,22 @@ public class WorkspacePath private constructor(
     }
 
     /** Snapshot metadata names the final link object, never its target; link ancestors are refused. */
-    internal fun resolveCapture(userPath: String): PathResolution {
+    internal fun resolveCapture(userPath: String): PathResolution = resolveCapture(userPath, null)
+
+    /**
+     * One capture pass — a stamp or a capture (WF-2): each directory's canonical path is taken once and reused for its
+     * files. Every path still checks its own link ancestors and kind first, so a directory that became a link during the
+     * pass is refused as before (D-47).
+     */
+    internal inner class CapturePass {
+        private val parents = HashMap<Path, Path>()
+
+        fun resolve(userPath: String): PathResolution = resolveCapture(userPath, parents)
+    }
+
+    internal fun capturePass(): CapturePass = CapturePass()
+
+    private fun resolveCapture(userPath: String, parents: MutableMap<Path, Path>?): PathResolution {
         val lexical = lexicalSegments(userPath)
         lexical.rejected?.let { return it }
         val segments = lexical.segments
@@ -260,7 +275,8 @@ public class WorkspacePath private constructor(
             }
             var candidate = root
             for (segment in segments) candidate = candidate.resolve(segment)
-            val parent = canonicalise(candidate.parent, segments.size - 1)
+            val parent = parents?.getOrPut(candidate.parent) { canonicalise(candidate.parent, segments.size - 1) }
+                ?: canonicalise(candidate.parent, segments.size - 1)
             if (!parent.startsWith(root)) {
                 return PathResolution.Rejected(RejectionReason.OutsideRoot, "capture outside workspace: $userPath")
             }
