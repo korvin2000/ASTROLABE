@@ -16,7 +16,7 @@
 **Design rule.** HELM's three modalities — observe, mutate, execute — remain the points where policy attaches (budgets on observation, preconditions on mutation, effect classes on execution). The surface is wider than HELM's because delegation, review, knowledge, skills and ask-user are modalities HELM excluded, and because operations whose cost differs by an order of magnitude should not share one worst-case budget `[C §8.4; C3]`. It is narrower than SEXTANT's ~30 operations because tool selection degrades with count `[MB §8.1]` and every dedicated operation must beat `bash + raw output` in the tool eval or not ship `[MB A7]`. Seven families with the operations enumerated below, byte-stable per role; rare capabilities via `look(catalog)` (`tools.catalog` is descriptive shorthand, not an eighth family).
 
 ```text
-look(what, target, budget=4000 (Defaults.lookBudgetTokens), near?, glob?, in="workspace"|"store"|"kb", since?)
+look(what, target, budget=4000 (Defaults.lookBudgetTokens), near?, glob?, in="workspace"|"store")  — the knowledge base is kb.search (C18)
   what ∈ { tree, outline, read, find, def, refs, importers, impact, recall, bmap, catalog }
   → { text, truncated, more?, scope, complete, tier, versions{path: v}, id }
   · read target = path | path:a-b | path::Symbol, or `range: "a-b"` beside a path target (`range: "path:a-b"` alone);
@@ -26,7 +26,7 @@ look(what, target, budget=4000 (Defaults.lookBudgetTokens), near?, glob?, in="wo
   · dedup: same (what, target, version) live in window → "see #17 (unchanged)"
   · find returns scope + complete + truncated; in="store" searches journal/blobs; in="kb" searches notes (stale ones labelled)
   · refs/importers/impact carry `tier` and `complete`; dynamic dispatch reported unresolved, never guessed        [J1 §5.6]
-  · recall(id, range?, since?) → stubbed result, a log slice, or new output of a bg handle; changed file ⇒ `historical v=…`
+  · recall(id, range?) → stubbed result or a log slice (new output of a bg handle: run(op="poll")); changed file ⇒ `historical v=…`
   · several independent looks in one turn run in parallel under one shared output budget                       [J1 §7.3]
 
 edit(ops, why)

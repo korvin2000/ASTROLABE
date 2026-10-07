@@ -98,7 +98,7 @@ public object ToolSchemas {
     public fun schema(family: ToolFamily): ToolSchema = ToolSchema(family.wire, description(family), jsonSchema(family), dialect)
 
     private fun description(family: ToolFamily): String = when (family) {
-        ToolFamily.Look -> "Observe: tree, outline, read (path | path:a-b | path::Symbol), find (in workspace|store|kb), def, refs, importers, impact, recall(id), bmap, catalog. Budgeted; results carry scope, complete and versions."
+        ToolFamily.Look -> "Observe: tree, outline, read (path | path:a-b | path::Symbol), find (in workspace|store), def, refs, importers, impact, recall(id), bmap, catalog. Budgeted; results carry scope, complete and versions."
         ToolFamily.Edit -> "Mutate, one form per op: {path, expect?, hunks} anchored hunks inside displayed ranges; {create, content}; {delete, expect?}; {rename, to, expect?}; {revert: #id|turn:N}; {transform: {script|argv, scope_glob, why}}. expect is the content hash the file was shown with (4+ hex, e.g. c02e); omitted, it is the version you last read. Preflighted; partial failures are reported, never rolled back."
         ToolFamily.Run -> "Execute argv (preferred) or one shell cmd; cwd defaults to the workspace root; op=wait(handle) blocks until the process ends or until_line (regex) / until_port (loopback) is ready — one call, no polling; a server never ends, so wait on it with until_line/until_port or a short timeout; until_* on a launch implies bg; op=poll/cancel for background handles. Non-zero exit is information; a launch's timeout kills the process tree, a wait's timeout ends only the wait and the process keeps running."
         ToolFamily.Verify -> "check(paths?) now; tests(selection=blast|accept|full|ids); acceptance(ids?); baseline(); review(scope?)."
@@ -111,7 +111,7 @@ public object ToolSchemas {
         ToolFamily.Look -> obj(
             required = listOf("what"),
             "what" to enum(ToolOps.look), "target" to str(), "budget" to int(), "near" to str(), "glob" to str(),
-            "in" to enum(listOf("workspace", "store", "kb")), "since" to str(), "id" to str(), "range" to str(),
+            "in" to enum(listOf("workspace", "store")), "id" to str(), "range" to str(),
         )
         ToolFamily.Edit -> obj(
             required = listOf("ops", "why"),

@@ -96,6 +96,8 @@ class LookTest {
 
     private fun status(outcome: ToolOutcome) = outcome.header!!.runtime.status
 
+    private fun refusal(json: String): String = (ToolCalls.parse(listOf(ProviderCall("c1", "look", json))) as ParsedCalls.Invalid).error
+
     @Test
     fun `a truncated archive recall continues over the archive, never over the active notes`() = runTest {
         val archived = (1..40).map { "x$it archived note number $it" }
@@ -329,7 +331,8 @@ class LookTest {
         assertTrue(workset.covers("src/big.py", v, LineRange(shownTo + 1, shownTo + 5)), "recalled lines at the current version are KNOWN")
         assertEquals("refused", status(look("""{"what":"recall","id":"#1","range":"300-310"}""")))
         assertEquals("refused", status(look("""{"what":"recall","id":"#9"}""")))
-        assertEquals("unsupported", status(look("""{"what":"recall","id":"#1","since":"0"}""")))
+        // C18: the schema has no since; one sent anyway is the parser's refusal, never an exception or a silent ignore.
+        assertTrue("since" in refusal("""{"what":"recall","id":"#1","since":"0"}"""))
     }
 
     @Test
@@ -365,7 +368,7 @@ class LookTest {
     }
 
     @Test
-    fun `find reports zero, incomplete, unsupported and unavailable distinctly and registers displayed hit lines`() = runTest {
+    fun `find reports zero, incomplete and unsupported distinctly and refuses in=kb at the parser and registers displayed hit lines`() = runTest {
         val hits = look("""{"what":"find","target":"return","glob":"src/*.py"}""")
         assertEquals("ok", status(hits))
         assertTrue(hits.body.startsWith("3 matches for /return/ in workspace glob=src/*.py"), hits.body)
@@ -391,9 +394,8 @@ class LookTest {
         assertEquals("incomplete", partial.header!!.runtime.completeness)
 
         assertEquals("unsupported", status(look("""{"what":"find","target":"(?i)"}""")))
-        val kb = look("""{"what":"find","target":"x","in":"kb"}""")
-        assertEquals("unavailable", status(kb))
-        assertEquals("incomplete", kb.header!!.runtime.completeness, "nothing searched is not absence")
+        // C18: in=kb left the schema; the knowledge base is kb.search, and the parser says so.
+        assertTrue("kb.search" in refusal("""{"what":"find","target":"x","in":"kb"}"""))
 
         journal.append(JournalEvent("ev-1", ids, 1, JournalKind.Result, text = "types: 2 errors in src/a.py", at = clock.instant()))
         val stored = look("""{"what":"find","target":"errors","in":"store"}""")

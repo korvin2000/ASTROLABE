@@ -332,11 +332,7 @@ public class Look(
 
     private fun find(args: LookArgs, context: TurnContext): ToolOutcome {
         val pattern = args.target?.takeIf { it.isNotEmpty() } ?: return filesMatching(args) ?: refused(args, "refused", "find needs a pattern in target, or a glob to list files by name")
-        return when (args.scope) {
-            "workspace" -> findInWorkspace(args, pattern, context)
-            "store" -> findInStore(args, pattern)
-            else -> refused(args, "unavailable", "find in=kb: the knowledge base arrives in P2.6; nothing was searched (complete=false)", complete = false)
-        }
+        return if (args.scope == "store") findInStore(args, pattern) else findInWorkspace(args, pattern, context)
     }
 
     private fun findInWorkspace(args: LookArgs, pattern: String, context: TurnContext): ToolOutcome {
@@ -453,7 +449,6 @@ public class Look(
         // D-365: "#14", "14" and 14 name the same result.
         val number = args.id?.trim()?.let { Aliases.parse(it) ?: it.toIntOrNull()?.takeIf { n -> n >= 1 } }
             ?: return refused(args, "refused", "recall needs id=#n, e.g. \"#14\"")
-        if (args.since != null) return refused(args, "unsupported", "recall since=: background output arrives with run handles (P1.6.5)")
         val alias = aliases.resolve(ids.work, number) ?: return refused(args, "refused", "no result #$number in this campaign")
         val observation = observations.get(alias.canonicalId) ?: return refused(args, "refused", "#$number is not a recallable observation (${alias.kind})")
         val stored = String(blobs.get(observation.contentRef), Charsets.UTF_8).lines()

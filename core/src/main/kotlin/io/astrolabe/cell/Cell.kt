@@ -75,6 +75,7 @@ import io.astrolabe.tool.ToolExecutor
 import io.astrolabe.tool.ToolFamily
 import io.astrolabe.tool.ToolOutcome
 import io.astrolabe.tool.ToolSchemas
+import io.astrolabe.tool.TurnContext
 import io.astrolabe.tool.TurnResult
 import io.astrolabe.tool.run.TurnOutput
 import io.astrolabe.tool.run.announceMoved
@@ -1748,9 +1749,14 @@ public class Cell @JvmOverloads constructor(
             tools.kb?.let { put(ToolFamily.Kb, recording(it)) }
         }
 
-        private fun recording(executor: ToolExecutor): ToolExecutor = ToolExecutor { call, context ->
-            enforceAuthority()
-            executor.execute(call, context).also { outcome -> record.record(call, outcome) }
+        // C18: every method but execute delegates, so the executor's own read budget (the host's lookBudgetTokens) reaches the dispatcher.
+        private fun recording(executor: ToolExecutor): ToolExecutor = object : ToolExecutor {
+            override suspend fun execute(call: ToolCall, context: TurnContext): ToolOutcome {
+                enforceAuthority()
+                return executor.execute(call, context).also { outcome -> record.record(call, outcome) }
+            }
+
+            override fun defaultReadTokens(call: ToolCall): Int? = executor.defaultReadTokens(call)
         }
 
         private fun enforceAuthority() {
