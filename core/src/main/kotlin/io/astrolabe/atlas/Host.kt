@@ -32,6 +32,12 @@ public interface HostProbe {
     /** True when [program] resolves on `PATH` (with `PATHEXT` on Windows). */
     public fun onPath(program: String): Boolean
 
+    /**
+     * True when [program] resolves on `PATH` as a binary a process start runs without a shell: `<program>.exe` on Windows —
+     * a `.cmd`/`.bat` shim needs `cmd.exe` — and an executable `<program>` on POSIX. A probe that cannot tell answers [onPath].
+     */
+    public fun launchable(program: String): Boolean = onPath(program)
+
     /** The environment variable [name], or `null` when unset. */
     public fun env(name: String): String?
 
@@ -50,14 +56,17 @@ public class PathProbe(override val os: OsFamily, environment: Map<String, Strin
     override fun env(name: String): String? =
         if (os == OsFamily.Windows) environment.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value else environment[name]
 
-    override fun onPath(program: String): Boolean {
+    override fun onPath(program: String): Boolean = resolves(
+        program,
+        if (os == OsFamily.Windows) env("PATHEXT")?.split(';')?.map { it.trim() }?.filter { it.isNotEmpty() } ?: DEFAULT_PATHEXT else listOf(""),
+    )
+
+    // A start without a shell (CreateProcess) appends `.exe` only: a `PATHEXT` shim on PATH is not launchable.
+    override fun launchable(program: String): Boolean = resolves(program, if (os == OsFamily.Windows) listOf(".exe") else listOf(""))
+
+    private fun resolves(program: String, extensions: List<String>): Boolean {
         val separator = if (os == OsFamily.Windows) ';' else ':'
         val dirs = env("PATH").orEmpty().split(separator).map { it.trim().trim('"') }.filter { it.isNotEmpty() }
-        val extensions = if (os == OsFamily.Windows) {
-            env("PATHEXT")?.split(';')?.map { it.trim() }?.filter { it.isNotEmpty() } ?: DEFAULT_PATHEXT
-        } else {
-            listOf("")
-        }
         for (dir in dirs) {
             for (extension in extensions) {
                 val candidate = try {

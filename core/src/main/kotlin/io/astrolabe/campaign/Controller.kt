@@ -513,8 +513,11 @@ public class Controller @JvmOverloads public constructor(
     // C18: the search backend, chosen once per campaign open and logged in one line — ripgrep when `rg` resolves on the host's PATH, else the JVM.
     private val searches = Collections.synchronizedMap(WeakHashMap<OpenedCampaign, Search>())
 
-    /** The search backend of [c]'s cells: ripgrep when `rg` resolves on the host's `PATH`, else the in-process JVM backend. */
-    internal fun search(c: OpenedCampaign): Search = searches[c] ?: Searches.auto { host.onPath(RIPGREP) }.also {
+    /**
+     * The search backend of [c]'s cells: ripgrep when a launchable `rg` resolves on the host's `PATH` (never a Windows
+     * `.cmd`/`.bat` shim), else the in-process JVM backend; a ripgrep that fails to start on its first search falls back to the JVM.
+     */
+    internal fun search(c: OpenedCampaign): Search = searches[c] ?: (if (host.launchable(RIPGREP)) io.astrolabe.os.search.RipgrepSearch(RIPGREP, Searches.jvm()) else Searches.jvm()).also {
         searches[c] = it
         LoggerFactory.getLogger(Controller::class.java).info("search backend {} for {}/{}", it.backend.name.lowercase(), c.ids.work.value, c.ids.attempt.value)
     }
