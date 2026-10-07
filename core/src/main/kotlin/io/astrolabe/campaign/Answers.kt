@@ -28,8 +28,9 @@ internal object Answers {
         if (edited != null) return "an edit was applied to ${edited.path}"
         for (intent in executions(c)) {
             if (intent.expectedEffect.startsWith("D ")) return "an action with effects ran: ${intent.argv.joinToString(" ")} (D-class)"
-            // D-321: effects a stamp of the tree cannot observe (network, install, outside the workspace, a background process).
-            if (!intent.workspaceConfined) return "an action with effects ran: ${intent.argv.joinToString(" ")} (effects outside what the tree shows)"
+            // D-321: effects a stamp of the tree cannot observe (network, install, outside the workspace, a background process);
+            // a script interpreter's are observed by the stamp (§9.4), so the candidate at s0 shows it left none.
+            if (!intent.workspaceConfined && !intent.stampObserved) return "an action with effects ran: ${intent.argv.joinToString(" ")} (effects outside what the tree shows)"
         }
         return null
     }

@@ -18,6 +18,7 @@ import io.astrolabe.cell.CellModel
 import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Command
 import io.astrolabe.contract.Contracts
+import io.astrolabe.contract.EvidencePurpose
 import io.astrolabe.contract.Origin
 import io.astrolabe.contract.Shape
 import io.astrolabe.contract.SqliteContractRepository
@@ -80,15 +81,19 @@ internal class Scenario(
 
     /**
      * Stores a contract whose acceptance is the `run:` item [check] before the first open (the harness derives the rest);
-     * a [shape] replaces the derived one, its requirements accepted by [id] (S1 runs the campaign gate's end checks).
+     * a [shape] replaces the derived one, its requirements accepted by [id] (S1 runs the campaign gate's end checks). The
+     * item is the project's check the host declared for the goal ([purpose] `goal`, W8); `null` leaves the legacy reading
+     * of a sniffed suite — regression evidence only (task-workflow §3.1).
      */
-    fun seed(check: Command, id: String = "AC-1", shape: Shape? = null) {
+    fun seed(check: Command, id: String = "AC-1", shape: Shape? = null, purpose: EvidencePurpose? = EvidencePurpose.Goal) {
         check(campaign == null) { "seed before the first open" }
         Store.open(stateRoot(), Git(root), clock).use { store ->
             val contracts = Contracts(SqliteContractRepository(store, clock), idGen, clock)
-            val derived = contracts.deriveS0(request.work, request.attempt, request.text, Atlas.build(root), Config(), policy.tokens).contract
-            val seeded = derived.copy(acceptance = listOf(Acceptance.Run(id, check, Origin.Harness, scope = Contracts.TOUCHED)))
-            contracts.open(if (shape == null) seeded else seeded.copy(shape = shape, requirements = seeded.requirements.map { it.copy(acceptance = listOf(id)) }))
+            val derived = contracts.deriveS0(request.work, request.attempt, request.text, Atlas.build(root), config, policy.tokens).contract
+            // Every requirement is checked by [id], as `deriveS0` binds a sniffed suite.
+            val seeded = derived.copy(acceptance = listOf(Acceptance.Run(id, check, Origin.Harness, scope = Contracts.TOUCHED, purpose = purpose)),
+                requirements = derived.requirements.map { it.copy(acceptance = listOf(id)) })
+            contracts.open(if (shape == null) seeded else seeded.copy(shape = shape))
         }
     }
 

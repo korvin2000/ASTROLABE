@@ -155,6 +155,46 @@ class ReviewScenarioTest {
         }
     }
 
+    /**
+     * T-09 (W8): the campaign-scope review end to end. An unsigned `review:` item owes it (§8.8); its review cell cannot be
+     * admitted on the configured campaign budget and no host reviewer answers, so the campaign stops waiting — the review
+     * is never skipped — with the review cell's numbers in the finish receipt, the review put to the decider, and the
+     * user's accept at the reopen completes without a model call.
+     */
+    @Test
+    fun `T-09 a campaign review nobody can give is never skipped, waits for a decision with the numbers, and the user's accept completes`() = runBlocking<Unit> {
+        val asked = ArrayList<AcceptanceDecisionRequest>()
+        var accept = false
+        val host = object : Authority by AutonomousAuthority() {
+            override suspend fun decide(request: AcceptanceDecisionRequest): AcceptanceDecision? {
+                asked += request
+                return if (accept) AcceptanceDecision(request.id, request.contractRevision, request.candidate, DecisionKind.Accept, Decider.User, "user", "reviewed by hand") else null
+            }
+        }
+        val owed = Acceptance.Review("AC-R", "a maintainer approves the whole change", Origin.User)
+        val config = review(Defaults().copy(reviewCampaignTokens = 3_000),
+            Scripted.Reply(listOf(say("checking the change"), read("rv1", "src/a.py"))),
+            Scripted.Reply(listOf(say("""{"verdict":"approve","confidence":0.9,"findings":[]}"""))),
+            host = host, extra = listOf(owed),
+        ) { _, run, reviewed ->
+            assertTrue(reviewed.record?.approved == true, "the increment's own review approved: ${reviewed.record?.unavailable}")
+            assertEquals(CampaignOutcome.WaitingForInput, run.outcome, "an unavailable campaign review is never skipped: ${run.state?.reason}")
+            val review = assertNotNull(run.finish?.review, "the receipt names the owed campaign review")
+            assertEquals(null, review.verdict)
+            val why = review.unavailable.orEmpty()
+            assertTrue("no reviewer answered" in why && "not admitted before its model call" in why, why)
+            assertTrue(asked.any { it.incrementId == null && it.items.any { item -> item.obligation == "campaign-review" } },
+                "the campaign review is put to the decider: ${asked.map { it.incrementId to it.items.map { i -> i.obligation } }}")
+        }
+        accept = true
+        Controller(config, clock, idGen, events).open(repo.root, request, policy).use { c ->
+            val fake = FakeAdapter(ScriptedModel.of())
+            val done = Controller(config, clock, idGen, events).run(c, CellModel(fake, large, HeuristicEstimator()), host)
+            assertEquals(CampaignOutcome.Completed, done.outcome, done.state?.reason)
+            assertTrue(fake.calls.isEmpty(), "the accept called the model ${fake.calls.size} times")
+        }
+    }
+
     private class Reviewed(val requests: Int, val looks: List<String>, val record: ReviewRecord?)
 
     /**
@@ -162,10 +202,10 @@ class ReviewScenarioTest {
      * cell's replies. [verify] sees the campaign, the run and the review cell's requests, look result headers and record.
      */
     private suspend fun review(
-        defaults: Defaults, vararg judge: Scripted, host: Authority = AutonomousAuthority(),
+        defaults: Defaults, vararg judge: Scripted, host: Authority = AutonomousAuthority(), extra: List<Acceptance> = emptyList(),
         verify: (OpenedCampaign, S0Run, Reviewed) -> Unit,
     ): Config {
-        seed()
+        seed(extra)
         val config = Config(stateRoot = stateRoot.toString(), profiles = FakeProfiles.all + (large.id to large), defaults = defaults)
         Controller(config, clock, idGen, events).open(repo.root, request, policy).use { c ->
             val v = checkNotNull(c.registry.version("src/a.py"))
@@ -223,7 +263,7 @@ class ReviewScenarioTest {
     private class OpenCrash : RuntimeException("injected crash during open")
 
     /** Hard reversibility makes the risk high: S2 is selected and the D-34 floor owes the increment a review (D-122). */
-    private fun seed() {
+    private fun seed(extra: List<Acceptance> = emptyList()) {
         Store.open(stateRoot, repo.git, clock).use { store ->
             val contracts = Contracts(SqliteContractRepository(store, clock), idGen, clock)
             val derived = contracts.deriveS0(request.work, request.attempt, request.text, Atlas.build(repo.root), Config(), policy.tokens).contract
@@ -231,7 +271,7 @@ class ReviewScenarioTest {
                 shape = Shape.S2,
                 risk = Risk(1, Reversibility.Hard, false),
                 requirements = listOf(Requirement("R1", "a returns 10", listOf("AC-1"), authorityRef = derived.requests.single().id)),
-                acceptance = listOf(Acceptance.Run("AC-1", printing, Origin.User)),
+                acceptance = listOf(Acceptance.Run("AC-1", printing, Origin.User)) + extra,
             ))
         }
     }

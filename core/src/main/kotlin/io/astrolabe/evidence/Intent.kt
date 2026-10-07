@@ -33,6 +33,12 @@ public data class Intent(
      * all. Legacy rows default to `false` and stay host-reconciled (D-321).
      */
     val workspaceConfined: Boolean = false,
+    /**
+     * Task-workflow §3.5 (WD-22): a foreground action that is no D-class and needs no capability beyond the workspace and
+     * a local run, so a stamp of the tree observes every durable effect it can have — including a script interpreter's,
+     * whose effects argv cannot predict (§9.4). An answer reads it; it grants and enforces nothing. Legacy rows: `false`.
+     */
+    val stampObserved: Boolean = false,
 ) {
     init {
         require(intentId.isNotBlank() && actionId.isNotBlank()) { "intent needs ids" }

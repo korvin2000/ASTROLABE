@@ -1212,7 +1212,7 @@ class RunTest {
     }
 
     @Test
-    fun `a command that is not a declared one, or the model's own addition, records no receipt`() = runTest {
+    fun `a command that is not a declared one records no receipt, and the model's own goal item is evaluated by the run that realizes it`() = runTest {
         repo.write("pytest_pass.txt", recorded("pytest-pass.txt"))
         val r = Recognizing(listOf(
             Acceptance.Run("AC-1", printing("pytest_pass.txt"), Origin.User),
@@ -1225,12 +1225,13 @@ class RunTest {
         run("""{"cmd":"${shell("type pytest_pass.txt README.md", "cat pytest_pass.txt README.md")}"}""", r.run)
         run("""{"cmd":"${shell("type pytest_pass.txt | findstr passed", "cat pytest_pass.txt | cat")}"}""", r.run)
         run("""{"cmd":"${shell("type ..\\\\pytest_pass.txt", "cat ../pytest_pass.txt")}","cwd":"src"}""", r.run)
-        // A model-added acceptance item is not a declared command (D-262): its run stays plain.
+        // Task-workflow §3.3 (W8, WD-21): a model-added item is no declared command, but the model's own authorized run of it
+        // binds its receipt to the item — evaluated by what ran, never by its word; verify still never launches it (D-262).
         val added = run("""{"cmd":"${printingCmd("README.md")}"}""", r.run)
-        assertFalse(added.body.contains("receipt "), added.body)
+        assertTrue(added.body.contains("receipt CHK-accept-AC-2"), added.body)
 
         assertTrue(r.receiptsOf("CHK-accept-AC-1").isEmpty())
-        assertTrue(r.receiptsOf("CHK-accept-AC-2").isEmpty())
+        assertEquals(1, r.receiptsOf("CHK-accept-AC-2").size)
         assertTrue(r.checks.all().none { it.id.startsWith(Checks.MODEL_PREFIX) }, "printing a file is no test, build or typecheck")
     }
 
