@@ -243,10 +243,15 @@ class SettingsReachabilityTest {
         event !is AgentEvent.Cell.ToolResulted && event !is AgentEvent.Cell.ModelProgress && event !is AgentEvent.Cell.ModelResponded &&
         event !is AgentEvent.Run.Output
 
+    /**
+     * Paths, the candidate stamps (`Checks @<stamp>`, which move between identical runs), the finish receipt's digest and
+     * the temporary repository's name in note ids are masked, so a stamp that happens to match in both baselines never
+     * counts as an effect.
+     */
     private fun normalise(line: String, root: Path, state: Path): String = listOf(root to "<root>", state to "<state>").fold(line) { acc, (path, mark) ->
         val text = path.toString()
         acc.replace(text.replace("\\", "\\\\"), mark).replace(text, mark).replace(text.replace('\\', '/'), mark)
-    }
+    }.replace(STAMP, "@<stamp>").replace(TEMP_REPO, "temprepo<n>").replace(RECEIPT_REF, "finishReceiptRef=<ref>")
 
     // ------------------------------------------------------------------ scripts
 
@@ -335,6 +340,9 @@ class SettingsReachabilityTest {
 
     private companion object {
         const val THREADS = 8
+        val STAMP = Regex("@[0-9a-f]{4,}")
+        val TEMP_REPO = Regex("temprepo[0-9]+")
+        val RECEIPT_REF = Regex("finishReceiptRef=[0-9a-f]+")
         const val BIG = "src/big.py"
         const val UTIL = "src/util.py"
         const val RULES = "AGENTS.md"
@@ -388,8 +396,8 @@ class SettingsReachabilityTest {
             Excepted("defaults.providerTerminalWaitSeconds", "a wall-clock wait for a provider terminal that never arrives; the fake adapter always ends its stream"),
             d("alpha") { it.copy(alpha = 0.05) },
             d("k", Context.PRESSURE) { it.copy(k = 1) },
-            // Reached in one of two runs only: the fixture's reads do not reliably press the cell into a rebuild (tail C18-pressure).
-            Deferred("defaults.m", "tail C18-pressure: the turns a pressure rebuild keeps; this fixture does not reliably press a cell into a rebuild"),
+            // No effect once stamps are masked: its earlier reach rode on a stamp the two baselines happened to share.
+            Deferred("defaults.m", "tail C18-pressure: the turns a pressure rebuild keeps; this fixture does not press a cell into a rebuild"),
             d("rMaxTokens") { it.copy(rMaxTokens = 600) },
             d("anchorMaxTokens") { it.copy(anchorMaxTokens = 200) },
             d("immediateStubTokens") { it.copy(immediateStubTokens = 1) },
@@ -404,9 +412,9 @@ class SettingsReachabilityTest {
             d("factLineMaxChars") { it.copy(factLineMaxChars = 10) },
             Unwired("defaults.noteBodyMaxTokens", "$TAIL_UNWIRED (kb.Note.MAX_BODY_TOKENS is the constant in force)"),
             Unwired("defaults.noteSummaryMaxChars", "$TAIL_UNWIRED (kb.Note.MAX_SUMMARY_CHARS is the constant in force)"),
-            // Reached on the follow-up's parent carry only: the cell-boundary carry and the pressure rebuild call
-            // CarryForward.carry without seedCapTokens and get its 4000 constant (tail C18-seeds).
-            d("seedsMaxTokens", Context.FOLLOW_UP) { it.copy(seedsMaxTokens = 1) },
+            // The cell-boundary carry: CARRY plays no follow-up, so the parent carry (reached on FOLLOW_UP in C18) is not
+            // what moves here. The pressure rebuild passes the same setting; this fixture does not press a rebuild.
+            d("seedsMaxTokens", Context.CARRY) { it.copy(seedsMaxTokens = 1) },
             d("seedRule", Context.CARRY_PATH) { it.copy(seedRule = SeedRule.V2) },
             Unwired("defaults.injectionMaxNotes", "$TAIL_UNWIRED (Controller ranks with InjectionWeights() defaults; hot file)"),
             Unwired("defaults.injectionMaxTokens", "$TAIL_UNWIRED (Controller ranks with InjectionWeights() defaults; hot file)"),
