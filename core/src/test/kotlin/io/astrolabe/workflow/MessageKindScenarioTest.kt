@@ -52,7 +52,8 @@ import kotlin.test.assertTrue
  * amendments; an exception inside a cell stops the run resumably and the next open continues the same work; a project the
  * core derives no check for opens once with the host's declared check; a follow-up opens only after a final parent. The
  * guards count opens, model requests, receipts and finalization attempts, so the fixture has one tool file, no big file
- * and no settling wait, and the scenarios play at once on first use (plan §7.2 rule 3).
+ * and no settling wait, and the scenarios play at once on first use (plan §7.2 rule 3). WF-4's locked-file play keeps its
+ * own fixture (ten tool files, the big file, the settling wait).
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class MessageKindScenarioTest {
@@ -66,6 +67,7 @@ class MessageKindScenarioTest {
         FAILED to { scenario(FAILED, body = ::cellExceptionContinues) },
         FOLLOW to { scenario(FOLLOW, seeded = false, body = ::declaredCheckOpensOnceThenFollowUp) },
         LOCKED to { scenario(LOCKED, variant = DirtyRepo.Variant.LockedFile, body = ::unreadableAtReopen) },
+        UNREADABLE to { lockedFileStopsResumably() },
     )
     private val played by lazy { Scenario.concurrently(plays.keys) { plays.getValue(it)() } }
 
@@ -89,6 +91,9 @@ class MessageKindScenarioTest {
 
     @Test
     fun `an input another process holds at a reopen stops the work resumably by its path instead of throwing`() = played.getValue(LOCKED).getOrThrow()
+
+    @Test
+    fun `WF-4 a locked file stops the run resumably and names the path`() = played.getValue(UNREADABLE).getOrThrow()
 
     /** §2.5 (a): the card's note, then its Send to agent, then the user's accept of the request still asked. */
     private suspend fun cardNoteThenSend(s: Scenario) {
@@ -291,6 +296,33 @@ class MessageKindScenarioTest {
         }
     }
 
+    /**
+     * Plan §7.2 WF-4: a file another process holds (a tool's lock file, as Gradle's was in R2) does not end the run. The
+     * outcome is a resumable stop that names the path — never a failed cell, a thrown run (`agent_error` in a host) or a
+     * candidate that silently leaves the file out.
+     */
+    private fun lockedFileStopsResumably(): Unit = runBlocking {
+        DirtyRepo.create(10, DirtyRepo.Variant.LockedFile).use { dirty ->
+            Scenario(dirty.root, stateRoot.resolve(UNREADABLE)).use { s ->
+                s.seed(dirty.check)
+                s.open()
+                when (val lock = dirty.lock()) {
+                    is DirtyRepo.Lock.Unsupported -> assumeTrue(false, lock.reason)
+                    is DirtyRepo.Lock.Held -> lock.use {
+                        val played = runCatching {
+                            s.play { c -> Scenario.editThenVerify(c, DirtyRepo.SOURCE, "    return sum(items)", "    return sum(x for x in items if x >= 0)") }
+                        }
+                        assertNull(played.exceptionOrNull(), "the run returns an outcome instead of throwing: ${played.exceptionOrNull()?.stackTraceToString()?.take(4000)}")
+                        val state = assertNotNull(played.getOrThrow().state)
+                        val outcome = assertNotNull(state.outcome, "the run stops: ${state.reason}")
+                        assertTrue(outcome.resumable, "the stop is resumable, not ${outcome.wire}: ${state.reason}")
+                        assertTrue(DirtyRepo.LOCKED in state.reason.orEmpty(), "the stop names ${DirtyRepo.LOCKED}: ${state.reason}")
+                    }
+                }
+            }
+        }
+    }
+
     @Volatile
     private var locked: DirtyRepo? = null
 
@@ -337,6 +369,7 @@ class MessageKindScenarioTest {
         const val FAILED = "failed"
         const val FOLLOW = "follow"
         const val LOCKED = "locked"
+        const val UNREADABLE = "unreadable"
 
         val printing: Command = if (WINDOWS) Command(listOf("cmd.exe", "/d", "/s", "/c", "type ${DirtyRepo.OUTPUT}")) else Command(listOf("/bin/sh", "-c", "cat ${DirtyRepo.OUTPUT}"))
     }

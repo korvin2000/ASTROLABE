@@ -683,6 +683,18 @@ public class Controller @JvmOverloads public constructor(
             }
         }
         val priorVersion = state?.contractVersion
+        // A-D.6: a handoff kept for the very row its process died before writing is that return, never a lost cell, so its
+        // increment continues as an epoch paid from the grant. It is applied first: its record names the row's `seq`, which
+        // any transition below (a host fix's unblock) would move past it.
+        state?.running?.takeIf { state.phase == CampaignPhase.Running }?.let { running ->
+            val checkpoint = SqliteCheckpoints(store, clock).latest(running.cell) ?: return@let
+            val stored = checkNotNull(state)
+            val kept = ReturnedHandoffs(store, clock).all(request.work, request.attempt).lastOrNull { it.cell == running.cell && it.seq == stored.seq + 1 } ?: return@let
+            val register = SqliteRegisterVersions(store, clock).latest(running.cell)
+                ?: Register.empty(running.cell, running.increment, stored.graph.increments.first { it.id == running.increment }.title)
+            journal.append(JournalEvent(idGen.next("ev"), ids, checkpoint.turn, JournalKind.Reconcile, refs = listOf(running.cell.value, kept.id), text = "open: cell ${running.cell.value} handed off before its controller stopped · its kept return ${kept.id} applied", at = clock.instant()))
+            state = Lifecycle.apply(stored, contract, Transition.Returned(kept.exit(ids, register, checkpoint))).also(campaigns::save)
+        }
         if (state?.phase == CampaignPhase.Finishing) {
             state = Lifecycle.apply(state, contract, Transition.Resumed("finalization interrupted; revalidate acceptance before completing")).also(campaigns::save)
         }
@@ -791,17 +803,6 @@ public class Controller @JvmOverloads public constructor(
         // A cell still running in the stored state belonged to a controller that stopped mid-cell: it is lost.
         state?.running?.takeIf { state.phase == CampaignPhase.Running }?.let { running ->
             val checkpoint = SqliteCheckpoints(store, clock).latest(running.cell)
-            // A-D.6: a handoff kept for the very row its process died before writing is that return, never a lost cell, so
-            // its increment continues as an epoch paid from the grant.
-            val stored = checkNotNull(state)
-            val kept = checkpoint?.let { ReturnedHandoffs(store, clock).all(request.work, request.attempt).lastOrNull { it.cell == running.cell && it.seq == stored.seq + 1 } }
-            if (kept != null) {
-                val register = SqliteRegisterVersions(store, clock).latest(running.cell)
-                    ?: Register.empty(running.cell, running.increment, stored.graph.increments.first { it.id == running.increment }.title)
-                journal.append(JournalEvent(idGen.next("ev"), ids, checkpoint.turn, JournalKind.Reconcile, refs = listOf(running.cell.value, kept.id), text = "open: cell ${running.cell.value} handed off before its controller stopped · its kept return ${kept.id} applied", at = clock.instant()))
-                state = Lifecycle.apply(stored, contract, Transition.Returned(kept.exit(ids, register, checkpoint))).also(campaigns::save)
-                return@let
-            }
             journal.append(JournalEvent(idGen.next("ev"), ids, checkpoint?.turn, JournalKind.Reconcile, refs = listOf(running.cell.value), text = "open: cell ${running.cell.value} was running when its controller stopped; last checkpoint turn ${checkpoint?.turn ?: "none"} · lost", at = clock.instant()))
             state = Lifecycle.apply(state, contract, Transition.Lost(running.cell, checkpoint)).also(campaigns::save)
         }
@@ -1700,7 +1701,8 @@ public class Controller @JvmOverloads public constructor(
             { id ->
                 val canonical = Aliases.parse(id)?.let { aliases.resolve(c.ids.work, it)?.canonicalId } ?: id
                 observations.get(canonical) != null || receipts.get(canonical) != null || c.journal.get(canonical) != null
-            }, HeuristicEstimator(), c.attempt.config.defaults.registerCapTokens, clock, c.attempt.config.protocol)
+            }, HeuristicEstimator(), c.attempt.config.defaults.registerCapTokens, clock,
+            io.astrolabe.context.FactRetention.protocolOf(c.store, clock, cell, c.attempt.config.roles, mainLine(c).protocol))
     }
 
     /** What crosses into a cell (task-workflow §4): the [carry], and whether its register seeds the cell's STATE ([continuation]). */

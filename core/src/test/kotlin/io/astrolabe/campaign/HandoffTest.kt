@@ -16,6 +16,7 @@ import io.astrolabe.cell.WINDOWS
 import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Command
 import io.astrolabe.contract.Contracts
+import io.astrolabe.contract.IncrementStatus
 import io.astrolabe.contract.Origin
 import io.astrolabe.contract.Requirement
 import io.astrolabe.contract.Shape
@@ -335,6 +336,86 @@ class HandoffTest {
         }
         controller().open(repo.root, request, policy).use { c ->
             assertBoundByEpochA(c, controller().runS0(c, scripted(finishing)))
+        }
+    }
+
+    /** Epoch B claims completion; the review its completion owes rejects epoch A's weakened assertion. */
+    private val rejected: List<Scripted> = listOf(
+        Scripted.Reply(listOf(call("f", "task", """{"op":"finish","text":"a returns 10"}"""))),
+        Scripted.Reply(listOf(say("""{"verdict":"reject","confidence":0.9,"findings":[{"severity":"blocker","location":"$testPath:2","issue":"the assertion no longer checks the value","suggestedFix":"restore the criterion","kind":"test-integrity"}]}"""))),
+    )
+
+    @Test
+    fun `a test weakened before a handoff refuses the epoch's completion when the review it owes rejects it`() = runBlocking<Unit> {
+        val request = CampaignRequest(WorkId("W-handoff-weaken-reject"), AttemptId("a1"), "make a return 10")
+        seedWithTest(request)
+        controller().open(repo.root, request, policy).use { c ->
+            val run = controller().runS0(c, scripted(weakening(c) + rejected))
+            val increment = c.state!!.graph.increments.single()
+            assertEquals(2, increment.cells.size, run.state?.reason)
+            assertEquals(listOf(testPath), ReturnedHandoffs(c.store, clock).all(c.ids.work, c.ids.attempt).single().testIntegrity().map { it.path }, "the handoff keeps the flag")
+            val review = assertNotNull(io.astrolabe.delegate.ReviewCell.latest(c.store, c.ids), "epoch B's completion asked for the review")
+            assertEquals(increment.id, review.incrementId)
+            assertTrue(review.integrity.any { testPath in it }, "the reviewer saw epoch A's change: ${review.integrity}")
+            assertTrue(!review.approved, "the review rejected it")
+            val flag = assertNotNull(run.exit, run.state?.reason).packet.flags.testIntegrity.single { it.path == testPath }
+            assertTrue(flag.blocksCompletion, "the rejection resolves nothing: ${flag.line}")
+            assertTrue(run.outcome != CampaignOutcome.Completed, "the epoch's completion is refused: ${run.outcome} ${run.state?.reason}")
+            assertTrue(increment.status != IncrementStatus.Verified, "${increment.status}")
+        }
+    }
+
+    @Test
+    fun `a handoff kept before its row is applied ahead of the reopen's unblock after a host fix, so its epoch inherits the flag and the public impact`() = runBlocking<Unit> {
+        val request = CampaignRequest(WorkId("W-handoff-orphan-unblock"), AttemptId("a1"), "make a return 10")
+        repo.write(testPath, "def test_a():\n    assert 1 == 1\n")
+        repo.write("src/b.py", "from a import a\n\n\ndef b():\n    return a()\n")
+        repo.commit("a test and a caller of a")
+        seed(request, Shape.S1, writePaths = listOf("src/", "tests/"))
+        // A planned graph of two independent increments: I1 is blocked on the host (the placeholder check sees a plan, so
+        // no plan cell replaces it); I2's cell hands off and its process dies before the row.
+        Store.open(stateRoot, repo.git, clock).use { store ->
+            val contract = checkNotNull(Contracts(SqliteContractRepository(store, clock), idGen, clock).current(request.work))
+            fun increment(id: String, requirement: String, acceptance: String, status: IncrementStatus) = io.astrolabe.contract.Increment(
+                id, listOf(requirement), listOf(acceptance), listOf("src/", "tests/"), 2, status, title = requirement, produces = io.astrolabe.graph.Production.Artifact,
+            )
+            val graph = io.astrolabe.graph.RequirementGraph(listOf(increment("I1", "R1", "AC-1", IncrementStatus.Blocked), increment("I2", "R2", "AC-2", IncrementStatus.Pending)))
+            SqliteCampaigns(store, clock).save(Lifecycle.open(contract, graph))
+        }
+        lateinit var handedOff: ContextId
+        controller().open(repo.root, request, policy).use { c ->
+            assertEquals(IncrementStatus.Blocked, c.state!!.graph.increments.first { it.id == "I1" }.status)
+            // Epoch A weakens the test and changes the signature of `a`, which src/b.py calls, then hands off.
+            val epochA = weakening(c).take(2) + listOf(
+                Scripted.Reply(listOf(read("read-a", "src/a.py"))),
+                Scripted.Reply(listOf(anchored("widen", "src/a.py", c.registry.version("src/a.py")!!, "def a():", "def a(x):"))),
+                Scripted.Fault(FaultKind.ContextOverflow),
+                Scripted.Fault(FaultKind.ContextOverflow),
+            )
+            c.store.db.tx { it.execute("CREATE TRIGGER die BEFORE INSERT ON campaigns WHEN EXISTS (SELECT 1 FROM packets WHERE kind = 'returned_handoff') BEGIN SELECT RAISE(ABORT, 'simulated process death'); END") }
+            assertFails { controller().run(c, scripted(epochA), maxHandoffs = 1) }
+            c.store.db.tx { it.execute("DROP TRIGGER die") }
+            val kept = ReturnedHandoffs(c.store, clock).all(c.ids.work, c.ids.attempt).single()
+            assertEquals("I2", kept.incrementId)
+            assertEquals(listOf(testPath), kept.testIntegrity().map { it.path }, "the record keeps the flag")
+            assertEquals(listOf("a"), kept.impactNudges().map { it.definition.symbol }, "the record keeps the public impact")
+            handedOff = kept.cell
+            // The host settles what I1 was blocked on while the work is closed: the reopen unblocks I1.
+            c.contracts.amendByHost(request.work, "the fixture I1 needs is in place") { it }
+        }
+        controller().open(repo.root, request, policy).use { c ->
+            assertEquals(CellStatus.Partial, c.state!!.cells.single { it.cell == handedOff }.status, "the kept return is applied as its row, not as a lost cell")
+            assertTrue(c.state!!.graph.increments.first { it.id == "I1" }.status != IncrementStatus.Blocked, "the host fix unblocked I1 in the same open")
+            val run = controller().run(c, overflowing(), maxHandoffs = 1)
+
+            assertEquals("the campaign's 1 handoffs are spent with 2 requirements unverified", run.state?.reason)
+            val epoch = spends(c).single().also { assertEquals(handedOff.value, it.text("from"), "the epoch was paid from the grant") }.text("to")
+            val successor = ReturnedHandoffs(c.store, clock).all(c.ids.work, c.ids.attempt).single { it.cell.value == epoch }
+            assertEquals(listOf(testPath), successor.testIntegrity().map { it.path }, "the epoch inherited the test-integrity flag")
+            assertEquals(listOf("a"), successor.impactNudges().map { it.definition.symbol }, "the epoch inherited the unresolved public impact")
+            val increment = c.state!!.graph.increments.first { it.id == "I2" }
+            assertEquals(listOf(handedOff.value, epoch), increment.cells.map { it.value })
+            assertEquals(0, increment.sizing.continuations)
         }
     }
 
