@@ -28,7 +28,7 @@ class CaptureBytesTest {
      */
     @Test
     fun `under the output policy the manifests and the untracked stamp are v2 and the output stays out of the trees`(@TempDir state: Path) {
-        val actual = captured(state, ScratchPolicy.BUILT_IN) { it.repo.untracked("out/report.txt", "scratch\n") }
+        val actual = captured(state, ScratchPolicy.V2) { it.repo.untracked("out/report.txt", "scratch\n") }
         assertEquals(listOf(EXPECTED[1], EXPECTED[3], EXPECTED[4]), listOf(actual[1], actual[3], actual[4]))
         assertEquals(EXPECTED_V2, actual)
     }

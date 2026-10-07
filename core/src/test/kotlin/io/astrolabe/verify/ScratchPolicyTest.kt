@@ -159,4 +159,23 @@ class ScratchPolicyTest {
         assertEquals(Applicability.Stale, now.applicability)
         assertTrue(now.reasons.any { "recorded under output policy none" in it }, now.reasons.toString())
     }
+
+    @Test
+    fun `v3 matches generated-directory markers as any segment for untracked paths only, and declared outputs as roots`() {
+        val v3 = ScratchPolicy.BUILT_IN
+        assertTrue(v3.excludes("tests/__pycache__/x.pyc"), "T-06: a nested generated directory is outside identity")
+        kotlin.test.assertFalse(v3.excludes("tests/__pycache__/x.pyc", tracked = true), "a tracked file under a marker stays in identity")
+        kotlin.test.assertFalse(v3.excludes("src/build/x.py"), "a generic name stays anchored at the root: src/build/x is source")
+        assertTrue(v3.excludes("build/x.txt"))
+        kotlin.test.assertFalse(v3.excludes("web/node_modules/package-lock.json"), "a lock file under a marker stays an input")
+        kotlin.test.assertFalse(v3.excludes("src/__pycache__"), "a file named like a marker is no directory under one")
+        kotlin.test.assertFalse(ScratchPolicy.V2.excludes("tests/__pycache__/x.pyc"), "a running attempt keeps its frozen v2")
+        val declared = v3.withOutputs(listOf("reports/"))
+        assertTrue(declared.excludes("reports/out.json"), "T-07: a declared output is outside identity")
+        kotlin.test.assertFalse(declared.excludes("reports/README.md", tracked = true), "a tracked path is never excluded")
+        kotlin.test.assertNotEquals(v3.id, declared.id, "stamps under different declared outputs never compare equal")
+        kotlin.test.assertNotEquals(ScratchPolicy.V2.id, v3.id)
+        assertEquals(ScratchPolicy.V2, ScratchPolicy.V2.withOutputs(listOf("reports")), "a v2 base takes no outputs")
+        assertEquals(v3, v3.withOutputs(emptyList()))
+    }
 }

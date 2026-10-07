@@ -343,12 +343,39 @@ public class Contracts(
         public const val TOUCHED: String = "touched"
 
         /**
-         * The contract's regression `run:` items (task-workflow §2.4 A, B): those at `scope: touched`, else every `run:`
-         * item. W8 reads the explicit evidence purpose instead.
+         * The contract's regression `run:` items (task-workflow §2.4 A, B): those of purpose `regression` (§3.1), else every
+         * `run:` item.
          */
         internal fun regressionItems(contract: Contract): List<String> {
             val runs = contract.acceptance.filterIsInstance<Acceptance.Run>()
-            return runs.filter { it.scope == TOUCHED }.ifEmpty { runs }.map { it.id }
+            return runs.filter { it.evidencePurpose == EvidencePurpose.Regression }.ifEmpty { runs }.map { it.id }
+        }
+
+        /**
+         * Task-workflow §3.6 (D-434, WF-1): [items] the host declares for a new contract — its saved test command, a review
+         * check — added to the derived [contract] with ids after the derived ones and every requirement bound to them. A
+         * saved `run:` command of purpose `regression` replaces the sniffed suite of its package (the same `cwd`); the sniffed
+         * suite of another package stays. A host item without a stated purpose keeps its own reading (§3.1).
+         */
+        @JvmStatic
+        public fun declared(contract: Contract, items: List<Acceptance>): Contract {
+            if (items.isEmpty()) return contract
+            val saved = items.filterIsInstance<Acceptance.Run>().filter { it.evidencePurpose == EvidencePurpose.Regression }.map { it.command.cwd }.toSet()
+            val dropped = contract.acceptance.filter { it is Acceptance.Run && it.origin is Origin.Harness && it.command.cwd in saved }.map { it.id }.toSet()
+            val kept = contract.acceptance.filterNot { it.id in dropped }
+            val taken = kept.map { it.id }.toMutableSet()
+            var n = kept.size
+            val added = items.map { item ->
+                do n++ while ("AC-$n" in taken)
+                val id = "AC-$n".also { taken += it }
+                when (item) {
+                    is Acceptance.Run -> item.copy(id = id)
+                    is Acceptance.Check -> item.copy(id = id)
+                    is Acceptance.Review -> item.copy(id = id)
+                }
+            }
+            return contract.copy(acceptance = kept + added,
+                requirements = contract.requirements.map { r -> r.copy(acceptance = r.acceptance.filterNot { it in dropped } + added.map { a -> a.id }) })
         }
     }
 }

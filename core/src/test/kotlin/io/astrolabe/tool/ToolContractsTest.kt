@@ -123,7 +123,7 @@ class ToolContractsTest {
         for (form in listOf("plan: {increments:[{id, requirements, accept", "increment_split: {increment, reason", "amendment: {change, reason}")) {
             assertTrue(form in described, described)
         }
-        assertTrue("propose(kind, proposal) with kind plan|increment_split|amendment — see proposal." in task.description, task.description)
+        assertTrue("propose(kind, proposal) with kind plan|increment_split|amendment|acceptance|output — see proposal." in task.description, task.description)
     }
 
     @Test

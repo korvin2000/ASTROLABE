@@ -13,7 +13,9 @@ import io.astrolabe.workspace.PathResolution
 import io.astrolabe.workspace.Workspace
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 
 /** Which part of the acceptance surface a touched path belongs to (§8.6). */
 public enum class AcceptanceSurface(public val wire: String) {
@@ -149,6 +151,12 @@ public object TestIntegrity {
         changes.distinctBy { normalize(it.path) }.mapNotNull { change ->
             val path = normalize(change.path)
             val surface = surfaceOf(path, contract, checks.packageManifest) ?: return@mapNotNull null
+            // Task-workflow §3.7 (WD-19): a manifest whose effective check definition is the same parsed before and after
+            // changed nothing a check reads; anything unresolved keeps today's whole-manifest flag.
+            if (surface == AcceptanceSurface.CheckDefinition && path.substringAfterLast('/') == MANIFEST) {
+                val before = change.before?.let { effectiveDefinition(it, path, contract, checks) }
+                if (before != null && before == change.after?.let { effectiveDefinition(it, path, contract, checks) }) return@mapNotNull null
+            }
             val before = lines(change.before)
             val after = lines(change.after)
             val prefix = before.zip(after).takeWhile { (a, b) -> a == b }.size
@@ -299,6 +307,67 @@ public object TestIntegrity {
     }
 
     // ------------------------------------------------------------- internals
+
+    private const val MANIFEST: String = "package.json"
+
+    /**
+     * Task-workflow §3.7: the part of the `package.json` at [path] a check reads, parsed — the `scripts.<name>` every
+     * registered check's or `run:` item's package command reaches in this package, with its `pre`/`post` hooks; the runner
+     * configuration keys; `workspaces`; `engines`; and the `dependencies`/`devDependencies` entries of the runners those
+     * scripts start and the plugins they name — in a canonical form; `null` when it cannot be resolved: an unreadable
+     * manifest, a script with shell constructs, `node -e`, another package, or an unknown runner.
+     */
+    internal fun effectiveDefinition(text: String, path: String, contract: Contract, checks: Checks): String? {
+        val manifest = runCatching { Json.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: return null
+        val directory = path.substringBeforeLast('/', "").let(::normalize)
+        val scripts = manifest["scripts"] as? JsonObject
+        val commands = checks.all().mapNotNull { it.command } + contract.acceptance.filterIsInstance<Acceptance.Run>().map { it.command }
+        val reached = sortedSetOf<String>()
+        for (command in commands) {
+            val pkg = packageCommand(command.argv) ?: continue
+            if (packageDirectory(command.cwd, pkg.directory) != directory) continue
+            val positional = pkg.argv.drop(1).takeWhile { it != "--" }.filterNot { it.startsWith("-") }
+            reached += when (positional.firstOrNull()) {
+                "test" -> "test"
+                "run", "run-script" -> positional.getOrNull(1) ?: return null
+                null -> continue
+                else -> return null
+            }
+        }
+        val hooks = reached.flatMap { listOf(it, "pre$it", "post$it") }.toSortedSet()
+        val runners = sortedSetOf<String>()
+        val named = sortedSetOf<String>()
+        for (name in reached) {
+            val script = (scripts?.get(name) as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
+            if (SHELL.containsMatchIn(script)) return null
+            val tokens = script.trim().split(Regex("\\s+"))
+            val runner = tokens.first().replace('\\', '/').substringAfterLast('/').let { if (it == "npx") tokens.getOrNull(1) ?: return null else it }
+            if (runner !in RUNNERS) return null
+            if (runner == "node" && tokens.any { it == "-e" || it == "--eval" || it == "-p" }) return null
+            if (runner in PACKAGE_MANAGERS) return null
+            runners += runner
+            tokens.drop(1).filterNot { it.startsWith("-") || '.' in it.substringAfterLast('/') }.forEach { named += it.substringBefore('/').let { t -> if (t.startsWith("@")) it.split('/').take(2).joinToString("/") else t } }
+        }
+        fun runnerDependency(name: String): Boolean = name in named || runners.any { r -> name == r || name.startsWith("@$r/") || name.startsWith("$r-") || name.endsWith("-$r") } ||
+            name in RUNNER_PACKAGES
+        val dependencies = listOf("dependencies", "devDependencies").associateWith { key ->
+            (manifest[key] as? JsonObject)?.filterKeys(::runnerDependency)?.toSortedMap().orEmpty()
+        }
+        val definition = buildJsonObject {
+            put("scripts", JsonObject(hooks.associateWith { scripts?.get(it) ?: JsonNull }))
+            put("config", JsonObject(RUNNER_KEYS.associateWith { manifest[it] ?: JsonNull }))
+            put("workspaces", manifest["workspaces"] ?: JsonNull)
+            put("engines", manifest["engines"] ?: JsonNull)
+            dependencies.forEach { (key, entries) -> put(key, JsonObject(entries)) }
+        }
+        return Json.encodeToString(JsonObject.serializer(), definition)
+    }
+
+    /** Runners whose configuration and dependencies define a check (§3.7); `node` runs `node --test`. */
+    private val RUNNERS = setOf("jest", "vitest", "mocha", "ava", "nyc", "c8", "node", "tap", "jasmine", "karma", "playwright", "cypress", "tsc")
+    private val RUNNER_KEYS = listOf("jest", "mocha", "ava", "vitest", "c8", "nyc")
+    private val RUNNER_PACKAGES = setOf("ts-jest", "babel-jest", "ts-node", "@swc/jest", "jest-environment-jsdom")
+    private val SHELL = Regex("""[;&|<>`$()]|\b(cd|npm|pnpm|yarn|npx\s+-p)\b""")
 
     private fun requiredChecksFor(path: String, surface: AcceptanceSurface, checks: Checks): List<String> = checks.required().filter { check ->
         when (surface) {

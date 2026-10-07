@@ -371,7 +371,7 @@ public data class TaskArgs @JvmOverloads constructor(
     }
 
     public companion object {
-        public val PROPOSAL_KINDS: List<String> = listOf("plan", "increment_split", "amendment")
+        public val PROPOSAL_KINDS: List<String> = listOf("plan", "increment_split", "amendment", "acceptance", "output")
     }
 }
 

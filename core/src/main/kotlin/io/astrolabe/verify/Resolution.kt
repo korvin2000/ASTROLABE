@@ -333,6 +333,28 @@ public enum class ProvenanceClass(public val wire: String) {
             else -> Unverified
         }
 
+        /**
+         * One requirement under task-workflow §3.2 (D-434): independent only when it has a [declaredGoal] obligation — the
+         * user's, an amendment's or a host's `goal` item — and every one passed at the final tree, and no declared item of
+         * either purpose ([declaredRegression] included) failed; otherwise agent test when nothing declared failed, none of
+         * the [agent]'s items failed and one of its goal items ([agentGoal]) passed; otherwise unverified. A green discovered
+         * suite alone is regression evidence, never "verified independently" (WF-12).
+         */
+        @JvmStatic
+        public fun requirement(
+            declaredGoal: Collection<ResultStatus>,
+            declaredRegression: Collection<ResultStatus>,
+            agentGoal: Collection<ResultStatus>,
+            agent: Collection<ResultStatus>,
+        ): ProvenanceClass {
+            val declaredFailed = ResultStatus.Failed in declaredGoal || ResultStatus.Failed in declaredRegression
+            return when {
+                declaredGoal.isNotEmpty() && declaredGoal.all { it == ResultStatus.Passed } && !declaredFailed -> Independent
+                !declaredFailed && ResultStatus.Failed !in agent && ResultStatus.Failed !in agentGoal && ResultStatus.Passed in agentGoal -> AgentTest
+                else -> Unverified
+            }
+        }
+
         /** The campaign: the worst of its [requirements]; none ⇒ unverified. */
         @JvmStatic
         public fun campaign(requirements: Collection<ProvenanceClass>): ProvenanceClass = requirements.minOrNull() ?: Unverified

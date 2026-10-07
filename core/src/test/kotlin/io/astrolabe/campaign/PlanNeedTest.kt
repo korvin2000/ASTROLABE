@@ -100,6 +100,14 @@ class PlanNeedTest {
     }
 
     @Test
+    fun `an S1 contract whose only acceptance is regression keeps the plan cell, and says why`() {
+        val sniffed = contract(acceptance = listOf(Acceptance.Run("AC-1", run, Origin.Harness, scope = "touched"), Acceptance.Run("AC-2", run, Origin.Harness), Acceptance.Run("AC-3", run, Origin.Harness)))
+        assertNull(PlanNeed.trivialGraph(sniffed, emptyMap()))
+        assertEquals("acceptance is regression only (AC-1, AC-2, AC-3): the plan states a goal criterion", PlanNeed.regressionOnly(sniffed))
+        assertNull(PlanNeed.regressionOnly(contract()), "user items are goal acceptance")
+    }
+
+    @Test
     fun `the plan validator decides where graph validation alone would admit G_single`() {
         val refactor = contract(requirements = listOf(Requirement("R1", "rename the parser module and keep its tests green", listOf("AC-1", "AC-2", "AC-3"), authorityRef = "U1")))
         assertEquals(emptyList(), ShapeSelector.single(refactor).validate(refactor))

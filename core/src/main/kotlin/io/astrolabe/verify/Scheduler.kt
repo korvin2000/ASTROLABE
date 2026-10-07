@@ -33,6 +33,8 @@ import io.astrolabe.workspace.VersionRegistry
 import io.astrolabe.workspace.Workspace
 import io.astrolabe.workspace.WorkspacePath
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import java.io.IOException
 import java.nio.file.Files
@@ -72,36 +74,75 @@ public data class Executed(
 /**
  * Paths a check may write without touching its inputs (declared scratch/output policy, D-45): caches, build output, reports.
  * [isScratch] keeps a check's own output out of its enumerated tested inputs, any segment matching, as D-45 always did.
- * [excludes] is candidate identity's rule (§8.4, W3, owner №32) from [version] 2 on: an untracked path under one of
+ * [excludes] is candidate identity's rule (§8.4, W3, owner №32) from version 2 on: an untracked path under one of
  * [prefixes] taken as a root anchored at the repository root — `build/x`, never `src/build/x` — that is no dependency lock
- * file. A tracked path is never excluded. [NONE] (version 0) excludes nothing: an attempt frozen without a policy keeps its
- * v1 identity. One attempt freezes one policy before its `s0` ([io.astrolabe.AttemptConfig.scratch]).
+ * file. Version 3 (task-workflow §5.2, D-435) adds the generated-directory [markers], matched as any directory segment
+ * (`tests/__pycache__/x.pyc`), and the task's declared [outputs] (§5.1) as anchored roots. A tracked path is never
+ * excluded. [NONE] (version 0) excludes nothing: an attempt frozen without a policy keeps its v1 identity. One attempt
+ * freezes one policy before its `s0` ([io.astrolabe.AttemptConfig.scratch]); a running attempt keeps its v2 policy.
  */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
-public data class ScratchPolicy @JvmOverloads constructor(val prefixes: Set<String> = DEFAULT_PREFIXES, val version: Int = VERSION) {
+public data class ScratchPolicy @JvmOverloads constructor(
+    val prefixes: Set<String> = DEFAULT_PREFIXES,
+    val version: Int = VERSION,
+    /** Not encoded when empty, so a v2 policy keeps its bytes and its attempt its fingerprint. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val markers: Set<String> = emptySet(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val outputs: Set<String> = emptySet(),
+) {
     public fun isScratch(path: String): Boolean {
         val normalized = path.replace('\\', '/')
-        return prefixes.any { p -> normalized == p || normalized.startsWith("$p/") || normalized.split('/').any { it == p } }
+        return prefixes.any { p -> normalized == p || normalized.startsWith("$p/") || normalized.split('/').any { it == p } } || isOutput(normalized)
+    }
+
+    /** [path] is under one of the task's declared [outputs] (§5.1). */
+    public fun isOutput(path: String): Boolean {
+        val normalized = path.replace('\\', '/')
+        return outputs.any { root -> normalized == root || normalized.startsWith("$root/") }
     }
 
     /** [path] (repository-relative) is outside candidate identity under this policy: untracked, under a declared root, no lock file. */
     @JvmOverloads
     public fun excludes(path: String, tracked: Boolean = false): Boolean {
-        if (version < VERSION || tracked) return false
+        if (version < ANCHORED || tracked) return false
         val normalized = path.replace('\\', '/')
         if (normalized.substringAfterLast('/') in EnvFingerprint.LOCK_FILE_NAMES) return false
-        return prefixes.any { root -> normalized.startsWith("$root/") }
+        if (prefixes.any { root -> normalized.startsWith("$root/") } || isOutput(normalized)) return true
+        return version >= MARKED && normalized.split('/').dropLast(1).any { it in markers }
+    }
+
+    /**
+     * The effective policy of an attempt (task-workflow §5.1): this base plus the contract's declared outputs at the
+     * attempt's open, frozen before its `s0`; a version-2 base takes none (it predates them).
+     */
+    public fun withOutputs(declared: Collection<String>): ScratchPolicy {
+        val roots = declared.map { it.replace('\\', '/').trimEnd('/') }.filter { it.isNotEmpty() }.toSet()
+        return if (version < MARKED || roots.isEmpty()) this else copy(outputs = outputs + roots)
     }
 
     /** What a stamp or a snapshot manifest taken under this policy records of it; `null` for a policy that excludes nothing. */
     val id: String?
-        get() = if (version < VERSION) null else Digest.ofUtf8(
-            CanonicalEncoding.encode("scratch-policy", version, listOf("roots" to prefixes.size.toString()) + prefixes.sortedWith(Stamper.PATH_ORDER).map { "root" to it }),
+        get() = if (version < ANCHORED) null else Digest.ofUtf8(
+            CanonicalEncoding.encode("scratch-policy", version, listOf("roots" to prefixes.size.toString()) + prefixes.sortedWith(Stamper.PATH_ORDER).map { "root" to it } +
+                if (version < MARKED) emptyList() else listOf("markers" to markers.size.toString()) + markers.sorted().map { "marker" to it } +
+                    listOf("outputs" to outputs.size.toString()) + outputs.sortedWith(Stamper.PATH_ORDER).map { "output" to it }),
         ).hex
 
     public companion object {
+        /** Generated-directory markers and declared outputs (task-workflow §5.2, D-435); version 2 had anchored roots only (W3). */
+        public const val VERSION: Int = 3
+
         /** Anchored output roots outside identity (W3); version 1 was the unanchored match, never applied to identity. */
-        public const val VERSION: Int = 2
+        public const val ANCHORED: Int = 2
+
+        /** The version that matches [markers] as any segment and applies declared [outputs]. */
+        public const val MARKED: Int = 3
+
+        /** §5.2: names that are always generated wherever they sit; never the generic `build`, `dist`, `out` (`src/build/x` is source). */
+        @JvmField
+        public val DEFAULT_MARKERS: Set<String> = setOf(
+            "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".hypothesis", ".tox", ".nox", "node_modules", ".gradle", ".cache",
+        )
 
         @JvmField
         public val DEFAULT_PREFIXES: Set<String> = setOf(
@@ -113,9 +154,13 @@ public data class ScratchPolicy @JvmOverloads constructor(val prefixes: Set<Stri
         @JvmField
         public val NONE: ScratchPolicy = ScratchPolicy(emptySet(), 0)
 
-        /** The built-in policy a new attempt freezes (owner №32): [DEFAULT_PREFIXES] as anchored roots. */
+        /** The v2 built-in policy (W3): [DEFAULT_PREFIXES] as anchored roots; an attempt frozen with it keeps it. */
         @JvmField
-        public val BUILT_IN: ScratchPolicy = ScratchPolicy(DEFAULT_PREFIXES, VERSION)
+        public val V2: ScratchPolicy = ScratchPolicy(DEFAULT_PREFIXES, ANCHORED)
+
+        /** The built-in policy a new attempt freezes (owner №32, D-435): [DEFAULT_PREFIXES] as anchored roots and [DEFAULT_MARKERS]. */
+        @JvmField
+        public val BUILT_IN: ScratchPolicy = ScratchPolicy(DEFAULT_PREFIXES, VERSION, DEFAULT_MARKERS)
     }
 }
 
@@ -414,7 +459,7 @@ public class Scheduler(
             workspace.git.lsTree(ObjectId(report.baseCommit), recursive = true).associateBy { it.path }
         // W3: under an output policy a tracked file is exported whatever its name; only untracked output stays behind.
         val untracked = report.untracked.mapTo(HashSet()) { it.path }
-        val members = (base.keys + report.members.keys).filterNot { scratch.isScratch(it) && (!underPolicy || it in untracked) }
+        val members = (base.keys + report.members.keys).filterNot { output(it) && (!underPolicy || it in untracked) }
         Files.createDirectories(dir)
         val exportedPaths = WorkspacePath.of(dir)
         val copied = HashMap<String, FileVersion>()
@@ -458,7 +503,7 @@ public class Scheduler(
     private fun scan(dir: Path, exported: Set<String>): Map<String, Seen> = Files.walk(dir).use { stream ->
         stream.filter { Files.isRegularFile(it, LinkOption.NOFOLLOW_LINKS) }.toList()
     }.map { it.relativeTo(dir).joinToString("/") { part -> part.toString() } to it }
-        .filterNot { (path, _) -> scratch.isScratch(path) && path !in exported }
+        .filterNot { (path, _) -> output(path) && path !in exported }
         .associate { (path, file) ->
             val attributes = Files.readAttributes(file, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
             path to Seen(FileVersion.of(Files.readAllBytes(file)), attributes.size(), attributes.lastModifiedTime(), Files.isExecutable(file))
@@ -659,7 +704,10 @@ public class Scheduler(
      * and rewriting them makes the evidence ineligible.
      */
     private fun ownOutput(path: String, closure: Closure, tracked: Lazy<Set<String>>): Boolean =
-        scratch.isScratch(path) && !(underPolicy && (closure is Closure.Known || path in tracked.value))
+        output(path) && !(underPolicy && (closure is Closure.Known || path in tracked.value))
+
+    /** Scratch by name (D-45), or under an output the task declared in the attempt's effective policy (task-workflow §5.1). */
+    private fun output(path: String): Boolean = scratch.isScratch(path) || stamper.scratch.isOutput(path)
 
     private val underPolicy: Boolean get() = stamper.scratch.id != null
 
