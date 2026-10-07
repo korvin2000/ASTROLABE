@@ -11,7 +11,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
- * `look(what, target, budget, near?, glob?, in, since?)` (§5.4). An omitted [budget] is the configured
+ * `look(what, target, budget, near?, glob?, in)` (§5.4); `in` is `workspace` or `store` — the knowledge base is `kb.search` (C18). An omitted [budget] is the configured
  * `Defaults.lookBudgetTokens`, resolved by the executor.
  */
 @Serializable
@@ -22,14 +22,13 @@ public data class LookArgs(
     val near: String? = null,
     val glob: String? = null,
     @SerialName("in") val scope: String = "workspace",
-    val since: String? = null,
-    /** `recall(id, range?, since?)`: the result id to recall. */
+    /** `recall(id, range?)`: the result id to recall. */
     val id: String? = null,
     val range: String? = null,
 ) {
     init {
         require(what in ToolOps.look) { "unknown look op '$what'" }
-        require(scope in setOf("workspace", "store", "kb")) { "unknown look scope '$scope'" }
+        require(scope in setOf("workspace", "store")) { "unknown look scope '$scope': in is workspace or store; search the knowledge base with kb.search" }
         require(budget == null || budget > 0) { "budget must be positive" }
     }
 }

@@ -150,6 +150,7 @@ import io.astrolabe.os.EnvPolicy
 import io.astrolabe.os.Git
 import io.astrolabe.os.LocalOs
 import io.astrolabe.os.ProcStatus
+import io.astrolabe.os.search.Search
 import io.astrolabe.os.search.Searches
 import io.astrolabe.provider.Money
 import io.astrolabe.recover.AcceptanceCheck
@@ -239,6 +240,7 @@ import java.nio.file.Path
 import java.time.Clock
 import java.time.Duration
 import java.util.Collections
+import org.slf4j.LoggerFactory
 import java.util.WeakHashMap
 import java.util.concurrent.atomic.AtomicReference
 import io.astrolabe.delegate.CellChildRunner
@@ -507,6 +509,15 @@ public class Controller @JvmOverloads public constructor(
     private val plugged = Collections.synchronizedMap(WeakHashMap<OpenedCampaign, PluggedLayers>())
 
     private fun plugged(c: OpenedCampaign): PluggedLayers = plugged[c] ?: PluggedLayers.of(layers, c.attempt.config.flags, c.journal, c.ids, idGen, clock).also { plugged[c] = it }
+
+    // C18: the search backend, chosen once per campaign open and logged in one line — ripgrep when `rg` resolves on the host's PATH, else the JVM.
+    private val searches = Collections.synchronizedMap(WeakHashMap<OpenedCampaign, Search>())
+
+    /** The search backend of [c]'s cells: ripgrep when `rg` resolves on the host's `PATH`, else the in-process JVM backend. */
+    internal fun search(c: OpenedCampaign): Search = searches[c] ?: Searches.auto { host.onPath(RIPGREP) }.also {
+        searches[c] = it
+        LoggerFactory.getLogger(Controller::class.java).info("search backend {} for {}/{}", it.backend.name.lowercase(), c.ids.work.value, c.ids.attempt.value)
+    }
 
     /** The task limits' spend, sessions and gate (C3). */
     private val limitControl = TaskLimitControl(idGen, clock, events)
@@ -2667,7 +2678,7 @@ public class Controller @JvmOverloads public constructor(
         }
         val tools = CellTools(
             state = StateTool(Validator(estimator, registerCapTokens = config.defaults.registerCapTokens, patchCapTokens = config.defaults.patchCapTokens, factLineMaxChars = config.defaults.factLineMaxChars, protocol = role.protocol), registerVersions, c.journal, estimator, idGen, ids, clock, register ?: Register.empty(cellId, increment.id, increment.title), events),
-            look = Look(tree.workspace, tree.registry, workset, tree.atlas, Searches.jvm(), c.journal, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, checks = tree.checks, mounts = layered.mounts, bmaps = BmapStore(c.store), tools = layered.tools, tiers = layered.tiers, budgetTokens = config.defaults.lookBudgetTokens),
+            look = Look(tree.workspace, tree.registry, workset, tree.atlas, search(c), c.journal, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, checks = tree.checks, mounts = layered.mounts, bmaps = BmapStore(c.store), tools = layered.tools, tiers = layered.tiers, budgetTokens = config.defaults.lookBudgetTokens),
             edit = Edit(
                 tree.workspace, tree.registry, workset, c.os, preimages, ScopeGuard(tree.workspace), c.contracts, tree.checks, observations, aliases, c.store.blobs, redaction, estimator, idGen, ids, syntax,
                 // D-99: `revert:turn:N` names the tree's shadow snapshots (the turn checkpoint records them).
@@ -3572,6 +3583,8 @@ public class Controller @JvmOverloads public constructor(
 
         /** How much of a message titles the increment it derives (task-workflow §2.4); the message itself is pinned whole. */
         private const val TITLE_CHARS: Int = 80
+        /** The ripgrep executable looked up on the host's `PATH` (C18). */
+        private const val RIPGREP: String = "rg"
         private const val PRESCAN_REFRESHED: String = "impact pre-scan refreshed: "
 
         /** The heading of the host's notes in a cell's pinned context (D-345): the user did not write them. */
