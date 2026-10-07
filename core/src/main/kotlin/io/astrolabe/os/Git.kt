@@ -318,22 +318,43 @@ public class Git @JvmOverloads constructor(
     }
 
     /**
-     * Stores the exact bytes of every file in [files] as a blob, in one `git hash-object -w --no-filters --stdin-paths`
-     * (WD-01), and returns the ids in [files] order. No clean filter and no end-of-line conversion runs (D-53).
+     * Stores blobs of the given [sizes] in one `git fast-import` stream (WD-01: one process) and returns their ids in order.
+     * [write] writes the exact bytes of blob `i`, `sizes[i]` of them, so bytes the caller already holds reach git without
+     * any file being read again (T-22). fast-import stores data verbatim: no clean filter and no end-of-line conversion
+     * runs (D-53); a blob whose byte count differs from its size ends the stream unfinished, which fast-import refuses.
      */
-    internal fun hashObjects(files: List<Path>): List<ObjectId> {
-        if (files.isEmpty()) return emptyList()
-        val input = StringBuilder()
-        for (file in files) {
-            val spelled = file.toAbsolutePath().normalize().toString().replace('\\', '/')
-            require('\n' !in spelled && '\r' !in spelled) { "a stdin path cannot contain a line break: '$spelled'" }
-            input.append(spelled).append('\n')
-        }
-        val out = decode(run(listOf("hash-object", "-w", "--no-filters", "--stdin-paths"), stdin = input.toString().toByteArray(StandardCharsets.UTF_8)))
+    internal fun writeBlobs(sizes: List<Long>, write: (Int, java.io.OutputStream) -> Unit): List<ObjectId> {
+        if (sizes.isEmpty()) return emptyList()
+        val argv = listOf("fast-import", "--quiet", "--done")
+        val out = decode(run(argv, writeStdin = { raw ->
+            val stream = java.io.BufferedOutputStream(raw, STREAM_BUFFER_BYTES)
+            for ((i, size) in sizes.withIndex()) {
+                stream.write("blob\nmark :${i + 1}\ndata $size\n".toByteArray(StandardCharsets.US_ASCII))
+                val body = object : java.io.OutputStream() {
+                    var count = 0L
+
+                    override fun write(b: Int) {
+                        stream.write(b)
+                        count++
+                    }
+
+                    override fun write(b: ByteArray, off: Int, len: Int) {
+                        stream.write(b, off, len)
+                        count += len
+                    }
+                }
+                write(i, body)
+                if (body.count != size) throw IOException("blob ${i + 1} wrote ${body.count} bytes for a declared $size")
+                stream.write('\n'.code)
+            }
+            for (i in sizes.indices) stream.write("get-mark :${i + 1}\n".toByteArray(StandardCharsets.US_ASCII))
+            stream.write("done\n".toByteArray(StandardCharsets.US_ASCII))
+            stream.flush()
+        }))
         val ids = out.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.map(ObjectId::parse).toList()
-        written.addAndGet(files.size.toLong())
-        PhaseTally.add(PhaseTally.Count.ObjectsWritten, files.size.toLong())
-        if (ids.size != files.size) throw GitError(listOf(executable, "hash-object", "--stdin-paths"), 0, "expected ${files.size} ids, got ${ids.size}")
+        written.addAndGet(sizes.size.toLong())
+        PhaseTally.add(PhaseTally.Count.ObjectsWritten, sizes.size.toLong())
+        if (ids.size != sizes.size) throw GitError(listOf(executable) + argv, 0, "expected ${sizes.size} ids, got ${ids.size}")
         return ids
     }
 
@@ -531,8 +552,9 @@ public class Git @JvmOverloads constructor(
         stdin: ByteArray? = null,
         indexFile: Path? = null,
         extraEnv: Map<String, String> = emptyMap(),
+        writeStdin: ((java.io.OutputStream) -> Unit)? = null,
     ): ByteArray {
-        val result = exec(argv, stdin, indexFile, extraEnv)
+        val result = exec(argv, stdin, indexFile, extraEnv, writeStdin)
         if (result.exitCode != 0) {
             throw GitError(listOf(executable) + argv, result.exitCode, result.stderr)
         }
@@ -544,6 +566,7 @@ public class Git @JvmOverloads constructor(
         stdin: ByteArray? = null,
         indexFile: Path? = null,
         extraEnv: Map<String, String> = emptyMap(),
+        writeStdin: ((java.io.OutputStream) -> Unit)? = null,
     ): Execution {
         val command = ArrayList<String>(argv.size + 1)
         command.add(executable)
@@ -565,7 +588,12 @@ public class Git @JvmOverloads constructor(
         }
         val stdout = pump("git-stdout") { read(process.inputStream, maxOutputBytes) }
         val stderr = pump("git-stderr") { read(process.errorStream, minOf(maxOutputBytes, 1024 * 1024)) }
-        val input = pump("git-stdin") { process.outputStream.use { if (stdin != null) it.write(stdin) } }
+        val input = pump("git-stdin") {
+            process.outputStream.use {
+                if (stdin != null) it.write(stdin)
+                writeStdin?.invoke(it)
+            }
+        }
         val pumps = listOf(stdout, stderr, input)
         val descendants = LinkedHashMap<Long, ProcessHandle>()
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis)
@@ -657,6 +685,9 @@ public class Git @JvmOverloads constructor(
         const val START_FAILED = -1
 
         const val NEWLINE: Byte = 0x0A
+
+        /** The buffer of a `fast-import` stream (T-22): the headers of many small blobs go out in few pipe writes. */
+        const val STREAM_BUFFER_BYTES = 64 * 1024
 
         val INHERITED_ENVIRONMENT = listOf(
             "PATH", "PATHEXT", "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",

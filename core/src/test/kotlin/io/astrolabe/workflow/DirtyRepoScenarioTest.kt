@@ -21,8 +21,9 @@ import kotlin.test.assertTrue
  * whole class, both at once ([Scenario.concurrently]). The counters are printed as `WF-counters` lines (the W2 report's before and after numbers).
  *
  * Guards: WF-2 (the git processes of every open and every snapshot are the same at 300 and 1500 files, and a capture
- * reads each file at most once — the request names a path, as live requests do, so the open's pre-scan builds the import
- * graph over the tool files: T-03) and WF-3 (the snapshot after one edited file writes one object; a new work publishes
+ * reads each file at most once — the request names a path and a backticked identifier, as the live `real-dirty-repo` request
+ * does, so the open's pre-scan builds the import graph and looks the identifier up in the outline of every file, the tool
+ * files no parser models included: T-03) and WF-3 (the snapshot after one edited file writes one object; a new work publishes
  * nothing the store or the object database already holds).
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -135,7 +136,10 @@ class DirtyRepoScenarioTest {
         /** Reads beside the capture and the atlas: lock and package manifests, rules, the snapshot manifests. */
         const val SLACK_FILES = 20
 
-        /** Names a path and an identifier, so the open's pre-scan builds the import graph (T-03, as a live request does). */
-        const val REQUEST = "make total in src/app.py ignore negative items"
+        /**
+         * Names a path and a backticked identifier, as a live request does: the open's pre-scan builds the import graph and its
+         * symbol index reads the outline of every file for the identifier (T-03).
+         */
+        const val REQUEST = "make `total` in src/app.py ignore negative items"
     }
 }

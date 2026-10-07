@@ -71,11 +71,11 @@ public class Workspace @JvmOverloads public constructor(
     internal val blobBytesRead: Long get() = blobBytesReadCount.get()
 
     /** Counts one store blob of [sizeBytes] read on this tree's behalf (§7.2). */
-    internal fun blobRead(sizeBytes: Int) {
+    internal fun blobRead(sizeBytes: Long) {
         blobsReadCount.incrementAndGet()
-        blobBytesReadCount.addAndGet(sizeBytes.toLong())
+        blobBytesReadCount.addAndGet(sizeBytes)
         io.astrolabe.os.PhaseTally.add(io.astrolabe.os.PhaseTally.Count.BlobsRead)
-        io.astrolabe.os.PhaseTally.add(io.astrolabe.os.PhaseTally.Count.BlobBytesRead, sizeBytes.toLong())
+        io.astrolabe.os.PhaseTally.add(io.astrolabe.os.PhaseTally.Count.BlobBytesRead, sizeBytes)
     }
 
     /** Content digests every [Stamper] of this workspace shares for the workspace's lifetime (D-364). */
