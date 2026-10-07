@@ -119,6 +119,18 @@ class VerifyTest {
         verify.inputs = listOf("src/a.py", "pytest_pass.txt", "pytest_fail.txt", "diag.txt")
     }
 
+    @Test
+    fun `a goal command identical to a regression check shares its execution and comes first`() {
+        // T-51 (D-434): the regression check of the same command never shadows the model's stated goal item.
+        val command = Command(listOf("pytest", "-q"))
+        val base = contracts.current(ids.work)!!
+        val contract = base.copy(acceptance = base.acceptance + Acceptance.Run("AC-8", command, Origin.Harness) + Acceptance.Run("AC-9", command, Origin.Model("R1")))
+        checks.register(Check(Checks.acceptId("AC-8"), CheckKind.Acceptance, Selector.Named(command), Closure.Unknown, CostClass.Slow, Trigger.IncrementEnd,
+            acceptanceIds = listOf("AC-8"), command = command, origin = Origin.Harness))
+        val recognized = verify.recognize(command.argv, shell = false, cwd = null, contract = contract, modelChecks = true)
+        assertEquals(listOf(Checks.acceptId("AC-9"), Checks.acceptId("AC-8")), recognized.map { it.id })
+    }
+
     @AfterTest
     fun tearDown() {
         coherence.close()

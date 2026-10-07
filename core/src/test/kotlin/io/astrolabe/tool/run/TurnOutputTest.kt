@@ -81,7 +81,7 @@ class TurnOutputTest {
     }
 
     @Test
-    fun `green verify results count in the same budget and say their output is not recallable`() {
+    fun `green verify results count in the same budget and point at their receipts for the whole output`() {
         val checks = (1..200).joinToString("\n") { "  CHK-$it: pytest 8.1 · passed · exit 0" }
         val verify = outcome("verify", "ok", "#9", "checks @ab12cd34: tests ✓ (#9)\n$checks", green = true)
         val runs = (1..2).map { it to run("#$it", "passed", 150) }
@@ -91,24 +91,27 @@ class TurnOutputTest {
 
         val shownVerify = shown.getValue(3)
         assertEquals("checks @ab12cd34: tests ✓ (#9)", shownVerify.body.lines().first())
-        assertTrue(shownVerify.body.contains("the full check output is not recallable"), shownVerify.body)
+        assertTrue(shownVerify.body.contains("each check's full output: look(recall, id=<its receipt alias in the lines above>)"), shownVerify.body)
         assertTrue((runs.map { (op, o) -> shown[op] ?: o } + shownVerify).sumOf { tokens(it) } <= budget)
     }
 
     @Test
-    fun `a failing verify reads ok in its header yet keeps every diagnostic while the other results share what it leaves`() {
+    fun `a failing verify reads ok in its header and takes the remainder first, its first failure kept, within the budget`() {
         // 20 checks: receipt summaries first, the failing check's diagnostics deep after another check's green output.
         val receipts = (1..20).joinToString("\n") { "receipt CHK-$it: tests ${if (it == 20) "✗ 1 fail" else "✓ 3 pass"} (#$it)" }
-        val green = (1..300).joinToString("\n") { "    CHK-1 output line $it" }
+        val green = (1..2000).joinToString("\n") { "    CHK-1 output line $it" }
         val verify = outcome("verify", "ok", "#20", "$receipts\n  CHK-1: pytest · passed\n$green\n  CHK-20: pytest · failed\n    E   AssertionError: the flaky diagnostic", green = false)
-        val runs = (1..39).map { it to run("#$it", "passed", 200) }
+        val runs = (1..9).map { it to run("#$it", "passed", 200) }
         val budget = 12_000L
 
         val shown = TurnOutput.fit(runs + (40 to verify), budget, estimator)
 
-        assertFalse(40 in shown, "the failing verify is shown whole")
-        assertTrue((shown[40] ?: verify).body.contains("E   AssertionError: the flaky diagnostic"))
-        assertTrue(runs.sumOf { (op, o) -> tokens(shown[op] ?: o) } <= budget - tokens(verify))
+        // P8.C.17 (D-424): no exemption — the verify is cut like a red run, its head (the failing receipt line) kept first.
+        val shownVerify = shown.getValue(40)
+        assertTrue(shownVerify.body.contains("receipt CHK-20: tests ✗ 1 fail (#20)"), shownVerify.body)
+        assertFalse(shownVerify.green)
+        assertTrue(tokens(shownVerify) > runs.maxOf { (op, o) -> tokens(shown[op] ?: o) }, "the red result takes the remainder first")
+        assertTrue(runs.sumOf { (op, o) -> tokens(shown[op] ?: o) } + tokens(shownVerify) <= budget)
     }
 
     @Test

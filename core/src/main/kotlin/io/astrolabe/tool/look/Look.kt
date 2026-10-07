@@ -19,6 +19,7 @@ import io.astrolabe.evidence.Journal
 import io.astrolabe.evidence.JournalScope
 import io.astrolabe.evidence.Observation
 import io.astrolabe.evidence.Observations
+import io.astrolabe.evidence.Receipts
 import io.astrolabe.evidence.RedactionMask
 import io.astrolabe.id.Digest
 import io.astrolabe.id.FileVersion
@@ -129,6 +130,8 @@ public class Look(
     private val tiers: IndexTiers = IndexTiers.TIER_0,
     /** The budget of a call that names none: the configured `Defaults.lookBudgetTokens`. */
     private val budgetTokens: Int = Defaults().lookBudgetTokens,
+    /** The receipts a receipt alias names: `recall` serves a check's stored output by it (P8.C.17); null refuses it. */
+    private val receipts: Receipts? = null,
 ) : ToolExecutor {
     init {
         require(ids.context != null) { "look runs inside a cell: ids.context is its lineage" }
@@ -450,7 +453,8 @@ public class Look(
         val number = args.id?.trim()?.let { Aliases.parse(it) ?: it.toIntOrNull()?.takeIf { n -> n >= 1 } }
             ?: return refused(args, "refused", "recall needs id=#n, e.g. \"#14\"")
         val alias = aliases.resolve(ids.work, number) ?: return refused(args, "refused", "no result #$number in this campaign")
-        val observation = observations.get(alias.canonicalId) ?: return refused(args, "refused", "#$number is not a recallable observation (${alias.kind})")
+        val observation = observations.get(alias.canonicalId) ?: receiptOutput(alias.kind, alias.canonicalId)
+            ?: return refused(args, "refused", "#$number is not a recallable observation (${alias.kind})")
         val stored = String(blobs.get(observation.contentRef), Charsets.UTF_8).lines()
         // A search body is a summary plus hit lines, never raw source: it is recalled by view line and grants no coverage.
         val path = observation.paths.singleOrNull()?.takeIf { observation.ranges[it] != null && alias.kind != SEARCH_KIND }
@@ -517,6 +521,17 @@ public class Look(
             ),
         )
         return outcome(recalled.text, actionId, status, body, view.tokens, versions = versions, scope = "recall #$number", complete = !view.truncated, captureComplete = observation.captureComplete, displayTruncated = view.truncated, redacted = observation.redaction.applied, artifact = blob)
+    }
+
+    /**
+     * P8.C.17: a receipt's stored output (its redacted raw log) as a view without a path, so recalling it shows the
+     * whole check output and never grants read coverage (D-49).
+     */
+    private fun receiptOutput(kind: String, receiptId: String): Observation? {
+        if (kind != RECEIPT_KIND) return null
+        val receipt = receipts?.get(receiptId) ?: return null
+        val raw = receipt.raw ?: return null
+        return Observation(receiptId, receipt.ids, receiptId, null, raw, emptyList(), emptyMap(), true, emptyMap(), receipt.limits.isEmpty())
     }
 
     // ------------------------------------------------- tree · outline · def · catalog
@@ -750,6 +765,9 @@ public class Look(
         return ToolOutcome(body, header, tokens = tokens)
     }
 }
+
+/** Alias kind of a verification receipt (the scheduler allocates it); `recall` serves its stored output. */
+private const val RECEIPT_KIND = "receipt"
 
 /** Alias kind of a `find` result, whose body is not source-aligned. */
 private const val SEARCH_KIND = "search"

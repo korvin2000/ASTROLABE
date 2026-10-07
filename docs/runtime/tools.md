@@ -27,6 +27,7 @@ look(what, target, budget=4000 (Defaults.lookBudgetTokens), near?, glob?, in="wo
   · find returns scope + complete + truncated; in="store" searches journal/blobs; in="kb" searches notes (stale ones labelled)
   · refs/importers/impact carry `tier` and `complete`; dynamic dispatch reported unresolved, never guessed        [J1 §5.6]
   · recall(id, range?) → stubbed result or a log slice (new output of a bg handle: run(op="poll")); changed file ⇒ `historical v=…`
+  · recall of a receipt alias (`#n` of a verify check) → the check's whole stored output; no read coverage    (P8.C.17)
   · several independent looks in one turn run in parallel under one shared output budget                       [J1 §7.3]
 
 edit(ops, why)
