@@ -1783,7 +1783,13 @@ public class Controller @JvmOverloads public constructor(
         // D-340: a completion waiting for a decision is settled first — no cell, no budget check, no model call.
         when (val resumed = resumePending(c, authority) ?: resumeReturned(c, authority, refused = null) { _, _ -> null }) {
             null, Resumed.Continue -> Unit
-            is Resumed.Committed -> return S0Run(stopOrFinish(c, "requirements remain unverified after ${resumed.result.incrementId}", scheduler(c), authority = authority), null, resumed.result, null)
+            is Resumed.Committed -> {
+                // Task-workflow §2.4 A: a message sent while the decision was pending gets its response increment now.
+                intake(c)?.let { return S0Run(it, null, resumed.result, null) }
+                if (checkNotNull(c.state).ledger.unfinished().isEmpty()) {
+                    return S0Run(stopOrFinish(c, "requirements remain unverified after ${resumed.result.incrementId}", scheduler(c), authority = authority), null, resumed.result, null)
+                }
+            }
             is Resumed.Stopped -> return S0Run(resumed.state, null, null, null)
         }
         reassessBlocked(c, authority)
