@@ -136,7 +136,7 @@ public class Astrolabe @JvmOverloads public constructor(
         // The first request is what the campaign was opened for; amendments live in the stored contract.
         val text = contract.requests.firstOrNull()?.text ?: throw IllegalArgumentException("work ${work.value}'s contract holds no request to reopen it with")
         val chosen = policy ?: io.astrolabe.campaign.HostPolicy.stored(io.astrolabe.evidence.Journal(project.store, clock), work)
-            .let { CampaignPolicy(contract.budget.tokens, contract.budget.cost, it.resumeExpected, it.hostNotes) }
+            .let { CampaignPolicy(contract.budget.tokens, contract.budget.cost, it.resumeExpected, it.hostNotes).copy(autoDeclareOutputs = it.autoDeclareOutputs) }
         return start(project, { CampaignRequest(work, contract.attemptId, text) }, chosen, publication)
     }
 
