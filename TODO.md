@@ -2406,10 +2406,11 @@ Evidence: `../ASTROLABE-DIAGNOSTICS-2026-10-05.md` (defects WD-01…WD-31 with `
 - Deps: P8.W.6. Pkg: `context/`, `cell/Cell.kt`, `campaign/Controller.kt`, bridge `StudioHost.kt`. Spec: plan §6 W9, owner №33; WD-27, WD-28, WD-29; P8.C.18 item 3.
 - Build: the previous cell's packet from the store; seeds with a fallback rule; carry across increments; pinned lines appended after the transcript; a parent-work link and the carry of its register and STATUS into a follow-up; the carry settings of P8.C.18 item 3.
 - Done: guards of WF-14, WF-15 green. Codex review.
-#### P8.W.10 [V] W10 Prompt cache of `openai-codex` on a reopen · TODO
+#### P8.W.10 [V] W10 Prompt cache of `openai-codex` on a reopen · DONE
 - Pkg: `provider-ai-gate`, SDK. Spec: plan §6 W10; WD-31.
 - Build: compare the wire request of a first open and of a reopen (cache key, session headers); fix the adapter or the SDK if the cause is ours.
 - Done: the cause recorded; a fix or an explicit "provider side".
+- Log: 2026-10-07 — merged `56e00db`: cause on the **provider side** (WD-31). Offline wire comparison of two opens of one work (own runtime and adapter each, real codex preset, intercepted HTTP): every sent byte equal except `Authorization`; `prompt_cache_key`, `session-id`, `x-client-request-id` = `WorkId.sessionKey`; instructions and tools stable within a cell, a follow-up only appends input. R2 events (`usage.native.attribution`): 2560 = tools 1370 + 1190 of 1515 `[S]` tokens in 512-token blocks, i.e. the whole stable prefix; the provider then does not grow the cache even 3 s apart and plateaus without a reopen too (9728, 13824, 14848; one-off 2560 and 0 reads). No adapter or SDK change; `CodexCacheKeyTest` pins the stability. +106 test; L2 `:provider-ai-gate:test` 53/0 (4 live skipped), compile + ABI green, WF 20/0; 1 cycle. Codex review skipped (test-only line, owner 2026-10-07: reviews only after large change sets). Tail: SDK sends `session-id`, Codex CLI may send `session_id`/`conversation_id` (unverified) — one live check (T-30). [report](../plan2/reports/WP-W10.md).
 - [ ] **Gate P8.W:** guards of WF-1…WF-15 green; L2 with compile-all and ABI; Codex review; live run; push `main`; tag `v2-wave-W`; the owner repeats the `play5` scenario in Studio.
 
 ### P8.H Wave H — role contour: shape S2 live, then S3 (amendment 2026-10-04; plan §4.3a, §6, owner №15–18; before E; after Gate P8.W, owner №30)
