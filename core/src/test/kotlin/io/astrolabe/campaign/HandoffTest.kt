@@ -339,6 +339,32 @@ class HandoffTest {
         }
     }
 
+    /** Epoch B claims completion; the review its completion owes rejects epoch A's weakened assertion. */
+    private val rejected: List<Scripted> = listOf(
+        Scripted.Reply(listOf(call("f", "task", """{"op":"finish","text":"a returns 10"}"""))),
+        Scripted.Reply(listOf(say("""{"verdict":"reject","confidence":0.9,"findings":[{"severity":"blocker","location":"$testPath:2","issue":"the assertion no longer checks the value","suggestedFix":"restore the criterion","kind":"test-integrity"}]}"""))),
+    )
+
+    @Test
+    fun `a test weakened before a handoff refuses the epoch's completion when the review it owes rejects it`() = runBlocking<Unit> {
+        val request = CampaignRequest(WorkId("W-handoff-weaken-reject"), AttemptId("a1"), "make a return 10")
+        seedWithTest(request)
+        controller().open(repo.root, request, policy).use { c ->
+            val run = controller().runS0(c, scripted(weakening(c) + rejected))
+            val increment = c.state!!.graph.increments.single()
+            assertEquals(2, increment.cells.size, run.state?.reason)
+            assertEquals(listOf(testPath), ReturnedHandoffs(c.store, clock).all(c.ids.work, c.ids.attempt).single().testIntegrity().map { it.path }, "the handoff keeps the flag")
+            val review = assertNotNull(io.astrolabe.delegate.ReviewCell.latest(c.store, c.ids), "epoch B's completion asked for the review")
+            assertEquals(increment.id, review.incrementId)
+            assertTrue(review.integrity.any { testPath in it }, "the reviewer saw epoch A's change: ${review.integrity}")
+            assertTrue(!review.approved, "the review rejected it")
+            val flag = assertNotNull(run.exit, run.state?.reason).packet.flags.testIntegrity.single { it.path == testPath }
+            assertTrue(flag.blocksCompletion, "the rejection resolves nothing: ${flag.line}")
+            assertTrue(run.outcome != CampaignOutcome.Completed, "the epoch's completion is refused: ${run.outcome} ${run.state?.reason}")
+            assertTrue(increment.status != IncrementStatus.Verified, "${increment.status}")
+        }
+    }
+
     @Test
     fun `a handoff kept before its row is applied ahead of the reopen's unblock after a host fix, so its epoch inherits the flag and the public impact`() = runBlocking<Unit> {
         val request = CampaignRequest(WorkId("W-handoff-orphan-unblock"), AttemptId("a1"), "make a return 10")
