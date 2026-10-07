@@ -2484,6 +2484,10 @@ Evidence: `../ASTROLABE-DIAGNOSTICS-2026-10-05.md` (defects WD-01…WD-31 with `
 - [ ] **Gate P8.H:** L2 with compile-all and ABI → push `main` (fast CI job) → the wave tag starts the full suite, not awaited (plan §8.4, owner №28); Java ABI; resume of attempts created before the amendment; old config snapshots read without the new policies; Codex statistics of H7.
 
 ### P8.E Wave E — balance (owner goal)
+#### P8.W.12 [S] W12 Fewer git processes per open: one repository-form probe per phase · TODO
+- Deps: P8.W.11. Pkg: `os/Git.kt`, `workspace/`. Spec: WF-2 absolute guard (38 / 26 / 37, `DirtyRepoScenarioTest`), `../plan2/reports/WP-WG2.md`.
+- Build: 14 of the 38 git processes of a first open are `config core.sparseCheckout` probes before every operation (`requireSupportedForm`); probe once per phase (≈ 25 per open) without changing what the open does (D-374 identity, D-274 recheck); explain or remove the 38 (fixture) vs 35 (live) difference by recording argv in the live phase counters once.
+- Done: the WF-2 absolute guard lowered to the measured count (a stronger guard, never looser); WF suite green. Owner decision on the open's semantics first. Session 6.
 #### P8.E.1 [M] E1 Binding key and binding-physics table (store **v7**), estimators, `routing_log` · DONE
 - Deps: P8.A.2, P8.A.5. Pkg: `route/`, `store/Migrations.kt`, `telemetry/`. Spec: plan §4.6, §6 E1, §10.4, §11 №5.
 - Tail (D-436): T-30 the SDK sends `session-id` while the Codex CLI may send `session_id`/`conversation_id`; one live check of `openai-codex` cache growth before changing the header (P8.W.10 report). Deps: P8.W.10.
