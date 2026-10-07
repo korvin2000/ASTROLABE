@@ -3,9 +3,11 @@ package io.astrolabe.cell
 import io.astrolabe.Defaults
 import io.astrolabe.budget.CellBudget
 import io.astrolabe.budget.ReserveVerdict
+import io.astrolabe.contract.EvidencePurpose
 import io.astrolabe.contract.Contract
 import io.astrolabe.contract.Increment
 import io.astrolabe.evidence.ClaimKind
+import io.astrolabe.graph.Production
 import io.astrolabe.id.Digest
 import io.astrolabe.register.Mark
 import io.astrolabe.register.Register
@@ -346,6 +348,8 @@ public class Gates(gates: List<Gate>) {
             val resolved = Resolver.increment(state.register, state.contract, state.increment, state.currencies, state.verdicts, state.unavailable, state.flags, state.unresolvedImpactNudges)
             val runs = resolved.results.filter { it.kind == ObligationKind.Run && it.obligation in state.increment.accept }
             if (runs.isEmpty() || runs.any { it.status != ResultStatus.Passed } || resolved.gaps.any { it.kind != GapKind.Unverified }) return emptyList()
+            // Task-workflow §3.1 (WD-20): regression obligations alone never say "finish now"; a green `goal` run: item must.
+            if (runs.none { state.contract.acceptance(it.obligation)?.evidencePurpose == EvidencePurpose.Goal }) return emptyList()
             val reviews = resolved.gaps.mapNotNull { it.obligation }
             val then = listOfNotNull(reviews.takeIf { it.isNotEmpty() }?.let { "the review of ${it.joinToString(", ")} follows the proposal" }) + resolved.knownRed
             return listOf(GateOutcome.Nudge(ready, "evidence suffices: ${runs.joinToString(", ") { it.obligation }} green on this tree and nothing left to close — finish now; " +
@@ -409,18 +413,26 @@ public class Gates(gates: List<Gate>) {
         }
     }
 
-    // §5.6 Entry: first non-register edit while the increment has no acceptance item in the contract and no plan step
-    // carries an `accept:` (D-372: acceptance the contract already defines needs no plan step to restate it).
+    // §5.6 Entry: first non-register edit while the increment has no goal acceptance item in the contract and no plan step
+    // carries an `accept:` (D-372: acceptance the contract already defines needs no plan step to restate it). Task-workflow
+    // §3.1 (WD-20): a regression item is not goal acceptance; a response increment (§2.4 A) is exempt.
     private object Entry : Gate {
         override val name: String get() = ENTRY
 
         override fun evaluate(state: GateState): List<GateOutcome> {
             if (state.calls.none { it.family == ToolFamily.Edit }) return emptyList()
-            if (state.register.plan.any { it.accept != null } || state.increment.accept.any { state.contract.acceptance(it) != null }) return emptyList()
+            val items = state.increment.accept.mapNotNull { state.contract.acceptance(it) }
+            if (state.register.plan.any { it.accept != null } || items.any { it.evidencePurpose == EvidencePurpose.Goal }) return emptyList()
+            val response = (state.increment.produces as? Production.Resolves)?.questionId
+            if (response != null && state.contract.requests.any { it.id == response }) return emptyList()
             // G2: a direct register has no plan, so its clause never holds and is not named; the direct text asks for the check itself.
             val direct = state.protocol == Protocol.Direct
-            val why = if (state.increment.accept.isEmpty()) "the increment declares no acceptance"
-                else "acceptance ${state.increment.accept.joinToString(", ")} is not in contract v${state.contract.version}" + if (direct) "" else " and no plan step carries an accept:"
+            val why = when {
+                state.increment.accept.isEmpty() -> "the increment declares no acceptance"
+                items.isNotEmpty() -> "acceptance ${items.joinToString(", ") { it.id }} is regression only (it shows nothing regressed, not the goal)" +
+                    if (direct) "" else " and no plan step carries an accept:"
+                else -> "acceptance ${state.increment.accept.joinToString(", ")} is not in contract v${state.contract.version}" + if (direct) "" else " and no plan step carries an accept:"
+            }
             val ask = if (direct) "name the command that will check the result and run it" else "write the acceptance crisply"
             return listOf(GateOutcome.Nudge(GateKey(name, "first-edit"), "entry: editing while $why — $ask, or ask one question (task.ask)"))
         }

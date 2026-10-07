@@ -273,7 +273,8 @@ public class Run(
         // D-321: a background process may outlive a crash, so only a foreground run's effects are confined to one stamp.
         val confined = !args.bg && classification.effectClass != EffectClass.D && !classification.effectsUnknown &&
             classification.requiredCapabilities.all { it in setOf(Capability.WorkspaceRead, Capability.WorkspaceWrite, Capability.RunLocal) }
-        val intent = Intent(idGen.next("intent"), ids, actionId, argv, args.cwd, classification.toString(), at = clock.instant(), replaySafe = replaySafe, workspaceConfined = confined)
+        val intent = Intent(idGen.next("intent"), ids, actionId, argv, args.cwd, classification.toString(), at = clock.instant(), replaySafe = replaySafe, workspaceConfined = confined,
+            stampObserved = !args.bg && observed(classification))
         val spec = SpawnSpec(
             // A recognised check runs as its registry declares it: the command its receipt names (C1a).
             command = recognized.firstOrNull()?.command?.let { Command.Argv(it.argv) } ?: if (shell) Command.Shell(args.cmd!!) else Command.Argv(argv),
@@ -347,7 +348,8 @@ public class Run(
         val confined = classification.effectClass != EffectClass.D && !classification.effectsUnknown &&
             classification.requiredCapabilities.all { it in setOf(Capability.WorkspaceRead, Capability.WorkspaceWrite, Capability.RunLocal) }
         val replaySafe = classification.effectClass == EffectClass.R && !classification.effectsUnknown
-        val intent = Intent(idGen.next("intent"), ids, actionId, argv, args.cwd, classification.toString(), at = clock.instant(), replaySafe = replaySafe, workspaceConfined = confined)
+        val intent = Intent(idGen.next("intent"), ids, actionId, argv, args.cwd, classification.toString(), at = clock.instant(), replaySafe = replaySafe, workspaceConfined = confined,
+            stampObserved = observed(classification))
         var rendered: ToolOutcome? = null
         var lost = false
         beforeDispatch()
@@ -378,6 +380,10 @@ public class Run(
      * C1a: a recognised check runs its declared command under this request's authorization only when that command's own
      * policy label is no broader — class, unknown effects and capabilities; otherwise the request runs plain, as asked.
      */
+    /** Task-workflow §3.5: no D-class and no capability beyond the workspace and a local run — a stamp observes what it leaves. */
+    private fun observed(classification: Classification): Boolean = classification.effectClass != EffectClass.D &&
+        classification.requiredCapabilities.all { it in setOf(Capability.WorkspaceRead, Capability.WorkspaceWrite, Capability.RunLocal) }
+
     private fun authorizes(authorized: Classification, check: Check, contract: Contract, containment: DiskContainment): Boolean {
         val command = check.command ?: return false
         // A one-shell wrapper around a plain line is what `run` itself launches for that line: it is labelled as the line.

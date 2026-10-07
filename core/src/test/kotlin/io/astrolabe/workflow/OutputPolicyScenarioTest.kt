@@ -8,6 +8,8 @@ import io.astrolabe.campaign.OpenedCampaign
 import io.astrolabe.cell.WINDOWS
 import io.astrolabe.contract.Command
 import io.astrolabe.contract.Shape
+import io.astrolabe.id.AttemptId
+import kotlinx.serialization.json.JsonPrimitive
 import io.astrolabe.evidence.Closure
 import io.astrolabe.evidence.SqliteReceipts
 import io.astrolabe.fixtures.Scripted
@@ -45,6 +47,7 @@ class OutputPolicyScenarioTest {
         REWRITES to { policy(REWRITES, DirtyRepo.Variant.RewritesData, { rewrites }, ::rewrittenInputs) },
         RED to { policy(RED, DirtyRepo.Variant.RewritesData, { redRewrites }, ::redStaysRed) },
         OUTSIDE to { policy(OUTSIDE, DirtyRepo.Variant.RewritesData, { check }, ::outsideInputMoved) },
+        DECLARED to { declaredOutput() },
     )
     private val played by lazy { Scenario.concurrently(plays.keys) { plays.getValue(it)() } }
 
@@ -61,6 +64,74 @@ class OutputPolicyScenarioTest {
     @Test
     fun `a pinned input outside the candidate that changes while the final waits voids its stored results and the decision key`() =
         played.getValue(OUTSIDE).getOrThrow()
+
+    @Test
+    fun `T-06 T-07 a nested generated directory is outside identity, a declared output leaves it from the next attempt, and apply now opens it on the tree`() =
+        played.getValue(DECLARED).getOrThrow()
+
+    /**
+     * Task-workflow §5.3 (D-435, WF-5, WF-3): under v3 a check writes `tests/__pycache__/x.pyc` (a generated-directory marker:
+     * outside identity) and `reports/out.json` (moves the candidate: its own input, so it stops once naming it). The user declares `reports/`: the contract's version
+     * moves, the running attempt's effective policy and receipts do not, and the model's own proposal of another path is
+     * refused in auto mode with the policy named. The user applies it now: the next attempt opens on the tree with a new
+     * `s0` under a policy naming `reports`, the check's rerun moves no candidate and stores nothing, and the tracked
+     * `reports/README.md` stays in identity.
+     */
+    private fun declaredOutput() = runBlocking {
+        DirtyRepo.create(1, bigBytes = 0, settle = false).use { dirty ->
+            dirty.repo.write("reports/README.md", "reports land here\n")
+            dirty.repo.commit("tracked readme under reports")
+            // The generated directory exists before the run, so the check's line starts with its output and is recognised as the pytest run it prints.
+            Files.createDirectories(dirty.root.resolve("tests/__pycache__"))
+            Scenario(dirty.root, stateRoot.resolve(DECLARED), configure = { it.copy(mode = io.astrolabe.Mode.Autonomous) }).use { s ->
+                val asked = ArrayList<AcceptanceDecisionRequest>()
+                s.decide { r -> asked += r; null }
+                s.seed(generating, shape = Shape.S1)
+                val first = s.open()
+                val v3 = first.attempt.scratch
+                assertEquals(io.astrolabe.verify.ScratchPolicy.BUILT_IN, v3, "a new attempt freezes v3")
+                val run = s.play {
+                    listOf(
+                        Scripted.Reply(listOf(io.astrolabe.cell.CellFixture.say("running the check"), io.astrolabe.cell.CellFixture.call("c1", "run", """{"argv":${kotlinx.serialization.json.JsonArray(generating.argv.map(::JsonPrimitive))}}"""))),
+                        Scripted.Reply(listOf(io.astrolabe.cell.CellFixture.say("declaring"), io.astrolabe.cell.CellFixture.call("c2", "task", """{"op":"propose","kind":"output","proposal":{"path":"logs/","reason":"the run's logs"}}"""))),
+                        Scripted.Reply(listOf(io.astrolabe.cell.CellFixture.say("done"))),
+                    )
+                }
+                assertEquals(CampaignOutcome.WaitingForInput, run.outcome, run.state?.reason)
+                assertTrue(OUT in run.state?.reason.orEmpty() && PYC !in run.state?.reason.orEmpty(), "the report moved the candidate, the marker's file did not: ${run.state?.reason}")
+                val untracked = first.stamper.report(fresh = true).untracked.map { it.path }
+                assertTrue(OUT in untracked && PYC !in untracked, "T-06: the marker's file is outside identity, the report is not: $untracked")
+                assertTrue("autoDeclareOutputs" in s.adapter!!.calls.last().request.toString(), "the model's proposal is refused with the policy named")
+                val before = first.contract.version
+                val receipt = SqliteReceipts(first.store, s.clock).forCheck(Checks.acceptId("AC-1")).last()
+                val askedBefore = asked.size
+
+                assertEquals("reports/README.md is tracked: a tracked path is never excluded (D-429)", io.astrolabe.campaign.DeclaredOutputs.refusal(first, "reports/README.md"))
+                val declared = io.astrolabe.campaign.DeclaredOutputs.declare(first, "reports/", io.astrolabe.contract.OutputDeclarer.User, "the task's report", clock = s.clock)
+                assertEquals(before + 1 to listOf("reports"), declared.version to declared.outputs.map { it.path }, "T-07: a host-origin revision")
+                assertEquals(v3.id, first.stamper.report(fresh = true).scratch.id, "the running attempt's effective policy does not move")
+                assertEquals(receipt.stampAfter, first.stamper.stamp(fresh = true).id, "its receipts stay current")
+
+                io.astrolabe.campaign.DeclaredOutputs.applyNow(first, AttemptId("a2"), s.clock)
+                val next = s.open(s.request.copy(attempt = AttemptId("a2")))
+                assertEquals(setOf("reports"), next.attempt.scratch.outputs, "the next attempt's effective policy names the declared output")
+                assertTrue(next.attempt.scratch.id != v3.id && next.s0.stampId != first.s0.stampId, "a new s0 under the new policy")
+                kotlin.test.assertFalse(next.attempt.scratch.excludes("reports/README.md", tracked = true), "the tracked file stays in identity")
+                val rerun = s.play {
+                    listOf(
+                        Scripted.Reply(listOf(io.astrolabe.cell.CellFixture.call("c1", "run", """{"argv":${kotlinx.serialization.json.JsonArray(generating.argv.map(::JsonPrimitive))}}"""))),
+                        Scripted.Reply(listOf(io.astrolabe.cell.CellFixture.say("done"))),
+                    )
+                }
+                assertEquals(CampaignOutcome.Completed, rerun.outcome, rerun.state?.reason)
+                val again = SqliteReceipts(next.store, s.clock).forCheck(Checks.acceptId("AC-1")).filter { it.ids.attempt == AttemptId("a2") }
+                assertEquals(listOf(next.s0.stampId), again.map { it.stampAfter }, "one receipt, and the rerun moved no candidate")
+                assertEquals(askedBefore, asked.size, "no decision request in the next attempt: ${asked.drop(askedBefore).map { it.items }}")
+                val snapshots = s.counted(CountedPhase.Snapshot).filter { it.ids.attempt == AttemptId("a2") }
+                assertEquals(0L, snapshots.sumOf { it.objectsWritten }, "the next attempt's snapshots store neither path: $snapshots")
+            }
+        }
+    }
 
     private suspend fun scratchOutput(s: Scenario) {
         val asked = ArrayList<AcceptanceDecisionRequest>()
@@ -176,6 +247,9 @@ class OutputPolicyScenarioTest {
         const val REWRITES = "rewrites"
         const val RED = "red"
         const val OUTSIDE = "outside"
+        const val DECLARED = "declared"
+        const val OUT = "reports/out.json"
+        const val PYC = "tests/__pycache__/x.pyc"
         const val INPUT = "build/input.json"
         const val FAILING = "pytest_fail.txt"
         const val TRACKED_OUTPUT = "build/keep.json"
@@ -193,6 +267,12 @@ class OutputPolicyScenarioTest {
         val rewrites: Command = shell(
             "echo [2]> data\\notes.json & echo [2]> build\\keep.json & echo x = 1> src\\util.py & type ${DirtyRepo.OUTPUT}",
             "echo [2] > data/notes.json; echo [2] > build/keep.json; echo x = 1 > src/util.py; cat ${DirtyRepo.OUTPUT}",
+        )
+
+        /** Passes, and writes a generated file under a nested marker and a report under `reports/` (task-workflow §5.3). */
+        val generating: Command = shell(
+            "echo pyc> tests\\__pycache__\\x.pyc & echo {}> reports\\out.json & type ${DirtyRepo.OUTPUT}",
+            "echo pyc > tests/__pycache__/x.pyc; echo {} > reports/out.json; cat ${DirtyRepo.OUTPUT}",
         )
 
         /** Fails, and rewrites the tracked data file. */

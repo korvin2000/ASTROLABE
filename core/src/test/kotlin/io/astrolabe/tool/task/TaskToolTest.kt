@@ -301,4 +301,50 @@ class TaskToolTest {
         assertEquals("masked", status(ask(tool, """{"op":"propose","kind":"plan","proposal":{"x":1}}""")))
         assertTrue(tool.asked.isEmpty())
     }
+
+    @Test
+    fun `the model's goal criterion is an addition recorded at once in auto mode, never a weakening, and grants no launch`() = runTest {
+        val auto = autonomous()
+        val proposing = TaskTool(AutonomousAuthority(), contracts, Journal(store, clock), HeuristicEstimator(), FixedIdGen(), auto, clock, mask = ToolMask(ToolOps.all))
+        val before = contracts.current(auto.work)!!
+        val out = ask(proposing, """{"op":"propose","kind":"acceptance","proposal":{"strengthens":"R1","run":"python -m pytest tests/test_x.py"}}""")
+        assertEquals("proposed", status(out), out.body)
+        val after = contracts.current(auto.work)!!
+        val item = after.acceptance.single() as io.astrolabe.contract.Acceptance.Run
+        assertEquals(listOf("python", "-m", "pytest", "tests/test_x.py"), item.command.argv)
+        assertEquals(io.astrolabe.contract.Origin.Model("R1") to io.astrolabe.contract.EvidencePurpose.Goal, item.origin to item.evidencePurpose)
+        assertEquals(before.version, after.version, "a strengthening is no revision")
+        assertTrue(after.amendmentsPending.isEmpty(), "WD-21: no amendment, so nothing an auto policy rejects as a weakening")
+        assertTrue("verify does not launch a model-added command (D-262)" in out.body, out.body)
+        assertEquals("rejected", status(ask(proposing, """{"op":"propose","kind":"acceptance","proposal":{"strengthens":"R9","run":"pytest"}}""")), "an unknown requirement")
+    }
+
+    @Test
+    fun `the model's output proposal is refused in auto mode with the policy named, recorded when the policy allows, and a question in ask mode`() = runTest {
+        val declared = ArrayList<String>()
+        val autonomous = autonomous()
+        fun tool(authority: io.astrolabe.event.Authority, auto: Boolean, at: Identities = autonomous) = TaskTool(authority, contracts, Journal(store, clock), HeuristicEstimator(), FixedIdGen(), at, clock,
+            mask = ToolMask(ToolOps.all), declareOutput = { path, _ -> declared += path; null }, autoDeclareOutputs = auto)
+        val json = """{"op":"propose","kind":"output","proposal":{"path":"reports/","reason":"the report the task writes"}}"""
+        val refused = ask(tool(AutonomousAuthority(), auto = false), json)
+        assertEquals("rejected", status(refused))
+        assertTrue("autoDeclareOutputs" in refused.body, refused.body)
+        assertEquals(emptyList(), declared)
+        assertEquals("proposed", status(ask(tool(AutonomousAuthority(), auto = true), json)))
+        assertEquals(listOf("reports/"), declared)
+
+        val interactive = ids // the derived contract's default mode
+        val asked = ArrayList<Question>()
+        val no = ask(tool(Answering { q -> asked += q; Answer(q.id, q.contractRevision, "keep it", chosenOption = 1) }, auto = false, at = interactive), json)
+        assertEquals("rejected", status(no))
+        assertTrue(asked.single().text.contains("reports/") && asked.single().text.contains("the report the task writes"), asked.single().text)
+        assertEquals("proposed", status(ask(tool(Answering { q -> Answer(q.id, q.contractRevision, "", chosenOption = 0) }, auto = false, at = interactive), json)))
+        assertEquals(listOf("reports/", "reports/"), declared)
+    }
+
+    /** A copy of the derived contract in autonomous mode, as work `W-A`. */
+    private fun autonomous(): Identities {
+        contracts.open(contracts.current(ids.work)!!.copy(workId = WorkId("W-A"), mode = io.astrolabe.Mode.Autonomous))
+        return Identities(WorkId("W-A"), AttemptId("a1"), context = ContextId("cell-1"))
+    }
 }

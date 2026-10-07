@@ -317,10 +317,15 @@ public data class CampaignPolicy @JvmOverloads constructor(
     /**
      * WF-1 (task-workflow §3.6): acceptance items the host declares for a new contract — its saved test command, a review
      * check — added to the derived contract before it is stored (ids renumbered after the derived ones, every requirement
-     * bound to them), so a project the core derives nothing executable for opens once. Ignored once a contract is stored;
-     * what a saved command means beside the sniffed suites is W8's.
+     * bound to them), so a project the core derives nothing executable for opens once. Ignored once a contract is stored.
+     * A saved command of purpose `regression` replaces the sniffed suite of its package ([Contracts.declared], §3.6).
      */
     val declaredChecks: List<Acceptance> = emptyList(),
+    /**
+     * Task-workflow §5.1 (D-435): an autonomous campaign records the model's `task.propose(output)` without a person. Off by
+     * default: the proposal is refused with this policy named.
+     */
+    val autoDeclareOutputs: Boolean = false,
 )
 
 /** What open-time reconciliation found (§13.1), before any consequential action. */
@@ -595,7 +600,9 @@ public class Controller @JvmOverloads public constructor(
         val storedAttempt = attempts.load(request.work, request.attempt)
         // C3: the balance profile applies once, when the attempt freezes; a reopen asks for the frozen one unless it names another.
         val requested = BalanceProfiles.applied(config, policy.balance ?: storedAttempt?.config?.balance ?: config.balance)
-        val frozen = storedAttempt ?: AttemptConfig.freeze(requested).also { attempts.save(request.work, request.attempt, it) }
+        // Task-workflow §5.1: the attempt's effective output policy — the base plus the contract's outputs at its first open — frozen before its s0.
+        val frozen = storedAttempt ?: AttemptConfig.freeze(requested).withOutputs(contracts.current(request.work)?.outputs.orEmpty().map { it.path })
+            .also { attempts.save(request.work, request.attempt, it) }
         val effective = frozen.config
         if (effective != io.astrolabe.configSnapshot(requested)) {
             events?.emit(AgentEvent.Warning(ids, "config-frozen", "the configuration changed during attempt ${request.attempt.value}; it takes effect at the next attempt (invariant 12)"))
@@ -637,7 +644,7 @@ public class Controller @JvmOverloads public constructor(
         // №31 (task-workflow §1.3): a follow-up opens only after a parent with a final outcome; one that can go on is resumed.
         if (stored == null) request.parentWork?.let { parent -> followable(contracts, campaigns, parent)?.let { throw IllegalArgumentException(it) } }
         // §3.5: a new contract carries the shape its campaign runs in; the tool masks derive from it.
-        val contract = stored ?: contracts.open(declared(derived.contract, policy.declaredChecks).copy(parentWork = request.parentWork).let { d ->
+        val contract = stored ?: contracts.open(Contracts.declared(derived.contract, policy.declaredChecks).copy(parentWork = request.parentWork).let { d ->
             val initial = (ShapeSelector.select(d, impactPrescan.prescan, effective.defaults.shapePolicy, policy.resumeExpected, capabilities = CAPABILITIES) as? ShapeDecision.Selected)?.shape
             if (initial == Shape.S1 || initial == Shape.S2) d.copy(shape = initial) else d
         })
@@ -1083,7 +1090,13 @@ public class Controller @JvmOverloads public constructor(
                 c.advance(Transition.Planned(trivial))
                 c.journal.append(JournalEvent(idGen.next("ev"), c.ids, null, JournalKind.Boundary,
                     text = "plan cell skipped: ${PlanNeed.reason(c.contract)}; single increment ${ShapeSelector.SINGLE}", at = clock.instant()))
-            } else plan(c, model, authority, syntax, span, packets)?.let { stop ->
+            } else run {
+                // Task-workflow §3.1: an S1 contract that is otherwise its own plan, but whose acceptance is regression only.
+                PlanNeed.regressionOnly(c.contract)?.let { why ->
+                    c.journal.append(JournalEvent(idGen.next("ev"), c.ids, null, JournalKind.Boundary, text = "plan cell runs: $why", at = clock.instant()))
+                }
+                plan(c, model, authority, syntax, span, packets)
+            }?.let { stop ->
                 // C3: a plan cell the task limits ended stops on the limit, so a raised limit resumes it; any other stop keeps its cause.
                 onLimit(c, authority)?.let { return S0Run(it, null, null, null) }
                 val outcome = if (c.refusal() != null) stopOutcome(c) else stop.outcome
@@ -1315,18 +1328,8 @@ public class Controller @JvmOverloads public constructor(
         return null
     }
 
-    /**
-     * D-344: why this campaign may not end with an answer, or `null` when it may — the tree is still snapshot 0 and no
-     * intent with effects (anything but a replay-safe read) was recorded.
-     */
-    private fun answerable(c: OpenedCampaign): String? {
-        val stamp = c.stamper.report(fresh = true).candidateId
-        if (stamp != c.s0.stampId) return "the tree changed since the task started (@${c.s0.stampId.hash8} → @${stamp.hash8})"
-        val effects = c.store.db.query("SELECT body FROM intents WHERE work_id = ?", c.ids.work) {
-            Json.decodeFromString(io.astrolabe.evidence.Intent.serializer(), it.string("body"))
-        }.filterNot { it.replaySafe }
-        return effects.firstOrNull()?.let { "an action with effects ran: ${it.argv.joinToString(" ")}" }
-    }
+    /** D-344, task-workflow §3.5: why this campaign may not end with an answer, or `null` — [Answers]' one predicate. */
+    private fun answerable(c: OpenedCampaign): String? = Answers.refusal(c)
 
     /**
      * C3 (plan §4.6) at a cell boundary: once the task limits leave no working part, nothing more is dispatched. The
@@ -2661,6 +2664,11 @@ public class Controller @JvmOverloads public constructor(
                     { c.contracts.current(c.ids.work) }, { registerVersions.latest(cellId) }, { c.kb.contractAnchors() }) else null,
                 delegator, delegator?.let { TaskPackets(WORKSPACE, ceiling, generation) }, tree.registry::version,
                 answerCheck = if (child == null && role.packetKind == io.astrolabe.cell.PacketKind.Result) { { answerable(c) } } else null,
+                // Task-workflow §5.1: the model's output proposal, validated by the harness; it applies from the next attempt.
+                declareOutput = if (child == null) { { path, reason ->
+                    DeclaredOutputs.refusal(c, path) ?: run { DeclaredOutputs.declare(c, path, io.astrolabe.contract.OutputDeclarer.Model, reason, ids.context, clock); null }
+                } } else null,
+                autoDeclareOutputs = HostPolicy.stored(c.journal, c.ids.work).autoDeclareOutputs,
             ),
             kb = KbTool(c.kb, estimator, idGen, queue = Queue(c.store, KbWriter(c.store, estimator, clock), idGen, clock), ids = ids, events = events, deniedKinds = role.deniedNoteKinds, dense = layered.dense, redaction = redaction),
         )
@@ -3440,22 +3448,6 @@ public class Controller @JvmOverloads public constructor(
     }
 
     /** WF-1 (task-workflow §3.6): [contract] with the host's [items] added — ids after the derived ones, every requirement bound to them. */
-    private fun declared(contract: Contract, items: List<Acceptance>): Contract {
-        if (items.isEmpty()) return contract
-        val taken = contract.acceptance.map { it.id }.toMutableSet()
-        var n = contract.acceptance.size
-        val added = items.map { item ->
-            do n++ while ("AC-$n" in taken)
-            val id = "AC-$n".also { taken += it }
-            when (item) {
-                is Acceptance.Run -> item.copy(id = id)
-                is Acceptance.Check -> item.copy(id = id)
-                is Acceptance.Review -> item.copy(id = id)
-            }
-        }
-        return contract.copy(acceptance = contract.acceptance + added, requirements = contract.requirements.map { it.copy(acceptance = it.acceptance + added.map { a -> a.id }) })
-    }
-
     private fun drift(shadow: ShadowRef, dirty: DirtyState): List<Touched> {
         val last = shadow.records().last()
         val before = checkNotNull(shadow.manifest(last.turn)).entries.associateBy { it.path }

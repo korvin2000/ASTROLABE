@@ -63,6 +63,9 @@ import io.astrolabe.verify.CampaignReview
 import io.astrolabe.verify.CampaignReviewOutcome
 import io.astrolabe.verify.Check
 import io.astrolabe.verify.CheckKind
+import io.astrolabe.verify.CostClass
+import io.astrolabe.verify.Trigger
+import io.astrolabe.evidence.Closure
 import io.astrolabe.verify.CheckLine
 import io.astrolabe.verify.CheckState
 import io.astrolabe.verify.Checker
@@ -640,7 +643,11 @@ public class Verify(
         // One execution is the receipt of exactly the declared command it ran: another declaration shares it only verbatim.
         val first = matching.firstOrNull()?.command
         val declared = matching.filter { it.command!!.argv == first!!.argv && directoryOf(it.command.cwd) == directoryOf(first.cwd) }
-        if (declared.isNotEmpty() || !modelChecks) return declared
+        if (declared.isNotEmpty()) return declared
+        // Task-workflow §3.3 (WD-21): the model's stated goal criterion is evaluated by what ran — its authorized run is the
+        // item's check and binds the receipt — never by its word; the launch stays `run`'s, under the effect policy (D-262).
+        stated(contract).firstOrNull(::realizes)?.let { return listOf(it) }
+        if (!modelChecks) return declared
         checks.all().firstOrNull { it.id.startsWith(Checks.MODEL_PREFIX) && realizes(it) }?.let { return listOf(it) }
         val kind = EvidenceKinds.recognize(tokens) ?: return emptyList()
         // C1b: never every requirement of the contract — without the increment's requirements the run stays plain.
@@ -649,6 +656,15 @@ public class Verify(
         // An id taken by another command (a digest collision) is never reused: that run stays plain.
         val known = checks[check.id] ?: return listOf(check)
         return if (known.command == check.command) listOf(known) else emptyList()
+    }
+
+    /**
+     * The checks of the model's `run:` items (`model(strengthens …)`, §3.3): registered when the campaign opened with them,
+     * else the acceptance check a stated item gets, returned unregistered and [adopt]ed once its run passed its gates.
+     */
+    private fun stated(contract: Contract): List<Check> = contract.acceptance.filterIsInstance<Acceptance.Run>().filter { it.origin is Origin.Model }.map { item ->
+        checks[Checks.acceptId(item.id)] ?: Check(Checks.acceptId(item.id), CheckKind.Acceptance, Selector.Named(item.command), Closure.Unknown, CostClass.Slow, Trigger.IncrementEnd,
+            acceptanceIds = listOf(item.id), command = item.command, origin = item.origin, evidence = item.evidence)
     }
 
     /** Registers the model's own check of a recognised run that passed its gates (C1a): a refused run leaves no check behind. */

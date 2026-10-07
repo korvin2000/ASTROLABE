@@ -161,6 +161,16 @@ public sealed interface Origin {
     }
 }
 
+/**
+ * What an acceptance item is evidence of (task-workflow §3.1, D-434): [Goal] — it checks a named requirement of this task;
+ * [Regression] — it shows nothing regressed (the sniffed suite, a command saved in the host, quality gates).
+ */
+@Serializable
+public enum class EvidencePurpose(public val wire: String) {
+    @SerialName("goal") Goal("goal"),
+    @SerialName("regression") Regression("regression"),
+}
+
 /** An executable command: argv form is canonical; [cwd] is workspace-relative. */
 @Serializable
 public data class Command(val argv: List<String>, val cwd: String? = null) {
@@ -181,11 +191,19 @@ public data class LastRun(val receiptId: String, val stamp: CandidateId, val cur
  * obligation once green. [obligationVersion] is the contract version that introduced or last amended the item
  * (D-52): assessments bind it.
  */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 public sealed interface Acceptance {
     public val id: String
     public val origin: Origin
     public val obligationVersion: Int
+
+    /** The stored evidence purpose (task-workflow §3.1); `null` on an item stored before W8 — [evidencePurpose] reads it. */
+    public val purpose: EvidencePurpose?
+
+    /** §3.1: the stored field decides; a legacy item reads `harness → regression`, `user | amended | model → goal`. */
+    public val evidencePurpose: EvidencePurpose
+        get() = purpose ?: if (origin is Origin.Harness) EvidencePurpose.Regression else EvidencePurpose.Goal
 
     /** One-line criterion text for digests and slices. */
     public val criterion: String
@@ -202,10 +220,16 @@ public sealed interface Acceptance {
         override val obligationVersion: Int = 1,
         /** What a pass proves when the host or the user declares it (plan §4.4); null: only a label recognised from the tool. */
         val evidence: EvidenceKind? = null,
+        /** Not encoded when absent, so an item stored before W8 keeps its bytes. */
+        @EncodeDefault(EncodeDefault.Mode.NEVER) override val purpose: EvidencePurpose? = null,
     ) : Acceptance {
         /** The v1.0 full constructor: no declared evidence kind. Kept for Java callers. */
         public constructor(id: String, command: Command, origin: Origin, scope: String?, last: LastRun?, obligationVersion: Int) :
-            this(id, command, origin, scope, last, obligationVersion, null)
+            this(id, command, origin, scope, last, obligationVersion, null, null)
+
+        /** The constructor before [purpose] (W8). Kept for Java callers. */
+        public constructor(id: String, command: Command, origin: Origin, scope: String?, last: LastRun?, obligationVersion: Int, evidence: EvidenceKind?) :
+            this(id, command, origin, scope, last, obligationVersion, evidence, null)
 
         override val criterion: String get() = "run: ${command.text}" + (scope?.let { " (scope $it)" } ?: "") + (evidence?.let { " [${it.wire}]" } ?: "")
     }
@@ -218,7 +242,11 @@ public sealed interface Acceptance {
         override val origin: Origin,
         val evidenceRef: String? = null,
         override val obligationVersion: Int = 1,
+        @EncodeDefault(EncodeDefault.Mode.NEVER) override val purpose: EvidencePurpose? = null,
     ) : Acceptance {
+        /** The constructor before [purpose] (W8). Kept for Java callers. */
+        public constructor(id: String, text: String, origin: Origin, evidenceRef: String?, obligationVersion: Int) : this(id, text, origin, evidenceRef, obligationVersion, null)
+
         override val criterion: String get() = "check: $text"
     }
 
@@ -230,7 +258,11 @@ public sealed interface Acceptance {
         override val origin: Origin,
         val signedBy: String? = null,
         override val obligationVersion: Int = 1,
+        @EncodeDefault(EncodeDefault.Mode.NEVER) override val purpose: EvidencePurpose? = null,
     ) : Acceptance {
+        /** The constructor before [purpose] (W8). Kept for Java callers. */
+        public constructor(id: String, text: String, origin: Origin, signedBy: String?, obligationVersion: Int) : this(id, text, origin, signedBy, obligationVersion, null)
+
         override val criterion: String get() = "review: $text"
     }
 }
@@ -387,10 +419,19 @@ public data class Contract(
         }
 
     /**
-     * §4.1 auto-derivation: a harness-sniffed suite is not a goal-level acceptance. While this is false the
-     * model must state one in its first register patch or ask one question (entry gate, P1.8.5).
+     * The requirements [itemId] checks (task-workflow §3.1 `checks`): the inverse of [Requirement.acceptance], plus each one
+     * a model item names in `strengthens` (`R1+R2`).
      */
-    val goalAcceptanceStated: Boolean get() = acceptance.any { it.origin !is Origin.Harness }
+    public fun checks(itemId: String): List<String> {
+        val strengthens = (acceptance(itemId)?.origin as? Origin.Model)?.strengthens?.split('+').orEmpty()
+        return requirements.filter { itemId in it.acceptance || it.id in strengthens }.map { it.id }
+    }
+
+    /**
+     * §3.1 (WD-20): the contract has an item of purpose `goal`. A regression item — the sniffed suite, a saved command —
+     * is not goal acceptance: while this is false the model must state one or ask one question (entry gate, P1.8.5).
+     */
+    val goalAcceptanceStated: Boolean get() = acceptance.any { it.evidencePurpose == EvidencePurpose.Goal }
 }
 
 /** Increment status (§4.2). */

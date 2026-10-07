@@ -2,7 +2,12 @@ package io.astrolabe.tool.task
 
 import io.astrolabe.auth.InstructionShape
 import io.astrolabe.cell.Protocol
+import io.astrolabe.Mode
+import io.astrolabe.contract.Acceptance
+import io.astrolabe.contract.Command
 import io.astrolabe.contract.Contracts
+import io.astrolabe.contract.EvidencePurpose
+import io.astrolabe.contract.Origin
 import io.astrolabe.delegate.Assembled
 import io.astrolabe.delegate.ChildPacket
 import io.astrolabe.delegate.ChildKind
@@ -91,6 +96,13 @@ public class TaskTool(
      * action with effects ran — or `null` when it may. Absent outside the main line: such a cell never answers.
      */
     private val answerCheck: (() -> String?)? = null,
+    /**
+     * Task-workflow §5.1 (D-435): records a path the task's output on the model's proposal once approved — the harness
+     * validates it — and returns why it refused, or `null` once recorded. Absent: this cell cannot declare an output.
+     */
+    private val declareOutput: ((path: String, reason: String) -> String?)? = null,
+    /** `CampaignPolicy.autoDeclareOutputs`: an autonomous campaign records the model's output proposal without a person (off by default). */
+    private val autoDeclareOutputs: Boolean = false,
 ) : ToolExecutor {
     internal var beforeDispatch: () -> Unit = {}
     init {
@@ -127,7 +139,7 @@ public class TaskTool(
         if (!mask.allows(call.name)) return result("masked", "${call.name} is masked in this role")
         return when (args.op) {
             "ask" -> ask(args, context)
-            "propose" -> propose(args)
+            "propose" -> propose(args, context)
             "delegate" -> delegate(args)
             "collect" -> collect(args)
             "answer" -> answer(args)
@@ -203,8 +215,10 @@ public class TaskTool(
         }
     }
 
-    private fun propose(args: TaskArgs): ToolOutcome {
+    private suspend fun propose(args: TaskArgs, context: TurnContext): ToolOutcome {
         val proposal = args.proposal!!
+        if (args.kind == "acceptance") return acceptance(proposal as? JsonObject)
+        if (args.kind == "output") return output(proposal as? JsonObject, context)
         if (args.kind == "amendment") {
             val fields = proposal as? JsonObject
             val change = (fields?.get("change") as? JsonPrimitive)?.contentOrNull
@@ -226,6 +240,76 @@ public class TaskTool(
             is ProposalOutcome.Refused -> result("rejected", "${args.kind} proposal refused: ${outcome.reason}")
         }
     }
+
+    /**
+     * Task-workflow §3.3 (WD-21): the model states a goal criterion — `{"strengthens": "R1", "run": "<command>", "cwd"?}` or
+     * `{"strengthens": "R1", "check": "<claim>"}` — recorded as `model(strengthens R1)`, purpose `goal`: an addition, never
+     * a weakening (D-69 applies to change and remove), so an autonomous contract takes it at once and an interactive one
+     * asks the authority. It grants no authority to launch anything (D-262): its command runs only through `run`, which
+     * binds the receipt to it.
+     */
+    private suspend fun acceptance(fields: JsonObject?): ToolOutcome {
+        val requirement = text(fields, "strengthens")
+        val command = text(fields, "run")
+        val claim = text(fields, "check")
+        if (requirement == null || (command == null) == (claim == null)) {
+            return result("rejected", "propose(acceptance) needs {\"strengthens\": \"R1\", \"run\": \"<command>\"} or {\"strengthens\": \"R1\", \"check\": \"<claim>\"}")
+        }
+        val contract = contracts.current(ids.work) ?: return result("denied", "no committed contract for ${ids.work}")
+        if (contract.requirement(requirement)?.lapsed != false) return result("rejected", "propose(acceptance) strengthens an open requirement of contract v${contract.version}; $requirement is none")
+        var n = contract.acceptance.size + 1
+        while (contract.acceptance("AC-$n") != null) n++
+        val origin = Origin.Model(requirement)
+        // D-52: the version that introduces it — the next one when the authority accepts it in an interactive contract.
+        val version = if (contract.mode == Mode.Interactive) contract.version + 1 else contract.version
+        val item: Acceptance = if (command != null) {
+            Acceptance.Run("AC-$n", Command(command.split(Regex("\\s+")), text(fields, "cwd")), origin, obligationVersion = version, purpose = EvidencePurpose.Goal)
+        } else {
+            Acceptance.Check("AC-$n", claim!!, origin, obligationVersion = version, purpose = EvidencePurpose.Goal)
+        }
+        if (contract.acceptance.any { it.origin == origin && it.criterion == item.criterion }) return result("rejected", "the criterion ${item.criterion} already strengthens $requirement")
+        val recorded = when (contract.mode) {
+            Mode.Autonomous -> contracts.strengthen(ids.work, item).acceptance(item.id) != null
+            Mode.Interactive -> {
+                val amendment = contracts.propose(ids.work, ids.context, "add acceptance ${item.id} for $requirement: ${item.criterion}", "the model's goal criterion", weakening = false)
+                contracts.resolve(ids.work, amendment.id, authority) { c -> c.copy(acceptance = c.acceptance + item) }.acceptance(item.id) != null
+            }
+        }
+        if (!recorded) return result("rejected", "acceptance ${item.id} (${item.criterion}) was not approved; the contract is unchanged")
+        val how = if (command != null) "run it through run(${command}) — that run is its evidence; verify does not launch a model-added command (D-262)" else "it needs an accepted evidence reference"
+        return result("proposed", "acceptance ${item.id} recorded: ${item.criterion} strengthens $requirement (goal, the model's: an agent test, never independent); $how")
+    }
+
+    /**
+     * Task-workflow §5.1 (D-435): the model proposes `{"path": …, "reason": …}` as the task's output. Interactive: a question
+     * to the user naming the path and the reason; autonomous: refused unless the policy allows auto-declaration. The harness
+     * validates every declaration; it takes effect from the next attempt.
+     */
+    private suspend fun output(fields: JsonObject?, context: TurnContext): ToolOutcome {
+        val path = text(fields, "path")
+        val reason = text(fields, "reason")
+        if (path == null || reason == null) return result("rejected", "propose(output) needs {\"path\": …, \"reason\": …}")
+        val declare = declareOutput ?: return result("masked", "propose(output) needs the controller's output intake")
+        val contract = contracts.current(ids.work) ?: return result("denied", "no committed contract for ${ids.work}")
+        if (contract.mode == Mode.Autonomous && !autoDeclareOutputs) {
+            return result("rejected", "output $path refused: the policy autoDeclareOutputs is off, so an autonomous task declares no output on the model's proposal; leave it in the candidate")
+        }
+        if (contract.mode == Mode.Interactive) {
+            val question = Question(idGen.next("q"), contract.version, ids, "Declare $path the output of this task (outside the candidate from the next attempt)? $reason", listOf("declare", "keep it in the candidate"))
+            events?.emit(AgentEvent.Ask.Question(ids, question.id))
+            val answer = authority.ask(question)
+            beforeDispatch()
+            val approved = answer != null && answer.questionId == question.id && answer.contractRevision == contract.version &&
+                (answer.chosenOption == 0 || answer.text.trim().equals("declare", ignoreCase = true) || answer.text.trim().equals("yes", ignoreCase = true))
+            exchanges += Asked(question, answer, context.turn, null, null)
+            if (!approved) return result("rejected", "output $path not declared: the user did not approve it")
+        }
+        val refusal = declare(path, reason)
+        return if (refusal == null) result("proposed", "output $path declared: it leaves candidate identity from the next attempt; this attempt's candidate is unchanged")
+            else result("rejected", "output $path refused: $refusal")
+    }
+
+    private fun text(fields: JsonObject?, name: String): String? = (fields?.get(name) as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
 
     private suspend fun delegate(args: TaskArgs): ToolOutcome {
         val delegator = delegator ?: return result("masked", "delegate needs the controller's delegator (S2+)")

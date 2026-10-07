@@ -183,6 +183,24 @@ class TestIntegrityTest {
     }
 
     @Test
+    fun `a manifest change outside its effective check definition is no surface change, one inside it and an unresolved script stay flagged`() {
+        val (base, _) = s0()
+        val contract = base.strengthen(Acceptance.Run("AC-5", Command(listOf("npm", "test"), cwd = "web"), Origin.Model("R1")))
+        val checks = Checks.seed(contract, RunnerCommands(test = Command(listOf("python", "-m", "pytest", "-q"))))
+        val before = """{"name":"web","version":"1.0.0","scripts":{"test":"jest --ci","start":"vite"},"dependencies":{"react":"18.2.0"},"devDependencies":{"jest":"29.7.0","ts-jest":"29.1.0"},"jest":{"testEnvironment":"node"}}"""
+        fun flags(after: String, text: String = before) = TestIntegrity.classify(listOf(SurfaceChange("web/package.json", text, after)), "edit #9", contract, checks)
+        assertEquals(emptyList(), flags(before.replace("\"1.0.0\"", "\"1.1.0\"").replace("18.2.0", "18.3.1").replace("\"vite\"", "\"vite --open\"")),
+            "name, version, an unrelated dependency and another script are outside the definition (WD-19)")
+        assertEquals(listOf(TestIntegrity.CHECK_CONFIG), flags(before.replace("jest --ci", "jest --ci --passWithNoTests")).map { it.kind }, "the script a check reaches")
+        assertEquals(1, flags(before.replace("\"node\"", "\"jsdom\"")).size, "the runner's configuration")
+        assertEquals(1, flags(before.replace("29.1.0", "29.2.0")).size, "a runner plugin's dependency entry")
+        assertEquals(1, flags(before.replace("\"start\"", "\"pretest\":\"node gen.js\",\"start\"")).size, "a lifecycle hook of the reached script")
+        val shell = before.replace("jest --ci", "jest --ci && node report.js")
+        assertEquals(1, flags(shell.replace("\"1.0.0\"", "\"2.0.0\""), text = shell).size, "a script the resolver cannot follow keeps the whole-manifest flag")
+        assertEquals(1, flags("not json").size, "an unreadable manifest keeps it")
+    }
+
+    @Test
     fun `a package manager directory option names the manifest directory, never every file under it`() {
         val (base, _) = s0()
         val manifests = mapOf("server" to """{"scripts":{"test":"node tools/check.js"}}""")

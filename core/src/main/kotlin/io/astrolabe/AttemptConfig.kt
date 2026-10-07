@@ -81,6 +81,13 @@ public class AttemptConfig(
         production: Boolean = this.production,
     ): AttemptConfig = AttemptConfig(harnessVersion, config, roleTextVersions, controls, production, scratch.takeIf { it.id != null })
 
+    /**
+     * Task-workflow §5.1 (D-435): this configuration with the effective output policy — the frozen base plus the task's
+     * [declared] outputs at the attempt's open — frozen before its `s0` like the base. A policy before version 3 takes none.
+     */
+    public fun withOutputs(declared: Collection<String>): AttemptConfig =
+        AttemptConfig(harnessVersion, config, roleTextVersions, controls, production, scratch.withOutputs(declared).takeIf { it.id != null })
+
     public operator fun component1(): String = harnessVersion
     public operator fun component2(): Config = config
     public operator fun component3(): Map<String, String> = roleTextVersions

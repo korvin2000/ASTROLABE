@@ -4,6 +4,7 @@ import io.astrolabe.auth.Stage
 import io.astrolabe.cell.ChangeOrigin
 import io.astrolabe.cell.ResultPacket
 import io.astrolabe.contract.Acceptance
+import io.astrolabe.contract.EvidencePurpose
 import io.astrolabe.contract.Origin
 import io.astrolabe.contract.RequirementStatus
 import io.astrolabe.delegate.QaRunRecord
@@ -44,7 +45,8 @@ import java.nio.file.Path
 /**
  * One requirement with its provenance axis (§4.4 C2): who set it ([by], from [authorityRef]), the [acceptance] items
  * that check it — its own and the model's that strengthen it — the model's own checks that name it ([agentChecks],
- * C1a), and the class they give it.
+ * C1a), and the class they give it. Task-workflow §3.2: [goalEvidence] names the `goal` items (and the model's own
+ * checks) that passed at the final tree, [regression] the regression items that check it.
  */
 @Serializable
 public data class RequirementLine @JvmOverloads constructor(
@@ -56,6 +58,8 @@ public data class RequirementLine @JvmOverloads constructor(
     val acceptance: List<String> = emptyList(),
     val provenanceClass: ProvenanceClass = ProvenanceClass.Unverified,
     val agentChecks: List<String> = emptyList(),
+    val goalEvidence: List<String> = emptyList(),
+    val regression: List<String> = emptyList(),
 )
 
 /**
@@ -179,6 +183,12 @@ public data class FinishReceipt @JvmOverloads constructor(
     val acceptanceSurfaceModelApproved: List<String> = emptyList(),
     /** How a task limit ended the campaign, with the best verified candidate it names (C3); `null` for every other ending. */
     val limit: LimitStop? = null,
+    /** The work this one follows up (task-workflow §1.4); `null` for a first run or a new task. */
+    val follows: WorkId? = null,
+    /** Every message after the request, with its kind and the work it went to (task-workflow §2.4): `U-3 steering → inc-U-3`. */
+    val messages: List<String> = emptyList(),
+    /** An `answered` task's evidence (task-workflow §3.5): the runs it made to answer; empty for every other outcome. */
+    val answerEvidence: List<String> = emptyList(),
 )
 
 /** The campaign review as the receipt reports it: the request, the diff it saw, and the signed verdict or why none arrived. */
@@ -318,13 +328,24 @@ public object FinishReceipts {
                 listOfNotNull(state.reason.takeIf { entry?.status != RequirementStatus.Verified })
             // §4.4 C2: a requirement is checked by its own items, the model's items that strengthen it, and the model's own checks that name it.
             val items = (r.acceptance + contract.acceptance.filter { strengthens(it.origin, r.id) }.map { it.id }).distinct()
-            val (agent, declared) = acceptance.filter { it.id in items }.partition { line -> evidenceBy(checkNotNull(contract.acceptance(line.id))) == Author.Model }
-            val own = modelChecks.filter { strengthens(it.origin, r.id) }
+            val lines = acceptance.filter { it.id in items }
+            fun goal(line: AcceptanceLine) = checkNotNull(contract.acceptance(line.id)).evidencePurpose == EvidencePurpose.Goal
+            val (agent, declared) = lines.partition { line -> evidenceBy(checkNotNull(contract.acceptance(line.id))) == Author.Model }
+            val own = modelChecks.filter { strengthens(it.origin, r.id) }.map { it.id to Obligations.run(it.id, "model check", currencies[it.id]).status }
+            // Task-workflow §3.2 (D-434): only declared goal obligations make a requirement independent; regression is regression.
             val provenanceClass = if (entry?.status != RequirementStatus.Verified) ProvenanceClass.Unverified
-                else ProvenanceClass.requirement(declared.map { it.result }, agent.map { it.result } + own.map { Obligations.run(it.id, "model check", currencies[it.id]).status })
+                else ProvenanceClass.requirement(declared.filter(::goal).map { it.result }, declared.filterNot(::goal).map { it.result },
+                    agent.filter(::goal).map { it.result } + own.map { it.second }, agent.map { it.result } + own.map { it.second })
             RequirementLine(r.id, entry?.status?.wire ?: RequirementStatus.Pending.wire, blockers, Author.of(r, contract.requests), r.authorityRef, items, provenanceClass,
-                own.map { it.id })
+                own.map { it.first },
+                goalEvidence = lines.filter { goal(it) && it.result == ResultStatus.Passed }.map { it.id } + own.filter { it.second == ResultStatus.Passed }.map { it.first },
+                regression = lines.filterNot(::goal).map { it.id })
         }
+        // §3.2: a requirement whose only green evidence is regression says so, never "verified independently" (WF-12).
+        val regressionOnly = requirements.filter { line ->
+            line.provenanceClass == ProvenanceClass.Unverified && line.goalEvidence.isEmpty() && line.regression.isNotEmpty() &&
+                line.regression.all { id -> acceptance.firstOrNull { it.id == id }?.result == ResultStatus.Passed }
+        }.map { "${it.id}: $REGRESSION_ONLY${it.id}" }
         // C1b: a mandatory check outside the acceptance items and the campaign gate (the blast radius, the types of touched
         // files) red on the final tree — completed past on an Open item — leaves the campaign unverified; a known red does not.
         // P8.C.10: theirs is the hold — the attempt's failures not shown fixed on the final tree: each is disclosed in
@@ -368,7 +389,7 @@ public object FinishReceipts {
                 acceptance.filter { it.provenance == null }.map { it.id } +
                 acceptance.filter { it.provenance == "accepted" }.map { "${it.id}: accepted without verification by ${it.acceptedBy} (${it.decider}): ${it.acceptedReason}" } +
                 decided.values.filter { p -> acceptance.none { it.id == p.item } }.map { "${it.item}: accepted without verification by ${it.by} (${it.decider?.name?.lowercase()}): ${it.reason}" } +
-                redOnFinalTree,
+                redOnFinalTree + regressionOnly,
             deadEnds = registers.flatMap { r -> r.deadEnds.map { it.text } },
             decisions = registers.flatMap { r -> r.decisions.map { "${it.text} because ${it.because}" } },
             // §4.2: a boundary-crossing decision is promoted to an ADR candidate; the curator admits it (P4.1).
@@ -399,8 +420,24 @@ public object FinishReceipts {
             provenanceClass = if (redOnFinalTree.isEmpty()) ProvenanceClass.campaign(requirements.map { it.provenanceClass }) else ProvenanceClass.Unverified,
             acceptanceSurfaceUnreviewed = unreviewedSurface,
             acceptanceSurfaceModelApproved = surface.filter { approvals[it.path] == ReviewerKind.Model }.map { it.path }.sorted(),
+            follows = contract.parentWork,
+            messages = messages(contract, state.graph.increments),
+            answerEvidence = if (outcome == CampaignOutcome.Answered) Answers.runs(c) else emptyList(),
         )
     }
+
+    /**
+     * T-34 (task-workflow §2.4): each message after the request with the work it went to — an amendment's increments, a
+     * response increment `inc-U-n`, or the work in progress it was pinned to.
+     */
+    private fun messages(contract: io.astrolabe.contract.Contract, increments: List<io.astrolabe.contract.Increment>): List<String> =
+        contract.requests.drop(1).map { r ->
+            val kind = contract.kindOf(r)
+            val derived = contract.requirements.filter { it.authorityRef == r.id }.map { it.id }.toSet()
+            val to = if (kind == io.astrolabe.contract.MessageKind.Amendment) increments.filter { inc -> inc.requirementIds.any { it in derived } }.map { it.id }
+                else increments.filter { it.id == "inc-${r.id}" }.map { it.id }
+            "${r.id} ${kind.wire} → " + to.joinToString(", ").ifEmpty { "pinned for the work in progress" }
+        }
 
     /**
      * §8.6 from the tree (D-396): the changes of [paths] since s0 on a required check's acceptance surface, classified
@@ -469,6 +506,15 @@ public object FinishReceipts {
         r.approved && r.contractVersion == contractVersion && (!human || r.path.lastOrNull() == HUMAN) &&
             r.integrity.any { it.startsWith("acceptance surface: $path (") } &&
             (r.evidenceVersions[path]?.let { it == current } ?: (r.candidate == candidate))
+
+    /** Task-workflow §3.2: the `notVerified` disclosure of a requirement whose only green evidence is regression. */
+    internal const val REGRESSION_ONLY: String = "regression only: no goal-level check of "
+
+    /**
+     * A `notVerified` line that only discloses the goal-evidence class (§3.2): L0–L2 are green, so it holds no publication
+     * back (D-250) — as an `agent_test` result does not; an unverified or decided item does.
+     */
+    internal fun classOnly(line: String): Boolean = REGRESSION_ONLY in line
 
     /** The last tier of a review that went to the host's authority (`ReviewCell`). */
     private const val HUMAN: String = "human"

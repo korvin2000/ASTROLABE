@@ -17,12 +17,19 @@ internal object PlanNeed {
     fun trivialGraph(contract: Contract, conAnchors: Map<String, Set<String>>): RequirementGraph? {
         if (contract.shape != Shape.S1) return null
         if (contract.acceptance.any { it is Acceptance.Review } || contract.contractsTouched.isNotEmpty()) return null
+        // Task-workflow §3.1 (WD-20): acceptance that is regression only states no goal; the plan cell asks for one.
+        if (!contract.goalAcceptanceStated) return null
         val graph = ShapeSelector.single(contract)
         val packet = PlanPacket(graph)
         if (PlanPacketValidator.gaps(contract, packet, conAnchors).isNotEmpty()) return null
         if (PlanPacketValidator.refactorGaps(contract, packet).isNotEmpty()) return null
         return graph
     }
+
+    /** Why the plan cell runs for an S1 contract that is otherwise its own plan: its acceptance is regression only (§3.1); `null` otherwise. */
+    fun regressionOnly(contract: Contract): String? =
+        if (contract.shape != Shape.S1 || contract.goalAcceptanceStated || contract.acceptance.isEmpty()) null
+        else "acceptance is regression only (${contract.acceptance.joinToString(", ") { it.id }}): the plan states a goal criterion"
 
     /** The journal's account of why the plan cell was skipped. */
     fun reason(contract: Contract): String {

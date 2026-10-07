@@ -218,11 +218,11 @@ internal object ContractTokens {
  * change, so `Astrolabe.resume` without a policy opens with the ones the campaign had.
  */
 @Serializable
-internal data class HostPolicy(val hostNotes: List<String> = emptyList(), val resumeExpected: Boolean = false) {
+internal data class HostPolicy(val hostNotes: List<String> = emptyList(), val resumeExpected: Boolean = false, val autoDeclareOutputs: Boolean = false) {
     companion object {
         const val SET: String = "host: policy set"
 
-        fun of(policy: CampaignPolicy): HostPolicy = HostPolicy(policy.hostNotes.filter { it.isNotBlank() }, policy.resumeExpected)
+        fun of(policy: CampaignPolicy): HostPolicy = HostPolicy(policy.hostNotes.filter { it.isNotBlank() }, policy.resumeExpected, policy.autoDeclareOutputs)
 
         fun stored(journal: Journal, work: WorkId): HostPolicy =
             journal.events(JournalScope(work, kinds = setOf(JournalKind.Reconcile))).lastOrNull { it.text.startsWith(SET) && it.payload != null }

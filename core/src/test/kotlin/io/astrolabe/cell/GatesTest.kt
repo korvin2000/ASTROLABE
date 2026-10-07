@@ -12,6 +12,7 @@ import io.astrolabe.contract.Acceptance
 import io.astrolabe.contract.Authorization
 import io.astrolabe.contract.Command
 import io.astrolabe.contract.Contract
+import io.astrolabe.contract.EvidencePurpose
 import io.astrolabe.contract.Increment
 import io.astrolabe.contract.Origin
 import io.astrolabe.contract.Requirement
@@ -62,7 +63,8 @@ class GatesTest {
         workId = WorkId("W-1"), version = 2, attemptId = AttemptId("a1"), mode = Mode.Autonomous, shape = Shape.S0,
         requests = listOf(UserRequest("U1", Instant.EPOCH, "fix rounding")),
         requirements = listOf(Requirement("R1", "total rounds half-up", listOf("AC-1"), authorityRef = "U1")),
-        acceptance = listOf(Acceptance.Run("AC-1", Command(listOf("pytest", "-q")), Origin.Harness, scope = "touched")),
+        // The project's suite the host declared the check of R1 (a goal item); a sniffed one alone is regression (W8).
+        acceptance = listOf(Acceptance.Run("AC-1", Command(listOf("pytest", "-q")), Origin.Harness, scope = "touched", purpose = EvidencePurpose.Goal)),
         constraints = emptyList(), exclusions = emptyList(), contractsTouched = emptyList(),
         scope = Scope(listOf("src/"), listOf("migrations/")), budget = Budget.of(Defaults(), Tokens(100_000)),
         authorization = Authorization(Stage.Patch, DClassPolicy.Ask, "workspace-local-test-only"),
@@ -105,9 +107,21 @@ class GatesTest {
     @Test
     fun `entry is silent on the first edit when the contract already holds the increment's acceptance`() {
         val bare = register.copy(plan = listOf(Step(1, Mark.Cursor, "round half-up")))
-        assertEquals(emptyList(), gates.evaluate(state(1, bare).copy(calls = listOf(edit()))).outcomes, "a harness-derived run: item")
-        val reviewed = contract.copy(acceptance = contract.acceptance + Acceptance.Review("AC-R", "the host reviews the change", Origin.Harness))
+        assertEquals(emptyList(), gates.evaluate(state(1, bare).copy(calls = listOf(edit()))).outcomes, "a goal run: item")
+        val reviewed = contract.copy(acceptance = contract.acceptance + Acceptance.Review("AC-R", "the host reviews the change", Origin.Harness, purpose = EvidencePurpose.Goal))
         assertEquals(emptyList(), gates.evaluate(state(1, bare).copy(contract = reviewed, increment = increment.copy(accept = listOf("AC-R")), calls = listOf(edit()))).outcomes, "the host's review item")
+    }
+
+    @Test
+    fun `entry asks once for a goal criterion when the increment's acceptance is regression only, and a response increment is exempt`() {
+        val bare = register.copy(plan = listOf(Step(1, Mark.Cursor, "round half-up")))
+        val sniffed = contract.copy(acceptance = listOf(Acceptance.Run("AC-1", Command(listOf("pytest", "-q")), Origin.Harness, scope = "touched")))
+        val first = gates.evaluate(state(1, bare).copy(contract = sniffed, calls = listOf(edit())))
+        assertEquals(listOf(GateKey(Gates.ENTRY, "first-edit")), first.nudges.map { it.key })
+        assertTrue(first.nudges.single().line.startsWith("entry: editing while acceptance AC-1 is regression only"), first.lines.toString())
+        assertEquals(emptyList(), gates.evaluate(state(1, bare).copy(contract = sniffed, calls = listOf(edit()), fired = first.fired)).nudges, "once")
+        val response = increment.copy(id = "inc-U1", produces = io.astrolabe.graph.Production.Resolves("U1"))
+        assertEquals(emptyList(), gates.evaluate(state(1, bare).copy(contract = sniffed, increment = response, calls = listOf(edit()))).nudges, "a response increment")
     }
 
     @Test
@@ -535,6 +549,8 @@ class GatesTest {
             "a red optional check is the runtime's record, and the hint names it",
         )
         assertEquals(emptyList(), hints(gates.evaluate(ready.copy(unresolvedImpactNudges = listOf("public def total() changed; 3 importers unread")))))
+        val sniffed = contract.copy(acceptance = listOf(Acceptance.Run("AC-1", Command(listOf("pytest", "-q")), Origin.Harness, scope = "touched")))
+        assertEquals(emptyList(), hints(gates.evaluate(ready.copy(contract = sniffed))), "regression obligations alone never say finish now (WD-20)")
     }
 
     @Test
