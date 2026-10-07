@@ -2402,7 +2402,7 @@ Evidence: `../ASTROLABE-DIAGNOSTICS-2026-10-05.md` (defects WD-01…WD-31 with `
 - Build: the task intent and history; message kinds (continuation, steering, amendment, decision) and how an amendment reconciles closed increments; goal acceptance apart from sniffed suites; what crosses a cell boundary, a reopen and a follow-up. t6 draft → Codex review → owner.
 - Done: the specification merged with the owner's decisions recorded.
 - Log: 2026-10-07 — merged `a3e9692`: `docs/runtime/task-workflow.md` (new), `docs/state/contracts.md` §4.1/§4.2, `docs/INDEX.md`. t6 draft, Codex review once (xhigh): 9 P1 + 6 P2, all fixed in one round without breaking an invariant; owner decisions D-433 (message kinds, WF-13 wording), D-434 (goal vs regression evidence), D-435 (declared outputs, nested markers); spec D-432. Split: W7 contract API, message table, response increment, resumable cell failure; W8 purpose, class, `answerable`, Node parsers, manifest definition, saved command, output declaration; W9 store carry behind one atomic `settle`, fallback seeds, increment and parent carry, append-only projection. [report](../plan2/reports/WP-W6.md).
-#### P8.W.7 [M] W7 Task model and message kinds · TODO
+#### P8.W.7 [M] W7 Task model and message kinds · IN_PROGRESS
 - Deps: P8.W.6. Pkg: `contract/`, `campaign/Controller.kt`, Studio `TaskService.java`. Spec: plan §6 W7; WD-13, WD-24.
 - Build: the objective is the original request plus amendments; a message to a work whose increments are all closed opens work and reaches a model; a confirmation is not an amendment.
 - Done: guard of WF-13 green. Codex review.
@@ -2410,7 +2410,7 @@ Evidence: `../ASTROLABE-DIAGNOSTICS-2026-10-05.md` (defects WD-01…WD-31 with `
 - Deps: P8.W.6, P8.W.7. Pkg: `cell/Gates.kt`, `campaign/PlanNeed.kt`, `verify/Resolution.kt`, `tool/verify/Verify.kt`, `tool/task/TaskTool.kt`, `tool/run/`, Studio. Spec: plan §6 W8; WD-19…WD-23; P8.C.17 item 3.
 - Build: `goalAcceptanceStated` read by the entry gate, the sufficiency hint and `PlanNeed`; a sniffed suite is regression evidence, not "independently verified"; a goal item stated by the model is allowed and judged; the path without tests; the saved Studio command is honoured; a question task ends with an answer; Node reporters.
 - Done: guard of WF-12 green; negative scenario "unrelated suites green, requested behaviour absent" does not close as verified. Codex review.
-#### P8.W.9 [M] W9 Context carry across boundaries, reopen and follow-up · TODO
+#### P8.W.9 [M] W9 Context carry across boundaries, reopen and follow-up · IN_PROGRESS
 - Deps: P8.W.6. Pkg: `context/`, `cell/Cell.kt`, `campaign/Controller.kt`, bridge `StudioHost.kt`. Spec: plan §6 W9, owner №33; WD-27, WD-28, WD-29; P8.C.18 item 3.
 - Build: the previous cell's packet from the store; seeds with a fallback rule; carry across increments; pinned lines appended after the transcript; a parent-work link and the carry of its register and STATUS into a follow-up; the carry settings of P8.C.18 item 3.
 - Done: guards of WF-14, WF-15 green. Codex review.
