@@ -635,6 +635,11 @@ public class Git @JvmOverloads constructor(
         environment["GIT_TERMINAL_PROMPT"] = "0"
         environment["LC_ALL"] = "C"
         environment["GIT_OPTIONAL_LOCKS"] = "0"
+        // Git for Windows opens paths past MAX_PATH (a state root's recovery blobs, its temporary index) only with
+        // core.longpaths; other gits ignore the key. Set as command-line scope through the environment, so argv is unchanged.
+        environment["GIT_CONFIG_COUNT"] = "1"
+        environment["GIT_CONFIG_KEY_0"] = "core.longpaths"
+        environment["GIT_CONFIG_VALUE_0"] = "true"
         if (indexFile != null) {
             environment["GIT_INDEX_FILE"] = indexFile.toString()
         }

@@ -348,6 +348,14 @@ public object Lifecycle {
         return CampaignState.opened(contract, graph)
     }
 
+    /**
+     * WD-05: how a run stopped by an unreadable input settles the [cell] still running. A cancelled [checkpoint] is an
+     * interruption; any other — the cell returned but its exit was never applied, or it settled nothing — is a lost
+     * cell, the same record a reopen writes, so the stop that follows finds no running cell.
+     */
+    internal fun unreadableSettlement(cell: ContextId, checkpoint: CellCheckpoint?): Transition =
+        if (checkpoint?.status == CellStatus.Cancelled) Transition.Interrupted(checkpoint) else Transition.Lost(cell, checkpoint)
+
     /** Applies [transition] or throws [IllegalStateException]: an unsupported transition never yields a state. */
     @JvmStatic
     public fun apply(state: CampaignState, contract: Contract, transition: Transition): CampaignState {

@@ -334,6 +334,21 @@ class LifecycleTest {
     }
 
     @Test
+    fun `an unreadable input settles a running cell whatever its checkpoint so the run stops resumably`() {
+        val stop = Transition.Stopped(CampaignOutcome.BlockedExternal, "unreadable input build.lock")
+        for (status in CellStatus.entries) {
+            val settlement = Lifecycle.unreadableSettlement(c1, checkpoint(c1, status))
+            if (status == CellStatus.Cancelled) assertIs<Transition.Interrupted>(settlement) else assertIs<Transition.Lost>(settlement)
+            val stopped = dispatched().then(settlement, stop)
+            assertEquals(CampaignOutcome.BlockedExternal, stopped.outcome, "after a $status checkpoint")
+            assertTrue(stopped.outcome!!.resumable)
+        }
+        val none = dispatched().then(Lifecycle.unreadableSettlement(c1, null), stop)
+        assertEquals(CellStatus.Failed, none.cells.single().status, "a cell that settled nothing is lost")
+        assertEquals(CampaignOutcome.BlockedExternal, none.outcome)
+    }
+
+    @Test
     fun `a handoff continues in an epoch that sizing keeps apart from continuations and from pressure rebuilds`() {
         val handedOff = partial(PartialReason.Handoff)
         assertEquals(io.astrolabe.cell.HandoffCause.Pressure, handedOff.handoffCause)

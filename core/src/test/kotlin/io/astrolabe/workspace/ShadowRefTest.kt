@@ -11,6 +11,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.io.TempDir
@@ -147,6 +148,26 @@ class ShadowRefTest {
                 "def a():\n    return 2\n".toByteArray(),
                 fixture.store.blobs.get(second.entry("src/a.py")!!.digest!!),
             )
+        }
+    }
+
+    @Test
+    fun `a recovery blob path past 260 characters is still written to git`(@TempDir temp: Path) {
+        // Windows MAX_PATH: git opens each recovery blob by its absolute path, 80 characters below the project root
+        // (`blobs/recovery/<hex>`), while the database 14 below it must stay openable; a 116-character state root
+        // puts the project root near 200, as a host's temp-dir state is.
+        val base = temp.toAbsolutePath()
+        val state = base.resolve("s".repeat(maxOf(1, 116 - base.toString().length - 1)))
+        WorkspaceFixture.create(state).use { fixture ->
+            val shadow = fixture.shadowRef()
+            shadow.open(fixture.dirtyState.capture())
+            fixture.repo.modify("src/a.py", "def a():\n    return 'long'\n")
+            val record = shadow.snapshot(1)
+            val digest = shadow.manifest(1)!!.entry("src/a.py")!!.digest!!
+            val blob = assertNotNull(fixture.store.blobs.file(digest))
+            assertTrue(blob.toAbsolutePath().toString().length > 260, "the recovery blob path is long: ${blob.toAbsolutePath()}")
+            assertEquals(ObjectId.parse(record.commit), shadow.head())
+            assertContentEquals("def a():\n    return 'long'\n".toByteArray(), fixture.store.blobs.get(digest))
         }
     }
 
