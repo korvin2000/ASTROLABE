@@ -62,6 +62,15 @@ class DirtyRepoScenarioTest {
     }
 
     @Test
+    fun `WF-2 every open runs exactly the git processes it ran when measured`() {
+        for (run in listOf(at300, at1500)) {
+            val opens = run.counted.filter { it.counted == CountedPhase.Open.wire }.map { it.gitProcesses }
+            // First open 38: store identity 3, capture 17, shadow commit 12, atlas and prescan ls-files 2, opening stamp 4 (14 of them sparse-checkout probes); reopen 26; second work 37 (no fast-import).
+            assertEquals(listOf(38L, 26L, 37L), opens, "${run.files} files: git processes of the first open, the reopen and the second work's open")
+        }
+    }
+
+    @Test
     fun `WF-2 a capture reads each file at most once`() {
         for (run in listOf(at300, at1500)) {
             val opens = run.counted.filter { it.counted == CountedPhase.Open.wire }
