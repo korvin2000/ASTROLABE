@@ -2378,6 +2378,10 @@ Goal: the model decides; the runtime executes, waits, records and finishes. Plan
 - Note (owner, 2026-10-04, D-421): the money axis is reported by the bill and by re-pricing the flows over price profiles with output/input ratios of about 2, 3, 5 and "tens"; the auditor (P8.B.1) needs a re-pricing what-if for it. `loop` is a yardstick only.
 - Deps: P8.D.1–P8.D.4, P8.B.2, P8.B.5–P8.B.7. Spec: plan §6 D5, §9, appendix A.6. Amendment 2026-10-04: a third arm `loop` and a separate stratum of long tasks (confirmation set of P8.B.6). Owner №29: the report also ranks where direct loses to `loop` — optimisation targets for direct, not a case for replacing it (plan §14).
 - Build: the confirmation set (plan §9.2) includes the class "second task in the same project" (pairs on one base, one working directory and one store per pair; the runner gains a pair mode) so P8.G.1–G.2 reuse it; in D5 the pairs count as ordinary tasks.
+#### P8.D.8 [S] D8 Direct residue of the session-5 integration review (P2 №5, №6) · TODO
+- Deps: P8.D.7. Pkg: `campaign/Controller.kt`, `campaign/Handoffs.kt`. Spec: `../plan2/reports/INTEGRATION-REVIEW-5.md` P2 №5, №6; A-D.6.
+- Build: (1) the grant renewal has its own crash window — the campaign is saved Resumed/LimitRaised before the renewal record (`Controller.kt` resume path); a crash between them leaves the exhausted grant and a second budget stop: save resume and its renewal marker atomically; (2) a terminal packet without STATUS does not guarantee STATUS recovery and S0 writes no ordinary boundary record, so a follow-up may get an empty or stale STATUS: recover the boundary from the terminal packet, checking the already written cell id.
+- Done: a fixture per window; `HandoffTest`/`ResumeTest`; WF suite green. Session 6.
 - [ ] **Gate P8.D:** L2 with compile-all and ABI → push `main` (fast CI job) → the wave tag starts the full suite, not awaited (plan §8.4, owner №28); Fable review of D5.
 
 ### P8.W Wave W — workflow stabilization (amendment 2026-10-05; plan §6 wave W, §7.2, owner №30–36; before the rest of D)
