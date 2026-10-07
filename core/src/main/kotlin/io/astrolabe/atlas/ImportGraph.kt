@@ -126,7 +126,7 @@ public class ImportGraph private constructor(
             "src/index.ts", "src/index.tsx", "src/index.js", "src/index.mjs", "index.ts", "index.js", "index.mjs",
         )
 
-        /** Builds the graph over every parsed row of [atlas], reading each D-09 file once for the dynamic scan. */
+        /** Builds the graph over every parsed row of [atlas], reading a D-09 file for the dynamic scan only when the atlas kept no findings of its own read. */
         @JvmStatic
         public fun of(atlas: Atlas, workspace: WorkspaceId): ImportGraph = of(atlas, workspace, OutlineSource(atlas::outline))
 
@@ -246,8 +246,9 @@ public class ImportGraph private constructor(
                     if (language in UNEXTRACTED) reason(path, "no import extraction for ${language.id}")
                 }
                 if (language.hasOutlineParser) {
-                    val text = readRelative(atlas.root, path)?.toString(Charsets.UTF_8) ?: continue
-                    scanDynamic(path, language, text, ::reason)
+                    // T-59: the findings of the read the atlas parsed this file from (the open's capture), else one read now.
+                    val findings = atlas.dynamicFindings(path) ?: readRelative(atlas.root, path)?.let { dynamicFindings(language, it) } ?: continue
+                    for (finding in findings) reason(path, finding)
                 }
             }
             buildEdges(atlas, files.keys, known, ::edge)
@@ -360,12 +361,19 @@ public class ImportGraph private constructor(
             return entry
         }
 
-        private fun scanDynamic(path: String, language: Language, text: String, reason: (String, String) -> Unit) {
-            val lines = text.lineSequence().toList()
+        /**
+         * The dynamic-import scan of a source in [language] over its raw [bytes]: generated-file markers, dynamic imports and
+         * reflection, in line order, as unresolved-import descriptions; `null` for a language with no outline parser. The
+         * atlas keeps them from the read it parses a file from (T-59), so the graph never reads a source again for them.
+         */
+        internal fun dynamicFindings(language: Language, bytes: ByteArray): List<String>? {
+            if (!language.hasOutlineParser) return null
+            val findings = ArrayList<String>()
+            val lines = bytes.toString(Charsets.UTF_8).lineSequence().toList()
             for (line in lines.take(GENERATED_PROBE_LINES)) {
                 val lower = line.lowercase(Locale.ROOT)
                 if (GENERATED_MARKERS.any { it in lower }) {
-                    reason(path, "generated file: ${line.trim()}")
+                    findings += "generated file: ${line.trim()}"
                     break
                 }
             }
@@ -373,7 +381,7 @@ public class ImportGraph private constructor(
                 Language.Python -> listOf(PY_DYNAMIC)
                 Language.JavaScript, Language.TypeScript -> listOf(JS_DYNAMIC_IMPORT, JS_DYNAMIC_REQUIRE)
                 Language.Kotlin, Language.Java -> listOf(JVM_REFLECTION)
-                else -> return
+                else -> return findings
             }
             val comment = if (language == Language.Python) "#" else "//"
             for ((index, line) in lines.withIndex()) {
@@ -382,9 +390,10 @@ public class ImportGraph private constructor(
                 for (pattern in patterns) {
                     val match = pattern.find(line) ?: continue
                     val kind = if (pattern === JVM_REFLECTION) "reflection" else "dynamic import"
-                    reason(path, "$kind at line ${index + 1}: ${match.value.takeWhile { it != '(' && it != '<' }.trim()}")
+                    findings += "$kind at line ${index + 1}: ${match.value.takeWhile { it != '(' && it != '<' }.trim()}"
                 }
             }
+            return findings
         }
 
         /** Gradle `include`/`project(":x")` and Maven `<module>`/sibling `<dependency>` edges between manifests. */

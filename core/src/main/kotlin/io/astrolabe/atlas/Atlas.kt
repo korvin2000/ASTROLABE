@@ -119,6 +119,9 @@ public data class Atlas(
     private val byPath: Map<String, AtlasRow> = rows.associateBy { it.path }
     private val outlines = ConcurrentHashMap<String, Outline>()
 
+    /** T-59: the dynamic-import findings of a parsed source, from the read that parsed it ([ImportGraph] reads nothing again). */
+    private val dynamic = ConcurrentHashMap<String, List<String>>()
+
     /**
      * The repository key: the digest of the sorted `path hash8` lines. Identical content under the
      * same paths produces an identical key, which is what makes a cache hit decidable.
@@ -187,6 +190,15 @@ public data class Atlas(
         return this
     }
 
+    /** Hands this instance the dynamic-import findings of the sources the build read (T-59). */
+    internal fun seedDynamic(seed: Map<String, List<String>>): Atlas {
+        for ((path, findings) in seed) if (path in byPath) dynamic.putIfAbsent(path, findings)
+        return this
+    }
+
+    /** The dynamic-import findings of [path] from the read that parsed it, or `null` when no such read was kept. */
+    internal fun dynamicFindings(path: String): List<String>? = dynamic[path]
+
     /** Paths whose resolved imports name [path], sorted. Tier 0, never complete. */
     public fun importers(path: String): List<String> =
         rows.filter { path in it.imports }.map { it.path }
@@ -225,6 +237,7 @@ public data class Atlas(
         val addedCollapsed = ArrayList<Collapsed>()
         val known = HashSet(kept.map { it.path })
         var fresh: Map<String, Outline> = emptyMap()
+        var freshDynamic: Map<String, List<String>> = emptyMap()
 
         val scanned = ArrayList<ScannedFile>()
         // Toolchain roots found by the last full scan; a toolchain unpacked since is collapsed by the next build.
@@ -257,6 +270,7 @@ public data class Atlas(
             val resolver = ImportResolver(known, context + parsed.outlines)
             for (file in scanned) buildRow(file, parsed, resolver, known)?.let { added += it }
             fresh = parsed.outlines
+            freshDynamic = parsed.dynamic
         }
         val totals = if (wanted.any { collapsedAncestor("$it/", toolchains) != null }) {
             scanRepository(root).collapsed
@@ -267,7 +281,7 @@ public data class Atlas(
             root = root,
             rows = (kept + added).sortedBy { it.path },
             collapsed = totals.sortedBy { it.path },
-        ).seedOutlines(outlines.filterKeys { it !in wanted } + fresh)
+        ).seedOutlines(outlines.filterKeys { it !in wanted } + fresh).seedDynamic(dynamic.filterKeys { it !in wanted } + freshDynamic)
     }
 
     /**
@@ -312,9 +326,10 @@ public data class Atlas(
         public fun build(root: Path): Atlas = build(root, emptyMap())
 
         /**
-         * [build] that takes the hash of a file no outline parser models ([Language.Other]) from [captured] — the entries
-         * this open's own capture read (W3; D-427 one read per file) — when the size it scanned matches, instead of reading
-         * it again; every other file is read as before, and such a file's outline comes on demand ([outline]). The rows are
+         * [build] that takes what this open's own capture read (W3, T-03; D-427 one read per file) instead of reading again:
+         * a file the [tap] took whose digest [captured] recorded at the scanned size gives its hash, outline and dynamic-import
+         * findings from that read, whatever its language; another file no outline parser models ([Language.Other]) takes
+         * its hash from [captured] and its outline on demand ([outline]); every other file is read as before. The rows are
          * the ones a read would give: an unparsed file contributes its size and hash only. The atlas is orientation, never
          * identity (§7.1, I-05).
          */
@@ -325,14 +340,14 @@ public data class Atlas(
             // T-03/T-25: a parsed file the capture read takes its outline from that read when the capture recorded those bytes.
             val tapped = { file: ScannedFile ->
                 val entry = captured[file.path]?.takeIf { it.present && it.sizeBytes == file.size }
-                tap?.taken?.get(file.path)?.takeIf { entry?.digest?.hash8 == it.first }
+                tap?.taken?.get(file.path)?.takeIf { entry?.digest?.hash8 == it.hash8 }
             }
             val parsed = parseAll(canonical, scan.files, tapped) { file ->
                 captured[file.path]?.takeIf { it.present && it.sizeBytes == file.size && Language.of(file.path) == Language.Other }?.digest?.hash8
             }
             val resolver = ImportResolver(known, parsed.outlines)
             val rows = scan.files.mapNotNull { buildRow(it, parsed, resolver, known) }.sortedBy { it.path }
-            return Atlas(canonical, rows, scan.collapsed.sortedBy { it.path }).seedOutlines(parsed.outlines)
+            return Atlas(canonical, rows, scan.collapsed.sortedBy { it.path }).seedOutlines(parsed.outlines).seedDynamic(parsed.dynamic)
         }
 
         /**
@@ -672,31 +687,37 @@ internal val JVM_LANGUAGES: Set<Language> = setOf(Language.Kotlin, Language.Java
 internal class ParsedFiles(
     val outlines: Map<String, Outline>,
     val hashes: Map<String, String>,
+    /** T-59: the dynamic-import findings of each parsed source, from the same read. */
+    val dynamic: Map<String, List<String>> = emptyMap(),
 )
 
 internal fun parseAll(
     root: Path,
     files: List<ScannedFile>,
-    tapped: (ScannedFile) -> Pair<String, Outline>? = { null },
+    tapped: (ScannedFile) -> AtlasTap.Taken? = { null },
     captured: (ScannedFile) -> String? = { null },
 ): ParsedFiles {
     val outlines = LinkedHashMap<String, Outline>(files.size)
     val hashes = HashMap<String, String>(files.size)
+    val dynamic = HashMap<String, List<String>>()
     for (file in files) {
-        captured(file)?.let { hash8 ->
-            hashes[file.path] = hash8
+        // T-03: a take comes first, so a file no parser models keeps the outline of the capture's read too.
+        tapped(file)?.let { take ->
+            hashes[file.path] = take.hash8
+            outlines[file.path] = take.outline
+            take.dynamic?.let { dynamic[file.path] = it }
             continue
         }
-        tapped(file)?.let { (hash8, outline) ->
+        captured(file)?.let { hash8 ->
             hashes[file.path] = hash8
-            outlines[file.path] = outline
             continue
         }
         val bytes = readRelative(root, file.path) ?: continue
         hashes[file.path] = Digest.of(bytes).hash8
         outlines[file.path] = Outline.of(file.path, bytes)
+        ImportGraph.dynamicFindings(Language.of(file.path), bytes)?.let { dynamic[file.path] = it }
     }
-    return ParsedFiles(outlines, hashes)
+    return ParsedFiles(outlines, hashes, dynamic)
 }
 
 /**
