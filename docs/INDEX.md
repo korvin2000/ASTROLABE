@@ -90,6 +90,7 @@ Sizes include navigation wrappers and links. Words are whitespace-delimited coun
 | [Gates, Result Packet and finish receipt](runtime/gates-termination.md) | 6.4 KiB / 928 words | 6.4 KiB / 928 words |
 | [Working Register and Workset](runtime/register-workset.md) | 6.1 KiB / 883 words | 6.1 KiB / 883 words |
 | [Residency, eviction and rebuild](runtime/residency-rebuild.md) | 4.3 KiB / 619 words | 4.3 KiB / 619 words |
+| [Task workflow: intent, messages, goal evidence and carried context](runtime/task-workflow.md) | ASTROLABE 2.0 W6 — §1 intent and history, §2 message kinds, §3 goal vs discovered suites, §4 carried context, §5 declared output, §7 owner decisions | 58.5 KiB / 8,274 words |
 | [Tool families, turn semantics and errors](runtime/tools.md) | 11.5 KiB / 1,567 words | 11.5 KiB / 1,567 words |
 | [Workspace, guarded edits and transformations](runtime/workspace-editing.md) | 8.0 KiB / 1,109 words | 8.0 KiB / 1,109 words |
 
