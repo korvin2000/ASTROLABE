@@ -169,6 +169,10 @@ class MessageKindScenarioTest {
         val graph = s.campaign!!.state!!.graph
         assertEquals(IncrementStatus.Verified, graph.increments.single { it.id == "inc-1" }.status, "verified work is never reopened")
         assertTrue(graph.increments.any { it.id == "inc-${steering.id}" }, "a response increment: ${graph.increments.map { it.id }}")
+        // W9 (task-workflow §4.3): the response increment's first cell starts from inc-1's last cell, as data, by its source.
+        val k = (s.adapter!!.calls.first().request.segment(io.astrolabe.provider.SegmentKind.K)!!.items.single() as Message).text
+        assertTrue(Regex("CARRY-FORWARD from inc-1 · cell-\\d+").containsMatchIn(k) && "Touched: ${DirtyRepo.SOURCE}@" in k, "the previous increment's carry: $k")
+        assertTrue(Regex("carried from inc-1 · cell-\\d+").containsMatchIn(pinned), "the resume note names the source: $pinned")
         assertEquals(1, s.campaign!!.contract.version)
         assertEquals(CampaignOutcome.WaitingForInput, second.outcome, second.state?.reason)
         val old = asked.last { it.incrementId == null }
@@ -220,6 +224,10 @@ class MessageKindScenarioTest {
         val fourth = s.adapter!!.calls.getOrNull(3)?.request
         assertNotNull(fourth, "the cell went on after the message")
         assertTrue("go on, and keep it short" in texts(fourth), "the cell's next request pins the message")
+        // T-36: the running cell consumed the message, so it opens no response increment and costs no model request after it.
+        val message = c.contract.requests.last()
+        assertTrue(c.state!!.graph.increments.none { it.id == "inc-${message.id}" }, "no response increment: ${c.state!!.graph.increments.map { it.id }}")
+        assertEquals(4, s.adapter!!.calls.size, "no extra model request after the cell that consumed the message")
     }
 
     /** WF-10 (T-02): the model's adapter throws inside the cell; the reopen continues the same work and completes it. */

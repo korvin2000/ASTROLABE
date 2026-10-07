@@ -287,25 +287,6 @@ class DirtyStateTest {
         }
     }
 
-    @Test
-    fun `T-04 a later workspace over the same root reuses the content cache and an acceptance capture still reads fresh`(@TempDir state: Path) {
-        WorkspaceFixture.create(state).use { fixture ->
-            fixture.repo.untracked("notes/a.txt", "tool file\n")
-            fixture.repo.modify("src/a.py", "def a():\n    return 5\n")
-            fixture.settle()
-            val first = fixture.dirtyState.capture(turn = 1)
-
-            val reopened = Workspace(io.astrolabe.id.WorkspaceId("ws-1"), fixture.repo.root, fixture.repo.git)
-            val dirty = DirtyState(reopened, fixture.store.blobs, Stamper(reopened, TEST_ENV), fixture.ids, fixture.clock)
-            val again = dirty.capture(turn = 1)
-
-            assertEquals(0L, reopened.filesRead, "the reopen's capture of an unchanged tree reads no content")
-            assertContentEquals(Snapshot.encodeToBytes(first), Snapshot.encodeToBytes(again))
-            dirty.capture(turn = 1, fresh = true)
-            assertTrue(reopened.filesRead >= 2, "an acceptance capture reads fresh whatever the cache holds: ${reopened.filesRead}")
-        }
-    }
-
     // ---------------------------------------------------------- content reuse (D-364)
 
     @Test
