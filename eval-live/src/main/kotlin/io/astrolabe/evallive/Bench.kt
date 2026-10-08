@@ -145,6 +145,7 @@ internal class Bench(
         val temp = Files.createTempDirectory(plan.temp, "run-")
         val workspace = temp.resolve("workspace")
         var dirt: DirtPlacement? = null
+        var keepStore = false
         try {
             // Plan §9.2: a pair starts from its first task's base; the second is measured against what the first left.
             val earlier = run.task.first
@@ -302,10 +303,17 @@ internal class Bench(
                 pair = pair.takeIf { opening.isNotEmpty() },
             )
             dir.resolve("result.json").writeText(Summary.encode(result))
+            keepStore = result.outcome == CampaignOutcome.BlockedExternal.wire
             return result
         } finally {
             runCatching { dirt?.close() }.onFailure { log("could not remove the dirt outside the tree: ${it.message}") }
-            if (plan.keepWorkspaces) log("kept the run directory $temp") else runCatching { Trees.delete(temp) }.onFailure { log("could not remove $temp: ${it.message}") }
+            if (plan.keepWorkspaces) log("kept the run directory $temp")
+            else if (keepStore) {
+                // A blocked_external run keeps its store, so the journal still holds the raw arguments of refused calls.
+                runCatching { Files.list(temp).use { it.toList() }.filter { it.fileName.toString() != "state" }.forEach(Trees::delete) }
+                    .onFailure { log("could not remove $temp: ${it.message}") }
+                log("kept the store of the blocked_external run ${temp.resolve("state")}")
+            } else runCatching { Trees.delete(temp) }.onFailure { log("could not remove $temp: ${it.message}") }
         }
     }
 

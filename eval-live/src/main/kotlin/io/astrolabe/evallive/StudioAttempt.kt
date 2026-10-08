@@ -77,7 +77,7 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 internal object StudioPolicy {
     /** `AutoProfiles.OPENROUTER_UPSTREAM_IGNORES`: upstreams whose tool-call parser corrupts nested arguments. */
-    val OPENROUTER_UPSTREAM_IGNORES: Map<String, List<String>> = mapOf("z-ai/" to listOf("Together"))
+    val OPENROUTER_UPSTREAM_IGNORES: Map<String, List<String>> = mapOf("z-ai/" to listOf("Together", "InferenceNet"))
 
     /** `DecisionService.ASSUME` of the Studio: the auto-mode answer to every question. */
     const val ASSUME: String = "Use the most reasonable assumption and list your assumptions in the summary."
