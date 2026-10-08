@@ -2,59 +2,50 @@
 
 Snapshot: TODO owns task status; CONTINUE-TASK.md owns next work; audit/SESSION-HISTORY.md records history.
 
-## Counts (2026-10-07, from `#### P… · STATUS` headings)
-**P0–P6 185/185 DONE.** P8 (ASTROLABE 2.0, plan `../ASTROLABE-2-PLAN.md`): **46 DONE / 26 TODO** — waves A, B (with B5,
-B7) and C (with C15, C16) done; wave D: Dp3, D1–D3 done, D7, D4, D5 open; wave W done (W0–W10, gates P8.W-A and P8.W,
-tag `v2-wave-W`; WF suite `io.astrolabe.workflow` 43 tests, 179.5 s of 180; Studio `*WorkflowScenario*` 25); W11 open; then H, E, F, release.
-Recount: `rg -c '^#### P8\..*· DONE' TODO.md`. P7 out of scope except the AI Gate transport. **Live:** `real-dirty-repo`
-auto and ask and `real-dirty-reopen` complete on deepseek flash (gate P8.W, `../plan2/reports/SESSION-4B.md`).
+## Counts (2026-10-08, from `#### P… · STATUS` headings)
+**P0–P6 185/185 DONE.** P8 (ASTROLABE 2.0, plan `../ASTROLABE-2-PLAN.md`): **53 DONE / 21 TODO / 1 IN_PROGRESS** — waves A, B
+(B5–B7), C (C15–C18; C17 item 2 open), D (Dp3, D1–D4, D7, D5) and W (W0–W11) done; gates P8.W-A, P8.W, P8.D ticked, tags
+`v2-wave-WA`, `v2-wave-W`, `v2-wave-D`; E1 done (store v7); then H (session 6), E2–E4, F, release. New small tasks: P8.C.19, P8.D.8, P8.W.12.
+Recount: `rg -c '^#### P8\..*· DONE' TODO.md`. P7 out of scope except the AI Gate transport.
+**Live** (gate P8.D, `bench/wd`, deepseek-v4.1-flash): `real-dirty-repo` auto / ask / `real-dirty-reopen` complete, acceptance passed;
+opens 1/2/2, 1509 files per open at 1500 untracked, requests 10/8/10 (`../plan2/reports/SESSION-5.md`).
 
 ## Completion levels
-- **P0–P6:** `FIXTURE_VALIDATED` on Windows + Linux CI (JDK 26). Every live gate is `UNMEASURED` (P7).
-- **P4 Stage D:** KB (queue, curator, lint, invalidation, injection, extractor, typed `NEG`), skills and behaviour maps,
-  delegation (probe, review cell + judge, QA contract, worth estimate), routing (tiers, escalation, cache-aware order,
-  shadow seam), recovery (failure classes, `Ladder`, guards, capsule repair), MCP `Mount` + frozen catalog. S2 runs.
-- **P5 Stage E:** worktrees, `Writer`, `Integrator`/`MergeQueue`, S3 shape + run loop (flag, off), publication beyond
-  `patch` (harness branch, non-force pushes), QA driver, L4 measurement, tier-1 `index-treesitter` (optional), tier-2
-  `LanguageService`, `Retriever` + dense seam, generated tools, promotion proposals, `Watcher`.
-- **P6 Stage F (`eval`):** fixture runner (`:eval:fixtures`), frozen campaigns, comparators, arms, promotion policy,
-  trace mining; since 2.0 the offline auditor `eval/audit` (`:eval:audit`).
-- Optional layers off by default (`precompile`, `calibrationPrior`, `otelExport`, `kbInjection = Off`, `qaCell`, S3,
-  tier-1 index, dense retrieval).
+- `IMPLEMENTED` → `FIXTURE_VALIDATED` → `PROMOTED` per TODO; live gates `UNMEASURED` unless a gate table says otherwise.
+- WF suite `io.astrolabe.workflow`: 43 tests in 10 classes (T-56 merged two), 160–179 s on Windows; WF-2 has an absolute guard
+  (38 / 26 / 37 git processes per open). Studio `*WorkflowScenario*` 25. Registry `docs/reference/workflow-invariants.md`.
 
-## Key types by package (entry points only)
-- **root:** `Astrolabe`, `Config`, `Flags`, `OptionalLayers`. **`java`:** `AstrolabeJava`, `Java*` SPI forms.
-- **`campaign`:** `Controller` (`open`, `run`, `publish`), `ShapeSelector` (S0–S3), `S3Run`, `Recoveries`,
-  `Escalations`, `CellOrder`, `Publications`/`Publisher`, `CampaignFinish`, `FinishReceipt`.
-- **`delegate`:** `Delegator`, `Probe`, `ReviewCell`/`Judge`/`EvidencePacket`, `QaCell`/`QaDriver`, `Writer`,
-  `Integrator`, `WorthTest`. **`recover`:** `FailureClass`, `Ladder`, `Fence`, `Guards`, `Capsule`, `Repair`, `Alternative`.
-- **`route`:** `Router`, `TierTable`, `FunctionTable`, `Escalation`, `CacheSchedule`, `ShadowRouting`.
-- **`kb`:** `StoreKb`, `Queue`, `Curator`, `Extractor`, `Skill`/`SkillViews`, `BehaviourMaps`, `Retriever`,
-  `PromotionProposals`. **`tool`:** `Look`, `Edit`, `Run`, `Verify`, `TaskTool`, `KbTool`, `Mount`/`Catalog`, `GeneratedTools`.
-- **`workspace`:** `Worktrees`, `Ownership`, `ScopeAlgebra`. **`atlas`:** `ImportGraph`, `OutlineIndex`, `LanguageService`; **`verify`:** `Scheduler`, `Watcher`.
-- **Modules:** `provider-api`, `core`, `eval`, `index-treesitter` (D-175/D-210); with the SDK checkout only: `provider-ai-gate` (D-332), `eval-live` (D-380).
+## Direct protocol (wave D)
+- `Config.protocol` (default `Structured`); `Roles.direct` with `kernel-direct/1`; goldens of `[S]` and schema fingerprints for all 9
+  roles (`cell/LayoutTest`); 15 direct fixtures (`DirectFixturesTest` DX-01…06 + D1–D3). Crash windows: orphaned handoff reconciled
+  first at open (D7); handoff cause, integrity flags and public impact live in the terminal packet (D-442); retention protocol by the
+  resolved runtime role (D-439, D-443). Studio: settings `protocol` (auto | structured | direct) and `protocolByModelClass` → `Config.protocol`.
+- D5 (`../plan2/reports/D5.md`): structured stays default (D-445); direct proven not worse on requests, uncached input and time on
+  deepseek, money not proven; ranked losses vs `loop`: reasoning volume, uncached input per request (cache share), first-request constant.
 
-## Store
-Schema **v6** (phase 0: `pending_completions`, `acceptance_decisions`; W9: `packets`, the cell packet in its settle transaction); skills/behaviour maps are `BlobKind.MODULE` blobs. E1's binding table takes v7.
+## Binding physics (E1)
+- `route/BindingKey` (model × gateway × upstream × wire-API, unknown bucket), `binding_physics` table and `binding_snapshots` per
+  (work, attempt) in store **v7**, `routing_log` rows per decision (wired in `Controller` and `Repair`), estimators `route/BindingEstimators`
+  (Codex-W). Host subscription of the physics feed is E3's.
 
-## Last verification
-Full `check` on CI (Ubuntu + Windows, JDK 26): green at `b3eae38` (gate P8.C, tag `v2-wave-C`). Since owner №28 a push
-to `main` runs only the fast job (compile + ABI): green at `b0901dc`. Sessions 4–4B: targeted tests per line and L2
-(`assemble testClasses checkKotlinAbi`) on every merged state; no local full suite. Tag `v2-wave-WA` was red (4 defects, fixed by WAF in 4B); tag `v2-wave-W` result not yet read. Studio tests run only locally.
+## Verification and tooling
+- `VerifyOutput.cap`: one output cap per `verify` call, recall of a receipt's raw log by alias, D-424 exemption dropped (C17).
+- Settings reachability: `SettingsReachabilityTest` over the real composition (93 fields: 71 reached, 6 exceptions, 11 unwired → P8.C.19).
+- Search backend chosen once per open (ripgrep when launchable, else JVM; D-441). `look` schema without `in=kb`/`since`.
+- Capture: T-03 fixed (outline kept for every read file), snapshots write objects from retained bytes with one `fast-import` (T-22).
 
-## History (details in `audit/SESSION-HISTORY.md`; decisions in TODO §3)
-Audit remediation, AI Gate transport, phase 0 acceptance, plan-handoff and efficiency fixes (D-321–D-375).
-## ASTROLABE 2.0 waves A–C and session 4 (2026-10-02/04, D-376–D-425; details in TODO §3 and the session history)
-Waves A–C: `create` receipt, `run(op=wait)`, billing and timings, `eval-live`, `EffectPolicy`, screening set, offline
-auditor, declared acceptance, provenance, hard per-task limits, strict regression gate, Studio limits. Session 4: the
-direct protocol (off by default), one `RunSpec` for Studio and `eval-live`, arm `loop`, nominal subscription prices (D-421).
-## ASTROLABE 2.0 session 4A (2026-10-05/06, D-426–D-431)
-WF-1…WF-11 scenario guards and `phase.counted`; one git process per snapshot, one read per file per capture; end checks
-before the pin, `DecisionKey` v3; `ScratchPolicy` frozen per attempt; review cells on their own budget; Studio one open
-per action, card text attached, continue in place; `eval-live --mode auto|ask`.
-## ASTROLABE 2.0 session 4B (2026-10-07, D-432–D-438)
-Task workflow spec `docs/runtime/task-workflow.md`: history with message kinds (untyped text = steering, amendment only
-explicit, card note + Send to agent), objective = request + amendments, response increments, `parentWork`; goal evidence
-by `purpose` (regression-only → `unverified`), model goal criteria evaluated by their run, `answered`; `ScratchPolicy` v3
-markers and declared outputs; carry from the store (`settle`, packets), seed fallback, increment and parent carry,
-append-only projection (WF-15). WF-12…WF-15 guarded; Codex integration review: 11 P1 fixed (WR2, WR2s).
+## eval-live and benchmarks
+- Arms `default`, `direct`, `loop`; one open per start; `DirtSpec.dir` absolute/UNC; pair mode (`after`); summary rebuilt from every
+  `result.json`; a `blocked_external` run keeps its state; OpenRouter upstream InferenceNet ignored for `z-ai/*` (D-444).
+- Tasks: 8 screening + 3 debugging long (`port-framework`, `large-tree`, `two-sessions`) + 5 closed long (`scenario-1004`, `api-callers`,
+  `merge-conflict`, `node-api`, `second-task-pairs`), each validated base/wrong/reference.
+- Benches: `bench/d5a` (screening, 96 runs; glm core contaminated), `bench/wd` (gate + partial long stratum), `bench/wd2` (clean glm, empty);
+  scripts `../plan2/bench/{d5-screening.sh,d5-aggregate.py,d5-context.py}`, resume `../plan2/bench/D5-RESUME.md`; auditor `./gradlew :eval:audit`
+  with the D-421 re-pricing.
+
+## Studio
+- Protocol choice (D4), host guidance by the attempt's protocol (WR5s), InferenceNet ignore (GLM2). `*WorkflowScenario*` 25/0 against core `main`.
+
+## Known debts (see CONTINUE-TASK.md and `../plan2/reports/TAILS-5.md`)
+- C17 item 2; P8.C.19 dead settings; P8.D.8 (grant renewal window, STATUS recovery); P8.W.12 (form probes, 38 vs 35 git);
+  H5: T-47, T-57; auditor lacks context per request (scripts cover it); glm screening to re-run from `bench/wd2`.

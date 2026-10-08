@@ -816,3 +816,14 @@ Gotchas learned this session: backtick test names may not contain `:` or `;`; a 
 - Integration review: 11 cross-line P1 fixed in WR2 (core) / WR2s (Studio). Live: T-03 passed its fixture guard yet stayed ×2 live → P8.W.11.
 - Gate: WF 43/43 179.5 s, Studio WF 25/0, live auto/ask/reopen completed; tag `v2-wave-W`. Tails 28 → 0 open (23 scheduled). Next: session 5.
 
+
+## 2026-10-07/08: ASTROLABE 2.0 session 5 — wave D: direct safe, selectable, measured; gate P8.D (D-439–D-445)
+- Started by fixing the red full suite of tag `v2-wave-W` (WAF2: DefaultsTest §17 row; OutputPolicy assertion by `rewrittenInputs`).
+- D7 (orphan reconcile first at open, retention by role, T-56), C18 (look budget reaches, schema cleaned, rg backend, 93-field reachability test),
+  E1 + E1w (BindingKey, store v7, snapshots, routing_log; estimators by Codex-W), B6a/B6b (8 long tasks, pair mode), D4 (9 goldens, 15 fixtures,
+  Studio protocol choice), C17 item 1 + T-31/T-49/T-50/T-51, W11 (T-03 live ×2 = outline re-read; 3014 → 1509 files per open).
+- One Codex integration review of merged `main`: 4 P1 (terminal-packet handoff, retention by resolved role, host guidance by protocol, direct arm) → WR5/WR5s.
+- D5: screening 96 runs (deepseek, glm) + partial long stratum; glm core contaminated by upstream InferenceNet (D-444); Codex statistics;
+  decision D-445: structured stays default, direct an option (money not proven, not-worse proven); ranked direct losses vs loop; owner stopped the runs.
+- Gate P8.D: WF 43/43, Studio 25/0, L2 847/0, live auto/ask/reopen better than 4B (WG2: "+6 git" was an averaging artifact); tag `v2-wave-D`.
+- Process: push needed the owner's explicit lift of the permission classifier; two Gradle runs in one checkout broke a merge check once more.
